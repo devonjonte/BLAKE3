@@ -666,12 +666,11 @@ impl IncrementCounter {
     }
 }
 
-/// The lanes of the one pass that hashes `whole` whole chunks with a
-/// partial one of `partial` bytes after them, where the pass costs less
-/// than the partial chunk's blocks after the whole ones: one whole chunk
-/// and a partial one of two blocks or more in four lanes (AVX2 and
-/// AVX-512: the chain falls from 25 blocks to 16 at 1536 bytes), three
-/// whole chunks in four lanes (SSE4.1 and AVX2), and in eight (AVX2) six or
+/// The lanes used to hash `whole` whole chunks with a partial one of
+/// `partial` bytes after them in one pass: one whole chunk and a partial
+/// one of two blocks or more in two row-packed AVX2 lanes (AVX2 and
+/// AVX-512), three whole chunks in four lanes (SSE4.1 and AVX2), and in
+/// eight (AVX2) six or
 /// seven, or five with a partial chunk of six blocks or more (with fewer,
 /// an i7-12700K's efficiency core ran the eight lanes up to 7% slower; a
 /// pass of eight lanes costs 1.6 times one of four on its performance
@@ -680,9 +679,9 @@ impl IncrementCounter {
 #[inline]
 fn spare_lane(platform: Platform, whole: usize, partial: usize) -> Option<usize> {
     match (platform, whole) {
-        (Platform::AVX2, 1) if partial > BLOCK_LEN => Some(4),
+        (Platform::AVX2, 1) if partial > BLOCK_LEN => Some(2),
         #[cfg(blake3_avx512_ffi)]
-        (Platform::AVX512, 1) if partial > BLOCK_LEN => Some(4),
+        (Platform::AVX512, 1) if partial > BLOCK_LEN => Some(2),
         (Platform::SSE41 | Platform::AVX2, 3) => Some(4),
         (Platform::AVX2, 6..=7) => Some(8),
         (Platform::AVX2, 5) if partial > 5 * BLOCK_LEN => Some(8),
@@ -710,7 +709,9 @@ fn compress_chunks_parallel(input: &[u8], key: &CVWords, chunk_counter: u64, fla
         let (whole, partial) = (&chunks_array[..], chunks_exact.remainder());
         // Sound: spare_lane admits each width only on a platform whose CPU
         // has its instructions.
-        if lanes == 4 {
+        if lanes == 2 {
+            unsafe { ffi_partial::hash_chunks_with_partial_pair(whole, partial, key, chunk_counter, flags, out) };
+        } else if lanes == 4 {
             unsafe { ffi_partial::hash_chunks_with_partial_sse41(whole, partial, key, chunk_counter, flags, out) };
         } else {
             unsafe { ffi_partial::hash_chunks_with_partial_avx2(whole, partial, key, chunk_counter, flags, out) };

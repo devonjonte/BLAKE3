@@ -6,9 +6,10 @@ and c/blake3_partial_x86-64_windows_msvc.asm, the same code in both forms).
     pypy3 tools/gen_x86.py unix > c/blake3_partial_x86-64_unix.S
     pypy3 tools/gen_x86.py msvc > c/blake3_partial_x86-64_windows_msvc.asm
 
-Two kernels, one per width W: blake3_partial_sse41 (W = 4, xmm, legacy SSE
-encodings, for any CPU with SSE4.1) and blake3_partial_avx2 (W = 8, ymm,
-VEX). Each takes one argument, a pointer to a parameter block that the
+Three kernels: blake3_partial_sse41 (W = 4, xmm, legacy SSE encodings),
+blake3_partial_avx2 (W = 8, ymm, VEX), and blake3_partial_avx2_pair
+(W = 2, each message's rows in one 128-bit half of a ymm register).
+Each takes one argument, a pointer to a parameter block that the
 caller fills (src/ffi_partial.rs), in the first argument register of the
 calling convention (rdi on Unix, rcx on Windows); nothing else differs
 between the two forms but the registers each convention has the callee
@@ -37,12 +38,14 @@ blocks: the caller zero-pads it). The registers follow upstream BLAKE3's
 x86 kernels: the state's four rows in registers 0-15, row c's first word
 kept in a stack slot but while row c is added to, so register 8 is the
 temporary the rotations need; the block's sixteen message words
-transposed onto the stack first.
+transposed onto the stack first. The two-input kernel instead keeps four
+state rows and four message rows in registers, with shuffles selecting
+the scheduled words. It uses the same word-major parameter layout.
 """
 
 import sys
 
-W_OF = {"sse41": 4, "avx2": 8}
+W_OF = {"sse41": 4, "avx2": 8, "avx2_pair": 2}
 MSG_PERMUTATION = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
 COLS = [(0, 4, 8, 12), (1, 5, 9, 13), (2, 6, 10, 14), (3, 7, 11, 15)]
 DIAGS = [(0, 5, 10, 15), (1, 6, 11, 12), (2, 7, 8, 13), (3, 4, 9, 14)]
@@ -72,7 +75,7 @@ class Kernel:
         self.isa, self.windows = isa, windows
         self.w = W_OF[isa]
         self.v = 4 * self.w
-        self.avx = isa == "avx2"
+        self.avx = isa.startswith("avx2")
         self.reg = "ymm" if self.avx else "xmm"
         self.word = "ymmword" if self.avx else "xmmword"
         self.p = "rcx" if windows else "rdi"
@@ -82,7 +85,7 @@ class Kernel:
         # Windows the callee's xmm6-xmm15.
         self.msg = 0
         self.spill = 16 * self.v
-        self.xsave = self.spill + max(self.v, 16)
+        self.xsave = 0 if isa == "avx2_pair" else self.spill + max(self.v, 16)
         self.frame = self.xsave + (160 if windows else 0)
 
     def e(self, s):
@@ -195,6 +198,87 @@ class Kernel:
                     self.e(f"shufps xmm{8 + k}, xmm{hi}, {imm}")
                     self.store_aligned(self.m(4 * q + k), r(8 + k))
 
+    def pair_blocks(self, name):
+        """Two messages, each row in one 128-bit half of an AVX2 vector.
+        The parameter block stays word-major; shuffles pack the rows at
+        entry and unpack their outputs. Four vectors keep the message.
+        """
+        def row_load(reg, field, extra=0):
+            self.load(f"ymm{reg}", self.pm(field, extra))
+            self.e(f"vpshufd ymm{reg}, ymm{reg}, 216")
+            self.e(f"vpermq ymm{reg}, ymm{reg}, 216")
+
+        def output(field):
+            for reg in range(2):
+                self.e(f"vpermq ymm8, ymm{reg}, 216")
+                self.e("vpshufd ymm8, ymm8, 216")
+                self.store(self.pm(field, 32 * reg), "ymm8")
+
+        def half(words, rd, rb):
+            # Each temporary collects two words in positions 0 and 2;
+            # one final shuffle joins them. A pair in the same source row
+            # uses that row directly. This needs one to three shuffles.
+            pairs = []
+            for reg, (a, b) in zip((8, 9), (words[:2], words[2:])):
+                if a // 4 == b // 4:
+                    pairs.append((4 + a // 4, a % 4, b % 4))
+                else:
+                    self.e(f"vshufps ymm{reg}, ymm{4 + a // 4}, ymm{4 + b // 4}, {(a % 4) | ((b % 4) << 4)}")
+                    pairs.append((reg, 0, 2))
+            (left, a, b), (right, c, d) = pairs
+            self.e(f"vshufps ymm8, ymm{left}, ymm{right}, {a | (b << 2) | (c << 4) | (d << 6)}")
+            # As in the word-parallel half: a is ready before b.
+            self.e("vpaddd ymm0, ymm0, ymm8")
+            self.e("vpaddd ymm0, ymm0, ymm1")
+            self.e("vpxor ymm3, ymm3, ymm0")
+            self.e(f"vpshufb ymm3, ymm3, ymm{14 if rd == 16 else 15}")
+            self.e("vpaddd ymm2, ymm2, ymm3")
+            self.e("vpxor ymm1, ymm1, ymm2")
+            self.e(f"vpsrld ymm9, ymm1, {rb}")
+            self.e(f"vpslld ymm1, ymm1, {32 - rb}")
+            self.e("vpor ymm1, ymm1, ymm9")
+
+        for j in range(2):
+            self.e(f"mov r{8 + j}, qword ptr [{self.p}+{self.off['MSG'] + 8 * j}]")
+        for reg in range(2):
+            row_load(reg, "KEY", 32 * reg)
+        for reg, rotation in [(14, 16), (15, 8)]:
+            base = f"{name}_rot{rotation}" if self.windows else f"rip+{name}_rot{rotation}"
+            self.load(f"ymm{reg}", f"ymmword ptr [{base}]")
+        self.e("xor edx, edx")
+        self.e("xor ebx, ebx")
+        self.lines.append(f"{name}_block:")
+        for row in range(4):
+            self.e(f"vmovdqu xmm{4 + row}, xmmword ptr [r8+rdx+{16 * row}]")
+            self.e(f"vinserti128 ymm{4 + row}, ymm{4 + row}, xmmword ptr [r9+rdx+{16 * row}], 1")
+        row_load(2, "IV")
+        for lane, reg in [(0, 3), (1, 10)]:
+            self.e(f"vmovd xmm{reg}, dword ptr [{self.p}+{self.off['CTR'] + 4 * lane}]")
+            self.e(f"vpinsrd xmm{reg}, xmm{reg}, dword ptr [{self.p}+{self.off['CTR'] + 8 + 4 * lane}], 1")
+            self.e(f"vpinsrd xmm{reg}, xmm{reg}, dword ptr [{self.p}+rbx+{self.off['LENS'] + 4 * lane}], 2")
+            self.e(f"vpinsrd xmm{reg}, xmm{reg}, dword ptr [{self.p}+rbx+{self.off['FLAGS'] + 4 * lane}], 3")
+        self.e("vinserti128 ymm3, ymm3, xmm10, 1")
+        for s in schedule():
+            half(s[:8:2], 16, 12)
+            half(s[1:8:2], 8, 7)
+            for reg, imm in [(1, 57), (2, 78), (3, 147)]:
+                self.e(f"vpshufd ymm{reg}, ymm{reg}, {imm}")
+            half(s[8::2], 16, 12)
+            half(s[9::2], 8, 7)
+            for reg, imm in [(1, 147), (2, 78), (3, 57)]:
+                self.e(f"vpshufd ymm{reg}, ymm{reg}, {imm}")
+        self.e("vpxor ymm0, ymm0, ymm2")
+        self.e("vpxor ymm1, ymm1, ymm3")
+        self.e(f"cmp edx, dword ptr [{self.p}+{self.off['LAST']}]")
+        self.e(f"jne {name}_next")
+        output("SNAP")
+        self.lines.append(f"{name}_next:")
+        self.e("add rdx, 64")
+        self.e("add rbx, 8")
+        self.e("cmp rdx, 1024")
+        self.e(f"jne {name}_block")
+        output("H")
+
     def body(self, name):
         r, w, v = self.r, self.w, self.v
         L = self.lines
@@ -207,6 +291,14 @@ class Kernel:
         if self.windows:
             for i in range(6, 16):
                 self.e(f"{'vmovdqu' if self.avx else 'movdqu'} xmmword ptr [rsp+{self.xsave + 16 * (i - 6)}], xmm{i}")
+        if self.isa == "avx2_pair":
+            self.pair_blocks(name)
+            self.finish(saved)
+            for rotation in (16, 8):
+                self.lines.append(f"{name}_rot{rotation}:")
+                values = [4 * (j // 4) + (j % 4 + rotation // 8) % 4 for j in range(32)]
+                self.e(("DB " if self.windows else ".byte ") + ", ".join(map(str, values)))
+            return
         for j in range(w):
             self.e(f"mov r{8 + j}, qword ptr [{self.p}+{self.off['MSG'] + 8 * j}]")
         for i in range(8):
@@ -241,6 +333,9 @@ class Kernel:
         self.e(f"jne {name}_block")
         for i in range(8):
             self.store(self.pm("H", v * i), r(i))
+        self.finish(saved)
+
+    def finish(self, saved):
         if self.windows:
             for i in range(6, 16):
                 self.e(f"{'vmovdqu' if self.avx else 'movdqu'} xmm{i}, xmmword ptr [rsp+{self.xsave + 16 * (i - 6)}]")
@@ -266,11 +361,11 @@ def unix():
            "#define _CET_ENDBR",
            "#endif",
            ".intel_syntax noprefix"]
-    for isa in ("sse41", "avx2"):
+    for isa in W_OF:
         name = f"blake3_partial_{isa}"
         out += [f".global _{name}", f".global {name}"]
     out += ["#ifdef __APPLE__", ".text", "#else", ".section .text", "#endif"]
-    for isa in ("sse41", "avx2"):
+    for isa in W_OF:
         name = f"blake3_partial_{isa}"
         k = Kernel(isa, windows=False)
         k.body(name)
@@ -280,11 +375,11 @@ def unix():
 
 def msvc():
     out = ["; Generated by tools/gen_x86.py; do not edit."]
-    for isa in ("sse41", "avx2"):
+    for isa in W_OF:
         name = f"blake3_partial_{isa}"
         out += [f"public _{name}", f"public {name}"]
     out += ["", "_TEXT   SEGMENT ALIGN(16) 'CODE'"]
-    for isa in ("sse41", "avx2"):
+    for isa in W_OF:
         name = f"blake3_partial_{isa}"
         k = Kernel(isa, windows=True)
         k.body(name)
