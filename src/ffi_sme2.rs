@@ -651,5 +651,4 @@ pub mod ffi {
 }
 
 #[cfg(test)]
-mod test {
-}
+mod test {}
