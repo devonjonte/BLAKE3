@@ -15,6 +15,8 @@
 .global blake3_partial_sse41
 .global _blake3_partial_avx2
 .global blake3_partial_avx2
+.global _blake3_partial_avx2_pair
+.global blake3_partial_avx2_pair
 #ifdef __APPLE__
 .text
 #else
@@ -2621,3 +2623,442 @@ blake3_partial_avx2_next:
         pop rbx
         pop rbp
         ret
+        .p2align 6
+_blake3_partial_avx2_pair:
+blake3_partial_avx2_pair:
+        _CET_ENDBR
+        push rbp
+        push rbx
+        push r12
+        push r13
+        push r14
+        push r15
+        mov rbp, rsp
+        sub rsp, 64
+        and rsp, -64
+        mov r8, qword ptr [rdi+0]
+        mov r9, qword ptr [rdi+8]
+        vmovdqu ymm0, ymmword ptr [rdi+16]
+        vpshufd ymm0, ymm0, 216
+        vpermq ymm0, ymm0, 216
+        vmovdqu ymm1, ymmword ptr [rdi+48]
+        vpshufd ymm1, ymm1, 216
+        vpermq ymm1, ymm1, 216
+        vmovdqu ymm14, ymmword ptr [rip+blake3_partial_avx2_pair_rot16]
+        vmovdqu ymm15, ymmword ptr [rip+blake3_partial_avx2_pair_rot8]
+        xor edx, edx
+        xor ebx, ebx
+blake3_partial_avx2_pair_block:
+        vmovdqu xmm4, xmmword ptr [r8+rdx+0]
+        vinserti128 ymm4, ymm4, xmmword ptr [r9+rdx+0], 1
+        vmovdqu xmm5, xmmword ptr [r8+rdx+16]
+        vinserti128 ymm5, ymm5, xmmword ptr [r9+rdx+16], 1
+        vmovdqu xmm6, xmmword ptr [r8+rdx+32]
+        vinserti128 ymm6, ymm6, xmmword ptr [r9+rdx+32], 1
+        vmovdqu xmm7, xmmword ptr [r8+rdx+48]
+        vinserti128 ymm7, ymm7, xmmword ptr [r9+rdx+48], 1
+        vmovdqu ymm2, ymmword ptr [rdi+80]
+        vpshufd ymm2, ymm2, 216
+        vpermq ymm2, ymm2, 216
+        vmovd xmm3, dword ptr [rdi+128]
+        vpinsrd xmm3, xmm3, dword ptr [rdi+136], 1
+        vpinsrd xmm3, xmm3, dword ptr [rdi+rbx+144], 2
+        vpinsrd xmm3, xmm3, dword ptr [rdi+rbx+272], 3
+        vmovd xmm10, dword ptr [rdi+132]
+        vpinsrd xmm10, xmm10, dword ptr [rdi+140], 1
+        vpinsrd xmm10, xmm10, dword ptr [rdi+rbx+148], 2
+        vpinsrd xmm10, xmm10, dword ptr [rdi+rbx+276], 3
+        vinserti128 ymm3, ymm3, xmm10, 1
+        vshufps ymm8, ymm4, ymm5, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm4, ymm5, 221
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 57
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 147
+        vshufps ymm8, ymm6, ymm7, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm6, ymm7, 221
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 147
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 57
+        vshufps ymm8, ymm4, ymm5, 62
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm5, ymm6, 34
+        vshufps ymm9, ymm4, ymm7, 16
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 57
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 147
+        vshufps ymm8, ymm4, ymm7, 1
+        vshufps ymm9, ymm6, ymm7, 49
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm6, ymm5, 19
+        vshufps ymm9, ymm7, ymm6, 2
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 147
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 57
+        vshufps ymm8, ymm4, ymm6, 35
+        vshufps ymm9, ymm7, ymm5, 49
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm5, ymm7, 0
+        vshufps ymm9, ymm4, ymm7, 34
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 57
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 147
+        vshufps ymm8, ymm5, ymm6, 18
+        vshufps ymm8, ymm8, ymm6, 56
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm5, ymm4, 1
+        vshufps ymm9, ymm7, ymm4, 19
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 147
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 57
+        vshufps ymm8, ymm6, ymm7, 2
+        vshufps ymm8, ymm8, ymm7, 104
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm5, ymm6, 19
+        vshufps ymm9, ymm4, ymm7, 51
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 57
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 147
+        vshufps ymm8, ymm5, ymm6, 48
+        vshufps ymm9, ymm5, ymm4, 17
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm9, ymm6, ymm5, 32
+        vshufps ymm8, ymm4, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 147
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 57
+        vshufps ymm8, ymm7, ymm6, 16
+        vshufps ymm8, ymm8, ymm7, 184
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm7, ymm6, 49
+        vshufps ymm8, ymm8, ymm6, 40
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 57
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 147
+        vshufps ymm9, ymm4, ymm5, 32
+        vshufps ymm8, ymm5, ymm9, 135
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm9, ymm4, ymm5, 1
+        vshufps ymm8, ymm4, ymm9, 142
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 147
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 57
+        vshufps ymm9, ymm6, ymm7, 48
+        vshufps ymm8, ymm6, ymm9, 141
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm7, ymm5, 18
+        vshufps ymm9, ymm7, ymm4, 16
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 57
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 147
+        vshufps ymm8, ymm7, ymm4, 1
+        vshufps ymm9, ymm4, ymm5, 2
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm4, ymm6, 35
+        vshufps ymm8, ymm8, ymm5, 232
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 147
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 57
+        vshufps ymm8, ymm6, ymm5, 19
+        vshufps ymm9, ymm4, ymm6, 1
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm7, ymm4, 3
+        vshufps ymm9, ymm6, ymm5, 33
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 57
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 147
+        vshufps ymm8, ymm7, ymm4, 34
+        vshufps ymm9, ymm4, ymm5, 51
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm14
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 12
+        vpslld ymm1, ymm1, 20
+        vpor ymm1, ymm1, ymm9
+        vshufps ymm8, ymm6, ymm7, 2
+        vshufps ymm9, ymm5, ymm7, 16
+        vshufps ymm8, ymm8, ymm9, 136
+        vpaddd ymm0, ymm0, ymm1
+        vpaddd ymm0, ymm0, ymm8
+        vpxor ymm3, ymm3, ymm0
+        vpshufb ymm3, ymm3, ymm15
+        vpaddd ymm2, ymm2, ymm3
+        vpxor ymm1, ymm1, ymm2
+        vpsrld ymm9, ymm1, 7
+        vpslld ymm1, ymm1, 25
+        vpor ymm1, ymm1, ymm9
+        vpshufd ymm1, ymm1, 147
+        vpshufd ymm2, ymm2, 78
+        vpshufd ymm3, ymm3, 57
+        vpxor ymm0, ymm0, ymm2
+        vpxor ymm1, ymm1, ymm3
+        cmp edx, dword ptr [rdi+400]
+        jne blake3_partial_avx2_pair_next
+        vpermq ymm8, ymm0, 216
+        vpshufd ymm8, ymm8, 216
+        vmovdqu ymmword ptr [rdi+528], ymm8
+        vpermq ymm8, ymm1, 216
+        vpshufd ymm8, ymm8, 216
+        vmovdqu ymmword ptr [rdi+560], ymm8
+blake3_partial_avx2_pair_next:
+        add rdx, 64
+        add rbx, 8
+        cmp rdx, 1024
+        jne blake3_partial_avx2_pair_block
+        vpermq ymm8, ymm0, 216
+        vpshufd ymm8, ymm8, 216
+        vmovdqu ymmword ptr [rdi+464], ymm8
+        vpermq ymm8, ymm1, 216
+        vpshufd ymm8, ymm8, 216
+        vmovdqu ymmword ptr [rdi+496], ymm8
+        vzeroupper
+        mov rsp, rbp
+        pop r15
+        pop r14
+        pop r13
+        pop r12
+        pop rbx
+        pop rbp
+        ret
+blake3_partial_avx2_pair_rot16:
+        .byte 2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13, 18, 19, 16, 17, 22, 23, 20, 21, 26, 27, 24, 25, 30, 31, 28, 29
+blake3_partial_avx2_pair_rot8:
+        .byte 1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12, 17, 18, 19, 16, 21, 22, 23, 20, 25, 26, 27, 24, 29, 30, 31, 28

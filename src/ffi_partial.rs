@@ -1,6 +1,7 @@
 //! Whole chunks and a partial one in one pass, side by side (x86-64): the
 //! generated kernels of `c/blake3_partial_x86-64_*` (tools/gen_x86.py),
-//! four lanes on SSE4.1, eight on AVX2. The partial chunk takes the lane
+//! four lanes on SSE4.1, two row-packed or eight word-parallel lanes on
+//! AVX2. The partial chunk takes the lane
 //! after the whole ones, its last block flagged CHUNK_END at its own step,
 //! and its chaining value is the kernel's snapshot at that step; so the
 //! longest chain of dependent blocks is a whole chunk's sixteen, where
@@ -29,6 +30,7 @@ pub struct Params<const W: usize> {
 unsafe extern "C" {
     fn blake3_partial_sse41(params: *mut Params<4>);
     fn blake3_partial_avx2(params: *mut Params<8>);
+    fn blake3_partial_avx2_pair(params: *mut Params<2>);
 }
 
 /// The byte shuffle (pshufb) that rotates each 32-bit word right by `r`
@@ -99,6 +101,12 @@ fn hash_chunks_with_partial<const W: usize>(
     }
 }
 
+/// [`hash_chunks_with_partial`] on two row-packed lanes: one whole chunk.
+/// Unsafe: the CPU must have AVX2.
+pub unsafe fn hash_chunks_with_partial_pair(whole: &[&[u8; CHUNK_LEN]], partial: &[u8], key: &CVWords, counter: u64, flags: u8, out: &mut [u8]) {
+    hash_chunks_with_partial::<2>(blake3_partial_avx2_pair, whole, partial, key, counter, flags, out)
+}
+
 /// [`hash_chunks_with_partial`] on four lanes: 1 to 3 whole chunks.
 /// Unsafe: the CPU must have SSE4.1.
 pub unsafe fn hash_chunks_with_partial_sse41(whole: &[&[u8; CHUNK_LEN]], partial: &[u8], key: &CVWords, counter: u64, flags: u8, out: &mut [u8]) {
@@ -147,6 +155,7 @@ mod test {
             ];
             assert_eq!(got, want, "{W} lanes");
         }
+        check::<2>();
         check::<4>();
         check::<8>();
     }
@@ -158,8 +167,11 @@ mod test {
     fn test_partial_kernels_against_portable() {
         let mut input = [0u8; 8 * CHUNK_LEN];
         crate::test::paint_test_input(&mut input);
-        let kernels: [(usize, unsafe fn(&[&[u8; CHUNK_LEN]], &[u8], &CVWords, u64, u8, &mut [u8]), bool); 2] =
-            [(4, hash_chunks_with_partial_sse41, crate::platform::sse41_detected()), (8, hash_chunks_with_partial_avx2, crate::platform::avx2_detected())];
+        let kernels: [(usize, unsafe fn(&[&[u8; CHUNK_LEN]], &[u8], &CVWords, u64, u8, &mut [u8]), bool); 3] = [
+            (2, hash_chunks_with_partial_pair, crate::platform::avx2_detected()),
+            (4, hash_chunks_with_partial_sse41, crate::platform::sse41_detected()),
+            (8, hash_chunks_with_partial_avx2, crate::platform::avx2_detected()),
+        ];
         for (w, kernel, present) in kernels {
             if !present {
                 continue;
