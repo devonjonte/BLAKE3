@@ -563,7 +563,10 @@ side's code changed (95 s before), for three reasons:
   no-verdict in 25 checks; a solo cell 5% slower caught 81% (84% at 48
   rounds, 61% at 12), 10% 92%, 20% 95%. The misses are the cells whose
   speed differs between processes (servil mt at 64 KiB and 1024
-  messages, servil st at 32 KiB).
+  messages, servil st at 32 KiB). The Mac (job 329: 48 runs from one
+  build, checks over consecutive runs): false flags 1 of 4756 cells, no
+  false no-verdict in 41 checks, 5% slower caught 77%, 10% 96%, 20% 99%;
+  open points after each pair 8.4, 1.7, 0.3, 0.
 - *Cargo's freshness.* Each side is a directory it owns (fork worktree,
   bench-hashes copy with its own lock, target directory), changed only
   where its sources differ, so an unchanged side builds nothing (1.2 s
