@@ -111,6 +111,10 @@ these anchors. Correctness is each project's tests' business: a benchmark
 checks no outputs (Zooko, September 26, 2026), and only keeps every
 result from being optimized away.
 
+## Measuring: wall time and cycles, both, always
+
+Whenever code is timed (a probe, a benchmark, a throwaway loop in a scratch directory), record two clocks together, through the one timing helper each project provides: wall time, which a caller waits for, and the thread's core cycles per core kind, which do not change with the clock speed and do not count time the core waits on a coprocessor (the SME unit). Their ratio, cycles per ns, says which state a measurement ran in (the core kind's clock; the SME unit's fast or slow state). Speed verdicts use wall time, compared within one state, with the state mix reported; a change that shifts the mix has that shift as part of its effect. Cycles explain and locate time, and are the finer comparison for core-only kernels across core kinds. When the two disagree, that is a finding to investigate, never a reason to prefer one. Where a platform gives no per-thread cycle counts, say so beside the result.
+
 ## Coding: integers first
 
 Avoid floating point except where the domain is continuous by nature (pixel coordinates on a log axis). Time is discrete by nature here: every clock we can read counts ticks, so elapsed time, like counts, bytes, and ranks, is an integer (Zooko, September 26, 2026). Measurements, statistics, ratios, and thresholds are integers. Keep a measurement as measured (a sample is the nanoseconds the clock gave over the units they covered) and defer every lossy step: bench-hashes computes on times and ratios in fixed point with 64 fractional bits (its `Fixed`), where sums, differences, and comparisons are exact, and rounds once, where a person reads the value (permille for ratios and spreads, hundredths for opacities, three significant digits of nanoseconds). Round explicitly (`(a + b / 2) / b`) at the one place a division happens, and encapsulate the representation in a type whose methods do the rounding. Convert to `f64` at the last moment, for drawing only.
@@ -129,85 +133,20 @@ A highly desirable property of an interface and its contract: the user learns th
 
 Each document serves one audience; keep it to that audience's needs.
 
-1. **The servil team** (Zooko, and John Servil, his AI assistant; future sessions of both), who change these two repositories: this file, `NOTES-servil.md`, and bench-hashes' `AGENTS.md`, `NEXT-STEPS.md`, and `NOTES.md`. Everything we know, need, or decided goes here.
+1. **The servil team** (Zooko, and John Servil, his AI assistant; future sessions of both), who change these two repositories: this file, `PROCEDURES.md`, `NOTES-servil.md`, and bench-hashes' `AGENTS.md`, `PROCEDURES.md`, `NEXT-STEPS.md`, and `NOTES.md`. Everything we know, need, or decided goes here.
 2. **People who run the benchmark or use the crate**: bench-hashes' `README.md` (how to run it, read the results, and share them; also the GitHub Pages home page), its `METHODOLOGY.md` (how it measures, for readers who investigate), the graph itself, and the servil preface of this repository's `README.md`. They need no development setup and none of our conventions.
 3. **Other developer teams, human and AI**, who change the code and cooperate with us: `CONTRIBUTING.md` here and in bench-hashes. It holds the bare necessities (layout, build and test, the regression check, the rules that keep results comparable) and points at our notes without asking anyone to follow them.
 
 A fact that concerns several audiences goes in each audience's document, phrased for it.
 
-# Measuring: wall time and cycles, both, always
-
-Wall time is what a caller waits for; the thread's core cycles (per core kind on macOS) do not change with the clock speed and do not count time the core waits on the SME unit; their ratio, cycles per ns, says which state a measurement ran in (the core kind's clock; the SME unit's fast or slow state). Every probe records all three per batch, through `examples/support/clocks.rs`. Speed verdicts use wall time, compared within one state, with the state mix reported; a change that shifts the mix has that shift as part of its effect. Cycles explain and locate time, and are the finer comparison for core-only kernels across core kinds. When the two disagree, that is a finding to investigate, never a reason to prefer one. The benchmark and `perf_regress` judge wall time; `--trace-clocks` records the cycles beside it. The Linux VM gives no per-thread cycle counts, and its probes say so.
-
-# Where to start
-
-Read `/workspace/bench-hashes/NEXT-STEPS.md` first: it says what the work is now (optimising this fork against the benchmark) and where the last session left both repositories. `NOTES-servil.md` in this directory holds the fork's design notes and the measurements behind each change.
-
 # Targets
 
 **Virtual machines are first-class optimization targets.** People run BLAKE3 inside VMs like the Debian guest this repository is developed in, and its speed there matters as much as on the native Mac. A change is good when it helps both, or helps one and leaves the other level; a change that wins natively and loses in a VM (or the reverse) needs a decision on the record, not a default. VMs behave differently in ways that matter here: an idle vCPU that spins or calls `sched_yield` steals host time from the vCPUs that hash (natively a yielding poller costs 2%, in the VM 36%), and a 16-vCPU guest may sit on fewer fast host cores than it has vCPUs. `examples/host_lab.rs` measures each of these; run it on both and keep both reports.
 
-# Performance regressions: check every code commit
+# Where to start
 
-Speed is this fork's purpose, so no commit that makes it slower may enter git unnoticed. **Every commit that touches `src/`, `c/`, `build.rs`, `Cargo.toml`, or `Cargo.lock` must pass `tools/perf_regress.py check` first.** The check builds bench-hashes against `HEAD` and against the working tree and runs the two builds alternately on this machine (A B B A A B B A, about 40 seconds on the VM plus builds), so load and drift fall on both sides alike; there are no stored numbers and nothing to keep current, and any machine can run it.
+Read `/workspace/bench-hashes/NEXT-STEPS.md` first: it says what the work is now (optimising this fork against the benchmark) and where the last session left both repositories. `NOTES-servil.md` holds the fork's design notes and the measurements behind each change. `PROCEDURES.md` holds how things are done here: the regression check, branches and promotion, releases, the Mac runner, probes, and the environment.
 
-**Install the pre-commit hook once per checkout**, and the check runs by itself on every code commit:
+# Speed: no slower commit enters unnoticed
 
-- macOS host: `sh tools/install-git-hooks.sh`
-- the Debian VM: `sh /workspace/vm/setup.sh` (after every VM restart; the mount drops executable bits, so the guest's hook lives in `/tmp/git-hooks`)
-
-**Run it by hand** when the hook is not installed or before pushing: `pypy3 tools/perf_regress.py check` (`python3` where PyPy is absent; in the VM with the usual `HOME=/workspace/vm/home CARGO_TARGET_DIR=/tmp/target CC=clang-19 TMPDIR=/tmp` prefix). It measures the working tree, so commit with everything the commit contains in the tree (`git commit -a`, or stash unrelated edits first). Nothing else should run on the machine meanwhile, and on the VM nothing heavy on the host either.
-
-**What each result obliges you to do:**
-
-- *Exit 0, no regression:* commit.
-- *Exit 1, a confirmed regression:* the hook aborts the commit. Do not commit around it. Find the cause and fix it, or, when the slowdown is the deliberate price of something worth more (correctness, simplicity with a measured cost), stop and ask the user; if they accept it, commit with `git commit --no-verify` and state the regressed cells, their numbers, and the user's decision in the commit message.
-- *Exit 2, no verdict:* the control (SHA-256, the same code on both sides) moved, so the machine's state changed during the check. Stop whatever else is running and check again.
-
-**Releases:** `python3 tools/gen-ver.py X.Y.Z` from a clean tree (Zooko's technique, copied from bench-hashes: a commit setting X.Y.Z, a second setting X.Y.Z+<first commit>, a lightweight tag vX.Y.Z+<first commit>; push `servil`, then the tag by name). Before a release, run `check --against <previous release tag>`. Each commit is checked only against its parent, so slowdowns too small to flag one at a time could add up; the release check sees their sum.
-
-**Commits that skipped the check** (`--no-verify`, or made where the hook was absent) must be checked before they are pushed: `pypy3 tools/perf_regress.py compare <parent> <commit>` for one, `pypy3 tools/perf_bisect.py <commit> <commit> ...` for a run of them (each against the one before, then the last against the first).
-
-`NOTES-servil.md` ("Performance-regression check") explains the rule and its measured false-alarm rate and sensitivity.
-
-# Branches: candidates, then servil
-
-`servil` is this fork's main line. Every commit on it has passed the whole gate below, on the VM and natively on the Mac.
-
-Work happens on `candidate/<topic>` branches (`candidate/p-e-classification`, `candidate/workgroup-placement`). Their commits pass the pre-commit check on the machine where they are made, as every code commit does, and may be pushed before native measurement: that is how the Mac's benchmark runner, which builds from GitHub alone, gets them.
-
-A candidate reaches `servil` only when all of these hold, and never without the performance check:
-
-1. It is a fast-forward of `servil`'s current tip, so what was measured is exactly what lands. When `servil` has moved, rebase and check again.
-2. Every test suite passes: the fork's default, `no_sme2`, and `pure` builds, the official vectors, and the benchmark's own tests.
-3. `pypy3 tools/perf_regress.py compare servil candidate/<topic>` reports no regression on the VM.
-4. The same comparison reports no regression natively on the Mac.
-
-A regression the user accepts, as the section above describes, lands with the user's decision, the regressed cells, and their numbers in the merge's message (for a fast-forward, the promoted commit's message; amend the message only, leaving the measured tree unchanged). The user accepts such trades under this rule (September 25, 2026): every slowed cell stays ahead of every competitor, the gains outweigh the losses, and the user decides; the minimax cells, where we trail or lead narrowly, may not slow. A candidate waiting on the Mac waits on its branch; the VM's verdict alone does not promote it.
-
-A promotion fast-forwards `servil` to the candidate, records the gate's evidence (suites, both verdicts, their job numbers) as a note on the tip (`git notes --ref=perf add`; push `servil` with `refs/notes/perf`), and deletes the candidate branch here and on GitHub. After a promotion, pin bench-hashes to the new tip (`cargo update -p blake3-servil` in bench-hashes, commit the `Cargo.lock`, push): that pin is what users measure, and records are made on it.
-
-# Environment
-
-## Where things are
-
-- `/workspace` is the host checkout of this fork (github.com/johnservil/BLAKE3, main branch `servil`, work on `candidate/<topic>` branches), mounted through sandboxfs. It persists across VM restarts.
-- `/workspace/bench-hashes` is the benchmark's own repository (github.com/johnservil/bench-hashes, branch `main`), nested inside the fork. It depends on the fork by git (`servil` branch) at the commit its `Cargo.lock` pins, so a user's `cargo run --release` measures that commit. To build it against this checkout's working tree, run `pypy3 tools/perf_regress.py build`: it builds in a directory of its own under `tmp/perf-ab/new/` (a fork worktree holding a copy of bench-hashes with its own `Cargo.lock`, where the patch `--config 'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'` applies) and prints the executable's path; nothing tracked changes, and Cargo rebuilds only what changed. `/workspace/.git/info/exclude` keeps it, `benchmark-results/`, `tmp/`, `vm/`, and the token out of the fork's status.
-- `/workspace/vm/` holds everything the guest needs that a restart would otherwise remove:
-  - `vm/home/` is `HOME` for `git` and `cargo`: `.gitconfig` with `safe.directory = *`, John Servil's `user.name`/`user.email`, and the credential helper.
-  - `vm/home/bin/gh-cred.sh` speaks the git credential protocol and reads the johnservil classic token from `/workspace/ghtokenclassic.txt` (never print that file). Both repos have `credential.helper = !sh /workspace/vm/home/bin/gh-cred.sh` (the mount drops executable bits, hence `!sh`).
-  - `vm/setup.sh` installs `clang-19` from apt.llvm.org, and `pypy3` and `librsvg2-bin` from Debian, when they are absent; creates `/tmp/target`; re-points both repos' credential helpers; and installs the guest's pre-commit hook in `/tmp/git-hooks`. Run `sh /workspace/vm/setup.sh` first after a VM restart.
-- Guest disk (`/tmp`, `/usr`, apt packages) vanishes with the VM. Only `/workspace` persists.
-
-## Building and running
-
-- The VM is Debian 12 on AArch64 with 16 vCPUs (inspect `nproc` after a restart). Its CPU exposes SME2 with 512-bit streaming vectors (`/proc/cpuinfo` lists `sme2`), so the fork's kernels run here. Absolute timings differ from Apple hardware; relative comparisons hold.
-- The fork's SME2 kernel is `c/blake3_sme2_aarch64.S`, compiled by the `cc` crate with `-march=armv9-a+sme2`. The system `cc` (GCC 12) and `as` (binutils 2.40) predate SME2, so under them the fork builds without the SME2 kernel and warns (the user's decision, September 25, 2026, for Debian 12 and Raspberry Pi OS users); every VM build takes `CC=clang-19`, which assembles SME2, and `perf_regress` fails stop when a build on an SME2 machine lacks the kernel; `TMPDIR` gives clang a temporary directory that exists in the guest.
-- Every `git` and `cargo` command takes `HOME=/workspace/vm/home`. Files on the mount show as uid 501 while the guest runs as uid 0, which is what `safe.directory` covers.
-- Build the fork: `HOME=/workspace/vm/home CARGO_TARGET_DIR=/tmp/target CC=clang-19 TMPDIR=/tmp cargo build --release`
-- Test the fork: `cargo test --release` (add `--features no_sme2` or `--features pure` for the other platform paths), and the official published vectors with `--manifest-path /workspace/test_vectors/Cargo.toml`, all with the same environment prefix.
-- Run the benchmark from `/workspace/bench-hashes`, since it writes `benchmark-results/` relative to the current directory: `cd /workspace/bench-hashes && HOME=/workspace/vm/home CARGO_TARGET_DIR=/tmp/target CC=clang-19 TMPDIR=/tmp cargo run --release -- --quick --contenders blake3-official,blake3-servil-st` measures the pinned fork commit; `$(pypy3 /workspace/tools/perf_regress.py build) --quick ...`, run from a scratch directory, measures the working tree. A full run is the default; `--quick` takes seconds.
-- `CARGO_TARGET_DIR=/tmp/target` is a tmpfs build cache (rebuilt after a restart); `CARGO_HOME=/usr/local/cargo`. The toolchain is rustc 1.98.1 without the `rustfmt` component, so there is no formatting check in the guest.
-- Commands for the user go on one line, with no `\` continuations.
-- Never `sleep` in commands.
-- Run long commands (builds, benchmark runs, package installs) without a timeout and let their output stream, so the user can watch progress and interrupt when they choose.
+Speed is this fork's purpose. Every commit that touches code passes the performance-regression check before it enters git, and the main line takes only changes that passed it on every target machine; `PROCEDURES.md` gives the procedure and what each verdict obliges.
