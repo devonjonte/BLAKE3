@@ -89,6 +89,10 @@ use crate::{CHUNK_LEN, Hash};
 use crate::{Hasher, KEY_LEN};
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, OnceLock};
+// TRACE
+pub static TRACE: [std::sync::atomic::AtomicU64; 512] = [const { std::sync::atomic::AtomicU64::new(0) }; 512]; // TRACE
+pub static TRACE_N: AtomicUsize = AtomicUsize::new(0); // TRACE
+pub fn tr(kind: u64) { let i = TRACE_N.fetch_add(1, Ordering::SeqCst); if i < 512 { TRACE[i].store(kind << 48 | pool().epoch.elapsed().as_nanos() as u64 & ((1 << 48) - 1), Ordering::SeqCst); } } // TRACE
 
 /// Inputs below this length are hashed on the calling thread. A split
 /// hands pieces to workers that are polling, a few microseconds each way;
@@ -648,7 +652,9 @@ impl Pool {
             active: Line(AtomicUsize::new(1)),
             max_threads,
         };
+        tr(0); // TRACE
         let slot = self.register(&job);
+        tr(1); // TRACE
         for index in 0..own {
             // Sound: the cursor starts past these, so this thread alone
             // writes their slots.
@@ -663,6 +669,7 @@ impl Pool {
             // writes slot index.
             unsafe { job.hash_piece(index, pool_platform()) };
         }
+        tr(2); // TRACE
         job.active.fetch_sub(1, Ordering::SeqCst);
         // Every piece is taken; the slot has nothing more to give from this
         // job. Unregister drains readers still making a reservation; afterwards
@@ -671,6 +678,7 @@ impl Pool {
             self.unregister(slot);
         }
         self.wait_done(&job.active);
+        tr(3); // TRACE
     }
 
     /// Put the job in a free slot. Returns the slot, or None when every
@@ -818,6 +826,7 @@ impl Pool {
             }
             self.sleepers.fetch_sub(1, Ordering::SeqCst);
             drop(guard);
+            tr(100 + rank as u64); // TRACE
             if let Some(taken) = taken {
                 break 'taken taken;
             }
@@ -831,9 +840,11 @@ fn worker_main(rank: usize) {
     let mut start = 0;
     loop {
         let (job_ptr, index) = pool.next_piece(&mut start, rank);
+        tr(200 + rank as u64); // TRACE
         // Sound by the pool's contract: our active reservation keeps the job alive.
         let job = unsafe { &*job_ptr };
         unsafe { job.hash_piece(index, pool_platform()) };
+        tr(300 + rank as u64); // TRACE
         pool.piece_done(&job.active);
     }
 }

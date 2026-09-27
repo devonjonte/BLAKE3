@@ -1226,6 +1226,7 @@ pub fn hash_multithreaded_with_budget(input: &[u8], max_threads: usize) -> Hash 
 /// assert_eq!(hash, blake3_servil::hash(&[0u8; 1 << 20]));
 /// ```
 #[cfg(feature = "std")]
+#[doc(hidden)] pub fn trace_take() -> Vec<(u64, u64)> { use std::sync::atomic::Ordering::SeqCst; let n = lanes::TRACE_N.swap(0, SeqCst).min(512); (0..n).map(|i| { let v = lanes::TRACE[i].load(SeqCst); (v >> 48, v & ((1 << 48) - 1)) }).collect() } // TRACE
 pub fn initialize() {
     self_test::ensure();
     lanes::initialize();
