@@ -532,12 +532,15 @@ back-to-back effect; not measured natively.
 
 - **p4 as one NEON quad** (probe/p4-quad, September 27, 2026): four
   64-byte messages 14% slower on the VM than two pairs.
-- **p4 as two scalar blocks beside a pair** (642757f, reverted in
-  9850a21): four 64-byte messages 13-14% faster on P-cores and the VM
-  (Mac 23.2 -> 20.3 ns/msg, ahead of official's 21.6), 30% more cycles on
+- **p4 as two scalar blocks beside a pair: taken after all** (642757f,
+  reverted in 9850a21, restored by Zooko's decision, September 27, 2026:
+  hash_many is built for top speed, no alternative kinder to E-cores has
+  been found, it was the last batch where BLAKE3 official led, and P-cores
+  do most of the work): four 64-byte messages 13-14% faster on P-cores and
+  the VM (Mac 23.2 -> 20.3 ns/msg, official 21.6), 30% more cycles on
   E-cores (720 against 555 per call; 347 against 392 on P; jobs 396-399).
-  The rule above PARENT_PLANS holds: two scalar lanes stay out of parent
-  plans. **Measuring E-cores on this Mac**: in High Power mode threads at
+  Other parent plans keep the rule: two scalar lanes stay out.
+  **Measuring E-cores on this Mac**: in High Power mode threads at
   background QoS stay on P-cores; keep 14 threads spinning at
   user-interactive QoS and the background thread spends about a fifth of
   its time on E; per-kind cycles per call = that kind's cycles per

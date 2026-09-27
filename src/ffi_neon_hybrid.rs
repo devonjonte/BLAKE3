@@ -43,6 +43,13 @@
 //! cycles on a P-core (7180 against 8718 for eight chunks), 6.5% more on an
 //! E-core (14170 against 13310).
 //!
+//! p4 is two scalar blocks beside a pair, as k4 is for chunks: four
+//! one-block messages 20.3 ns/msg against two pairs' 23.2 on an M4 Max
+//! P-core (348 cycles per call against 395; jobs 382-389), 14% faster on
+//! the VM; 30% more cycles on an E-core (720 per call against 555; jobs
+//! 396-399), a cost Zooko accepted for top speed where most work runs.
+//! One quad was 14% slower on the VM.
+//!
 //! The scalar kernel also serves every single-chunk job: `hash_chunk` runs
 //! a whole input of one chunk or less, root compression included, in one
 //! call; `compress_blocks` is `ChunkState::update`'s inner loop; and
@@ -362,7 +369,10 @@ const PARENT_KERNELS: [Option<Kernel>; 10] = [
 /// 13 -12 / -15, 14 -17 / -12, 15 -18 / -19; on the VM 6-39% faster. 2,
 /// 4, 8, and 16 keep their kernels; 13-16 were level with the other
 /// plans tried on the VM. Two scalar lanes stay out: E-cores pay for a
-/// second one what P-cores save.
+/// second one what P-cores save. The exception is p4 itself (Zooko,
+/// September 27, 2026): hash_many is built for top speed, P-cores do most
+/// of this machine's work, and four messages were the last batch where
+/// BLAKE3 official led (P -12%, E +30% in cycles per call).
 const PARENT_PLANS: [&[usize]; 17] = [
     &[],
     &[1],
