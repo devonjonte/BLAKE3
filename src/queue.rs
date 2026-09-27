@@ -17,7 +17,10 @@
 //! stays registered while tasks are in flight: the pool's workers take
 //! them as they appear, the engine takes some itself, and the engine
 //! delivers from the front in submission order as each is done (a piece
-//! by replaying `Hasher::update` with its subtrees' results). A message or
+//! by replaying `Hasher::update` with its subtrees' results). While the
+//! front waits, the engine hashes one of its tasks when no worker has
+//! taken it; once a queue of pieces has its finish in flight, when the
+//! program waits for the digest rather than its buffers, any task. A message or
 //! piece holding a subtree of `lanes::MIN_SPLIT_LEN` or more is hashed at
 //! delivery the one-shot way, over the pool, and so is one shorter than
 //! `FEED_MIN`, which costs less to hash than to hand over. Sleeping workers are woken
@@ -276,7 +279,8 @@ where
      * flight (`take`, which may leave some pending when the feed is full),
      * deliver the done ones from the front in order (`deliver`, returning
      * whether it delivered any), and when the front waits on tasks, hash
-     * one of the front's itself or poll. Returns when nothing is in flight or pending
+     * one of the front's itself (any task, once a submission that `ends`
+     * a message is in flight) or poll. Returns when nothing is in flight or pending
      * (the queue goes idle, its feed retired so the workers may sleep), or
      * after a delivery when another queue waits for the engine (this one
      * back in line, its tasks still in flight).
@@ -285,6 +289,7 @@ where
         self: Arc<Self>,
         take: impl Fn(&Self, &mut Handling<H, I>, &mut VecDeque<I>),
         deliver: impl Fn(&Self, &mut Handling<H, I>) -> bool,
+        ends: impl Fn(&I) -> bool,
     ) {
         let mut handling = self.handling.lock().expect("a panic on the engine thread aborts, so no lock is poisoned");
         let mut polled = std::time::Instant::now();
@@ -310,8 +315,14 @@ where
             } else {
                 // The front waits on its tasks: hash one of them here when no
                 // worker has taken it, else poll, so that each submission
-                // goes out as soon as it is done.
-                let front = handling.flight.front().map_or(0, |front| front.first + front.count);
+                // goes out as soon as it is done. With a finish in flight the
+                // program waits for the digest rather than its buffers, so
+                // the engine hashes any task no worker has taken.
+                let front = if handling.flight.iter().any(|flight| ends(&flight.item)) {
+                    usize::MAX
+                } else {
+                    handling.flight.front().map_or(0, |front| front.first + front.count)
+                };
                 if !handling.feed.as_ref().is_some_and(|feed| feed.help(front, crate::platform::Platform::detect())) {
                     crate::lanes::poll_pause(&mut polled);
                 }
@@ -376,6 +387,7 @@ impl<H: MessageHandler> Serve for Inner<H, H::Buffer, shape::Messages> {
                 }
                 delivered
             },
+            |_| false,
         );
     }
 }
@@ -455,6 +467,7 @@ impl<H: PieceHandler> Serve for Inner<H, PieceItem<H::Buffer>, shape::Pieces> {
                 }
                 delivered
             },
+            |item| matches!(item, PieceItem::Finish),
         );
     }
 }
@@ -471,6 +484,7 @@ impl<H: FixedHandler> Serve for Inner<H, (H::Buffer, H::Digests), shape::Fixed> 
                 }
                 delivered
             },
+            |_| false,
         );
     }
 }
