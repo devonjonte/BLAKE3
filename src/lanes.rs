@@ -834,7 +834,10 @@ impl Pool {
             self.sleepers.fetch_sub(1, Ordering::SeqCst);
             drop(guard);
             if waited {
-                for _ in 0..self.owed.swap(0, Ordering::SeqCst) {
+                // Wake the larger half of the owed sleepers, so the wakes
+                // fan out over the woken as a tree.
+                let owed = self.owed.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| (n > 0).then_some(n / 2));
+                for _ in 0..owed.map_or(0, |n| n - n / 2) {
                     self.posted.notify_one();
                 }
             }
