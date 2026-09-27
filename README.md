@@ -18,8 +18,7 @@ crate, and adds:
 
 - `hash_multithreaded`, which spreads one large input (768 KiB or more) over every core;
 - `hash_many`, which hashes a batch of equal-length messages (Merkle-tree leaves and nodes,
-  for example) in one call;
-- `Stream`, which hashes input as it arrives.
+  for example) in one call.
 
 To use it, add
 

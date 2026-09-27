@@ -1198,21 +1198,6 @@ mod unsafe_paths {
         });
     }
 
-    /// A stream of one buffer and a little more, written in odd pieces.
-    #[test]
-    fn test_stream_past_one_buffer() {
-        let data = input(crate::stream::BUFFER_LEN + 1000, 3);
-        let mut stream = Stream::new();
-        let mut at = 0;
-        while at < data.len() {
-            let buffer = stream.buffer();
-            let n = buffer.len().min(data.len() - at).min(300_001);
-            buffer[..n].copy_from_slice(&data[at..][..n]);
-            stream.filled(n);
-            at += n;
-        }
-        assert_eq!(stream.finalize(), hash(&data));
-    }
 }
 
 // Every platform's hash_many against the portable one, for every input

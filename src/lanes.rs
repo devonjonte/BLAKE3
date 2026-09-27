@@ -58,8 +58,7 @@
 //! # Waiting
 //!
 //! Nothing keeps a worker awake between calls (AGENTS.md, "Serve real
-//! programs"): a worker polls the slots only while a job is registered
-//! (or a [`Hold`] lives: a stream whose next buffer is already waiting),
+//! programs"): a worker polls the slots only while a job is registered,
 //! and sleeps on a condition variable as soon as none is. So every call
 //! meets sleeping workers, and a call wakes only as many as it can use
 //! (its pieces less one, within its thread budget): it wakes one itself,
@@ -572,7 +571,7 @@ struct Pool {
     cpus: usize,
     /// The clock jobs' registration times count from.
     epoch: std::time::Instant,
-    /// Jobs in the slots and live [`Hold`]s: workers poll while there are any.
+    /// Jobs in the slots: workers poll while there are any.
     registered: AtomicUsize,
     /// Workers asleep on `posted`.
     sleepers: AtomicUsize,
@@ -843,25 +842,6 @@ impl Pool {
                 return taken;
             }
         }
-    }
-}
-
-/// While it lives, the pool's workers poll as they do for a registered job
-/// instead of sleeping when they find none: for a caller whose next call
-/// is already waiting (a stream's next buffer), so the gap between its
-/// calls is inside one call. It wakes no sleeper; the next call does.
-pub(crate) struct Hold(());
-
-impl Hold {
-    pub(crate) fn new() -> Hold {
-        pool().registered.fetch_add(1, Ordering::SeqCst);
-        Hold(())
-    }
-}
-
-impl Drop for Hold {
-    fn drop(&mut self) {
-        pool().registered.fetch_sub(1, Ordering::SeqCst);
     }
 }
 

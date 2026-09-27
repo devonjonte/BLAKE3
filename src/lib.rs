@@ -32,20 +32,14 @@
 //!
 //! # For best performance
 //!
-//! Each hashing interface says what it is built for:
+//! Each hashing interface says what it is built for; streaming interfaces
+//! built for efficiency are planned.
 //!
-//! - **Top speed:** [`hash`], [`hash_many`], and [`Stream`] are the
-//!   fastest way to do their task for a caller that keeps them fed: the
-//!   whole input in one call, the whole batch in one call, and a long
-//!   input read straight into the stream.
-//! - **A low worst case:** [`hash_multithreaded`] and
-//!   [`hash_many_multithreaded`] use other cores only where waking them
-//!   pays on every machine measured, run no slower than their
-//!   single-threaded forms, and leave nothing running between calls, so a
-//!   program that hashes now and then pays nothing while it waits. A
-//!   program with a stream of inputs gets top speed by handing them over
-//!   together: one [`Stream`] for one long input, one batch for many
-//!   messages of one length.
+//! - **Ease of use:** [`hash`], [`hash_multithreaded`], [`hash_many`],
+//!   [`hash_many_multithreaded`], and [`Hasher`]. The multithreaded forms
+//!   use other cores only where waking them pays on every machine
+//!   measured, run no slower than their single-threaded forms, and leave
+//!   nothing running between calls, at more energy per byte (below).
 //!
 //! And by situation:
 //!
@@ -56,13 +50,9 @@
 //!   first call of a process otherwise runs the startup self-test (below,
 //!   0.1 to 0.2 ms), and the first multithreaded call starts the worker
 //!   threads, about a millisecond.
-//! - **Input arriving (a file, a socket, a decompressor): a [`Stream`],
-//!   with each read landing in its buffer.** [`Stream::update_reader`]
-//!   reads any [`std::io::Read`] straight into the stream's buffers, and
-//!   [`Stream::buffer`] hands out the space for code that writes the input
-//!   itself; the stream hashes each full buffer on another thread while
-//!   the next one fills. [`Stream::new_multithreaded`] spreads each buffer
-//!   over every core.
+//! - **Input arriving (a file, a socket, a decompressor): a [`Hasher`].**
+//!   [`Hasher::update`] takes each piece as it arrives, and
+//!   [`Hasher::update_reader`] reads any [`std::io::Read`] through it.
 //! - **Batch small messages of one length with [`hash_many`]**, back to
 //!   back in one buffer, the whole batch in one call: 1024 messages of 64
 //!   bytes hash about 5x faster than in a loop of [`hash`], and messages
@@ -190,10 +180,6 @@ mod portable;
 #[cfg(blake3_sme2)]
 #[path = "ffi_sme2.rs"]
 mod sme2;
-#[cfg(feature = "std")]
-mod stream;
-#[cfg(feature = "std")]
-pub use stream::Stream;
 #[cfg(blake3_sse2_rust)]
 #[path = "rust_sse2.rs"]
 mod sse2;
@@ -1883,11 +1869,11 @@ impl Hasher {
     /// [`update`](Hasher::update) over several threads, with the same
     /// result: the whole subtrees of 1 MiB and more in `input` are cut into
     /// pieces that the calling thread and this crate's worker threads hash
-    /// at once, under the rules of [`hash_multithreaded`]. The hashing
-    /// thread of [`Stream::new_multithreaded`] runs each buffer through it;
-    /// callers use the stream (Zooko, September 25, 2026: the caller's thread
-    /// should produce while another hashes, not take turns with it).
+    /// at once, under the rules of [`hash_multithreaded`]. Crate-internal
+    /// and tested; kept for the planned streaming interfaces
+    /// (docs/api-design.md), which it will serve.
     #[cfg(feature = "std")]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn update_multithreaded(&mut self, input: &[u8]) -> &mut Self {
         self.update_with_join::<join::SerialJoin>(input, true)
     }

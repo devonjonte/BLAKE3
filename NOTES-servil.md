@@ -462,15 +462,6 @@ worst case). After idle, VM: mt 64 KiB 1.68 -> 0.59 ns/B (st 0.55),
 256 KiB 0.50 -> 0.28 (st 0.29), 4096 x 64 B 32.2 -> 17.1 (st 18.1); back to
 back, Mac solo 1 MiB mt 0.067 ns/B against st 0.152.
 
-**Holds** (3d7102e): `lanes::Hold` counts as a registered job while it
-lives (workers poll, nobody is woken). A multithreaded Stream's hashing
-thread holds one while its next buffer is already queued and drops it
-before waiting for the caller: a stream with buffers waiting is one call
-in progress, and a slow producer leaves the workers asleep. Without it
-each 1 MiB buffer paid a wake (VM streamed mt 32 MiB 0.062 -> 0.101
-ns/B); with it Mac streamed mt solo 32 MiB 0.065 -> 0.043, 8 MiB 0.067 ->
-0.048 (jobs 375-378).
-
 **Two aims, stated in the API docs** (Zooko, September 27, 2026): each
 hashing interface is built for top speed (hash, hash_many, Stream: the
 fastest way to do the task for a caller that keeps it fed) or for a low
@@ -496,19 +487,14 @@ threads now beat one at every size (they did not: 1 MiB 0.160 against
 the raw chunk kernel at once, 2.0-2.4x one's throughput on the Mac, 1.7-2.0x
 on the VM (job 187); a second SME2 thread in the pool is the next idea.
 
-**Stream** (59ad5c1, c242b2e): hashing behind the caller. Four 1 MiB
-buffers (whole subtrees, the flat walk's largest) per stream; the caller
-fills one (`buffer()`/`filled(n)`, or `update_reader`, which reads into
-them) while
-a hashing thread runs `Hasher::update` (or the crate-internal
-`update_multithreaded`) on full
-ones; `buffer()` blocks when all four are out. The hashing thread and the
-buffers are the calling thread's, kept asleep for its next stream (a
-thread-local); a stream shorter than a buffer is hashed in place at
-finalize. Mac, streamed 64 KiB pieces with the producer's copy (record
-ec5de66): servil 1 MiB 0.161 ns/B, 8 MiB 0.157, 128 MiB 0.150; servil mt 1
-MiB 0.046, 8 MiB 0.041. Open: short streams' fill and drain, the per-stream
-wake, 64 B overhead (0.91 against hash()'s 0.70 ns/B).
+**Stream, deleted** (September 27, 2026, Zooko: nothing to distract from
+the API plan until the benchmark is frozen). It hashed behind the caller
+in four 1 MiB buffers the caller filled (a copy, unless the data arrived
+by read), on a hashing thread per calling thread (59ad5c1, c242b2e), and
+held the pool while its next buffer waited (a `lanes::Hold`, 3d7102e:
+streamed mt 32 MiB 0.065 -> 0.043 ns/B on the Mac). The planned queue
+(docs/api-design.md) passes the caller's buffers by ownership instead;
+the hold comes back with it. The code is in git history.
 
 **Streaming scope** (Zooko, September 25, 2026): input in memory goes to
 one call (`hash`, `hash_multithreaded`); input that arrives goes to a
