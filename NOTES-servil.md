@@ -554,10 +554,20 @@ more per stream (open, below). Measured and refuted on the way:
   many 64 KiB inputs 0.149 -> 0.220; the four-piece stream level. On the
   VM tasks wait that long even with workers awake, and a delivery held up
   by the engine's own hash costs more than the hash saves.
-Open (ours to explain): what the four-piece stream lost when the engine
-stopped hashing later pieces itself. Candidates: the woken workers' first
-piece on a core the idle slowed, against the engine's SME2; the engine
-idle while its three later pieces run on NEON.
+Explained (probe/queue-timeline, Mac job 436; wall time per piece, the
+workers' cycles unreadable from the probe): the engine hashes a 64 KiB
+piece on SME2 in 13.9 us, a worker on NEON in 21-23 us. Helping with any
+task, the engine takes 40-60% of a four-piece stream's pieces (40.6 us a
+stream, against 51 us helping with the front alone), but in a long
+stream it holds each delivery 4-7 us while it hashes (4 MiB: 604 us a
+stream against 497). The engine is both the fastest hasher and the
+deliverer. Each stream also starts with the engine's wake (2 us on the
+Mac, 8 on the VM) and, for its later pieces, the workers' (3-7 us Mac,
+15-18 VM): the feed retires between streams. A worker taking the SME2
+turn for a feed task: VM 4 MiB streams 156 -> 186 ns/KiB (the SME unit's
+slow state, as for SME2 pieces handed out one at a time). Next: a
+delivery thread apart from the engine (the plan's design), so the engine
+can hash on SME2 without holding deliveries.
 
 **The queue's small inputs: two wakes per round trip** (open, for
 Zooko). The benchmark's program cycles four buffers and blocks on its
