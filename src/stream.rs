@@ -14,7 +14,7 @@
 
 use crate::{Hash, Hasher};
 use std::cell::{Cell, RefCell};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError};
 
 /// Bytes per buffer: 1 MiB, the flat walk's largest subtree, at which
 /// `Hasher::update` runs at `hash`'s speed.
@@ -73,7 +73,23 @@ fn keep_buffer(buffer: Buffer) {
 fn hashing_thread(from_caller: Receiver<ToHasher>, to_caller: SyncSender<FromHasher>) {
     let mut hasher = Hasher::new();
     let mut multithreaded = false;
-    for message in from_caller {
+    // While a multithreaded stream's next buffer is already waiting, the
+    // stream is one call in progress: a hold keeps the pool's workers
+    // polling across the gap between buffers. Waiting for the caller drops
+    // it, so a slow producer leaves the workers asleep.
+    let mut hold = None;
+    loop {
+        let message = match from_caller.try_recv() {
+            Ok(message) => message,
+            Err(TryRecvError::Empty) => {
+                hold = None;
+                match from_caller.recv() {
+                    Ok(message) => message,
+                    Err(_) => return,
+                }
+            }
+            Err(TryRecvError::Disconnected) => return,
+        };
         match message {
             ToHasher::Start { multithreaded: m } => {
                 hasher = Hasher::new();
@@ -81,6 +97,7 @@ fn hashing_thread(from_caller: Receiver<ToHasher>, to_caller: SyncSender<FromHas
             }
             ToHasher::Buffer(buffer) => {
                 if multithreaded {
+                    hold.get_or_insert_with(crate::lanes::Hold::new);
                     hasher.update_multithreaded(&buffer);
                 } else {
                     hasher.update(&buffer);
