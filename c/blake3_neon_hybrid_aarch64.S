@@ -16,7 +16,7 @@
 // pairs; k7 scalar + quad + pair; k8 two scalars + quad + pair; k9
 // scalar + two quads; k10 two scalars + two quads. p<n> hashes n
 // contiguous 64-byte parent blocks with one shared counter: p2 pair, p4
-// two scalars + pair (as k4), p8 two quads. Messages are transposed onto
+// two pairs, p8 two quads. Messages are transposed onto
 // the stack each block and the second NEON unit's d row lives there too,
 // which is what lets two units of state share 32 vector registers.
 //
@@ -526,12 +526,6 @@ blake3_hybrid_p2_loop:
 _blake3_hybrid_p4:
 blake3_hybrid_p4:
         sub sp, sp, #1088
-        stp x19, x20, [sp, #0]
-        stp x21, x22, [sp, #16]
-        stp x23, x24, [sp, #32]
-        stp x25, x26, [sp, #48]
-        stp x27, x28, [sp, #64]
-        stp x29, x30, [sp, #80]
         stp d8, d9, [sp, #96]
         stp d10, d11, [sp, #112]
         stp d12, d13, [sp, #128]
@@ -539,6 +533,10 @@ blake3_hybrid_p4:
         str x4, [sp, #160]
         str x1, [sp, #168]
         str x5, [sp, #176]
+        ldr x6, [x0, #0]
+        str x6, [sp, #992]
+        ldr x6, [x0, #8]
+        str x6, [sp, #1000]
         ldr x6, [x0, #16]
         str x6, [sp, #1008]
         ldr x6, [x0, #24]
@@ -587,89 +585,143 @@ blake3_hybrid_p4:
         lsr x7, x5, #32
         bfi x7, x7, #32, #32
         stp x6, x7, [sp, #352]
+        add x4, x3, #0
+        add x5, x3, #0
+        mov w6, w4
+        bfi x6, x6, #32, #32
+        mov w7, w5
+        bfi x7, x7, #32, #32
+        stp x6, x7, [sp, #368]
+        lsr x6, x4, #32
+        bfi x6, x6, #32, #32
+        lsr x7, x5, #32
+        bfi x7, x7, #32, #32
+        stp x6, x7, [sp, #384]
         ldr s0, [x2, #0]
+        dup v16.4s, v0.s[0]
         ldr s0, [x2, #4]
         dup v1.4s, v0.s[0]
+        dup v17.4s, v0.s[0]
         ldr s0, [x2, #8]
         dup v2.4s, v0.s[0]
+        dup v18.4s, v0.s[0]
         ldr s0, [x2, #12]
         dup v3.4s, v0.s[0]
+        dup v19.4s, v0.s[0]
         ldr s0, [x2, #16]
         dup v4.4s, v0.s[0]
+        dup v20.4s, v0.s[0]
         ldr s0, [x2, #20]
         dup v5.4s, v0.s[0]
+        dup v21.4s, v0.s[0]
         ldr s0, [x2, #24]
         dup v6.4s, v0.s[0]
+        dup v22.4s, v0.s[0]
         ldr s0, [x2, #28]
         dup v7.4s, v0.s[0]
+        dup v23.4s, v0.s[0]
         ldr s0, [x2]
         dup v0.4s, v0.s[0]
-        ldp w6, w7, [x2, #0]
-        ldp w8, w9, [x2, #8]
-        ldp w10, w11, [x2, #16]
-        ldp w12, w13, [x2, #24]
-        add x4, x3, #0
-        str x4, [sp, #200]
-        ldp w19, w20, [x2, #0]
-        ldp w21, w22, [x2, #8]
-        ldp w23, w24, [x2, #16]
-        ldp w25, w26, [x2, #24]
-        add x4, x3, #0
-        str x4, [sp, #216]
-        str x1, [sp, #1072]
-        ldr x1, [x0, #8]
-        ldr x0, [x0, #0]
 blake3_hybrid_p4_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
-        ldr x5, [sp, #1072]
         and w2, w3, #0xff
-        cmp x5, x4
+        cmp x1, x4
         ubfx w4, w3, #8, #8
         csel w4, w4, wzr, eq
         orr w2, w2, w4
-        cmp x5, #1
+        cmp x1, #1
         ubfx w3, w3, #16, #8
         csel w3, w3, wzr, eq
         orr w2, w2, w3
+        ldr x3, [sp, #992]
+        ldr x4, [sp, #1000]
+        ldr q8, [x3, #0]
+        ldr q9, [x4, #0]
+        zip1 v10.4s, v8.4s, v9.4s
+        zip2 v11.4s, v8.4s, v9.4s
+        zip1 v12.4s, v10.4s, v10.4s
+        zip2 v13.4s, v10.4s, v10.4s
+        zip1 v14.4s, v11.4s, v11.4s
+        zip2 v15.4s, v11.4s, v11.4s
+        stp q12, q13, [sp, #480]
+        stp q14, q15, [sp, #512]
+        ldr q8, [x3, #16]
+        ldr q9, [x4, #16]
+        zip1 v10.4s, v8.4s, v9.4s
+        zip2 v11.4s, v8.4s, v9.4s
+        zip1 v12.4s, v10.4s, v10.4s
+        zip2 v13.4s, v10.4s, v10.4s
+        zip1 v14.4s, v11.4s, v11.4s
+        zip2 v15.4s, v11.4s, v11.4s
+        stp q12, q13, [sp, #544]
+        stp q14, q15, [sp, #576]
+        ldr q8, [x3, #32]
+        ldr q9, [x4, #32]
+        zip1 v10.4s, v8.4s, v9.4s
+        zip2 v11.4s, v8.4s, v9.4s
+        zip1 v12.4s, v10.4s, v10.4s
+        zip2 v13.4s, v10.4s, v10.4s
+        zip1 v14.4s, v11.4s, v11.4s
+        zip2 v15.4s, v11.4s, v11.4s
+        stp q12, q13, [sp, #608]
+        stp q14, q15, [sp, #640]
+        ldr q8, [x3, #48]
+        ldr q9, [x4, #48]
+        zip1 v10.4s, v8.4s, v9.4s
+        zip2 v11.4s, v8.4s, v9.4s
+        zip1 v12.4s, v10.4s, v10.4s
+        zip2 v13.4s, v10.4s, v10.4s
+        zip1 v14.4s, v11.4s, v11.4s
+        zip2 v15.4s, v11.4s, v11.4s
+        stp q12, q13, [sp, #672]
+        stp q14, q15, [sp, #704]
         ldr x3, [sp, #1008]
         ldr x4, [sp, #1016]
         ldr q8, [x3, #0]
         ldr q9, [x4, #0]
         zip1 v10.4s, v8.4s, v9.4s
         zip2 v11.4s, v8.4s, v9.4s
-        zip1 v16.4s, v10.4s, v10.4s
-        zip2 v17.4s, v10.4s, v10.4s
-        zip1 v18.4s, v11.4s, v11.4s
-        zip2 v19.4s, v11.4s, v11.4s
+        zip1 v12.4s, v10.4s, v10.4s
+        zip2 v13.4s, v10.4s, v10.4s
+        zip1 v14.4s, v11.4s, v11.4s
+        zip2 v15.4s, v11.4s, v11.4s
+        stp q12, q13, [sp, #736]
+        stp q14, q15, [sp, #768]
         ldr q8, [x3, #16]
         ldr q9, [x4, #16]
         zip1 v10.4s, v8.4s, v9.4s
         zip2 v11.4s, v8.4s, v9.4s
-        zip1 v20.4s, v10.4s, v10.4s
-        zip2 v21.4s, v10.4s, v10.4s
-        zip1 v22.4s, v11.4s, v11.4s
-        zip2 v23.4s, v11.4s, v11.4s
+        zip1 v12.4s, v10.4s, v10.4s
+        zip2 v13.4s, v10.4s, v10.4s
+        zip1 v14.4s, v11.4s, v11.4s
+        zip2 v15.4s, v11.4s, v11.4s
+        stp q12, q13, [sp, #800]
+        stp q14, q15, [sp, #832]
         ldr q8, [x3, #32]
         ldr q9, [x4, #32]
         zip1 v10.4s, v8.4s, v9.4s
         zip2 v11.4s, v8.4s, v9.4s
-        zip1 v24.4s, v10.4s, v10.4s
-        zip2 v25.4s, v10.4s, v10.4s
-        zip1 v26.4s, v11.4s, v11.4s
-        zip2 v27.4s, v11.4s, v11.4s
+        zip1 v12.4s, v10.4s, v10.4s
+        zip2 v13.4s, v10.4s, v10.4s
+        zip1 v14.4s, v11.4s, v11.4s
+        zip2 v15.4s, v11.4s, v11.4s
+        stp q12, q13, [sp, #864]
+        stp q14, q15, [sp, #896]
         ldr q8, [x3, #48]
         ldr q9, [x4, #48]
         zip1 v10.4s, v8.4s, v9.4s
         zip2 v11.4s, v8.4s, v9.4s
-        zip1 v28.4s, v10.4s, v10.4s
-        zip2 v29.4s, v10.4s, v10.4s
-        zip1 v30.4s, v11.4s, v11.4s
-        zip2 v31.4s, v11.4s, v11.4s
+        zip1 v12.4s, v10.4s, v10.4s
+        zip2 v13.4s, v10.4s, v10.4s
+        zip1 v14.4s, v11.4s, v11.4s
+        zip2 v15.4s, v11.4s, v11.4s
+        stp q12, q13, [sp, #928]
+        stp q14, q15, [sp, #960]
         ldr w3, [sp, #160]
         lsr w3, w3, #24
         mov w4, #64
-        cmp x5, #1
+        cmp x1, #1
         csel w3, w3, w4, eq
         ldr q8, [sp, #272]
         ldr q9, [sp, #288]
@@ -679,210 +731,130 @@ blake3_hybrid_p4_loop:
         ldr q13, [sp, #352]
         dup v14.4s, w3
         dup v15.4s, w2
-        ldp w14, w15, [sp, #184]
-        ldp w16, w17, [sp, #192]
-        ldr x4, [sp, #200]
-        str x4, [sp, #232]
-        str w3, [sp, #240]
-        str w2, [sp, #244]
-        ldp w27, w28, [sp, #184]
-        ldp w29, w30, [sp, #192]
-        ldr x4, [sp, #216]
-        str x4, [sp, #248]
-        str w3, [sp, #256]
-        str w2, [sp, #260]
-        SG_SPILL_R w6, w10, w14, w3, w2, x0, 0, 4, 232
-        SG_SPILL_R w19, w23, w27, w5, w4, x1, 0, 4, 248
-        PG_REG v0, v4, v8, v12, v16, v17
-        SG_SPILL_R w7, w11, w15, w3, w2, x0, 8, 12, 236
-        SG_SPILL_R w20, w24, w28, w5, w4, x1, 8, 12, 252
-        PG_REG v1, v5, v9, v13, v18, v19
-        SG_SPILL_R w8, w12, w16, w3, w2, x0, 16, 20, 240
-        SG_SPILL_R w21, w25, w29, w5, w4, x1, 16, 20, 256
-        PG_REG v2, v6, v10, v14, v20, v21
-        SG_SPILL_R w9, w13, w17, w3, w2, x0, 24, 28, 244
-        SG_SPILL_R w22, w26, w30, w5, w4, x1, 24, 28, 260
-        PG_REG v3, v7, v11, v15, v22, v23
-        SG_SPILL_R w6, w11, w16, w3, w2, x0, 32, 36, 244
-        SG_SPILL_R w19, w24, w29, w5, w4, x1, 32, 36, 260
-        PG_REG v0, v5, v10, v15, v24, v25
-        SG_SPILL_R w7, w12, w17, w3, w2, x0, 40, 44, 232
-        SG_SPILL_R w20, w25, w30, w5, w4, x1, 40, 44, 248
-        PG_REG v1, v6, v11, v12, v26, v27
-        SG_SPILL_R w8, w13, w14, w3, w2, x0, 48, 52, 236
-        SG_SPILL_R w21, w26, w27, w5, w4, x1, 48, 52, 252
-        PG_REG v2, v7, v8, v13, v28, v29
-        SG_SPILL_R w9, w10, w15, w3, w2, x0, 56, 60, 240
-        SG_SPILL_R w22, w23, w28, w5, w4, x1, 56, 60, 256
-        PG_REG v3, v4, v9, v14, v30, v31
-        SG_SPILL_R w6, w10, w14, w3, w2, x0, 8, 24, 232
-        SG_SPILL_R w19, w23, w27, w5, w4, x1, 8, 24, 248
-        PG_REG v0, v4, v8, v12, v18, v22
-        SG_SPILL_R w7, w11, w15, w3, w2, x0, 12, 40, 236
-        SG_SPILL_R w20, w24, w28, w5, w4, x1, 12, 40, 252
-        PG_REG v1, v5, v9, v13, v19, v26
-        SG_SPILL_R w8, w12, w16, w3, w2, x0, 28, 0, 240
-        SG_SPILL_R w21, w25, w29, w5, w4, x1, 28, 0, 256
-        PG_REG v2, v6, v10, v14, v23, v16
-        SG_SPILL_R w9, w13, w17, w3, w2, x0, 16, 52, 244
-        SG_SPILL_R w22, w26, w30, w5, w4, x1, 16, 52, 260
-        PG_REG v3, v7, v11, v15, v20, v29
-        SG_SPILL_R w6, w11, w16, w3, w2, x0, 4, 44, 244
-        SG_SPILL_R w19, w24, w29, w5, w4, x1, 4, 44, 260
-        PG_REG v0, v5, v10, v15, v17, v27
-        SG_SPILL_R w7, w12, w17, w3, w2, x0, 48, 20, 232
-        SG_SPILL_R w20, w25, w30, w5, w4, x1, 48, 20, 248
-        PG_REG v1, v6, v11, v12, v28, v21
-        SG_SPILL_R w8, w13, w14, w3, w2, x0, 36, 56, 236
-        SG_SPILL_R w21, w26, w27, w5, w4, x1, 36, 56, 252
-        PG_REG v2, v7, v8, v13, v25, v30
-        SG_SPILL_R w9, w10, w15, w3, w2, x0, 60, 32, 240
-        SG_SPILL_R w22, w23, w28, w5, w4, x1, 60, 32, 256
-        PG_REG v3, v4, v9, v14, v31, v24
-        SG_SPILL_R w6, w10, w14, w3, w2, x0, 12, 16, 232
-        SG_SPILL_R w19, w23, w27, w5, w4, x1, 12, 16, 248
-        PG_REG v0, v4, v8, v12, v19, v20
-        SG_SPILL_R w7, w11, w15, w3, w2, x0, 40, 48, 236
-        SG_SPILL_R w20, w24, w28, w5, w4, x1, 40, 48, 252
-        PG_REG v1, v5, v9, v13, v26, v28
-        SG_SPILL_R w8, w12, w16, w3, w2, x0, 52, 8, 240
-        SG_SPILL_R w21, w25, w29, w5, w4, x1, 52, 8, 256
-        PG_REG v2, v6, v10, v14, v29, v18
-        SG_SPILL_R w9, w13, w17, w3, w2, x0, 28, 56, 244
-        SG_SPILL_R w22, w26, w30, w5, w4, x1, 28, 56, 260
-        PG_REG v3, v7, v11, v15, v23, v30
-        SG_SPILL_R w6, w11, w16, w3, w2, x0, 24, 20, 244
-        SG_SPILL_R w19, w24, w29, w5, w4, x1, 24, 20, 260
-        PG_REG v0, v5, v10, v15, v22, v21
-        SG_SPILL_R w7, w12, w17, w3, w2, x0, 36, 0, 232
-        SG_SPILL_R w20, w25, w30, w5, w4, x1, 36, 0, 248
-        PG_REG v1, v6, v11, v12, v25, v16
-        SG_SPILL_R w8, w13, w14, w3, w2, x0, 44, 60, 236
-        SG_SPILL_R w21, w26, w27, w5, w4, x1, 44, 60, 252
-        PG_REG v2, v7, v8, v13, v27, v31
-        SG_SPILL_R w9, w10, w15, w3, w2, x0, 32, 4, 240
-        SG_SPILL_R w22, w23, w28, w5, w4, x1, 32, 4, 256
-        PG_REG v3, v4, v9, v14, v24, v17
-        SG_SPILL_R w6, w10, w14, w3, w2, x0, 40, 28, 232
-        SG_SPILL_R w19, w23, w27, w5, w4, x1, 40, 28, 248
-        PG_REG v0, v4, v8, v12, v26, v23
-        SG_SPILL_R w7, w11, w15, w3, w2, x0, 48, 36, 236
-        SG_SPILL_R w20, w24, w28, w5, w4, x1, 48, 36, 252
-        PG_REG v1, v5, v9, v13, v28, v25
-        SG_SPILL_R w8, w12, w16, w3, w2, x0, 56, 12, 240
-        SG_SPILL_R w21, w25, w29, w5, w4, x1, 56, 12, 256
-        PG_REG v2, v6, v10, v14, v30, v19
-        SG_SPILL_R w9, w13, w17, w3, w2, x0, 52, 60, 244
-        SG_SPILL_R w22, w26, w30, w5, w4, x1, 52, 60, 260
-        PG_REG v3, v7, v11, v15, v29, v31
-        SG_SPILL_R w6, w11, w16, w3, w2, x0, 16, 0, 244
-        SG_SPILL_R w19, w24, w29, w5, w4, x1, 16, 0, 260
-        PG_REG v0, v5, v10, v15, v20, v16
-        SG_SPILL_R w7, w12, w17, w3, w2, x0, 44, 8, 232
-        SG_SPILL_R w20, w25, w30, w5, w4, x1, 44, 8, 248
-        PG_REG v1, v6, v11, v12, v27, v18
-        SG_SPILL_R w8, w13, w14, w3, w2, x0, 20, 32, 236
-        SG_SPILL_R w21, w26, w27, w5, w4, x1, 20, 32, 252
-        PG_REG v2, v7, v8, v13, v21, v24
-        SG_SPILL_R w9, w10, w15, w3, w2, x0, 4, 24, 240
-        SG_SPILL_R w22, w23, w28, w5, w4, x1, 4, 24, 256
-        PG_REG v3, v4, v9, v14, v17, v22
-        SG_SPILL_R w6, w10, w14, w3, w2, x0, 48, 52, 232
-        SG_SPILL_R w19, w23, w27, w5, w4, x1, 48, 52, 248
-        PG_REG v0, v4, v8, v12, v28, v29
-        SG_SPILL_R w7, w11, w15, w3, w2, x0, 36, 44, 236
-        SG_SPILL_R w20, w24, w28, w5, w4, x1, 36, 44, 252
-        PG_REG v1, v5, v9, v13, v25, v27
-        SG_SPILL_R w8, w12, w16, w3, w2, x0, 60, 40, 240
-        SG_SPILL_R w21, w25, w29, w5, w4, x1, 60, 40, 256
-        PG_REG v2, v6, v10, v14, v31, v26
-        SG_SPILL_R w9, w13, w17, w3, w2, x0, 56, 32, 244
-        SG_SPILL_R w22, w26, w30, w5, w4, x1, 56, 32, 260
-        PG_REG v3, v7, v11, v15, v30, v24
-        SG_SPILL_R w6, w11, w16, w3, w2, x0, 28, 8, 244
-        SG_SPILL_R w19, w24, w29, w5, w4, x1, 28, 8, 260
-        PG_REG v0, v5, v10, v15, v23, v18
-        SG_SPILL_R w7, w12, w17, w3, w2, x0, 20, 12, 232
-        SG_SPILL_R w20, w25, w30, w5, w4, x1, 20, 12, 248
-        PG_REG v1, v6, v11, v12, v21, v19
-        SG_SPILL_R w8, w13, w14, w3, w2, x0, 0, 4, 236
-        SG_SPILL_R w21, w26, w27, w5, w4, x1, 0, 4, 252
-        PG_REG v2, v7, v8, v13, v16, v17
-        SG_SPILL_R w9, w10, w15, w3, w2, x0, 24, 16, 240
-        SG_SPILL_R w22, w23, w28, w5, w4, x1, 24, 16, 256
-        PG_REG v3, v4, v9, v14, v22, v20
-        SG_SPILL_R w6, w10, w14, w3, w2, x0, 36, 56, 232
-        SG_SPILL_R w19, w23, w27, w5, w4, x1, 36, 56, 248
-        PG_REG v0, v4, v8, v12, v25, v30
-        SG_SPILL_R w7, w11, w15, w3, w2, x0, 44, 20, 236
-        SG_SPILL_R w20, w24, w28, w5, w4, x1, 44, 20, 252
-        PG_REG v1, v5, v9, v13, v27, v21
-        SG_SPILL_R w8, w12, w16, w3, w2, x0, 32, 48, 240
-        SG_SPILL_R w21, w25, w29, w5, w4, x1, 32, 48, 256
-        PG_REG v2, v6, v10, v14, v24, v28
-        SG_SPILL_R w9, w13, w17, w3, w2, x0, 60, 4, 244
-        SG_SPILL_R w22, w26, w30, w5, w4, x1, 60, 4, 260
-        PG_REG v3, v7, v11, v15, v31, v17
-        SG_SPILL_R w6, w11, w16, w3, w2, x0, 52, 12, 244
-        SG_SPILL_R w19, w24, w29, w5, w4, x1, 52, 12, 260
-        PG_REG v0, v5, v10, v15, v29, v19
-        SG_SPILL_R w7, w12, w17, w3, w2, x0, 0, 40, 232
-        SG_SPILL_R w20, w25, w30, w5, w4, x1, 0, 40, 248
-        PG_REG v1, v6, v11, v12, v16, v26
-        SG_SPILL_R w8, w13, w14, w3, w2, x0, 8, 24, 236
-        SG_SPILL_R w21, w26, w27, w5, w4, x1, 8, 24, 252
-        PG_REG v2, v7, v8, v13, v18, v22
-        SG_SPILL_R w9, w10, w15, w3, w2, x0, 16, 28, 240
-        SG_SPILL_R w22, w23, w28, w5, w4, x1, 16, 28, 256
-        PG_REG v3, v4, v9, v14, v20, v23
-        SG_SPILL_R w6, w10, w14, w3, w2, x0, 44, 60, 232
-        SG_SPILL_R w19, w23, w27, w5, w4, x1, 44, 60, 248
-        PG_REG v0, v4, v8, v12, v27, v31
-        SG_SPILL_R w7, w11, w15, w3, w2, x0, 20, 0, 236
-        SG_SPILL_R w20, w24, w28, w5, w4, x1, 20, 0, 252
-        PG_REG v1, v5, v9, v13, v21, v16
-        SG_SPILL_R w8, w12, w16, w3, w2, x0, 4, 36, 240
-        SG_SPILL_R w21, w25, w29, w5, w4, x1, 4, 36, 256
-        PG_REG v2, v6, v10, v14, v17, v25
-        SG_SPILL_R w9, w13, w17, w3, w2, x0, 32, 24, 244
-        SG_SPILL_R w22, w26, w30, w5, w4, x1, 32, 24, 260
-        PG_REG v3, v7, v11, v15, v24, v22
-        SG_SPILL_R w6, w11, w16, w3, w2, x0, 56, 40, 244
-        SG_SPILL_R w19, w24, w29, w5, w4, x1, 56, 40, 260
-        PG_REG v0, v5, v10, v15, v30, v26
-        SG_SPILL_R w7, w12, w17, w3, w2, x0, 8, 48, 232
-        SG_SPILL_R w20, w25, w30, w5, w4, x1, 8, 48, 248
-        PG_REG v1, v6, v11, v12, v18, v28
-        SG_SPILL_R w8, w13, w14, w3, w2, x0, 12, 16, 236
-        SG_SPILL_R w21, w26, w27, w5, w4, x1, 12, 16, 252
-        PG_REG v2, v7, v8, v13, v19, v20
-        SG_SPILL_R w9, w10, w15, w3, w2, x0, 28, 52, 240
-        SG_SPILL_R w22, w23, w28, w5, w4, x1, 28, 52, 256
-        PG_REG v3, v4, v9, v14, v23, v29
-        eor w6, w6, w14
-        eor w7, w7, w15
-        eor w8, w8, w16
-        eor w9, w9, w17
-        ldr w3, [sp, #232]
-        eor w10, w10, w3
-        ldr w3, [sp, #236]
-        eor w11, w11, w3
-        ldr w3, [sp, #240]
-        eor w12, w12, w3
-        ldr w3, [sp, #244]
-        eor w13, w13, w3
-        eor w19, w19, w27
-        eor w20, w20, w28
-        eor w21, w21, w29
-        eor w22, w22, w30
-        ldr w5, [sp, #248]
-        eor w23, w23, w5
-        ldr w5, [sp, #252]
-        eor w24, w24, w5
-        ldr w5, [sp, #256]
-        eor w25, w25, w5
-        ldr w5, [sp, #260]
-        eor w26, w26, w5
+        ldr q24, [sp, #272]
+        ldr q25, [sp, #288]
+        ldr q26, [sp, #304]
+        ldr q27, [sp, #320]
+        ldr q29, [sp, #368]
+        str q29, [sp, #416]
+        ldr q29, [sp, #384]
+        str q29, [sp, #432]
+        dup v29.4s, w3
+        str q29, [sp, #448]
+        dup v29.4s, w2
+        str q29, [sp, #464]
+        PG v0, v4, v8, v12, 28, 480, 496
+        PG v1, v5, v9, v13, 28, 512, 528
+        PG v2, v6, v10, v14, 28, 544, 560
+        PG v3, v7, v11, v15, 28, 576, 592
+        PG_SPILL v16, v20, v24, 29, 28, 736, 752, 416
+        PG_SPILL v17, v21, v25, 29, 28, 768, 784, 432
+        PG_SPILL v18, v22, v26, 29, 28, 800, 816, 448
+        PG_SPILL v19, v23, v27, 29, 28, 832, 848, 464
+        PG v0, v5, v10, v15, 28, 608, 624
+        PG v1, v6, v11, v12, 28, 640, 656
+        PG v2, v7, v8, v13, 28, 672, 688
+        PG v3, v4, v9, v14, 28, 704, 720
+        PG_SPILL v16, v21, v26, 29, 28, 864, 880, 464
+        PG_SPILL v17, v22, v27, 29, 28, 896, 912, 416
+        PG_SPILL v18, v23, v24, 29, 28, 928, 944, 432
+        PG_SPILL v19, v20, v25, 29, 28, 960, 976, 448
+        PG v0, v4, v8, v12, 28, 512, 576
+        PG v1, v5, v9, v13, 28, 528, 640
+        PG v2, v6, v10, v14, 28, 592, 480
+        PG v3, v7, v11, v15, 28, 544, 688
+        PG_SPILL v16, v20, v24, 29, 28, 768, 832, 416
+        PG_SPILL v17, v21, v25, 29, 28, 784, 896, 432
+        PG_SPILL v18, v22, v26, 29, 28, 848, 736, 448
+        PG_SPILL v19, v23, v27, 29, 28, 800, 944, 464
+        PG v0, v5, v10, v15, 28, 496, 656
+        PG v1, v6, v11, v12, 28, 672, 560
+        PG v2, v7, v8, v13, 28, 624, 704
+        PG v3, v4, v9, v14, 28, 720, 608
+        PG_SPILL v16, v21, v26, 29, 28, 752, 912, 464
+        PG_SPILL v17, v22, v27, 29, 28, 928, 816, 416
+        PG_SPILL v18, v23, v24, 29, 28, 880, 960, 432
+        PG_SPILL v19, v20, v25, 29, 28, 976, 864, 448
+        PG v0, v4, v8, v12, 28, 528, 544
+        PG v1, v5, v9, v13, 28, 640, 672
+        PG v2, v6, v10, v14, 28, 688, 512
+        PG v3, v7, v11, v15, 28, 592, 704
+        PG_SPILL v16, v20, v24, 29, 28, 784, 800, 416
+        PG_SPILL v17, v21, v25, 29, 28, 896, 928, 432
+        PG_SPILL v18, v22, v26, 29, 28, 944, 768, 448
+        PG_SPILL v19, v23, v27, 29, 28, 848, 960, 464
+        PG v0, v5, v10, v15, 28, 576, 560
+        PG v1, v6, v11, v12, 28, 624, 480
+        PG v2, v7, v8, v13, 28, 656, 720
+        PG v3, v4, v9, v14, 28, 608, 496
+        PG_SPILL v16, v21, v26, 29, 28, 832, 816, 464
+        PG_SPILL v17, v22, v27, 29, 28, 880, 736, 416
+        PG_SPILL v18, v23, v24, 29, 28, 912, 976, 432
+        PG_SPILL v19, v20, v25, 29, 28, 864, 752, 448
+        PG v0, v4, v8, v12, 28, 640, 592
+        PG v1, v5, v9, v13, 28, 672, 624
+        PG v2, v6, v10, v14, 28, 704, 528
+        PG v3, v7, v11, v15, 28, 688, 720
+        PG_SPILL v16, v20, v24, 29, 28, 896, 848, 416
+        PG_SPILL v17, v21, v25, 29, 28, 928, 880, 432
+        PG_SPILL v18, v22, v26, 29, 28, 960, 784, 448
+        PG_SPILL v19, v23, v27, 29, 28, 944, 976, 464
+        PG v0, v5, v10, v15, 28, 544, 480
+        PG v1, v6, v11, v12, 28, 656, 512
+        PG v2, v7, v8, v13, 28, 560, 608
+        PG v3, v4, v9, v14, 28, 496, 576
+        PG_SPILL v16, v21, v26, 29, 28, 800, 736, 464
+        PG_SPILL v17, v22, v27, 29, 28, 912, 768, 416
+        PG_SPILL v18, v23, v24, 29, 28, 816, 864, 432
+        PG_SPILL v19, v20, v25, 29, 28, 752, 832, 448
+        PG v0, v4, v8, v12, 28, 672, 688
+        PG v1, v5, v9, v13, 28, 624, 656
+        PG v2, v6, v10, v14, 28, 720, 640
+        PG v3, v7, v11, v15, 28, 704, 608
+        PG_SPILL v16, v20, v24, 29, 28, 928, 944, 416
+        PG_SPILL v17, v21, v25, 29, 28, 880, 912, 432
+        PG_SPILL v18, v22, v26, 29, 28, 976, 896, 448
+        PG_SPILL v19, v23, v27, 29, 28, 960, 864, 464
+        PG v0, v5, v10, v15, 28, 592, 512
+        PG v1, v6, v11, v12, 28, 560, 528
+        PG v2, v7, v8, v13, 28, 480, 496
+        PG v3, v4, v9, v14, 28, 576, 544
+        PG_SPILL v16, v21, v26, 29, 28, 848, 768, 464
+        PG_SPILL v17, v22, v27, 29, 28, 816, 784, 416
+        PG_SPILL v18, v23, v24, 29, 28, 736, 752, 432
+        PG_SPILL v19, v20, v25, 29, 28, 832, 800, 448
+        PG v0, v4, v8, v12, 28, 624, 704
+        PG v1, v5, v9, v13, 28, 656, 560
+        PG v2, v6, v10, v14, 28, 608, 672
+        PG v3, v7, v11, v15, 28, 720, 496
+        PG_SPILL v16, v20, v24, 29, 28, 880, 960, 416
+        PG_SPILL v17, v21, v25, 29, 28, 912, 816, 432
+        PG_SPILL v18, v22, v26, 29, 28, 864, 928, 448
+        PG_SPILL v19, v23, v27, 29, 28, 976, 752, 464
+        PG v0, v5, v10, v15, 28, 688, 528
+        PG v1, v6, v11, v12, 28, 480, 640
+        PG v2, v7, v8, v13, 28, 512, 576
+        PG v3, v4, v9, v14, 28, 544, 592
+        PG_SPILL v16, v21, v26, 29, 28, 944, 784, 464
+        PG_SPILL v17, v22, v27, 29, 28, 736, 896, 416
+        PG_SPILL v18, v23, v24, 29, 28, 768, 832, 432
+        PG_SPILL v19, v20, v25, 29, 28, 800, 848, 448
+        PG v0, v4, v8, v12, 28, 656, 720
+        PG v1, v5, v9, v13, 28, 560, 480
+        PG v2, v6, v10, v14, 28, 496, 624
+        PG v3, v7, v11, v15, 28, 608, 576
+        PG_SPILL v16, v20, v24, 29, 28, 912, 976, 416
+        PG_SPILL v17, v21, v25, 29, 28, 816, 736, 432
+        PG_SPILL v18, v22, v26, 29, 28, 752, 880, 448
+        PG_SPILL v19, v23, v27, 29, 28, 864, 832, 464
+        PG v0, v5, v10, v15, 28, 704, 640
+        PG v1, v6, v11, v12, 28, 512, 672
+        PG v2, v7, v8, v13, 28, 528, 544
+        PG v3, v4, v9, v14, 28, 592, 688
+        PG_SPILL v16, v21, v26, 29, 28, 960, 896, 464
+        PG_SPILL v17, v22, v27, 29, 28, 768, 928, 416
+        PG_SPILL v18, v23, v24, 29, 28, 784, 800, 432
+        PG_SPILL v19, v20, v25, 29, 28, 848, 944, 448
         eor v0.16b, v0.16b, v8.16b
         eor v1.16b, v1.16b, v9.16b
         eor v2.16b, v2.16b, v10.16b
@@ -891,49 +863,65 @@ blake3_hybrid_p4_loop:
         eor v5.16b, v5.16b, v13.16b
         eor v6.16b, v6.16b, v14.16b
         eor v7.16b, v7.16b, v15.16b
-        add x0, x0, #64
-        add x1, x1, #64
+        eor v16.16b, v16.16b, v24.16b
+        eor v17.16b, v17.16b, v25.16b
+        eor v18.16b, v18.16b, v26.16b
+        eor v19.16b, v19.16b, v27.16b
+        ldr q29, [sp, #416]
+        eor v20.16b, v20.16b, v29.16b
+        ldr q29, [sp, #432]
+        eor v21.16b, v21.16b, v29.16b
+        ldr q29, [sp, #448]
+        eor v22.16b, v22.16b, v29.16b
+        ldr q29, [sp, #464]
+        eor v23.16b, v23.16b, v29.16b
+        ldr x3, [sp, #992]
+        add x3, x3, #64
+        str x3, [sp, #992]
+        ldr x3, [sp, #1000]
+        add x3, x3, #64
+        str x3, [sp, #1000]
         ldr x3, [sp, #1008]
         add x3, x3, #64
         str x3, [sp, #1008]
         ldr x3, [sp, #1016]
         add x3, x3, #64
         str x3, [sp, #1016]
-        ldr x3, [sp, #1072]
-        subs x3, x3, #1
-        str x3, [sp, #1072]
+        subs x1, x1, #1
         b.ne blake3_hybrid_p4_loop
         ldr x2, [sp, #176]
-        stp w6, w7, [x2, #0]
-        stp w8, w9, [x2, #8]
-        stp w10, w11, [x2, #16]
-        stp w12, w13, [x2, #24]
-        stp w19, w20, [x2, #32]
-        stp w21, w22, [x2, #40]
-        stp w23, w24, [x2, #48]
-        stp w25, w26, [x2, #56]
         zip1 v8.2d, v0.2d, v1.2d
         zip1 v9.2d, v2.2d, v3.2d
         zip2 v10.2d, v0.2d, v1.2d
         zip2 v11.2d, v2.2d, v3.2d
         uzp1 v8.4s, v8.4s, v9.4s
         uzp1 v10.4s, v10.4s, v11.4s
-        str q8, [x2, #64]
-        str q10, [x2, #96]
+        str q8, [x2, #0]
+        str q10, [x2, #32]
         zip1 v8.2d, v4.2d, v5.2d
         zip1 v9.2d, v6.2d, v7.2d
         zip2 v10.2d, v4.2d, v5.2d
         zip2 v11.2d, v6.2d, v7.2d
         uzp1 v8.4s, v8.4s, v9.4s
         uzp1 v10.4s, v10.4s, v11.4s
+        str q8, [x2, #16]
+        str q10, [x2, #48]
+        zip1 v8.2d, v16.2d, v17.2d
+        zip1 v9.2d, v18.2d, v19.2d
+        zip2 v10.2d, v16.2d, v17.2d
+        zip2 v11.2d, v18.2d, v19.2d
+        uzp1 v8.4s, v8.4s, v9.4s
+        uzp1 v10.4s, v10.4s, v11.4s
+        str q8, [x2, #64]
+        str q10, [x2, #96]
+        zip1 v8.2d, v20.2d, v21.2d
+        zip1 v9.2d, v22.2d, v23.2d
+        zip2 v10.2d, v20.2d, v21.2d
+        zip2 v11.2d, v22.2d, v23.2d
+        uzp1 v8.4s, v8.4s, v9.4s
+        uzp1 v10.4s, v10.4s, v11.4s
         str q8, [x2, #80]
         str q10, [x2, #112]
-        ldp x19, x20, [sp, #0]
-        ldp x21, x22, [sp, #16]
-        ldp x23, x24, [sp, #32]
-        ldp x25, x26, [sp, #48]
-        ldp x27, x28, [sp, #64]
-        ldp x29, x30, [sp, #80]
         ldp d8, d9, [sp, #96]
         ldp d10, d11, [sp, #112]
         ldp d12, d13, [sp, #128]
