@@ -89,6 +89,10 @@ use crate::{CHUNK_LEN, Hash};
 use crate::{Hasher, KEY_LEN};
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, OnceLock};
+// TRACE
+pub static TRACE: [std::sync::atomic::AtomicU64; 512] = [const { std::sync::atomic::AtomicU64::new(0) }; 512]; // TRACE
+pub static TRACE_N: AtomicUsize = AtomicUsize::new(0); // TRACE
+pub fn tr(kind: u64) { let i = TRACE_N.fetch_add(1, Ordering::SeqCst); if i < 512 { TRACE[i].store(kind << 48 | pool().epoch.elapsed().as_nanos() as u64 & ((1 << 48) - 1), Ordering::SeqCst); } } // TRACE
 
 /// Inputs below this length are hashed on the calling thread. A split
 /// hands pieces to workers that are polling, a few microseconds each way;
@@ -570,8 +574,10 @@ struct Pool {
     epoch: std::time::Instant,
     /// Workers asleep on `posted`.
     sleepers: AtomicUsize,
-    /// Of those, the ones a caller has notified and that have yet to wake.
+    /// Of those, the ones a caller has asked to wake and that have yet to.
     notified: AtomicUsize,
+    /// Of those, the ones still to be woken: woken workers wake them.
+    owed: AtomicUsize,
     sleep_lock: Mutex<()>,
     posted: Condvar,
     /// Callers asleep on `finished_signal`.
@@ -610,6 +616,7 @@ fn pool() -> &'static Pool {
             epoch: std::time::Instant::now(),
             sleepers: AtomicUsize::new(0),
             notified: AtomicUsize::new(0),
+            owed: AtomicUsize::new(0),
             sleep_lock: Mutex::new(()),
             posted: Condvar::new(),
             waiters: AtomicUsize::new(0),
@@ -648,7 +655,9 @@ impl Pool {
             active: Line(AtomicUsize::new(1)),
             max_threads,
         };
+        tr(0); // TRACE
         let slot = self.register(&job);
+        tr(1); // TRACE
         for index in 0..own {
             // Sound: the cursor starts past these, so this thread alone
             // writes their slots.
@@ -663,6 +672,7 @@ impl Pool {
             // writes slot index.
             unsafe { job.hash_piece(index, pool_platform()) };
         }
+        tr(2); // TRACE
         job.active.fetch_sub(1, Ordering::SeqCst);
         // Every piece is taken; the slot has nothing more to give from this
         // job. Unregister drains readers still making a reservation; afterwards
@@ -671,14 +681,15 @@ impl Pool {
             self.unregister(slot);
         }
         self.wait_done(&job.active);
+        tr(3); // TRACE
     }
 
     /// Put the job in a free slot. Returns the slot, or None when every
-    /// slot is taken. When the workers awake are fewer than the pieces,
-    /// every sleeper is woken, in one system call: a wake costs the waker
-    /// ten microseconds or more on some machines and the sleeper arrives
-    /// tens of microseconds later, so one call pays once for all, and
-    /// the woken workers then stay awake while calls keep coming.
+    /// slot is taken. When the workers awake are fewer than the call can
+    /// use, the caller wakes one sleeper and leaves the others it needs
+    /// owed: a wake costs the waker about 4 µs on the VM (all fifteen at
+    /// once, 56 µs), and each woken worker wakes owed sleepers before it
+    /// takes a piece, so the wakes spread over the woken.
     fn register(&self, job: &Job) -> Option<usize> {
         // The caller keeps this erased lifetime valid by unregistering,
         // draining readers, and waiting for active == 0 before returning.
@@ -695,9 +706,13 @@ impl Pool {
             let _guard = self.sleep_lock.lock().unwrap();
             let sleepers = self.sleepers.load(Ordering::SeqCst);
             let unnotified = sleepers - self.notified.load(Ordering::SeqCst);
-            if unnotified > 0 && (self.cpus - 1 - unnotified) < job.pieces - 1 {
-                self.notified.store(sleepers, Ordering::SeqCst);
-                self.posted.notify_all();
+            let awake = self.cpus - 1 - unnotified;
+            let wanted = job.pieces.min(job.max_threads) - 1;
+            if unnotified > 0 && awake < wanted {
+                let wake = (wanted - awake).min(unnotified);
+                self.notified.fetch_add(wake, Ordering::SeqCst);
+                self.owed.fetch_add(wake - 1, Ordering::SeqCst);
+                self.posted.notify_one();
             }
         }
         Some(slot)
@@ -818,6 +833,10 @@ impl Pool {
             }
             self.sleepers.fetch_sub(1, Ordering::SeqCst);
             drop(guard);
+            tr(100 + rank as u64); // TRACE
+            for _ in 0..self.owed.swap(0, Ordering::SeqCst) {
+                self.posted.notify_one();
+            }
             if let Some(taken) = taken {
                 break 'taken taken;
             }
@@ -831,9 +850,11 @@ fn worker_main(rank: usize) {
     let mut start = 0;
     loop {
         let (job_ptr, index) = pool.next_piece(&mut start, rank);
+        tr(200 + rank as u64); // TRACE
         // Sound by the pool's contract: our active reservation keeps the job alive.
         let job = unsafe { &*job_ptr };
         unsafe { job.hash_piece(index, pool_platform()) };
+        tr(300 + rank as u64); // TRACE
         pool.piece_done(&job.active);
     }
 }
