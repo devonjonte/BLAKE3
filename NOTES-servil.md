@@ -530,6 +530,9 @@ back-to-back effect; not measured natively.
 
 ## Rejected (with the reason; do not retry without new evidence)
 
+- **p4 as one NEON quad** (probe/p4-quad, September 27, 2026): four
+  64-byte messages 14% slower on the VM than two pairs; two scalars
+  beside a pair (taken, 642757f) was 13-14% faster on both machines.
 - **Wake fan-out as a tree** (probe/wake-half, September 27, 2026): each
   woken worker wakes the larger half of the owed sleepers instead of the
   first woken waking them all. Level on both machines (Mac jobs 369-372:
