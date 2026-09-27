@@ -578,6 +578,15 @@ side's code changed (95 s before), for three reasons:
 A synthetic slowdown (+33% at 64 B) was held on 64 B and one-message
 batches, confirmed over 6 then 4 points, in about 35 s.
 
+After idle (since September 26, 2026): bench-hashes' third scenario, calls
+after the thread slept 1 ms, judged at a 20% margin and holding a change
+like solo cells (a program hashing now and then is the recommended usage
+too). VM calibration (7 checks over consecutive runs): no false flag or
+no-verdict; 50% slower caught 88%, 70% 99%, twice as slow always. A
+planted 50 us spin on waking the pool's sleepers was held on servil mt
+after idle at 256 KiB (+58%, then +43%) and 4096 messages (+50%, +45%),
+no solo cell moved. The after-idle cells add about 2.5 s a run.
+
 Found while calibrating (September 26, 2026), both open:
 - *The VM warms up.* Under sustained load the guest slows over its first
   3-4 minutes, then holds: SHA-256 +5-11%, servil mt about +6% (settled

@@ -7,9 +7,9 @@ a commit, measured side by side.
     pypy3 tools/perf_regress.py compare OLD NEW        # two commits
     pypy3 tools/perf_regress.py build                  # bench-hashes against the working tree
 
-Exit 0: no solo regression (shared cells slower are listed). 1: a
-confirmed solo regression. 2: no verdict (the comparison itself was
-unreliable, see below).
+Exit 0: no regression in a cell that holds a change (solo, after idle;
+shared cells slower are listed). 1: a confirmed regression in one. 2: no
+verdict (the comparison itself was unreliable, see below).
 
 `check` builds bench-hashes twice, once against the fork at REV (the old
 side) and once against this working tree (the new side, as a commit object
@@ -36,9 +36,10 @@ to back (NOTES-servil.md, "perf_regress"):
   pair, the new side's 5th percentile exceeds the old side's by more than
   the scenario's margin: 3% solo, 10% shared (Zooko, September 25, 2026:
   the recommended usage first, the shared scenario measured and held to
-  a looser line; AGENTS.md).
-* A regression holds the change (exit 1) when a solo cell is slower; a
-  shared cell slower is reported beside an exit 0, and the commit names
+  a looser line; AGENTS.md), 20% after idle (calls after a 1 ms sleep,
+  whose 5th percentile varies about 7.5% between runs on the VM).
+* A regression holds the change (exit 1) when a solo or after-idle cell
+  is slower; a shared cell slower is reported beside an exit 0, and the commit names
   it, its numbers, and the reason the change is worth it (Zooko,
   September 26, 2026).
 * A pair's runs measure only the points where some cell is still open:
@@ -61,7 +62,11 @@ over consecutive runs of 24 rounds): false flags before confirmation in
 misses are cells whose speed differs from process to process: servil mt
 at 64 KiB and 1024 messages, servil st at 32 KiB). A check takes about
 16 s on the VM plus the builds, against 73 s when every pair ran every
-point at 48 rounds.
+point at 48 rounds; the after-idle cells add about 2.5 s a run. After
+idle (VM, 7 checks over consecutive runs): no false flag or no-verdict at
+the 20% margin; a cell 50% slower caught 88% of the time, 70% slower 99%,
+twice as slow always (the pool asleep at 64 KiB made servil mt 5x slower
+than servil st).
 
 The check measures the 29 points in POINTS, which cover the code paths
 and boundaries of the one-message and batch use cases at the benchmark's points; the published graph's plateau sizes add
@@ -123,7 +128,10 @@ ROUNDS = 24
 QUANTILE = 0.05
 PAIRS = 4  # the runs go A B B A A B B A
 # A cell is slower (faster) past this ratio, by scenario.
-MARGIN = {"solo": Fraction(3, 100), "shared": Fraction(10, 100)}
+MARGIN = {"solo": Fraction(3, 100), "shared": Fraction(10, 100), "after-idle": Fraction(20, 100)}
+# Cells whose slowdown holds the change: the recommended usage, whether a
+# program calls back to back or now and then (Zooko, September 26, 2026).
+HOLDING = {"solo", "after-idle"}
 
 # A commit's lib.rs contains one of these, newest first; each names the
 # shim that makes the benchmark build against it, and whether its batch
@@ -549,7 +557,7 @@ def compare(old_rev, new):
         # Solo cells hold the change; shared cells are reported (Zooko,
         # September 26, 2026: a change that slows them has a reason worth
         # more, which its commit message names beside the cells).
-        held = [key for key in confirmed if key.split("|")[1] == "solo"]
+        held = [key for key in confirmed if key.split("|")[1] in HOLDING]
         reported = [key for key in confirmed if key not in held]
 
         def show(keys):
@@ -558,8 +566,8 @@ def compare(old_rev, new):
                       f"(90th percentile {float(slow[key] - 1):+.1%})")
 
         if held:
-            print(f"perf_regress: REGRESSION: {new_name} is slower than {old_rev} in {len(held)} solo cells "
-                  f"(5th percentile, median of pair ratios):")
+            print(f"perf_regress: REGRESSION: {new_name} is slower than {old_rev} in {len(held)} cells that hold a "
+                  f"change (solo, after idle; 5th percentile, median of pair ratios):")
             show(held)
         if reported:
             print(f"perf_regress: {new_name} is slower than {old_rev} in {len(reported)} shared cells; "
@@ -569,7 +577,7 @@ def compare(old_rev, new):
         if held:
             return 1
         if reported:
-            print(f"perf_regress: no solo regression against {old_rev}")
+            print(f"perf_regress: no regression in a cell that holds a change against {old_rev}")
             return 0
         print(f"perf_regress: the second {PAIRS} pairs did not confirm; no regression")
     for key in sorted(faster):
