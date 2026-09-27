@@ -24,8 +24,8 @@ a full run; later ones run in full by default and take `--quick`.)
     {"type": "test", "fork_commit": "..."}
 
 (A test job runs the fork's suites natively: the library tests in the
-default, no_sme2, and pure builds, the doc tests, and the official
-vectors.)
+default, no_sme2, and pure builds, the doc tests, the integration tests in
+tests/ (the planned API's contract), and the official vectors.)
 
 (A benchmark job with "repeat": N runs the benchmark N times back to
 back, run i's files in run-i/, for calibrations.)
@@ -204,6 +204,8 @@ def test(job, run, work, out):
     for features in [[], ["--features", "no_sme2"], ["--features", "pure"]]:
         run.run(["cargo", "test", "--release", "--lib", *features], cwd=fork)
     run.run(["cargo", "test", "--release", "--doc"], cwd=fork)
+    if (fork / "tests").is_dir():
+        run.run(["cargo", "test", "--release", "--test", "*"], cwd=fork)
     run.run(["cargo", "test", "--release", "--manifest-path", "test_vectors/Cargo.toml"], cwd=fork)
     return "passed"
 
