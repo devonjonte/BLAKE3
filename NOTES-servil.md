@@ -569,14 +569,26 @@ slow state, as for SME2 pieces handed out one at a time). With the
 engine's help taking the turn too, so one thread at a time runs SME2
 (probe/queue-sme2-turn): the probe on the Mac read 256 KiB streams 51.0
 -> 44.5 us (job 437), but the benchmark (jobs 438-441, A B B A) read
-level in one process (256 KiB streamed 0.191 against 0.190 ns/B) and in
-the other every servil mt cell 1.1-3.5x slower, 64 B inputs included,
-which never reach the feed (servil st level): a process-wide slow state
-the change brings on, unexplained; the VM 50% slower on long streams.
+level in one process (256 KiB streamed 0.191 against 0.190 ns/B; the
+other met the process state below); the VM 50% slower on long streams.
 Dropped. Next: a delivery thread apart from the engine (the plan's
 design), so the engine can hash on SME2 without holding deliveries; its
 cost, a second wake in series for the inputs hashed at delivery, needs
 a design that keeps small inputs on one wake.
+
+**Some benchmark processes run the queue 1.1-3.5x slower on the Mac**
+(open, ours to explain): jobs 440, 446, and 448, on both sides of their
+comparisons, every servil mt cell of the queue slower in the whole
+process (many 64 B inputs 75-77 ns/B against 21, streams 10-20%), servil
+st level, mains power. Not reproduced in 16 fresh processes (job 450:
+64 B inputs 1.21-1.36 us each, the program's and the engine's threads on
+P-cores at 3.3 GHz) nor after the benchmark's patterns in 8 processes
+(job 451: long streams, two queues at once, calls after 1 ms sleeps,
+hash_multithreaded; at most 1.75 us, right after the sleeps, the engine
+at 2.5 GHz). Candidates: other load on the Mac while those jobs ran (the
+cells are wake-bound, a single thread's hashing is not); something of
+the benchmark process the probes lack. Next: the benchmark's samples
+file per process (`--trace-clocks` traces the caller alone).
 
 **The queue's small inputs: two wakes per round trip** (open, for
 Zooko). The benchmark's program cycles four buffers and blocks on its
