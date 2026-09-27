@@ -21,7 +21,7 @@ The streaming APIs are **built for efficiency**; every other API is
 | many messages of one length | an index of records, a layer of a tree | `hash_many_multithreaded` (recommended), or `hash_many` |
 | one long input arriving in pieces, simply | a reader, a decompressor | `Hasher::update`, `update_reader` |
 | one long input arriving in pieces, top speed | a file server, a backup tool | `Queue::pieces` |
-| many separate inputs arriving, top speed | a content-addressed store, per-object digests over a network | `Queue` (below) |
+| many separate inputs arriving, top speed | a content-addressed store, per-object digests over a network | `Queue::messages`, or `Queue::fixed` for one length |
 | authenticated or derived | a MAC, a per-tenant key, a KDF | the keyed and derive-key form of each shape |
 | saving energy, seriously | a laptop on battery, a fleet billed for power | the queue, efficient in energy |
 | saving energy, casually | background work | the single-threaded forms, at background priority |
