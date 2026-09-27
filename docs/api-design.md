@@ -115,6 +115,12 @@ implements, from one delivery thread; no polling and no blocking.
   program cycles a fixed set of buffers (fill one, for a file or socket by
   the `read` itself; submit it; get it back in a handler call; fill it
   again). No copy, no allocation per input. `submit` returns at once.
+- **`submit` takes `&self`**: a handler may hold its own queue (shared
+  through an `Arc`) and submit from inside its call; a queue is `Send +
+  Sync`. `Threads` and `Efficiency` print for diagnostics (`Debug`).
+- **The tests come first**: `tests/api_plan.rs` states this contract
+  against the official vectors and the reference implementation, before
+  the implementation exists.
 - **Back-pressure is the program's own buffers**: every buffer comes back
   through the handler, so the buffers in flight never exceed the number
   the program made; a program out of buffers waits for its next handler
