@@ -533,6 +533,27 @@ median ns/B, first engine -> feed: streamed 256 KiB 0.256 -> 0.161, 1 MiB
 then delivered (VM streamed 32 MiB +28%; every buffer held until the
 batch's last), and with a `Hold` between batches (+35%).
 
+**The engine helps only with the front's tasks** (fb29457): while the
+front waits, the engine hashes one of the front's own tasks when no
+worker has taken it, and otherwise polls, so each submission goes out as
+soon as it is done. Mac (jobs 422-425), servil mt: streamed 1 MiB 0.151
+-> 0.134 ns/B, 32 MiB 0.143 -> 0.113; many 64 KiB inputs 0.144 -> 0.116;
+but a stream of four 64 KiB pieces (256 KiB) 0.165 -> 0.193, about 7 us
+more per stream (open, below). Measured and refuted on the way:
+- Also helping with any task while no worker is awake (jobs 426-429):
+  level everywhere, 256 KiB included.
+- Waking workers only once a burst has published 512 KiB (jobs 430-433):
+  256 KiB streamed 0.192 -> 0.292, 1 MiB 0.134 -> 0.176; the VM alike. The
+  woken workers are what short streams need, not what slows them.
+- Pieces cut into tasks of at most 16 KiB, the engine helping with any
+  short task (VM probe, 5 x 32 MiB streams): 0.389 ns/B, 32 KiB 0.307,
+  64 KiB 0.247. More tasks in flight wake every worker, and fifteen
+  pollers contend on the feed's cursor.
+Open (ours to explain): what the four-piece stream lost when the engine
+stopped hashing later pieces itself. Candidates: the woken workers' first
+piece on a core the idle slowed, against the engine's SME2; the engine
+idle while its three later pieces run on NEON.
+
 **The queue's small inputs: two wakes per round trip** (open, for
 Zooko). The benchmark's program cycles four buffers and blocks on its
 channel when none is free; the engine sleeps once it has delivered all
