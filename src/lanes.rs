@@ -1038,9 +1038,12 @@ impl Feed {
         }
     }
 
-    /// Hash one published task on this thread, if any is left to take;
-    /// whether one was.
-    pub(crate) fn help(&self, platform: Platform) -> bool {
+    /// Hash one published task below `before` on this thread, if one is
+    /// left to take; whether one was.
+    pub(crate) fn help(&self, before: usize, platform: Platform) -> bool {
+        if self.job.cursor.load(Ordering::SeqCst) >= before {
+            return false;
+        }
         match self.job.claim() {
             Some(index) => {
                 // Sound: claimed through the cursor, so ours alone.

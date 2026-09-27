@@ -276,7 +276,7 @@ where
      * flight (`take`, which may leave some pending when the feed is full),
      * deliver the done ones from the front in order (`deliver`, returning
      * whether it delivered any), and when the front waits on tasks, hash
-     * one itself or poll. Returns when nothing is in flight or pending
+     * one of the front's itself or poll. Returns when nothing is in flight or pending
      * (the queue goes idle, its feed retired so the workers may sleep), or
      * after a delivery when another queue waits for the engine (this one
      * back in line, its tasks still in flight).
@@ -307,8 +307,14 @@ where
                     engine_send(self);
                     return;
                 }
-            } else if !handling.feed.as_ref().is_some_and(|feed| feed.help(crate::platform::Platform::detect())) {
-                crate::lanes::poll_pause(&mut polled);
+            } else {
+                // The front waits on its tasks: hash one of them here when no
+                // worker has taken it, else poll, so that each submission
+                // goes out as soon as it is done.
+                let front = handling.flight.front().map_or(0, |front| front.first + front.count);
+                if !handling.feed.as_ref().is_some_and(|feed| feed.help(front, crate::platform::Platform::detect())) {
+                    crate::lanes::poll_pause(&mut polled);
+                }
             }
         }
     }
