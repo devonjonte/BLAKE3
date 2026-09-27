@@ -19,7 +19,8 @@
 //! delivers from the front in submission order as each is done (a piece
 //! by replaying `Hasher::update` with its subtrees' results). A message or
 //! piece holding a subtree of `lanes::MIN_SPLIT_LEN` or more is hashed at
-//! delivery the one-shot way, over the pool. Sleeping workers are woken
+//! delivery the one-shot way, over the pool, and so is one shorter than
+//! `FEED_MIN`, which costs less to hash than to hand over. Sleeping workers are woken
 //! only while `WAKE_MIN` bytes or more are in flight; with nothing in
 //! flight the feed retires and the workers sleep, so nothing runs between
 //! bursts for work that may come (AGENTS.md, "Serve real programs").
@@ -209,6 +210,11 @@ enum PieceItem<B> {
     Finish,
 }
 
+/// The shortest message or piece that goes to the feed: shorter ones cost
+/// less to hash at delivery than to hand over (Mac, many 1 KiB inputs:
+/// 1.62 ns/B through the feed, 1.33 at delivery).
+const FEED_MIN: usize = crate::SME2_SIZED_LEN;
+
 /// The least work in flight that wakes sleeping workers for it, in bytes:
 /// below it the engine hashes the tasks itself, and workers already awake
 /// take their share.
@@ -334,7 +340,7 @@ impl<H: MessageHandler> Serve for Inner<H, H::Buffer, shape::Messages> {
             |queue, handling, pending| {
                 while let Some(buffer) = pending.pop_front() {
                     let len = buffer.as_ref().len();
-                    if queue.max_threads == 1 || len >= crate::lanes::MIN_SPLIT_LEN {
+                    if queue.max_threads == 1 || len < FEED_MIN || len >= crate::lanes::MIN_SPLIT_LEN {
                         handling.flight.push_back(Flight { item: buffer, first: 0, count: 0 });
                         continue;
                     }
@@ -383,10 +389,12 @@ impl<H: PieceHandler> Serve for Inner<H, PieceItem<H::Buffer>, shape::Pieces> {
                     };
                     let mut plan = handling.plan;
                     crate::plan_subtrees(&mut plan, piece, &mut handling.tasks);
-                    // A piece that is one large subtree (or more) is hashed
-                    // at delivery, over the pool in the one-shot way; so is
-                    // every piece with efficiency Energy.
+                    // A short piece, and one holding a large subtree, is
+                    // hashed at delivery (the large one over the pool, the
+                    // one-shot way); so is every piece with efficiency
+                    // Energy.
                     let alone = queue.max_threads == 1
+                        || piece.len() < FEED_MIN
                         || handling.tasks.len() > crate::lanes::FEED_SLOTS / 2
                         || handling.tasks.iter().any(|task| task.len >= crate::lanes::MIN_SPLIT_LEN);
                     if alone || handling.tasks.is_empty() {
