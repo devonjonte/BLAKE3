@@ -1038,15 +1038,11 @@ impl Feed {
         }
     }
 
-    /// Hash one published task on this thread, if one is left to take
-    /// and it is below `before` (the tasks whose results the owner waits
-    /// for first) or no worker is awake to take it; whether one was.
+    /// Hash one published task below `before` on this thread, if one is
+    /// left to take; whether one was.
     pub(crate) fn help(&self, before: usize, platform: Platform) -> bool {
         if self.job.cursor.load(Ordering::SeqCst) >= before {
-            let pool = pool();
-            if pool.sleepers.load(Ordering::SeqCst) + 1 < pool.cpus {
-                return false;
-            }
+            return false;
         }
         match self.job.claim() {
             Some(index) => {
