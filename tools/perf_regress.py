@@ -241,6 +241,51 @@ impl Stream {
 '''
 
 
+SHIM_QUEUE = r'''
+
+// perf_regress.py shim: the Queue of later commits (plain mode alone),
+// hashing on the calling thread inside submit, so the current bench-hashes
+// builds against this commit (the check measures no streamed or
+// many-inputs cells).
+#[cfg(feature = "std")]
+pub enum Mode<'a> { Hash, Keyed(&'a [u8; 32]), DeriveKey(&'a str) }
+#[cfg(feature = "std")]
+#[derive(Clone, Copy, Debug)]
+pub enum Efficiency { Time, Energy }
+#[cfg(feature = "std")]
+pub trait MessageHandler: Send + 'static {
+    type Buffer: AsRef<[u8]> + Send + 'static;
+    fn hashed(&mut self, buffer: Self::Buffer, hash: Hash);
+}
+#[cfg(feature = "std")]
+pub trait PieceHandler: Send + 'static {
+    type Buffer: AsRef<[u8]> + Send + 'static;
+    fn piece_done(&mut self, buffer: Self::Buffer);
+    fn finished(&mut self, hash: Hash);
+}
+#[cfg(feature = "std")]
+pub mod shape { pub struct Messages; pub struct Pieces; }
+#[cfg(feature = "std")]
+pub struct Queue<H, S = shape::Messages> { handler: std::sync::Mutex<(H, Hasher)>, shape: core::marker::PhantomData<S> }
+#[cfg(feature = "std")]
+fn shim_queue<H, S>(mode: Mode, handler: H) -> Queue<H, S> {
+    assert!(matches!(mode, Mode::Hash), "the perf_regress shim hashes in plain mode alone");
+    Queue { handler: std::sync::Mutex::new((handler, Hasher::new())), shape: core::marker::PhantomData }
+}
+#[cfg(feature = "std")]
+impl<H: MessageHandler> Queue<H, shape::Messages> {
+    pub fn messages(mode: Mode, _: Efficiency, handler: H) -> Self { shim_queue(mode, handler) }
+    pub fn submit(&self, buffer: H::Buffer) { let hash = hash(buffer.as_ref()); self.handler.lock().unwrap().0.hashed(buffer, hash); }
+}
+#[cfg(feature = "std")]
+impl<H: PieceHandler> Queue<H, shape::Pieces> {
+    pub fn pieces(mode: Mode, _: Efficiency, handler: H) -> Self { shim_queue(mode, handler) }
+    pub fn submit(&self, piece: H::Buffer) { let mut h = self.handler.lock().unwrap(); h.1.update(piece.as_ref()); h.0.piece_done(piece); }
+    pub fn finish(&self) { let mut h = self.handler.lock().unwrap(); let hash = h.1.finalize(); h.1.reset(); h.0.finished(hash); }
+}
+'''
+
+
 # Every command runs in this environment: this one without git's repository
 # variables. Inside a pre-commit hook git sets GIT_INDEX_FILE (for
 # `git commit PATH...`, a temporary index that becomes the commit) and
@@ -315,6 +360,8 @@ def shimmed_sources(commit):
         lib = re.sub(*KERNELS_RENAME, lib) + SHIM_KERNELS
     if "pub use stream::Stream" not in lib:
         lib += SHIM_STREAM
+    if "pub use queue::" not in lib:
+        lib += SHIM_QUEUE
     if lib != git("show", f"{commit}:src/lib.rs"):
         out["src/lib.rs"] = lib
     return out, shimmed
