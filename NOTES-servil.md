@@ -431,14 +431,56 @@ lock-free slot table; pieces pulled through a cursor, shrinking toward the
 end (`next_piece_len`, 8-128 KiB, so the slowest thread's last piece is
 small); one `active` count limits reservations and publishes results;
 workers ranked (rank r takes from a job only 20 ns x r after registration,
-so small calls wake few); polls spin with `spin_loop` and yield every
-20 µs; a worker sleeps after 200 µs without a piece; a call arriving when
-callers fill the CPUs hashes its input whole. Every piece runs NEON (on
+so a call's pieces go to few); polls spin with `spin_loop` and yield every
+20 µs, only while a job is registered or a `Hold` lives; a worker that
+finds neither sleeps at once (1046c10, Zooko: nothing kept awake between
+calls; before, workers spun 200 µs after their last piece, which the
+benchmark's back-to-back loops rewarded and few programs meet); a call
+arriving when callers fill the CPUs hashes its input whole. Every piece runs NEON (on
 the Mac the NEON pool beat the SME2 pool at every mt point from 128 KiB).
 Polls are loads only; `cursor` and `active` sit on their own lines
 (fifteen pollers' RMWs had stalled a caller's register by 10-150 µs).
 `initialize()` spawns the workers; the first multithreaded call does if the
 program has not (documented: up to tens of milliseconds, once).
+
+**Waking** (1046c10, September 27, 2026): every call meets sleeping
+workers, so a call wakes only those it can use (pieces - 1, within its
+budget, less those awake or on their way). The caller wakes one; the
+first to wake takes the rest as owed and wakes them one by one before
+its first piece. Costs measured (median of 51, after 1 ms): the waker
+pays about 3 µs per `notify_one` on the Mac, 4-12 µs in the VM;
+`notify_all` of fifteen costs the waker 25-56 µs; a woken worker arrives
+15-20 µs after its wake on the Mac, 20-45 µs in the VM, on a core the
+idle time slowed. A 1 MiB call on the Mac: the first worker at 10-18 µs,
+the last at 45-70 µs, the first woken's own first piece about 35 µs in
+(it spends about 2.6 µs per wake). **MIN_SPLIT_LEN = 768 KiB**: with 1 ms
+of sleep before each call the split came back sooner from 512 KiB on the
+Mac (136 µs against 158; 256-384 KiB level; jobs 364-367) and from
+768 KiB in the VM (146 against 181; 512 KiB 154 against 130); Zooko took
+the length where it pays on both (hash_multithreaded is built for a low
+worst case). After idle, VM: mt 64 KiB 1.68 -> 0.59 ns/B (st 0.55),
+256 KiB 0.50 -> 0.28 (st 0.29), 4096 x 64 B 32.2 -> 17.1 (st 18.1); back to
+back, Mac solo 1 MiB mt 0.067 ns/B against st 0.152.
+
+**Holds** (3d7102e): `lanes::Hold` counts as a registered job while it
+lives (workers poll, nobody is woken). A multithreaded Stream's hashing
+thread holds one while its next buffer is already queued and drops it
+before waiting for the caller: a stream with buffers waiting is one call
+in progress, and a slow producer leaves the workers asleep. Without it
+each 1 MiB buffer paid a wake (VM streamed mt 32 MiB 0.062 -> 0.101
+ns/B); with it Mac streamed mt solo 32 MiB 0.065 -> 0.043, 8 MiB 0.067 ->
+0.048 (jobs 375-378).
+
+**Two aims, stated in the API docs** (Zooko, September 27, 2026): each
+hashing interface is built for top speed (hash, hash_many, Stream: the
+fastest way to do the task for a caller that keeps it fed) or for a low
+worst case (hash_multithreaded, hash_many_multithreaded: other cores only
+where waking them pays on every machine measured, never slower than the
+single-threaded form, nothing running between calls). A judgment call
+between speed and everyone's worst case goes to the aim the interface is
+built for; users who want top speed on a stream of inputs are steered to
+the interfaces that keep the engine fed. Zooko on the name of the second
+aim: still open ("the what else is a little unclear").
 
 **The SME2 thread** (0366e48, September 25, 2026): a multithreaded call
 that gets the SME2 turn hashes a prefix of its input itself, in whole
@@ -487,6 +529,15 @@ with no length pass (a pass before SME2 kernels cost 25%).
 back-to-back effect; not measured natively.
 
 ## Rejected (with the reason; do not retry without new evidence)
+
+- **Wake fan-out as a tree** (probe/wake-half, September 27, 2026): each
+  woken worker wakes the larger half of the owed sleepers instead of the
+  first woken waking them all. Level on both machines (Mac jobs 369-372:
+  solo mt 1 MiB 0.066 against 0.067 ns/B, 8 MiB 0.027 against 0.028; VM
+  within noise). The simpler scheme stays.
+- **All woken workers draining the owed wakes one at a time** (September
+  27, VM): every early worker spent its time waking; the first piece taken
+  at about 120 µs into a 1 MiB call.
 
 - Lanes (one worker per SME unit, fair-share admission): three threads on
   an M4 Max, lost to single-threaded from 128 KiB under two callers.
