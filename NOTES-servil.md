@@ -496,7 +496,7 @@ streamed mt 32 MiB 0.065 -> 0.043 ns/B on the Mac). The planned queue
 (docs/api-design.md) passes the caller's buffers by ownership instead;
 the hold comes back with it. The code is in git history.
 
-**The planned API, first version** (September 28, 2026; docs/api-design.md,
+**The planned API** (September 28, 2026; docs/api-design.md,
 tests/api_plan.rs). `Mode` (plain, keyed, derive-key) and `Threads` (One,
 All, Budget(n)) are arguments of `hash_with` and `hash_many_with`; the
 `_with_budget` functions went. Every batch path takes the mode's key words
@@ -507,22 +507,43 @@ packed flags, beside CHUNK_START / CHUNK_END / PARENT / ROOT, so every mode
 costs the same (perf_regress on the VM: level). `initialize()` runs the
 self-test alone; `initialize_multithreaded()` also starts the pool.
 
-**The queue, first version** (`src/queue.rs`). `Queue<H, S = shape::Messages>`:
-the shape is a second type parameter because inherent impls with the same
-method name (`submit`) under different trait bounds on one type parameter
-overlap (E0592); distinct concrete shapes do not. One engine thread per
-process takes boxed jobs from an mpsc channel in order: each job locks its
-queue's `Mutex<Handling>` (the handler, and for pieces the `Hasher`),
-hashes (`Efficiency::Time`: `lanes::hash_with_key` / `lanes::hash_many` /
-`Hasher::update_multithreaded` at every thread; `Energy`: one thread), and
-calls the handler; a panic in a job aborts. Order, resubmission from a
-handler, and drop-cancels-nothing follow from the one FIFO. Costs, VM
-`--quick`: each piece is a round trip through two thread wakes, so a
-stream of 64 B through the queue ran 437x slower than `Hasher::update`
-(373 against 0.86 ns/B); pieces of 64 KiB hash on one thread (below the
-768 KiB split). Next, to make it fast: no allocation per submission, a
-delivery thread apart from hashing, pieces batched and handed to the pool
-while the caller fills the next, the `Hold` back while buffers wait.
+**The queue** (`src/queue.rs`; module docs have the mechanism).
+`Queue<H, S = shape::Messages>`: the shape is a second type parameter
+because inherent impls with the same method name (`submit`) under
+different trait bounds on one type parameter overlap (E0592); distinct
+concrete shapes do not. The handle holds `Arc<dyn Any>` and each shape's
+methods downcast it to their `Inner<H, item, S>`. One engine thread per
+process; each queue keeps its pending submissions and tells the engine
+(an mpsc of `Arc<dyn Serve>`) only when it was idle. With
+`Efficiency::Time` submissions become tasks in the queue's `lanes::Feed`
+(a 64-slot ring beside one pool Job that stays registered while tasks are
+in flight; its cursor moves by CAS onto published tasks only): a message
+is one task; a piece is the whole subtrees `Hasher::update` would hash in
+it (`plan_subtrees`, from a `PlanState` that runs ahead of the hasher),
+and delivery replays `update` with their results (`update_with_results`:
+a pair of children for a subtree of two chunks or more at chunk zero,
+else a chaining value). Workers are woken while 128 KiB or more is in
+flight (`WAKE_MIN`); the feed retires when nothing is in flight. Shorter
+than 16 KiB (`FEED_MIN`), or holding a subtree of 768 KiB or more, a
+submission is hashed at delivery. Measured, Mac (jobs 410-417), servil mt
+median ns/B, first engine -> feed: streamed 256 KiB 0.256 -> 0.161, 1 MiB
+0.225 -> 0.150, 32 MiB 0.213 -> 0.142 (Hasher 0.238); many inputs 64 KiB
+0.216 -> 0.144, 256 KiB 0.185 -> 0.114. VM: streamed 32 MiB 0.245 ->
+0.191. Tried and worse: the whole waiting batch at once over the pool,
+then delivered (VM streamed 32 MiB +28%; every buffer held until the
+batch's last), and with a `Hold` between batches (+35%).
+
+**The queue's small inputs: two wakes per round trip** (open, for
+Zooko). The benchmark's program cycles four buffers and blocks on its
+channel when none is free; the engine sleeps once it has delivered all
+four. So every four inputs cost the engine's wake (by the next submit)
+and the program's (by the handler's send): Mac 64 B inputs 21 ns/B
+(1.35 us per input) against `hash`'s 0.68, 1 KiB 1.40 against 0.66, 16
+KiB 0.275 against 0.237; VM 64 B 98 ns/B (its wakes cost 20-45 us). A
+single-piece stream alike (64 KiB streamed 0.31 against 0.23). Only
+keeping the engine awake after it delivers would remove the engine's
+wake, and that keeps something running for work that may come (AGENTS.md,
+"Serve real programs"); more buffers in flight amortise both wakes.
 
 **Streaming scope** (Zooko, September 25, 2026): input in memory goes to
 one call (`hash`, `hash_multithreaded`); input that arrives goes to a
@@ -795,9 +816,9 @@ all); marks two-speed cells.
 
 ## Testing
 
-    cargo test --release --lib                      # 85 tests
-    cargo test --release --features no_sme2 --lib   # 81
-    cargo test --release --features pure --lib      # 70
+    cargo test --release --lib                      # 86 tests
+    cargo test --release --features no_sme2 --lib   # 82
+    cargo test --release --features pure --lib      # 71
     cargo test --release --doc                      # 21
     cargo test --release --test api_plan            # 12, the planned API's contract
     cargo test --release --manifest-path test_vectors/Cargo.toml   # 2
