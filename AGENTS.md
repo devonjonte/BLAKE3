@@ -141,7 +141,7 @@ A fact that concerns several audiences goes in each audience's document, phrased
 
 # Targets
 
-**Virtual machines are first-class optimization targets.** People run BLAKE3 inside VMs like the Debian guest this repository is developed in, and its speed there matters as much as on the native Mac. A change is good when it helps both, or helps one and leaves the other level; a change that wins natively and loses in a VM (or the reverse) needs a decision on the record, not a default. VMs behave differently in ways that matter here: an idle vCPU that spins or calls `sched_yield` steals host time from the vCPUs that hash (natively a yielding poller costs 2%, in the VM 36%), and a 16-vCPU guest may sit on fewer fast host cores than it has vCPUs. `examples/host_lab.rs` measures each of these; run it on both and keep both reports.
+**The native Mac comes first; virtual machines follow** (the user's decision, September 27, 2026). Performance-sensitive programs run on native hosts far more often than in VMs, and the Mac shows what our code does (each thread's cycles per core kind, the host's own scheduler), where a VM's layers hide it. Diagnose and design on the Mac first; then measure the VM, and keep it level or better. A change that wins natively and loses in a VM needs a decision on the record, not a default. VMs behave differently in ways that matter here: an idle vCPU that spins or calls `sched_yield` steals host time from the vCPUs that hash (natively a yielding poller costs 2%, in the VM 36%), and a 16-vCPU guest may sit on fewer fast host cores than it has vCPUs. `examples/host_lab.rs` measures each of these; run it on both and keep both reports.
 
 # Where to start
 
