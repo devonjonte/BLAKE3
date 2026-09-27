@@ -6,6 +6,13 @@ section), and this file records why each choice was made. Decisions
 already made carry their date; everything else is a proposal, and each
 open question is marked **Q**.
 
+**The strategy** (Zooko, September 27, 2026; AGENTS.md, "The streaming
+APIs first"): the users most sensitive to performance, for time or for
+energy, use the streaming APIs, so every trade-off goes to them, even at a
+cost to the other APIs; choosing the efficient API is the caller's job.
+The streaming APIs are **built for efficiency**; every other API is
+**built for ease of use** (the API docs' labels, decided).
+
 ## Users and what they call
 
 | user | use case | calls |
@@ -16,11 +23,14 @@ open question is marked **Q**.
 | one long input arriving in pieces, top speed | a file server, a backup tool | `Queue` in one-input form (below) |
 | many separate inputs arriving, top speed | a content-addressed store, per-object digests over a network | `Queue` (below) |
 | authenticated or derived | a MAC, a per-tenant key, a KDF | the keyed and derive-key form of each shape |
-| saving energy | a laptop on battery, background work | the single-threaded forms, at background priority |
+| saving energy, seriously | a laptop on battery, a fleet billed for power | the queue, efficient in energy |
+| saving energy, casually | background work | the single-threaded forms, at background priority |
 
-The one-shot forms are the simple ones; top speed belongs to the queue,
-which keeps the engine fed. The API docs say which each form is built for
-(wording **Q1**: "one call, simple" and "top speed, keep it fed").
+The one-shot forms and `Hasher` are built for ease of use; the queue is
+built for efficiency. **Q1 (new)**: efficiency in time or in energy, both
+supported; how the queue takes the choice (a boolean at construction, or
+the thread choice itself: all cores for time, one E-core-friendly thread
+for energy).
 
 ## Dimensions
 
@@ -35,8 +45,10 @@ counting the caller). The queue takes the same choice at construction.
 eighth of P-cores' energy at a third to a quarter of the speed). The docs
 of every multithreaded form say so beside the recommendation; the crate
 docs keep the advice to hash single-threaded at background priority when
-time allows. No separate energy-efficient API now (the `efficient` module
-idea stays in NEXT-STEPS).
+time allows. Users serious about energy use the queue in its
+energy-efficient form (Q1); the `efficient` module idea in NEXT-STEPS
+(SME2 on the caller, E-core helpers at background QoS) is how that form
+might run.
 
 **Modes.** Every shape serves plain hashing, keyed hashing, and key
 derivation; they differ only in the key words and flags, so they cost the
@@ -55,8 +67,14 @@ pub fn hash_multithreaded_with(mode: Mode, input: &[u8], max_threads: usize) -> 
 Queue::new(mode, threads)
 ```
 
-**Q2**: this `Mode` (one new concept, which the upstream crate keeps
-internal), or a function per combination (no new concept, many names)?
+`Mode` it is (Zooko, September 27, 2026): one concept with a default, so
+a user who wants plain hashing never meets it. Proposal to go with it: the
+thread choice as one argument too, `Threads::{One, All, Budget(n)}`, so
+each shape has its two easy functions and one full one:
+`hash`, `hash_multithreaded`, `hash_with(mode, threads, input)`;
+`hash_many`, `hash_many_multithreaded`, `hash_many_with(mode, threads,
+input, message_len, out)`; upstream's `keyed_hash` and `derive_key` stay
+for drop-in use; the `..._with_budget` functions go.
 
 **Signatures.** One style throughout: inputs as `&[u8]` (one-shot) or
 owned buffers (queue); a one-message digest as `Hash` (its equality runs
@@ -94,10 +112,13 @@ for (buffer, hash) in queue.finish() { /* the rest */ }
 ```
 
 - **Budget** (the back-pressure): bytes in flight, a few MiB by default.
-- **One long input in pieces**: `Queue::one_input(...)`, where each
-  submitted buffer is the next piece and `finish` returns the one digest;
-  pieces come back as they are hashed. **Q3**: one type with two forms, or
-  two types?
+- **The streaming shapes**: (a) one message of any length after another,
+  each with its digest; (b) a long or endless series of fixed-length
+  messages, batched; (c) one long message in pieces (a file), one digest
+  for all of them; (d) a Merkle tree over a series of leaves. **Q3**
+  (restated): one queue type whose constructor names the shape, or a type
+  per shape? (a) and (b) differ only in what the queue may batch; (c)
+  returns one digest; (d) returns a root and, if wanted, the layers.
 - **Shared buffers**: an `Arc<[u8]>` submitted to us and to a writer at
   once serves both without a copy; it returns to its pool when the last
   user lets go.
@@ -106,10 +127,9 @@ for (buffer, hash) in queue.finish() { /* the rest */ }
   together batch through `hash_many`'s kernels; large ones split over the
   pool from 768 KiB. The handoff is a lock-free ring of descriptors, a
   futex wake only when a side sleeps.
-- **A copying helper** for callers without buffers of their own, as
-  `Stream` is today (`buffer`, `filled`, `update_reader`); its docs say it
-  copies unless the data arrives by `read`. **Q4**: keep `Stream` as that
-  helper, or fold it into the queue?
+- `Stream` is deleted for now (Zooko, September 27, 2026), so nothing
+  distracts from the plan until the benchmark is frozen; a copying helper
+  may come back after that.
 
 **io_uring, as an optional Linux layer.** A read's completion hands its
 buffer to the queue; the queue's completions post into the program's own
@@ -143,7 +163,7 @@ a door.
 |---|---|---|
 | one-shot one message | one input at a time, 64 B-128 MiB | every hash; servil st and mt |
 | one-shot batch | batches of 64-byte messages, 1-262144 | BLAKE3 official (`Platform::hash_many`, sixteen a call), SHA-256s one call each; servil st and mt |
-| one input in pieces | the input arriving in 64 KiB pieces from a producer that copies them in (as a read would) | every hash's incremental API; servil through the queue's one-input form |
+| one input in pieces | the input arriving in 64 KiB pieces from a producer that copies them in (as a read would) | every hash's incremental API; servil through `Hasher` and the queue's one-input shape |
 | many inputs | new: a producer handing over N inputs of one size in turn from a fixed set of buffers, digests collected as they come, timed end to end | every hash in a loop; servil through the queue |
 | modes | keyed and derive-key spot checks at a few sizes in perf_regress (same cost as plain; a check that it stays so), no graph axis | servil |
 | energy | a maintainers' probe (probe/energy), outside the benchmark: joules per byte by form | servil |
