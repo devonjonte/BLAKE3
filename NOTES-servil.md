@@ -665,20 +665,23 @@ each probe on its own base. Kept probes: `probe/ecore-kernels`,
 `probe/ecore-trigger`, `probe/transition`, `probe/sme2-gap`; bench-hashes
 `probe/fork-no-sme2` builds the fork with `no_sme2`.
 
-**The Mac on battery** (September 27, 2026, jobs 346-351): M4 Max,
-`powermode 2` (High Power), on battery at 47%. A 200 ms spin ran on
-P-cores at 4.4 GHz at background QoS as at user-interactive, yet
-hash(64 KiB) with 1 ms of sleep before each call ran mostly on E-cores
-at about 1 GHz (median 41 µs), and back-to-back calls afterwards stayed
-there (20-24 µs, 256-400 of 400 calls on E), against 14.7 µs on P before
-the sleeps; user-interactive QoS kept none of it on P. Jobs 346-349 (the
-first after-idle pool probe) ran in this state and are set aside. Since
-then bench-hashes records the power state (report, samples, graph; the
+**Pauses slow the core's clock** (September 27, 2026, jobs 351 on
+battery and 357 on mains, M4 Max, `powermode 2`): hash(64 KiB) back to
+back 13.5 µs on P at 3.2 GHz; with 1 ms of sleep before each call
+39 µs, the P-core at about 1.2 GHz (battery 41 µs); back to back again
+afterwards the clock stays low (mains 29 µs at 1.5 GHz on P; battery
+20 µs on E). Battery power moves more of the calls after a pause onto
+E-cores (233 of 400 against 32) and changes the times little; the
+clock's fall after a pause happens on either. So the after-idle cells
+measure the machine's clock ramp as much as our wakes, and records made
+after a stretch of pauses read slow. A 200 ms spin ran on P at 4.4 GHz
+at background QoS as at user-interactive (job 350, battery). Since then
+bench-hashes records the power state (report, samples, graph; the
 graph's header names a run on battery or in Low Power Mode),
 perf_regress prints it beside its verdict, and the runner writes it into
 every `verdict.json`. Open, the machine's but ours to predict and tell
-users: how often a program that hashes now and then meets this on a
-laptop on battery, and what it costs st and mt. The per-core-kind split
+users: the clock's fall after a pause (how long a pause, how long the
+recovery) and what it costs st and mt. The per-core-kind split
 of `clocks::Counts` over calls of 20-400 µs is unchecked (it read
 "100% E" at 3.5 GHz, beyond an E-core's clock).
 
