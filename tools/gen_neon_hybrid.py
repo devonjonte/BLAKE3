@@ -1000,9 +1000,10 @@ def build():
     pquad = lambda idx, slots: Quad(idx, slots, u0 if idx == 0 else u1, idx == 1, "v28", "v29", rtemp="v30", **P)
     # A parent (or one-block message) on the integer units beside NEON parents.
     psc1 = lambda slot: [Scalar(0, slot, one, "w23", preg="x24", ctr_step=0)]
+    psc2 = lambda s0, s1: [Scalar(0, s0, two_a, "w2", "w3", preg="x0", ctr_step=0), Scalar(1, s1, two_b, "w4", "w5", preg="x1", ctr_step=0)]
     return {
         "p2": kernel("blake3_hybrid_p2", [], [plone((0, 1))]),
-        "p4": kernel("blake3_hybrid_p4", [], [ppair(0, (0, 1)), ppair(1, (2, 3))]),
+        "p4": kernel("blake3_hybrid_p4", psc2(0, 1), [plone((2, 3))]),
         "p8": kernel("blake3_hybrid_p8", [], [pquad(0, (0, 1, 2, 3)), pquad(1, (4, 5, 6, 7))]),
         # p3, p5, p7, p9: one block more on the integer units beside the
         # NEON parents, as k3, k5, k7, k9 do for chunks.
@@ -1055,7 +1056,7 @@ HEADER = """\
 // pairs; k7 scalar + quad + pair; k8 two scalars + quad + pair; k9
 // scalar + two quads; k10 two scalars + two quads. p<n> hashes n
 // contiguous 64-byte parent blocks with one shared counter: p2 pair, p4
-// two pairs, p8 two quads. Messages are transposed onto
+// two scalars + pair (as k4), p8 two quads. Messages are transposed onto
 // the stack each block and the second NEON unit's d row lives there too,
 // which is what lets two units of state share 32 vector registers.
 //

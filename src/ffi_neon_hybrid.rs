@@ -43,6 +43,12 @@
 //! cycles on a P-core (7180 against 8718 for eight chunks), 6.5% more on an
 //! E-core (14170 against 13310).
 //!
+//! p4 is two scalar blocks beside a pair, as k4 is for chunks: four
+//! one-block messages 20.3 ns/msg against two pairs' 23.2 on an M4 Max
+//! P-core (348 cycles per call against 395; jobs 382-389), 14% faster on
+//! the VM; its E-core cycles are unmeasured (the Mac in High Power mode
+//! kept background threads on P-cores). One quad was 14% slower.
+//!
 //! The scalar kernel also serves every single-chunk job: `hash_chunk` runs
 //! a whole input of one chunk or less, root compression included, in one
 //! call; `compress_blocks` is `ChunkState::update`'s inner loop; and
