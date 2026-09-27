@@ -4,7 +4,7 @@ For the servil team: how things are done in this repository and its guest. The p
 
 # The performance-regression check: every code commit
 
-Speed is this fork's purpose, so no commit that makes it slower may enter git unnoticed. **Every commit that touches `src/`, `c/`, `build.rs`, `Cargo.toml`, or `Cargo.lock` must pass `tools/perf_regress.py check` first.** The check builds bench-hashes against `HEAD` and against the working tree and runs the two builds alternately on this machine (A B B A A B B A, about 40 seconds on the VM plus builds), so load and drift fall on both sides alike; there are no stored numbers and nothing to keep current, and any machine can run it.
+Speed is this fork's purpose, so no commit that makes it slower may enter git unnoticed. **Every commit that touches `src/`, `c/`, `build.rs`, `Cargo.toml`, or `Cargo.lock` must pass `tools/perf_regress.py check` first.** The check builds bench-hashes against `HEAD` and against the working tree and runs the two builds alternately on this machine (A B B A A B B A, each later pair measuring only the points still undecided: about 20-40 s on the VM, 30-45 s as a Mac job, builds included), so load and drift fall on both sides alike; there are no stored numbers and nothing to keep current, and any machine can run it.
 
 **Install the pre-commit hook once per checkout**, and the check runs by itself on every code commit:
 
@@ -23,7 +23,7 @@ Speed is this fork's purpose, so no commit that makes it slower may enter git un
 
 **Commits that skipped the check** (`--no-verify`, or made where the hook was absent) must be checked before they are pushed: `pypy3 tools/perf_regress.py compare <parent> <commit>` for one, `pypy3 tools/perf_bisect.py <commit> <commit> ...` for a run of them (each against the one before, then the last against the first).
 
-`NOTES-servil.md` ("Performance-regression check") explains the rule and its measured false-alarm rate and sensitivity.
+`NOTES-servil.md` ("perf_regress", under "Tooling and its pitfalls") explains the rule, its margins by scenario (solo 3%, after idle 20%, which hold a change; shared 10%, which is reported), and its measured false-alarm rates and sensitivity on the VM and the Mac.
 
 # Branches: candidates, then servil
 
