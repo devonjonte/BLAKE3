@@ -25,7 +25,7 @@
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// `len` copies of one byte. Speed does not depend on the bytes; distinct
 /// seeds give concurrent callers distinct buffers.
@@ -47,9 +47,39 @@ impl Report {
     }
 }
 
+/// Every measuring thread's counts since the last [`clock_line`]: each
+/// section reports the clock its measurements ran at (AGENTS.md,
+/// "Measuring").
+static COUNTS: Mutex<Vec<clocks::Counts>> = Mutex::new(Vec::new());
+
+/// Run a measuring loop on this thread, keeping its counts for the
+/// section's clock line.
+fn counted<R>(f: impl FnOnce() -> R) -> R {
+    let before = clocks::Counts::read();
+    let result = f();
+    if let (Some(before), Some(after)) = (before, clocks::Counts::read()) {
+        COUNTS.lock().unwrap().push(after.since(before));
+    }
+    result
+}
+
+/// "  clock: 4390-4410 MHz, P-cores (12 measuring threads)", or that the
+/// platform counts no cycles; empties the collection.
+fn clock_line() -> String {
+    let mut counts = std::mem::take(&mut *COUNTS.lock().unwrap());
+    counts.retain(|c| c.p.time_ns + c.e.time_ns > 0);
+    if counts.is_empty() {
+        return "  clock: no cycle counts on this platform".to_owned();
+    }
+    counts.sort_by_key(|c| c.mhz());
+    let most_e = counts.iter().map(|c| c.e_percent()).max().unwrap();
+    let cores = if most_e == 0 { "P-cores".to_owned() } else { format!("up to {most_e}% of a thread's time on E-cores") };
+    format!("  clock: {}-{} MHz, {cores} ({} measuring threads)", counts[0].mhz(), counts[counts.len() - 1].mhz(), counts.len())
+}
+
 /// Spin for `d` without touching the scheduler.
 fn busy(d: Duration) {
-    let t = Instant::now();
+    let t = clocks::now();
     while t.elapsed() < d {
         std::hint::spin_loop();
     }
@@ -85,7 +115,7 @@ fn hand_off(style: Wait) -> f64 {
     let word = Arc::new(AtomicU64::new(0));
     let seen = Arc::new(AtomicU64::new(0));
     let pair = Arc::new((Mutex::new(0u64), Condvar::new()));
-    let epoch = Instant::now();
+    let epoch = clocks::now();
     let reps = 2000u64;
     let (w2, s2, p2) = (word.clone(), seen.clone(), pair.clone());
     let waiter = std::thread::spawn(move || {
@@ -201,15 +231,17 @@ fn hashers_beside(len: usize, hashers: usize, idlers: usize, style: Option<Wait>
                     std::hint::black_box(blake3_servil::hash(&input));
                 }
                 barrier.wait();
-                let t = Instant::now();
-                let mut count = 0u64;
-                while t.elapsed() < Duration::from_millis(40) {
-                    for _ in 0..4 {
-                        std::hint::black_box(blake3_servil::hash(std::hint::black_box(&input)));
+                counted(|| {
+                    let t = clocks::now();
+                    let mut count = 0u64;
+                    while t.elapsed() < Duration::from_millis(40) {
+                        for _ in 0..4 {
+                            std::hint::black_box(blake3_servil::hash(std::hint::black_box(&input)));
+                        }
+                        count += 4;
                     }
-                    count += 4;
-                }
-                t.elapsed().as_nanos() as f64 / count as f64
+                    clocks::since_ns(t) as f64 / count as f64
+                })
             })
         })
         .collect();
@@ -238,13 +270,15 @@ fn per_call(len: usize, callers: usize, f: fn(&[u8])) -> f64 {
                     f(&input);
                 }
                 barrier.wait();
-                let t = Instant::now();
-                let mut count = 0u64;
-                while t.elapsed() < budget || count < 5 {
-                    f(std::hint::black_box(&input));
-                    count += 1;
-                }
-                t.elapsed().as_nanos() as f64 / count as f64
+                counted(|| {
+                    let t = clocks::now();
+                    let mut count = 0u64;
+                    while t.elapsed() < budget || count < 5 {
+                        f(std::hint::black_box(&input));
+                        count += 1;
+                    }
+                    clocks::since_ns(t) as f64 / count as f64
+                })
             })
         })
         .collect();
@@ -285,11 +319,13 @@ fn transition(report: &mut Report) {
     let mut scratch = vec![0u8; 4096];
     let reps = 5000;
     let mut time = |name: &str, f: &mut dyn FnMut(&mut [u8], &mut [u8], &mut [u8])| -> f64 {
-        let t = Instant::now();
-        for _ in 0..reps {
-            f(&mut out, &mut out2, &mut scratch);
-        }
-        let us = t.elapsed().as_nanos() as f64 / reps as f64 / 1000.0;
+        let us = counted(|| {
+            let t = clocks::now();
+            for _ in 0..reps {
+                f(&mut out, &mut out2, &mut scratch);
+            }
+            clocks::since_ns(t) as f64 / reps as f64 / 1000.0
+        });
         let _ = name;
         us
     };
@@ -341,14 +377,14 @@ fn main() {
 
     report.line("1. primitives".to_owned());
     let n = 100_000;
-    let t = Instant::now();
+    let t = clocks::now();
     for _ in 0..n {
         std::thread::yield_now();
     }
     report.line(format!("  sched_yield on an idle CPU      {:7.0} ns", t.elapsed().as_nanos() as f64 / n as f64));
-    let t = Instant::now();
+    let t = clocks::now();
     for _ in 0..n {
-        std::hint::black_box(Instant::now());
+        std::hint::black_box(clocks::now());
     }
     report.line(format!("  Instant::now                    {:7.0} ns", t.elapsed().as_nanos() as f64 / n as f64));
     for style in [Wait::Spin, Wait::Yield, Wait::Condvar] {
@@ -371,7 +407,7 @@ fn main() {
         let mut waker = Duration::ZERO;
         for k in 0..reps {
             busy(Duration::from_micros(50));
-            let t = Instant::now();
+            let t = clocks::now();
             let mut g = pair.0.lock().unwrap();
             *g = k + 1;
             pair.1.notify_one();
@@ -394,6 +430,7 @@ fn main() {
         report.line(line);
     }
 
+    report.line(clock_line());
     report.line("3. idle waiters: 8 KiB hashes, ns per hash per thread (median / slowest)".to_owned());
     let half = (cpus / 2).max(1);
     for (hashers, idlers) in [(half, cpus - half), (cpus.saturating_sub(2).max(1), 2.min(cpus - 1))] {
@@ -407,9 +444,11 @@ fn main() {
         report.line(line);
     }
 
+    report.line(clock_line());
     report.line("4. SME2 → NEON on one thread".to_owned());
     transition(&mut report);
 
+    report.line(clock_line());
     report.line("5. the pool: ns per call (µs), serial vs multithreaded, one caller / two callers at once".to_owned());
     blake3_servil::initialize();
     for len in [64usize << 10, 128 << 10, 256 << 10, 1 << 20, 4 << 20, 16 << 20, 64 << 20] {
@@ -428,6 +467,7 @@ fn main() {
         ));
     }
 
+    report.line(clock_line());
     report.line("6. two SME2 callers at once: per-thread time, two at once over one alone (x2.0 = sharing one SME unit)".to_owned());
     for (name, f) in [("hash_many 4096 x 64 B", batch_serial as fn(&[u8])), ("hash 1 MiB", tree_serial)] {
         let len = if name.starts_with("hash_many") { 4096 * 64 } else { 1 << 20 };
@@ -450,6 +490,7 @@ fn main() {
         report.line(format!("  {name}: alone {:.1} µs; two at once, quiet: {}; right after an all-core burst: {}", alone / 1e3, show(&quiet), show(&after_burst)));
     }
 
+    report.line(clock_line());
     #[cfg(target_arch = "aarch64")]
     {
         report.line("7. WFE".to_owned());
@@ -465,7 +506,7 @@ fn main() {
                 }
             })
         };
-        let t = Instant::now();
+        let t = clocks::now();
         let mut returns = 0u64;
         while t.elapsed() < Duration::from_millis(200) {
             let v: u64;

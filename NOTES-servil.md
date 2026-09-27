@@ -635,9 +635,11 @@ Nothing heavy may run in the VM during a Mac job (they share cores). Its
 results matched the user's own Terminal runs (704 cells, median ratio
 1.001). Results belong to the runner's account: they cannot be moved.
 
-**Probe timing**: `examples/support/clocks.rs` (included with `#[path]`)
-measures wall time and cycles per core kind together, per batch, and
-shows their ratio; use it in every probe (AGENTS.md, "Measuring"). The
+**Probe timing**: the `clocks/` crate (fork and bench-hashes alike; until
+September 26, 2026 `examples/support/clocks.rs`, and bench-hashes' own
+bindings) measures wall time and cycles per core kind together, per
+batch, and shows the clock they ran at; use it in every probe (AGENTS.md,
+"Measuring"). The
 record of switching between the two: cycle normalization in the benchmark
 until September 2026 (removed: it hid SME2 waits), cycles for the E-core
 kernel probes (wall time swings 2x with the E clock), wall time for the

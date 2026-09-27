@@ -48,7 +48,7 @@ A promotion fast-forwards `servil` to the candidate, records the gate's evidence
 
 # Probes
 
-A probe times through `examples/support/clocks.rs`, wall time and cycles per core kind together (AGENTS.md, "Measuring"). A probe outside the fork's examples, in a scratch crate, includes the same file: `#[path = "/workspace/examples/support/clocks.rs"] mod clocks;`, then `clocks::measure(batches, batch_us, || ...)`. Clocks, and why these: the hardware counter (`std::time::Instant`: `CLOCK_UPTIME_RAW` on Darwin, `CLOCK_MONOTONIC` on Linux) for wall time; Apple's `thread_selfcounts(THSC_TIME_CPI_PER_PERF_LEVEL)` for cycles, instructions, and time per core kind; thread CPU time (`CLOCK_THREAD_CPUTIME_ID`) for nothing (as accurate at 1 ms, but no better, and an accounting layer to reason about); github.com/johnservil/measure-clocks3, `CPU-TIME-CLOCKS-AND-FREQUENCY.md`, has the experiments.
+Every clock read, in the fork, in bench-hashes, and in any scratch probe, goes through the `clocks/` crate in this repository (AGENTS.md, "Measuring"): `clocks::measure(batches, batch_ns, || ...)` for a probe's batches (each batch's wall time and the thread's counts per core kind, shown as ns per call and the clock it ran at), `clocks::now()` and `clocks::since_ns()` for wall time alone, `clocks::Counts::read()` for the counts. The fork's examples have it as a dev-dependency; a scratch crate adds `clocks = { path = "/workspace/clocks" }`. Its documentation says which clocks and why (github.com/johnservil/measure-clocks3, `CPU-TIME-CLOCKS-AND-FREQUENCY.md`, has the experiments). The pool's pacing in `src/lanes.rs` reads `Instant` directly: control, not measurement, and the library depends on nothing.
 
 # `perf_regress` and older commits
 
