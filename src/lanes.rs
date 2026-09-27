@@ -57,28 +57,27 @@
 //!
 //! # Waiting
 //!
-//! A worker between pieces polls the slots; after [`SPIN_BEFORE_SLEEP`]
-//! without taking a piece it sleeps on a condition variable. A caller
-//! waiting for its last pieces polls the same way, then sleeps. Polls
-//! spin in user space and yield the CPU every [`YIELD_EVERY`]. Measured on
-//! a 16-vCPU VM beside eight hashing threads, eight idle waiters that
-//! call `sched_yield` in a loop slow each hash by 36%, eight that spin by
-//! 18%, eight asleep by nothing; a spinning waiter also notices a posted
-//! job sooner (0.10 µs against 0.17). The yield every 20 µs keeps a
-//! runnable thread from waiting a scheduler quantum behind a poller
-//! (measured on a two-CPU machine: two threads spinning without ever
-//! yielding took a 128 KiB split from 29 µs to 2 ms).
+//! Nothing keeps a worker awake between calls (AGENTS.md, "Serve real
+//! programs"): a worker polls the slots only while a job is registered,
+//! and sleeps on a condition variable as soon as none is. So every call
+//! meets sleeping workers, and a call wakes only as many as it can use
+//! (its pieces less one, within its thread budget): it wakes one itself,
+//! about 3 µs of the caller's time (a wake of all fifteen at once cost the
+//! caller 25-56 µs), and the first to wake wakes the rest. A woken worker
+//! arrives 15-45 µs later on a core whose clock the idle time lowered, so
+//! inputs below [`MIN_SPLIT_LEN`] stay on the caller's thread. A caller
+//! waiting for its last pieces polls, then sleeps after
+//! [`SPIN_BEFORE_SLEEP`]. Polls spin in user space and yield the CPU every
+//! [`YIELD_EVERY`]: the yield keeps a runnable thread from waiting a
+//! scheduler quantum behind a poller (measured on a two-CPU machine: two
+//! threads spinning without ever yielding took a 128 KiB split from 29 µs
+//! to 2 ms). Beside eight hashing threads on a 16-vCPU VM, eight idle
+//! pollers that call `sched_yield` in a loop slowed each hash by 36%, eight
+//! that spin by 18%, eight asleep by nothing.
 //!
-//! Idle pollers cost the threads that hash, so the pool keeps as few as a
-//! call needs: workers are ranked, and worker `r` takes from a job only
-//! [`RANK_STAGGER_NS`]` × r` after it was registered. The lowest ranks
-//! take a call's pieces; the rest never do, and fall asleep. On the VM a
-//! 64 KiB call (eight pieces) went from 12.4 µs to 5.3 µs this way, the
-//! same as confining the process to nine CPUs. Waking a sleeper costs the
-//! waker a microsecond or more and the sleeper arrives tens of
-//! microseconds later, so a call whose pieces outnumber the workers
-//! awake wakes every sleeper at once, in one system call; the cost falls
-//! on the first larger call after a run of smaller ones.
+//! Workers are ranked, and worker `r` takes from a job only
+//! [`RANK_STAGGER_NS`]` × r` after it was registered, so the lowest ranks
+//! take a call's pieces.
 
 use crate::hazmat::{self, ChainingValue, Mode};
 #[cfg(test)]
@@ -90,12 +89,17 @@ use crate::{Hasher, KEY_LEN};
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, OnceLock};
 
-/// Inputs below this length are hashed on the calling thread. A split
-/// hands pieces to workers that are polling, a few microseconds each way;
-/// 64 KiB takes about 14 µs on one SME2 thread, and as eight pieces it
-/// comes back sooner (VM, beside a copy of itself: 0.19 ns/B against
-/// 0.21; 32 KiB and 48 KiB came back later split than whole).
-pub(crate) const MIN_SPLIT_LEN: usize = 64 * 1024;
+/// Inputs below this length are hashed on the calling thread. Every call
+/// meets sleeping workers (nothing keeps them awake between calls), and a
+/// woken worker arrives 15-45 µs later on a core whose clock the idle time
+/// lowered, so a split pays only for inputs that take the caller longer.
+/// Measured with 1 ms of sleep before each call, the split came back
+/// sooner from 512 KiB on an M4 Max (136 µs against 158; jobs 364-367)
+/// and from 768 KiB in the VM (146 against 181; 512 KiB 154 against
+/// 130). Zooko chose the length at which it pays on both (September 27,
+/// 2026): hash_multithreaded keeps every user's worst case low, and the
+/// modes built for top speed feed the workers without gaps.
+pub(crate) const MIN_SPLIT_LEN: usize = 768 * 1024;
 
 /// The shortest piece: eight chunks, a hybrid kernel's worth.
 const MIN_PIECE_LEN: usize = 8 * CHUNK_LEN;
@@ -127,8 +131,7 @@ fn poll_pause(yielded: &mut std::time::Instant) {
     }
 }
 
-/// How long a worker polls without taking a piece, and a caller for its
-/// last pieces, before sleeping.
+/// How long a caller polls for its last pieces before sleeping.
 pub(crate) const SPIN_BEFORE_SLEEP: std::time::Duration = std::time::Duration::from_micros(200);
 
 /// The length of the next piece when `remaining` bytes are uncut and
@@ -568,10 +571,14 @@ struct Pool {
     cpus: usize,
     /// The clock jobs' registration times count from.
     epoch: std::time::Instant,
+    /// Jobs in the slots: workers poll while there are any.
+    registered: AtomicUsize,
     /// Workers asleep on `posted`.
     sleepers: AtomicUsize,
-    /// Of those, the ones a caller has notified and that have yet to wake.
+    /// Of those, the ones a caller has asked to wake and that have yet to.
     notified: AtomicUsize,
+    /// Of those, the ones still to be woken: woken workers wake them.
+    owed: AtomicUsize,
     sleep_lock: Mutex<()>,
     posted: Condvar,
     /// Callers asleep on `finished_signal`.
@@ -608,8 +615,10 @@ fn pool() -> &'static Pool {
             callers: AtomicUsize::new(0),
             cpus,
             epoch: std::time::Instant::now(),
+            registered: AtomicUsize::new(0),
             sleepers: AtomicUsize::new(0),
             notified: AtomicUsize::new(0),
+            owed: AtomicUsize::new(0),
             sleep_lock: Mutex::new(()),
             posted: Condvar::new(),
             waiters: AtomicUsize::new(0),
@@ -674,11 +683,11 @@ impl Pool {
     }
 
     /// Put the job in a free slot. Returns the slot, or None when every
-    /// slot is taken. When the workers awake are fewer than the pieces,
-    /// every sleeper is woken, in one system call: a wake costs the waker
-    /// ten microseconds or more on some machines and the sleeper arrives
-    /// tens of microseconds later, so one call pays once for all, and
-    /// the woken workers then stay awake while calls keep coming.
+    /// slot is taken. When the workers awake are fewer than the call can
+    /// use, the caller wakes one sleeper and leaves the others it needs
+    /// owed: a wake costs the waker about 4 µs on the VM (all fifteen at
+    /// once, 56 µs), and each woken worker wakes owed sleepers before it
+    /// takes a piece, so the wakes spread over the woken.
     fn register(&self, job: &Job) -> Option<usize> {
         // The caller keeps this erased lifetime valid by unregistering,
         // draining readers, and waiting for active == 0 before returning.
@@ -686,6 +695,7 @@ impl Pool {
         let slot = (0..MAX_JOBS).find(|&i| {
             self.slots[i].job.compare_exchange(std::ptr::null_mut(), ptr, Ordering::SeqCst, Ordering::Relaxed).is_ok()
         })?;
+        self.registered.fetch_add(1, Ordering::SeqCst);
         // Sleepers already notified are on their way (a wake takes tens
         // of microseconds to land); a second caller in that window counts
         // them as awake and pays nothing. The lock-free reads are a hint;
@@ -695,9 +705,13 @@ impl Pool {
             let _guard = self.sleep_lock.lock().unwrap();
             let sleepers = self.sleepers.load(Ordering::SeqCst);
             let unnotified = sleepers - self.notified.load(Ordering::SeqCst);
-            if unnotified > 0 && (self.cpus - 1 - unnotified) < job.pieces - 1 {
-                self.notified.store(sleepers, Ordering::SeqCst);
-                self.posted.notify_all();
+            let awake = self.cpus - 1 - unnotified;
+            let wanted = job.pieces.min(job.max_threads) - 1;
+            if unnotified > 0 && awake < wanted {
+                let wake = (wanted - awake).min(unnotified);
+                self.notified.fetch_add(wake, Ordering::SeqCst);
+                self.owed.fetch_add(wake - 1, Ordering::SeqCst);
+                self.posted.notify_one();
             }
         }
         Some(slot)
@@ -706,6 +720,7 @@ impl Pool {
     /// Clear the slot and wait out any worker mid-take on it.
     fn unregister(&self, slot: usize) {
         self.slots[slot].job.store(std::ptr::null_mut(), Ordering::SeqCst);
+        self.registered.fetch_sub(1, Ordering::SeqCst);
         while self.slots[slot].readers.load(Ordering::SeqCst) > 0 {
             std::hint::spin_loop();
         }
@@ -786,31 +801,31 @@ impl Pool {
         None
     }
 
-    /// The next piece for a worker: polled for a while (yielding the CPU
-    /// between polls, so a thread that has work on this CPU runs), then
-    /// waited for.
+    /// The next piece for a worker: polled for while a job is registered
+    /// (yielding the CPU between polls, so a thread that has work on this
+    /// CPU runs), else waited for asleep. Nothing keeps a worker awake
+    /// between calls (AGENTS.md, "Serve real programs").
     fn next_piece(&self, start: &mut usize, rank: usize) -> (*const Job<'static>, usize) {
-        let taken = 'taken: loop {
-            let started = std::time::Instant::now();
-            let mut yielded = started;
-            while started.elapsed() < SPIN_BEFORE_SLEEP {
+        loop {
+            let mut yielded = std::time::Instant::now();
+            while self.registered.load(Ordering::SeqCst) > 0 {
                 if let Some(taken) = self.take_piece(start, rank) {
-                    break 'taken taken;
+                    return taken;
                 }
                 poll_pause(&mut yielded);
             }
-            // Asleep until a wake, then back to polling: a woken worker
-            // that finds nothing yet stays available for the next call.
-            // The guard is held from the count's increment through the
-            // take, the wait, and the decrement, so under sleep_lock every
-            // sleeper counted is waiting, and notified never exceeds
-            // sleepers: a caller's wake cannot fall between the take and
-            // the wait, and a sleeper that leaves without waiting was
-            // never counted as notified.
+            // No job: asleep until a wake, then back to polling while a
+            // job is registered. The guard is held from the count's
+            // increment through the take, the wait, and the decrement, so
+            // under sleep_lock every sleeper counted is waiting, and
+            // notified never exceeds sleepers: a caller's wake cannot fall
+            // between the check and the wait, and a sleeper that leaves
+            // without waiting was never counted as notified.
             let mut guard = self.sleep_lock.lock().unwrap();
             self.sleepers.fetch_add(1, Ordering::SeqCst);
             let taken = self.take_piece(start, rank);
-            if taken.is_none() {
+            let waited = taken.is_none() && self.registered.load(Ordering::SeqCst) == 0;
+            if waited {
                 guard = self.posted.wait(guard).unwrap();
                 // Awake: one fewer notified sleeper on the way (a wake
                 // nobody asked for leaves the count where it is).
@@ -818,11 +833,15 @@ impl Pool {
             }
             self.sleepers.fetch_sub(1, Ordering::SeqCst);
             drop(guard);
-            if let Some(taken) = taken {
-                break 'taken taken;
+            if waited {
+                for _ in 0..self.owed.swap(0, Ordering::SeqCst) {
+                    self.posted.notify_one();
+                }
             }
-        };
-        taken
+            if let Some(taken) = taken {
+                return taken;
+            }
+        }
     }
 }
 
@@ -956,7 +975,7 @@ mod test {
     /// (so `update` shrinks the subtrees it hands the pool), keyed too.
     #[test]
     fn test_update_multithreaded_matches_hash() {
-        let mut input = vec![0u8; (3 << 20) + 12345];
+        let mut input = vec![0u8; (5 * MIN_SPLIT_LEN + 1025).max(3 << 20) + 12345];
         crate::test::paint_test_input(&mut input);
         let key = [42u8; KEY_LEN];
         for len in [0, 1, MIN_SPLIT_LEN, MIN_SPLIT_LEN + 1, 5 * MIN_SPLIT_LEN + 1025, 3 << 20, input.len()] {

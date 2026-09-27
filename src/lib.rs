@@ -33,7 +33,7 @@
 //! # For best performance
 //!
 //! - **Input in memory: one call.** [`hash`] on the whole input runs
-//!   fastest on one thread, and [`hash_multithreaded`] on inputs of 64 KiB
+//!   fastest on one thread, and [`hash_multithreaded`] on inputs of 768 KiB
 //!   and more when the program can spare the CPUs (8 MiB: about 6x
 //!   [`hash`]'s speed on an M4 Max). Call [`initialize`] at start-up: the
 //!   first call of a process otherwise runs the startup self-test (below,
@@ -1172,7 +1172,9 @@ pub fn hash(input: &[u8]) -> Hash {
 /// The default hash function over several threads.
 ///
 /// Returns the same [`Hash`](struct@Hash) as [`hash`] for every input. Inputs below
-/// 64 KiB are hashed on the calling thread alone, at [`hash`]'s speed.
+/// 768 KiB are hashed on the calling thread alone, at [`hash`]'s speed.
+/// The worker threads sleep between calls, so a call wakes them, and
+/// below that length the wake would cost more than the workers give.
 /// Larger inputs are cut into pieces that the calling thread and worker
 /// threads hash at once; this crate starts the workers once per process,
 /// one per CPU beyond the first, and keeps them. When concurrent calls
@@ -1301,7 +1303,7 @@ pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
 }
 
 /// [`hash_many`] over several threads. Writes the same digests for every
-/// batch. Batches under 64 KiB in all are hashed on the calling thread
+/// batch. Batches under 768 KiB in all are hashed on the calling thread
 /// alone, at [`hash_many`]'s speed. Larger batches are cut into ranges of
 /// messages that the calling thread and this crate's worker threads hash
 /// at once, under the same rules as [`hash_multithreaded`]: the workers
@@ -1849,7 +1851,7 @@ impl Hasher {
     }
 
     /// [`update`](Hasher::update) over several threads, with the same
-    /// result: the whole subtrees of 64 KiB and more in `input` are cut into
+    /// result: the whole subtrees of 1 MiB and more in `input` are cut into
     /// pieces that the calling thread and this crate's worker threads hash
     /// at once, under the rules of [`hash_multithreaded`]. The hashing
     /// thread of [`Stream::new_multithreaded`] runs each buffer through it;
