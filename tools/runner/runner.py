@@ -211,11 +211,26 @@ def test(job, run, work, out):
 HANDLERS = {"benchmark": benchmark, "perf_regress": perf_regress, "example": example, "test": test}
 
 
+def power():
+    """The Mac's power state in pmset's terms: the source ("AC Power",
+    "Battery Power") and its charge, then the power mode setting in use
+    (lowpowermode, or powermode 0 automatic, 1 low, 2 high). On battery a
+    thread that sleeps between calls moved to the efficiency cores at
+    about 1 GHz (job 351), so every job records it."""
+    def pmset(*args):
+        return subprocess.run(["pmset", *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout
+    batt = pmset("-g", "batt").splitlines()
+    source = batt[0].removeprefix("Now drawing from ").strip("'") if batt else "unreported"
+    charge = next((word.rstrip(";") for line in batt[1:] for word in line.split() if word.rstrip(";").endswith("%")), None)
+    modes = [" ".join(line.split()) for line in pmset("-g").splitlines() if line.split()[:1] in (["powermode"], ["lowpowermode"])]
+    return ", ".join([source] + ([charge] if charge else []) + modes)
+
+
 def process(path, results):
     out = results / f"{path.stem}.{time.strftime('%Y%m%d-%H%M%S')}"
     out.mkdir()
     print(f"runner: {path.name}: started, log in {out / 'runner.log'}", file=sys.stderr, flush=True)
-    verdict = {"job": path.name, "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    verdict = {"job": path.name, "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "power at start": power()}
     with open(out / "runner.log", "w") as log:
         try:
             job = json.loads(path.read_text())
@@ -230,6 +245,7 @@ def process(path, results):
             verdict["error"] = f"{type(e).__name__}: {e}"
             print(f"runner: {verdict['error']}", file=log, flush=True)
     verdict["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    verdict["power at end"] = power()
     (out / "verdict.json").write_text(json.dumps(verdict, indent=2) + "\n")
     print(f"runner: {path.name}: {verdict['status']} -> {out}", file=sys.stderr, flush=True)
 

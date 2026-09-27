@@ -432,9 +432,19 @@ def run(exe, points):
         return parse(found[0].read_text())
 
 
+# The power states the check's runs reported (bench-hashes' "# power:"
+# line), in the order first seen: a check on battery power or in a
+# low-power mode says so beside its verdict.
+POWER_SEEN = []
+
+
 def parse(text):
     cells, header = {}, None
     for line in text.splitlines():
+        if line.startswith("# power: "):
+            power = line.removeprefix("# power: ")
+            if power not in POWER_SEEN:
+                POWER_SEEN.append(power)
         if line.startswith("#"):
             continue
         if header is None:
@@ -614,9 +624,9 @@ def main():
         if args.command == "build":
             print(side_bench(args.side, args.commit or working_tree_commit(), shim=False)[0])
             return 0
-        if args.command == "check":
-            return compare(args.against, None)
-        return compare(args.old, args.new)
+        code = compare(args.against, None) if args.command == "check" else compare(args.old, args.new)
+        print(f"perf_regress: power during the check: {' / '.join(POWER_SEEN) or 'not reported (an older bench-hashes)'}")
+        return code
 
 
 if __name__ == "__main__":
