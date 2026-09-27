@@ -549,6 +549,11 @@ more per stream (open, below). Measured and refuted on the way:
   short task (VM probe, 5 x 32 MiB streams): 0.389 ns/B, 32 KiB 0.307,
   64 KiB 0.247. More tasks in flight wake every worker, and fifteen
   pollers contend on the feed's cursor.
+- Helping with a later task once it has waited 2 us (or 10 us) for a
+  worker (VM, A B B A): streamed 32 MiB 0.145 -> 0.207 (0.230 at 10 us),
+  many 64 KiB inputs 0.149 -> 0.220; the four-piece stream level. On the
+  VM tasks wait that long even with workers awake, and a delivery held up
+  by the engine's own hash costs more than the hash saves.
 Open (ours to explain): what the four-piece stream lost when the engine
 stopped hashing later pieces itself. Candidates: the woken workers' first
 piece on a core the idle slowed, against the engine's SME2; the engine
