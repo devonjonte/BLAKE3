@@ -116,11 +116,12 @@ CONTENDERS = [CONTROL] + SUBJECTS
 # 1 MiB), unequal subtrees (3 MiB), and the memory-resident plateau
 # (8 MiB); batches of one, of the NEON parent plans (2, 3, 8), of a first
 # and a partial SME2 group (16, 24), in bulk (64, 256), at the split
-# (1024), and over the pool (2048, 4096, 16384).
+# (1024), and over the pool (2048, 4096, 16384); 4 and 12, where BLAKE3 official
+# led last (added September 27, 2026: the p4 kernel change went unmeasured).
 ONE_MESSAGE_POINTS = ["64 B", "1 KiB", "2 KiB", "2304 B", "3 KiB", "3839 B", "4 KiB", "4470 B", "7935 B", "8 KiB", "16 KiB",
                       "32 KiB", "64 KiB", "256 KiB", "1 MiB", "3 MiB", "8 MiB"]
 POINTS = ONE_MESSAGE_POINTS + [
-          "1", "2", "3", "8", "16", "24", "64", "256", "1024", "2048", "4096", "16384"]
+          "1", "2", "3", "4", "8", "12", "16", "24", "64", "256", "1024", "2048", "4096", "16384"]
 # Rounds per run: the variance between processes exceeds a run's sampling
 # noise, so short runs lose little (5% slower caught 81% at 24 rounds, 84%
 # at 48, 61% at 12).
