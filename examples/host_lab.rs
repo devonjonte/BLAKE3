@@ -33,14 +33,14 @@ fn show(c: &clocks::Counts) -> String {
     format!("{} us on cores, {} MHz, {}% on E", ns / 1000, c.mhz(), c.e_percent())
 }
 
-fn child() {
-    blake3_servil::initialize_multithreaded();
+/// 64 B inputs through a fresh queue, the program cycling four buffers:
+/// ns per input, and the engine thread's counts over them.
+fn small_inputs(inputs: u64) -> (u64, Option<clocks::Counts>) {
+    *ENGINE_COUNTS.lock().unwrap() = None;
     let (tx, rx) = mpsc::channel();
     let queue = Queue::messages(Mode::Hash, Efficiency::Time, Handler(tx, None, 0));
     let input = [7u8; 64];
     let mut free: Vec<Vec<u8>> = (0..4).map(|_| Vec::with_capacity(64)).collect();
-    let inputs = 200_000;
-    let program_before = clocks::Counts::read();
     let start = clocks::now();
     for _ in 0..inputs {
         let mut buffer = match free.pop() {
@@ -54,22 +54,58 @@ fn child() {
     while free.len() < 4 {
         free.push(rx.recv().unwrap().0);
     }
-    let ns = clocks::since_ns(start);
-    let program = program_before.zip(clocks::Counts::read()).map(|(before, after)| after.since(before));
-    let engine = *ENGINE_COUNTS.lock().unwrap();
-    println!(
-        "{} ns per input; program thread: {}; engine thread: {}",
-        ns / inputs,
-        program.map_or("no counts".into(), |c| show(&c)),
-        engine.map_or("no counts".into(), |(c, _)| show(&c)),
-    );
+    (clocks::since_ns(start) / inputs, ENGINE_COUNTS.lock().unwrap().map(|(c, _)| c))
+}
+
+/// A 32 MiB stream through Queue::pieces, 64 KiB pieces, four buffers.
+fn stream(input: &[u8]) {
+    struct P(mpsc::Sender<Option<Vec<u8>>>);
+    impl blake3_servil::PieceHandler for P {
+        type Buffer = Vec<u8>;
+        fn piece_done(&mut self, b: Vec<u8>) { self.0.send(Some(b)).unwrap(); }
+        fn finished(&mut self, _: Hash) { self.0.send(None).unwrap(); }
+    }
+    let (tx, rx) = mpsc::channel();
+    let queue = Queue::pieces(Mode::Hash, Efficiency::Time, P(tx));
+    let mut free: Vec<Vec<u8>> = (0..4).map(|_| Vec::with_capacity(65536)).collect();
+    for piece in input.chunks(65536) {
+        let mut b = match free.pop() { Some(b) => b, None => loop { if let Some(b) = rx.recv().unwrap() { break b } } };
+        b.clear(); b.extend_from_slice(piece); queue.submit(b);
+    }
+    queue.finish();
+    while rx.recv().unwrap().is_some() {}
+}
+
+fn report(phase: &str) {
+    let (ns, engine) = small_inputs(50_000);
+    println!("  after {phase}: {ns} ns per 64 B input; engine thread: {}", engine.map_or("no counts".into(), |c| show(&c)));
+}
+
+fn child() {
+    blake3_servil::initialize_multithreaded();
+    report("start");
+    let big = vec![3u8; 32 << 20];
+    for _ in 0..20 { stream(&big); }
+    report("20 streams of 32 MiB");
+    std::thread::scope(|scope| {
+        for _ in 0..2 { scope.spawn(|| { for _ in 0..20 { small_inputs(20_000); stream(&big[..4 << 20]); } }); }
+    });
+    report("two threads at once (shared)");
+    for _ in 0..300 {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        small_inputs(8);
+    }
+    report("300 calls after 1 ms sleeps (after idle)");
+    for _ in 0..20 { std::hint::black_box(blake3_servil::hash_multithreaded(&big)); }
+    report("20 hash_multithreaded of 32 MiB");
+    println!("--");
 }
 
 fn main() {
     if std::env::var_os("QUEUE_PROBE_CHILD").is_some() {
         return child();
     }
-    for _ in 0..16 {
+    for _ in 0..8 {
         let out = std::process::Command::new(std::env::current_exe().unwrap()).env("QUEUE_PROBE_CHILD", "1").output().unwrap();
         print!("{}", String::from_utf8_lossy(&out.stdout));
     }
