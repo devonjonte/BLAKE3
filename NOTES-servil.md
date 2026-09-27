@@ -582,7 +582,9 @@ After idle (since September 26, 2026): bench-hashes' third scenario, calls
 after the thread slept 1 ms, judged at a 20% margin and holding a change
 like solo cells (a program hashing now and then is the recommended usage
 too). VM calibration (7 checks over consecutive runs): no false flag or
-no-verdict; 50% slower caught 88%, 70% 99%, twice as slow always. A
+no-verdict; 50% slower caught 88%, 70% 99%, twice as slow always; Mac
+(job 338, 41 checks): the same at 20% (50% slower caught 82%, twice as
+slow 99%), after-idle 5th percentiles varying 9% between runs there. A
 planted 50 us spin on waking the pool's sleepers was held on servil mt
 after idle at 256 KiB (+58%, then +43%) and 4096 messages (+50%, +45%),
 no solo cell moved. The after-idle cells add about 2.5 s a run.
