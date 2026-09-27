@@ -4,28 +4,27 @@
 //! # How it runs
 //!
 //! One mechanism: `submit` turns a submission into tasks on the caller's
-//! thread and returns; the pool's workers hash the tasks; one delivery
+//! thread and returns; the pool's threads hash the tasks; one delivery
 //! thread hands the results back in order.
 //!
 //! - **Submit.** The submission goes into the queue's list of entries, in
 //!   a box of its own (its bytes, results, and count of unfinished tasks
-//!   stay in place while workers read and write them). A message is one
-//!   task; a piece of a long message is the whole subtrees
-//!   `Hasher::update` would hash in it (`plan_subtrees`: their chunk
-//!   counters follow from the piece's offset). The tasks go onto the
-//!   pool's task list (`lanes::TASKS`), which wakes a sleeping worker per
-//!   task waiting.
-//! - **Hash.** Workers pop tasks while any wait; each writes its result
-//!   into its entry and counts down.
+//!   stay in place while other threads read and write them). Its tasks are
+//!   the whole subtrees `Hasher::update` would hash in it, in parts of at
+//!   most `lanes::TASK_LEN` (`plan_subtrees`: a piece's chunk counters
+//!   follow from its offset in the message; a message is a stream of one
+//!   piece). They go onto the pool's task list (`lanes::TASKS`), which
+//!   wakes a thread per task in flight, the SME2 thread first.
+//! - **Hash.** The SME2 thread (on SME2) and the workers (on NEON) pop
+//!   tasks; each writes its result into its entry and counts down.
 //! - **Deliver.** The delivery thread takes each queue's front entry once
-//!   its count is zero and calls the handler (a piece by replaying
-//!   `Hasher::update` with its subtrees' results). Entries without tasks it
-//!   hashes itself when they reach the front: those shorter than
-//!   `TASK_MIN` (hashed faster than handed over), messages of
-//!   `lanes::MIN_SPLIT_LEN` or more and pieces of it (the one-shot way,
-//!   over the pool), batches of fixed-length messages, and everything with
-//!   `Efficiency::Energy`, which the delivery thread hashes alone. It polls
-//!   while any entry is in flight and sleeps when none is, so nothing runs
+//!   its count is zero, replays `Hasher::update` with its results (and for
+//!   a message finalizes), and calls the handler. Entries without tasks it
+//!   hashes itself: those shorter than `TASK_MIN` (hashed faster than
+//!   handed over), batches of fixed-length messages, and everything with
+//!   `Efficiency::Energy`, which the delivery thread hashes alone. While any
+//!   entry is in flight it holds the pool (the threads poll across the gaps
+//!   between tasks); with none it and the pool sleep, so nothing runs
 //!   between bursts for work that may come (AGENTS.md, "Serve real
 //!   programs").
 //!
@@ -237,7 +236,7 @@ where
     /// Put `item` in flight, with tasks for `plan` to cut from it (it
     /// appends their inputs and chunk counters to `tasks`, and returns
     /// whether they are the entry's work or the entry is hashed at delivery).
-    fn submit(self: &Arc<Self>, item: I, root: bool, plan: impl FnOnce(&I, &mut crate::PlanState, &mut Vec<Task>) -> bool) {
+    fn submit(self: &Arc<Self>, item: I, plan: impl FnOnce(&I, &mut crate::PlanState, &mut Vec<Task>) -> bool) {
         let mut state = self.state.lock().expect("a panic on the delivery thread aborts, so no lock is poisoned");
         let mut entry = Box::new(Entry { item, results: Vec::new(), left: AtomicUsize::new(0) });
         let mut tasks = Vec::new();
@@ -246,7 +245,6 @@ where
             entry.left = AtomicUsize::new(tasks.len());
             let (out, left) = (entry.results.as_mut_ptr(), &entry.left as *const AtomicUsize);
             TASKS.push(tasks.into_iter().enumerate().map(|(index, task)| Task {
-                root,
                 key: self.key,
                 flags: self.flags,
                 // Sound: the entry's box keeps `results` and `left` in place.
@@ -273,7 +271,10 @@ where
         let mut delivered = false;
         loop {
             let entry = {
-                let mut state = self.state.lock().expect("no lock is poisoned");
+                // A submitter holding the lock means entries are coming:
+                // leave it be (a wait here would park this thread) and look
+                // again on the next round.
+                let Ok(mut state) = self.state.try_lock() else { return (delivered, true) };
                 match state.entries.front() {
                     None => {
                         state.active = false;
@@ -299,9 +300,13 @@ trait Deliver: Send + Sync + 'static {
 impl<H: MessageHandler> Deliver for Inner<H, H::Buffer, shape::Messages> {
     fn deliver(&self) -> (bool, bool) {
         self.deliver_with(|queue, handling, entry| {
-            let hash = match entry.results.first() {
-                Some(result) => Hash(result[..OUT_LEN].try_into().unwrap()),
-                None => crate::lanes::hash_with_key(entry.item.as_ref(), &queue.key, queue.flags, queue.max_threads),
+            let hash = if entry.results.is_empty() {
+                crate::hash_serial(entry.item.as_ref(), &queue.key, queue.flags)
+            } else {
+                // A message is a stream of one piece.
+                let mut hasher = Hasher::new_internal(&queue.key, queue.flags);
+                hasher.update_with_results(entry.item.as_ref(), &mut entry.results.iter());
+                hasher.finalize()
             };
             handling.handler.hashed(entry.item, hash);
         })
@@ -310,14 +315,12 @@ impl<H: MessageHandler> Deliver for Inner<H, H::Buffer, shape::Messages> {
 
 impl<H: PieceHandler> Deliver for Inner<H, PieceItem<H::Buffer>, shape::Pieces> {
     fn deliver(&self) -> (bool, bool) {
-        self.deliver_with(|queue, handling, entry| match entry.item {
+        self.deliver_with(|_, handling, entry| match entry.item {
             PieceItem::Piece(piece) => {
-                if !entry.results.is_empty() {
-                    handling.hasher.update_with_results(piece.as_ref(), &mut entry.results.iter());
-                } else if queue.max_threads > 1 {
-                    handling.hasher.update_multithreaded(piece.as_ref());
-                } else {
+                if entry.results.is_empty() {
                     handling.hasher.update(piece.as_ref());
+                } else {
+                    handling.hasher.update_with_results(piece.as_ref(), &mut entry.results.iter());
                 }
                 handling.handler.piece_done(piece);
             }
@@ -351,10 +354,12 @@ impl<H: MessageHandler> Queue<H, shape::Messages> {
     pub fn submit(&self, buffer: H::Buffer) {
         let inner = self.inner::<H::Buffer>();
         let tasks = inner.max_threads > 1;
-        inner.submit(buffer, true, |buffer, _, out| {
+        inner.submit(buffer, |buffer, _, out| {
             let bytes = buffer.as_ref();
-            out.push(Task::of(bytes, 0));
-            tasks && (TASK_MIN..crate::lanes::MIN_SPLIT_LEN).contains(&bytes.len())
+            tasks && bytes.len() >= TASK_MIN && {
+                crate::plan_subtrees(&mut Default::default(), bytes, out);
+                true
+            }
         });
     }
 }
@@ -372,18 +377,18 @@ impl<H: PieceHandler> Queue<H, shape::Pieces> {
     pub fn submit(&self, piece: H::Buffer) {
         let inner = self.inner::<PieceItem<H::Buffer>>();
         let tasks = inner.max_threads > 1;
-        inner.submit(PieceItem::Piece(piece), false, |item, plan, out| {
+        inner.submit(PieceItem::Piece(piece), |item, plan, out| {
             let PieceItem::Piece(piece) = item else { unreachable!("a piece") };
             let bytes = piece.as_ref();
             crate::plan_subtrees(plan, bytes, out);
-            tasks && (TASK_MIN..crate::lanes::MIN_SPLIT_LEN).contains(&bytes.len())
+            tasks && bytes.len() >= TASK_MIN
         });
     }
 
     /// End the message: its digest goes to `handler.finished` after every
     /// piece has come back. Returns at once.
     pub fn finish(&self) {
-        self.inner::<PieceItem<H::Buffer>>().submit(PieceItem::Finish, false, |_, plan, _| {
+        self.inner::<PieceItem<H::Buffer>>().submit(PieceItem::Finish, |_, plan, _| {
             *plan = Default::default();
             false
         });
@@ -407,7 +412,7 @@ impl<H: FixedHandler> Queue<H, shape::Fixed> {
         let inner = self.inner::<(H::Buffer, H::Digests)>();
         let slot = crate::many::slot_len(inner.message_len);
         assert_eq!(Some(buffer.as_ref().len()), slot.checked_mul(digests.as_mut().len()), "the buffer holds one slot of whole blocks per digest");
-        inner.submit((buffer, digests), true, |_, _, _| false);
+        inner.submit((buffer, digests), |_, _, _| false);
     }
 }
 
@@ -435,21 +440,26 @@ impl Delivery {
     }
 
     /// Deliver from every queue in flight, in turn; poll while any entry
-    /// waits on its tasks, sleep while no queue is in flight. A panic in a
+    /// waits on its tasks, holding the pool (its workers poll too), and
+    /// sleep while no queue is in flight. A panic in a
     /// handler aborts the process (handler rule 4); so does one in the
     /// hashing, a bug.
     fn run(&self) {
         let mut polled = std::time::Instant::now();
+        let mut hold = None;
         loop {
             let mut queues = {
                 let mut held = self.queues.lock().unwrap();
                 while held.0.is_empty() {
+                    // Nothing in flight: the pool may sleep, and so does this thread.
+                    hold = None;
                     held.1 = true;
                     held = self.wake.wait(held).unwrap();
                     held.1 = false;
                 }
                 std::mem::take(&mut held.0)
             };
+            hold.get_or_insert_with(crate::lanes::Hold::new);
             let mut delivered = false;
             queues.retain(|queue| {
                 let (any, in_flight) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| queue.deliver())).unwrap_or_else(|_| std::process::abort());

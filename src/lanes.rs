@@ -717,7 +717,8 @@ impl Pool {
         // them as awake and pays nothing. The lock-free reads are a hint;
         // the counts are exact under sleep_lock, where every sleeper
         // counted is waiting (see next_piece).
-        if self.sleepers.load(Ordering::SeqCst) > self.notified.load(Ordering::SeqCst) {
+        let unnotified = self.sleepers.load(Ordering::SeqCst).saturating_sub(self.notified.load(Ordering::SeqCst));
+        if unnotified > 0 && self.cpus - 1 - unnotified.min(self.cpus - 1) < wanted {
             let _guard = self.sleep_lock.lock().unwrap();
             let sleepers = self.sleepers.load(Ordering::SeqCst);
             let unnotified = sleepers - self.notified.load(Ordering::SeqCst);
@@ -825,7 +826,7 @@ impl Pool {
             while self.registered.load(Ordering::SeqCst) > 0 {
                 if let Some(task) = TASKS.pop() {
                     task.run(pool_platform());
-                    TASKS.finished();
+                    TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
                     continue;
                 }
                 if let Some(taken) = self.take_piece(start, rank) {
@@ -864,16 +865,19 @@ impl Pool {
     }
 }
 
-/// One piece of a queue's work (crate::queue), hashed by whichever worker
-/// pops it from [`TASKS`]: a whole message's digest (`root`), or a whole
-/// subtree at chunk `counter` of a stream, as [`crate::plan_subtrees`]
-/// cuts it. Its result goes to `out`, then it counts down `left`; the
-/// queue keeps the bytes, `out`, and `left` in place until `left` is zero.
+/// The longest part of a queue's input planned as tasks
+/// ([`crate::plan_subtrees`]): a task is a whole subtree within one part.
+pub(crate) const TASK_LEN: usize = 64 * CHUNK_LEN;
+
+/// One piece of a queue's work (crate::queue), hashed by whichever thread
+/// pops it from [`TASKS`]: a whole subtree at chunk `counter` of a message,
+/// as [`crate::plan_subtrees`] cuts it. Its result goes to `out`, then it
+/// counts down `left`; the queue keeps the bytes, `out`, and `left` in
+/// place until `left` is zero.
 pub(crate) struct Task {
     pub(crate) input: *const u8,
     pub(crate) len: usize,
     pub(crate) counter: u64,
-    pub(crate) root: bool,
     pub(crate) key: crate::CVWords,
     pub(crate) flags: u8,
     pub(crate) out: *mut [u8; crate::BLOCK_LEN],
@@ -887,19 +891,17 @@ impl Task {
     /// A task over `input` at chunk `counter`, its mode, kind, and
     /// destinations still to fill in.
     pub(crate) fn of(input: &[u8], counter: u64) -> Task {
-        Task { input: input.as_ptr(), len: input.len(), counter, root: false, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null() }
+        Task { input: input.as_ptr(), len: input.len(), counter, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null() }
     }
 
-    /// Hash on `platform` into `out`: a message's digest (first 32 bytes);
-    /// for a subtree of two chunks or more at chunk zero (it may be the
-    /// whole input), its pair of child chaining values; for any other
-    /// subtree, its chaining value (first 32 bytes). Then count down.
+    /// Hash on `platform` into `out`: for a subtree of two chunks or more at
+    /// chunk zero (it may be the whole message), its pair of child chaining
+    /// values; for any other, its chaining value (first 32 bytes). Then
+    /// count down.
     pub(crate) fn run(self, platform: Platform) {
         // Sound: the queue keeps these in place until `left` is zero.
         let (bytes, out) = unsafe { (core::slice::from_raw_parts(self.input, self.len), &mut *self.out) };
-        if self.root {
-            out[..crate::OUT_LEN].copy_from_slice(crate::hash_serial_on(bytes, &self.key, self.flags, platform).as_bytes());
-        } else if self.counter == 0 && self.len > CHUNK_LEN {
+        if self.counter == 0 && self.len > CHUNK_LEN {
             *out = crate::compress_subtree_to_parent_node::<crate::join::SerialJoin>(bytes, &self.key, 0, self.flags, platform);
         } else {
             out[..crate::OUT_LEN].copy_from_slice(&crate::hash_all_at_once::<crate::join::SerialJoin>(bytes, &self.key, self.counter, self.flags, platform).chaining_value());
@@ -908,27 +910,27 @@ impl Task {
     }
 }
 
-/// Every queue's tasks waiting for a worker, in the order pushed. While
-/// any task is in flight (waiting or being hashed) the list counts as a
-/// registered job, so the workers poll it across the gaps between a
-/// stream's tasks; with none in flight it keeps nobody awake.
+/// Every queue's tasks waiting for a worker, in the order pushed. Workers
+/// poll it while the pool is held (a [`Hold`]: the queue's delivery thread
+/// holds it while any submission is in flight).
 pub(crate) struct Tasks {
-    /// The tasks waiting, and whether the list counts as registered.
-    list: Mutex<(std::collections::VecDeque<Task>, bool)>,
-    /// The waiting tasks, read without the lock by pollers.
+    list: Mutex<std::collections::VecDeque<Task>>,
+    /// The list's length, read without the lock by pollers.
     queued: AtomicUsize,
-    /// The tasks pushed and not yet finished.
+    /// Tasks pushed and not yet finished: what pushes wake threads for.
     in_flight: AtomicUsize,
-    /// Whether the SME2 thread sleeps, and its wake.
+    /// Whether the SME2 thread sleeps (read without the lock), and its wake.
     sme2_asleep: Mutex<bool>,
+    sme2_sleeps: std::sync::atomic::AtomicBool,
     sme2_wake: Condvar,
 }
 
 pub(crate) static TASKS: Tasks = Tasks {
-    list: Mutex::new((std::collections::VecDeque::new(), false)),
+    list: Mutex::new(std::collections::VecDeque::new()),
     queued: AtomicUsize::new(0),
     in_flight: AtomicUsize::new(0),
     sme2_asleep: Mutex::new(false),
+    sme2_sleeps: std::sync::atomic::AtomicBool::new(false),
     sme2_wake: Condvar::new(),
 };
 
@@ -936,46 +938,55 @@ pub(crate) static TASKS: Tasks = Tasks {
 /// SME unit hashes a 64 KiB piece in 14 us where a NEON worker takes 22,
 /// Mac, probe/queue-timeline), under the process's turn so that a caller of
 /// hash() elsewhere keeps the unit; without the turn, on NEON. It polls
-/// while tasks wait and sleeps as soon as none does; every push wakes it
-/// first.
+/// while the pool is held or tasks wait, and sleeps otherwise; every push
+/// wakes it first.
 fn sme2_main() {
-    let mut yielded = std::time::Instant::now();
+    let pool = pool();
     loop {
         {
             let mut asleep = TASKS.sme2_asleep.lock().unwrap();
-            while TASKS.queued.load(Ordering::SeqCst) == 0 {
+            while TASKS.queued.load(Ordering::SeqCst) == 0 && pool.registered.load(Ordering::SeqCst) == 0 {
                 *asleep = true;
+                TASKS.sme2_sleeps.store(true, Ordering::SeqCst);
+                // A push between the check above and this store sees the
+                // flag, takes the lock after the wait releases it, and wakes.
+                if TASKS.queued.load(Ordering::SeqCst) > 0 {
+                    break;
+                }
                 asleep = TASKS.sme2_wake.wait(asleep).unwrap();
             }
             *asleep = false;
+            TASKS.sme2_sleeps.store(false, Ordering::SeqCst);
         }
-        while let Some(task) = TASKS.pop() {
-            let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
-            task.run(turn.platform());
-            drop(turn);
-            TASKS.finished();
-            poll_pause(&mut yielded);
+        let mut yielded = std::time::Instant::now();
+        while TASKS.queued.load(Ordering::SeqCst) > 0 || pool.registered.load(Ordering::SeqCst) > 0 {
+            match TASKS.pop() {
+                Some(task) => {
+                    let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
+                    task.run(turn.platform());
+                    drop(turn);
+                    TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
+                }
+                None => poll_pause(&mut yielded),
+            }
         }
     }
 }
 
 impl Tasks {
-    /// Add `tasks`, and wake sleeping workers so that one per task waiting
-    /// is awake or on its way.
+    /// Add `tasks`, and wake sleeping threads so that one per task in
+    /// flight (waiting or being hashed) is awake or on its way: the SME2
+    /// thread first, then workers.
     pub(crate) fn push(&self, tasks: impl Iterator<Item = Task>) {
         let pool = pool();
         let mut list = self.list.lock().unwrap();
-        let before = list.0.len();
-        list.0.extend(tasks);
-        let pushed = list.0.len() - before;
-        let in_flight = self.in_flight.fetch_add(pushed, Ordering::SeqCst) + pushed;
-        if !list.1 && pushed > 0 {
-            list.1 = true;
-            pool.registered.fetch_add(1, Ordering::SeqCst);
-        }
-        self.queued.store(list.0.len(), Ordering::SeqCst);
+        let before = list.len();
+        list.extend(tasks);
+        let queued = list.len();
+        let in_flight = self.in_flight.fetch_add(queued - before, Ordering::SeqCst) + queued - before;
+        self.queued.store(queued, Ordering::SeqCst);
         drop(list);
-        if pool.sme2 && *self.sme2_asleep.lock().unwrap() {
+        if pool.sme2 && self.sme2_sleeps.load(Ordering::SeqCst) && *self.sme2_asleep.lock().unwrap() {
             self.sme2_wake.notify_one();
         }
         pool.wake_for(in_flight.saturating_sub(usize::from(pool.sme2)));
@@ -988,21 +999,29 @@ impl Tasks {
         }
         // Another thread popping means this one would wait for it: poll on.
         let mut list = self.list.try_lock().ok()?;
-        let task = list.0.pop_front()?;
-        self.queued.store(list.0.len(), Ordering::SeqCst);
+        let task = list.pop_front()?;
+        self.queued.store(list.len(), Ordering::SeqCst);
         Some(task)
     }
+}
 
-    /// A popped task is finished: with none left in flight, the list no
-    /// longer counts as registered.
-    fn finished(&self) {
-        if self.in_flight.fetch_sub(1, Ordering::SeqCst) == 1 {
-            let mut list = self.list.lock().unwrap();
-            if list.1 && self.in_flight.load(Ordering::SeqCst) == 0 {
-                list.1 = false;
-                pool().registered.fetch_sub(1, Ordering::SeqCst);
-            }
-        }
+/// While it lives, the pool's workers and the SME2 thread poll as they do
+/// for a registered job instead of sleeping when they find no work: held
+/// by the queue's delivery thread while any submission is in flight, so
+/// the gaps between a stream's tasks fall inside one call. It wakes no
+/// sleeper; pushed tasks do.
+pub(crate) struct Hold(());
+
+impl Hold {
+    pub(crate) fn new() -> Hold {
+        pool().registered.fetch_add(1, Ordering::SeqCst);
+        Hold(())
+    }
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        pool().registered.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
