@@ -812,6 +812,56 @@ fn largest_power_of_two_leq(n: usize) -> usize {
     ((n / 2) + 1).next_power_of_two()
 }
 
+/// Where a stream stands for [`plan_subtrees`]: its chunk counter and the
+/// bytes in its partial chunk (0 to CHUNK_LEN), as a [`Hasher`]'s chunk
+/// state holds them.
+#[cfg(feature = "std")]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct PlanState {
+    counter: u64,
+    partial: usize,
+}
+
+/// The whole subtrees that [`Hasher::update`] on `piece` would hash from
+/// `state`, appended to `tasks` in order (each computed as
+/// [`lanes::Task`] says), and `state` moved past the piece: what
+/// [`Hasher::update_with_results`] takes back. The bytes around them (a
+/// partial chunk's fill, a piece's last chunk) stay for the replay. The
+/// stream starts at chunk zero.
+#[cfg(feature = "std")]
+pub(crate) fn plan_subtrees(state: &mut PlanState, piece: &[u8], tasks: &mut Vec<lanes::Task>) {
+    let mut offset = 0;
+    if state.partial > 0 {
+        offset = cmp::min(CHUNK_LEN - state.partial, piece.len());
+        if offset == piece.len() {
+            state.partial += offset;
+            return;
+        }
+        state.counter += 1;
+    }
+    while piece.len() - offset > CHUNK_LEN {
+        let len = next_subtree_len(state.counter, piece.len() - offset);
+        tasks.push(lanes::Task { input: piece[offset..].as_ptr(), len, counter: state.counter });
+        state.counter += (len / CHUNK_LEN) as u64;
+        offset += len;
+    }
+    state.partial = piece.len() - offset;
+}
+
+/// The whole subtree Hasher::update hashes next, from chunk `chunk_counter`
+/// with `remaining` bytes (more than one chunk) to go: the largest power of
+/// two chunks that fits and evenly divides the count so far.
+#[inline(always)]
+fn next_subtree_len(chunk_counter: u64, remaining: usize) -> usize {
+    debug_assert!(remaining > CHUNK_LEN);
+    let mut subtree_len = largest_power_of_two_leq(remaining);
+    let count_so_far = chunk_counter * CHUNK_LEN as u64;
+    while (subtree_len - 1) as u64 & count_so_far != 0 {
+        subtree_len /= 2;
+    }
+    subtree_len
+}
+
 // Use SIMD parallelism to hash up to MAX_SIMD_DEGREE chunks at the same time
 // on a single thread. Write out the chunk chaining values and return the
 // number of chunks hashed. These chunks are never the root and never empty;
@@ -1992,6 +2042,42 @@ impl Hasher {
         self.update_with_join::<join::SerialJoin>(input, true)
     }
 
+    /// [`update`](Hasher::update) with every whole subtree's result taken
+    /// from `results`, in the order [`plan_subtrees`] gave them, as
+    /// [`lanes::Task`]'s `hash` computes them.
+    #[cfg(feature = "std")]
+    pub(crate) fn update_with_results<'a>(&mut self, mut input: &[u8], results: &mut impl Iterator<Item = &'a [u8; BLOCK_LEN]>) {
+        if self.chunk_state.count() > 0 {
+            let take = cmp::min(CHUNK_LEN - self.chunk_state.count(), input.len());
+            self.chunk_state.update(&input[..take]);
+            input = &input[take..];
+            if input.is_empty() {
+                return;
+            }
+            let chunk_cv = self.chunk_state.output().chaining_value();
+            self.push_cv(&chunk_cv, self.chunk_state.chunk_counter);
+            self.chunk_state = ChunkState::new(&self.key, self.chunk_state.chunk_counter + 1, self.chunk_state.flags, self.chunk_state.platform);
+        }
+        while input.len() > CHUNK_LEN {
+            let len = next_subtree_len(self.chunk_state.chunk_counter, input.len());
+            let chunks = (len / CHUNK_LEN) as u64;
+            let result = results.next().expect("a result for every planned subtree");
+            let counter = self.chunk_state.chunk_counter;
+            if counter == 0 && len > CHUNK_LEN {
+                self.push_cv(result[..OUT_LEN].try_into().unwrap(), counter);
+                self.push_cv(result[OUT_LEN..].try_into().unwrap(), counter + chunks / 2);
+            } else {
+                self.push_cv(result[..OUT_LEN].try_into().unwrap(), counter);
+            }
+            self.chunk_state.chunk_counter += chunks;
+            input = &input[len..];
+        }
+        if !input.is_empty() {
+            self.chunk_state.update(input);
+            self.merge_cv_stack(self.chunk_state.chunk_counter);
+        }
+    }
+
     /// `update`'s loop; with `pooled`, whole subtrees of
     /// `lanes::MIN_SPLIT_LEN` and more go to the pool.
     fn update_with_join<J: join::Join>(&mut self, mut input: &[u8], pooled: bool) -> &mut Self {
@@ -2052,9 +2138,8 @@ impl Hasher {
         while input.len() > CHUNK_LEN {
             debug_assert_eq!(self.chunk_state.count(), 0, "no partial chunk data");
             debug_assert_eq!(CHUNK_LEN.count_ones(), 1, "power of 2 chunk len");
-            let mut subtree_len = largest_power_of_two_leq(input.len());
-            let count_so_far = self.chunk_state.chunk_counter * CHUNK_LEN as u64;
-            // Shrink the subtree_len until it evenly divides the count so far.
+            // The largest power of two chunks, shrunk until it evenly
+            // divides the count so far (next_subtree_len).
             // We know that subtree_len itself is a power of 2, so we can use a
             // bitmasking trick instead of an actual remainder operation. (Note
             // that if the caller consistently passes power-of-2 inputs of the
@@ -2071,9 +2156,7 @@ impl Hasher {
             // number of chunks will remain odd, and we'll never graduate to
             // higher degrees of parallelism. See
             // https://github.com/BLAKE3-team/BLAKE3/issues/69.
-            while (subtree_len - 1) as u64 & count_so_far != 0 {
-                subtree_len /= 2;
-            }
+            let subtree_len = next_subtree_len(self.chunk_state.chunk_counter, input.len());
             // The shrunken subtree_len might now be 1 chunk long. If so, hash
             // that one chunk by itself. Otherwise, compress the subtree into a
             // pair of CVs.

@@ -123,7 +123,7 @@ const RANK_STAGGER_NS: u64 = 20;
 const YIELD_EVERY: std::time::Duration = std::time::Duration::from_micros(20);
 
 #[inline]
-fn poll_pause(yielded: &mut std::time::Instant) {
+pub(crate) fn poll_pause(yielded: &mut std::time::Instant) {
     for _ in 0..8 {
         std::hint::spin_loop();
     }
@@ -258,6 +258,40 @@ fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, f
     pool.run_job(work, pieces.len(), 0, pool_platform(), max_threads);
 }
 
+/// One of a feed's separate inputs ([`Feed`]): a
+/// message (for roots), or a whole subtree at chunk `counter` of a stream,
+/// as [`crate::plan_subtrees`] cuts them. The bytes stay valid
+/// and unchanged while the call runs.
+#[derive(Clone, Copy)]
+pub(crate) struct Task {
+    pub(crate) input: *const u8,
+    pub(crate) len: usize,
+    pub(crate) counter: u64,
+}
+
+// Sound: a Task is read while the feed's owner keeps its bytes.
+unsafe impl Send for Task {}
+unsafe impl Sync for Task {}
+
+impl Task {
+    /// The task's result on `platform` into `out`: with `roots`, the
+    /// message's digest (first 32 bytes); else a subtree's pair of child
+    /// chaining values for a subtree of two chunks or more at chunk zero
+    /// (it may be the whole input's), or its chaining value (first 32
+    /// bytes) for any other.
+    pub(crate) fn hash(&self, key: &crate::CVWords, flags: u8, roots: bool, platform: Platform, out: &mut [u8; crate::BLOCK_LEN]) {
+        // Sound: the feed's owner keeps the bytes.
+        let bytes = unsafe { core::slice::from_raw_parts(self.input, self.len) };
+        if roots {
+            out[..crate::OUT_LEN].copy_from_slice(crate::hash_serial_on(bytes, key, flags, platform).as_bytes());
+        } else if self.counter == 0 && self.len > crate::CHUNK_LEN {
+            *out = crate::compress_subtree_to_parent_node::<crate::join::SerialJoin>(bytes, key, 0, flags, platform);
+        } else {
+            out[..crate::OUT_LEN].copy_from_slice(&crate::hash_all_at_once::<crate::join::SerialJoin>(bytes, key, self.counter, flags, platform).chaining_value());
+        }
+    }
+}
+
 /// Cut `count` messages in slots of `message_len` bytes into ranges for `threads`
 /// threads, in order: each range holds about [`next_piece_len`] of the
 /// bytes that remain, at least one message, so ranges shrink toward the
@@ -331,6 +365,9 @@ enum Work<'a> {
         pieces: &'a [Piece],
         outputs: *mut [u8; crate::OUT_LEN],
     },
+    /// A queue's tasks, published into a ring while the job stays
+    /// registered ([`Feed`]).
+    Feed(*const Ring),
 }
 
 /// An atomic counter on its own cache line: `cursor` and `active` are
@@ -361,6 +398,41 @@ fn reserve_thread(active: &AtomicUsize, max_threads: usize) -> bool {
 }
 
 impl Job<'_> {
+    /// The pieces there are to take so far: a feed's published tasks, else
+    /// the job's pieces.
+    #[inline]
+    fn limit(&self) -> usize {
+        match &self.work {
+            // Sound: a registered feed's ring outlives its job's registration.
+            Work::Feed(ring) => unsafe { &**ring }.published.load(Ordering::Acquire),
+            _ => self.pieces,
+        }
+    }
+
+    /// Take the next piece through the cursor, if there is one: a feed's
+    /// cursor moves only onto published tasks.
+    #[inline]
+    fn claim(&self) -> Option<usize> {
+        match &self.work {
+            Work::Feed(_) => {
+                let mut index = self.cursor.load(Ordering::SeqCst);
+                loop {
+                    if index >= self.limit() {
+                        return None;
+                    }
+                    match self.cursor.compare_exchange_weak(index, index + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                        Ok(_) => return Some(index),
+                        Err(now) => index = now,
+                    }
+                }
+            }
+            _ => {
+                let index = self.cursor.fetch_add(1, Ordering::SeqCst);
+                (index < self.pieces).then_some(index)
+            }
+        }
+    }
+
     /// Hash piece `index` into its slot. The caller has taken `index`
     /// through `cursor`.
     unsafe fn hash_piece(&self, index: usize, platform: Platform) {
@@ -379,6 +451,15 @@ impl Job<'_> {
                 // Sound: this range of outputs belongs to piece `index` alone.
                 let digests = unsafe { core::slice::from_raw_parts_mut(outputs.add(piece.offset), piece.len) };
                 crate::many::hash_many_on(messages, *message_len, key, *flags, digests, platform);
+            }
+            Work::Feed(ring) => {
+                // Sound: the ring outlives the feed's registration, and
+                // task `index` is this thread's alone until its done flag.
+                let ring = unsafe { &**ring };
+                let at = index % FEED_SLOTS;
+                let task = unsafe { *ring.tasks[at].get() };
+                task.hash(&ring.key, ring.flags, ring.roots, platform, unsafe { &mut *ring.results[at].get() });
+                ring.done[at].store(true, Ordering::Release);
             }
         }
     }
@@ -699,6 +780,13 @@ impl Pool {
             self.slots[i].job.compare_exchange(std::ptr::null_mut(), ptr, Ordering::SeqCst, Ordering::Relaxed).is_ok()
         })?;
         self.registered.fetch_add(1, Ordering::SeqCst);
+        self.wake_for(job.pieces.min(job.max_threads) - 1);
+        Some(slot)
+    }
+
+    /// Make `wanted` workers awake or on their way, waking sleepers as
+    /// needed: the caller wakes one, the woken wake the rest.
+    fn wake_for(&self, wanted: usize) {
         // Sleepers already notified are on their way (a wake takes tens
         // of microseconds to land); a second caller in that window counts
         // them as awake and pays nothing. The lock-free reads are a hint;
@@ -709,7 +797,6 @@ impl Pool {
             let sleepers = self.sleepers.load(Ordering::SeqCst);
             let unnotified = sleepers - self.notified.load(Ordering::SeqCst);
             let awake = self.cpus - 1 - unnotified;
-            let wanted = job.pieces.min(job.max_threads) - 1;
             if unnotified > 0 && awake < wanted {
                 let wake = (wanted - awake).min(unnotified);
                 self.notified.fetch_add(wake, Ordering::SeqCst);
@@ -717,7 +804,6 @@ impl Pool {
                 self.posted.notify_one();
             }
         }
-        Some(slot)
     }
 
     /// Clear the slot and wait out any worker mid-take on it.
@@ -782,14 +868,12 @@ impl Pool {
                 // Sound: a reader of the slot; the caller waits for readers.
                 let job = unsafe { &*ptr };
                 if now.saturating_sub(job.registered_ns) >= rank as u64 * RANK_STAGGER_NS
-                    && job.cursor.load(Ordering::SeqCst) < job.pieces
+                    && job.cursor.load(Ordering::SeqCst) < job.limit()
                     && job.active.load(Ordering::SeqCst) < job.max_threads
                 {
                     if reserve_thread(&job.active, job.max_threads) {
-                        let index = job.cursor.fetch_add(1, Ordering::SeqCst);
-                        if index < job.pieces {
-                            taken = Some(index);
-                        } else {
+                        taken = job.claim();
+                        if taken.is_none() {
                             job.active.fetch_sub(1, Ordering::SeqCst);
                         }
                     }
@@ -845,6 +929,167 @@ impl Pool {
                 return taken;
             }
         }
+    }
+}
+
+/// Tasks a feed holds in flight at once (published and not yet taken back).
+pub(crate) const FEED_SLOTS: usize = 64;
+
+/// A feed's tasks and results, slot `i % FEED_SLOTS` for task `i`.
+pub(crate) struct Ring {
+    tasks: [std::cell::UnsafeCell<Task>; FEED_SLOTS],
+    results: [std::cell::UnsafeCell<[u8; crate::BLOCK_LEN]>; FEED_SLOTS],
+    done: [std::sync::atomic::AtomicBool; FEED_SLOTS],
+    /// Tasks published: workers take indices below it.
+    published: AtomicUsize,
+    key: crate::CVWords,
+    flags: u8,
+    roots: bool,
+}
+
+// Sound: a slot's task is written by the feed's owner before its index is
+// published and read by the one thread that claims it; its result is
+// written by that thread before its done flag and read by the owner after.
+unsafe impl Sync for Ring {}
+
+/// A stream of independent tasks ([`Task`]) hashed as they arrive: the
+/// owner publishes tasks, the pool's workers and the owner take them in
+/// order through one job that stays registered while tasks are in flight
+/// (workers poll it; nothing is woken until [`Feed::wake`]), and the owner
+/// takes each result back in order once done. With nothing in flight the
+/// owner retires the job ([`Feed::retire`]) and the workers sleep, so a
+/// feed keeps nothing awake between bursts (AGENTS.md, "Serve real
+/// programs").
+pub(crate) struct Feed {
+    ring: Box<Ring>,
+    job: Box<Job<'static>>,
+    slot: Option<usize>,
+    /// Tasks taken back (their slots free again).
+    returned: usize,
+    /// The bytes of the tasks published and not taken back.
+    bytes: usize,
+}
+
+// Sound: the job and ring are the feed's own; workers reach them only
+// while registered, and retire waits them out.
+unsafe impl Send for Feed {}
+
+impl Feed {
+    /// A feed of tasks in the mode of `key` and `flags`; with `roots`, each
+    /// task is a whole message (see [`Task::hash`]).
+    pub(crate) fn new(key: &crate::CVWords, flags: u8, roots: bool) -> Feed {
+        let ring = Box::new(Ring {
+            tasks: std::array::from_fn(|_| std::cell::UnsafeCell::new(Task { input: std::ptr::null(), len: 0, counter: 0 })),
+            results: std::array::from_fn(|_| std::cell::UnsafeCell::new([0; crate::BLOCK_LEN])),
+            done: std::array::from_fn(|_| std::sync::atomic::AtomicBool::new(false)),
+            published: AtomicUsize::new(0),
+            key: *key,
+            flags,
+            roots,
+        });
+        let job = Box::new(Job {
+            work: Work::Feed(&*ring),
+            registered_ns: 0,
+            // Registration wakes nobody (wanted = pieces - 1).
+            pieces: 1,
+            cursor: Line(AtomicUsize::new(0)),
+            // The owner, while the feed is registered.
+            active: Line(AtomicUsize::new(1)),
+            max_threads: usize::MAX,
+        });
+        Feed { ring, job, slot: None, returned: 0, bytes: 0 }
+    }
+
+    /// Tasks published so far; the next one gets this index.
+    pub(crate) fn published(&self) -> usize {
+        self.ring.published.load(Ordering::Relaxed)
+    }
+
+    /// Whether `count` more tasks fit in flight.
+    pub(crate) fn room(&self, count: usize) -> bool {
+        self.published() + count - self.returned <= FEED_SLOTS
+    }
+
+    /// Publish `task`, registering the feed with the pool if it is not.
+    /// The task's bytes stay valid and unchanged until its result is taken
+    /// back. Requires room.
+    pub(crate) fn publish(&mut self, task: Task) {
+        assert!(self.room(1), "a feed holds at most FEED_SLOTS tasks in flight");
+        let index = self.published();
+        // Sound: slot index % FEED_SLOTS was taken back (room), and no
+        // thread claims index before the store below publishes it.
+        unsafe { *self.ring.tasks[index % FEED_SLOTS].get() = task };
+        self.bytes += task.len;
+        self.ring.published.store(index + 1, Ordering::Release);
+        if self.slot.is_none() {
+            let pool = pool();
+            self.job.registered_ns = pool.epoch.elapsed().as_nanos() as u64;
+            // With every slot taken, the owner hashes the tasks itself
+            // (help) and registers again at its next publish.
+            self.slot = pool.register(&self.job);
+        }
+    }
+
+    /// With at least `min_bytes` in flight, wake sleeping workers so that
+    /// one per task in flight beyond the first is awake or on its way.
+    pub(crate) fn wake(&self, min_bytes: usize) {
+        if self.bytes >= min_bytes {
+            pool().wake_for(self.published() - self.returned - 1);
+        }
+    }
+
+    /// Hash one published task on this thread, if any is left to take;
+    /// whether one was.
+    pub(crate) fn help(&self, platform: Platform) -> bool {
+        match self.job.claim() {
+            Some(index) => {
+                // Sound: claimed through the cursor, so ours alone.
+                unsafe { self.job.hash_piece(index, platform) };
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Task `index`'s result once done (see [`Task::hash`]).
+    pub(crate) fn result(&self, index: usize) -> Option<&[u8; crate::BLOCK_LEN]> {
+        debug_assert!(self.returned <= index && index < self.published());
+        let at = index % FEED_SLOTS;
+        // Sound: the done flag's acquire orders the result's write before.
+        self.ring.done[at].load(Ordering::Acquire).then(|| unsafe { &*self.ring.results[at].get() })
+    }
+
+    /// Free the slots of the tasks before `index`, whose results the owner
+    /// has read.
+    pub(crate) fn take_back(&mut self, index: usize) {
+        while self.returned < index {
+            let at = self.returned % FEED_SLOTS;
+            // Sound: the task's result was read, so no thread touches it.
+            self.bytes -= unsafe { (*self.ring.tasks[at].get()).len };
+            self.ring.done[at].store(false, Ordering::Relaxed);
+            self.returned += 1;
+        }
+    }
+
+    /// With every task taken back, unregister: the workers stop polling
+    /// the feed (and sleep, if no other job is registered).
+    pub(crate) fn retire(&mut self) {
+        assert_eq!(self.returned, self.published(), "every task taken back before the feed retires");
+        if let Some(slot) = self.slot.take() {
+            let pool = pool();
+            pool.unregister(slot);
+            // A worker that finished the last task may still be releasing
+            // its reservation: wait for the owner's own to be the last.
+            while self.job.active.load(Ordering::SeqCst) > 1 {
+                std::hint::spin_loop();
+            }
+        }
+    }
+}
+
+impl Drop for Feed {
+    fn drop(&mut self) {
+        self.retire();
     }
 }
 
