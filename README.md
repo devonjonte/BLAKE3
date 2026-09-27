@@ -18,7 +18,11 @@ crate, and adds:
 
 - `hash_multithreaded`, which spreads one large input (768 KiB or more) over every core;
 - `hash_many`, which hashes a batch of equal-length messages (Merkle-tree leaves and nodes,
-  for example) in one call.
+  for example) in one call;
+- `Queue`, which hashes a stream of inputs behind your program: you hand it your buffers and
+  move on, and each comes back hashed through a handler you write;
+- `hash_with` and `hash_many_with`, which take the mode (plain, keyed, or key derivation) and
+  the number of threads as arguments.
 
 To use it, add
 

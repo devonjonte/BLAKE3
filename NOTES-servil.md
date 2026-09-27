@@ -496,6 +496,34 @@ streamed mt 32 MiB 0.065 -> 0.043 ns/B on the Mac). The planned queue
 (docs/api-design.md) passes the caller's buffers by ownership instead;
 the hold comes back with it. The code is in git history.
 
+**The planned API, first version** (September 28, 2026; docs/api-design.md,
+tests/api_plan.rs). `Mode` (plain, keyed, derive-key) and `Threads` (One,
+All, Budget(n)) are arguments of `hash_with` and `hash_many_with`; the
+`_with_budget` functions went. Every batch path takes the mode's key words
+and flags (`many::hash_many_on(input, len, key, flags, ..)`, down to the
+SME2 chunked-message kernel and the NEON `hash_messages_raw`, which gained
+a flags argument): the mode's flags ride in the low byte of each kernel's
+packed flags, beside CHUNK_START / CHUNK_END / PARENT / ROOT, so every mode
+costs the same (perf_regress on the VM: level). `initialize()` runs the
+self-test alone; `initialize_multithreaded()` also starts the pool.
+
+**The queue, first version** (`src/queue.rs`). `Queue<H, S = shape::Messages>`:
+the shape is a second type parameter because inherent impls with the same
+method name (`submit`) under different trait bounds on one type parameter
+overlap (E0592); distinct concrete shapes do not. One engine thread per
+process takes boxed jobs from an mpsc channel in order: each job locks its
+queue's `Mutex<Handling>` (the handler, and for pieces the `Hasher`),
+hashes (`Efficiency::Time`: `lanes::hash_with_key` / `lanes::hash_many` /
+`Hasher::update_multithreaded` at every thread; `Energy`: one thread), and
+calls the handler; a panic in a job aborts. Order, resubmission from a
+handler, and drop-cancels-nothing follow from the one FIFO. Costs, VM
+`--quick`: each piece is a round trip through two thread wakes, so a
+stream of 64 B through the queue ran 437x slower than `Hasher::update`
+(373 against 0.86 ns/B); pieces of 64 KiB hash on one thread (below the
+768 KiB split). Next, to make it fast: no allocation per submission, a
+delivery thread apart from hashing, pieces batched and handed to the pool
+while the caller fills the next, the `Hold` back while buffers wait.
+
 **Streaming scope** (Zooko, September 25, 2026): input in memory goes to
 one call (`hash`, `hash_multithreaded`); input that arrives goes to a
 `Stream`, each read landing in its buffers. `Hasher::update_multithreaded`
@@ -767,10 +795,11 @@ all); marks two-speed cells.
 
 ## Testing
 
-    cargo test --release --lib                      # 89 tests
-    cargo test --release --features no_sme2 --lib   # 85
-    cargo test --release --features pure --lib      # 74
+    cargo test --release --lib                      # 85 tests
+    cargo test --release --features no_sme2 --lib   # 81
+    cargo test --release --features pure --lib      # 70
     cargo test --release --doc                      # 21
+    cargo test --release --test api_plan            # 12, the planned API's contract
     cargo test --release --manifest-path test_vectors/Cargo.toml   # 2
     cargo test --release --manifest-path bench-hashes/Cargo.toml   # 7
 

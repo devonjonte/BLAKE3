@@ -32,31 +32,42 @@
 //!
 //! # For best performance
 //!
-//! Each hashing interface says what it is built for; streaming interfaces
-//! built for efficiency are planned.
+//! Each hashing interface says what it is built for:
 //!
 //! - **Ease of use:** [`hash`], [`hash_multithreaded`], [`hash_many`],
-//!   [`hash_many_multithreaded`], and [`Hasher`]. The multithreaded forms
-//!   use other cores only where waking them pays on every machine
-//!   measured, run no slower than their single-threaded forms, and leave
-//!   nothing running between calls, at more energy per byte (below).
+//!   [`hash_many_multithreaded`], their full forms [`hash_with`] and
+//!   [`hash_many_with`], and [`Hasher`]. The multithreaded forms use other
+//!   cores only where waking them pays on every machine measured, run no
+//!   slower than their single-threaded forms, and leave nothing running
+//!   between calls, at more energy per byte (below).
+//! - **Efficiency, in time or in energy:** [`Queue`], for a stream of
+//!   inputs. The program hands over its buffers and moves on while the
+//!   crate hashes them, and each comes back through a handler the program
+//!   writes.
 //!
 //! And by situation:
 //!
-//! - **Input in memory: one call.** [`hash`] on the whole input runs
-//!   fastest on one thread, and [`hash_multithreaded`] on inputs of 768 KiB
-//!   and more when the program can spare the CPUs (8 MiB: about 6x
-//!   [`hash`]'s speed on an M4 Max). Call [`initialize`] at start-up: the
-//!   first call of a process otherwise runs the startup self-test (below,
-//!   0.1 to 0.2 ms), and the first multithreaded call starts the worker
-//!   threads, about a millisecond.
-//! - **Input arriving (a file, a socket, a decompressor): a [`Hasher`].**
-//!   [`Hasher::update`] takes each piece as it arrives, and
-//!   [`Hasher::update_reader`] reads any [`std::io::Read`] through it.
-//! - **Batch small messages of one length with [`hash_many`]**, back to
-//!   back in one buffer, the whole batch in one call: 1024 messages of 64
-//!   bytes hash about 5x faster than in a loop of [`hash`], and messages
-//!   of 128 B to 1 KiB (Merkle-tree leaves) gain alike.
+//! - **Input in memory: one call.** [`hash_multithreaded`] on the whole
+//!   input: at [`hash`]'s speed below 768 KiB and faster from there when
+//!   the program can spare the CPUs (8 MiB: about 6x [`hash`]'s speed on
+//!   an M4 Max). Call [`initialize_multithreaded`] at start-up: the first
+//!   call of a process otherwise runs the startup self-test (below, 0.1 to
+//!   0.2 ms), and the first multithreaded call that leaves the calling
+//!   thread starts the worker threads, under a millisecond.
+//! - **A stream of inputs (files, records, network objects): a [`Queue`].**
+//!   [`Queue::messages`] for separate inputs, [`Queue::pieces`] for one
+//!   long input arriving in pieces, [`Queue::fixed`] for messages of one
+//!   length.
+//! - **Input arriving, simply: a [`Hasher`].** [`Hasher::update`] takes
+//!   each piece as it arrives, and [`Hasher::update_reader`] reads any
+//!   [`std::io::Read`] through it.
+//! - **Batch small messages of one length with [`hash_many_multithreaded`]**,
+//!   back to back in one buffer, the whole batch in one call: 1024
+//!   messages of 64 bytes hash about 5x faster than in a loop of [`hash`],
+//!   and messages of 128 B to 1 KiB (Merkle-tree leaves) gain alike.
+//! - **Keyed hashing and key derivation** run at the same speed as plain
+//!   hashing in every form: [`keyed_hash`], [`derive_key`], and a [`Mode`]
+//!   for every other one.
 //! - **Make the calls from one thread.** The multithreaded functions
 //!   spread the work themselves. On Apple M4 and later, several threads
 //!   hashing at once share one SME unit: one runs at full speed and the
@@ -67,11 +78,12 @@
 //!   41 µs instead of 13.5), and for longer after 100 ms. A program that
 //!   hashes now and then meets this whatever it calls; spinning instead of
 //!   sleeping lowers the clock too.
-//! - **For the least energy**, hash single-threaded, and at background
-//!   priority (macOS: `QOS_CLASS_BACKGROUND`) when the time allows: on an
-//!   M4 Max, E-cores hash a byte for about an eighth of the energy that
-//!   P-cores spend, at a third to a quarter of the speed, and
-//!   multithreaded calls spend about 2.7x the energy per byte of [`hash`].
+//! - **For the least energy**, hash single-threaded ([`hash`], or a queue
+//!   with [`Efficiency::Energy`]), and at background priority (macOS:
+//!   `QOS_CLASS_BACKGROUND`) when the time allows: on an M4 Max, E-cores
+//!   hash a byte for about an eighth of the energy that P-cores spend, at
+//!   a third to a quarter of the speed, and multithreaded calls spend
+//!   about 2.7x the energy per byte of [`hash`].
 //!
 //! [`kernel_report`] says which code paths run at each input length on
 //! this machine.
@@ -85,8 +97,9 @@
 //! result with the reference implementation's. A difference means this
 //! build or this CPU computes wrong digests, and stops the program with a
 //! panic naming the code path. The check takes 0.1 to 0.2 ms once per
-//! process (Apple M4 Max, and a Linux VM on it); [`initialize`] runs it
-//! at start-up, and otherwise the first call does. Builds without the
+//! process (Apple M4 Max, and a Linux VM on it); [`initialize`] (or
+//! [`initialize_multithreaded`]) runs it at start-up, and otherwise the
+//! first call does. Builds without the
 //! `std` feature skip it.
 //!
 //! # Cargo Features
@@ -206,6 +219,10 @@ mod join;
 #[cfg(feature = "std")]
 mod lanes;
 mod many;
+#[cfg(feature = "std")]
+mod queue;
+#[cfg(feature = "std")]
+pub use queue::{Efficiency, FixedHandler, MessageHandler, PieceHandler, Queue, shape};
 mod self_test;
 
 /// The startup self-test's own time, for probes: it runs again (it has
@@ -1152,7 +1169,7 @@ fn hash_all_at_once<J: join::Join>(
 
 /// The default hash function.
 ///
-/// Built for top speed: the fastest way to do this task, for a caller that keeps it fed (see [For best performance](crate#for-best-performance)).
+/// Built for ease of use (see [For best performance](crate#for-best-performance)).
 ///
 /// For an incremental version that accepts multiple writes, see [`Hasher::new`],
 /// [`Hasher::update`], and [`Hasher::finalize`]. These two lines are equivalent:
@@ -1170,7 +1187,11 @@ fn hash_all_at_once<J: join::Join>(
 /// [`OutputReader`].
 ///
 /// This function is always single-threaded. For the same hash over several
-/// threads, see [`hash_multithreaded`] and [`hash_multithreaded_with_budget`].
+/// threads, see [`hash_multithreaded`] (recommended) and [`hash_with`].
+///
+/// Call [`initialize`] early in the program: the first call of a process
+/// otherwise runs the startup self-test (under 200 µs on an Apple M4 Max)
+/// before it hashes.
 ///
 /// On Apple M4 and later, inputs of 16 KiB and more hash fastest when one
 /// thread of the program hashes them at a time: when several threads do at
@@ -1182,7 +1203,11 @@ pub fn hash(input: &[u8]) -> Hash {
 
 /// The default hash function over several threads.
 ///
-/// Built for a low worst case: it uses other cores only where waking them pays on every machine measured, runs no slower than its single-threaded form, and leaves nothing running between calls (see [For best performance](crate#for-best-performance)).
+/// Built for ease of use (see [For best performance](crate#for-best-performance)):
+/// it uses other cores only where waking them pays on every machine
+/// measured, runs no slower than [`hash`], and leaves nothing running
+/// between calls. It spends more energy per byte than [`hash`] when it
+/// uses other cores (about 2.7x on an Apple M4 Max).
 ///
 /// Returns the same [`Hash`](struct@Hash) as [`hash`] for every input. Inputs below
 /// 768 KiB are hashed on the calling thread alone, at [`hash`]'s speed.
@@ -1194,8 +1219,9 @@ pub fn hash(input: &[u8]) -> Hash {
 /// already occupy the machine's CPUs, a new call hashes on its own thread.
 /// Existing calls can still have workers finishing their pieces.
 ///
-/// The first call that leaves the calling thread runs [`initialize`]
-/// unless the program already has, and takes that long longer.
+/// Call [`initialize_multithreaded`] early in the program: the first call
+/// that leaves the calling thread otherwise starts the worker threads
+/// (under 1 ms on an Apple M4 Max) before it hashes.
 ///
 /// Concurrent calls within one process share the workers: they take pieces
 /// from each call in turn, so two callers hashing at once each get about
@@ -1212,38 +1238,110 @@ pub fn hash_multithreaded(input: &[u8]) -> Hash {
     lanes::hash(input, usize::MAX)
 }
 
-/// [`hash_multithreaded`] with at most `max_threads` threads, the calling
-/// thread included. `max_threads` is at least 1; 1 hashes on the calling
-/// thread alone, as [`hash`] does. Returns the same [`Hash`](struct@Hash) as [`hash`]
-/// for every input.
-///
-/// ```
-/// let input = [0u8; 1 << 20];
-/// assert_eq!(blake3_servil::hash_multithreaded_with_budget(&input, 2), blake3_servil::hash(&input));
-/// ```
-#[cfg(feature = "std")]
-pub fn hash_multithreaded_with_budget(input: &[u8], max_threads: usize) -> Hash {
-    assert!(max_threads >= 1, "a hash needs at least the calling thread");
-    lanes::hash(input, max_threads)
-}
-
-/// Run the startup self-test (see the crate documentation) and start the
-/// worker threads that [`hash_multithreaded`] and
-/// [`hash_multithreaded_with_budget`] use, once per process: one per CPU
-/// beyond the first (about half a millisecond for fifteen). The first
-/// call, and the first multithreaded call that leaves the calling thread,
-/// do the same when the program has yet to call this; call it at start-up
-/// to choose when those costs fall. Later calls return at once.
+/// Run the startup self-test (see the crate documentation) now, once per
+/// process: under 200 µs on an Apple M4 Max. The first hash of a process
+/// runs it otherwise; call this early to keep that cost off the first
+/// hash. Later calls return at once.
 ///
 /// ```
 /// blake3_servil::initialize();
-/// let hash = blake3_servil::hash_multithreaded(&[0u8; 1 << 20]);
-/// assert_eq!(hash, blake3_servil::hash(&[0u8; 1 << 20]));
+/// let hash = blake3_servil::hash(b"foo");
+/// # assert_eq!(hash, blake3_servil::Hasher::new().update(b"foo").finalize());
 /// ```
 #[cfg(feature = "std")]
 pub fn initialize() {
     self_test::ensure();
+}
+
+/// [`initialize`], and start the worker threads that the multithreaded
+/// forms use, once per process: one per CPU beyond the first, under 1 ms
+/// on an Apple M4 Max. The first multithreaded call that leaves the
+/// calling thread starts them otherwise; call this early to keep that cost
+/// off that call. Later calls return at once. The workers sleep whenever
+/// no call has work for them.
+///
+/// ```
+/// blake3_servil::initialize_multithreaded();
+/// let hash = blake3_servil::hash_multithreaded(&[0u8; 1 << 20]);
+/// assert_eq!(hash, blake3_servil::hash(&[0u8; 1 << 20]));
+/// ```
+#[cfg(feature = "std")]
+pub fn initialize_multithreaded() {
+    self_test::ensure();
     lanes::initialize();
+}
+
+/// Which digest a hashing call computes: [`hash`]'s, [`keyed_hash`]'s, or
+/// [`derive_key`]'s. Every form of every shape (one message, a batch, a
+/// [`Queue`]) takes each mode at the same speed.
+#[derive(Clone, Copy)]
+pub enum Mode<'a> {
+    /// The default hash function, as [`hash`].
+    Hash,
+    /// The keyed hash function with this key, as [`keyed_hash`].
+    Keyed(&'a [u8; KEY_LEN]),
+    /// The key derivation function with this context string, as
+    /// [`derive_key`]; the input is the key material.
+    DeriveKey(&'a str),
+}
+
+impl Mode<'_> {
+    /// The key words and flags this mode hashes with.
+    fn key_and_flags(self) -> (CVWords, u8) {
+        match self {
+            Mode::Hash => (*IV, 0),
+            Mode::Keyed(key) => (platform::words_from_le_bytes_32(key), KEYED_HASH),
+            Mode::DeriveKey(context) => (platform::words_from_le_bytes_32(&hazmat::hash_derive_key_context(context)), DERIVE_KEY_MATERIAL),
+        }
+    }
+}
+
+/// How many threads a hashing call may use, the calling thread included.
+#[cfg(feature = "std")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Threads {
+    /// The calling thread alone, as [`hash`] and [`hash_many`].
+    One,
+    /// As many as pay, as [`hash_multithreaded`] and
+    /// [`hash_many_multithreaded`].
+    All,
+    /// As many as pay, at most this many at once; at least 1.
+    Budget(usize),
+}
+
+#[cfg(feature = "std")]
+impl Threads {
+    /// The most threads, the caller's included; panics on a budget of 0.
+    fn max_threads(self) -> usize {
+        match self {
+            Threads::One => 1,
+            Threads::All => usize::MAX,
+            Threads::Budget(n) => {
+                assert!(n >= 1, "a thread budget counts the calling thread, so it is at least 1");
+                n
+            }
+        }
+    }
+}
+
+/// [`hash`] in any [`Mode`] on any number of [`Threads`]: the full form
+/// behind [`hash`], [`hash_multithreaded`], [`keyed_hash`], and
+/// [`derive_key`], each of whose digests it returns for the same mode.
+/// Built for ease of use (see [For best performance](crate#for-best-performance)).
+/// More than one thread follows [`hash_multithreaded`]'s rules.
+///
+/// ```
+/// use blake3_servil::{Mode, Threads};
+/// let key = [7u8; 32];
+/// let input = vec![1u8; 1 << 20];
+/// assert_eq!(blake3_servil::hash_with(Mode::Keyed(&key), Threads::Budget(4), &input), blake3_servil::keyed_hash(&key, &input));
+/// assert_eq!(blake3_servil::hash_with(Mode::Hash, Threads::One, &input), blake3_servil::hash(&input));
+/// ```
+#[cfg(feature = "std")]
+pub fn hash_with(mode: Mode, threads: Threads, input: &[u8]) -> Hash {
+    let max_threads = threads.max_threads();
+    let (key, flags) = mode.key_and_flags();
+    lanes::hash_with_key(input, &key, flags, max_threads)
 }
 
 /// The whole input on the calling thread, in the given mode: the one-chunk
@@ -1277,7 +1375,7 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
 }
 
 /// Many messages of one length, each starting at a multiple of 64 bytes.
-/// Built for top speed: the fastest way to do this task, for a caller that keeps it fed (see [For best performance](crate#for-best-performance)).
+/// Built for ease of use (see [For best performance](crate#for-best-performance)).
 ///
 /// `out[i]` becomes the [`hash`] of `input[i * stride..][..message_len]`,
 /// where `stride` is `message_len` rounded up to a multiple of 64 (64 for
@@ -1313,18 +1411,29 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
 /// assert_eq!(digests[9], *blake3_servil::hash(&[10u8; 100]).as_bytes());
 /// ```
 pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    let turn = platform::Sme2Turn::take(Platform::detect(), many::sme2_sized(message_len, out.len()));
-    many::hash_many_on(input, message_len, out, turn.platform());
+    hash_many_serial(input, message_len, IV, 0, out);
 }
 
-/// [`hash_many`] over several threads. Built for a low worst case: it uses other cores only where waking them pays on every machine measured, runs no slower than its single-threaded form, and leaves nothing running between calls (see [For best performance](crate#for-best-performance)).
+/// [`hash_many`] in the mode of `key` and `flags`, on the calling thread.
+#[inline]
+fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]]) {
+    let turn = platform::Sme2Turn::take(Platform::detect(), many::sme2_sized(message_len, out.len()));
+    many::hash_many_on(input, message_len, key, flags, out, turn.platform());
+}
+
+/// [`hash_many`] over several threads, recommended over it. Built for ease
+/// of use (see [For best performance](crate#for-best-performance)): it uses
+/// other cores only where waking them pays on every machine measured, runs
+/// no slower than [`hash_many`], and leaves nothing running between calls.
+/// It spends more energy per byte than [`hash_many`] when it uses other
+/// cores.
 ///
 /// Writes the same digests for every batch. Batches under 768 KiB in all are hashed on the calling thread
 /// alone, at [`hash_many`]'s speed. Larger batches are cut into ranges of
 /// messages that the calling thread and this crate's worker threads hash
 /// at once, under the same rules as [`hash_multithreaded`]: the workers
 /// are started once per process, one per CPU beyond the first
-/// ([`initialize`]), concurrent calls share them in turn, and a call
+/// ([`initialize_multithreaded`]), concurrent calls share them in turn, and a call
 /// arriving when calls already fill the CPUs hashes on its own thread.
 ///
 /// ```
@@ -1335,24 +1444,29 @@ pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
 /// ```
 #[cfg(feature = "std")]
 pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    lanes::hash_many(input, message_len, out, usize::MAX);
+    lanes::hash_many(input, message_len, IV, 0, out, usize::MAX);
 }
 
-/// [`hash_many_multithreaded`] with at most `max_threads` threads, the
-/// calling thread included. `max_threads` is at least 1; 1 hashes on the
-/// calling thread alone, as [`hash_many`] does.
+/// [`hash_many`] in any [`Mode`] on any number of [`Threads`]: the full
+/// form behind [`hash_many`] and [`hash_many_multithreaded`]. `out[i]`
+/// becomes [`hash_with`]'s digest of message i in `mode`, under
+/// [`hash_many`]'s layout. Built for ease of use (see [For best
+/// performance](crate#for-best-performance)). More than one thread follows
+/// [`hash_many_multithreaded`]'s rules.
 ///
 /// ```
+/// use blake3_servil::{Mode, Threads};
+/// let key = [7u8; 32];
 /// let nodes = vec![1u8; 2000 * 64];
-/// let mut a = vec![[0u8; 32]; 2000];
-/// let mut b = a.clone();
-/// blake3_servil::hash_many_multithreaded_with_budget(&nodes, 64, &mut a, 2);
-/// blake3_servil::hash_many(&nodes, 64, &mut b);
-/// assert_eq!(a, b);
+/// let mut macs = vec![[0u8; 32]; 2000];
+/// blake3_servil::hash_many_with(Mode::Keyed(&key), Threads::Budget(2), &nodes, 64, &mut macs);
+/// assert_eq!(macs[5], *blake3_servil::keyed_hash(&key, &[1u8; 64]).as_bytes());
 /// ```
 #[cfg(feature = "std")]
-pub fn hash_many_multithreaded_with_budget(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]], max_threads: usize) {
-    lanes::hash_many(input, message_len, out, max_threads);
+pub fn hash_many_with(mode: Mode, threads: Threads, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
+    let max_threads = threads.max_threads();
+    let (key, flags) = mode.key_and_flags();
+    lanes::hash_many(input, message_len, &key, flags, out, max_threads);
 }
 
 /// One kernel [`hash`] runs, from `from_len` input bytes up to the next
@@ -1588,8 +1702,8 @@ pub fn kernel_report_multithreaded() -> KernelReport {
 ///
 /// For output sizes other than 32 bytes, see [`Hasher::finalize_xof`], and [`OutputReader`].
 ///
-/// This function is always single-threaded. For multithreading support, see
-/// [`Hasher::update_rayon`](struct.Hasher.html#method.update_rayon).
+/// This function is always single-threaded. For the same digest over several
+/// threads, see [`hash_with`] with [`Mode::Keyed`].
 pub fn keyed_hash(key: &[u8; KEY_LEN], input: &[u8]) -> Hash {
     let key_words = platform::words_from_le_bytes_32(key);
     hash_serial(input, &key_words, KEYED_HASH)
@@ -1640,8 +1754,8 @@ pub fn keyed_hash(key: &[u8; KEY_LEN], input: &[u8]) -> Hash {
 ///
 /// For output sizes other than 32 bytes, see [`Hasher::finalize_xof`], and [`OutputReader`].
 ///
-/// This function is always single-threaded. For multithreading support, see
-/// [`Hasher::update_rayon`](struct.Hasher.html#method.update_rayon).
+/// This function is always single-threaded. For the same key over several
+/// threads, see [`hash_with`] with [`Mode::DeriveKey`].
 ///
 /// [Argon2]: https://en.wikipedia.org/wiki/Argon2
 pub fn derive_key(context: &str, key_material: &[u8]) -> [u8; OUT_LEN] {

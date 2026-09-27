@@ -2,15 +2,15 @@
 //! round-robin.
 //!
 //! This module is crate-internal. The public entry points are
-//! [`crate::hash_multithreaded`] and
-//! [`crate::hash_multithreaded_with_budget`], whose contracts speak of
+//! [`crate::hash_multithreaded`], [`crate::hash_with`], and their batch
+//! forms, whose contracts speak of
 //! threads alone; pieces and the pool are how those contracts
 //! are met, and this file is where they are explained.
 //!
 //! # Pieces
 //!
 //! The input is cut at chunk boundaries into pieces, each a valid BLAKE3
-//! subtree (see [`hazmat::left_subtree_len`]), from the front: each piece
+//! subtree (see [`crate::hazmat::left_subtree_len`]), from the front: each piece
 //! is about a thread's share of what remains ([`next_piece_len`]), a power
 //! of two chunks within [`MIN_PIECE_LEN`] and [`MAX_PIECE_LEN`]. Pieces
 //! shrink toward the end, so a thread that is slow (an efficiency core, or
@@ -27,7 +27,7 @@
 //! in the pool's slot table, then takes pieces through the cursor until
 //! none remain. It unregisters the job and waits for its active threads
 //! to finish. The same count enforces the call's thread budget. Workers,
-//! started once per process ([`crate::initialize`]), one per CPU beyond
+//! started once per process ([`crate::initialize_multithreaded`]), one per CPU beyond
 //! the first, serve the registered jobs round-robin, one piece at a time
 //! through the same cursor. Two callers
 //! hashing at once therefore each get about half the workers' time, and
@@ -38,7 +38,7 @@
 //! whole on its own thread. This check happens once per call; workers
 //! need only the job's cursor and thread budget for each piece. The fixed
 //! pool and the calling threads can overlap; the OS schedules them.
-//! [`crate::hash_multithreaded_with_budget`] bounds the threads hashing
+//! A thread budget ([`crate::Threads::Budget`]) bounds the threads hashing
 //! one call's pieces at once, including its caller.
 //!
 //! # Kernels
@@ -79,7 +79,9 @@
 //! [`RANK_STAGGER_NS`]` × r` after it was registered, so the lowest ranks
 //! take a call's pieces.
 
-use crate::hazmat::{self, ChainingValue, Mode};
+use crate::hazmat::ChainingValue;
+#[cfg(test)]
+use crate::hazmat::{self, Mode};
 #[cfg(test)]
 use crate::hazmat::HasherExt;
 use crate::platform::Platform;
@@ -149,29 +151,29 @@ fn next_piece_len(remaining: usize, threads: usize) -> usize {
 /// holding a piece at once (the caller's included; at least 1).
 #[inline]
 pub(crate) fn hash(input: &[u8], max_threads: usize) -> Hash {
-    hash_with_mode(input, Mode::Hash, max_threads)
+    hash_with_key(input, crate::IV, 0, max_threads)
 }
 
-/// Hash `input` over the machine's threads in the given mode.
+/// Hash `input` over the machine's threads in the mode of `key` and
+/// `flags` (IV and 0 for plain hashing).
 #[inline]
-pub(crate) fn hash_with_mode(input: &[u8], mode: Mode, max_threads: usize) -> Hash {
+pub(crate) fn hash_with_key(input: &[u8], key: &crate::CVWords, flags: u8, max_threads: usize) -> Hash {
     assert!(max_threads >= 1, "a hash needs at least the calling thread");
     // The short path first and inline, so a small input costs what hash()
     // costs; everything the pool needs is behind the call below.
     if input.len() < MIN_SPLIT_LEN || max_threads == 1 {
-        let (key, flags) = (mode.key_words(), mode.flags_byte());
-        return crate::hash_serial(input, &key, flags);
+        return crate::hash_serial(input, key, flags);
     }
-    hash_over_pool(input, mode, max_threads)
+    hash_over_pool(input, key, flags, max_threads)
 }
 
 #[inline(never)]
-fn hash_over_pool(input: &[u8], mode: Mode, max_threads: usize) -> Hash {
+fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8, max_threads: usize) -> Hash {
     let pool = pool();
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let _caller = Caller(&pool.callers);
     if callers >= pool.cpus {
-        return pool.hash_subtree(input, &mode.key_words(), 0, mode.flags_byte()).root_hash();
+        return pool.hash_subtree(input, key, 0, flags).root_hash();
     }
     let threads = pool.cpus.min(max_threads);
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
@@ -181,13 +183,13 @@ fn hash_over_pool(input: &[u8], mode: Mode, max_threads: usize) -> Hash {
         input,
         pieces: &pieces,
         cvs: cvs.as_mut_ptr(),
-        key: mode.key_words(),
+        key: *key,
         counter: 0,
-        flags: mode.flags_byte(),
+        flags,
     };
     pool.run_job(work, pieces.len(), own, turn.platform(), max_threads);
     drop(turn);
-    merge_root(&pieces, &mut cvs, mode)
+    merge_root(&pieces, &mut cvs, key, flags)
 }
 
 /// The two child chaining values of the subtree `input` at chunk
@@ -231,28 +233,28 @@ pub(crate) fn subtree_children(
 /// holding a range at once (the caller's included; at least 1): below
 /// MIN_SPLIT_LEN of input, or with one message, on this thread.
 #[inline]
-pub(crate) fn hash_many(input: &[u8], message_len: usize, outputs: &mut [[u8; crate::OUT_LEN]], max_threads: usize) {
+pub(crate) fn hash_many(input: &[u8], message_len: usize, key: &crate::CVWords, flags: u8, outputs: &mut [[u8; crate::OUT_LEN]], max_threads: usize) {
     assert!(max_threads >= 1, "a hash needs at least the calling thread");
     // The short path first and inline, so a small batch costs what
     // crate::hash_many costs; everything the pool needs is behind the call.
     if max_threads == 1 || outputs.len() < 2 || input.len() < MIN_SPLIT_LEN {
-        return crate::hash_many(input, message_len, outputs);
+        return crate::hash_many_serial(input, message_len, key, flags, outputs);
     }
-    hash_many_over_pool(input, message_len, outputs, max_threads)
+    hash_many_over_pool(input, message_len, key, flags, outputs, max_threads)
 }
 
 #[inline(never)]
-fn hash_many_over_pool(input: &[u8], message_len: usize, outputs: &mut [[u8; crate::OUT_LEN]], max_threads: usize) {
+fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, flags: u8, outputs: &mut [[u8; crate::OUT_LEN]], max_threads: usize) {
     let slot = crate::many::slot_len(message_len);
     assert_eq!(Some(input.len()), slot.checked_mul(outputs.len()), "input holds one slot of whole blocks per output");
     let pool = pool();
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let _caller = Caller(&pool.callers);
     if callers >= pool.cpus {
-        return crate::hash_many(input, message_len, outputs);
+        return crate::hash_many_serial(input, message_len, key, flags, outputs);
     }
     let pieces = cut_messages(outputs.len(), slot, pool.cpus.min(max_threads));
-    let work = Work::Messages { input, message_len, pieces: &pieces, outputs: outputs.as_mut_ptr() };
+    let work = Work::Messages { input, message_len, key: *key, flags, pieces: &pieces, outputs: outputs.as_mut_ptr() };
     pool.run_job(work, pieces.len(), 0, pool_platform(), max_threads);
 }
 
@@ -324,6 +326,8 @@ enum Work<'a> {
     Messages {
         input: &'a [u8],
         message_len: usize,
+        key: crate::CVWords,
+        flags: u8,
         pieces: &'a [Piece],
         outputs: *mut [u8; crate::OUT_LEN],
     },
@@ -368,13 +372,13 @@ impl Job<'_> {
                 let cv = crate::hash_all_at_once::<crate::join::SerialJoin>(bytes, key, counter, *flags, platform).chaining_value();
                 unsafe { *cvs.add(index) = cv };
             }
-            Work::Messages { input, message_len, pieces, outputs } => {
+            Work::Messages { input, message_len, key, flags, pieces, outputs } => {
                 let piece = pieces[index];
                 let slot = crate::many::slot_len(*message_len);
                 let messages = &input[piece.offset * slot..][..piece.len * slot];
                 // Sound: this range of outputs belongs to piece `index` alone.
                 let digests = unsafe { core::slice::from_raw_parts_mut(outputs.add(piece.offset), piece.len) };
-                crate::many::hash_many_on(messages, *message_len, digests, platform);
+                crate::many::hash_many_on(messages, *message_len, key, *flags, digests, platform);
             }
         }
     }
@@ -501,11 +505,10 @@ fn subtree_cv(pieces: &[Piece], cvs: &[ChainingValue], mode: Mode) -> ChainingVa
 /// the platform's SIMD parent kernel, carrying an odd final child upward.
 /// The final two CVs belong to the root's children, including a short right
 /// subtree, on the pool's platform like the pieces.
-fn merge_root(pieces: &[Piece], cvs: &mut [ChainingValue], mode: Mode) -> Hash {
-    let (key, flags) = (mode.key_words(), mode.flags_byte());
-    let count = merge_to_children(pieces, cvs, &key, flags);
+fn merge_root(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::CVWords, flags: u8) -> Hash {
+    let count = merge_to_children(pieces, cvs, key, flags);
     debug_assert_eq!(count, 2);
-    hazmat::merge_subtrees_root(&cvs[0], &cvs[1], mode)
+    crate::parent_node_output(&cvs[0], &cvs[1], key, flags, pool_platform()).root_hash()
 }
 
 /// [`merge_root`] up to the root's two children, left in `cvs[0]` and
@@ -902,7 +905,7 @@ mod test {
                     .iter()
                     .map(|p| crate::hash_all_at_once::<crate::join::SerialJoin>(&input[p.offset..][..p.len], crate::IV, (p.offset / CHUNK_LEN) as u64, 0, Platform::detect()).chaining_value())
                     .collect();
-                assert_eq!(merge_root(&pieces, &mut cvs, Mode::Hash), crate::hash(&input[..len]), "{len} {threads}");
+                assert_eq!(merge_root(&pieces, &mut cvs, crate::IV, 0), crate::hash(&input[..len]), "{len} {threads}");
             }
         }
     }
@@ -958,13 +961,13 @@ mod test {
             let key = [42u8; KEY_LEN];
             assert_eq!(
                 crate::keyed_hash(&key, &input[..len]),
-                hash_with_mode(&input[..len], Mode::KeyedHash(&key), usize::MAX),
+                hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH, usize::MAX),
                 "keyed len = {len}"
             );
             let context_key = hazmat::hash_derive_key_context("lanes test");
             assert_eq!(
                 *Hasher::new_from_context_key(&context_key).update(&input[..len]).finalize().as_bytes(),
-                *hash_with_mode(&input[..len], Mode::DeriveKeyMaterial(&context_key), usize::MAX).as_bytes(),
+                *hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL, usize::MAX).as_bytes(),
                 "derive len = {len}"
             );
         }
@@ -1024,7 +1027,7 @@ mod test {
                     let left = subtree_cv(&pieces[..split], &cvs[..split], Mode::Hash);
                     let right = subtree_cv(&pieces[split..], &cvs[split..], Mode::Hash);
                     assert_eq!(want, hazmat::merge_subtrees_root(&left, &right, Mode::Hash));
-                    assert_eq!(want, merge_root(&pieces, &mut cvs, Mode::Hash), "len = {len}, threads = {threads}");
+                    assert_eq!(want, merge_root(&pieces, &mut cvs, crate::IV, 0), "len = {len}, threads = {threads}");
                 }
             }
         }
@@ -1048,7 +1051,7 @@ mod test {
                         let left = subtree_cv(&pieces[..split], &cvs[..split], mode);
                         let right = subtree_cv(&pieces[split..], &cvs[split..], mode);
                         let want = hazmat::merge_subtrees_root(&left, &right, mode);
-                        assert_eq!(want, merge_root(&pieces, &mut cvs.clone(), mode), "len={len}, threads={threads}");
+                        assert_eq!(want, merge_root(&pieces, &mut cvs.clone(), &mode.key_words(), mode.flags_byte()), "len={len}, threads={threads}");
                     }
                 }
             }
@@ -1166,7 +1169,7 @@ mod test {
             }
             for cap in [1, 2, 3, 4, 64, usize::MAX] {
                 let mut got = vec![[0u8; crate::OUT_LEN]; count];
-                hash_many(input, message_len, &mut got, cap);
+                hash_many(input, message_len, crate::IV, 0, &mut got, cap);
                 assert_eq!(want, got, "{message_len}-byte messages, cap {cap}");
             }
         }
@@ -1192,7 +1195,7 @@ mod test {
                     let mut got = vec![[0u8; crate::OUT_LEN]; count];
                     for _ in 0..10 {
                         if i % 2 == 0 {
-                            hash_many(buffer, crate::BLOCK_LEN, &mut got, cap);
+                            hash_many(buffer, crate::BLOCK_LEN, crate::IV, 0, &mut got, cap);
                             assert_eq!(want, &got[..]);
                         } else {
                             assert_eq!(tree_want, hash(buffer, cap));

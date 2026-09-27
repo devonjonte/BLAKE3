@@ -1190,9 +1190,9 @@ mod unsafe_paths {
                 let (batch, tree, expected) = (&batch, &tree, &expected);
                 scope.spawn(move || {
                     let mut out = vec![[0u8; OUT_LEN]; 1024];
-                    hash_many_multithreaded_with_budget(batch, 64, &mut out, budget);
+                    hash_many_with(Mode::Hash, Threads::Budget(budget), batch, 64, &mut out);
                     assert_eq!(&out, expected, "batch, budget {budget}");
-                    assert_eq!(hash_multithreaded_with_budget(tree, budget), expected_tree, "tree, budget {budget}");
+                    assert_eq!(hash_with(Mode::Hash, Threads::Budget(budget), tree), expected_tree, "tree, budget {budget}");
                 });
             }
         });

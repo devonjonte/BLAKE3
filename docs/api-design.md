@@ -120,7 +120,11 @@ implements, from one delivery thread; no polling and no blocking.
   Sync`. `Threads` and `Efficiency` print for diagnostics (`Debug`).
 - **The tests come first**: `tests/api_plan.rs` states this contract
   against the official vectors and the reference implementation, before
-  the implementation exists.
+  the implementation exists. The first, simple version passes them
+  (September 28, 2026): one engine thread takes every queue's submissions
+  in order, hashes each through the one-shot code, and calls its handler;
+  NOTES-servil.md, "The queue, first version", has what it costs and what
+  comes next.
 - **Back-pressure is the program's own buffers**: every buffer comes back
   through the handler, so the buffers in flight never exceed the number
   the program made; a program out of buffers waits for its next handler

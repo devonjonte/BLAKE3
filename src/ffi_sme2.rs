@@ -259,10 +259,11 @@ pub const MESSAGE_CHUNKS: core::ops::RangeInclusive<usize> = 2..=15;
 /// Chunk k of every lane goes to the message kernel at counter k (the
 /// whole chunks in one call, the last chunk in a second); then each parent
 /// level across the lanes, pairs gathered into sixteen contiguous blocks
-/// per group, until the root, which takes ROOT. Unsafe because the CPU
+/// per group, until the root, which takes ROOT. `key` and `flags` give
+/// the mode (IV and 0 for plain hashing). Unsafe because the CPU
 /// must have SME2 with 512-bit streaming vectors and every pointer must
 /// reach `len` rounded up to whole blocks.
-pub unsafe fn hash_chunked_messages(lanes: &[*const u8; GROUP], len: usize, key: &CVWords, out: &mut [u8]) {
+pub unsafe fn hash_chunked_messages(lanes: &[*const u8; GROUP], len: usize, key: &CVWords, flags: u8, out: &mut [u8]) {
     use crate::{CHUNK_END, CHUNK_START, PARENT, ROOT};
     let chunks = len.div_ceil(CHUNK_LEN);
     assert!(MESSAGE_CHUNKS.contains(&chunks), "messages of 2 to 15 chunks");
@@ -287,7 +288,7 @@ pub unsafe fn hash_chunked_messages(lanes: &[*const u8; GROUP], len: usize, key:
     // cvs holds node k of every lane at cvs + (16 k + lane) * 32, as the
     // kernels write sixteen lanes contiguous per call and group.
     let cv = |k: usize, lane: usize| unsafe { cvs.add((GROUP * k + lane) * OUT_LEN) };
-    let chunk_flags = (CHUNK_START as u64) << 8 | (CHUNK_END as u64) << 16;
+    let chunk_flags = flags as u64 | (CHUNK_START as u64) << 8 | (CHUNK_END as u64) << 16;
     unsafe {
         for k in 0..chunks {
             for (i, lane) in lanes.iter().enumerate() {
@@ -320,11 +321,11 @@ pub unsafe fn hash_chunked_messages(lanes: &[*const u8; GROUP], len: usize, key:
             if nodes % 2 == 1 {
                 core::ptr::copy_nonoverlapping(cv(nodes - 1, 0), cv(parents, 0), GROUP * OUT_LEN);
             }
-            let n = ffi::blake3_sme2_hash16_parents_512(pairs, key.as_ptr(), 0, PARENT as u32, cvs, parents as u64);
+            let n = ffi::blake3_sme2_hash16_parents_512(pairs, key.as_ptr(), 0, (flags | PARENT) as u32, cvs, parents as u64);
             assert_eq!(n, 16, "SME2 streaming vector length changed under us");
             nodes = parents + nodes % 2;
         }
-        let n = ffi::blake3_sme2_hash16_parents_512(pairs, key.as_ptr(), 0, (PARENT | ROOT) as u32, cvs, 1);
+        let n = ffi::blake3_sme2_hash16_parents_512(pairs, key.as_ptr(), 0, (flags | PARENT | ROOT) as u32, cvs, 1);
         assert_eq!(n, 16, "SME2 streaming vector length changed under us");
         core::ptr::copy_nonoverlapping(cvs, out.as_mut_ptr(), count * OUT_LEN);
     }

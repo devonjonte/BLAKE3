@@ -11,7 +11,7 @@
 //! SME2; others through the same code as [`crate::hash`], one at a time.
 
 use crate::platform::Platform;
-use crate::{BLOCK_LEN, CHUNK_END, CHUNK_LEN, CHUNK_START, IV, IncrementCounter, OUT_LEN, ROOT};
+use crate::{BLOCK_LEN, CHUNK_END, CHUNK_LEN, CHUNK_START, CVWords, IncrementCounter, OUT_LEN, ROOT};
 
 /// Most messages per platform call: eight SME2 groups per entry into
 /// streaming mode, the same as the tree walk's `sme2::DEGREE`. Measured on
@@ -32,18 +32,19 @@ pub(crate) fn slot_len(len: usize) -> usize {
 }
 
 /// `outputs[i] = hash(input[i * slot..][..len])` for every message, with
-/// `slot = slot_len(len)`, on `platform`: messages of up to a chunk go to
+/// `slot = slot_len(len)`, in the mode of `key` and `flags` (IV and 0 for
+/// plain hashing), on `platform`: messages of up to a chunk go to
 /// the kernels TABLE at a time, 2 to 15 chunks side by side on SME2, others
 /// through the one-message path. Requires `input.len() == slot *
 /// outputs.len()` and every slot's bytes past `len` zero (checked in debug
 /// builds; a nonzero byte there changes that message's digest).
-pub(crate) fn hash_many_on(input: &[u8], len: usize, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
+pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
     // One-block messages first, on the path they took before slots (a
     // shared entry cost 64 B x 3 7% in the regression check).
     if len == BLOCK_LEN && outputs.len() >= 2 {
         assert_eq!(Some(input.len()), BLOCK_LEN.checked_mul(outputs.len()), "input holds one slot of whole blocks per output");
         for (messages, digests) in input.chunks(BLOCK_LEN * TABLE).zip(outputs.chunks_mut(TABLE)) {
-            hash_run::<{ BLOCK_LEN }>(messages, digests, platform);
+            hash_run::<{ BLOCK_LEN }>(messages, key, flags, digests, platform);
         }
         return;
     }
@@ -51,20 +52,20 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, outputs: &mut [[u8; OUT_LEN
     assert_eq!(Some(input.len()), slot.checked_mul(outputs.len()), "input holds one slot of whole blocks per output");
     debug_assert!(len % BLOCK_LEN == 0 || input.chunks_exact(slot).all(|s| s[len..].iter().all(|&b| b == 0)), "every slot's bytes past its message are zero");
     if len == 0 {
-        outputs.fill(*crate::hash_serial_on(&[], IV, 0, platform).as_bytes());
+        outputs.fill(*crate::hash_serial_on(&[], key, flags, platform).as_bytes());
         return;
     }
     #[cfg(blake3_sme2)]
     if chunked(len) && platform_is_sme2(platform) && (outputs.len() >= 16 || outputs.len() >= sme2_chunked_min(len)) {
-        return hash_chunked(input, len, outputs, platform);
+        return hash_chunked(input, len, key, flags, outputs, platform);
     }
     #[cfg(blake3_neon_hybrid)]
     if (CHUNK_LEN + 1..=2 * CHUNK_LEN).contains(&len) && outputs.len() >= 2 && neon_plans() {
-        return hash_two_chunks(input, len, outputs);
+        return hash_two_chunks(input, len, key, flags, outputs);
     }
     if outputs.len() < 2 || len > CHUNK_LEN {
         for (i, output) in outputs.iter_mut().enumerate() {
-            *output = *crate::hash_serial_on(&input[i * slot..][..len], IV, 0, platform).as_bytes();
+            *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
         }
         return;
     }
@@ -72,22 +73,22 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, outputs: &mut [[u8; OUT_LEN
     let last_len = len - (slot - BLOCK_LEN);
     for (messages, digests) in input.chunks(slot * TABLE).zip(outputs.chunks_mut(TABLE)) {
         match slot / BLOCK_LEN {
-            1 => hash_run_short::<{ BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            2 => hash_blocks::<{ 2 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            3 => hash_blocks::<{ 3 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            4 => hash_blocks::<{ 4 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            5 => hash_blocks::<{ 5 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            6 => hash_blocks::<{ 6 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            7 => hash_blocks::<{ 7 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            8 => hash_blocks::<{ 8 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            9 => hash_blocks::<{ 9 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            10 => hash_blocks::<{ 10 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            11 => hash_blocks::<{ 11 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            12 => hash_blocks::<{ 12 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            13 => hash_blocks::<{ 13 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            14 => hash_blocks::<{ 14 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            15 => hash_blocks::<{ 15 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
-            16 => hash_blocks::<{ 16 * BLOCK_LEN }>(messages, digests, platform, plans, last_len),
+            1 => hash_run_short::<{ BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            2 => hash_blocks::<{ 2 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            3 => hash_blocks::<{ 3 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            4 => hash_blocks::<{ 4 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            5 => hash_blocks::<{ 5 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            6 => hash_blocks::<{ 6 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            7 => hash_blocks::<{ 7 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            8 => hash_blocks::<{ 8 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            9 => hash_blocks::<{ 9 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            10 => hash_blocks::<{ 10 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            11 => hash_blocks::<{ 11 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            12 => hash_blocks::<{ 12 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            13 => hash_blocks::<{ 13 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            14 => hash_blocks::<{ 14 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            15 => hash_blocks::<{ 15 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
+            16 => hash_blocks::<{ 16 * BLOCK_LEN }>(messages, key, flags, digests, platform, plans, last_len),
             _ => unreachable!("messages of up to a chunk"),
         }
     }
@@ -131,7 +132,7 @@ fn chunked(len: usize) -> bool {
 /// them, and otherwise run through hash() one at a time, first.
 #[cfg(blake3_sme2)]
 #[inline(never)]
-fn hash_chunked(input: &[u8], len: usize, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
+fn hash_chunked(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
     const GROUP: usize = 16;
     let slot = slot_len(len);
     let left = outputs.len() % GROUP;
@@ -143,7 +144,7 @@ fn hash_chunked(input: &[u8], len: usize, outputs: &mut [[u8; OUT_LEN]], platfor
     let grouped = outputs.len() - alone;
     let (groups, rest) = outputs.split_at_mut(grouped);
     for (i, output) in rest.iter_mut().enumerate() {
-        *output = *crate::hash_serial_on(&input[(grouped + i) * slot..][..len], IV, 0, platform).as_bytes();
+        *output = *crate::hash_serial_on(&input[(grouped + i) * slot..][..len], key, flags, platform).as_bytes();
     }
     for (g, digests) in groups.chunks_mut(GROUP).enumerate() {
         let mut lanes = [core::ptr::null::<u8>(); GROUP];
@@ -153,7 +154,7 @@ fn hash_chunked(input: &[u8], len: usize, outputs: &mut [[u8; OUT_LEN]], platfor
         }
         // Sound: the caller found SME2 (platform_is_sme2), and every lane
         // points at a whole slot inside `input`, zero past its message.
-        unsafe { crate::sme2::hash_chunked_messages(&lanes, len, IV, digests.as_flattened_mut()) };
+        unsafe { crate::sme2::hash_chunked_messages(&lanes, len, key, flags, digests.as_flattened_mut()) };
     }
 }
 
@@ -168,7 +169,7 @@ fn hash_chunked(input: &[u8], len: usize, outputs: &mut [[u8; OUT_LEN]], platfor
 /// B x 4 824 (Mac P-core 914 against servil's 1050 before, job 283).
 #[cfg(blake3_neon_hybrid)]
 #[inline(never)]
-fn hash_two_chunks(input: &[u8], len: usize, outputs: &mut [[u8; OUT_LEN]]) {
+fn hash_two_chunks(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]]) {
     use crate::PARENT;
     let slot = slot_len(len);
     let second = len - CHUNK_LEN;
@@ -192,8 +193,8 @@ fn hash_two_chunks(input: &[u8], len: usize, outputs: &mut [[u8; OUT_LEN]]) {
         // the SHA-3 extension (neon_plans).
         unsafe {
             let firsts = core::slice::from_raw_parts(firsts.as_ptr() as *const &[u8; CHUNK_LEN], count);
-            crate::neon_hybrid::hash_many_last_len(firsts, IV, 0, IncrementCounter::No, 0, CHUNK_START, CHUNK_END, BLOCK_LEN, cvs[..count].as_flattened_mut());
-            crate::neon_hybrid::hash_messages_raw(seconds.as_ptr() as *const *const u8, count, second_blocks, IV, 1, CHUNK_START, CHUNK_END, last_len, cvs[count..2 * count].as_flattened_mut());
+            crate::neon_hybrid::hash_many_last_len(firsts, key, 0, IncrementCounter::No, flags, CHUNK_START, CHUNK_END, BLOCK_LEN, cvs[..count].as_flattened_mut());
+            crate::neon_hybrid::hash_messages_raw(seconds.as_ptr() as *const *const u8, count, second_blocks, key, 1, flags, CHUNK_START, CHUNK_END, last_len, cvs[count..2 * count].as_flattened_mut());
         }
         for (i, pair) in pairs[..count].iter_mut().enumerate() {
             pair[..OUT_LEN].copy_from_slice(&cvs[i]);
@@ -201,7 +202,7 @@ fn hash_two_chunks(input: &[u8], len: usize, outputs: &mut [[u8; OUT_LEN]]) {
         }
         let parents: arrayvec::ArrayVec<&[u8; BLOCK_LEN], GROUP> = pairs[..count].iter().collect();
         // Sound: as above.
-        unsafe { crate::neon_hybrid::hash_many_last_len(&parents, IV, 0, IncrementCounter::No, PARENT, 0, ROOT, BLOCK_LEN, digests.as_flattened_mut()) };
+        unsafe { crate::neon_hybrid::hash_many_last_len(&parents, key, 0, IncrementCounter::No, flags | PARENT, 0, ROOT, BLOCK_LEN, digests.as_flattened_mut()) };
     }
 }
 
@@ -226,10 +227,10 @@ pub(crate) fn sme2_sized(len: usize, count: usize) -> bool {
 /// 64-byte messages took 30% longer (VM, bench-hashes); out of line they
 /// cost what they did before.
 #[inline(never)]
-fn hash_run<const N: usize>(messages: &[u8], outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
+fn hash_run<const N: usize>(messages: &[u8], key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
     #[cfg(blake3_sme2)]
     if platform_is_sme2(platform) && outputs.len() % 16 >= if outputs.len() > 16 { ONE_BLOCK_PAD_AFTER_GROUPS } else { ONE_BLOCK_PAD_MIN } {
-        return hash_run_padded::<N>(messages, outputs, BLOCK_LEN);
+        return hash_run_padded::<N>(messages, key, flags, outputs, BLOCK_LEN);
     }
     let mut table: [core::mem::MaybeUninit<&[u8; N]>; TABLE] = [core::mem::MaybeUninit::uninit(); TABLE];
     for (slot, message) in table[..outputs.len()].iter_mut().zip(messages.chunks_exact(N)) {
@@ -237,18 +238,18 @@ fn hash_run<const N: usize>(messages: &[u8], outputs: &mut [[u8; OUT_LEN]], plat
     }
     // Sound: the first outputs.len() slots were written just above.
     let filled: &[&[u8; N]] = unsafe { core::slice::from_raw_parts(table.as_ptr() as *const &[u8; N], outputs.len()) };
-    platform.hash_many::<N>(filled, IV, 0, IncrementCounter::No, CHUNK_START | CHUNK_END | ROOT, 0, 0, outputs.as_flattened_mut());
+    platform.hash_many::<N>(filled, key, 0, IncrementCounter::No, flags | CHUNK_START | CHUNK_END | ROOT, 0, 0, outputs.as_flattened_mut());
 }
 
 /// One-block messages on SME2, every group on the message kernel, the
 /// last one padded, their last block `last_len` bytes.
 #[cfg(blake3_sme2)]
 #[inline(never)]
-fn hash_run_padded<const N: usize>(messages: &[u8], outputs: &mut [[u8; OUT_LEN]], last_len: usize) {
+fn hash_run_padded<const N: usize>(messages: &[u8], key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], last_len: usize) {
     let mut slots: Slots<N> = [core::mem::MaybeUninit::uninit(); TABLE + 16];
     let lanes = fill_table(&mut slots, messages, outputs.len(), outputs.len().next_multiple_of(16));
     // Sound: the caller found SME2 (platform_is_sme2).
-    unsafe { crate::sme2::hash_messages::<N>(lanes, IV, 0, CHUNK_START, CHUNK_END | ROOT, last_len, outputs.as_flattened_mut()) };
+    unsafe { crate::sme2::hash_messages::<N>(lanes, key, flags, CHUNK_START, CHUNK_END | ROOT, last_len, outputs.as_flattened_mut()) };
 }
 
 /// [`hash_run`] for messages of 1 to 63 bytes (one short block): on SME2
@@ -256,18 +257,18 @@ fn hash_run_padded<const N: usize>(messages: &[u8], outputs: &mut [[u8; OUT_LEN]
 /// records 64 for every block), else the NEON plans, or one call each
 /// without them.
 #[inline(never)]
-fn hash_run_short<const N: usize>(messages: &[u8], outputs: &mut [[u8; OUT_LEN]], platform: Platform, plans: bool, last_len: usize) {
+fn hash_run_short<const N: usize>(messages: &[u8], key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform, plans: bool, last_len: usize) {
     #[cfg(blake3_sme2)]
     if platform_is_sme2(platform) && outputs.len() >= ONE_BLOCK_PAD_MIN {
-        return hash_run_padded::<N>(messages, outputs, last_len);
+        return hash_run_padded::<N>(messages, key, flags, outputs, last_len);
     }
     if plans {
         let mut slots: Slots<N> = [core::mem::MaybeUninit::uninit(); TABLE + 16];
         let lanes = fill_table(&mut slots, messages, outputs.len(), outputs.len());
-        neon_plans_last_len::<N>(lanes, last_len, outputs);
+        neon_plans_last_len::<N>(lanes, key, flags, last_len, outputs);
     } else {
         for (output, message) in outputs.iter_mut().zip(messages.chunks_exact(N)) {
-            *output = *crate::hash_serial_on(&message[..last_len], IV, 0, platform).as_bytes();
+            *output = *crate::hash_serial_on(&message[..last_len], key, flags, platform).as_bytes();
         }
     }
 }
@@ -317,15 +318,15 @@ fn fill_table<'a, 's, const N: usize>(slots: &'s mut Slots<'a, N>, messages: &'a
 /// The integer + NEON parent plans over `lanes`, each message's last block
 /// `last_len` bytes.
 #[inline(always)]
-fn neon_plans_last_len<const N: usize>(lanes: &[&[u8; N]], last_len: usize, outputs: &mut [[u8; OUT_LEN]]) {
+fn neon_plans_last_len<const N: usize>(lanes: &[&[u8; N]], key: &CVWords, flags: u8, last_len: usize, outputs: &mut [[u8; OUT_LEN]]) {
     #[cfg(blake3_neon_hybrid)]
     // Sound: the caller found the SHA-3 extension (neon_plans).
     unsafe {
-        crate::neon_hybrid::hash_many_last_len(lanes, IV, 0, IncrementCounter::No, 0, CHUNK_START, CHUNK_END | ROOT, last_len, outputs.as_flattened_mut())
+        crate::neon_hybrid::hash_many_last_len(lanes, key, 0, IncrementCounter::No, flags, CHUNK_START, CHUNK_END | ROOT, last_len, outputs.as_flattened_mut())
     };
     #[cfg(not(blake3_neon_hybrid))]
     {
-        let _ = (lanes, last_len, outputs);
+        let _ = (lanes, key, flags, last_len, outputs);
         unreachable!("the NEON plans exist on AArch64 alone");
     }
 }
@@ -347,7 +348,7 @@ fn neon_plans_last_len<const N: usize>(lanes: &[&[u8; N]], last_len: usize, outp
 ///   blocks: four at a time, a fourth, spare lane for three left over, the
 ///   integer kernel for one or two; with a short last block, one call each.
 #[inline(never)]
-fn hash_blocks<const N: usize>(messages: &[u8], outputs: &mut [[u8; OUT_LEN]], platform: Platform, plans: bool, last_len: usize) {
+fn hash_blocks<const N: usize>(messages: &[u8], key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform, plans: bool, last_len: usize) {
     const GROUP: usize = 16;
     let count = outputs.len();
     if count == 0 {
@@ -365,12 +366,12 @@ fn hash_blocks<const N: usize>(messages: &[u8], outputs: &mut [[u8; OUT_LEN]], p
     if !rest.is_empty() {
         let rest_lanes = &table[on_sme2..count];
         if plans {
-            neon_plans_last_len::<N>(rest_lanes, last_len, rest);
+            neon_plans_last_len::<N>(rest_lanes, key, flags, last_len, rest);
         } else if last_len == BLOCK_LEN {
-            hash_four_at_a_time::<N>(rest_lanes, rest, platform);
+            hash_four_at_a_time::<N>(rest_lanes, key, flags, rest, platform);
         } else {
             for (output, message) in rest.iter_mut().zip(rest_lanes) {
-                *output = *crate::hash_serial_on(&message[..(N - BLOCK_LEN) + last_len], IV, 0, platform).as_bytes();
+                *output = *crate::hash_serial_on(&message[..(N - BLOCK_LEN) + last_len], key, flags, platform).as_bytes();
             }
         }
     }
@@ -379,7 +380,7 @@ fn hash_blocks<const N: usize>(messages: &[u8], outputs: &mut [[u8; OUT_LEN]], p
         // Sound: platform_is_sme2 means detect() found SME2 with 512-bit
         // streaming vectors.
         let sme2_lanes = &table[..if padded { lanes } else { on_sme2 }];
-        unsafe { crate::sme2::hash_messages::<N>(sme2_lanes, IV, 0, CHUNK_START, CHUNK_END | ROOT, last_len, groups.as_flattened_mut()) };
+        unsafe { crate::sme2::hash_messages::<N>(sme2_lanes, key, flags, CHUNK_START, CHUNK_END | ROOT, last_len, groups.as_flattened_mut()) };
     }
     #[cfg(not(blake3_sme2))]
     let _ = groups;
@@ -391,20 +392,20 @@ fn hash_blocks<const N: usize>(messages: &[u8], outputs: &mut [[u8; OUT_LEN]], p
 /// one or two (256 B, VM: 2 messages took 7% longer than a loop of hash()
 /// on the kernel, which hashes a remainder in portable code).
 #[inline(never)]
-fn hash_four_at_a_time<const N: usize>(lanes: &[&[u8; N]], outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
-    let (flags, start, end) = (0, CHUNK_START, CHUNK_END | ROOT);
+fn hash_four_at_a_time<const N: usize>(lanes: &[&[u8; N]], key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
+    let (start, end) = (CHUNK_START, CHUNK_END | ROOT);
     let fours = lanes.len() / 4 * 4;
-    platform.hash_many::<N>(&lanes[..fours], IV, 0, IncrementCounter::No, flags, start, end, outputs[..fours].as_flattened_mut());
+    platform.hash_many::<N>(&lanes[..fours], key, 0, IncrementCounter::No, flags, start, end, outputs[..fours].as_flattened_mut());
     match lanes.len() - fours {
         3 => {
             let spare = [lanes[fours], lanes[fours + 1], lanes[fours + 2], lanes[fours + 2]];
             let mut digests = [[0u8; OUT_LEN]; 4];
-            platform.hash_many::<N>(&spare, IV, 0, IncrementCounter::No, flags, start, end, digests.as_flattened_mut());
+            platform.hash_many::<N>(&spare, key, 0, IncrementCounter::No, flags, start, end, digests.as_flattened_mut());
             outputs[fours..].copy_from_slice(&digests[..3]);
         }
         _ => {
             for (output, message) in outputs[fours..].iter_mut().zip(&lanes[fours..]) {
-                *output = *crate::hash_serial_on(&message[..], IV, 0, platform).as_bytes();
+                *output = *crate::hash_serial_on(&message[..], key, flags, platform).as_bytes();
             }
         }
     }
@@ -509,7 +510,7 @@ mod test {
                 for &platform in &platforms {
                     // Sixteen sentinels past the end catch a spare lane's store.
                     let mut out = vec![[0xAAu8; OUT_LEN]; count + 16];
-                    hash_many_on(&input, len, &mut out[..count], platform);
+                    hash_many_on(&input, len, crate::IV, 0, &mut out[..count], platform);
                     assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count} x {len} B: a store past the last output");
                     for (i, digest) in out[..count].iter().enumerate() {
                         assert_eq!(*digest, *crate::hash(message(&input, len, i)).as_bytes(), "{platform:?}, message {i} of {count}, {len} bytes");
@@ -545,7 +546,7 @@ mod test {
                 let input = messages(len, count);
                 for &platform in &platforms {
                     let mut out = vec![[0xAAu8; OUT_LEN]; count + 16];
-                    hash_many_on(&input, len, &mut out[..count], platform);
+                    hash_many_on(&input, len, crate::IV, 0, &mut out[..count], platform);
                     assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count} x {len} B: a store past the last output");
                     for (i, digest) in out[..count].iter().enumerate() {
                         assert_eq!(*digest, *crate::test::reference_hash(message(&input, len, i)).as_bytes(), "{platform:?}, message {i} of {count}, {len} bytes");
@@ -569,7 +570,7 @@ mod test {
             let input = messages(4 * BLOCK_LEN, count);
             for &platform in &platforms {
                 let mut out = vec![[0xAAu8; OUT_LEN]; count + 16];
-                hash_blocks::<{ 4 * BLOCK_LEN }>(&input, &mut out[..count], platform, false, BLOCK_LEN);
+                hash_blocks::<{ 4 * BLOCK_LEN }>(&input, crate::IV, 0, &mut out[..count], platform, false, BLOCK_LEN);
                 assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count}: a store past the last output");
                 for (i, digest) in out[..count].iter().enumerate() {
                     assert_eq!(*digest, *crate::hash(message(&input, 256, i)).as_bytes(), "{platform:?}, message {i} of {count}");
@@ -594,10 +595,48 @@ mod test {
                 let input = messages(len, count);
                 for &platform in &platforms {
                     let mut out = vec![[0xAAu8; OUT_LEN]; count + 16];
-                    hash_many_on(&input, len, &mut out[..count], platform);
+                    hash_many_on(&input, len, crate::IV, 0, &mut out[..count], platform);
                     assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count} x {len} B: a store past the last output");
                     for (i, digest) in out[..count].iter().enumerate() {
                         assert_eq!(*digest, *crate::hash(message(&input, len, i)).as_bytes(), "{platform:?}, message {i} of {count}, {len} bytes");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The keyed and derive-key modes through every batch path on every
+    /// platform this CPU has (one-block runs, short blocks, whole blocks,
+    /// two chunks, 2-15 chunks, longer messages, the C NEON arrangement),
+    /// against keyed_hash() and derive_key() one message at a time.
+    #[test]
+    fn test_hash_many_modes_every_platform() {
+        #[allow(unused_mut)]
+        let mut platforms = vec![Platform::detect(), Platform::Portable];
+        #[cfg(blake3_neon)]
+        platforms.push(Platform::neon().expect("NEON on AArch64"));
+        let key = [0x5Au8; crate::KEY_LEN];
+        let context = "blake3-servil many modes test";
+        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let modes: [(CVWords, u8, &dyn Fn(&[u8]) -> [u8; OUT_LEN]); 2] = [
+            (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH, &|m| *crate::keyed_hash(&key, m).as_bytes()),
+            (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL, &|m| crate::derive_key(context, m)),
+        ];
+        for len in [0, 1, 63, BLOCK_LEN, 100, 256, 1000, CHUNK_LEN, CHUNK_LEN + 1, 2000, 2 * CHUNK_LEN, 4000, 15 * CHUNK_LEN, 16 * CHUNK_LEN + 5] {
+            for count in [1, 2, 3, 4, 5, 10, 11, 12, 16, 17, 21, 33, 129] {
+                let input = messages(len, count);
+                for (key_words, flags, one) in &modes {
+                    let want: Vec<[u8; OUT_LEN]> = (0..count).map(|i| one(message(&input, len, i))).collect();
+                    for &platform in &platforms {
+                        let mut out = vec![[0u8; OUT_LEN]; count];
+                        hash_many_on(&input, len, key_words, *flags, &mut out, platform);
+                        assert_eq!(out, want, "{platform:?}, flags {flags}, {count} x {len} B");
+                    }
+                    #[cfg(blake3_neon_hybrid)]
+                    if len == 4 * BLOCK_LEN {
+                        let mut out = vec![[0u8; OUT_LEN]; count];
+                        hash_blocks::<{ 4 * BLOCK_LEN }>(&input, key_words, *flags, &mut out, Platform::neon().unwrap(), false, BLOCK_LEN);
+                        assert_eq!(out, want, "the C NEON arrangement, flags {flags}, {count} x {len} B");
                     }
                 }
             }
