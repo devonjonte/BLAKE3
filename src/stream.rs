@@ -140,6 +140,9 @@ fn keep_link(link: Link) {
 
 /// A hash computed behind the caller: fill the stream's buffers, and a
 /// hashing thread hashes each full one while the caller fills the next.
+/// Built for top speed on a long input, single-threaded or multithreaded:
+/// the fastest way to hash one, for a caller that keeps it fed (see
+/// [For best performance](crate#for-best-performance)).
 /// [`finalize`](Stream::finalize) returns the same [`Hash`] as [`crate::hash`]
 /// of all the bytes filled, in order.
 ///

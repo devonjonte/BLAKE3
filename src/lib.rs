@@ -32,6 +32,23 @@
 //!
 //! # For best performance
 //!
+//! Each hashing interface says what it is built for:
+//!
+//! - **Top speed:** [`hash`], [`hash_many`], and [`Stream`] are the
+//!   fastest way to do their task for a caller that keeps them fed: the
+//!   whole input in one call, the whole batch in one call, and a long
+//!   input read straight into the stream.
+//! - **A low worst case:** [`hash_multithreaded`] and
+//!   [`hash_many_multithreaded`] use other cores only where waking them
+//!   pays on every machine measured, run no slower than their
+//!   single-threaded forms, and leave nothing running between calls, so a
+//!   program that hashes now and then pays nothing while it waits. A
+//!   program with a stream of inputs gets top speed by handing them over
+//!   together: one [`Stream`] for one long input, one batch for many
+//!   messages of one length.
+//!
+//! And by situation:
+//!
 //! - **Input in memory: one call.** [`hash`] on the whole input runs
 //!   fastest on one thread, and [`hash_multithreaded`] on inputs of 768 KiB
 //!   and more when the program can spare the CPUs (8 MiB: about 6x
@@ -54,6 +71,12 @@
 //!   spread the work themselves. On Apple M4 and later, several threads
 //!   hashing at once share one SME unit: one runs at full speed and the
 //!   others slower.
+//! - **Idle time slows the next hash, on the machine's side.** After half
+//!   a millisecond or more without work, an M4 Max runs a core's next
+//!   85 µs or so of work at about a third of its clock (hashing 64 KiB:
+//!   41 µs instead of 13.5), and for longer after 100 ms. A program that
+//!   hashes now and then meets this whatever it calls; spinning instead of
+//!   sleeping lowers the clock too.
 //! - **For the least energy**, hash single-threaded, and at background
 //!   priority (macOS: `QOS_CLASS_BACKGROUND`) when the time allows: on an
 //!   M4 Max, E-cores hash a byte for about an eighth of the energy that
@@ -1143,6 +1166,8 @@ fn hash_all_at_once<J: join::Join>(
 
 /// The default hash function.
 ///
+/// Built for top speed: the fastest way to do this task, for a caller that keeps it fed (see [For best performance](crate#for-best-performance)).
+///
 /// For an incremental version that accepts multiple writes, see [`Hasher::new`],
 /// [`Hasher::update`], and [`Hasher::finalize`]. These two lines are equivalent:
 ///
@@ -1170,6 +1195,8 @@ pub fn hash(input: &[u8]) -> Hash {
 }
 
 /// The default hash function over several threads.
+///
+/// Built for a low worst case: it uses other cores only where waking them pays on every machine measured, runs no slower than its single-threaded form, and leaves nothing running between calls (see [For best performance](crate#for-best-performance)).
 ///
 /// Returns the same [`Hash`](struct@Hash) as [`hash`] for every input. Inputs below
 /// 768 KiB are hashed on the calling thread alone, at [`hash`]'s speed.
@@ -1263,7 +1290,9 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
     hash_all_at_once::<join::SerialJoin>(input, key, 0, flags, platform).root_hash()
 }
 
-/// Many messages of one length, each starting at a multiple of 64 bytes:
+/// Many messages of one length, each starting at a multiple of 64 bytes.
+/// Built for top speed: the fastest way to do this task, for a caller that keeps it fed (see [For best performance](crate#for-best-performance)).
+///
 /// `out[i]` becomes the [`hash`] of `input[i * stride..][..message_len]`,
 /// where `stride` is `message_len` rounded up to a multiple of 64 (64 for
 /// an empty message). `input` holds exactly `out.len()` strides, and the
@@ -1302,8 +1331,9 @@ pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
     many::hash_many_on(input, message_len, out, turn.platform());
 }
 
-/// [`hash_many`] over several threads. Writes the same digests for every
-/// batch. Batches under 768 KiB in all are hashed on the calling thread
+/// [`hash_many`] over several threads. Built for a low worst case: it uses other cores only where waking them pays on every machine measured, runs no slower than its single-threaded form, and leaves nothing running between calls (see [For best performance](crate#for-best-performance)).
+///
+/// Writes the same digests for every batch. Batches under 768 KiB in all are hashed on the calling thread
 /// alone, at [`hash_many`]'s speed. Larger batches are cut into ranges of
 /// messages that the calling thread and this crate's worker threads hash
 /// at once, under the same rules as [`hash_multithreaded`]: the workers
