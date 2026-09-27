@@ -565,9 +565,18 @@ deliverer. Each stream also starts with the engine's wake (2 us on the
 Mac, 8 on the VM) and, for its later pieces, the workers' (3-7 us Mac,
 15-18 VM): the feed retires between streams. A worker taking the SME2
 turn for a feed task: VM 4 MiB streams 156 -> 186 ns/KiB (the SME unit's
-slow state, as for SME2 pieces handed out one at a time). Next: a
-delivery thread apart from the engine (the plan's design), so the engine
-can hash on SME2 without holding deliveries.
+slow state, as for SME2 pieces handed out one at a time). With the
+engine's help taking the turn too, so one thread at a time runs SME2
+(probe/queue-sme2-turn): the probe on the Mac read 256 KiB streams 51.0
+-> 44.5 us (job 437), but the benchmark (jobs 438-441, A B B A) read
+level in one process (256 KiB streamed 0.191 against 0.190 ns/B) and in
+the other every servil mt cell 1.1-3.5x slower, 64 B inputs included,
+which never reach the feed (servil st level): a process-wide slow state
+the change brings on, unexplained; the VM 50% slower on long streams.
+Dropped. Next: a delivery thread apart from the engine (the plan's
+design), so the engine can hash on SME2 without holding deliveries; its
+cost, a second wake in series for the inputs hashed at delivery, needs
+a design that keeps small inputs on one wake.
 
 **The queue's small inputs: two wakes per round trip** (open, for
 Zooko). The benchmark's program cycles four buffers and blocks on its
