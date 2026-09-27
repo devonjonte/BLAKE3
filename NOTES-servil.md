@@ -685,6 +685,30 @@ recovery) and what it costs st and mt. The per-core-kind split
 of `clocks::Counts` over calls of 20-400 µs is unchecked (it read
 "100% E" at 3.5 GHz, beyond an E-core's clock).
 
+**The clock after a pause, measured** (September 27, 2026, jobs 358 and
+359 alike, `probe/clock-pauses`, M4 Max on mains, user-interactive QoS;
+each trial 20 ms of back-to-back calls, a pause, then calls one by one;
+median of 15). hash(64 KiB), warm 13.5 µs at 3.2 GHz:
+- Sleeps of 20-200 µs cost nothing.
+- Sleeps of 500 µs to 20 ms: the first two calls run at about 1.06 GHz
+  (41-42 µs each), then the clock returns by the third to fifth call:
+  about 85 µs of work at a third of the speed. Predictable, and the
+  machine's: macOS lowers an idle core's clock after about half a
+  millisecond and raises it again after about 85 µs of work.
+- A sleep of 100 ms: the calls stay at about 1.9 GHz (22 µs) through all
+  40 calls.
+- A 1 ms spin (`std::hint::spin_loop`) instead of a sleep: the calls
+  after it run at 2.5 GHz (17 µs) through all 40. The pool's pollers spin
+  this way, so a worker that polled may hash at a lower clock; its own
+  clock is unmeasured so far (the probe reads the caller's).
+The first call after the pause, st against mt (µs): pauses of at most
+100 µs, 64 KiB 13.5 against 4.5-5.5, 1 MiB 153 against 31-36; 200 µs
+(the workers just asleep, the caller still fast), 64 KiB 13.5 against
+25-30, mt's worst ratio and entirely ours; 1-5 ms, 64 KiB 41 against
+48-76, 1 MiB 213 against 130-145; 20-100 ms, 64 KiB 41-43 against
+100-117, 1 MiB 234-542 against 146-514. The pool pays from 1 MiB after
+any pause and never at 64 KiB once its workers sleep.
+
 **The minimax list**: `pypy3 tools/losses.py <samples.tsv>`; compares
 medians (servil against single-threaded contenders, servil mt against
 all); marks two-speed cells.
