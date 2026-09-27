@@ -20,7 +20,7 @@ The streaming APIs are **built for efficiency**; every other API is
 | one buffer in memory, other latencies around it | a file already read, a message received | `hash_multithreaded` (recommended), or `hash` |
 | many messages of one length | an index of records, a layer of a tree | `hash_many_multithreaded` (recommended), or `hash_many` |
 | one long input arriving in pieces, simply | a reader, a decompressor | `Hasher::update`, `update_reader` |
-| one long input arriving in pieces, top speed | a file server, a backup tool | `Queue`, each piece `End::More` until the last |
+| one long input arriving in pieces, top speed | a file server, a backup tool | `Queue::pieces` |
 | many separate inputs arriving, top speed | a content-addressed store, per-object digests over a network | `Queue` (below) |
 | authenticated or derived | a MAC, a per-tenant key, a KDF | the keyed and derive-key form of each shape |
 | saving energy, seriously | a laptop on battery, a fleet billed for power | the queue, efficient in energy |
@@ -96,55 +96,91 @@ between one message's end and the next one's start; any message length.
 ## The queue: streaming without copies
 
 Decided with Zooko (September 27, 2026): Merkle trees are out for now;
-one queue type serves every streaming shape; the engine is one per
-process, and a queue is a handle onto it.
+the engine is one per process and a queue is a handle onto it; the queue
+takes its shape; results arrive as calls to a handler the user
+implements, from one delivery thread; no polling and no blocking.
 
 - **The engine**: the process-wide singleton (one pool, its hashing
-  threads, the SME2 unit's turn). It starts with the first queue, or
-  earlier with `initialize_multithreaded()`; the user never makes or
-  configures it. (The user keeps competing processes off the machine if
-  that matters to him.)
-- **A queue**: a cheap handle holding one stream of work's own state: its
-  mode and key, its efficiency choice, its message in progress, and the
-  order its digests return in. Threads of a program with streams of their
-  own make a queue each; the engine serves the queues in turn, as the pool
-  serves concurrent callers.
+  threads, the SME2 unit's turn, and one delivery thread). It starts with
+  the first queue, or earlier with `initialize_multithreaded()`; the user
+  never makes or configures it. (The user keeps competing processes off
+  the machine if that matters to him.)
+- **A queue**: a cheap handle for one stream of work, made for one shape,
+  holding its mode and key, its efficiency choice (`Efficiency::Time`:
+  every core; `Efficiency::Energy`: one thread, the E-core-friendly way),
+  its message in progress, and its handler. A program with streams of
+  several shapes, or on several threads, makes a queue each; the engine
+  serves the queues in turn.
 - **Buffers pass by ownership**, as Rust's io_uring libraries do: the
   program cycles a fixed set of buffers (fill one, for a file or socket by
-  the `read` itself; submit it; get it back with its digests; fill it
-  again). No copy, no allocation per input, one handoff per buffer.
-- **Each submission says what the buffer holds**, so one type serves
-  every shape: the end of a message, the message continuing in the next
-  buffer, or k messages of one length back to back (k digests, batched).
+  the `read` itself; submit it; get it back in a handler call; fill it
+  again). No copy, no allocation per input. `submit` returns at once.
+- **Back-pressure is the program's own buffers**: every buffer comes back
+  through the handler, so the buffers in flight never exceed the number
+  the program made; a program out of buffers waits for its next handler
+  call, as an io_uring program waits for its next completion.
+
+The three shapes, each with its handler trait (one set of calls resolved
+at compile time: `Queue<H>`):
 
 ```rust
-let mut queue = Queue::new(Mode::Hash, Efficiency::Time);  // or Efficiency::Energy
-queue.submit(buffer, End::Message);   // T: AsRef<[u8]> + Send + 'static; blocks while the budget is full
-queue.submit(buffer, End::More);      // the message continues in the next buffer
-queue.submit_fixed(buffer, len);      // len-byte messages back to back
-queue.try_submit(buffer, End::Message)?;  // or returns the buffer at once when full
-while let Some((buffer, digests)) = queue.ready() { /* in submission order */ }
-for (buffer, digests) in queue.finish() { /* the rest */ }
+pub trait MessageHandler: Send + 'static {        // messages of any length, one per buffer
+    type Buffer: AsRef<[u8]> + Send + 'static;
+    fn hashed(&mut self, buffer: Self::Buffer, hash: Hash);
+}
+pub trait PieceHandler: Send + 'static {          // one long message in pieces
+    type Buffer: AsRef<[u8]> + Send + 'static;
+    fn piece_done(&mut self, buffer: Self::Buffer);
+    fn finished(&mut self, hash: Hash);
+}
+pub trait FixedHandler: Send + 'static {          // messages of one length, back to back
+    type Buffer: AsRef<[u8]> + Send + 'static;
+    type Digests: AsMut<[[u8; 32]]> + Send + 'static;
+    fn hashed(&mut self, buffer: Self::Buffer, digests: Self::Digests);
+}
+
+let queue = Queue::messages(Mode::Hash, Efficiency::Time, handler);
+queue.submit(buffer);
+let queue = Queue::pieces(Mode::Hash, Efficiency::Time, handler);
+queue.submit(piece);                    // in order; queue.finish() ends the message
+let queue = Queue::fixed(64, Mode::Hash, Efficiency::Time, handler);
+queue.submit(buffer, digests);          // the digests' space is the caller's too, returned with the buffer
 ```
 
-- **Budget** (the back-pressure): bytes in flight, a few MiB by default.
-- **Efficiency per queue**: a queue for time spreads over every core; a
-  queue for energy hashes on one thread, the E-core-friendly way (the
-  `efficient` module idea); one engine serves both.
+The handler contract:
+
+1. **Short, never blocking**: a slow handler delays the delivery of every
+   queue's results; heavy work goes to the program's own threads.
+2. **Order and exclusion**: a queue's handler is called in submission
+   order, one call at a time (so `&mut self`, no locking).
+3. **Calling back in**: `submit` from inside a handler is allowed (refill
+   and resubmit is the natural cycle); it never waits on the engine.
+4. **A panic in a handler aborts the process** (fail stop; a panic cannot
+   unwind through the engine's threads safely).
+5. **Dropping a queue cancels nothing**: buffers in flight are still
+   hashed and returned through the handler, which the engine keeps alive
+   until its last call; a handler never finished stays alive until the
+   process ends. Buffers always come back; nothing drops them silently.
+
+- **Delivery**: one delivery thread per engine takes results as the
+  hashing threads finish them, in any order, and calls each queue's
+  handler in submission order; hashing threads never run user code. It
+  sleeps when there is nothing to deliver, so a wake (about 3 µs on the
+  Mac) falls once per burst of results. Direct delivery from the hashing
+  threads is worth measuring against it later.
 - **Shared buffers**: an `Arc<[u8]>` submitted to us and to a writer at
   once serves both without a copy; it returns to its pool when the last
   user lets go.
-- **Inside**: the engine's hashing threads hold the pool while inputs
-  wait; inputs waiting together batch through `hash_many`'s kernels; large
-  ones split over the pool from 768 KiB. The handoff is a lock-free ring
-  of descriptors, a futex wake only when a side sleeps.
+- **Inside**: the engine's hashing threads keep the pool in the call while
+  inputs wait; inputs waiting together batch through `hash_many`'s
+  kernels; large ones split over the pool from 768 KiB. The handoffs are
+  lock-free rings of descriptors, a futex wake only when a side sleeps.
 
 **io_uring, as an optional Linux layer.** A read's completion hands its
-buffer to the queue; the queue's completions post into the program's own
-ring (`IORING_OP_MSG_RING`, Linux 5.18), so one `io_uring_wait` covers
-disk, network, and hashing; digests written into a program's buffer go
-out as a send. Elsewhere completions wake a condition variable (macOS: a
-kqueue event on request).
+buffer to the queue; a handler that posts into the program's own ring
+(`IORING_OP_MSG_RING`, Linux 5.18) makes one `io_uring_wait` cover disk,
+network, and hashing; digests written into a program's buffer go out as a
+send.
 
 **Chaining.** Any stage that passes buffers by ownership chains to the
 queue: a compressor's output buffer becomes the hasher's input.
