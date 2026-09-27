@@ -531,8 +531,17 @@ back-to-back effect; not measured natively.
 ## Rejected (with the reason; do not retry without new evidence)
 
 - **p4 as one NEON quad** (probe/p4-quad, September 27, 2026): four
-  64-byte messages 14% slower on the VM than two pairs; two scalars
-  beside a pair (taken, 642757f) was 13-14% faster on both machines.
+  64-byte messages 14% slower on the VM than two pairs.
+- **p4 as two scalar blocks beside a pair** (642757f, reverted in
+  9850a21): four 64-byte messages 13-14% faster on P-cores and the VM
+  (Mac 23.2 -> 20.3 ns/msg, ahead of official's 21.6), 30% more cycles on
+  E-cores (720 against 555 per call; 347 against 392 on P; jobs 396-399).
+  The rule above PARENT_PLANS holds: two scalar lanes stay out of parent
+  plans. **Measuring E-cores on this Mac**: in High Power mode threads at
+  background QoS stay on P-cores; keep 14 threads spinning at
+  user-interactive QoS and the background thread spends about a fifth of
+  its time on E; per-kind cycles per call = that kind's cycles per
+  instruction x instructions per call (probe/p4-base-ecore2).
 - **Wake fan-out as a tree** (probe/wake-half, September 27, 2026): each
   woken worker wakes the larger half of the owed sleepers instead of the
   first woken waking them all. Level on both machines (Mac jobs 369-372:
