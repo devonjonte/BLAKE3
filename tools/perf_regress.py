@@ -374,7 +374,9 @@ def side_bench(side, commit, shim=True):
     if not derived_from.exists() or derived_from.read_bytes() != committed:
         (copy / "Cargo.lock").write_bytes(committed)
         derived_from.write_bytes(committed)
-    env = {**ENV, "CARGO_TARGET_DIR": str(target_root() / f"perf-{side}")}
+    # The copy's provenance is the checkout it was copied from (bench-hashes'
+    # build.rs would otherwise ask git in the fork worktree around the copy).
+    env = {**ENV, "CARGO_TARGET_DIR": str(target_root() / f"perf-{side}"), "BENCH_HASHES_CHECKOUT": str(bench)}
     fork_version = re.search(r'(?m)^version = "([^"]+)"', (checkout / "Cargo.toml").read_text()).group(1)
     locked = re.search(r'name = "blake3-servil"\nversion = "([^"]+)"', (copy / "Cargo.lock").read_text()).group(1)
     if locked != fork_version:
