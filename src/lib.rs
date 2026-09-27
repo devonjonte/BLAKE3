@@ -1474,7 +1474,7 @@ pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
 
 /// [`hash_many`] in the mode of `key` and `flags`, on the calling thread.
 #[inline]
-fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]]) {
+pub(crate) fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]]) {
     let turn = platform::Sme2Turn::take(Platform::detect(), many::sme2_sized(message_len, out.len()));
     many::hash_many_on(input, message_len, key, flags, out, turn.platform());
 }

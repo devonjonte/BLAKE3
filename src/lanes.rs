@@ -871,16 +871,18 @@ pub(crate) const TASK_LEN: usize = 64 * CHUNK_LEN;
 
 /// One piece of a queue's work (crate::queue), hashed by whichever thread
 /// pops it from [`TASKS`]: a whole subtree at chunk `counter` of a message,
-/// as [`crate::plan_subtrees`] cuts it. Its result goes to `out`, then it
-/// counts down `left`; the queue keeps the bytes, `out`, and `left` in
-/// place until `left` is zero.
+/// as [`crate::plan_subtrees`] cuts it, its result a 64-byte block at `out`;
+/// or, with `batch` the messages' length, a range of a batch's messages in
+/// their slots, their digests at `out`. Then it counts down `left`; the
+/// queue keeps the bytes, `out`, and `left` in place until `left` is zero.
 pub(crate) struct Task {
     pub(crate) input: *const u8,
     pub(crate) len: usize,
     pub(crate) counter: u64,
+    pub(crate) batch: Option<usize>,
     pub(crate) key: crate::CVWords,
     pub(crate) flags: u8,
-    pub(crate) out: *mut [u8; crate::BLOCK_LEN],
+    pub(crate) out: *mut u8,
     pub(crate) left: *const AtomicUsize,
 }
 
@@ -891,7 +893,7 @@ impl Task {
     /// A task over `input` at chunk `counter`, its mode, kind, and
     /// destinations still to fill in.
     pub(crate) fn of(input: &[u8], counter: u64) -> Task {
-        Task { input: input.as_ptr(), len: input.len(), counter, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null() }
+        Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null() }
     }
 
     /// Hash on `platform` into `out`: for a subtree of two chunks or more at
@@ -900,7 +902,17 @@ impl Task {
     /// count down.
     pub(crate) fn run(self, platform: Platform) {
         // Sound: the queue keeps these in place until `left` is zero.
-        let (bytes, out) = unsafe { (core::slice::from_raw_parts(self.input, self.len), &mut *self.out) };
+        let bytes = unsafe { core::slice::from_raw_parts(self.input, self.len) };
+        if let Some(message_len) = self.batch {
+            let count = self.len / crate::many::slot_len(message_len);
+            // Sound: `out` holds a digest per message of the range.
+            let digests = unsafe { core::slice::from_raw_parts_mut(self.out as *mut [u8; crate::OUT_LEN], count) };
+            crate::many::hash_many_on(bytes, message_len, &self.key, self.flags, digests, platform);
+            unsafe { &*self.left }.fetch_sub(1, Ordering::Release);
+            return;
+        }
+        // Sound: a subtree's `out` is one 64-byte block.
+        let out = unsafe { &mut *(self.out as *mut [u8; crate::BLOCK_LEN]) };
         if self.counter == 0 && self.len > CHUNK_LEN {
             *out = crate::compress_subtree_to_parent_node::<crate::join::SerialJoin>(bytes, &self.key, 0, self.flags, platform);
         } else {
@@ -984,6 +996,9 @@ impl Tasks {
         list.extend(tasks);
         let queued = list.len();
         let in_flight = self.in_flight.fetch_add(queued - before, Ordering::SeqCst) + queued - before;
+        // Room for every task in flight, whatever the workers' timing: the
+        // list grows only when the program has more in flight than ever.
+        list.reserve(in_flight.saturating_sub(queued));
         self.queued.store(queued, Ordering::SeqCst);
         drop(list);
         if pool.sme2 && self.sme2_sleeps.load(Ordering::SeqCst) && *self.sme2_asleep.lock().unwrap() {
