@@ -1046,8 +1046,10 @@ impl Feed {
         }
         match self.job.claim() {
             Some(index) => {
+                // On SME2 only under the turn, as the workers take it.
+                let turn = crate::platform::Sme2Turn::take(platform, true);
                 // Sound: claimed through the cursor, so ours alone.
-                unsafe { self.job.hash_piece(index, platform) };
+                unsafe { self.job.hash_piece(index, turn.platform()) };
                 true
             }
             None => false,
@@ -1103,7 +1105,13 @@ fn worker_main(rank: usize) {
         let (job_ptr, index) = pool.next_piece(&mut start, rank);
         // Sound by the pool's contract: our active reservation keeps the job alive.
         let job = unsafe { &*job_ptr };
-        unsafe { job.hash_piece(index, pool_platform()) };
+        // A queue's task runs on SME2 when this worker gets the process's
+        // turn (one thread at a time): the SME unit hashes a 64 KiB piece
+        // in 14 us where NEON takes 22 (Mac, probe/queue-timeline, job 437).
+        let feed = matches!(job.work, Work::Feed(_));
+        let turn = crate::platform::Sme2Turn::take(Platform::detect(), feed);
+        unsafe { job.hash_piece(index, if feed { turn.platform() } else { pool_platform() }) };
+        drop(turn);
         pool.piece_done(&job.active);
     }
 }
