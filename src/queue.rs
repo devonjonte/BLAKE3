@@ -3,42 +3,42 @@
 //!
 //! # How it runs
 //!
-//! One engine thread per process serves every queue. A queue keeps its
-//! waiting submissions in a list of its own; a submission to an idle queue
-//! tells the engine the queue has work (one channel message, which wakes
-//! the engine if it sleeps), and further submissions while the queue waits
-//! or is served only join its list, so a busy queue costs no wakes.
+//! One mechanism: `submit` turns a submission into tasks on the caller's
+//! thread and returns; the pool's workers hash the tasks; one delivery
+//! thread hands the results back in order.
 //!
-//! With `Efficiency::Time`, the engine cuts each submission into
-//! independent tasks as it arrives (a message is one; a piece of a long
-//! message is the whole subtrees `Hasher::update` would hash in it, their
-//! chunk counters known from the piece's offset: `plan_subtrees`) and
-//! publishes them to the queue's feed (`lanes::Feed`), a pool job that
-//! stays registered while tasks are in flight: the pool's workers take
-//! them as they appear, the engine takes some itself, and the engine
-//! delivers from the front in submission order as each is done (a piece
-//! by replaying `Hasher::update` with its subtrees' results). A message or
-//! piece holding a subtree of `lanes::MIN_SPLIT_LEN` or more is hashed at
-//! delivery the one-shot way, over the pool, and so is one shorter than
-//! `FEED_MIN`, which costs less to hash than to hand over. Sleeping workers are woken
-//! only while `WAKE_MIN` bytes or more are in flight; with nothing in
-//! flight the feed retires and the workers sleep, so nothing runs between
-//! bursts for work that may come (AGENTS.md, "Serve real programs").
-//! `Efficiency::Energy` hashes each submission on the engine thread at
-//! delivery. A queue of fixed-length messages hashes each buffer at
-//! delivery through `hash_many`'s code.
+//! - **Submit.** The submission goes into the queue's list of entries, in
+//!   a box of its own (its bytes, results, and count of unfinished tasks
+//!   stay in place while workers read and write them). A message is one
+//!   task; a piece of a long message is the whole subtrees
+//!   `Hasher::update` would hash in it (`plan_subtrees`: their chunk
+//!   counters follow from the piece's offset). The tasks go onto the
+//!   pool's task list (`lanes::TASKS`), which wakes a sleeping worker per
+//!   task waiting.
+//! - **Hash.** Workers pop tasks while any wait; each writes its result
+//!   into its entry and counts down.
+//! - **Deliver.** The delivery thread takes each queue's front entry once
+//!   its count is zero and calls the handler (a piece by replaying
+//!   `Hasher::update` with its subtrees' results). Entries without tasks it
+//!   hashes itself when they reach the front: those shorter than
+//!   `TASK_MIN` (hashed faster than handed over), messages of
+//!   `lanes::MIN_SPLIT_LEN` or more and pieces of it (the one-shot way,
+//!   over the pool), batches of fixed-length messages, and everything with
+//!   `Efficiency::Energy`, which the delivery thread hashes alone. It polls
+//!   while any entry is in flight and sleeps when none is, so nothing runs
+//!   between bursts for work that may come (AGENTS.md, "Serve real
+//!   programs").
 //!
-//! The engine serves queues in the order they told it; a queue being
-//! served gives way after a delivery when another waits. The pool's
-//! workers never run user code; the engine does, in the handler calls.
+//! The pool's workers never run user code; the delivery thread does, in
+//! the handler calls.
 
-use crate::lanes::{Feed, Task};
+use crate::lanes::{TASKS, Task};
 use crate::{CVWords, Hash, Hasher, Mode, OUT_LEN};
 use std::any::Any;
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Condvar, Mutex};
 
 /// What a [`Queue`] spends to hash: time or energy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,13 +159,12 @@ pub struct Queue<H, S = shape::Messages> {
     shape: PhantomData<fn() -> (H, S)>,
 }
 
-/// One queue's state, shared by its handle and the engine.
+/// One queue's state, shared by its handle and the delivery thread.
 struct Inner<H, I, S> {
-    /// Submissions waiting for the engine, and whether the engine has been
-    /// told this queue has work (it is in the channel or being served).
-    pending: Mutex<Pending<I>>,
-    /// What the engine alone touches.
-    handling: Mutex<Handling<H, I>>,
+    /// The entries in flight, in submission order.
+    state: Mutex<State<I>>,
+    /// What the delivery thread alone touches.
+    handling: Mutex<Handling<H>>,
     key: CVWords,
     flags: u8,
     max_threads: usize,
@@ -174,34 +173,26 @@ struct Inner<H, I, S> {
     shape: PhantomData<fn() -> S>,
 }
 
-struct Pending<I> {
-    items: VecDeque<I>,
-    scheduled: bool,
+struct State<I> {
+    entries: VecDeque<Box<Entry<I>>>,
+    /// Where planning stands: past every piece submitted (the hasher
+    /// stands past the delivered ones).
+    plan: crate::PlanState,
+    /// Whether the delivery thread holds this queue (entries in flight).
+    active: bool,
 }
 
-/// What the engine alone touches: the handler, the message in progress (a
-/// queue of pieces), and the work in flight.
-struct Handling<H, I> {
+/// A submission in flight: its item, its tasks' results, and how many of
+/// its tasks are unfinished. No results: hashed at delivery.
+struct Entry<I> {
+    item: I,
+    results: Vec<[u8; crate::BLOCK_LEN]>,
+    left: AtomicUsize,
+}
+
+struct Handling<H> {
     handler: H,
     hasher: Hasher,
-    /// Submissions taken from the pending list, hashed or being hashed, in
-    /// order: delivered from the front as each is done.
-    flight: VecDeque<Flight<I>>,
-    /// Where the planning of a queue of pieces stands: past every piece
-    /// in flight (the hasher stands past the delivered ones).
-    plan: crate::PlanState,
-    /// The tasks in flight, with `efficiency` Time; created on first use.
-    feed: Option<Feed>,
-    tasks: Vec<Task>,
-}
-
-/// A submission taken from the pending list: its tasks `first..first +
-/// count` in the feed, or none (`count` 0: a message or piece the engine
-/// hashes at delivery, alone or over the pool).
-struct Flight<I> {
-    item: I,
-    first: usize,
-    count: usize,
 }
 
 /// A queue of pieces' submissions.
@@ -210,25 +201,20 @@ enum PieceItem<B> {
     Finish,
 }
 
-/// The shortest message or piece that goes to the feed: shorter ones cost
-/// less to hash at delivery than to hand over (Mac, many 1 KiB inputs:
-/// 1.62 ns/B through the feed, 1.33 at delivery).
-const FEED_MIN: usize = crate::SME2_SIZED_LEN;
-
-/// The least work in flight that wakes sleeping workers for it, in bytes:
-/// below it the engine hashes the tasks itself, and workers already awake
-/// take their share.
-const WAKE_MIN: usize = 128 * 1024;
+/// The shortest message or piece hashed as tasks: shorter ones cost less to
+/// hash at delivery than to hand over (Mac, many 1 KiB inputs: 1.62 ns/B as
+/// tasks, 1.33 at delivery).
+const TASK_MIN: usize = crate::SME2_SIZED_LEN;
 
 impl<H: Send + 'static, S: 'static> Queue<H, S> {
     fn new<I: Send + 'static>(mode: Mode, efficiency: Efficiency, handler: H, message_len: usize) -> Self
     where
-        Inner<H, I, S>: Serve,
+        Inner<H, I, S>: Deliver,
     {
         let (key, flags) = mode.key_and_flags();
         let inner = Inner::<H, I, S> {
-            pending: Mutex::new(Pending { items: VecDeque::new(), scheduled: false }),
-            handling: Mutex::new(Handling { handler, hasher: Hasher::new_internal(&key, flags), flight: VecDeque::new(), plan: Default::default(), feed: None, tasks: Vec::new() }),
+            state: Mutex::new(State { entries: VecDeque::new(), plan: Default::default(), active: false }),
+            handling: Mutex::new(Handling { handler, hasher: Hasher::new_internal(&key, flags) }),
             key,
             flags,
             max_threads: efficiency.max_threads(),
@@ -246,226 +232,111 @@ impl<H: Send + 'static, S: 'static> Queue<H, S> {
 
 impl<H: Send + 'static, I: Send + 'static, S: 'static> Inner<H, I, S>
 where
-    Inner<H, I, S>: Serve,
+    Inner<H, I, S>: Deliver,
 {
-    /// Add a submission; tell the engine when the queue was idle.
-    fn submit(self: &Arc<Self>, item: I) {
-        let mut pending = self.pending.lock().expect("a panic on the engine thread aborts, so no lock is poisoned");
-        pending.items.push_back(item);
-        if !pending.scheduled {
-            pending.scheduled = true;
-            drop(pending);
-            engine_send(self.clone());
+    /// Put `item` in flight, with tasks for `plan` to cut from it (it
+    /// appends their inputs and chunk counters to `tasks`, and returns
+    /// whether they are the entry's work or the entry is hashed at delivery).
+    fn submit(self: &Arc<Self>, item: I, root: bool, plan: impl FnOnce(&I, &mut crate::PlanState, &mut Vec<Task>) -> bool) {
+        let mut state = self.state.lock().expect("a panic on the delivery thread aborts, so no lock is poisoned");
+        let mut entry = Box::new(Entry { item, results: Vec::new(), left: AtomicUsize::new(0) });
+        let mut tasks = Vec::new();
+        if plan(&entry.item, &mut state.plan, &mut tasks) && !tasks.is_empty() {
+            entry.results = vec![[0; crate::BLOCK_LEN]; tasks.len()];
+            entry.left = AtomicUsize::new(tasks.len());
+            let (out, left) = (entry.results.as_mut_ptr(), &entry.left as *const AtomicUsize);
+            TASKS.push(tasks.into_iter().enumerate().map(|(index, task)| Task {
+                root,
+                key: self.key,
+                flags: self.flags,
+                // Sound: the entry's box keeps `results` and `left` in place.
+                out: unsafe { out.add(index) },
+                left,
+                ..task
+            }));
+        }
+        state.entries.push_back(entry);
+        if !state.active {
+            state.active = true;
+            drop(state);
+            DELIVERY.hold(self.clone());
         }
     }
-}
 
-/// What the engine runs for a queue that has work.
-trait Serve: Send + Sync + 'static {
-    /// Take the waiting batch, hash it, and call the handler for each
-    /// submission in order; back in line if more waits.
-    fn serve(self: Arc<Self>);
-}
-
-impl<H: Send + 'static, I: Send + 'static, S: 'static> Inner<H, I, S>
-where
-    Inner<H, I, S>: Serve,
-{
     /*
-     * The engine's side of serve. Repeatedly: move pending submissions into
-     * flight (`take`, which may leave some pending when the feed is full),
-     * deliver the done ones from the front in order (`deliver`, returning
-     * whether it delivered any), and when the front waits on tasks, hash
-     * one itself or poll. Returns when nothing is in flight or pending
-     * (the queue goes idle, its feed retired so the workers may sleep), or
-     * after a delivery when another queue waits for the engine (this one
-     * back in line, its tasks still in flight).
+     * The delivery thread's side: hand back every entry at the front whose
+     * tasks are done, each through `deliver`, outside the state's lock (the
+     * handler may submit to this queue). Returns whether it delivered any,
+     * and whether the queue still has entries in flight.
      */
-    fn serve_with(
-        self: Arc<Self>,
-        take: impl Fn(&Self, &mut Handling<H, I>, &mut VecDeque<I>),
-        deliver: impl Fn(&Self, &mut Handling<H, I>) -> bool,
-    ) {
-        let mut handling = self.handling.lock().expect("a panic on the engine thread aborts, so no lock is poisoned");
-        let mut polled = std::time::Instant::now();
+    fn deliver_with(&self, deliver: impl Fn(&Self, &mut Handling<H>, Entry<I>)) -> (bool, bool) {
+        let mut delivered = false;
         loop {
-            {
-                let mut pending = self.pending.lock().expect("no lock is poisoned");
-                take(&self, &mut handling, &mut pending.items);
-                if handling.flight.is_empty() && pending.items.is_empty() {
-                    pending.scheduled = false;
-                    drop(pending);
-                    if let Some(feed) = handling.feed.as_mut() {
-                        feed.retire();
+            let entry = {
+                let mut state = self.state.lock().expect("no lock is poisoned");
+                match state.entries.front() {
+                    None => {
+                        state.active = false;
+                        return (delivered, false);
                     }
-                    return;
+                    Some(front) if front.left.load(Ordering::Acquire) > 0 => return (delivered, true),
+                    Some(_) => state.entries.pop_front().unwrap(),
                 }
-            }
-            if deliver(&self, &mut handling) {
-                if ENGINE_WAITING.load(Ordering::SeqCst) > 0 {
-                    drop(handling);
-                    engine_send(self);
-                    return;
-                }
-            } else if !handling.feed.as_ref().is_some_and(|feed| feed.help(crate::platform::Platform::detect())) {
-                crate::lanes::poll_pause(&mut polled);
-            }
+            };
+            let mut handling = self.handling.lock().expect("no lock is poisoned");
+            deliver(self, &mut handling, *entry);
+            delivered = true;
         }
     }
 }
 
-/// Queues sent to the engine and not yet taken: a queue being served gives
-/// way after a delivery when any wait.
-static ENGINE_WAITING: AtomicUsize = AtomicUsize::new(0);
-
-/// Publish the handling's `tasks` (one submission's) to its feed and put
-/// the submission in flight, or give it back when the feed lacks room.
-fn publish<H, I>(handling: &mut Handling<H, I>, key: &CVWords, flags: u8, roots: bool, item: I) -> Result<(), I> {
-    let feed = handling.feed.get_or_insert_with(|| Feed::new(key, flags, roots));
-    if !feed.room(handling.tasks.len()) {
-        return Err(item);
-    }
-    let first = feed.published();
-    for task in handling.tasks.drain(..) {
-        feed.publish(task);
-    }
-    feed.wake(WAKE_MIN);
-    handling.flight.push_back(Flight { item, first, count: feed.published() - first });
-    Ok(())
+/// What the delivery thread runs for a queue in flight.
+trait Deliver: Send + Sync + 'static {
+    /// Deliver what is done: (whether any was, whether entries remain).
+    fn deliver(&self) -> (bool, bool);
 }
 
-impl<H: MessageHandler> Serve for Inner<H, H::Buffer, shape::Messages> {
-    fn serve(self: Arc<Self>) {
-        self.serve_with(
-            |queue, handling, pending| {
-                while let Some(buffer) = pending.pop_front() {
-                    let len = buffer.as_ref().len();
-                    if queue.max_threads == 1 || len < FEED_MIN || len >= crate::lanes::MIN_SPLIT_LEN {
-                        handling.flight.push_back(Flight { item: buffer, first: 0, count: 0 });
-                        continue;
-                    }
-                    handling.tasks.push(Task { input: buffer.as_ref().as_ptr(), len, counter: 0 });
-                    if let Err(buffer) = publish(handling, &queue.key, queue.flags, true, buffer) {
-                        handling.tasks.clear();
-                        pending.push_front(buffer);
-                        break;
-                    }
-                }
-            },
-            |queue, handling| {
-                let mut delivered = false;
-                while let Some(front) = handling.flight.front() {
-                    let hash = if front.count == 0 {
-                        crate::lanes::hash_with_key(front.item.as_ref(), &queue.key, queue.flags, queue.max_threads)
-                    } else {
-                        let feed = handling.feed.as_mut().expect("tasks in flight have a feed");
-                        let Some(result) = feed.result(front.first) else { break };
-                        let hash = Hash(result[..OUT_LEN].try_into().unwrap());
-                        feed.take_back(front.first + 1);
-                        hash
-                    };
-                    let front = handling.flight.pop_front().unwrap();
-                    handling.handler.hashed(front.item, hash);
-                    delivered = true;
-                }
-                delivered
-            },
-        );
+impl<H: MessageHandler> Deliver for Inner<H, H::Buffer, shape::Messages> {
+    fn deliver(&self) -> (bool, bool) {
+        self.deliver_with(|queue, handling, entry| {
+            let hash = match entry.results.first() {
+                Some(result) => Hash(result[..OUT_LEN].try_into().unwrap()),
+                None => crate::lanes::hash_with_key(entry.item.as_ref(), &queue.key, queue.flags, queue.max_threads),
+            };
+            handling.handler.hashed(entry.item, hash);
+        })
     }
 }
 
-impl<H: PieceHandler> Serve for Inner<H, PieceItem<H::Buffer>, shape::Pieces> {
-    fn serve(self: Arc<Self>) {
-        self.serve_with(
-            |queue, handling, pending| {
-                while let Some(item) = pending.pop_front() {
-                    let piece = match &item {
-                        PieceItem::Piece(piece) => piece.as_ref(),
-                        PieceItem::Finish => {
-                            handling.plan = Default::default();
-                            handling.flight.push_back(Flight { item, first: 0, count: 0 });
-                            continue;
-                        }
-                    };
-                    let mut plan = handling.plan;
-                    crate::plan_subtrees(&mut plan, piece, &mut handling.tasks);
-                    // A short piece, and one holding a large subtree, is
-                    // hashed at delivery (the large one over the pool, the
-                    // one-shot way); so is every piece with efficiency
-                    // Energy.
-                    let alone = queue.max_threads == 1
-                        || piece.len() < FEED_MIN
-                        || handling.tasks.len() > crate::lanes::FEED_SLOTS / 2
-                        || handling.tasks.iter().any(|task| task.len >= crate::lanes::MIN_SPLIT_LEN);
-                    if alone || handling.tasks.is_empty() {
-                        handling.tasks.clear();
-                        handling.plan = plan;
-                        handling.flight.push_back(Flight { item, first: 0, count: 0 });
-                        continue;
-                    }
-                    match publish(handling, &queue.key, queue.flags, false, item) {
-                        Ok(()) => handling.plan = plan,
-                        Err(item) => {
-                            handling.tasks.clear();
-                            pending.push_front(item);
-                            break;
-                        }
-                    }
+impl<H: PieceHandler> Deliver for Inner<H, PieceItem<H::Buffer>, shape::Pieces> {
+    fn deliver(&self) -> (bool, bool) {
+        self.deliver_with(|queue, handling, entry| match entry.item {
+            PieceItem::Piece(piece) => {
+                if !entry.results.is_empty() {
+                    handling.hasher.update_with_results(piece.as_ref(), &mut entry.results.iter());
+                } else if queue.max_threads > 1 {
+                    handling.hasher.update_multithreaded(piece.as_ref());
+                } else {
+                    handling.hasher.update(piece.as_ref());
                 }
-            },
-            |queue, handling| {
-                let mut delivered = false;
-                while let Some(front) = handling.flight.front() {
-                    match &front.item {
-                        PieceItem::Piece(piece) if front.count > 0 => {
-                            let feed = handling.feed.as_mut().expect("tasks in flight have a feed");
-                            let (first, count) = (front.first, front.count);
-                            if feed.result(first + count - 1).is_none() || (first..first + count).any(|index| feed.result(index).is_none()) {
-                                break;
-                            }
-                            let mut results = (first..first + count).map(|index| feed.result(index).unwrap());
-                            handling.hasher.update_with_results(piece.as_ref(), &mut results);
-                            debug_assert!(results.next().is_none(), "every result replayed");
-                            feed.take_back(first + count);
-                        }
-                        PieceItem::Piece(piece) => {
-                            if queue.max_threads > 1 {
-                                handling.hasher.update_multithreaded(piece.as_ref());
-                            } else {
-                                handling.hasher.update(piece.as_ref());
-                            }
-                        }
-                        PieceItem::Finish => {}
-                    }
-                    match handling.flight.pop_front().unwrap().item {
-                        PieceItem::Piece(piece) => handling.handler.piece_done(piece),
-                        PieceItem::Finish => {
-                            let hash = handling.hasher.finalize();
-                            handling.hasher.reset();
-                            handling.handler.finished(hash);
-                        }
-                    }
-                    delivered = true;
-                }
-                delivered
-            },
-        );
+                handling.handler.piece_done(piece);
+            }
+            PieceItem::Finish => {
+                let hash = handling.hasher.finalize();
+                handling.hasher.reset();
+                handling.handler.finished(hash);
+            }
+        })
     }
 }
 
-impl<H: FixedHandler> Serve for Inner<H, (H::Buffer, H::Digests), shape::Fixed> {
-    fn serve(self: Arc<Self>) {
-        self.serve_with(
-            |_, handling, pending| handling.flight.extend(pending.drain(..).map(|item| Flight { item, first: 0, count: 0 })),
-            |queue, handling| {
-                let delivered = !handling.flight.is_empty();
-                while let Some(Flight { item: (buffer, mut digests), .. }) = handling.flight.pop_front() {
-                    crate::lanes::hash_many(buffer.as_ref(), queue.message_len, &queue.key, queue.flags, digests.as_mut(), queue.max_threads);
-                    handling.handler.hashed(buffer, digests);
-                }
-                delivered
-            },
-        );
+impl<H: FixedHandler> Deliver for Inner<H, (H::Buffer, H::Digests), shape::Fixed> {
+    fn deliver(&self) -> (bool, bool) {
+        self.deliver_with(|queue, handling, entry| {
+            let (buffer, mut digests) = entry.item;
+            crate::lanes::hash_many(buffer.as_ref(), queue.message_len, &queue.key, queue.flags, digests.as_mut(), queue.max_threads);
+            handling.handler.hashed(buffer, digests);
+        })
     }
 }
 
@@ -478,7 +349,13 @@ impl<H: MessageHandler> Queue<H, shape::Messages> {
 
     /// Hash `buffer`'s bytes as one message; returns at once.
     pub fn submit(&self, buffer: H::Buffer) {
-        self.inner::<H::Buffer>().submit(buffer);
+        let inner = self.inner::<H::Buffer>();
+        let tasks = inner.max_threads > 1;
+        inner.submit(buffer, true, |buffer, _, out| {
+            let bytes = buffer.as_ref();
+            out.push(Task::of(bytes, 0));
+            tasks && (TASK_MIN..crate::lanes::MIN_SPLIT_LEN).contains(&bytes.len())
+        });
     }
 }
 
@@ -493,13 +370,23 @@ impl<H: PieceHandler> Queue<H, shape::Pieces> {
 
     /// Append `piece`'s bytes to the message; returns at once.
     pub fn submit(&self, piece: H::Buffer) {
-        self.inner::<PieceItem<H::Buffer>>().submit(PieceItem::Piece(piece));
+        let inner = self.inner::<PieceItem<H::Buffer>>();
+        let tasks = inner.max_threads > 1;
+        inner.submit(PieceItem::Piece(piece), false, |item, plan, out| {
+            let PieceItem::Piece(piece) = item else { unreachable!("a piece") };
+            let bytes = piece.as_ref();
+            crate::plan_subtrees(plan, bytes, out);
+            tasks && (TASK_MIN..crate::lanes::MIN_SPLIT_LEN).contains(&bytes.len())
+        });
     }
 
     /// End the message: its digest goes to `handler.finished` after every
     /// piece has come back. Returns at once.
     pub fn finish(&self) {
-        self.inner::<PieceItem<H::Buffer>>().submit(PieceItem::Finish);
+        self.inner::<PieceItem<H::Buffer>>().submit(PieceItem::Finish, false, |_, plan, _| {
+            *plan = Default::default();
+            false
+        });
     }
 }
 
@@ -520,42 +407,69 @@ impl<H: FixedHandler> Queue<H, shape::Fixed> {
         let inner = self.inner::<(H::Buffer, H::Digests)>();
         let slot = crate::many::slot_len(inner.message_len);
         assert_eq!(Some(buffer.as_ref().len()), slot.checked_mul(digests.as_mut().len()), "the buffer holds one slot of whole blocks per digest");
-        inner.submit((buffer, digests));
+        inner.submit((buffer, digests), true, |_, _, _| false);
     }
 }
 
-/// Put `queue` in the engine's line.
-fn engine_send(queue: Arc<dyn Serve>) {
-    ENGINE_WAITING.fetch_add(1, Ordering::SeqCst);
-    engine().send(queue).expect("the engine thread runs until the process ends");
+/// The delivery thread's queues in flight, and whether it sleeps.
+struct Delivery {
+    queues: Mutex<(Vec<Arc<dyn Deliver>>, bool)>,
+    wake: Condvar,
 }
 
-/// The engine's channel: queues that have work, in the order they told it.
-fn engine() -> &'static mpsc::Sender<Arc<dyn Serve>> {
-    static ENGINE: OnceLock<mpsc::Sender<Arc<dyn Serve>>> = OnceLock::new();
-    ENGINE.get_or_init(|| {
-        let (sender, queues) = mpsc::channel::<Arc<dyn Serve>>();
-        std::thread::Builder::new()
-            .name("blake3-servil-queue".into())
-            .spawn(move || {
-                for queue in queues {
-                    ENGINE_WAITING.fetch_sub(1, Ordering::SeqCst);
-                    // A panic in a handler aborts the process (handler
-                    // rule 4); so does one in the hashing, a bug.
-                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| queue.serve())).is_err() {
-                        std::process::abort();
-                    }
+static DELIVERY: Delivery = Delivery { queues: Mutex::new((Vec::new(), false)), wake: Condvar::new() };
+
+impl Delivery {
+    /// Give the delivery thread `queue`, which has just put an entry in
+    /// flight; start the thread with the first.
+    fn hold(&self, queue: Arc<dyn Deliver>) {
+        static STARTED: std::sync::Once = std::sync::Once::new();
+        STARTED.call_once(|| {
+            std::thread::Builder::new().name("blake3-servil-queue".into()).spawn(|| DELIVERY.run()).expect("the queue's delivery thread starts");
+        });
+        let mut queues = self.queues.lock().unwrap();
+        queues.0.push(queue);
+        if queues.1 {
+            self.wake.notify_one();
+        }
+    }
+
+    /// Deliver from every queue in flight, in turn; poll while any entry
+    /// waits on its tasks, sleep while no queue is in flight. A panic in a
+    /// handler aborts the process (handler rule 4); so does one in the
+    /// hashing, a bug.
+    fn run(&self) {
+        let mut polled = std::time::Instant::now();
+        loop {
+            let mut queues = {
+                let mut held = self.queues.lock().unwrap();
+                while held.0.is_empty() {
+                    held.1 = true;
+                    held = self.wake.wait(held).unwrap();
+                    held.1 = false;
                 }
-            })
-            .expect("the queue's engine thread starts");
-        sender
-    })
+                std::mem::take(&mut held.0)
+            };
+            let mut delivered = false;
+            queues.retain(|queue| {
+                let (any, in_flight) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| queue.deliver())).unwrap_or_else(|_| std::process::abort());
+                delivered |= any;
+                in_flight
+            });
+            self.queues.lock().unwrap().0.append(&mut queues);
+            if !delivered {
+                crate::lanes::poll_pause(&mut polled);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::lanes::Task;
     use crate::platform::Platform;
     use crate::{BLOCK_LEN, CHUNK_LEN, Hasher};
+    use std::sync::atomic::AtomicUsize;
 
     /// Pieces planned into whole subtrees, hashed as tasks, and replayed
     /// give Hasher::update's digest, for runs of pieces of many lengths
@@ -569,7 +483,6 @@ mod test {
         let key = [9u32; 8];
         for start in [0, 500, CHUNK_LEN, 3 * CHUNK_LEN] {
             for (step, batch) in [(1usize, 1usize), (3, 2), (5, 3), (7, 4), (11, 6)] {
-                // A sequence of piece lengths, deterministic from the step.
                 let pieces: Vec<usize> = (0..12).map(|i| lens[(i * step + start) % lens.len()]).collect();
                 let mut want = Hasher::new_internal(&key, crate::KEYED_HASH);
                 let mut got = want.clone();
@@ -589,8 +502,9 @@ mod test {
                         crate::plan_subtrees(&mut plan, piece, &mut tasks);
                     }
                     let mut results = vec![[0u8; BLOCK_LEN]; tasks.len()];
-                    for (task, result) in tasks.iter().zip(&mut results) {
-                        task.hash(&key, crate::KEYED_HASH, false, Platform::detect(), result);
+                    let left = AtomicUsize::new(tasks.len());
+                    for (task, result) in tasks.into_iter().zip(&mut results) {
+                        Task { key, flags: crate::KEYED_HASH, out: result, left: &left, ..task }.run(Platform::detect());
                     }
                     let mut replay = results.iter();
                     for piece in &slices {

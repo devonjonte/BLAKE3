@@ -841,7 +841,7 @@ pub(crate) fn plan_subtrees(state: &mut PlanState, piece: &[u8], tasks: &mut Vec
     }
     while piece.len() - offset > CHUNK_LEN {
         let len = next_subtree_len(state.counter, piece.len() - offset);
-        tasks.push(lanes::Task { input: piece[offset..].as_ptr(), len, counter: state.counter });
+        tasks.push(lanes::Task::of(&piece[offset..offset + len], state.counter));
         state.counter += (len / CHUNK_LEN) as u64;
         offset += len;
     }
