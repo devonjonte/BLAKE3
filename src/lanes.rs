@@ -127,8 +127,7 @@ fn poll_pause(yielded: &mut std::time::Instant) {
     }
 }
 
-/// How long a worker polls without taking a piece, and a caller for its
-/// last pieces, before sleeping.
+/// How long a caller polls for its last pieces before sleeping.
 pub(crate) const SPIN_BEFORE_SLEEP: std::time::Duration = std::time::Duration::from_micros(200);
 
 /// The length of the next piece when `remaining` bytes are uncut and
@@ -568,10 +567,14 @@ struct Pool {
     cpus: usize,
     /// The clock jobs' registration times count from.
     epoch: std::time::Instant,
+    /// Jobs in the slots: workers poll while there are any.
+    registered: AtomicUsize,
     /// Workers asleep on `posted`.
     sleepers: AtomicUsize,
-    /// Of those, the ones a caller has notified and that have yet to wake.
+    /// Of those, the ones a caller has asked to wake and that have yet to.
     notified: AtomicUsize,
+    /// Of those, the ones still to be woken: woken workers wake them.
+    owed: AtomicUsize,
     sleep_lock: Mutex<()>,
     posted: Condvar,
     /// Callers asleep on `finished_signal`.
@@ -608,8 +611,10 @@ fn pool() -> &'static Pool {
             callers: AtomicUsize::new(0),
             cpus,
             epoch: std::time::Instant::now(),
+            registered: AtomicUsize::new(0),
             sleepers: AtomicUsize::new(0),
             notified: AtomicUsize::new(0),
+            owed: AtomicUsize::new(0),
             sleep_lock: Mutex::new(()),
             posted: Condvar::new(),
             waiters: AtomicUsize::new(0),
@@ -674,11 +679,11 @@ impl Pool {
     }
 
     /// Put the job in a free slot. Returns the slot, or None when every
-    /// slot is taken. When the workers awake are fewer than the pieces,
-    /// every sleeper is woken, in one system call: a wake costs the waker
-    /// ten microseconds or more on some machines and the sleeper arrives
-    /// tens of microseconds later, so one call pays once for all, and
-    /// the woken workers then stay awake while calls keep coming.
+    /// slot is taken. When the workers awake are fewer than the call can
+    /// use, the caller wakes one sleeper and leaves the others it needs
+    /// owed: a wake costs the waker about 4 µs on the VM (all fifteen at
+    /// once, 56 µs), and each woken worker wakes owed sleepers before it
+    /// takes a piece, so the wakes spread over the woken.
     fn register(&self, job: &Job) -> Option<usize> {
         // The caller keeps this erased lifetime valid by unregistering,
         // draining readers, and waiting for active == 0 before returning.
@@ -686,6 +691,7 @@ impl Pool {
         let slot = (0..MAX_JOBS).find(|&i| {
             self.slots[i].job.compare_exchange(std::ptr::null_mut(), ptr, Ordering::SeqCst, Ordering::Relaxed).is_ok()
         })?;
+        self.registered.fetch_add(1, Ordering::SeqCst);
         // Sleepers already notified are on their way (a wake takes tens
         // of microseconds to land); a second caller in that window counts
         // them as awake and pays nothing. The lock-free reads are a hint;
@@ -695,9 +701,13 @@ impl Pool {
             let _guard = self.sleep_lock.lock().unwrap();
             let sleepers = self.sleepers.load(Ordering::SeqCst);
             let unnotified = sleepers - self.notified.load(Ordering::SeqCst);
-            if unnotified > 0 && (self.cpus - 1 - unnotified) < job.pieces - 1 {
-                self.notified.store(sleepers, Ordering::SeqCst);
-                self.posted.notify_all();
+            let awake = self.cpus - 1 - unnotified;
+            let wanted = job.pieces.min(job.max_threads) - 1;
+            if unnotified > 0 && awake < wanted {
+                let wake = (wanted - awake).min(unnotified);
+                self.notified.fetch_add(wake, Ordering::SeqCst);
+                self.owed.fetch_add(wake - 1, Ordering::SeqCst);
+                self.posted.notify_one();
             }
         }
         Some(slot)
@@ -706,6 +716,7 @@ impl Pool {
     /// Clear the slot and wait out any worker mid-take on it.
     fn unregister(&self, slot: usize) {
         self.slots[slot].job.store(std::ptr::null_mut(), Ordering::SeqCst);
+        self.registered.fetch_sub(1, Ordering::SeqCst);
         while self.slots[slot].readers.load(Ordering::SeqCst) > 0 {
             std::hint::spin_loop();
         }
@@ -786,31 +797,31 @@ impl Pool {
         None
     }
 
-    /// The next piece for a worker: polled for a while (yielding the CPU
-    /// between polls, so a thread that has work on this CPU runs), then
-    /// waited for.
+    /// The next piece for a worker: polled for while a job is registered
+    /// (yielding the CPU between polls, so a thread that has work on this
+    /// CPU runs), else waited for asleep. Nothing keeps a worker awake
+    /// between calls (AGENTS.md, "Serve real programs").
     fn next_piece(&self, start: &mut usize, rank: usize) -> (*const Job<'static>, usize) {
-        let taken = 'taken: loop {
-            let started = std::time::Instant::now();
-            let mut yielded = started;
-            while started.elapsed() < SPIN_BEFORE_SLEEP {
+        loop {
+            let mut yielded = std::time::Instant::now();
+            while self.registered.load(Ordering::SeqCst) > 0 {
                 if let Some(taken) = self.take_piece(start, rank) {
-                    break 'taken taken;
+                    return taken;
                 }
                 poll_pause(&mut yielded);
             }
-            // Asleep until a wake, then back to polling: a woken worker
-            // that finds nothing yet stays available for the next call.
-            // The guard is held from the count's increment through the
-            // take, the wait, and the decrement, so under sleep_lock every
-            // sleeper counted is waiting, and notified never exceeds
-            // sleepers: a caller's wake cannot fall between the take and
-            // the wait, and a sleeper that leaves without waiting was
-            // never counted as notified.
+            // No job: asleep until a wake, then back to polling while a
+            // job is registered. The guard is held from the count's
+            // increment through the take, the wait, and the decrement, so
+            // under sleep_lock every sleeper counted is waiting, and
+            // notified never exceeds sleepers: a caller's wake cannot fall
+            // between the check and the wait, and a sleeper that leaves
+            // without waiting was never counted as notified.
             let mut guard = self.sleep_lock.lock().unwrap();
             self.sleepers.fetch_add(1, Ordering::SeqCst);
             let taken = self.take_piece(start, rank);
-            if taken.is_none() {
+            let waited = taken.is_none() && self.registered.load(Ordering::SeqCst) == 0;
+            if waited {
                 guard = self.posted.wait(guard).unwrap();
                 // Awake: one fewer notified sleeper on the way (a wake
                 // nobody asked for leaves the count where it is).
@@ -818,11 +829,15 @@ impl Pool {
             }
             self.sleepers.fetch_sub(1, Ordering::SeqCst);
             drop(guard);
-            if let Some(taken) = taken {
-                break 'taken taken;
+            if waited {
+                for _ in 0..self.owed.swap(0, Ordering::SeqCst) {
+                    self.posted.notify_one();
+                }
             }
-        };
-        taken
+            if let Some(taken) = taken {
+                return taken;
+            }
+        }
     }
 }
 
