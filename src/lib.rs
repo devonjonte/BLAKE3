@@ -217,7 +217,8 @@ pub mod traits;
 mod io;
 mod join;
 #[cfg(feature = "std")]
-mod lanes;
+#[doc(hidden)]
+pub mod lanes;
 mod many;
 #[cfg(feature = "std")]
 mod queue;

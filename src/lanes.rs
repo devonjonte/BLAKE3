@@ -453,12 +453,15 @@ impl Job<'_> {
                 crate::many::hash_many_on(messages, *message_len, key, *flags, digests, platform);
             }
             Work::Feed(ring) => {
+                probe::set(&probe::CLAIMED, index, probe::now());
+                probe::set(&probe::CLAIMER, index, WORKER_RANK.with(|r| r.get()));
                 // Sound: the ring outlives the feed's registration, and
                 // task `index` is this thread's alone until its done flag.
                 let ring = unsafe { &**ring };
                 let at = index % FEED_SLOTS;
                 let task = unsafe { *ring.tasks[at].get() };
                 task.hash(&ring.key, ring.flags, ring.roots, platform, unsafe { &mut *ring.results[at].get() });
+                probe::set(&probe::DONE, index, probe::now());
                 ring.done[at].store(true, Ordering::Release);
             }
         }
@@ -1019,6 +1022,7 @@ impl Feed {
         // Sound: slot index % FEED_SLOTS was taken back (room), and no
         // thread claims index before the store below publishes it.
         unsafe { *self.ring.tasks[index % FEED_SLOTS].get() = task };
+        probe::set(&probe::PUBLISHED, index, probe::now());
         self.bytes += task.len;
         self.ring.published.store(index + 1, Ordering::Release);
         if self.slot.is_none() {
@@ -1041,7 +1045,7 @@ impl Feed {
     /// Hash one published task below `before` on this thread, if one is
     /// left to take; whether one was.
     pub(crate) fn help(&self, before: usize, platform: Platform) -> bool {
-        if self.job.cursor.load(Ordering::SeqCst) >= before {
+        if self.job.cursor.load(Ordering::SeqCst) >= before && !probe::HELP_ANY.load(Ordering::Relaxed) {
             return false;
         }
         match self.job.claim() {
@@ -1065,6 +1069,9 @@ impl Feed {
     /// Free the slots of the tasks before `index`, whose results the owner
     /// has read.
     pub(crate) fn take_back(&mut self, index: usize) {
+        for i in self.returned..index {
+            probe::set(&probe::DELIVERED, i, probe::now());
+        }
         while self.returned < index {
             let at = self.returned % FEED_SLOTS;
             // Sound: the task's result was read, so no thread touches it.
@@ -1096,7 +1103,10 @@ impl Drop for Feed {
     }
 }
 
+thread_local! { static WORKER_RANK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
+
 fn worker_main(rank: usize) {
+    WORKER_RANK.with(|r| r.set(rank as u64 + 1));
     let pool = pool();
     let mut start = 0;
     loop {
@@ -1497,4 +1507,21 @@ mod proofs {
         let piece = next_piece_len(len - offset, threads).min(cap);
         assert!(piece.is_power_of_two() && piece <= cap && offset & (piece - 1) == 0);
     }
+}
+
+/// Probe (probe/queue-timeline): per task index, when it was published,
+/// claimed, done, and delivered (ns of the pool's epoch), and who claimed
+/// it (0 the engine, r + 1 worker rank r).
+pub mod probe {
+    use std::sync::atomic::{AtomicBool, AtomicU64};
+    pub const N: usize = 1 << 16;
+    pub static PUBLISHED: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
+    pub static CLAIMED: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
+    pub static CLAIMER: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
+    pub static DONE: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
+    pub static DELIVERED: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
+    pub static HELP_ANY: AtomicBool = AtomicBool::new(false);
+    pub fn now() -> u64 { super::pool().epoch.elapsed().as_nanos() as u64 }
+    pub fn set(a: &[AtomicU64; N], i: usize, v: u64) { if i < N { a[i].store(v, std::sync::atomic::Ordering::Relaxed) } }
+    pub fn get(a: &[AtomicU64; N], i: usize) -> u64 { a[i].load(std::sync::atomic::Ordering::Relaxed) }
 }
