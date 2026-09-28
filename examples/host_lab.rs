@@ -30,11 +30,31 @@ fn repeat(label: &str, bytes: u64, f: &dyn Fn()) {
     println!("{label:<34} energy min {} median {} max {} (spread {}.{:02}x); wall {:?} ms", per(en[0]), per(en[5]), per(en[9]), en[9] / en[0].max(1), (en[9] * 100 / en[0].max(1)) % 100, e.iter().map(|x| x.1 / 1_000_000).collect::<Vec<_>>());
 }
 
+/// The energy of `f`, read at once and again after 1, 10, and 100 ms
+/// asleep: whether the counter's energy arrives late.
+fn lag(label: &str, bytes: u64, f: &dyn Fn()) {
+    for delay in [1u64, 10, 100] {
+        let mut rows = Vec::new();
+        for _ in 0..8 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let e0 = clocks::process_energy_nj().unwrap_or(0);
+            f();
+            let now = clocks::process_energy_nj().unwrap_or(0) - e0;
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+            let later = clocks::process_energy_nj().unwrap_or(0) - e0;
+            rows.push((now * 1000 / bytes, later * 1000 / bytes));
+        }
+        rows.sort();
+        println!("{label:<24} read at once / after {delay:>3} ms asleep, pJ/B: {:?}", rows);
+    }
+}
+
 fn main() {
     blake3_servil::initialize_multithreaded();
     clocks::set_qos(clocks::USER_INTERACTIVE);
     let big = vec![5u8; 64 << 20];
-    for _ in 0..2 {
+    lag("hash 64 MiB", 64 << 20, &|| { black_box(blake3_servil::hash(&big)); });
+    for _ in 0..0 {
         repeat("spin 100 ms (P)", 0, &|| spin_ms(100));
         repeat("hash 64 MiB", 64 << 20, &|| { black_box(blake3_servil::hash(&big)); });
         repeat("hash_multithreaded 64 MiB", 64 << 20, &|| { black_box(blake3_servil::hash_multithreaded(&big)); });
