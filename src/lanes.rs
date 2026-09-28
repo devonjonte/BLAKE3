@@ -689,7 +689,7 @@ fn pool() -> &'static Pool {
             slots: std::array::from_fn(|_| Slot { job: AtomicPtr::new(std::ptr::null_mut()), readers: AtomicUsize::new(0) }),
             callers: AtomicUsize::new(0),
             cpus,
-            sme2: cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect())),
+            sme2: false && cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect())),
             epoch: std::time::Instant::now(),
             linger_until: std::sync::atomic::AtomicU64::new(0),
             registered: AtomicUsize::new(0),
