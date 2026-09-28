@@ -39,7 +39,9 @@
 //!   [`hash_many_with`], and [`Hasher`]. The multithreaded forms use other
 //!   cores only where waking them pays on every machine measured, run no
 //!   slower than their single-threaded forms, and leave nothing running
-//!   between calls, at more energy per byte (below).
+//!   between calls (but for a [`Hasher`] between multithreaded updates,
+//!   which keeps its worker threads ready for 50 µs), at more energy per
+//!   byte (below).
 //! - **Throughput, in time or in energy:** [`Queue`], for a stream of
 //!   inputs. The program hands over its buffers and moves on while the
 //!   crate hashes them, and each comes back through a handler the program
@@ -62,7 +64,10 @@
 //!   length.
 //! - **Input arriving, simply: a [`Hasher`].** [`Hasher::update`] takes
 //!   each piece as it arrives, and [`Hasher::update_reader`] reads any
-//!   [`std::io::Read`] through it.
+//!   [`std::io::Read`] through it. [`Hasher::update_multithreaded`]
+//!   spreads a long message's pieces over the worker threads (64 KiB
+//!   pieces of a long message: about 2.4x [`Hasher::update`]'s speed on an
+//!   M4 Max, at several times the energy per byte).
 //! - **Batch small messages of one length with [`hash_many_multithreaded`]**,
 //!   back to back in one buffer, the whole batch in one call: 1024
 //!   messages of 64 bytes hash about 5x faster than in a loop of [`hash`],
