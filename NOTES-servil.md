@@ -572,6 +572,26 @@ on message members (4 KiB messages 10-30% slower, jobs 494-497).
   bound `Queue::messages` for tiny messages; `Queue::fixed` is the API
   for them.
 
+**Lingering between multithreaded updates** (September 28, night; Zooko's
+decision of that day in docs/api-design.md, the bound his open question).
+`Hasher::update_multithreaded` past a message's first 128 KiB
+(`LINGER_AFTER`), for an update of 64 KiB or more, sets the pool's
+`linger_until` 50 us ahead (`lanes::LINGER`) and wakes sleepers without
+waiting; workers poll while a job is registered or the deadline is
+ahead. The next update hashes its whole subtrees of 64 KiB and more over
+the pool (`subtree_children` from `LINGER_SPLIT_LEN`; eight NEON pieces
+of 8 KiB, the caller's SME2 share zero at that size) when the eight
+workers it wants are awake, else on its own thread. Mac, 64 KiB pieces
+after the gap, old -> new (jobs 508-515): 128 MiB 0.24 -> 0.098 ns/B, 32
+MiB 0.25 -> 0.108, 4 MiB 0.27 -> 0.146, 1 MiB 0.26 -> 0.19; shared 128
+MiB 0.26 -> 0.11; 64-512 KiB level within the after-gap noise (jobs
+520-523). Using the pool as soon as the deadline was set, before the
+woken workers arrived, left the caller alone on NEON (slower than its
+SME2): 256 KiB 10% slower. The bound's reasoning: waiting as long as a
+wake costs before sleeping spends at most twice what knowing the future
+would; a program that stops updating leaves workers polling at most
+50 us.
+
 **The feed design, superseded** (candidate/queue-speed, September 28): a
 64-slot ring per queue beside a pool job, an engine thread doing intake,
 helping, and delivery. Lessons kept: the engine as both hasher and
