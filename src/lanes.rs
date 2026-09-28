@@ -110,7 +110,7 @@ pub(crate) const MIN_SPLIT_LEN: usize = 768 * 1024;
 pub(crate) const LINGER_SPLIT_LEN: usize = 64 * 1024;
 
 /// The shortest piece: eight chunks, a hybrid kernel's worth.
-const MIN_PIECE_LEN: usize = 8 * CHUNK_LEN;
+const MIN_PIECE_LEN: usize = 4 * CHUNK_LEN;
 
 /// The longest piece.
 const MAX_PIECE_LEN: usize = 128 * CHUNK_LEN;
@@ -245,7 +245,7 @@ pub(crate) fn linger() {
 }
 
 /// The workers a lingering Hasher keeps ready: a 64 KiB piece's cut.
-const LINGER_WORKERS: usize = 8;
+const LINGER_WORKERS: usize = 12;
 
 /// Whether workers are polling for a lingering Hasher, so a whole subtree
 /// shorter than MIN_SPLIT_LEN pays to go over the pool: lingering, and the
