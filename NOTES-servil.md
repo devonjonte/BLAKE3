@@ -565,7 +565,14 @@ closing a part-filled task only after 16 polls (VM level; a program with
 on message members (4 KiB messages 10-30% slower, jobs 494-497); each
 slot on a 128-byte line of its own (jobs 504-507), the delivery thread
 backing off over idle rounds (jobs 534-537), and a short message's digest
-in its slot beside `left` (jobs 544-547): all level on the Mac. So the
+in its slot beside `left` (jobs 544-547): all level on the Mac. A task's
+short messages as one chain entry (a group: items in a reused array,
+one count, sealed when the task closes or another entry follows): the VM
+probe slower (175-190 against 150-166 ns per message; the delivery
+thread polls the open group's count while the submitter writes the same
+slot), and which slots become groups follows the threads' timing, so
+their first reserve came after warm-up (tests/queue_no_alloc.rs: 6
+allocations); dropped unbuilt on the Mac. So the
 64-byte cell sits at the handover's floor in this harness: the program's
 thread, the bottleneck, spends 25 ns taking a returned buffer from its
 channel and about 40-60 ns in `submit`, mostly lines another core wrote.
