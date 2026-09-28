@@ -1,75 +1,35 @@
-//! Probe (probe/after-gap): what a call costs after the program's thread
-//! slept 1 ms (the benchmark's gap), against the same call back to back,
-//! for hash() at sizes on each side of the kernels' boundaries, and for
-//! SHA-256 (sha2) as the control. Variants after the gap: a few
-//! microseconds of integer work first (does the clock's ramp explain
-//! it?), and one 64-byte hash first (does the first vector work pay?).
-//! Wall time and cycles per core kind (clocks).
+//! Probe (probe/first-call): what the first call after a 1 ms sleep costs
+//! beyond a second call right after it, for hash() and SHA-256 (sha2) at 64
+//! B and 1 KiB: a cost of the first call's cold state (cache lines, pages,
+//! predictors) or of the core's. 400 gaps each; the first and the second
+//! call timed alone, summed. Wall time and the clock (clocks).
 use sha2::Digest;
 use std::hint::black_box;
 
-const GAP: u64 = 1_000_000;
-
-fn spin(iterations: u64) -> u64 {
-    let mut x = 1u64;
-    for i in 0..iterations {
-        x = black_box(x.wrapping_mul(6364136223846793005).wrapping_add(i));
+fn pair(label: &str, f: &dyn Fn()) {
+    let calls = 400u64;
+    let (mut first, mut second) = (0u64, 0u64);
+    let before = clocks::Counts::read();
+    for _ in 0..calls {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let t = clocks::now();
+        f();
+        first += clocks::since_ns(t);
+        let t = clocks::now();
+        f();
+        second += clocks::since_ns(t);
     }
-    x
-}
-
-fn show(label: &str, b: clocks::Batch) {
-    println!("  {label:<28} {}", b.show());
+    let mhz = before.zip(clocks::Counts::read()).map(|(b, a)| a.since(b).mhz()).unwrap_or(0);
+    println!("{label:<22} first {:>5} ns, second {:>5} ns, first - second {:>5} ns ({mhz} MHz over both)", first / calls, second / calls, (first - second) / calls);
 }
 
 fn main() {
     blake3_servil::initialize_multithreaded();
-    let input = vec![7u8; 1 << 20];
-    for len in [64usize, 1024, 2048, 4096, 8192, 16384, 65536] {
-        let m = &input[..len];
-        println!("{len} B");
-        let bb = clocks::measure(5, 2_000_000, || { black_box(blake3_servil::hash(black_box(m))); });
-        show("servil back to back", bb[2]);
-        let calls = 300;
-        show("servil after gap", clocks::measure_after_gaps(calls, GAP, || { black_box(blake3_servil::hash(black_box(m))); }));
-        show("servil after gap+spin 20us", {
-            let mut b = clocks::Batch { calls, wall_ns: 0, counts: None };
-            for _ in 0..calls {
-                std::thread::sleep(std::time::Duration::from_nanos(GAP));
-                black_box(spin(80_000));
-                let t = clocks::now();
-                black_box(blake3_servil::hash(black_box(m)));
-                b.wall_ns += clocks::since_ns(t);
-            }
-            b
-        });
-        show("servil after gap+hash(64)", {
-            let mut b = clocks::Batch { calls, wall_ns: 0, counts: None };
-            for _ in 0..calls {
-                std::thread::sleep(std::time::Duration::from_nanos(GAP));
-                black_box(blake3_servil::hash(black_box(&input[..64])));
-                let t = clocks::now();
-                black_box(blake3_servil::hash(black_box(m)));
-                b.wall_ns += clocks::since_ns(t);
-            }
-            b
-        });
-        show("servil after gap, 2nd call", {
-            let mut b = clocks::Batch { calls, wall_ns: 0, counts: None };
-            for _ in 0..calls {
-                std::thread::sleep(std::time::Duration::from_nanos(GAP));
-                black_box(blake3_servil::hash(black_box(m)));
-                let t = clocks::now();
-                black_box(blake3_servil::hash(black_box(m)));
-                b.wall_ns += clocks::since_ns(t);
-            }
-            b
-        });
-        let bb = clocks::measure(5, 2_000_000, || { black_box(sha2::Sha256::digest(black_box(m))); });
-        show("sha256 back to back", bb[2]);
-        show("sha256 after gap", clocks::measure_after_gaps(calls, GAP, || { black_box(sha2::Sha256::digest(black_box(m))); }));
-        show("spin(1000) after gap", clocks::measure_after_gaps(calls, GAP, || { black_box(spin(1000)); }));
-        let bb = clocks::measure(5, 2_000_000, || { black_box(spin(1000)); });
-        show("spin(1000) back to back", bb[2]);
+    let data = vec![7u8; 1024];
+    for _ in 0..2 {
+        pair("servil hash 64 B", &|| { black_box(blake3_servil::hash(black_box(&data[..64]))); });
+        pair("sha256 64 B", &|| { black_box(sha2::Sha256::digest(black_box(&data[..64]))); });
+        pair("servil hash 1 KiB", &|| { black_box(blake3_servil::hash(black_box(&data[..]))); });
+        pair("sha256 1 KiB", &|| { black_box(sha2::Sha256::digest(black_box(&data[..]))); });
     }
 }
