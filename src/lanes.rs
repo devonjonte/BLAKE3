@@ -115,6 +115,11 @@ const MIN_PIECE_LEN: usize = 8 * CHUNK_LEN;
 /// The longest piece.
 const MAX_PIECE_LEN: usize = 128 * CHUNK_LEN;
 
+/// Sleepers a caller wakes itself, and the wakes each woken worker passes
+/// on from those owed: the wakes spread as a tree.
+const DIRECT_WAKES: usize = 2;
+const WAKE_FANOUT: usize = 3;
+
 /// How long a worker polls finding nothing before it sleeps (next_piece):
 /// about what a wake costs, so polling spends at most twice what knowing
 /// the future would.
@@ -801,9 +806,12 @@ impl Pool {
             let awake = self.cpus - 1 - unnotified;
             if unnotified > 0 && awake < wanted {
                 let wake = (wanted - awake).min(unnotified);
+                let direct = wake.min(DIRECT_WAKES);
                 self.notified.fetch_add(wake, Ordering::SeqCst);
-                self.owed.fetch_add(wake - 1, Ordering::SeqCst);
-                self.posted.notify_one();
+                self.owed.fetch_add(wake - direct, Ordering::SeqCst);
+                for _ in 0..direct {
+                    self.posted.notify_one();
+                }
             }
         }
     }
@@ -940,7 +948,9 @@ impl Pool {
             self.sleepers.fetch_sub(1, Ordering::SeqCst);
             drop(guard);
             if waited {
-                for _ in 0..self.owed.swap(0, Ordering::SeqCst) {
+                // A share of the wakes owed, so that they spread as a tree.
+                let owed = self.owed.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |o| Some(o.saturating_sub(WAKE_FANOUT))).unwrap();
+                for _ in 0..owed.min(WAKE_FANOUT) {
                     self.posted.notify_one();
                 }
             }
