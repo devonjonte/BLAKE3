@@ -631,6 +631,12 @@ task on NEON (probe/sme2-thread-all-neon, jobs 604-607): level on 16 KiB
 to 64 MiB messages and batches of 4096 and 65536, so subtree tasks keep
 SME2, at the same speed for less energy per byte.
 
+**The 64-byte continuous cell's two speeds** (job 680, a full run with
+`--trace-clocks`): all twelve solo samples on P-cores; the benchmark
+thread's clock 2.6-3.2 GHz against the core's 4.4 (other busy cores of
+its cluster lower it); 0.74 ns/B at 3.06 GHz, 0.78-1.14 at 2.61. Neither
+core kind nor clock explains the spread; open.
+
 **Idle workers sleep** (September 28, night): a worker, and the SME2
 thread, that finds nothing for 50 us (`lanes::WORKER_IDLE`, about a
 wake's cost) sleeps even while a job or a queue holds the pool; pushes
