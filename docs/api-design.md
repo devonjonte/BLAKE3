@@ -74,7 +74,11 @@ its workers ready between them.
 - **Q**: a bound on lingering. A program that keeps a `Hasher` open for a
   long time (one per network connection, say) must not keep workers
   spinning; a proposal is to linger for a fixed, measured time after each
-  update and then sleep.
+  update and then sleep. Built: 50 µs after each update of 64 KiB or more
+  (2.4x the speed of `update` for 4-6x the energy per byte, Mac).
+- **The energy-saving form does not linger** (Zooko, September 28, 2026):
+  when the multithreaded synchronous calls take the time-or-energy
+  argument, `Efficiency::Energy` keeps no workers ready between updates.
 
 **Initialization** (settled, September 27). `initialize()` runs the
 startup self-test (under 200 µs on an M4 Max);

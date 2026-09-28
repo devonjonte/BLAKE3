@@ -486,7 +486,11 @@ of sleep before each call the split came back sooner from 512 KiB on the
 Mac (136 µs against 158; 256-384 KiB level; jobs 364-367) and from
 768 KiB in the VM (146 against 181; 512 KiB 154 against 130); Zooko took
 the length where it pays on both (hash_multithreaded is built for a low
-worst case). After idle, VM: mt 64 KiB 1.68 -> 0.59 ns/B (st 0.55),
+worst case). **Now 512 KiB** (Zooko, September 28, 2026, native first;
+c46c57c): Mac after the gap 512 KiB about 40% faster, the VM's 20-30%
+slower. The split once sat at 32 KiB, when the workers polled between
+calls; with sleeping workers a wake costs 15-70 µs, more than a 32 KiB
+input takes one core. After idle, VM: mt 64 KiB 1.68 -> 0.59 ns/B (st 0.55),
 256 KiB 0.50 -> 0.28 (st 0.29), 4096 x 64 B 32.2 -> 17.1 (st 18.1); back to
 back, Mac solo 1 MiB mt 0.067 ns/B against st 0.152.
 
@@ -724,8 +728,7 @@ caller hashing its later pieces on its own platform (SME2 under the
 turn) instead of NEON: level on the Mac from 1 to 128 MiB (jobs
 529-532); left out. **The split at 512 KiB** (`probe/split-512`): Mac
 after the gap 512 KiB 0.35 -> 0.19-0.24 ns/B and 8192 messages 22.5 ->
-13.3 ns/msg (jobs 538-541), VM 512 KiB 20-30% slower; Zooko's choice of
-768 KiB stands until he decides. **4 KiB pieces** (`MIN_PIECE_LEN`,
+13.3 ns/msg (jobs 538-541), VM 512 KiB 20-30% slower; taken (Zooko, September 28). **4 KiB pieces** (`MIN_PIECE_LEN`,
 `probe/piece-4k`, jobs 552-559): streams through a lingering Hasher
 25-70% slower (a 64 KiB job's cut ends in 4 KiB pieces), one message
 level once lingering kept eight workers; left at 8 KiB.
