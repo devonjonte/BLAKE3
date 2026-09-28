@@ -399,8 +399,14 @@ after 50 ms asleep, two sets of ten): a 100 ms integer spin on a P-core
 medians 262 and 267; hash_multithreaded over 64 MiB 281-956 pJ/B, medians
 651 and 685. Single readings spread 1.5-3.4x (the low ones suggest the
 kernel attributes energy late, in lumps); medians of ten agree within
-about 5%. An energy cell needs many repeats and medians, and a check of
-how the counter lags.
+about 5%. The lag, measured (job 699, hash over 64 MiB, eight
+each): read at once 147-326 pJ/B; the same work read again after 1 ms
+asleep 313-441, after 10 ms 384-412 (7% spread), after 100 ms 313-378.
+The kernel credits a thread's energy late, at its next block or switch:
+a reading taken after the measured threads have slept (10 ms) is complete
+and repeatable, one taken at once undercounts by a third and spreads.
+The energy probes of jobs 560-567 and 617-624 slept 5 ms before their
+last reading; job 698 read at once. For stage 3: sleep, then read.
 
 **A user's Apple M3 Ultra** (20 P + 8 E cores, two dies, no SME2; fork
 b74b59e, bench d28326e, quiet; kept in the fork's tmp/AppleM3Ultra.darwin25/).
