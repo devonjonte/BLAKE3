@@ -197,6 +197,8 @@ struct Inner<H, I, S> {
     /// The delivery thread's own: the unfinished count of the entry its
     /// last look stopped at, which it polls alone.
     waiting: AtomicPtr<AtomicUsize>,
+    /// The delivery thread's own: how many rounds it has polled `waiting`.
+    polls: AtomicUsize,
     /// Whether the delivery thread holds this queue (entries in flight).
     active: OwnLine<AtomicBool>,
     key: CVWords,
@@ -375,6 +377,7 @@ impl<H: Send + 'static, S: 'static> Queue<H, S> {
             handling: OwnLine(Mutex::new(Handling { handler, hasher: Hasher::new_internal(&key, flags) })),
             head: AtomicPtr::new(first),
             waiting: AtomicPtr::new(core::ptr::null_mut()),
+            polls: AtomicUsize::new(0),
             active: OwnLine(AtomicBool::new(false)),
             key,
             flags,
@@ -511,6 +514,18 @@ where
         // Sound: the entry stays linked and in place until this thread
         // delivers it.
         if !waiting.is_null() && unsafe { &*waiting }.load(Ordering::Acquire) > 0 {
+            // The entry waited on may be in the open task of short
+            // messages, which a stream fills first: hand it over after a
+            // while (handing each over at once took the submitters' lock
+            // and made tasks of a few, a loop that ran batches of 16 at a
+            // fifth of their speed in some samples).
+            let polls = self.polls.fetch_add(1, Ordering::Relaxed) + 1;
+            if polls == CLOSE_AFTER_POLLS {
+                let closed = crate::lanes::lock_polling(&self.state).close_open(true);
+                if let Some(task) = closed {
+                    TASKS.push(core::iter::once(task));
+                }
+            }
             return (false, true);
         }
         let mut head = self.head.load(Ordering::Relaxed);
@@ -544,13 +559,8 @@ where
         drop(handling);
         self.head.store(head, Ordering::Relaxed);
         self.waiting.store(unfinished, Ordering::Relaxed);
+        self.polls.store(0, Ordering::Relaxed);
         if !unfinished.is_null() {
-            // The entry waited on may be in the open batch: hand that over,
-            // so that it finishes.
-            let closed = crate::lanes::lock_polling(&self.state).close_open(true);
-            if let Some(task) = closed {
-                TASKS.push(core::iter::once(task));
-            }
             return (count > 0, true);
         }
         if count == DELIVER_AT_ONCE {
@@ -569,6 +579,11 @@ where
         (count > 0, in_flight)
     }
 }
+
+/// How many rounds the delivery thread waits on an entry before handing
+/// over the open task of short messages, which may hold it: about a
+/// microsecond (a round is a look at every queue and a pause).
+const CLOSE_AFTER_POLLS: usize = 16;
 
 /// The most entries of one queue delivered between two looks at its state.
 const DELIVER_AT_ONCE: usize = 64;
