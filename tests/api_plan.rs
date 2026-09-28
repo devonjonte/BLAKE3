@@ -76,6 +76,48 @@ fn one_message_every_form_matches_the_vectors() {
     }
 }
 
+/// A message in pieces through `Hasher::update_multithreaded` (and mixed
+/// with `update`), in every mode: streams of 64 KiB pieces long enough to
+/// keep the workers ready between updates (past the first 128 KiB), pieces
+/// that leave a chunk part-filled, and pieces past the multithreaded split,
+/// against the reference implementation.
+#[test]
+fn a_message_in_pieces_matches_the_reference() {
+    blake3_servil::initialize_multithreaded();
+    let hashers = |m: usize| match m {
+        0 => blake3_servil::Hasher::new(),
+        1 => blake3_servil::Hasher::new_keyed(KEY),
+        _ => blake3_servil::Hasher::new_derive_key(CONTEXT),
+    };
+    let cases: [(usize, usize); 8] = [
+        (64 << 10, 64 << 10),
+        (2 << 20, 64 << 10),
+        ((2 << 20) + 777, 64 << 10),
+        (1 << 20, 1000),
+        ((1 << 20) + 5, (64 << 10) + 1),
+        (3 << 20, 100_000),
+        (4 << 20, 1 << 20),
+        (5 << 20, 192 << 10),
+    ];
+    for (len, piece) in cases {
+        let data = input(len);
+        for m in 0..3 {
+            let expected = Hash::from(reference(m, &data));
+            let mut hasher = hashers(m);
+            for part in data.chunks(piece) {
+                hasher.update_multithreaded(part);
+            }
+            assert_eq!(hasher.finalize(), expected, "update_multithreaded, {len} B in {piece} B pieces, mode {m}");
+            // Alternating with update, a piece at a time.
+            let mut hasher = hashers(m);
+            for (k, part) in data.chunks(piece).enumerate() {
+                if k % 3 == 1 { hasher.update(part); } else { hasher.update_multithreaded(part); }
+            }
+            assert_eq!(hasher.finalize(), expected, "update and update_multithreaded, {len} B in {piece} B pieces, mode {m}");
+        }
+    }
+}
+
 #[test]
 fn one_message_large_inputs_match_the_reference() {
     for len in LARGE {

@@ -1414,6 +1414,11 @@ fn hash_serial(input: &[u8], key: &CVWords, flags: u8) -> Hash {
     hash_serial_on(input, key, flags, turn.platform())
 }
 
+/// How much of a message `Hasher::update_multithreaded` hashes before it
+/// keeps the workers ready between updates: two 64 KiB pieces.
+#[cfg(feature = "std")]
+const LINGER_AFTER: u64 = 2 * 64 * 1024;
+
 /// The smallest input the SME2 kernels take part in: one group of sixteen
 /// chunks. Below it the SME2 platform runs the NEON hybrids.
 pub(crate) const SME2_SIZED_LEN: usize = 16 * CHUNK_LEN;
@@ -2057,7 +2062,16 @@ impl Hasher {
     /// ```
     #[cfg(feature = "std")]
     pub fn update_multithreaded(&mut self, input: &[u8]) -> &mut Self {
-        self.update_with_join::<join::SerialJoin>(input, true)
+        let before = self.count();
+        self.update_with_join::<join::SerialJoin>(input, true);
+        // Past its first pieces a message promises more (lanes::linger):
+        // the workers stay ready for the next update, which then hashes its
+        // whole subtrees of 64 KiB and more over them. The first two
+        // pieces pay no wake, so a short message costs what update costs.
+        if before >= LINGER_AFTER && input.len() >= lanes::LINGER_SPLIT_LEN {
+            lanes::linger();
+        }
+        self
     }
 
     /// [`update`](Hasher::update) with every whole subtree's result taken
@@ -2224,7 +2238,7 @@ impl Hasher {
                 // This is the high-performance happy path, though getting here
                 // depends on the caller giving us a long enough input.
                 #[cfg(feature = "std")]
-                let pool_takes = pooled && subtree_len >= lanes::MIN_SPLIT_LEN;
+                let pool_takes = pooled && (subtree_len >= lanes::MIN_SPLIT_LEN || (subtree_len >= lanes::LINGER_SPLIT_LEN && lanes::lingering()));
                 #[cfg(not(feature = "std"))]
                 let pool_takes = false;
                 let cv_pair = if pool_takes {

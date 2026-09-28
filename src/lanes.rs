@@ -103,6 +103,10 @@ use std::sync::{Condvar, Mutex, OnceLock};
 /// modes built for top speed feed the workers without gaps.
 pub(crate) const MIN_SPLIT_LEN: usize = 768 * 1024;
 
+/// The shortest whole subtree a lingering Hasher hashes over the pool: a
+/// common read's 64 KiB.
+pub(crate) const LINGER_SPLIT_LEN: usize = 64 * 1024;
+
 /// The shortest piece: eight chunks, a hybrid kernel's worth.
 const MIN_PIECE_LEN: usize = 8 * CHUNK_LEN;
 
@@ -210,12 +214,45 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8, max_threads: us
     merge_root(&pieces, &mut cvs, key, flags)
 }
 
+/*
+ * Lingering (Zooko, September 28, 2026: a `Hasher` between multithreaded
+ * updates may keep its workers ready, for a bounded time). A message in
+ * progress promises more updates, which usually come in swift succession;
+ * waking sleeping workers for each 64 KiB piece costs more than the piece
+ * (tens of microseconds against about ten), so each update past the
+ * first ones keeps them polling for LINGER after it, and wakes them when
+ * they sleep; the next update finds them ready and hashes its piece over
+ * the pool. A program that stops updating leaves them polling for at
+ * most LINGER. LINGER is about what a wake costs: waiting that long
+ * before sleeping spends at most twice what knowing the future would.
+ */
+const LINGER: std::time::Duration = std::time::Duration::from_micros(50);
+
+/// Keep the workers polling for LINGER from now, waking sleepers (the
+/// caller does not wait for them).
+pub(crate) fn linger() {
+    let pool = pool();
+    let until = (pool.epoch.elapsed() + LINGER).as_nanos() as u64;
+    pool.linger_until.fetch_max(until, Ordering::Relaxed);
+    pool.wake_for(LINGER_WORKERS);
+}
+
+/// The workers a lingering Hasher keeps ready: a 64 KiB piece's cut.
+const LINGER_WORKERS: usize = 8;
+
+/// Whether workers are polling for a lingering Hasher, so a whole subtree
+/// shorter than MIN_SPLIT_LEN pays to go over the pool.
+pub(crate) fn lingering() -> bool {
+    pool().lingering()
+}
+
 /// The two child chaining values of the subtree `input` at chunk
 /// `counter`, over the machine's threads (at most `max_threads` holding a
 /// piece at once, the caller's included): what
 /// `compress_subtree_to_parent_node` returns for a whole subtree.
-/// Requires a power-of-two number of chunks, at least MIN_SPLIT_LEN bytes,
-/// and `counter` a multiple of that number, as `Hasher::update` hands out.
+/// Requires a power-of-two number of chunks, at least LINGER_SPLIT_LEN
+/// bytes (MIN_SPLIT_LEN when no Hasher lingers), and `counter` a multiple
+/// of that number, as `Hasher::update` hands out.
 pub(crate) fn subtree_children(
     input: &[u8],
     key: &crate::CVWords,
@@ -223,7 +260,7 @@ pub(crate) fn subtree_children(
     flags: u8,
     max_threads: usize,
 ) -> [u8; 2 * crate::OUT_LEN] {
-    assert!(input.len().is_power_of_two() && input.len() >= MIN_SPLIT_LEN, "a whole subtree of at least MIN_SPLIT_LEN bytes");
+    assert!(input.len().is_power_of_two() && input.len() >= LINGER_SPLIT_LEN, "a whole subtree of at least LINGER_SPLIT_LEN bytes");
     assert_eq!(counter % (input.len() / CHUNK_LEN) as u64, 0, "a subtree starts at a multiple of its chunk count");
     assert!(max_threads >= 1, "a hash needs at least the calling thread");
     let pool = pool();
@@ -594,6 +631,9 @@ struct Pool {
     sme2: bool,
     /// The clock jobs' registration times count from.
     epoch: std::time::Instant,
+    /// Workers poll until this time (ns from `epoch`) with no job: a
+    /// `Hasher` between multithreaded updates keeps them ready (`linger`).
+    linger_until: std::sync::atomic::AtomicU64,
     /// Jobs in the slots: workers poll while there are any.
     registered: AtomicUsize,
     /// Workers asleep on `posted`.
@@ -639,6 +679,7 @@ fn pool() -> &'static Pool {
             cpus,
             sme2: cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect())),
             epoch: std::time::Instant::now(),
+            linger_until: std::sync::atomic::AtomicU64::new(0),
             registered: AtomicUsize::new(0),
             sleepers: AtomicUsize::new(0),
             notified: AtomicUsize::new(0),
@@ -663,6 +704,11 @@ fn pool() -> &'static Pool {
 }
 
 impl Pool {
+    /// Whether workers keep polling with no job (`linger`).
+    fn lingering(&self) -> bool {
+        (self.epoch.elapsed().as_nanos() as u64) < self.linger_until.load(Ordering::Relaxed)
+    }
+
     /// Hash a subtree on the pool's platform, on callers and workers alike.
     /// `input` tiles a valid subtree at `counter`, as hash_all_at_once requires.
     fn hash_subtree(&self, input: &[u8], key: &crate::CVWords, counter: u64, flags: u8) -> crate::Output {
@@ -841,7 +887,7 @@ impl Pool {
     fn next_piece(&self, start: &mut usize, rank: usize) -> (*const Job<'static>, usize) {
         loop {
             let mut yielded = std::time::Instant::now();
-            while self.registered.load(Ordering::SeqCst) > 0 {
+            while self.registered.load(Ordering::SeqCst) > 0 || self.lingering() {
                 if let Some(task) = TASKS.pop() {
                     task.run(pool_platform());
                     TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
@@ -862,7 +908,7 @@ impl Pool {
             let mut guard = self.sleep_lock.lock().unwrap();
             self.sleepers.fetch_add(1, Ordering::SeqCst);
             let taken = self.take_piece(start, rank);
-            let waited = taken.is_none() && self.registered.load(Ordering::SeqCst) == 0;
+            let waited = taken.is_none() && self.registered.load(Ordering::SeqCst) == 0 && !self.lingering();
             if waited {
                 guard = self.posted.wait(guard).unwrap();
                 // Awake: one fewer notified sleeper on the way (a wake
