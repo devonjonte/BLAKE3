@@ -741,10 +741,6 @@ impl Pool {
             // writes their slots.
             unsafe { job.hash_piece(index, own_platform) };
         }
-        // The caller's later pieces run on its own platform too: holding the
-        // SME2 turn, it is the process's one SME2 thread, about three times
-        // as fast as a worker's NEON, and after a gap it may hash most of the
-        // job while the woken workers arrive.
         loop {
             let index = job.cursor.fetch_add(1, Ordering::SeqCst);
             if index >= pieces {
@@ -752,7 +748,7 @@ impl Pool {
             }
             // Sound: this thread took index through the cursor, so it alone
             // writes slot index.
-            unsafe { job.hash_piece(index, own_platform) };
+            unsafe { job.hash_piece(index, pool_platform()) };
         }
         job.active.fetch_sub(1, Ordering::SeqCst);
         // Every piece is taken; the slot has nothing more to give from this
