@@ -609,10 +609,10 @@ batches of 16 about 10% and of 65536 7%, 1 KiB messages 15-20% slower
 (or noise: 0.12-0.19 across runs), the rest level. Taken: the SME2
 thread runs gathered tasks (short messages, small batches) on NEON
 (64-byte messages 14-15% faster solo and shared, batches of 16 and 64
-10-15%, the rest level; VM no regression). Open for Zooko: whether the
-SME2 thread pays for subtree tasks at all in the time-saving queue
-(16 KiB and 65536-message batches came out faster without it), against
-SME2's lower energy per byte.
+10-15%, the rest level; VM no regression). The SME2 thread running every
+task on NEON (probe/sme2-thread-all-neon, jobs 604-607): level on 16 KiB
+to 64 MiB messages and batches of 4096 and 65536, so subtree tasks keep
+SME2, at the same speed for less energy per byte.
 
 **Idle workers sleep** (September 28, night): a worker, and the SME2
 thread, that finds nothing for 50 us (`lanes::WORKER_IDLE`, about a
