@@ -1134,7 +1134,7 @@ fn sme2_main() {
         idle = false;
         while TASKS.queued.load(Ordering::SeqCst) > 0 || pool.registered.load(Ordering::SeqCst) > 0 {
             match TASKS.pop() {
-                Some(task) if task.members > 0 => {
+                Some(task) if true => {
                     // Short messages and small batches, gathered, run
                     // faster on NEON than through an SME2 session per task
                     // (Mac: 64-byte messages 14-15% faster, batches of 16
