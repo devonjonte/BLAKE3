@@ -311,6 +311,18 @@ KiB 0.201 / 0.160, 256 KiB 0.172 / 0.1695, 1 MiB 0.152 / 0.151. Open:
   guest cannot see; one run in a benchmark switched from fast to slow
   mid-run.
 
+**A call after a 1 ms sleep** (September 28, night; probe/after-gap and
+probe/first-call, jobs 478-479 and 533, M4 Max). The thread wakes at about
+1.3 GHz and spends a quarter to half of its time on E-cores, SHA-256's
+calls alike. hash(4 KiB) takes 5300 cycles back to back and 8900 after
+the gap; SHA-256's stay level (6260 and 6390): the NEON hybrids lose more
+on E-cores than SHA-256's instructions. 20 us of integer work first
+halves it (the clock's ramp). A first call's cost over a second one right
+after it: servil 238-244 ns at 64 B, SHA-256 168-204; at 1 KiB 181-300
+and 168-301: no cold-start cost of servil's own to shave. The second
+call still takes servil 2.6-2.8 us at 1 KiB against SHA-256's 1.15-1.2:
+one chunk's sixteen dependent compressions against SHA-256's hardware.
+
 **Idle threads cost the busy ones.** Beside eight hashing threads, eight
 idle ones: asleep, free; spinning on loads +18% (VM and Mac); `sched_yield`
 in a loop +36% on the VM, +2% on the Mac. `WFE` returns every 0.1-1.3 µs
