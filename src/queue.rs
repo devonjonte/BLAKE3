@@ -583,7 +583,7 @@ where
 /// How many rounds the delivery thread waits on an entry before handing
 /// over the open task of short messages, which may hold it: about a
 /// microsecond (a round is a look at every queue and a pause).
-const CLOSE_AFTER_POLLS: usize = 16;
+const CLOSE_AFTER_POLLS: usize = 64;
 
 /// The most entries of one queue delivered between two looks at its state.
 const DELIVER_AT_ONCE: usize = 64;
