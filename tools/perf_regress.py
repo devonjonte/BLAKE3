@@ -54,7 +54,8 @@ to back (NOTES-servil.md, "perf_regress"):
 * The control is the same code on both sides. If the rule calls any of
   its cells slower or faster, the comparison is unreliable: no verdict.
 * Two speeds (tools/speeds.py, the rule every measurement uses): a cell
-  whose pooled samples, either side, run at two speeds is also slower
+  of the queue whose pooled samples, on both sides, run at two speeds
+  is also slower
   (faster) when its slow speed's median, each side's runs pooled over the
   pairs, moves past the cell's margin; the 5th percentile sees the fast
   speed alone. A share moved between the speeds is shown, never judged:
@@ -615,15 +616,22 @@ def speeds_of(measured, key):
 
 
 def slow_speed_moved(measured, key):
-    """+1 (-1) when either side ran at two speeds and the slow speed's
+    """+1 (-1) when both sides ran at two speeds and the slow speed's
     median moved past the cell's margin slower (faster), else 0. The 5th
     percentile sees the fast speed alone; this is the check for the slow
     one. A share moved between the speeds is reported, never judged: the
     same code's shares swing run to run (tools/ab.py shows how far)."""
     c = speeds_of(measured, key)
-    if not c["two_speeds"]:
+    # Only a slow speed both sides ran at compares: a side without one
+    # moved its share, which is shown, never judged.
+    if len(c["old"]) < 2 or len(c["new"]) < 2:
         return 0
     _, scenario, use_case, _ = key.split("|")
+    # The calls after the gap: their slow speed is, for now, the cell run
+    # before them (a first call after a large one meets cold caches; NOTES,
+    # "The busy gap"), which moves the control past 20%: shown, not judged.
+    if use_case in AFTER_GAP:
+        return 0
     m = margin(scenario, use_case)
     r = Fraction(c["slow_permille"], 1000)
     return 1 if r > 1 + m else -1 if r < 1 - m else 0
