@@ -22,6 +22,19 @@
 //!
 //! Read wall time alone inside a timed interval and the counts outside it:
 //! a counts read is a system call.
+//!
+//! **Resolution.** The wall clock steps in ticks of the platform's counter:
+//! 24 MHz, 41.67 ns, on an Apple M4 Max (every Darwin wall clock and the
+//! CPU-time clocks alike; `CLOCK_REALTIME` and `CLOCK_MONOTONIC` in whole
+//! microseconds: measure-clocks3, results of December 7, 2025) and in the
+//! Linux VM (`arch_timer` at 24 MHz). A reading is a whole number of
+//! ticks. So an interval of a few ticks is measured in one of two ways:
+//! as a batch of calls long enough that a tick is a small share of it
+//! ([`measure`]), or, where every call must be timed alone (a call after
+//! a gap), as the sum of many such readings, each starting at a phase
+//! against the ticks that nothing correlates with the call
+//! ([`measure_after_gaps`]): the sum's rounding averages out. A median or
+//! a minimum of single short readings keeps the rounding; take neither.
 
 use std::time::Instant;
 
@@ -150,6 +163,26 @@ pub fn measure(batches: usize, batch_ns: u64, mut f: impl FnMut()) -> Vec<Batch>
         .collect()
 }
 
+/// `calls` calls of `f`, each after the calling thread has slept `gap_ns`
+/// (as a program that hashes now and then calls, with whatever the gap
+/// let go cold: sleeping workers, a lowered clock), as one [`Batch`]: the
+/// wall time inside each call, summed (the sleeps left out; see
+/// "Resolution" above for why a sum), and the counts around them all
+/// (the thread counts no time while it sleeps).
+pub fn measure_after_gaps(calls: u64, gap_ns: u64, mut f: impl FnMut()) -> Batch {
+    assert!(calls > 0, "a measurement takes at least one call");
+    let before = Counts::read();
+    let mut wall_ns = 0;
+    for _ in 0..calls {
+        std::thread::sleep(std::time::Duration::from_nanos(gap_ns));
+        let t = now();
+        f();
+        wall_ns += since_ns(t);
+    }
+    let counts = before.zip(Counts::read()).map(|(before, after)| after.since(before));
+    Batch { calls, wall_ns, counts }
+}
+
 /// The CPU time this process has used, all its threads together, in
 /// nanoseconds: for telling this process's share of the machine's busy
 /// time from other programs' (bench-hashes' load report), never for
@@ -269,6 +302,17 @@ mod tests {
             assert!(b.calls > 0 && b.wall_ns > 0, "{b:?}");
             assert!(b.show().contains("ns/call"));
         }
+    }
+
+    #[test]
+    fn calls_after_gaps_sum_their_own_time_alone() {
+        let mut calls = 0;
+        let b = measure_after_gaps(5, 1_000_000, || {
+            calls += 1;
+            std::hint::black_box((0..100u64).sum::<u64>());
+        });
+        assert_eq!((calls, b.calls), (5, 5));
+        assert!(b.wall_ns > 0 && b.wall_ns < 5_000_000, "the sleeps stay out of the sum: {b:?}");
     }
 
     #[test]
