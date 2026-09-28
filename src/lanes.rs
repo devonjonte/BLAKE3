@@ -979,7 +979,7 @@ pub(crate) struct Task {
 }
 
 /// The most short messages (or small batches) one task takes.
-pub(crate) const MEMBERS: usize = 64;
+pub(crate) const MEMBERS: usize = 16;
 
 /// A short message in a task of several ([`Task::members`]).
 #[derive(Clone, Copy)]
