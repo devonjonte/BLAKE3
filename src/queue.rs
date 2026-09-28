@@ -246,15 +246,12 @@ impl<I> State<I> {
 }
 
 impl<I> State<I> {
-    /// Hand the open batch of short messages to the pool when it is full,
-    /// or (with `now`) whenever a hashing thread would otherwise have
-    /// nothing to do: a busy pool lets batches fill, an idle one gains more
-    /// from a short batch now.
-    fn close_open(&mut self, now: bool) {
+    /// The open batch of short messages, to hand to the pool (after the
+    /// state's lock is released) when it is full or (with `waited`) when
+    /// the delivery thread waits on it; otherwise it goes on filling.
+    fn close_open(&mut self, waited: bool) -> Option<Task> {
         let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS);
-        if full || (now && self.open.is_some() && TASKS.in_flight() < crate::lanes::task_threads()) {
-            TASKS.push(self.open.take().into_iter());
-        }
+        if full || waited { self.open.take() } else { None }
     }
 }
 
@@ -380,11 +377,15 @@ where
         // delivery, after `left` reaches zero.
         open.member[open.members] = crate::lanes::Member { input: bytes.as_ptr(), len: bytes.len(), out: slot.results.as_mut_ptr() as *mut u8, left: &slot.left };
         open.members += 1;
-        state.close_open(true);
+        let closed = state.close_open(false);
         state.order.push_back(index);
-        if !guard.active {
-            guard.active = true;
-            drop(guard);
+        let activate = !guard.active;
+        guard.active = true;
+        drop(guard);
+        if let Some(task) = closed {
+            TASKS.push(core::iter::once(task));
+        }
+        if activate {
             DELIVERY.hold(self.clone());
         }
     }
@@ -396,39 +397,55 @@ where
      * and whether the queue still has entries in flight.
      */
     fn deliver_with(&self, deliver: impl Fn(&Self, &mut Handling<H>, I, &[[u8; crate::BLOCK_LEN]], bool)) -> (bool, bool) {
-        let mut delivered = false;
-        loop {
-            let (index, slot, item) = {
-                // A submitter holding the lock means entries are coming:
-                // leave it be (a wait here would park this thread) and look
-                // again on the next round.
-                let Ok(mut state) = self.state.try_lock() else { return (delivered, true) };
-                let Some(&index) = state.order.front() else {
-                    state.active = false;
-                    return (delivered, false);
-                };
+        // The entries ready at the front, taken under one lock, delivered,
+        // then handed back under one more.
+        let mut ready = [(0usize, core::ptr::null_mut::<Slot<I>>()); DELIVER_AT_ONCE];
+        let (count, in_flight, closed) = {
+            // A submitter holding the lock means entries are coming:
+            // leave it be (a wait here would park this thread) and look
+            // again on the next round.
+            let Ok(mut state) = self.state.try_lock() else { return (false, true) };
+            let mut count = 0;
+            while count < DELIVER_AT_ONCE {
+                let Some(&index) = state.order.front() else { break };
                 let slot = state.slot(index);
-                // Sound: the front slot is in flight, and only this thread
+                // Sound: a slot in `order` is in flight, and only this thread
                 // takes slots out of `order`.
                 if unsafe { &(*slot).left }.load(Ordering::Acquire) > 0 {
-                    // It may wait in the open batch: hand that over once a
-                    // hashing thread is free.
-                    state.close_open(true);
-                    return (delivered, true);
+                    break;
                 }
                 state.order.pop_front();
-                (index, slot, unsafe { (*slot).item.take() }.expect("a slot in flight holds its item"))
-            };
-            let mut handling = self.handling.lock().expect("no lock is poisoned");
-            // Sound: the slot is out of `order` and not yet free: this
-            // thread's alone, its tasks finished.
-            deliver(self, &mut handling, item, unsafe { &(*slot).results }, unsafe { (*slot).digest });
-            drop(handling);
-            self.state.lock().expect("no lock is poisoned").free.push(index);
-            delivered = true;
+                ready[count] = (index, slot);
+                count += 1;
+            }
+            // The front may wait in the open batch: hand that over.
+            let closed = if count == 0 && !state.order.is_empty() { state.close_open(true) } else { None };
+            if state.order.is_empty() && count == 0 {
+                state.active = false;
+            }
+            (count, !state.order.is_empty() || count > 0, closed)
+        };
+        if let Some(task) = closed {
+            TASKS.push(core::iter::once(task));
         }
+        if count > 0 {
+            let mut handling = self.handling.lock().expect("no lock is poisoned");
+            for &(_, slot) in &ready[..count] {
+                // Sound: the slot is out of `order` and not yet free: this
+                // thread's alone, its tasks finished.
+                let item = unsafe { (*slot).item.take() }.expect("a slot in flight holds its item");
+                deliver(self, &mut handling, item, unsafe { &(*slot).results }, unsafe { (*slot).digest });
+            }
+            drop(handling);
+            let mut state = self.state.lock().expect("no lock is poisoned");
+            state.free.extend(ready[..count].iter().map(|&(index, _)| index));
+        }
+        (count > 0, in_flight)
     }
 }
+
+/// The most entries of one queue delivered between two looks at its state.
+const DELIVER_AT_ONCE: usize = 64;
 
 /// What the delivery thread runs for a queue in flight.
 trait Deliver: Send + Sync + 'static {

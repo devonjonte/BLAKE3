@@ -978,20 +978,6 @@ impl Task {
     }
 }
 
-/// The threads that hash tasks: the workers, and the SME2 thread where it
-/// runs.
-pub(crate) fn task_threads() -> usize {
-    let pool = pool();
-    pool.cpus - 1 + usize::from(pool.sme2)
-}
-
-impl Tasks {
-    /// Tasks pushed and not yet finished.
-    pub(crate) fn in_flight(&self) -> usize {
-        self.in_flight.load(Ordering::SeqCst)
-    }
-}
-
 /// Every queue's tasks waiting for a worker, in the order pushed. Workers
 /// poll it while the pool is held (a [`Hold`]: the queue's delivery thread
 /// holds it while any submission is in flight).
