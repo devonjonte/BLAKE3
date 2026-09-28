@@ -541,6 +541,11 @@ where
     }
 }
 
+/// The delivery thread's back-off when idle: a round's extra spins grow by
+/// IDLE_BACKOFF_SPINS per idle round, up to IDLE_BACKOFF_ROUNDS times that.
+const IDLE_BACKOFF_SPINS: usize = 16;
+const IDLE_BACKOFF_ROUNDS: usize = 16;
+
 /// The most entries of one queue delivered between two looks at its state.
 const DELIVER_AT_ONCE: usize = 64;
 
@@ -735,6 +740,7 @@ impl Delivery {
     /// hashing, a bug.
     fn run(&self) {
         let mut polled = std::time::Instant::now();
+        let mut idle_rounds = 0;
         let mut hold = None;
         // The queues this round serves, swapped with the held list's (both
         // keep their capacity: no allocation).
@@ -765,8 +771,17 @@ impl Delivery {
             let mut held = crate::lanes::lock_polling(&self.queues);
             held.2 -= idle;
             held.0.append(&mut queues);
-            if !delivered {
+            // Idle rounds back off, to about a microsecond: a round reads
+            // lines the submitters are writing (the chain's tail, the
+            // entry waited on), and each read takes them from a submitter.
+            if delivered {
+                idle_rounds = 0;
+            } else {
                 crate::lanes::poll_pause(&mut polled);
+                idle_rounds = (idle_rounds + 1).min(IDLE_BACKOFF_ROUNDS);
+                for _ in 0..idle_rounds * IDLE_BACKOFF_SPINS {
+                    std::hint::spin_loop();
+                }
             }
         }
     }
