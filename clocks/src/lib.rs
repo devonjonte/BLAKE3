@@ -94,6 +94,12 @@ impl Counts {
         Counts { p: level(self.p, earlier.p), e: level(self.e, earlier.e) }
     }
 
+    /// These counts and `other`'s together.
+    pub fn plus(self, other: Counts) -> Counts {
+        let level = |a: Level, b: Level| Level { cycles: a.cycles + b.cycles, instructions: a.instructions + b.instructions, time_ns: a.time_ns + b.time_ns };
+        Counts { p: level(self.p, other.p), e: level(self.e, other.e) }
+    }
+
     /// Cycles per microsecond of the thread's time on cores, rounded: the
     /// clock it ran at in MHz (lower where it waited on the SME unit).
     /// Requires some time counted.
@@ -165,24 +171,44 @@ pub fn measure(batches: usize, batch_ns: u64, mut f: impl FnMut()) -> Vec<Batch>
         .collect()
 }
 
-/// `calls` calls of `f`, each after the calling thread has slept `gap_ns`
-/// (as a program that hashes now and then calls, with whatever the gap
-/// let go cold: sleeping workers, a lowered clock), as one [`Batch`]: the
-/// wall time inside each call, summed (the sleeps left out; see
-/// "Resolution" above for why a sum), and the counts around them all
-/// (the thread counts no time while it sleeps).
+/// `calls` calls of `f`, each after the calling thread has spent `gap_ns`
+/// on other work of its own ([`busy_work`]: integer arithmetic in
+/// registers), as a program that hashes now and then between other work
+/// calls: the pool's workers have fallen asleep, the caller's core stays
+/// busy (Zooko, September 28, 2026: a busy gap for steadier results; an
+/// idle core between calls is left unmeasured). One [`Batch`]: the wall
+/// time inside each call, summed (see "Resolution" above for why a sum),
+/// and the counts around each call alone, summed (their reads outside the
+/// timed interval).
 pub fn measure_after_gaps(calls: u64, gap_ns: u64, mut f: impl FnMut()) -> Batch {
     assert!(calls > 0, "a measurement takes at least one call");
-    let before = Counts::read();
     let mut wall_ns = 0;
+    let mut counts: Option<Counts> = Some(Counts::default());
     for _ in 0..calls {
-        std::thread::sleep(std::time::Duration::from_nanos(gap_ns));
+        busy_work(gap_ns);
+        let before = Counts::read();
         let t = now();
         f();
         wall_ns += since_ns(t);
+        let call = before.zip(Counts::read()).map(|(before, after)| after.since(before));
+        counts = counts.zip(call).map(|(sum, call)| sum.plus(call));
     }
-    let counts = before.zip(Counts::read()).map(|(before, after)| after.since(before));
     Batch { calls, wall_ns, counts }
+}
+
+/// Keep the calling thread busy for `ns` of wall time with integer
+/// arithmetic in registers (a multiply-add chain), touching no memory: the
+/// program's own work between calls, which leaves the caches as the call
+/// last left them.
+pub fn busy_work(ns: u64) {
+    let started = now();
+    let mut x = 1u64;
+    while since_ns(started) < ns {
+        for _ in 0..256 {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        }
+        x = std::hint::black_box(x);
+    }
 }
 
 /// The CPU time this process has used, all its threads together, in

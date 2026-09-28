@@ -230,7 +230,10 @@ one-shot call per message, their incremental API per piece, their batch
 call where they have one (BLAKE3 official through `Platform::hash_many`,
 sixteen a call).
 
-- The gap: 1 ms, the program asleep (Zooko, September 28, 2026).
+- The gap: 1 ms of the program's own work, integer arithmetic on its
+  thread (Zooko, September 28, 2026, morning; it was 1 ms asleep, whose
+  clock states split every cell). An idle core between calls is left
+  unmeasured.
   Anything we keep ready, such as a `Hasher` lingering between updates,
   has gone to sleep well before the gap ends.
 - perf_regress judges the cells above: the synchronous calls after the
