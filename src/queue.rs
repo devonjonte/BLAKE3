@@ -286,7 +286,7 @@ impl<I> State<I> {
     fn close_open(&mut self, waited: bool) -> Option<Task> {
         // Small batches fill a task up to a task's bytes (short messages
         // fill all 64 places: 4 KiB messages measured 10-30% slower at 16).
-        let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS || (open.batch.is_some() && open.len >= crate::lanes::TASK_LEN));
+        let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS || open.len >= if open.batch.is_some() { crate::lanes::TASK_LEN } else { 4 * crate::lanes::TASK_LEN });
         if full || waited { self.open.take() } else { None }
     }
 }
@@ -326,7 +326,7 @@ enum PieceItem<B> {
 /// The shortest message or piece hashed as tasks of its own: shorter
 /// messages go several to a task (`lanes::MEMBERS`), shorter pieces are
 /// hashed at delivery (a piece's bytes join the message in order).
-const TASK_MIN: usize = crate::SME2_SIZED_LEN;
+const TASK_MIN: usize = 2 * crate::SME2_SIZED_LEN;
 
 /// The shortest batch of fixed-length messages hashed as tasks of its own
 /// (a task's bytes): shorter ones go several to a task (on the Mac a task
