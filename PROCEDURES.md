@@ -23,7 +23,7 @@ Speed is this fork's purpose, so no commit that makes it slower may enter git un
 
 **Commits that skipped the check** (`--no-verify`, or made where the hook was absent) must be checked before they are pushed: `pypy3 tools/perf_regress.py compare <parent> <commit>` for one, `pypy3 tools/perf_bisect.py <commit> <commit> ...` for a run of them (each against the one before, then the last against the first).
 
-`NOTES-servil.md` ("perf_regress", under "Tooling and its pitfalls") explains the rule, its margins by scenario (solo 3%, after idle 20%, which hold a change; shared 10%, which is reported), and its measured false-alarm rates and sensitivity on the VM and the Mac.
+`NOTES-servil.md` ("perf_regress", under "Tooling and its pitfalls") explains the rule, its margins (the synchronous calls after the gap 20%; the queue's continuous cells 3% solo, 10% shared; solo cells hold a change, shared ones are reported), and its measured false-alarm rates and sensitivity on the VM and the Mac.
 
 # Branches: candidates, then servil
 

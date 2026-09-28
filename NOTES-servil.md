@@ -686,17 +686,16 @@ gap a 64 B call costs about 500 ns for every hash alike, against about
 40 ns back to back; unexplained (the vCPU's wake, cold caches, the
 clock?), to be measured on the Mac.
 
-**perf_regress's stale parts** (September 28): it still names the
-after-idle scenario and the old use cases, which the benchmark on
-`candidate/benchmark-plan` no longer has; fix it before a code commit
-runs it against that benchmark (bench-hashes NEXT-STEPS, "Resume here").
-
 **perf_regress** (`check` = working tree against HEAD, `compare OLD NEW`,
 `build` = the working tree's bench-hashes for runs by hand): runs A B B
-A A B B A of sha256 (the control), servil, and servil mt at 29 points, 24
-rounds each; a cell is slower when all four pairs' 5th percentiles are
-more than 3% above (solo cells) or 10% above (shared cells, since
-September 25, 2026); the control moving means no verdict. Confirmed solo
+A A B B A of sha256 (the control), servil, and servil mt at 28 points
+over the benchmark's five use cases (September 28, night), 24 rounds
+each; a cell is slower when all four pairs' 5th percentiles are more
+than its margin above: 20% for the synchronous calls after the gap
+(solo and shared), 3% solo and 10% shared for the queue's continuous
+cells; the control moving means no verdict. A check takes about 25-30 s
+of runs on the VM beside the builds; the after-gap cells' margin is
+Zooko's start, awaiting a calibration on these use cases. Confirmed solo
 cells hold the change (exit 1); confirmed shared cells are listed beside
 exit 0, and the commit message names them and the reason (since
 September 26, 2026). Each listed cell also shows its 90th-percentile

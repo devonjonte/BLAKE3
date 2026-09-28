@@ -7,9 +7,9 @@ a commit, measured side by side.
     pypy3 tools/perf_regress.py compare OLD NEW        # two commits
     pypy3 tools/perf_regress.py build                  # bench-hashes against the working tree
 
-Exit 0: no regression in a cell that holds a change (solo, after idle;
-shared cells slower are listed). 1: a confirmed regression in one. 2: no
-verdict (the comparison itself was unreliable, see below).
+Exit 0: no regression in a cell that holds a change (solo; shared cells
+slower are listed). 1: a confirmed regression in one. 2: no verdict (the
+comparison itself was unreliable, see below).
 
 `check` builds bench-hashes twice, once against the fork at REV (the old
 side) and once against this working tree (the new side, as a commit object
@@ -34,12 +34,14 @@ to back (NOTES-servil.md, "perf_regress"):
   them, so a steady drift across the eight runs cancels. A cell (one
   contender, scenario, use case, and point) is slower when, in every
   pair, the new side's 5th percentile exceeds the old side's by more than
-  the scenario's margin: 3% solo, 10% shared (Zooko, September 25, 2026:
-  the recommended usage first, the shared scenario measured and held to
-  a looser line; AGENTS.md), 20% after idle (calls after a 1 ms sleep,
-  whose 5th percentile varies about 7.5% between runs on the VM).
-* A regression holds the change (exit 1) when a solo or after-idle cell
-  is slower; a shared cell slower is reported beside an exit 0, and the commit names
+  the cell's margin: for the synchronous calls, each after the gap (a 1
+  ms sleep), 20% (Zooko's start, September 28, 2026; their 5th
+  percentile varies about 7.5% between runs on the VM); for the queue's
+  continuous cells 3% solo, 10% shared (Zooko, September 25, 2026: the
+  recommended usage first, the shared scenario measured and held to a
+  looser line; AGENTS.md).
+* A regression holds the change (exit 1) when a solo cell is slower; a
+  shared cell slower is reported beside an exit 0, and the commit names
   it, its numbers, and the reason the change is worth it (Zooko,
   September 26, 2026).
 * A pair's runs measure only the points where some cell is still open:
@@ -55,34 +57,30 @@ to back (NOTES-servil.md, "perf_regress"):
   which a two-speed cell's slow speed reaches; it informs, and the
   verdict ignores it (the rule is calibrated for the 5th percentile).
 
-Measured on unchanged code (VM, September 26, 2026; checks simulated
-over consecutive runs of 24 rounds): false flags before confirmation in
-0.07% of cells (2 of 2900), no false no-verdict in 25 checks; a solo cell
-5% slower is caught 81% of the time, 10% slower 92%, 20% slower 95% (the
-misses are cells whose speed differs from process to process: servil mt
-at 64 KiB and 1024 messages, servil st at 32 KiB). A check takes about
-16 s on the VM plus the builds, against 73 s when every pair ran every
-point at 48 rounds; the after-idle cells add about 2.5 s a run. After
-idle (VM, 7 checks over consecutive runs): no false flag or no-verdict at
-the 20% margin; a cell 50% slower caught 88% of the time, 70% slower 99%,
-twice as slow always (the pool asleep at 64 KiB made servil mt 5x slower
-than servil st).
+The rule's calibration (VM, September 26, 2026, on the benchmark of
+then, whose synchronous cells ran back to back and after idle): at a 3%
+margin, false flags before confirmation in 0.07% of cells, none
+confirmed in 25 checks; a solo cell 5% slower caught 81% of the time,
+10% slower 92%; at the 20% margin after a 1 ms sleep, a cell 50% slower
+caught 88% of the time, twice as slow always. On the current use cases
+(VM, September 28, 2026) two checks of unchanged code took 30 and 25 s
+of runs beside about 14 s of builds and called no cell slower after
+confirmation; the continuous batches of 16, a cell of two speeds, came
+out 7.7% faster in one. The current use cases await a calibration of
+their own.
 
-The check measures the 29 points in POINTS, which cover the code paths
-and boundaries of the one-message and batch use cases at the benchmark's points; the published graph's plateau sizes add
-run time and no path.
+The check measures the points in POINTS_BY_USE_CASE, which cover the
+code paths and boundaries of the benchmark's five use cases; the
+published graph's plateau sizes add run time and no path.
 
-The benchmark calls the batch API that takes one buffer of equal messages
-(hash_many(input, message_len, out)). Older commits get a shim so it
-builds: one with that API under the name hash_many_equal forwards to it,
-and its batch cells are judged; one whose hash_many takes a slice of
-slices has it renamed hash_many_slices and a copying shim over it, and
-one that predates batches gets a shim hashing one message at a time. A
-comparison involving either of those last two measures and judges the
-one-message cells alone. Batch kernel reports that take no message length are
-renamed and called through a shim that takes it.
-Commits that predate Stream get a shim over a Hasher on the calling
-thread (the check measures no streamed cells).
+The benchmark calls the current fork API. Older commits get shims so it
+builds: the one-buffer batch API forwarded from hash_many_equal, or
+copied over the slice API, or one message at a time before batches (a
+comparison with either of those last two judges no batch cells); batch
+kernel reports that take no message length renamed and called through a
+shim that takes it; Stream and Queue, before they existed, over a Hasher
+on the calling thread (no continuous cells judged); and
+Hasher::update_multithreaded, before it was public, as update.
 """
 import argparse
 import fcntl
@@ -106,33 +104,66 @@ CACHE = ROOT / "tmp/perf-ab"
 CONTROL = "sha256"
 SUBJECTS = ["blake3-servil-st", "blake3-servil-mt"]
 CONTENDERS = [CONTROL] + SUBJECTS
-# The code paths and boundaries of both use cases among the benchmark's
-# points, and none of the plateau sizes the published graph needs (16-128
-# MiB and batches past 16384 cost 60% of a full run and exercise no path
-# that 8 MiB does not): one message on the scalar kernel (64 B, 1 KiB), the
-# hybrids (2, 3, 4, 8 KiB; a partial final chunk beside whole ones at
-# 2304, 3839, 4470, 7935 B, the q kernels), the first SME2
-# groups (16, 32 KiB), the split threshold (64 KiB), bulk (256 KiB,
-# 1 MiB), unequal subtrees (3 MiB), and the memory-resident plateau
-# (8 MiB); batches of one, of the NEON parent plans (2, 3, 8), of a first
-# and a partial SME2 group (16, 24), in bulk (64, 256), at the split
-# (1024), and over the pool (2048, 4096, 16384); 4 and 12, where BLAKE3 official
-# led last (added September 27, 2026: the p4 kernel change went unmeasured).
-ONE_MESSAGE_POINTS = ["64 B", "1 KiB", "2 KiB", "2304 B", "3 KiB", "3839 B", "4 KiB", "4470 B", "7935 B", "8 KiB", "16 KiB",
-                      "32 KiB", "64 KiB", "256 KiB", "1 MiB", "3 MiB", "8 MiB"]
-POINTS = ONE_MESSAGE_POINTS + [
-          "1", "2", "3", "4", "8", "12", "16", "24", "64", "256", "1024", "2048", "4096", "16384"]
+# The benchmark's use cases (FROZEN.md, September 28, 2026): the
+# synchronous calls, each after the gap (a 1 ms sleep), and the queue's
+# continuous ones. Points name the code paths and boundaries, and none of
+# the plateau sizes the published graph needs: one message on the scalar
+# kernel (64 B, 1 KiB), the hybrids (2304 B, 4 KiB, 7935 B: a partial final
+# chunk beside whole ones), the first SME2 group (16 KiB), bulk (64, 256
+# KiB), the multithreaded split (1 MiB) and plateau (8 MiB); batches of
+# one, of the NEON parent plans (4), of a first SME2 group (16), in bulk
+# (64, 1024), and over the pool (16384); streams of one short piece, one
+# whole piece, and many; the queue's short messages (members), a first
+# subtree task (16 KiB), one piece, many pieces, and batches as members
+# (16, 256) and as tasks of their own (4096). A call after the gap costs
+# the gap, so a cell whose calls take under about 2 us (the benchmark's
+# GAP_SAMPLE_NS) costs one gap per call summed: few such points.
+AFTER_GAP = {"OneMessage", "ManyMessages", "Streaming"}
+CONTINUOUS = {"ContinuousMessages", "ContinuousBatches"}
+USE_CASES = AFTER_GAP | CONTINUOUS
+# The command line names a point by its use case's prefix and its label
+# (bench-hashes' label_prefix); the samples file by the two apart.
+PREFIX = {"OneMessage": "", "ManyMessages": "", "Streaming": "streamed ", "ContinuousMessages": "continuous ",
+          "ContinuousBatches": "continuous batch "}
+POINTS_BY_USE_CASE = {
+    "OneMessage": ["64 B", "1 KiB", "2304 B", "4 KiB", "7935 B", "16 KiB", "64 KiB", "256 KiB", "1 MiB", "8 MiB"],
+    "ManyMessages": ["1", "4", "16", "64", "1024", "16384"],
+    "Streaming": ["64 B", "64 KiB", "1 MiB", "8 MiB"],
+    "ContinuousMessages": ["64 B", "1 KiB", "16 KiB", "64 KiB", "1 MiB"],
+    "ContinuousBatches": ["16", "256", "4096"],
+}
+
+
+def argument(use_case, label):
+    """The point's name on the benchmark's command line."""
+    return PREFIX[use_case] + label
+
+
+def points_of(use_cases):
+    return [argument(u, label) for u in sorted(use_cases) for label in POINTS_BY_USE_CASE[u]]
+
+
 # Rounds per run: the variance between processes exceeds a run's sampling
 # noise, so short runs lose little (5% slower caught 81% at 24 rounds, 84%
 # at 48, 61% at 12).
 ROUNDS = 24
 QUANTILE = 0.05
 PAIRS = 4  # the runs go A B B A A B B A
-# A cell is slower (faster) past this ratio, by scenario.
-MARGIN = {"solo": Fraction(3, 100), "shared": Fraction(10, 100), "after-idle": Fraction(20, 100)}
-# Cells whose slowdown holds the change: the recommended usage, whether a
-# program calls back to back or now and then (Zooko, September 26, 2026).
-HOLDING = {"solo", "after-idle"}
+
+
+def margin(scenario, use_case):
+    """A cell is slower (faster) past this ratio: calls after the gap 20%
+    (Zooko's start, September 28, 2026; their 5th percentile varies about
+    7.5% between runs on the VM), the continuous cells 3% solo and 10%
+    shared (Zooko, September 25, 2026)."""
+    if use_case in AFTER_GAP:
+        return Fraction(20, 100)
+    return Fraction(3, 100) if scenario == "solo" else Fraction(10, 100)
+
+
+# Cells whose slowdown holds the change: solo, the recommended usage
+# (Zooko, September 26, 2026); shared cells are reported.
+HOLDING = {"solo"}
 
 # A commit's lib.rs contains one of these, newest first; each names the
 # shim that makes the benchmark build against it, and whether its batch
@@ -264,7 +295,13 @@ pub trait PieceHandler: Send + 'static {
     fn finished(&mut self, hash: Hash);
 }
 #[cfg(feature = "std")]
-pub mod shape { pub struct Messages; pub struct Pieces; }
+pub trait FixedHandler: Send + 'static {
+    type Buffer: AsRef<[u8]> + Send + 'static;
+    type Digests: AsMut<[[u8; OUT_LEN]]> + Send + 'static;
+    fn hashed(&mut self, buffer: Self::Buffer, digests: Self::Digests);
+}
+#[cfg(feature = "std")]
+pub mod shape { pub struct Messages; pub struct Pieces; pub struct Fixed; }
 #[cfg(feature = "std")]
 pub struct Queue<H, S = shape::Messages> { handler: std::sync::Mutex<(H, Hasher)>, shape: core::marker::PhantomData<S> }
 #[cfg(feature = "std")]
@@ -282,6 +319,28 @@ impl<H: PieceHandler> Queue<H, shape::Pieces> {
     pub fn pieces(mode: Mode, _: Efficiency, handler: H) -> Self { shim_queue(mode, handler) }
     pub fn submit(&self, piece: H::Buffer) { let mut h = self.handler.lock().unwrap(); h.1.update(piece.as_ref()); h.0.piece_done(piece); }
     pub fn finish(&self) { let mut h = self.handler.lock().unwrap(); let hash = h.1.finalize(); h.1.reset(); h.0.finished(hash); }
+}
+#[cfg(feature = "std")]
+impl<H: FixedHandler> Queue<H, shape::Fixed> {
+    // Messages a whole number of blocks long (the benchmark's 64 B), one per slot.
+    pub fn fixed(_message_len: usize, mode: Mode, _: Efficiency, handler: H) -> Self { shim_queue(mode, handler) }
+    pub fn submit(&self, buffer: H::Buffer, mut digests: H::Digests) {
+        let out = digests.as_mut();
+        let len = buffer.as_ref().len() / out.len().max(1);
+        for (i, o) in out.iter_mut().enumerate() { *o = *hash(&buffer.as_ref()[i * len..][..len]).as_bytes(); }
+        self.handler.lock().unwrap().0.hashed(buffer, digests);
+    }
+}
+'''
+
+
+SHIM_UPDATE_MULTITHREADED = r'''
+
+// perf_regress.py shim: Hasher::update_multithreaded of later commits, as
+// update on the calling thread.
+#[cfg(feature = "std")]
+impl Hasher {
+    pub fn update_multithreaded(&mut self, input: &[u8]) -> &mut Self { self.update(input) }
 }
 '''
 
@@ -338,10 +397,11 @@ def write_if_different(path, content):
 
 def shimmed_sources(commit):
     """({path in the fork: its source with the shims this commit needs},
-    whether its batch cells cannot be judged). Each source is derived from
-    the commit's own, so applying the shims again writes nothing."""
+    the use cases a shim stands in for, which cannot be judged). Each
+    source is derived from the commit's own, so applying the shims again
+    writes nothing."""
     lib = git("show", f"{commit}:src/lib.rs")
-    out, shimmed = {}, False
+    out, shimmed = {}, set()
     if BATCH_SLICES in lib:
         for name in git("ls-tree", "--name-only", f"{commit}:src").split():
             if name.endswith(".rs"):
@@ -349,7 +409,7 @@ def shimmed_sources(commit):
                 renamed = re.sub(*SLICES_RENAME, text)
                 if renamed != text:
                     out[f"src/{name}"] = renamed
-        shimmed = True
+        shimmed |= {"ManyMessages", "ContinuousBatches"}
     lib = out.get("src/lib.rs", lib)
     if BATCH_ONE_BUFFER in lib:
         pass
@@ -358,13 +418,19 @@ def shimmed_sources(commit):
     elif BATCH_SLICES in git("show", f"{commit}:src/lib.rs"):
         lib += SHIM_SLICES
     else:
-        lib, shimmed = lib + SHIM, True
+        lib = lib + SHIM
+        shimmed |= {"ManyMessages", "ContinuousBatches"}
     if KERNELS_ONE_BLOCK in lib:
         lib = re.sub(*KERNELS_RENAME, lib) + SHIM_KERNELS
     if "pub use stream::Stream" not in lib:
         lib += SHIM_STREAM
     if "pub use queue::" not in lib:
         lib += SHIM_QUEUE
+        shimmed |= CONTINUOUS
+    if "pub(crate) fn update_multithreaded" in lib:
+        lib = lib.replace("pub(crate) fn update_multithreaded", "pub fn update_multithreaded")
+    elif "fn update_multithreaded" not in lib:
+        lib += SHIM_UPDATE_MULTITHREADED
     if lib != git("show", f"{commit}:src/lib.rs"):
         out["src/lib.rs"] = lib
     return out, shimmed
@@ -378,8 +444,8 @@ def target_root():
 
 
 def side_bench(side, commit, shim=True):
-    """(bench-hashes executable built against the fork at `commit`, whether
-    its batch cells cannot be judged), built in the side `side` ("old" or
+    """(bench-hashes executable built against the fork at `commit`, the use
+    cases a shim stands in for), built in the side `side` ("old" or
     "new"): a fork worktree under CACHE/side with a copy of bench-hashes
     inside, and a target directory of its own. Each step changes only what
     differs (the worktree moves only when its commit does, and then git
@@ -396,7 +462,7 @@ def side_bench(side, commit, shim=True):
         git("worktree", "add", "--detach", str(checkout), commit)
     elif git("rev-parse", "HEAD", cwd=checkout) != commit:
         git("checkout", "--quiet", "--force", "--detach", commit, cwd=checkout)
-    sources, shimmed = shimmed_sources(commit) if shim else ({}, False)
+    sources, shimmed = shimmed_sources(commit) if shim else ({}, set())
     # The shims, written where they differ (a moved checkout has none: the
     # forced checkout reset the files they change).
     for path, text in sources.items():
@@ -522,11 +588,12 @@ def ratios_of(measured, key):
     return [b[key][0] / a[key][0] for a, b in measured if key in a]
 
 
-def is_open(ratios, scenario):
+def is_open(ratios, key):
     """Whether a cell with these pair ratios could still be called slower
     or faster: every ratio so far beyond its margin on one side."""
-    margin = MARGIN[scenario]
-    return all(r > 1 + margin for r in ratios) or all(r < 1 - margin for r in ratios)
+    _, scenario, use_case, _ = key.split("|")
+    m = margin(scenario, use_case)
+    return all(r > 1 + m for r in ratios) or all(r < 1 - m for r in ratios)
 
 
 def pairs(old, new, start, points, use_cases):
@@ -545,8 +612,8 @@ def pairs(old, new, start, points, use_cases):
             a = run(old, points)
         out.append((a, b))
         measured_points = len(points)
-        still = {key.split("|")[3] for key in out[0][0]
-                 if key.split("|")[2] in use_cases and is_open(ratios_of(out, key), key.split("|")[1])}
+        still = {argument(key.split("|")[2], key.split("|")[3]) for key in out[0][0]
+                 if key.split("|")[2] in use_cases and is_open(ratios_of(out, key), key)}
         points = [p for p in points if p in still]
         tenths = (time.monotonic_ns() - began + 50_000_000) // 100_000_000
         print(f"perf_regress: pair {start + i + 1} done in {tenths // 10}.{tenths % 10} s "
@@ -564,13 +631,13 @@ def judge(measured, use_cases, contenders):
     margin (falls below 1 - it)."""
     slower, faster, ratio, slow = [], [], {}, {}
     for key in measured[0][0]:
-        contender, scenario, use_case, _ = key.split("|")
+        contender, _scenario, use_case, _ = key.split("|")
         if contender not in contenders or use_case not in use_cases:
             continue
         ratios = ratios_of(measured, key)
         ratio[key] = statistics.median(ratios)
         slow[key] = statistics.median(b[key][1] / a[key][1] for a, b in measured if key in a)
-        if len(ratios) == PAIRS and is_open(ratios, scenario):
+        if len(ratios) == PAIRS and is_open(ratios, key):
             (slower if ratios[0] > 1 else faster).append(key)
     return slower, faster, ratio, slow
 
@@ -581,12 +648,12 @@ def compare(old_rev, new):
     old, old_shim = side_bench("old", old_rev)
     new_exe, new_shim = side_bench("new", working_tree_commit() if new is None else new)
     new_name = "the working tree" if new is None else new
-    # A shimmed side's batch cells are not judged, so they are not run:
-    # run, they changed the control's next cells (SHA-256 at 64 B 3-6%
-    # slower beside servil f70c758's shimmed 256-byte batches, VM).
-    shimmed = old_shim or new_shim
-    use_cases = {"OneMessage"} if shimmed else {"OneMessage", "ManyMessages"}
-    points = ONE_MESSAGE_POINTS if shimmed else POINTS
+    # A shimmed side's cells are not judged, so they are not run: run,
+    # they changed the control's next cells (SHA-256 at 64 B 3-6% slower
+    # beside servil f70c758's shimmed 256-byte batches, VM).
+    # A use case a side's shim stands in for is neither run nor judged.
+    use_cases = USE_CASES - old_shim - new_shim
+    points = points_of(use_cases)
     print(f"perf_regress: {new_name} against {old_rev}, {PAIRS} alternating pairs, "
           f"use cases {', '.join(sorted(use_cases))}", file=sys.stderr, flush=True)
     measured = pairs(old, new_exe, 0, points, use_cases)
@@ -609,7 +676,7 @@ def compare(old_rev, new):
     slower, faster, ratio, slow = judge(measured, use_cases, SUBJECTS)
     if slower:
         # The confirmation measures the slower cells' points alone.
-        again = [p for p in points if p in {key.split("|")[3] for key in slower}]
+        again = [p for p in points if p in {argument(key.split("|")[2], key.split("|")[3]) for key in slower}]
         print(f"perf_regress: {len(slower)} cells slower in {PAIRS} pairs; {PAIRS} more pairs over their "
               f"{len(again)} points must agree", file=sys.stderr, flush=True)
         more = pairs(old, new_exe, PAIRS, again, use_cases)
@@ -630,7 +697,7 @@ def compare(old_rev, new):
 
         if held:
             print(f"perf_regress: REGRESSION: {new_name} is slower than {old_rev} in {len(held)} cells that hold a "
-                  f"change (solo, after idle; 5th percentile, median of pair ratios):")
+                  f"change (solo; 5th percentile, median of pair ratios):")
             show(held)
         if reported:
             print(f"perf_regress: {new_name} is slower than {old_rev} in {len(reported)} shared cells; "
