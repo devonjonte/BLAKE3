@@ -285,6 +285,9 @@ impl<I> State<I> {
             let mut returned = crate::lanes::lock_polling(returned);
             // Both lists keep room for every slot.
             std::mem::swap(&mut self.free, &mut *returned);
+            // The longest returned first: its lines have had the longest to
+            // leave the delivery thread's cache.
+            self.free.0.reverse();
             if self.free.0.is_empty() {
                 self.add_block(&mut returned);
             }
