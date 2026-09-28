@@ -763,7 +763,15 @@ than its margin above: 20% for the synchronous calls after the gap
 (solo and shared), 3% solo and 10% shared for the queue's continuous
 cells; the control moving means no verdict. A check takes about 25-30 s
 of runs on the VM beside the builds; the after-gap cells' margin is
-Zooko's start, awaiting a calibration on these use cases. Confirmed solo
+Zooko's start. A first calibration on these use cases (VM, September 28,
+night): four checks of unchanged code, no regression called (one first
+flag the confirmation dropped; one cell called faster, the continuous
+batches of 16, which run at two speeds); a planted slowdown in
+`Queue::submit` of +100-300% on the continuous messages caught and
+confirmed, one of about 1% not; about 20% planted in `hash()` for 64 B
+not confirmed, where the after-gap medians of unchanged code vary about
+twofold between VM runs at 64 B (servil st 7.5 and 14.1 ns/B). The Mac
+awaits the runner's restart (its installed perf_regress predates this). Confirmed solo
 cells hold the change (exit 1); confirmed shared cells are listed beside
 exit 0, and the commit message names them and the reason (since
 September 26, 2026). Each listed cell also shows its 90th-percentile
