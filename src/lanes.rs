@@ -903,13 +903,14 @@ pub(crate) struct Task {
     pub(crate) out: *mut u8,
     pub(crate) left: *const AtomicUsize,
     /// With `members` above zero, the task is that many separate short
-    /// messages instead: each one's digest to its `out`, then its `left`
-    /// counted down (the task's own fields unused).
+    /// messages instead (or, with `batch`, batches of that length's
+    /// messages): each one's digest (digests) to its `out`, then its
+    /// `left` counted down; `len` sums their bytes.
     pub(crate) members: usize,
     pub(crate) member: [Member; MEMBERS],
 }
 
-/// The most short messages one task takes: one SME2 group.
+/// The most short messages (or small batches) one task takes.
 pub(crate) const MEMBERS: usize = 64;
 
 /// A short message in a task of several ([`Task::members`]).
@@ -933,9 +934,10 @@ impl Task {
         Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null(), members: 0, member: [NO_MEMBER; MEMBERS] }
     }
 
-    /// An empty task of short messages in the mode of `key` and `flags`.
-    pub(crate) fn members(key: &crate::CVWords, flags: u8) -> Task {
-        Task { key: *key, flags, ..Task::of(&[], 0) }
+    /// An empty task of short messages (with `batch`, batches of messages
+    /// of that length) in the mode of `key` and `flags`.
+    pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {
+        Task { key: *key, flags, batch, ..Task::of(&[], 0) }
     }
 
     /// Hash on `platform` into `out`: for a subtree of two chunks or more at
@@ -973,6 +975,18 @@ impl Task {
     /// others one at a time.
     fn run_members(self, platform: Platform) {
         let members = &self.member[..self.members];
+        if let Some(message_len) = self.batch {
+            for m in members {
+                // Sound: the queue keeps each batch's bytes, digest space,
+                // and `left` in place until its `left` is zero.
+                let bytes = unsafe { core::slice::from_raw_parts(m.input, m.len) };
+                let count = m.len / crate::many::slot_len(message_len);
+                let digests = unsafe { core::slice::from_raw_parts_mut(m.out as *mut [u8; crate::OUT_LEN], count) };
+                crate::many::hash_many_on(bytes, message_len, &self.key, self.flags, digests, platform);
+                unsafe { &*m.left }.fetch_sub(1, Ordering::Release);
+            }
+            return;
+        }
         // Sound: the queue keeps every member's bytes, `out`, and `left` in
         // place until its `left` is zero.
         if members.len() >= 2 && members.iter().all(|m| m.len == crate::BLOCK_LEN) {

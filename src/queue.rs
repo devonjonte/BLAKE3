@@ -284,7 +284,7 @@ impl<I> State<I> {
     /// state's lock is released) when it is full or (with `waited`) when
     /// the delivery thread waits on it; otherwise it goes on filling.
     fn close_open(&mut self, waited: bool) -> Option<Task> {
-        let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS);
+        let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS || open.len >= crate::lanes::TASK_LEN);
         if full || waited { self.open.take() } else { None }
     }
 }
@@ -326,9 +326,10 @@ enum PieceItem<B> {
 /// hashed at delivery (a piece's bytes join the message in order).
 const TASK_MIN: usize = crate::SME2_SIZED_LEN;
 
-/// The shortest batch of fixed-length messages hashed as tasks: shorter
-/// ones hash at delivery (Mac, batches of 16 64-byte messages: 34 ns per
-/// message at delivery, 68 as tasks; batches of 64: 21 and 17).
+/// The shortest batch of fixed-length messages hashed as tasks of its own:
+/// shorter ones go several to a task (a task of its own for a batch of 16
+/// 64-byte messages cost twice what hashing it at delivery did on the Mac,
+/// 68 against 34 ns per message).
 const BATCH_TASK_MIN: usize = 4096;
 
 impl<H: Send + 'static, S: 'static> Queue<H, S> {
@@ -419,16 +420,18 @@ where
         self.activate(owner);
     }
 
-    /// Put a short message in flight as a member of the queue's open batch
-    /// of short messages (`bytes` from the item, which stays in its slot).
-    fn submit_member(&self, owner: &Arc<dyn Any + Send + Sync>, item: I, bytes: impl FnOnce(&I) -> &[u8]) {
+    /// Put a short message (with `batch`, a small batch of messages of
+    /// that length) in flight as a member of the queue's open task: `member`
+    /// gives its bytes and, for a batch, its digest space, from the item,
+    /// which stays in its slot.
+    fn submit_member(&self, owner: &Arc<dyn Any + Send + Sync>, item: I, batch: Option<usize>, member: impl FnOnce(&mut I) -> (*const u8, usize, Option<*mut u8>)) {
         let mut guard = crate::lanes::lock_polling(&self.state);
         let state = &mut *guard;
         let slot = state.take_slot(&self.returned);
         // Sound: a free slot is this thread's until linked.
         let slot = unsafe { &mut *slot };
-        let bytes = bytes(slot.item.insert(item));
-        // The member's digest lands in results[0]; a slot that held one
+        let (input, len, out) = member(slot.item.insert(item));
+        // A message's digest lands in results[0]; a slot that held one
         // keeps it (rewriting it would take the line from the worker that
         // last wrote it).
         if slot.results.len() != 1 {
@@ -437,11 +440,12 @@ where
         }
         slot.digest = true;
         slot.left.store(1, Ordering::Relaxed);
-        let open = state.open.get_or_insert_with(|| Task::members(&self.key, self.flags));
-        // Sound: the slot's block, bytes, and result stay in place until its
-        // delivery, after `left` reaches zero.
-        open.member[open.members] = crate::lanes::Member { input: bytes.as_ptr(), len: bytes.len(), out: slot.results.as_mut_ptr() as *mut u8, left: &slot.left };
+        let open = state.open.get_or_insert_with(|| Task::members(&self.key, self.flags, batch));
+        // Sound: the slot's block, bytes, and result (or the digest space)
+        // stay in place until its delivery, after `left` reaches zero.
+        open.member[open.members] = crate::lanes::Member { input, len, out: out.unwrap_or(slot.results.as_mut_ptr() as *mut u8), left: &slot.left };
         open.members += 1;
+        open.len += len;
         let closed = state.close_open(false);
         state.link(slot);
         drop(guard);
@@ -584,8 +588,10 @@ impl<H: PieceHandler> Deliver for Inner<H, PieceItem<H::Buffer>, shape::Pieces> 
 
 impl<H: FixedHandler> Deliver for Inner<H, (H::Buffer, H::Digests), shape::Fixed> {
     fn deliver(&self) -> (bool, bool) {
-        self.deliver_with(|queue, handling, (buffer, mut digests), results, _| {
-            if results.is_empty() {
+        self.deliver_with(|queue, handling, (buffer, mut digests), results, hashed| {
+            // A small batch was hashed as a member of a task (`hashed`), a
+            // larger one as tasks of its own (results); any other here.
+            if results.is_empty() && !hashed {
                 crate::hash_many_serial(buffer.as_ref(), queue.message_len, &queue.key, queue.flags, digests.as_mut());
             }
             handling.handler.hashed(buffer, digests);
@@ -605,7 +611,7 @@ impl<H: MessageHandler> Queue<H, shape::Messages> {
         let (inner, owner) = self.inner::<H::Buffer>();
         let tasks = inner.max_threads > 1;
         if tasks && buffer.as_ref().len() < TASK_MIN {
-            return inner.submit_member(owner, buffer, |buffer| buffer.as_ref());
+            return inner.submit_member(owner, buffer, None, |buffer| (buffer.as_ref().as_ptr(), buffer.as_ref().len(), None));
         }
         inner.submit(owner, buffer, |buffer, _, out| {
             let bytes = buffer.as_ref();
@@ -667,6 +673,11 @@ impl<H: FixedHandler> Queue<H, shape::Fixed> {
         let (message_len, tasks) = (inner.message_len, inner.max_threads > 1);
         let slot = crate::many::slot_len(message_len);
         assert_eq!(Some(buffer.as_ref().len()), slot.checked_mul(digests.as_mut().len()), "the buffer holds one slot of whole blocks per digest");
+        let len = buffer.as_ref().len();
+        if tasks && len > 0 && len < BATCH_TASK_MIN {
+            // Small batches go several to a task, as short messages do.
+            return inner.submit_member(owner, (buffer, digests), Some(message_len), |(buffer, digests)| (buffer.as_ref().as_ptr(), buffer.as_ref().len(), Some(digests.as_mut().as_mut_ptr() as *mut u8)));
+        }
         inner.submit(owner, (buffer, digests), |(buffer, digests), _, out| {
             let bytes = buffer.as_ref();
             // The digests' space is the program's, in the slot with its
