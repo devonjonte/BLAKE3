@@ -1,37 +1,63 @@
-use blake3_servil::lanes::probe::*;
-use blake3_servil::{Efficiency, Hash, Mode, PieceHandler, Queue};
-use std::sync::{atomic::Ordering::Relaxed, mpsc};
-enum B { P(Vec<u8>), D(Hash) }
-struct P(mpsc::Sender<B>);
-impl PieceHandler for P {
-    type Buffer = Vec<u8>;
-    fn piece_done(&mut self, b: Vec<u8>) { self.0.send(B::P(b)).unwrap(); }
-    fn finished(&mut self, h: Hash) { self.0.send(B::D(h)).unwrap(); }
+//! Probe (probe/busy-gap): calls after a busy gap run at two speeds; is it
+//! the counts' system call before each call, or the vector unit gone cold
+//! through integer-only work?
+use std::hint::black_box;
+
+fn call_ns(input: &[u8]) -> u64 {
+    let t = clocks::now();
+    black_box(blake3_servil::hash(black_box(input)));
+    clocks::since_ns(t)
 }
-fn main() {
-    blake3_servil::initialize_multithreaded();
-    let input = vec![5u8; 32 << 20];
-    let (tx, rx) = mpsc::channel();
-    let mut free: Vec<Vec<u8>> = (0..4).map(|_| Vec::with_capacity(65536)).collect();
-    let (mut copy_ns, mut wait_ns) = (0u64, 0u64);
-    let t = std::time::Instant::now();
-    for _ in 0..10 {
-        let q = Queue::pieces(Mode::Hash, Efficiency::Time, P(tx.clone()));
-        for piece in input.chunks(65536) {
-            let w = std::time::Instant::now();
-            let mut b = match free.pop() { Some(b) => b, None => loop { if let B::P(b) = rx.recv().unwrap() { break b } } };
-            wait_ns += w.elapsed().as_nanos() as u64;
-            let c = std::time::Instant::now();
-            b.clear(); b.extend_from_slice(piece);
-            copy_ns += c.elapsed().as_nanos() as u64;
-            q.submit(b);
+
+fn neon_work(ns: u64) {
+    // Busy work that keeps the vector unit in use: a float multiply-add chain on 4 lanes.
+    let started = clocks::now();
+    let mut v = [1.0f32; 16];
+    while clocks::since_ns(started) < ns {
+        for _ in 0..64 {
+            for x in v.iter_mut() {
+                *x = *x * 1.000001 + 0.5;
+            }
         }
-        q.finish();
-        loop { match rx.recv().unwrap() { B::P(b) => free.push(b), B::D(_) => break } }
+        v = black_box(v);
     }
-    let pieces = 10 * 512;
-    println!("ns/B {:.3}", t.elapsed().as_nanos() as f64 / (10.0 * input.len() as f64));
-    println!("producer per piece: wait {} ns, copy {} ns, submit {} ns", wait_ns / pieces, copy_ns / pieces, SUBMIT_NS.load(Relaxed) / SUBMITS.load(Relaxed));
-    let runs = [RUNS[0].load(Relaxed), RUNS[1].load(Relaxed)];
-    println!("tasks: sme2 thread {} (avg {} ns), workers {} (avg {} ns), push->pop avg {} ns, last done->delivered avg {} ns", runs[0], RUN_NS[0].load(Relaxed) / runs[0].max(1), runs[1], RUN_NS[1].load(Relaxed) / runs[1].max(1), POP_WAIT.load(Relaxed) / (runs[0] + runs[1]), DONE_TO_DELIVERED.load(Relaxed) / DELIVERS.load(Relaxed).max(1));
+}
+
+fn report(name: &str, samples: &mut Vec<u128>) {
+    samples.sort_unstable();
+    let s = clocks::speeds::speeds(samples);
+    let total = samples.len();
+    let text: Vec<String> = s.iter().map(|sp| format!("{} ns ({}%)", sp.median >> 64, sp.count * 100 / total)).collect();
+    println!("{name}: {}", text.join(" | "));
+}
+
+fn main() {
+    blake3_servil::initialize();
+    for len in [512usize, 4096] {
+        let input = vec![7u8; len];
+        for round in 0..2 {
+            let mut plain = Vec::new();
+            let mut with_counts = Vec::new();
+            let mut neon_gap = Vec::new();
+            let mut sleep_gap = Vec::new();
+            for _ in 0..200 {
+                clocks::busy_work(1_000_000);
+                plain.push(clocks::speeds::per_unit(call_ns(&input), 1));
+                clocks::busy_work(1_000_000);
+                let before = clocks::Counts::read();
+                let ns = call_ns(&input);
+                black_box((before, clocks::Counts::read()));
+                with_counts.push(clocks::speeds::per_unit(ns, 1));
+                neon_work(1_000_000);
+                neon_gap.push(clocks::speeds::per_unit(call_ns(&input), 1));
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                sleep_gap.push(clocks::speeds::per_unit(call_ns(&input), 1));
+            }
+            println!("-- {len} B, round {round}");
+            report("integer gap, no counts read", &mut plain);
+            report("integer gap, counts read around the call", &mut with_counts);
+            report("vector gap, no counts read", &mut neon_gap);
+            report("sleep gap", &mut sleep_gap);
+        }
+    }
 }
