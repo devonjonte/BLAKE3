@@ -589,6 +589,19 @@ allocations); dropped unbuilt on the Mac. So the
 thread, the bottleneck, spends 25 ns taking a returned buffer from its
 channel and about 40-60 ns in `submit`, mostly lines another core wrote.
 
+**A ceiling near one 16 KiB task a microsecond** (September 28, night,
+Mac, jobs 572-587, open): two programs through their own queues move 16
+KiB messages no faster in all than one alone (solo 0.07 ns/B, shared
+0.14 each: about 0.87 million tasks a second), where 4 KiB messages
+(gathered 64 to a task) and 64 KiB ones (a task each, at the hashing
+threads' capacity) scale. Not the task's size (MEMBERS 16, tasks of
+about 600 B instead of 2 KiB: level, probe/members-16) nor the list's
+lock (pollers leaving it to pushers: level, probe/push-first). Gathering
+messages under 32 KiB into tasks of up to 256 KiB (probe/members-32k):
+shared 16 KiB 0.142 -> 0.089 ns/B, solo 0.068 -> 0.072 (+6%, fewer tasks
+to spread): a trade for Zooko. Next to look at: the SME2 thread's turn
+per task, the delivery thread's replay per 16 KiB message.
+
 **Idle workers sleep** (September 28, night): a worker, and the SME2
 thread, that finds nothing for 50 us (`lanes::WORKER_IDLE`, about a
 wake's cost) sleeps even while a job or a queue holds the pool; pushes
