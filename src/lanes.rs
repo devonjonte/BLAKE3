@@ -406,6 +406,17 @@ enum Work<'a> {
 #[repr(align(128))]
 struct Line(AtomicUsize);
 
+/// Any value on a cache line of its own.
+#[repr(align(128))]
+pub(crate) struct OwnLine<T>(T);
+
+impl<T> std::ops::Deref for OwnLine<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
 impl std::ops::Deref for Line {
     type Target = AtomicUsize;
     fn deref(&self) -> &AtomicUsize {
@@ -1082,11 +1093,13 @@ impl Task {
 /// poll it while the pool is held (a [`Hold`]: the queue's delivery thread
 /// holds it while any submission is in flight).
 pub(crate) struct Tasks {
-    list: Mutex<std::collections::VecDeque<Task>>,
+    /// Each on a line of its own: pollers read `queued`, every finishing
+    /// thread writes `in_flight`, and pushers and poppers take the lock.
+    list: OwnLine<Mutex<std::collections::VecDeque<Task>>>,
     /// The list's length, read without the lock by pollers.
-    queued: AtomicUsize,
+    queued: OwnLine<AtomicUsize>,
     /// Tasks pushed and not yet finished: what pushes wake threads for.
-    in_flight: AtomicUsize,
+    in_flight: OwnLine<AtomicUsize>,
     /// The room the queues made in the list (make_room), under its lock.
     room: AtomicUsize,
     /// Whether the SME2 thread sleeps (read without the lock), and its wake.
@@ -1096,9 +1109,9 @@ pub(crate) struct Tasks {
 }
 
 pub(crate) static TASKS: Tasks = Tasks {
-    list: Mutex::new(std::collections::VecDeque::new()),
-    queued: AtomicUsize::new(0),
-    in_flight: AtomicUsize::new(0),
+    list: OwnLine(Mutex::new(std::collections::VecDeque::new())),
+    queued: OwnLine(AtomicUsize::new(0)),
+    in_flight: OwnLine(AtomicUsize::new(0)),
     room: AtomicUsize::new(0),
     sme2_asleep: Mutex::new(false),
     sme2_sleeps: std::sync::atomic::AtomicBool::new(false),
