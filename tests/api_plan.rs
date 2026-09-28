@@ -384,6 +384,42 @@ fn queues_on_several_threads_keep_their_own_order() {
     });
 }
 
+/// Several threads submitting to one queue at once (a queue is `Sync`):
+/// every buffer comes back once, with its digest, and each thread's own
+/// submissions in its order.
+#[test]
+fn one_queue_shared_by_several_submitting_threads() {
+    let (tx, rx) = mpsc::channel();
+    let queue = Queue::messages(Mode::Hash, Efficiency::Time, Messages(tx));
+    const THREADS: usize = 4;
+    const EACH: usize = 3000;
+    std::thread::scope(|scope| {
+        for t in 0..THREADS {
+            let queue = &queue;
+            scope.spawn(move || {
+                for i in 0..EACH {
+                    // The first byte and the length name the thread and the index.
+                    let len = [64usize, 1000, 20_000][i % 3];
+                    let mut buffer = input(len);
+                    buffer[0] = t as u8;
+                    buffer[1..9].copy_from_slice(&(i as u64).to_le_bytes());
+                    queue.submit(buffer);
+                }
+            });
+        }
+    });
+    let mut next = [0u64; THREADS];
+    for _ in 0..THREADS * EACH {
+        let (buffer, hash) = rx.recv().unwrap();
+        let t = buffer[0] as usize;
+        let i = u64::from_le_bytes(buffer[1..9].try_into().unwrap());
+        assert_eq!(i, next[t], "thread {t}'s submissions come back in its order");
+        next[t] += 1;
+        assert_eq!(hash, Hash::from(reference(0, &buffer)), "thread {t}, submission {i}");
+    }
+    assert_eq!(next, [EACH as u64; THREADS], "every buffer came back once");
+}
+
 /// A panic in a handler aborts the process (fail stop). Run in a child
 /// process: the test binary reruns itself with only the panicking test.
 #[cfg(unix)]
