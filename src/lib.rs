@@ -40,10 +40,12 @@
 //!   cores only where waking them pays on every machine measured, run no
 //!   slower than their single-threaded forms, and leave nothing running
 //!   between calls, at more energy per byte (below).
-//! - **Efficiency, in time or in energy:** [`Queue`], for a stream of
+//! - **Throughput, in time or in energy:** [`Queue`], for a stream of
 //!   inputs. The program hands over its buffers and moves on while the
 //!   crate hashes them, and each comes back through a handler the program
-//!   writes.
+//!   writes: the most hashed per second (or per joule) for a program that
+//!   keeps enough in flight, at a handover's latency for each input. The
+//!   ease-of-use forms give the lowest latency for one input.
 //!
 //! And by situation:
 //!
@@ -822,14 +824,22 @@ pub(crate) struct PlanState {
     partial: usize,
 }
 
-/// The whole subtrees that [`Hasher::update`] on `piece` would hash from
-/// `state`, appended to `tasks` in order (each computed as
-/// [`lanes::Task`] says), and `state` moved past the piece: what
-/// [`Hasher::update_with_results`] takes back. The bytes around them (a
-/// partial chunk's fill, a piece's last chunk) stay for the replay. The
-/// stream starts at chunk zero.
+/// The whole subtrees that [`Hasher::update`] would hash from `state` on
+/// `piece` in parts of at most [`lanes::TASK_LEN`] (any split of the input
+/// gives the same digest; the parts spread a long input over threads),
+/// appended to `tasks` in order (each computed as [`lanes::Task`] says),
+/// and `state` moved past the piece: what [`Hasher::update_with_results`]
+/// takes back. The bytes around them (a partial chunk's fill, a part's last
+/// chunk) stay for the replay. The stream starts at chunk zero.
 #[cfg(feature = "std")]
 pub(crate) fn plan_subtrees(state: &mut PlanState, piece: &[u8], tasks: &mut Vec<lanes::Task>) {
+    for part in piece.chunks(lanes::TASK_LEN) {
+        plan_part(state, part, tasks);
+    }
+}
+
+#[cfg(feature = "std")]
+fn plan_part(state: &mut PlanState, piece: &[u8], tasks: &mut Vec<lanes::Task>) {
     let mut offset = 0;
     if state.partial > 0 {
         offset = cmp::min(CHUNK_LEN - state.partial, piece.len());
@@ -841,7 +851,7 @@ pub(crate) fn plan_subtrees(state: &mut PlanState, piece: &[u8], tasks: &mut Vec
     }
     while piece.len() - offset > CHUNK_LEN {
         let len = next_subtree_len(state.counter, piece.len() - offset);
-        tasks.push(lanes::Task { input: piece[offset..].as_ptr(), len, counter: state.counter });
+        tasks.push(lanes::Task::of(&piece[offset..offset + len], state.counter));
         state.counter += (len / CHUNK_LEN) as u64;
         offset += len;
     }
@@ -1466,7 +1476,7 @@ pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
 
 /// [`hash_many`] in the mode of `key` and `flags`, on the calling thread.
 #[inline]
-fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]]) {
+pub(crate) fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]]) {
     let turn = platform::Sme2Turn::take(Platform::detect(), many::sme2_sized(message_len, out.len()));
     many::hash_many_on(input, message_len, key, flags, out, turn.platform());
 }
@@ -2051,10 +2061,17 @@ impl Hasher {
     }
 
     /// [`update`](Hasher::update) with every whole subtree's result taken
-    /// from `results`, in the order [`plan_subtrees`] gave them, as
-    /// [`lanes::Task`]'s `hash` computes them.
+    /// from `results`, in the order [`plan_subtrees`] gave them (in the same
+    /// parts), as [`lanes::Task`] computes them.
     #[cfg(feature = "std")]
-    pub(crate) fn update_with_results<'a>(&mut self, mut input: &[u8], results: &mut impl Iterator<Item = &'a [u8; BLOCK_LEN]>) {
+    pub(crate) fn update_with_results<'a>(&mut self, input: &[u8], results: &mut impl Iterator<Item = &'a [u8; BLOCK_LEN]>) {
+        for part in input.chunks(lanes::TASK_LEN) {
+            self.update_part_with_results(part, results);
+        }
+    }
+
+    #[cfg(feature = "std")]
+    fn update_part_with_results<'a>(&mut self, mut input: &[u8], results: &mut impl Iterator<Item = &'a [u8; BLOCK_LEN]>) {
         if self.chunk_state.count() > 0 {
             let take = cmp::min(CHUNK_LEN - self.chunk_state.count(), input.len());
             self.chunk_state.update(&input[..take]);
