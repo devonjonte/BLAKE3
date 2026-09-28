@@ -118,7 +118,7 @@ const MAX_PIECE_LEN: usize = 128 * CHUNK_LEN;
 /// How long a worker polls finding nothing before it sleeps (next_piece):
 /// about what a wake costs, so polling spends at most twice what knowing
 /// the future would.
-const WORKER_IDLE: std::time::Duration = std::time::Duration::from_micros(50);
+const WORKER_IDLE: std::time::Duration = std::time::Duration::from_micros(15);
 
 /// Worker `r` takes from a job only once it has been registered for
 /// `r` times this long. The lowest ranks take the pieces a call needs;
