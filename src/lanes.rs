@@ -1165,13 +1165,16 @@ impl Tasks {
     /// Add `tasks`, and wake sleeping threads so that one per task in
     /// flight (waiting or being hashed) is awake or on its way: the SME2
     /// thread first, then workers.
-    pub(crate) fn push(&self, tasks: impl Iterator<Item = Task>) {
+    pub(crate) fn push(&self, tasks: impl ExactSizeIterator<Item = Task>) {
         let pool = pool();
+        // The count, which every finishing thread writes, outside the lock
+        // (inside, it held pushers and pollers up: two programs' 16 KiB
+        // messages 2.0 -> 1.65 us each on the Mac, probe/submit-16k).
+        let pushed = tasks.len();
+        let in_flight = self.in_flight.fetch_add(pushed, Ordering::SeqCst) + pushed;
         let mut list = lock_polling(&self.list);
-        let before = list.len();
         list.extend(tasks);
         let queued = list.len();
-        let in_flight = self.in_flight.fetch_add(queued - before, Ordering::SeqCst) + queued - before;
         // Room for every task in flight, whatever the workers' timing: the
         // list grows only when the program has more in flight than ever.
         list.reserve(in_flight.saturating_sub(queued));
