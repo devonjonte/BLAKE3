@@ -250,6 +250,21 @@ unsafe impl<I: Send> Send for Slots<I> {}
 
 const SLOT_BLOCK: usize = 16;
 
+/// How many submissions ahead take_slot prefetches a slot's lines.
+const PREFETCH_AHEAD: usize = 4;
+
+/// A hint: fetch the line at `p` for writing (no effect on correctness).
+#[inline(always)]
+fn prefetch_for_write(p: *const u8) {
+    #[cfg(target_arch = "aarch64")]
+    // Sound: a prefetch never faults and changes no memory.
+    unsafe {
+        core::arch::asm!("prfm pstl1keep, [{0}]", in(reg) p, options(nostack, preserves_flags, readonly));
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    let _ = p;
+}
+
 /// A submission in flight: its item, its tasks' results (none: hashed at
 /// delivery), how many of its tasks are unfinished, and the next entry.
 /// The results keep their capacity from one submission to the next.
@@ -297,6 +312,12 @@ impl<I> State<I> {
             }
         }
         let slot = self.free.0.pop().unwrap();
+        // Ask for the lines of a slot a few submissions ahead now, for
+        // writing: another core wrote them last (probe/slot-prefetch).
+        if let Some(&ahead) = self.free.0.len().checked_sub(PREFETCH_AHEAD).and_then(|i| self.free.0.get(i)) {
+            prefetch_for_write(ahead as *const u8);
+            prefetch_for_write((ahead as *const u8).wrapping_add(core::mem::size_of::<Slot<I>>() - 1));
+        }
         // Sound: a free slot is untouched by any other thread.
         unsafe { &*slot }.next.store(core::ptr::null_mut(), Ordering::Relaxed);
         slot
