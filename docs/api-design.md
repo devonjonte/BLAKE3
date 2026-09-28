@@ -18,9 +18,6 @@ reaching for a loop over `hash`:
    - *A message in one buffer*: all in memory.
    - *A message arriving in pieces*.
    - *A batch*: many messages of one length, all in memory.
-   Messages arriving one after another, each complete, are the first
-   shape many times over; question 4 sends a continuous stream of them to
-   the queue.
 3. **Do you want to save time or energy?**
 4. **(Several threads only.) When you finish hashing a message, will
    there typically be another message already ready to be hashed?**
@@ -216,8 +213,8 @@ whichever is fewer), timed end to end over many inputs:
 
 | use case | call pattern | points |
 |---|---|---|
-| messages arriving | messages of one length, each read into a free buffer and submitted in pieces of up to 64 KiB (a message up to 64 KiB is one buffer); covers messages in one buffer and in pieces | message length, 64 B-128 MiB |
-| batches arriving | buffers of fixed-length messages through `Queue::fixed` | message length and messages per buffer |
+| messages | messages of one length, each read into a free buffer and submitted in pieces of up to 64 KiB (a message up to 64 KiB is one buffer); covers messages in one buffer and in pieces | message length, 64 B-128 MiB |
+| batches | buffers of fixed-length messages through `Queue::fixed` | message length and messages per buffer |
 
 The other contenders run the same producers through their own calls: a
 one-shot call per message, their incremental API per piece, their batch
