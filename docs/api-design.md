@@ -13,6 +13,18 @@ cost to the other APIs; choosing the efficient API is the caller's job.
 The streaming APIs are **built for efficiency**; every other API is
 **built for ease of use** (the API docs' labels, decided).
 
+**The efficiency the streaming API maximises is throughput** (Zooko,
+September 28, 2026): bytes or messages hashed per second, in time or per
+joule, by a program that keeps the engine fed. It spends latency to buy
+throughput: a submission comes back after a handover and a delivery,
+microseconds a call can avoid. A user who wants the lowest latency for
+each input calls the one-shot forms, and that is a valid choice. What the
+queue owes is that handovers never slow the hashing threads, so its
+throughput is the hashing's. A program gets that throughput when it keeps
+enough in flight to cover the round trip (Little's law: in flight = rate x
+round trip): four 64 KiB buffers already do; 64-byte messages need about a
+thousand, or batches (`Queue::fixed`).
+
 ## Users and what they call
 
 | user | use case | calls |

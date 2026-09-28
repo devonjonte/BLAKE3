@@ -40,10 +40,12 @@
 //!   cores only where waking them pays on every machine measured, run no
 //!   slower than their single-threaded forms, and leave nothing running
 //!   between calls, at more energy per byte (below).
-//! - **Efficiency, in time or in energy:** [`Queue`], for a stream of
+//! - **Throughput, in time or in energy:** [`Queue`], for a stream of
 //!   inputs. The program hands over its buffers and moves on while the
 //!   crate hashes them, and each comes back through a handler the program
-//!   writes.
+//!   writes: the most hashed per second (or per joule) for a program that
+//!   keeps enough in flight, at a handover's latency for each input. The
+//!   ease-of-use forms give the lowest latency for one input.
 //!
 //! And by situation:
 //!

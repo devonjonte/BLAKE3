@@ -102,8 +102,14 @@ pub mod shape {
 }
 
 /// A stream of inputs, hashed behind the program. Built for efficiency
-/// (see [For best performance](crate#for-best-performance)): in time or in
-/// energy, chosen per queue ([`Efficiency`]).
+/// of throughput (see [For best performance](crate#for-best-performance)):
+/// the most bytes or messages hashed per second, or per joule, chosen per
+/// queue ([`Efficiency`]). Each submission comes back after a handover, so
+/// a single input takes longer than [`hash`](crate::hash) takes; for the
+/// lowest latency per input, call the one-shot functions. The queue's
+/// throughput is the hashing's when the program keeps enough in flight to
+/// cover the round trip: a few buffers of 64 KiB and more, or many small
+/// messages (or batches of them, [`Queue::fixed`]).
 ///
 /// The program submits its buffers and moves on; each comes back, hashed,
 /// through a call to the queue's handler, which the program implements.
