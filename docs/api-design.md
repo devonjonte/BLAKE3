@@ -12,13 +12,14 @@ The crate docs open as a choose-your-own-adventure (Zooko, September 28,
 reaching for a loop over `hash`:
 
 1. **Can your program use several threads?** A program that cannot gets
-   the single-threaded calls, built for intermittent use; the docs say
-   that the best speed for a continuous load takes several threads.
+   the single-threaded calls, built to save time under intermittent use,
+   and answers question 2 alone; the docs say that saving energy, and the
+   best speed for a continuous load, take several threads.
 2. **What shape is your data?**
    - *A message in one buffer*: all in memory.
    - *A message arriving in pieces*.
    - *A batch*: many messages of one length, all in memory.
-3. **Do you want to save time or energy?**
+3. **(Several threads only.) Do you want to save time or energy?**
 4. **(Several threads only.) When you finish hashing a message, will
    there typically be another message already ready to be hashed?**
    - *No, the program goes off and does other things*: intermittent, a
@@ -43,11 +44,8 @@ inside.
 
 **Time or energy.** Each queue takes the choice as an argument
 (`Efficiency::Time` or `Efficiency::Energy`); the multithreaded
-synchronous calls take it too.
-- **Q** (to settle once both are built and measured): whether the
-  single-threaded calls offer the choice. If the two differ little in
-  practice, single-threaded calls always save time and the choice goes
-  from them.
+synchronous calls take it too. Single-threaded calls always save time
+(Zooko, September 28, 2026).
 - **Q**: what saving energy means for a multithreaded synchronous call. A
   call with the caller on SME2 and E-core NEON helpers at background QoS
   hashed 8 MiB 10-27% faster than `hash` for a third less energy
