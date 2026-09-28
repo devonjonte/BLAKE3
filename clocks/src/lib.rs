@@ -38,6 +38,8 @@
 
 use std::time::Instant;
 
+pub mod speeds;
+
 /// The wall clock, as reports name it.
 #[cfg(target_vendor = "apple")]
 pub const WALL_CLOCK: &str = "std::time::Instant → CLOCK_UPTIME_RAW (mach_absolute_time; stops during sleep, no NTP slew)";

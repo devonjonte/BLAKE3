@@ -146,19 +146,27 @@ pub mod shape {
 ///    still hashed and comes back through the handler, which lives until
 ///    its last call.
 ///
+/// A program that allocates nothing once it runs makes its queue once and
+/// keeps it, and carries what comes back to its own thread in a channel
+/// made with room for every buffer it keeps in flight, such as the
+/// standard library's `sync_channel`, whose ring is allocated when it is
+/// made:
+///
 /// ```
 /// use blake3_servil::{Efficiency, Hash, MessageHandler, Mode, Queue};
 /// use std::sync::mpsc;
 ///
-/// struct Digests(mpsc::Sender<(Vec<u8>, Hash)>);
+/// struct Digests(mpsc::SyncSender<(Vec<u8>, Hash)>);
 /// impl MessageHandler for Digests {
 ///     type Buffer = Vec<u8>;
 ///     fn hashed(&mut self, buffer: Vec<u8>, hash: Hash) {
-///         self.0.send((buffer, hash)).unwrap();
+///         // Never waits: the channel has room for every buffer in flight.
+///         self.0.try_send((buffer, hash)).unwrap();
 ///     }
 /// }
 ///
-/// let (sender, results) = mpsc::channel();
+/// let in_flight = 2;
+/// let (sender, results) = mpsc::sync_channel(in_flight);
 /// let queue = Queue::messages(Mode::Hash, Efficiency::Time, Digests(sender));
 /// queue.submit(b"foo".to_vec());
 /// queue.submit(b"bar".to_vec());

@@ -53,9 +53,14 @@ to back (NOTES-servil.md, "perf_regress"):
   slower cells alone; a regression is a cell slower in both.
 * The control is the same code on both sides. If the rule calls any of
   its cells slower or faster, the comparison is unreliable: no verdict.
-* Each listed cell also shows the median pair ratio of 90th percentiles,
-  which a two-speed cell's slow speed reaches; it informs, and the
-  verdict ignores it (the rule is calibrated for the 5th percentile).
+* Two speeds (tools/speeds.py, the rule every measurement uses): a cell
+  whose pooled samples, either side, run at two speeds is also slower
+  (faster) when its slow speed's median, each side's runs pooled over the
+  pairs, moves past the cell's margin; the 5th percentile sees the fast
+  speed alone. A share moved between the speeds is shown, never judged:
+  the same code's shares swing from run to run. Every listed cell shows
+  both sides' speeds and shares, and the median pair ratio of 90th
+  percentiles.
 
 The rule's calibration (VM, September 26, 2026, on the benchmark of
 then, whose synchronous cells ran back to back and after idle): at a 3%
@@ -96,6 +101,9 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import speeds  # noqa: E402  (tools/speeds.py: the two-speed rule)
 
 # The fork checkout the tool works in (its own, or --root's), and the
 # sides' directories in it.
@@ -579,7 +587,7 @@ def parse(text):
             # cell's slow speed reaches (reported beside verdicts, never
             # judged: the rule's calibration is for the 5th percentile).
             cells[f"{contender}|{scenario}|{use_case}|{point}"] = (
-                ordered[int(QUANTILE * len(ordered))], ordered[int(0.9 * len(ordered))])
+                ordered[int(QUANTILE * len(ordered))], ordered[int(0.9 * len(ordered))], ordered)
     return cells
 
 
@@ -596,6 +604,29 @@ def is_open(ratios, key):
     _, scenario, use_case, _ = key.split("|")
     m = margin(scenario, use_case)
     return all(r > 1 + m for r in ratios) or all(r < 1 - m for r in ratios)
+
+
+def speeds_of(measured, key):
+    """The key's samples pooled over the pairs that measured it, each side's
+    runs together, compared speed with speed (tools/speeds.py)."""
+    old = [x for a, b in measured if key in a for x in a[key][2]]
+    new = [x for a, b in measured if key in a for x in b[key][2]]
+    return speeds.compare(old, new)
+
+
+def slow_speed_moved(measured, key):
+    """+1 (-1) when either side ran at two speeds and the slow speed's
+    median moved past the cell's margin slower (faster), else 0. The 5th
+    percentile sees the fast speed alone; this is the check for the slow
+    one. A share moved between the speeds is reported, never judged: the
+    same code's shares swing run to run (tools/ab.py shows how far)."""
+    c = speeds_of(measured, key)
+    if not c["two_speeds"]:
+        return 0
+    _, scenario, use_case, _ = key.split("|")
+    m = margin(scenario, use_case)
+    r = Fraction(c["slow_permille"], 1000)
+    return 1 if r > 1 + m else -1 if r < 1 - m else 0
 
 
 def pairs(old, new, start, points, use_cases):
@@ -615,7 +646,8 @@ def pairs(old, new, start, points, use_cases):
         out.append((a, b))
         measured_points = len(points)
         still = {argument(key.split("|")[2], key.split("|")[3]) for key in out[0][0]
-                 if key.split("|")[2] in use_cases and is_open(ratios_of(out, key), key)}
+                 if key.split("|")[2] in use_cases
+                 and (is_open(ratios_of(out, key), key) or slow_speed_moved(out, key))}
         points = [p for p in points if p in still]
         tenths = (time.monotonic_ns() - began + 50_000_000) // 100_000_000
         print(f"perf_regress: pair {start + i + 1} done in {tenths // 10}.{tenths % 10} s "
@@ -641,6 +673,8 @@ def judge(measured, use_cases, contenders):
         slow[key] = statistics.median(b[key][1] / a[key][1] for a, b in measured if key in a)
         if len(ratios) == PAIRS and is_open(ratios, key):
             (slower if ratios[0] > 1 else faster).append(key)
+        elif len(ratios) == PAIRS and slow_speed_moved(measured, key):
+            (slower if slow_speed_moved(measured, key) > 0 else faster).append(key)
     return slower, faster, ratio, slow
 
 
@@ -696,6 +730,7 @@ def compare(old_rev, new):
             for key in keys:
                 print(f"  {key}: {float(ratio[key] - 1):+.1%}, then {float(ratio2[key] - 1):+.1%} "
                       f"(90th percentile {float(slow[key] - 1):+.1%})")
+                print(f"      speeds: {speeds.describe_comparison(speeds_of(measured + more, key))}")
 
         if held:
             print(f"perf_regress: REGRESSION: {new_name} is slower than {old_rev} in {len(held)} cells that hold a "
@@ -714,6 +749,7 @@ def compare(old_rev, new):
         print(f"perf_regress: the second {PAIRS} pairs did not confirm; no regression")
     for key in sorted(faster):
         print(f"  faster  {key}: {float(ratio[key] - 1):+.1%} (90th percentile {float(slow[key] - 1):+.1%})")
+        print(f"      speeds: {speeds.describe_comparison(speeds_of(measured, key))}")
     print(f"perf_regress: no regression against {old_rev}")
     return 0
 

@@ -27,6 +27,11 @@ import argparse
 import statistics
 from collections import defaultdict
 from fractions import Fraction
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import speeds as speeds_rule  # noqa: E402
 
 SUBJECTS = ["blake3-servil-st", "blake3-servil-mt"]
 MULTITHREADED = {"blake3-official-mt", "blake3-servil-mt"}
@@ -35,20 +40,13 @@ RENAMED = {"blake3-servil": "blake3-servil-st", "blake3": "blake3-official", "bl
 
 
 def speeds(values):
-    """(median, slow speed's median or None, slow speed's share)."""
+    """(median, slow speed's median or None, slow speed's share), by the
+    rule in tools/speeds.py."""
     v = sorted(values)
-    n, median = len(v), statistics.median(v)
-    side = max(1, -(-n * 100 // 1000))
-    best = None
-    for split in range(side, n - side + 1):
-        gap = v[split] - v[split - 1]
-        if gap >= median * Fraction(4, 100) and (best is None or gap > best[1]):
-            best = (split, gap)
-    if best:
-        fast, slow = statistics.median(v[:best[0]]), statistics.median(v[best[0]:])
-        if slow >= fast * Fraction(5, 4):
-            return median, slow, (n - best[0]) / n
-    return median, None, 0.0
+    found = speeds_rule.speeds(v)
+    if len(found) == 1:
+        return statistics.median(v), None, 0.0
+    return statistics.median(v), found[1][0], found[1][1] / len(v)
 
 
 def load(path):

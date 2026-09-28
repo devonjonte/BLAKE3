@@ -109,7 +109,14 @@ Its requirements (Zooko, September 27-28, 2026):
   a file or socket by the `read` itself; submit it; get it back in a
   handler call; fill it again).
 - **Zero dynamic allocation** after warm-up (`tests/queue_no_alloc.rs`
-  holds it).
+  holds it). The program's side can match it (Zooko, September 28,
+  2026, morning): it makes its queue once and keeps it, and returns
+  buffers and digests to its own thread through a channel with room for
+  everything in flight (the standard library's `sync_channel`, a ring
+  allocated when made); the docs' example and the benchmark do so. An
+  io_uring program registers its buffers with the kernel, reads into
+  them, and submits the same buffers: the bytes the kernel wrote are the
+  bytes hashed.
 - **Always multithreaded**, efficient in time or in energy per queue.
 
 The engine and its queues (decided September 27, 2026):
