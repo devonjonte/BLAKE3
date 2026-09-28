@@ -40,7 +40,7 @@
 //! The pool's workers never run user code; the delivery thread does, in
 //! the handler calls.
 
-use crate::lanes::{TASKS, Task};
+use crate::lanes::{Gathered, TASKS, Task};
 use crate::{CVWords, Hash, Hasher, Mode, OUT_LEN};
 use std::any::Any;
 use std::marker::PhantomData;
@@ -231,9 +231,9 @@ struct State<I> {
     /// stands past the delivered ones).
     plan: crate::PlanState,
     /// Short messages gathered into one task, not yet handed to the pool.
-    open: Option<Task>,    /// Whether this queue hands tasks to the pool, and the room it made in
+    open: Option<Gathered>,    /// Whether this queue hands tasks to the pool, and the room it made in
     /// the pool's task list for them (lanes::Tasks::make_room).
-    tasks_room: Option<usize>,
+    tasks_room: Option<(usize, usize)>,
 }
 
 /// Slots, by address.
@@ -268,8 +268,9 @@ impl<I> State<I> {
         let block = Box::into_raw(Box::new(std::array::from_fn(|_| Slot { item: None, results: Vec::with_capacity(most), left: AtomicUsize::new(0), digest: false, next: AtomicPtr::new(core::ptr::null_mut()) })));
         self.blocks.push(block);
         if let Some(room) = &mut self.tasks_room {
-            TASKS.make_room(SLOT_BLOCK * most);
-            *room += SLOT_BLOCK * most;
+            TASKS.make_room(SLOT_BLOCK * most, SLOT_BLOCK);
+            room.0 += SLOT_BLOCK * most;
+            room.1 += SLOT_BLOCK;
         }
         let total = self.blocks.len() * SLOT_BLOCK;
         self.free.0.reserve(total - self.free.0.len());
@@ -298,7 +299,7 @@ impl<I> State<I> {
     /// The open batch of short messages, to hand to the pool (after the
     /// state's lock is released) when it is full or (with `waited`) when
     /// the delivery thread waits on it; otherwise it goes on filling.
-    fn close_open(&mut self, waited: bool) -> Option<Task> {
+    fn close_open(&mut self, waited: bool) -> Option<Gathered> {
         // Small batches fill a task up to a task's bytes (short messages
         // fill all 64 places: 4 KiB messages measured 10-30% slower at 16).
         let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS || (open.batch.is_some() && open.len >= crate::lanes::TASK_LEN));
@@ -319,8 +320,8 @@ impl<I> State<I> {
 
 impl<I> Drop for State<I> {
     fn drop(&mut self) {
-        if let Some(room) = self.tasks_room {
-            TASKS.give_room(room);
+        if let Some((room, room_gathered)) = self.tasks_room {
+            TASKS.give_room(room, room_gathered);
         }
         for &block in &self.blocks {
             // Sound: from Box::into_raw, dropped once, with nothing in flight
@@ -359,7 +360,7 @@ impl<H: Send + 'static, S: 'static> Queue<H, S> {
     {
         let (key, flags) = mode.key_and_flags();
         let mut returned = Slots(Vec::new());
-        let mut state = State { blocks: Vec::new(), free: Slots(Vec::new()), tail: core::ptr::null_mut(), tasks: Vec::new(), most: 0, plan: Default::default(), open: None, tasks_room: (efficiency.max_threads() > 1).then_some(0) };
+        let mut state = State { blocks: Vec::new(), free: Slots(Vec::new()), tail: core::ptr::null_mut(), tasks: Vec::new(), most: 0, plan: Default::default(), open: None, tasks_room: (efficiency.max_threads() > 1).then_some((0, 0)) };
         state.add_block(&mut returned);
         // The chain starts at a slot delivered already.
         let first = state.free.0.pop().unwrap();
@@ -411,8 +412,8 @@ where
             if let Some(room) = &mut state.tasks_room {
                 // Every slot may hold a submission of this many tasks.
                 let more = state.blocks.len() * SLOT_BLOCK * (tasks.len() - state.most.max(1).min(tasks.len()));
-                TASKS.make_room(more);
-                *room += more;
+                TASKS.make_room(more, 0);
+                room.0 += more;
             }
             state.most = tasks.len();
             // Every free slot makes room now, the ones in flight when next
@@ -466,7 +467,7 @@ where
         }
         slot.digest = true;
         slot.left.store(1, Ordering::Relaxed);
-        let open = state.open.get_or_insert_with(|| Task::members(&self.key, self.flags, batch));
+        let open = state.open.get_or_insert_with(|| Gathered::new(&self.key, self.flags, batch));
         // Sound: the slot's block, bytes, and result (or the digest space)
         // stay in place until its delivery, after `left` reaches zero.
         open.member[open.members] = crate::lanes::Member { input, len, out: out.unwrap_or(slot.results.as_mut_ptr() as *mut u8), left: &slot.left };
@@ -475,8 +476,8 @@ where
         let closed = state.close_open(false);
         state.link(slot);
         drop(guard);
-        if let Some(task) = closed {
-            TASKS.push(core::iter::once(task));
+        if let Some(gathered) = closed {
+            TASKS.push_gathered(gathered);
         }
         self.activate(owner);
     }
@@ -543,8 +544,8 @@ where
             // The entry waited on may be in the open batch: hand that over,
             // so that it finishes.
             let closed = crate::lanes::lock_polling(&self.state).close_open(true);
-            if let Some(task) = closed {
-                TASKS.push(core::iter::once(task));
+            if let Some(gathered) = closed {
+                TASKS.push_gathered(gathered);
             }
             return (count > 0, true);
         }

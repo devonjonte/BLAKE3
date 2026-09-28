@@ -906,6 +906,12 @@ impl Pool {
             // and in a VM the host time the busy threads need).
             let mut idle_since = std::time::Instant::now();
             while self.registered.load(Ordering::SeqCst) > 0 || self.lingering() {
+                if let Some(gathered) = TASKS.pop_gathered() {
+                    gathered.run(pool_platform());
+                    TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
+                    idle_since = std::time::Instant::now();
+                    continue;
+                }
                 if let Some(task) = TASKS.pop() {
                     task.run(pool_platform());
                     TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
@@ -930,7 +936,7 @@ impl Pool {
             let mut guard = self.sleep_lock.lock().unwrap();
             self.sleepers.fetch_add(1, Ordering::SeqCst);
             let taken = self.take_piece(start, rank);
-            let waited = taken.is_none() && ((self.registered.load(Ordering::SeqCst) == 0 && !self.lingering()) || TASKS.queued.load(Ordering::SeqCst) == 0);
+            let waited = taken.is_none() && ((self.registered.load(Ordering::SeqCst) == 0 && !self.lingering()) || !TASKS.waiting());
             if waited {
                 guard = self.posted.wait(guard).unwrap();
                 // Awake: one fewer notified sleeper on the way (a wake
@@ -970,10 +976,18 @@ pub(crate) struct Task {
     pub(crate) flags: u8,
     pub(crate) out: *mut u8,
     pub(crate) left: *const AtomicUsize,
-    /// With `members` above zero, the task is that many separate short
-    /// messages instead (or, with `batch`, batches of that length's
-    /// messages): each one's digest (digests) to its `out`, then its
-    /// `left` counted down; `len` sums their bytes.
+}
+
+/// A task of several short messages (or, with `batch`, batches of that
+/// length's messages), each one's digest (digests) to its `out`, then its
+/// `left` counted down; `len` sums their bytes. Its own list in `Tasks`
+/// (64 members make it 2 KiB; subtree tasks stay about 100 bytes, which
+/// cross the list's lock in a line or two).
+pub(crate) struct Gathered {
+    pub(crate) key: crate::CVWords,
+    pub(crate) flags: u8,
+    pub(crate) batch: Option<usize>,
+    pub(crate) len: usize,
     pub(crate) members: usize,
     pub(crate) member: [Member; MEMBERS],
 }
@@ -999,23 +1013,15 @@ impl Task {
     /// A task over `input` at chunk `counter`, its mode, kind, and
     /// destinations still to fill in.
     pub(crate) fn of(input: &[u8], counter: u64) -> Task {
-        Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null(), members: 0, member: [NO_MEMBER; MEMBERS] }
+        Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null() }
     }
 
-    /// An empty task of short messages (with `batch`, batches of messages
-    /// of that length) in the mode of `key` and `flags`.
-    pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {
-        Task { key: *key, flags, batch, ..Task::of(&[], 0) }
-    }
 
     /// Hash on `platform` into `out`: for a subtree of two chunks or more at
     /// chunk zero (it may be the whole message), its pair of child chaining
     /// values; for any other, its chaining value (first 32 bytes). Then
     /// count down.
     pub(crate) fn run(self, platform: Platform) {
-        if self.members > 0 {
-            return self.run_members(platform);
-        }
         // Sound: the queue keeps these in place until `left` is zero.
         let bytes = unsafe { core::slice::from_raw_parts(self.input, self.len) };
         if let Some(message_len) = self.batch {
@@ -1037,11 +1043,20 @@ impl Task {
     }
 }
 
-impl Task {
+// Sound: a task's pointers stay valid until its `left` reaches zero.
+unsafe impl Send for Gathered {}
+
+impl Gathered {
+    /// An empty task of short messages (with `batch`, batches of messages
+    /// of that length) in the mode of `key` and `flags`.
+    pub(crate) fn new(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Gathered {
+        Gathered { key: *key, flags, batch, len: 0, members: 0, member: [NO_MEMBER; MEMBERS] }
+    }
+
     /// The members' digests: messages of one block side by side on the
     /// multi-lane kernels (`hash_many`'s, from a table of pointers); any
     /// others one at a time.
-    fn run_members(self, platform: Platform) {
+    pub(crate) fn run(self, platform: Platform) {
         let members = &self.member[..self.members];
         if let Some(message_len) = self.batch {
             for m in members {
@@ -1089,6 +1104,11 @@ pub(crate) struct Tasks {
     in_flight: AtomicUsize,
     /// The room the queues made in the list (make_room), under its lock.
     room: AtomicUsize,
+    /// Tasks of several short messages, their count, and their room, as
+    /// the above.
+    gathered: Mutex<std::collections::VecDeque<Gathered>>,
+    queued_gathered: AtomicUsize,
+    room_gathered: AtomicUsize,
     /// Whether the SME2 thread sleeps (read without the lock), and its wake.
     sme2_asleep: Mutex<bool>,
     sme2_sleeps: std::sync::atomic::AtomicBool,
@@ -1100,6 +1120,9 @@ pub(crate) static TASKS: Tasks = Tasks {
     queued: AtomicUsize::new(0),
     in_flight: AtomicUsize::new(0),
     room: AtomicUsize::new(0),
+    gathered: Mutex::new(std::collections::VecDeque::new()),
+    queued_gathered: AtomicUsize::new(0),
+    room_gathered: AtomicUsize::new(0),
     sme2_asleep: Mutex::new(false),
     sme2_sleeps: std::sync::atomic::AtomicBool::new(false),
     sme2_wake: Condvar::new(),
@@ -1119,12 +1142,12 @@ fn sme2_main() {
     loop {
         {
             let mut asleep = TASKS.sme2_asleep.lock().unwrap();
-            while TASKS.queued.load(Ordering::SeqCst) == 0 && (idle || pool.registered.load(Ordering::SeqCst) == 0) {
+            while !TASKS.waiting() && (idle || pool.registered.load(Ordering::SeqCst) == 0) {
                 *asleep = true;
                 TASKS.sme2_sleeps.store(true, Ordering::SeqCst);
                 // A push between the check above and this store sees the
                 // flag, takes the lock after the wait releases it, and wakes.
-                if TASKS.queued.load(Ordering::SeqCst) > 0 {
+                if TASKS.waiting() {
                     break;
                 }
                 asleep = TASKS.sme2_wake.wait(asleep).unwrap();
@@ -1135,18 +1158,19 @@ fn sme2_main() {
         let mut yielded = std::time::Instant::now();
         let mut idle_since = std::time::Instant::now();
         idle = false;
-        while TASKS.queued.load(Ordering::SeqCst) > 0 || pool.registered.load(Ordering::SeqCst) > 0 {
+        while TASKS.waiting() || pool.registered.load(Ordering::SeqCst) > 0 {
+            if let Some(gathered) = TASKS.pop_gathered() {
+                // Short messages and small batches, gathered, run faster on
+                // NEON than through an SME2 session per task (Mac: 64-byte
+                // messages 14-15% faster, batches of 16 and 64 10-15%);
+                // below 16 KiB the other members run the NEON kernels on
+                // either platform.
+                gathered.run(pool_platform());
+                TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
+                idle_since = std::time::Instant::now();
+                continue;
+            }
             match TASKS.pop() {
-                Some(task) if task.members > 0 => {
-                    // Short messages and small batches, gathered, run
-                    // faster on NEON than through an SME2 session per task
-                    // (Mac: 64-byte messages 14-15% faster, batches of 16
-                    // and 64 10-15%); below 16 KiB the other members run
-                    // the NEON kernels on either platform.
-                    task.run(pool_platform());
-                    TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
-                    idle_since = std::time::Instant::now();
-                }
                 Some(task) => {
                     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
                     task.run(turn.platform());
@@ -1183,10 +1207,45 @@ impl Tasks {
         debug_assert!(queued <= self.room.load(Ordering::Relaxed), "the queues made room for every task");
         self.queued.store(queued, Ordering::SeqCst);
         drop(list);
+        self.wake(pool, in_flight);
+    }
+
+    /// Add a task of several short messages, as `push` adds tasks.
+    pub(crate) fn push_gathered(&self, gathered: Gathered) {
+        let pool = pool();
+        let in_flight = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut list = lock_polling(&self.gathered);
+        list.push_back(gathered);
+        let queued = list.len();
+        debug_assert!(queued <= self.room_gathered.load(Ordering::Relaxed), "the queues made room for every task");
+        self.queued_gathered.store(queued, Ordering::SeqCst);
+        drop(list);
+        self.wake(pool, in_flight);
+    }
+
+    /// Wake sleeping threads so that one per task in flight is awake or on
+    /// its way: the SME2 thread first, then workers.
+    fn wake(&self, pool: &Pool, in_flight: usize) {
         if pool.sme2 && self.sme2_sleeps.load(Ordering::SeqCst) && *self.sme2_asleep.lock().unwrap() {
             self.sme2_wake.notify_one();
         }
         pool.wake_for(in_flight.saturating_sub(usize::from(pool.sme2)));
+    }
+
+    /// Whether any task waits (a hint, read without the locks).
+    fn waiting(&self) -> bool {
+        self.queued.load(Ordering::SeqCst) > 0 || self.queued_gathered.load(Ordering::SeqCst) > 0
+    }
+
+    /// A waiting task of several short messages, as `pop` takes a task.
+    fn pop_gathered(&self) -> Option<Gathered> {
+        if self.queued_gathered.load(Ordering::SeqCst) == 0 {
+            return None;
+        }
+        let mut list = self.gathered.try_lock().ok()?;
+        let gathered = list.pop_front()?;
+        self.queued_gathered.store(list.len(), Ordering::SeqCst);
+        Some(gathered)
     }
 
     /// Make room in the list for `more` tasks: a queue makes room for the
@@ -1196,17 +1255,25 @@ impl Tasks {
     /// "every task in flight" counted tasks finished but not yet counted
     /// down, and grew the list after warm-up once in a hundred runs of
     /// tests/queue_no_alloc.rs).
-    pub(crate) fn make_room(&self, more: usize) {
+    pub(crate) fn make_room(&self, more: usize, more_gathered: usize) {
         let mut list = lock_polling(&self.list);
         let room = self.room.fetch_add(more, Ordering::Relaxed) + more;
+        let len = list.len();
+        list.reserve(room.saturating_sub(len));
+        drop(list);
+        let mut list = lock_polling(&self.gathered);
+        let room = self.room_gathered.fetch_add(more_gathered, Ordering::Relaxed) + more_gathered;
         let len = list.len();
         list.reserve(room.saturating_sub(len));
     }
 
     /// Give back room a queue made (its capacity stays).
-    pub(crate) fn give_room(&self, less: usize) {
-        let _list = lock_polling(&self.list);
+    pub(crate) fn give_room(&self, less: usize, less_gathered: usize) {
+        let list = lock_polling(&self.list);
         self.room.fetch_sub(less, Ordering::Relaxed);
+        drop(list);
+        let _list = lock_polling(&self.gathered);
+        self.room_gathered.fetch_sub(less_gathered, Ordering::Relaxed);
     }
 
     /// A waiting task, unless none waits or another thread is taking one.
