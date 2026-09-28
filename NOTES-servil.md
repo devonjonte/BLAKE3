@@ -642,6 +642,11 @@ speed; after hash_multithreaded 8 MiB the process spent 145 us of CPU
 in the next 200 ms, against 748; Mac continuous cells level or better
 (jobs 548-551); perf_regress on the VM: no regression.
 
+**Wakes as a tree** (probe/wake-tree, jobs 634-637): the caller waking two
+sleepers itself and each woken worker up to three of those owed, instead
+of one and then all the rest: level from 1 to 8 MiB and on batches of
+16384 and 65536 after the gap; left out.
+
 **The caller's own pieces on SME2** (September 28, night): run_job's
 caller hashing its later pieces on its own platform (SME2 under the
 turn) instead of NEON: level on the Mac from 1 to 128 MiB (jobs
