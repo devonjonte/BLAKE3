@@ -211,6 +211,17 @@ pub fn process_cpu_ns() -> u64 {
     }
 }
 
+/// The energy this process has used so far, all its threads together, in
+/// nanojoules, where the platform counts it (macOS: the kernel's estimate,
+/// `proc_pid_rusage` RUSAGE_INFO_V6 `ri_energy_nj`; it reads sleep as
+/// under 0.01 W and a scalar spin as about 3 W on an M4 Max P-core,
+/// NOTES-servil.md "Energy per byte"; whether it counts the SME unit's own
+/// power is unknown). None elsewhere. Not yet validated for the
+/// benchmark's energy cells (docs/api-design.md, **Q**).
+pub fn process_energy_nj() -> Option<u64> {
+    imp::process_energy_nj()
+}
+
 /// macOS QoS classes: user-interactive runs on P-cores, background on E-cores.
 pub const USER_INTERACTIVE: u32 = 0x21;
 pub const BACKGROUND: u32 = 0x09;
@@ -277,6 +288,19 @@ mod imp {
         // Sound: a plain call on the calling thread.
         assert_eq!(unsafe { pthread_set_qos_class_self_np(class, 0) }, 0, "pthread_set_qos_class_self_np");
     }
+
+    pub fn process_energy_nj() -> Option<u64> {
+        unsafe extern "C" {
+            fn proc_pid_rusage(pid: i32, flavor: i32, buffer: *mut u64) -> i32;
+            fn getpid() -> i32;
+        }
+        // rusage_info_v6 as u64 words (<sys/resource.h>): ri_uuid (2),
+        // ri_user_time at 2, ..., ri_energy_nj at 42 (room to spare).
+        const RUSAGE_INFO_V6: i32 = 6;
+        let mut words = [0u64; 128];
+        // Sound: `words` is writable and longer than rusage_info_v6.
+        (unsafe { proc_pid_rusage(getpid(), RUSAGE_INFO_V6, words.as_mut_ptr()) } == 0).then_some(words[42])
+    }
 }
 
 #[cfg(not(target_vendor = "apple"))]
@@ -286,6 +310,10 @@ mod imp {
     }
 
     pub fn set_qos(_class: u32) {}
+
+    pub fn process_energy_nj() -> Option<u64> {
+        None
+    }
 }
 
 #[cfg(test)]
