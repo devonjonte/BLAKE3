@@ -230,8 +230,10 @@ struct State<I> {
     /// Where planning stands: past every piece submitted (the hasher
     /// stands past the delivered ones).
     plan: crate::PlanState,
-    /// Short messages gathered into one task, not yet handed to the pool.
+    /// Short messages (or small batches) gathered into one task, not yet
+    /// handed to the pool, and its last member's link.
     open: Option<Task>,
+    open_last: *mut crate::lanes::MemberLink,
 }
 
 /// Slots, by address.
@@ -250,6 +252,8 @@ const SLOT_BLOCK: usize = 16;
 struct Slot<I> {
     item: Option<I>,
     results: Vec<[u8; crate::BLOCK_LEN]>,
+    /// The entry as a member of a task of several.
+    link: crate::lanes::MemberLink,
     left: AtomicUsize,
     /// Whether `results` holds the message's digest (a short message
     /// hashed with others), not its subtrees' results.
@@ -263,7 +267,7 @@ impl<I> State<I> {
     /// `free` and `returned`.
     fn add_block(&mut self, returned: &mut Slots<I>) {
         let most = self.most.max(1);
-        let block = Box::into_raw(Box::new(std::array::from_fn(|_| Slot { item: None, results: Vec::with_capacity(most), left: AtomicUsize::new(0), digest: false, next: AtomicPtr::new(core::ptr::null_mut()) })));
+        let block = Box::into_raw(Box::new(std::array::from_fn(|_| Slot { item: None, results: Vec::with_capacity(most), link: crate::lanes::MemberLink::EMPTY, left: AtomicUsize::new(0), digest: false, next: AtomicPtr::new(core::ptr::null_mut()) })));
         self.blocks.push(block);
         let total = self.blocks.len() * SLOT_BLOCK;
         self.free.0.reserve(total - self.free.0.len());
@@ -350,7 +354,7 @@ impl<H: Send + 'static, S: 'static> Queue<H, S> {
     {
         let (key, flags) = mode.key_and_flags();
         let mut returned = Slots(Vec::new());
-        let mut state = State { blocks: Vec::new(), free: Slots(Vec::new()), tail: core::ptr::null_mut(), tasks: Vec::new(), most: 0, plan: Default::default(), open: None };
+        let mut state = State { blocks: Vec::new(), free: Slots(Vec::new()), tail: core::ptr::null_mut(), tasks: Vec::new(), most: 0, plan: Default::default(), open: None, open_last: core::ptr::null_mut() };
         state.add_block(&mut returned);
         // The chain starts at a slot delivered already.
         let first = state.free.0.pop().unwrap();
@@ -451,10 +455,19 @@ where
         }
         slot.digest = true;
         slot.left.store(1, Ordering::Relaxed);
-        let open = state.open.get_or_insert_with(|| Task::members(&self.key, self.flags, batch));
         // Sound: the slot's block, bytes, and result (or the digest space)
         // stay in place until its delivery, after `left` reaches zero.
-        open.member[open.members] = crate::lanes::Member { input, len, out: out.unwrap_or(slot.results.as_mut_ptr() as *mut u8), left: &slot.left };
+        slot.link = crate::lanes::MemberLink { member: crate::lanes::Member { input, len, out: out.unwrap_or(slot.results.as_mut_ptr() as *mut u8), left: &slot.left }, next: core::ptr::null() };
+        let link: *mut crate::lanes::MemberLink = &mut slot.link;
+        let open = state.open.get_or_insert_with(|| Task::members(&self.key, self.flags, batch));
+        if open.members == 0 {
+            open.first = link;
+        } else {
+            // Sound: the open task's last member is in flight, and its link
+            // is written only here, under the state's lock.
+            unsafe { (*state.open_last).next = link };
+        }
+        state.open_last = link;
         open.members += 1;
         open.len += len;
         let closed = state.close_open(false);
