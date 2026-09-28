@@ -1,37 +1,42 @@
-use blake3_servil::lanes::probe::*;
-use blake3_servil::{Efficiency, Hash, Mode, PieceHandler, Queue};
-use std::sync::{atomic::Ordering::Relaxed, mpsc};
-enum B { P(Vec<u8>), D(Hash) }
-struct P(mpsc::Sender<B>);
-impl PieceHandler for P {
-    type Buffer = Vec<u8>;
-    fn piece_done(&mut self, b: Vec<u8>) { self.0.send(B::P(b)).unwrap(); }
-    fn finished(&mut self, h: Hash) { self.0.send(B::D(h)).unwrap(); }
+//! Probe (probe/energy-repeat): how repeatable the process's energy counter
+//! is (clocks::process_energy_nj, macOS RUSAGE_INFO_V6 ri_energy_nj), for
+//! stage 3's energy cells: ten repeats each of a 100 ms integer spin on a
+//! P-core (user-interactive QoS), hash() over 64 MiB, and
+//! hash_multithreaded() over 64 MiB, each after 50 ms asleep; energy per
+//! repeat (and per byte), and the spread (max/min) of each set.
+use std::hint::black_box;
+
+fn spin_ms(ms: u64) {
+    let t = clocks::now();
+    let mut x = 1u64;
+    while clocks::since_ns(t) < ms * 1_000_000 {
+        for i in 0..1000 { x = black_box(x.wrapping_mul(6364136223846793005).wrapping_add(i)); }
+    }
+    black_box(x);
 }
+
+fn repeat(label: &str, bytes: u64, f: &dyn Fn()) {
+    let mut e = Vec::new();
+    for _ in 0..10 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let (e0, t) = (clocks::process_energy_nj().unwrap_or(0), clocks::now());
+        f();
+        let wall = clocks::since_ns(t);
+        e.push((clocks::process_energy_nj().unwrap_or(0) - e0, wall));
+    }
+    let mut en: Vec<u64> = e.iter().map(|x| x.0).collect();
+    en.sort();
+    let per = |nj: u64| if bytes > 0 { format!("{} pJ/B", nj * 1000 / bytes) } else { format!("{} mW", nj * 1000 / 100_000_000) };
+    println!("{label:<34} energy min {} median {} max {} (spread {}.{:02}x); wall {:?} ms", per(en[0]), per(en[5]), per(en[9]), en[9] / en[0].max(1), (en[9] * 100 / en[0].max(1)) % 100, e.iter().map(|x| x.1 / 1_000_000).collect::<Vec<_>>());
+}
+
 fn main() {
     blake3_servil::initialize_multithreaded();
-    let input = vec![5u8; 32 << 20];
-    let (tx, rx) = mpsc::channel();
-    let mut free: Vec<Vec<u8>> = (0..4).map(|_| Vec::with_capacity(65536)).collect();
-    let (mut copy_ns, mut wait_ns) = (0u64, 0u64);
-    let t = std::time::Instant::now();
-    for _ in 0..10 {
-        let q = Queue::pieces(Mode::Hash, Efficiency::Time, P(tx.clone()));
-        for piece in input.chunks(65536) {
-            let w = std::time::Instant::now();
-            let mut b = match free.pop() { Some(b) => b, None => loop { if let B::P(b) = rx.recv().unwrap() { break b } } };
-            wait_ns += w.elapsed().as_nanos() as u64;
-            let c = std::time::Instant::now();
-            b.clear(); b.extend_from_slice(piece);
-            copy_ns += c.elapsed().as_nanos() as u64;
-            q.submit(b);
-        }
-        q.finish();
-        loop { match rx.recv().unwrap() { B::P(b) => free.push(b), B::D(_) => break } }
+    clocks::set_qos(clocks::USER_INTERACTIVE);
+    let big = vec![5u8; 64 << 20];
+    for _ in 0..2 {
+        repeat("spin 100 ms (P)", 0, &|| spin_ms(100));
+        repeat("hash 64 MiB", 64 << 20, &|| { black_box(blake3_servil::hash(&big)); });
+        repeat("hash_multithreaded 64 MiB", 64 << 20, &|| { black_box(blake3_servil::hash_multithreaded(&big)); });
     }
-    let pieces = 10 * 512;
-    println!("ns/B {:.3}", t.elapsed().as_nanos() as f64 / (10.0 * input.len() as f64));
-    println!("producer per piece: wait {} ns, copy {} ns, submit {} ns", wait_ns / pieces, copy_ns / pieces, SUBMIT_NS.load(Relaxed) / SUBMITS.load(Relaxed));
-    let runs = [RUNS[0].load(Relaxed), RUNS[1].load(Relaxed)];
-    println!("tasks: sme2 thread {} (avg {} ns), workers {} (avg {} ns), push->pop avg {} ns, last done->delivered avg {} ns", runs[0], RUN_NS[0].load(Relaxed) / runs[0].max(1), runs[1], RUN_NS[1].load(Relaxed) / runs[1].max(1), POP_WAIT.load(Relaxed) / (runs[0] + runs[1]), DONE_TO_DELIVERED.load(Relaxed) / DELIVERS.load(Relaxed).max(1));
 }
