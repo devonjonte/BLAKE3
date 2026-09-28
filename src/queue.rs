@@ -237,7 +237,10 @@ const SLOT_BLOCK: usize = 16;
 
 /// A submission in flight: its item, its tasks' results (none: hashed at
 /// delivery), how many of its tasks are unfinished, and the next entry.
-/// The results keep their capacity from one submission to the next.
+/// The results keep their capacity from one submission to the next. On a
+/// cache line of its own (128 bytes on Apple's cores): neighbours in flight
+/// are written by different threads at once.
+#[repr(align(128))]
 struct Slot<I> {
     item: Option<I>,
     results: Vec<[u8; crate::BLOCK_LEN]>,
