@@ -671,7 +671,14 @@ us for tasks that hash in 10 (SME2) to 30 us (a P-core's NEON). E-cores
 holding up in-order delivery would explain it (80 us a task), but the
 pool's threads at user-interactive QoS measured level
 (probe/workers-qos, jobs 715-718). 1 MiB messages alike (10 us in
-submit, 32 waiting, 57 in all).
+submit, 32 waiting, 57 in all). Timed by stage (probe/task-times, job
+719, 64 KiB messages): NEON workers took 88% of the tasks at 33 us of
+hashing each, the SME2 thread 12% at 20 us; a task waited 4-6 us in the
+list; a message's round trip averaged 51 us. Tasks of about 100 bytes,
+their members in a queue's fixed set of member blocks
+(candidate/member-blocks, jobs 720-723): 2% faster overall, mixed by
+cell (batches of 4096 7% slower solo, shared 16 KiB 11%), 64 KiB level:
+the task's size is not this ceiling; left out.
 
 **Idle workers sleep** (September 28, night): a worker, and the SME2
 thread, that finds nothing for 50 us (`lanes::WORKER_IDLE`, about a
