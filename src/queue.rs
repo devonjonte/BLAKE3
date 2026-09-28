@@ -237,16 +237,22 @@ const SLOT_BLOCK: usize = 16;
 
 /// A submission in flight: its item, its tasks' results (none: hashed at
 /// delivery), how many of its tasks are unfinished, and the next entry.
-/// The results keep their capacity from one submission to the next.
+/// The results keep their capacity from one submission to the next. A
+/// short message's digest lands in `hash`, beside `left`, which the worker
+/// counts down in the same stroke: one line moves from worker to delivery
+/// per message.
+#[repr(C)]
 struct Slot<I> {
-    item: Option<I>,
-    results: Vec<[u8; crate::BLOCK_LEN]>,
     left: AtomicUsize,
-    /// Whether `results` holds the message's digest (a short message
-    /// hashed with others), not its subtrees' results.
-    digest: bool,
+    /// A short message's digest (`member`).
+    hash: [u8; OUT_LEN],
+    /// Whether the entry was hashed as a member of a task: a short
+    /// message's digest in `hash`, or a small batch's in its digest space.
+    member: bool,
     /// The entry submitted after this one, once linked.
     next: AtomicPtr<Slot<I>>,
+    item: Option<I>,
+    results: Vec<[u8; crate::BLOCK_LEN]>,
 }
 
 impl<I> State<I> {
@@ -254,7 +260,7 @@ impl<I> State<I> {
     /// `free` and `returned`.
     fn add_block(&mut self, returned: &mut Slots<I>) {
         let most = self.most.max(1);
-        let block = Box::into_raw(Box::new(std::array::from_fn(|_| Slot { item: None, results: Vec::with_capacity(most), left: AtomicUsize::new(0), digest: false, next: AtomicPtr::new(core::ptr::null_mut()) })));
+        let block = Box::into_raw(Box::new(std::array::from_fn(|_| Slot { left: AtomicUsize::new(0), hash: [0; OUT_LEN], member: false, next: AtomicPtr::new(core::ptr::null_mut()), item: None, results: Vec::with_capacity(most) })));
         self.blocks.push(block);
         let total = self.blocks.len() * SLOT_BLOCK;
         self.free.0.reserve(total - self.free.0.len());
@@ -386,7 +392,7 @@ where
         let slot = unsafe { &mut *slot };
         let item = slot.item.insert(item);
         slot.results.clear();
-        slot.digest = false;
+        slot.member = false;
         let mut tasks = std::mem::take(&mut state.tasks);
         let planned = plan(item, &mut state.plan, &mut tasks);
         if tasks.len() > state.most {
@@ -433,19 +439,12 @@ where
         // Sound: a free slot is this thread's until linked.
         let slot = unsafe { &mut *slot };
         let (input, len, out) = member(slot.item.insert(item));
-        // A message's digest lands in results[0]; a slot that held one
-        // keeps it (rewriting it would take the line from the worker that
-        // last wrote it).
-        if slot.results.len() != 1 {
-            slot.results.clear();
-            slot.results.resize(1, [0; crate::BLOCK_LEN]);
-        }
-        slot.digest = true;
+        slot.member = true;
         slot.left.store(1, Ordering::Relaxed);
         let open = state.open.get_or_insert_with(|| Task::members(&self.key, self.flags, batch));
         // Sound: the slot's block, bytes, and result (or the digest space)
         // stay in place until its delivery, after `left` reaches zero.
-        open.member[open.members] = crate::lanes::Member { input, len, out: out.unwrap_or(slot.results.as_mut_ptr() as *mut u8), left: &slot.left };
+        open.member[open.members] = crate::lanes::Member { input, len, out: out.unwrap_or(slot.hash.as_mut_ptr()), left: &slot.left };
         open.members += 1;
         open.len += len;
         let closed = state.close_open(false);
@@ -477,7 +476,7 @@ where
      * queue). Returns whether it delivered any, and whether the queue
      * still has entries in flight.
      */
-    fn deliver_with(&self, deliver: impl Fn(&Self, &mut Handling<H>, I, &[[u8; crate::BLOCK_LEN]], bool)) -> (bool, bool) {
+    fn deliver_with(&self, deliver: impl Fn(&Self, &mut Handling<H>, I, &[[u8; crate::BLOCK_LEN]], Option<&[u8; OUT_LEN]>)) -> (bool, bool) {
         let waiting = self.waiting.load(Ordering::Relaxed);
         // Sound: the entry stays linked and in place until this thread
         // delivers it.
@@ -509,7 +508,8 @@ where
             let handling = handling.get_or_insert_with(|| self.handling.lock().expect("no lock is poisoned"));
             // Sound: its tasks are finished; it is this thread's now.
             let item = unsafe { (*next).item.take() }.expect("a slot in flight holds its item");
-            deliver(self, handling, item, unsafe { &(*next).results }, unsafe { (*next).digest });
+            let member = unsafe { (*next).member }.then(|| unsafe { &(*next).hash });
+            deliver(self, handling, item, unsafe { &(*next).results }, member);
             count += 1;
         }
         drop(handling);
@@ -552,9 +552,9 @@ trait Deliver: Send + Sync + 'static {
 
 impl<H: MessageHandler> Deliver for Inner<H, H::Buffer, shape::Messages> {
     fn deliver(&self) -> (bool, bool) {
-        self.deliver_with(|queue, handling, buffer, results, digest| {
-            let hash = if digest {
-                Hash(results[0][..OUT_LEN].try_into().unwrap())
+        self.deliver_with(|queue, handling, buffer, results, member| {
+            let hash = if let Some(hash) = member {
+                Hash(*hash)
             } else if results.is_empty() {
                 crate::hash_serial(buffer.as_ref(), &queue.key, queue.flags)
             } else {
@@ -590,10 +590,10 @@ impl<H: PieceHandler> Deliver for Inner<H, PieceItem<H::Buffer>, shape::Pieces> 
 
 impl<H: FixedHandler> Deliver for Inner<H, (H::Buffer, H::Digests), shape::Fixed> {
     fn deliver(&self) -> (bool, bool) {
-        self.deliver_with(|queue, handling, (buffer, mut digests), results, hashed| {
-            // A small batch was hashed as a member of a task (`hashed`), a
-            // larger one as tasks of its own (results); any other here.
-            if results.is_empty() && !hashed {
+        self.deliver_with(|queue, handling, (buffer, mut digests), results, member| {
+            // A small batch was hashed as a member of a task, a larger one
+            // as tasks of its own (results); any other here.
+            if results.is_empty() && member.is_none() {
                 crate::hash_many_serial(buffer.as_ref(), queue.message_len, &queue.key, queue.flags, digests.as_mut());
             }
             handling.handler.hashed(buffer, digests);
