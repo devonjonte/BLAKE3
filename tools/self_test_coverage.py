@@ -11,8 +11,8 @@ with its hit count, or NOT REACHED. From the fork's checkout, in the VM:
     nm /tmp/cov/target/release/cov | grep -E ' [Tt] (blake3_hybrid_[kpqc][0-9]+|blake3_sme2[a-z0-9_]*_512)$' | awk '{print $3}' | sort -u > /tmp/syms.txt
     SHELL=/bin/sh gdb -q -batch -ex 'set startup-with-shell off' -x tools/self_test_coverage.py /tmp/cov/target/release/cov
 
-(with the usual HOME, CARGO_TARGET_DIR, CC, and TMPDIR prefix for cargo;
-CARGO_TARGET_DIR changes where the binary is). September 26, 2026: all 31
+(in the VM after vm/setup.sh; a CARGO_TARGET_DIR changes where the
+binary is). September 26, 2026: all 31
 entries reached on SME2 (the VM).
 """
 import collections

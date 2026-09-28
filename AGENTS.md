@@ -144,6 +144,8 @@ A fact that concerns several audiences goes in each audience's document, phrased
 
 # Where to start
 
+In the VM, run `sh /workspace/vm/setup.sh` before any other command, once per session (it is idempotent and quick after the first run of a boot); every `git` and `cargo` command then works as it is.
+
 Read `/workspace/bench-hashes/NEXT-STEPS.md` first: it says what the work is now (optimising this fork against the benchmark) and where the last session left both repositories. `NOTES-servil.md` holds the fork's design notes and the measurements behind each change. `PROCEDURES.md` holds how things are done here: the regression check, branches and promotion, releases, the Mac runner, probes, and the environment.
 
 # Speed: no slower commit enters unnoticed
