@@ -662,6 +662,17 @@ delivery thread's later close): servil 0.83-1.21 ns/B, SHA-256 in the same
 run 0.84-1.07, both at 2.3-3.0 GHz (the machine's clock through a full
 run, the same for both): at the clock they share, the two are close.
 
+**The queue's ceiling for 64 KiB messages** (probe/submit-64k, job 714;
+open): with the benchmark's 1 MiB in flight (16 buffers), a program
+spends 3.9 us per 64 KiB message: 1.4 us in `submit`, 1.7 us waiting for
+a buffer to come back, the rest copying. So the engine is the limit,
+about 16 GB/s, where hash_multithreaded reaches 45: a round trip near 64
+us for tasks that hash in 10 (SME2) to 30 us (a P-core's NEON). E-cores
+holding up in-order delivery would explain it (80 us a task), but the
+pool's threads at user-interactive QoS measured level
+(probe/workers-qos, jobs 715-718). 1 MiB messages alike (10 us in
+submit, 32 waiting, 57 in all).
+
 **Idle workers sleep** (September 28, night): a worker, and the SME2
 thread, that finds nothing for 50 us (`lanes::WORKER_IDLE`, about a
 wake's cost) sleeps even while a job or a queue holds the pool; pushes
