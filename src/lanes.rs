@@ -1087,6 +1087,10 @@ pub(crate) struct Tasks {
     queued: AtomicUsize,
     /// Tasks pushed and not yet finished: what pushes wake threads for.
     in_flight: AtomicUsize,
+    /// Pushers waiting for or holding the list's lock: pollers leave it to
+    /// them (a push competing with fifteen pollers' try_locks for the line
+    /// capped the tasks handed over near one a microsecond).
+    pushing: AtomicUsize,
     /// Whether the SME2 thread sleeps (read without the lock), and its wake.
     sme2_asleep: Mutex<bool>,
     sme2_sleeps: std::sync::atomic::AtomicBool,
@@ -1097,6 +1101,7 @@ pub(crate) static TASKS: Tasks = Tasks {
     list: Mutex::new(std::collections::VecDeque::new()),
     queued: AtomicUsize::new(0),
     in_flight: AtomicUsize::new(0),
+    pushing: AtomicUsize::new(0),
     sme2_asleep: Mutex::new(false),
     sme2_sleeps: std::sync::atomic::AtomicBool::new(false),
     sme2_wake: Condvar::new(),
@@ -1157,6 +1162,7 @@ impl Tasks {
     /// thread first, then workers.
     pub(crate) fn push(&self, tasks: impl Iterator<Item = Task>) {
         let pool = pool();
+        self.pushing.fetch_add(1, Ordering::SeqCst);
         let mut list = lock_polling(&self.list);
         let before = list.len();
         list.extend(tasks);
@@ -1167,6 +1173,7 @@ impl Tasks {
         list.reserve(in_flight.saturating_sub(queued));
         self.queued.store(queued, Ordering::SeqCst);
         drop(list);
+        self.pushing.fetch_sub(1, Ordering::SeqCst);
         if pool.sme2 && self.sme2_sleeps.load(Ordering::SeqCst) && *self.sme2_asleep.lock().unwrap() {
             self.sme2_wake.notify_one();
         }
@@ -1175,7 +1182,7 @@ impl Tasks {
 
     /// A waiting task, unless none waits or another thread is taking one.
     fn pop(&self) -> Option<Task> {
-        if self.queued.load(Ordering::SeqCst) == 0 {
+        if self.queued.load(Ordering::SeqCst) == 0 || self.pushing.load(Ordering::SeqCst) > 0 {
             return None;
         }
         // Another thread popping means this one would wait for it: poll on.
