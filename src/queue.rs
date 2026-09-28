@@ -231,7 +231,9 @@ struct State<I> {
     /// stands past the delivered ones).
     plan: crate::PlanState,
     /// Short messages gathered into one task, not yet handed to the pool.
-    open: Option<Task>,
+    open: Option<Task>,    /// Whether this queue hands tasks to the pool, and the room it made in
+    /// the pool's task list for them (lanes::Tasks::make_room).
+    tasks_room: Option<usize>,
 }
 
 /// Slots, by address.
@@ -265,6 +267,10 @@ impl<I> State<I> {
         let most = self.most.max(1);
         let block = Box::into_raw(Box::new(std::array::from_fn(|_| Slot { item: None, results: Vec::with_capacity(most), left: AtomicUsize::new(0), digest: false, next: AtomicPtr::new(core::ptr::null_mut()) })));
         self.blocks.push(block);
+        if let Some(room) = &mut self.tasks_room {
+            TASKS.make_room(SLOT_BLOCK * most);
+            *room += SLOT_BLOCK * most;
+        }
         let total = self.blocks.len() * SLOT_BLOCK;
         self.free.0.reserve(total - self.free.0.len());
         returned.0.reserve(total - returned.0.len());
@@ -313,6 +319,9 @@ impl<I> State<I> {
 
 impl<I> Drop for State<I> {
     fn drop(&mut self) {
+        if let Some(room) = self.tasks_room {
+            TASKS.give_room(room);
+        }
         for &block in &self.blocks {
             // Sound: from Box::into_raw, dropped once, with nothing in flight
             // (the delivery thread holds the queue until its last delivery).
@@ -350,7 +359,7 @@ impl<H: Send + 'static, S: 'static> Queue<H, S> {
     {
         let (key, flags) = mode.key_and_flags();
         let mut returned = Slots(Vec::new());
-        let mut state = State { blocks: Vec::new(), free: Slots(Vec::new()), tail: core::ptr::null_mut(), tasks: Vec::new(), most: 0, plan: Default::default(), open: None };
+        let mut state = State { blocks: Vec::new(), free: Slots(Vec::new()), tail: core::ptr::null_mut(), tasks: Vec::new(), most: 0, plan: Default::default(), open: None, tasks_room: (efficiency.max_threads() > 1).then_some(0) };
         state.add_block(&mut returned);
         // The chain starts at a slot delivered already.
         let first = state.free.0.pop().unwrap();
@@ -399,6 +408,12 @@ where
         let mut tasks = std::mem::take(&mut state.tasks);
         let planned = plan(item, &mut state.plan, &mut tasks);
         if tasks.len() > state.most {
+            if let Some(room) = &mut state.tasks_room {
+                // Every slot may hold a submission of this many tasks.
+                let more = state.blocks.len() * SLOT_BLOCK * (tasks.len() - state.most.max(1).min(tasks.len()));
+                TASKS.make_room(more);
+                *room += more;
+            }
             state.most = tasks.len();
             // Every free slot makes room now, the ones in flight when next
             // handed out (below): growth follows the program's submissions,

@@ -1087,6 +1087,8 @@ pub(crate) struct Tasks {
     queued: AtomicUsize,
     /// Tasks pushed and not yet finished: what pushes wake threads for.
     in_flight: AtomicUsize,
+    /// The room the queues made in the list (make_room), under its lock.
+    room: AtomicUsize,
     /// Whether the SME2 thread sleeps (read without the lock), and its wake.
     sme2_asleep: Mutex<bool>,
     sme2_sleeps: std::sync::atomic::AtomicBool,
@@ -1097,6 +1099,7 @@ pub(crate) static TASKS: Tasks = Tasks {
     list: Mutex::new(std::collections::VecDeque::new()),
     queued: AtomicUsize::new(0),
     in_flight: AtomicUsize::new(0),
+    room: AtomicUsize::new(0),
     sme2_asleep: Mutex::new(false),
     sme2_sleeps: std::sync::atomic::AtomicBool::new(false),
     sme2_wake: Condvar::new(),
@@ -1175,15 +1178,35 @@ impl Tasks {
         let mut list = lock_polling(&self.list);
         list.extend(tasks);
         let queued = list.len();
-        // Room for every task in flight, whatever the workers' timing: the
-        // list grows only when the program has more in flight than ever.
-        list.reserve(in_flight.saturating_sub(queued));
+        // The queues made room for every task their entries can have in
+        // flight (make_room): no growth here, whatever the threads' timing.
+        debug_assert!(queued <= self.room.load(Ordering::Relaxed), "the queues made room for every task");
         self.queued.store(queued, Ordering::SeqCst);
         drop(list);
         if pool.sme2 && self.sme2_sleeps.load(Ordering::SeqCst) && *self.sme2_asleep.lock().unwrap() {
             self.sme2_wake.notify_one();
         }
         pool.wake_for(in_flight.saturating_sub(usize::from(pool.sme2)));
+    }
+
+    /// Make room in the list for `more` tasks: a queue makes room for the
+    /// most tasks its entries can have waiting (its slots times the most
+    /// tasks a submission has had), so that the list grows with what the
+    /// programs keep in flight, never with the threads' timing (a room of
+    /// "every task in flight" counted tasks finished but not yet counted
+    /// down, and grew the list after warm-up once in a hundred runs of
+    /// tests/queue_no_alloc.rs).
+    pub(crate) fn make_room(&self, more: usize) {
+        let mut list = lock_polling(&self.list);
+        let room = self.room.fetch_add(more, Ordering::Relaxed) + more;
+        let len = list.len();
+        list.reserve(room.saturating_sub(len));
+    }
+
+    /// Give back room a queue made (its capacity stays).
+    pub(crate) fn give_room(&self, less: usize) {
+        let _list = lock_polling(&self.list);
+        self.room.fetch_sub(less, Ordering::Relaxed);
     }
 
     /// A waiting task, unless none waits or another thread is taking one.
