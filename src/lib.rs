@@ -2022,7 +2022,7 @@ impl Hasher {
     /// Add input bytes to the hash state. You can call this any number of times.
     ///
     /// This method is always single-threaded. For multithreading support, see
-    /// [`update_rayon`](#method.update_rayon) (enabled with the `rayon` Cargo feature).
+    /// [`update_multithreaded`](#method.update_multithreaded).
     ///
     /// Note that the degree of SIMD parallelism that `update` can use is limited by the size of
     /// this input buffer. See [`update_reader`](#method.update_reader).
@@ -2033,12 +2033,20 @@ impl Hasher {
     /// [`update`](Hasher::update) over several threads, with the same
     /// result: the whole subtrees of 1 MiB and more in `input` are cut into
     /// pieces that the calling thread and this crate's worker threads hash
-    /// at once, under the rules of [`hash_multithreaded`]. Crate-internal
-    /// and tested; kept for the planned streaming interfaces
-    /// (docs/api-design.md), which it will serve.
+    /// at once, under the rules of [`hash_multithreaded`]; smaller inputs
+    /// stay on the calling thread. Never slower than `update` on the same
+    /// input, and one `Hasher` may mix the two.
+    ///
+    /// ```
+    /// let input = vec![7u8; 3 << 20];
+    /// let mut hasher = blake3_servil::Hasher::new();
+    /// for piece in input.chunks(64 * 1024) {
+    ///     hasher.update_multithreaded(piece);
+    /// }
+    /// assert_eq!(hasher.finalize(), blake3_servil::hash(&input));
+    /// ```
     #[cfg(feature = "std")]
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn update_multithreaded(&mut self, input: &[u8]) -> &mut Self {
+    pub fn update_multithreaded(&mut self, input: &[u8]) -> &mut Self {
         self.update_with_join::<join::SerialJoin>(input, true)
     }
 

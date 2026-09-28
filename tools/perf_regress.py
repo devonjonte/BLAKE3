@@ -323,6 +323,9 @@ def working_tree_commit():
 # Cargo.lock, derived from the committed one; the committed lock is never
 # written.
 PATCH = 'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'
+# The instrument is the working tree's on both sides, as the benchmark is:
+# the clocks crate in this checkout.
+CLOCKS_PATCH = f'patch."https://github.com/johnservil/BLAKE3".clocks.path="{ROOT / "clocks"}"'
 
 
 def write_if_different(path, content):
@@ -428,9 +431,9 @@ def side_bench(side, commit, shim=True):
     fork_version = re.search(r'(?m)^version = "([^"]+)"', (checkout / "Cargo.toml").read_text()).group(1)
     locked = re.search(r'name = "blake3-servil"\nversion = "([^"]+)"', (copy / "Cargo.lock").read_text()).group(1)
     if locked != fork_version:
-        subprocess.run(["cargo", "--config", PATCH, "update", "--quiet", "-p", "blake3-servil"], cwd=copy, env=env,
+        subprocess.run(["cargo", "--config", PATCH, "--config", CLOCKS_PATCH, "update", "--quiet", "-p", "blake3-servil"], cwd=copy, env=env,
                        check=True)
-    out = subprocess.run(["cargo", "--config", PATCH, "build", "--release", "--message-format=json-render-diagnostics"],
+    out = subprocess.run(["cargo", "--config", PATCH, "--config", CLOCKS_PATCH, "build", "--release", "--message-format=json-render-diagnostics"],
                          cwd=copy, env=env, check=True, stdout=subprocess.PIPE, text=True).stdout
     messages = [json.loads(line) for line in out.splitlines()]
     # The fork must come from the side's checkout, never the locked commit.
