@@ -216,8 +216,11 @@ pub fn process_cpu_ns() -> u64 {
 /// `proc_pid_rusage` RUSAGE_INFO_V6 `ri_energy_nj`; it reads sleep as
 /// under 0.01 W and a scalar spin as about 3 W on an M4 Max P-core,
 /// NOTES-servil.md "Energy per byte"; whether it counts the SME unit's own
-/// power is unknown). None elsewhere. Not yet validated for the
-/// benchmark's energy cells (docs/api-design.md, **Q**).
+/// power is unknown). None elsewhere. The kernel credits a thread's energy
+/// late, at its next block or switch: read after the measured threads have
+/// slept (10 ms: a 64 MiB hash then reads within 7%; read at once, a third
+/// less, and scattered). Not yet validated for the benchmark's energy
+/// cells (docs/api-design.md, **Q**).
 pub fn process_energy_nj() -> Option<u64> {
     imp::process_energy_nj()
 }
