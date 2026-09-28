@@ -284,7 +284,9 @@ impl<I> State<I> {
     /// state's lock is released) when it is full or (with `waited`) when
     /// the delivery thread waits on it; otherwise it goes on filling.
     fn close_open(&mut self, waited: bool) -> Option<Task> {
-        let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS);
+        // Small batches fill a task up to a task's bytes (short messages
+        // fill all 64 places: 4 KiB messages measured 10-30% slower at 16).
+        let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS || (open.batch.is_some() && open.len >= crate::lanes::TASK_LEN));
         if full || waited { self.open.take() } else { None }
     }
 }
@@ -326,11 +328,11 @@ enum PieceItem<B> {
 /// hashed at delivery (a piece's bytes join the message in order).
 const TASK_MIN: usize = crate::SME2_SIZED_LEN;
 
-/// The shortest batch of fixed-length messages hashed as tasks of its own:
-/// shorter ones go several to a task (a task of its own for a batch of 16
-/// 64-byte messages cost twice what hashing it at delivery did on the Mac,
-/// 68 against 34 ns per message).
-const BATCH_TASK_MIN: usize = 4096;
+/// The shortest batch of fixed-length messages hashed as tasks of its own
+/// (a task's bytes): shorter ones go several to a task (on the Mac a task
+/// of its own cost a batch of 16 64-byte messages 68 ns per message, twice
+/// hashing it at delivery, and one of 64 messages shared 36-50).
+const BATCH_TASK_MIN: usize = crate::lanes::TASK_LEN;
 
 impl<H: Send + 'static, S: 'static> Queue<H, S> {
     fn new<I: Send + 'static>(mode: Mode, efficiency: Efficiency, handler: H, message_len: usize) -> Self
@@ -445,6 +447,7 @@ where
         // stay in place until its delivery, after `left` reaches zero.
         open.member[open.members] = crate::lanes::Member { input, len, out: out.unwrap_or(slot.results.as_mut_ptr() as *mut u8), left: &slot.left };
         open.members += 1;
+        open.len += len;
         let closed = state.close_open(false);
         state.link(slot);
         drop(guard);
