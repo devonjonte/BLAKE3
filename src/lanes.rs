@@ -1136,7 +1136,9 @@ fn sme2_main() {
             match TASKS.pop() {
                 Some(task) if task.members > 0 && task.batch.is_none() => {
                     // Short messages side by side run faster on NEON than
-                    // through an SME2 session per task.
+                    // through an SME2 session per task (64-byte messages
+                    // 14-15% faster on the Mac); below 16 KiB the other
+                    // members run the NEON kernels on either platform.
                     task.run(pool_platform());
                     TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
                     idle_since = std::time::Instant::now();
