@@ -222,8 +222,8 @@ sixteen a call).
 - The gap: 1 ms, the program asleep (Zooko, September 28, 2026).
   Anything we keep ready, such as a `Hasher` lingering between updates,
   has gone to sleep well before the gap ends.
-- perf_regress follows: it judges the cells above (today it judges back
-  to back at 3% and after idle at 20%).
+- perf_regress judges the cells above: the synchronous calls after the
+  gap at 20%, the continuous cells at 3% solo and 10% shared.
 - **Q**: the continuous cells under both `Efficiency` settings: time
   cells judged by wall time, energy cells by joules.
 - **Q**: an energy counter in the timing helper, per process and
