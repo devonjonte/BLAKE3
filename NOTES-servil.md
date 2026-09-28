@@ -599,8 +599,24 @@ about 600 B instead of 2 KiB: level, probe/members-16) nor the list's
 lock (pollers leaving it to pushers: level, probe/push-first). Gathering
 messages under 32 KiB into tasks of up to 256 KiB (probe/members-32k):
 shared 16 KiB 0.142 -> 0.089 ns/B, solo 0.068 -> 0.072 (+6%, fewer tasks
-to spread): a trade for Zooko. Next to look at: the SME2 thread's turn
-per task, the delivery thread's replay per 16 KiB message.
+to spread): a trade for Zooko. The SME2 thread is not it either
+(level without it). What it is (probe/submit-16k, jobs 608-611, 625):
+`submit` itself, 780 ns per 16 KiB message alone and 2.6 us with two
+programs: the task list's lock (acquired in 90-170 ns alone, 630 ns with
+two pushers and the pollers; held 230-510 ns a push, while the pusher
+copied the 2 KiB task into ring slots other cores last read and
+incremented the in-flight count every finishing thread writes). The
+count moved outside the lock (taken: two programs 2.0 -> 1.65 us per
+message in the probe, the benchmark's shared 16 KiB -4%); pollers pausing
+after a failed try_lock helped two programs (2.9 -> 2.0 us) and was left
+out with the rest of that probe; 600-byte tasks (MEMBERS 16) held the
+lock 137 ns instead of 227. Linking a task's members through their
+entries instead of carrying them (candidate/member-links, tasks of about
+100 bytes; jobs 626-629): 16 KiB messages 6% faster, batches of 4096 3%,
+64-byte messages 25-33% slower (a line per member entry, 64 a task,
+against the carried array's 17): left out. Keeping both would take two
+task lists, small subtree tasks and gathered tasks with their arrays;
+past that, a lock-free list.
 
 **The SME2 thread and gathered tasks** (September 28, night, Mac, jobs
 588-603). With no SME2 thread (probe/no-sme2-thread, NEON workers
