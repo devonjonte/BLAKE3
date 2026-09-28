@@ -661,6 +661,12 @@ level once lingering kept eight workers; left at 8 KiB.
   slots in blocks that never move, results keeping their capacity, lists
   growing only to the program's in-flight high-water mark;
   `tests/queue_no_alloc.rs` counts every allocation (none after warm-up).
+  The pool's task list is shared by every queue: each makes room in it
+  for its slots times the most tasks a submission has had, and gives the
+  room back when dropped (September 28, night). The room "every task in
+  flight" it had before counted tasks finished but not yet counted down,
+  so the list grew after warm-up once in 60-100 runs of the test (half
+  the time under TSan); now 0 in 150, and 0 in 8 under TSan.
 - Measured (Mac): see bench-hashes NEXT-STEPS, "Resume here". Per-message
   delivery is serial by contract, so a program's own per-message costs
   bound `Queue::messages` for tiny messages; `Queue::fixed` is the API
