@@ -133,6 +133,24 @@ pub(crate) fn poll_pause(yielded: &mut std::time::Instant) {
     }
 }
 
+/// Lock `mutex`, polling for it first: its holders keep it for well under
+/// a microsecond, and a waiter the std mutex parks costs both sides a
+/// system call (the waiter's sleep, the holder's wake: microseconds in a
+/// VM, 50000 of them per million 64-byte messages through the queue).
+/// Parks only after about LOCK_POLLS failed tries.
+pub(crate) fn lock_polling<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    for _ in 0..LOCK_POLLS {
+        match mutex.try_lock() {
+            Ok(guard) => return guard,
+            Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
+            Err(std::sync::TryLockError::Poisoned(_)) => panic!("a panic while hashing aborts, so no lock is poisoned"),
+        }
+    }
+    mutex.lock().expect("a panic while hashing aborts, so no lock is poisoned")
+}
+
+const LOCK_POLLS: usize = 256;
+
 /// How long a caller polls for its last pieces before sleeping.
 pub(crate) const SPIN_BEFORE_SLEEP: std::time::Duration = std::time::Duration::from_micros(200);
 
@@ -1047,7 +1065,7 @@ impl Tasks {
     /// thread first, then workers.
     pub(crate) fn push(&self, tasks: impl Iterator<Item = Task>) {
         let pool = pool();
-        let mut list = self.list.lock().unwrap();
+        let mut list = lock_polling(&self.list);
         let before = list.len();
         list.extend(tasks);
         let queued = list.len();
