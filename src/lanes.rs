@@ -983,10 +983,32 @@ pub(crate) struct Task {
     pub(crate) left: *const AtomicUsize,
     /// With `members` above zero, the task is that many separate short
     /// messages instead (or, with `batch`, batches of that length's
-    /// messages): each one's digest (digests) to its `out`, then its
-    /// `left` counted down; `len` sums their bytes.
+    /// messages), in `block`, one of its queue's (`home`): each one's
+    /// digest (digests) to its `out`, then its `left` counted down; `len`
+    /// sums their bytes. The members live in the block, not the task, so a
+    /// task crosses the task list in a line or two (one carrying 64 members
+    /// was 2 KiB, copied in and out under the list's lock).
     pub(crate) members: usize,
+    pub(crate) block: *mut MemberBlock,
+    pub(crate) home: *const MemberBlocks,
+}
+
+/// The members of a task of several, in one of its queue's blocks.
+pub(crate) struct MemberBlock {
     pub(crate) member: [Member; MEMBERS],
+}
+
+/// A queue's member blocks not in use: a fixed set, made with the queue.
+pub(crate) type MemberBlocks = Mutex<Vec<Box<MemberBlock>>>;
+
+// Sound: a block's pointers are read by the one thread that holds the
+// block (its task's), and stay valid while its members are in flight.
+unsafe impl Send for MemberBlock {}
+
+impl MemberBlock {
+    pub(crate) fn new() -> Box<MemberBlock> {
+        Box::new(MemberBlock { member: [NO_MEMBER; MEMBERS] })
+    }
 }
 
 /// The most short messages (or small batches) one task takes.
@@ -1010,13 +1032,14 @@ impl Task {
     /// A task over `input` at chunk `counter`, its mode, kind, and
     /// destinations still to fill in.
     pub(crate) fn of(input: &[u8], counter: u64) -> Task {
-        Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null(), members: 0, member: [NO_MEMBER; MEMBERS] }
+        Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null(), members: 0, block: core::ptr::null_mut(), home: core::ptr::null() }
     }
 
     /// An empty task of short messages (with `batch`, batches of messages
-    /// of that length) in the mode of `key` and `flags`.
-    pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {
-        Task { key: *key, flags, batch, ..Task::of(&[], 0) }
+    /// of that length) in the mode of `key` and `flags`, its members in
+    /// `block`, which goes back to `home` once they are read.
+    pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>, block: Box<MemberBlock>, home: &MemberBlocks) -> Task {
+        Task { key: *key, flags, batch, block: Box::into_raw(block), home, ..Task::of(&[], 0) }
     }
 
     /// Hash on `platform` into `out`: for a subtree of two chunks or more at
@@ -1053,7 +1076,15 @@ impl Task {
     /// multi-lane kernels (`hash_many`'s, from a table of pointers); any
     /// others one at a time.
     fn run_members(self, platform: Platform) {
-        let members = &self.member[..self.members];
+        // The members read, and their block given back, before any is
+        // counted down: a member counted down may be delivered, and its
+        // queue dropped. Room for every block: no allocation.
+        // Sound: the block is this task's, from Box::into_raw in `members`,
+        // and its queue lives while any member is in flight.
+        let block = unsafe { Box::from_raw(self.block) };
+        let all: arrayvec::ArrayVec<Member, MEMBERS> = block.member[..self.members].iter().copied().collect();
+        lock_polling(unsafe { &*self.home }).push(block);
+        let members = &all[..];
         if let Some(message_len) = self.batch {
             for m in members {
                 // Sound: the queue keeps each batch's bytes, digest space,

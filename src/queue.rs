@@ -40,7 +40,7 @@
 //! The pool's workers never run user code; the delivery thread does, in
 //! the handler calls.
 
-use crate::lanes::{OwnLine, TASKS, Task};
+use crate::lanes::{MemberBlock, MemberBlocks, OwnLine, TASKS, Task};
 use crate::{CVWords, Hash, Hasher, Mode, OUT_LEN};
 use std::any::Any;
 use std::marker::PhantomData;
@@ -201,6 +201,9 @@ struct Inner<H, I, S> {
     polls: AtomicUsize,
     /// Whether the delivery thread holds this queue (entries in flight).
     active: OwnLine<AtomicBool>,
+    /// The member blocks not in use (MEMBER_BLOCKS of them for a queue
+    /// that hands tasks to the pool, made with it).
+    member_blocks: OwnLine<MemberBlocks>,
     key: CVWords,
     flags: u8,
     max_threads: usize,
@@ -353,6 +356,10 @@ enum PieceItem<B> {
 /// hashed at delivery (a piece's bytes join the message in order).
 const TASK_MIN: usize = crate::SME2_SIZED_LEN;
 
+/// Tasks of several short messages a queue has in flight at once, at
+/// most: beyond, a short message is hashed at delivery. 64 members each.
+const MEMBER_BLOCKS: usize = 32;
+
 /// The shortest batch of fixed-length messages hashed as tasks of its own
 /// (a task's bytes): shorter ones go several to a task (on the Mac a task
 /// of its own cost a batch of 16 64-byte messages 68 ns per message, twice
@@ -379,6 +386,7 @@ impl<H: Send + 'static, S: 'static> Queue<H, S> {
             waiting: AtomicPtr::new(core::ptr::null_mut()),
             polls: AtomicUsize::new(0),
             active: OwnLine(AtomicBool::new(false)),
+            member_blocks: OwnLine(Mutex::new(if efficiency.max_threads() > 1 { (0..MEMBER_BLOCKS).map(|_| MemberBlock::new()).collect() } else { Vec::new() })),
             key,
             flags,
             max_threads: efficiency.max_threads(),
@@ -465,6 +473,20 @@ where
         // Sound: a free slot is this thread's until linked.
         let slot = unsafe { &mut *slot };
         let (input, len, out) = member(slot.item.insert(item));
+        if state.open.is_none() {
+            match crate::lanes::lock_polling(&self.member_blocks).pop() {
+                Some(block) => state.open = Some(Task::members(&self.key, self.flags, batch, block, &self.member_blocks)),
+                None => {
+                    // Every block in flight: this one is hashed at delivery.
+                    slot.results.clear();
+                    slot.digest = false;
+                    slot.left.store(0, Ordering::Relaxed);
+                    state.link(slot);
+                    drop(guard);
+                    return self.activate(owner);
+                }
+            }
+        }
         // A message's digest lands in results[0]; a slot that held one
         // keeps it (rewriting it would take the line from the worker that
         // last wrote it).
@@ -474,10 +496,12 @@ where
         }
         slot.digest = true;
         slot.left.store(1, Ordering::Relaxed);
-        let open = state.open.get_or_insert_with(|| Task::members(&self.key, self.flags, batch));
+        let open = state.open.as_mut().expect("an open task");
         // Sound: the slot's block, bytes, and result (or the digest space)
-        // stay in place until its delivery, after `left` reaches zero.
-        open.member[open.members] = crate::lanes::Member { input, len, out: out.unwrap_or(slot.results.as_mut_ptr() as *mut u8), left: &slot.left };
+        // stay in place until its delivery, after `left` reaches zero; the
+        // member block is the open task's, written only here, under the
+        // state's lock.
+        unsafe { (*open.block).member[open.members] = crate::lanes::Member { input, len, out: out.unwrap_or(slot.results.as_mut_ptr() as *mut u8), left: &slot.left } };
         open.members += 1;
         open.len += len;
         let closed = state.close_open(false);
