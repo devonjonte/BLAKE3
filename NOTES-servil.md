@@ -657,7 +657,10 @@ SME2, at the same speed for less energy per byte.
 `--trace-clocks`): all twelve solo samples on P-cores; the benchmark
 thread's clock 2.6-3.2 GHz against the core's 4.4 (other busy cores of
 its cluster lower it); 0.74 ns/B at 3.06 GHz, 0.78-1.14 at 2.61. Neither
-core kind nor clock explains the spread; open.
+core kind nor clock explains the spread; open. Job 705 (after the
+delivery thread's later close): servil 0.83-1.21 ns/B, SHA-256 in the same
+run 0.84-1.07, both at 2.3-3.0 GHz (the machine's clock through a full
+run, the same for both): at the clock they share, the two are close.
 
 **Idle workers sleep** (September 28, night): a worker, and the SME2
 thread, that finds nothing for 50 us (`lanes::WORKER_IDLE`, about a
