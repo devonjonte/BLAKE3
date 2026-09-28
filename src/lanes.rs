@@ -113,10 +113,15 @@ const MIN_PIECE_LEN: usize = 8 * CHUNK_LEN;
 /// The longest piece.
 const MAX_PIECE_LEN: usize = 128 * CHUNK_LEN;
 
+/// How long a worker polls finding nothing before it sleeps (next_piece):
+/// about what a wake costs, so polling spends at most twice what knowing
+/// the future would.
+const WORKER_IDLE: std::time::Duration = std::time::Duration::from_micros(50);
+
 /// Worker `r` takes from a job only once it has been registered for
 /// `r` times this long. The lowest ranks take the pieces a call needs;
-/// the highest find none, stop polling after SPIN_BEFORE_SLEEP, and
-/// sleep, so a small call runs beside no idle pollers. It need only
+/// the highest find none, stop polling after WORKER_IDLE, and sleep, so a
+/// small call runs beside few idle pollers. It need only
 /// exceed the jitter of noticing a job (about 0.1 µs); the highest rank
 /// on a 16-CPU machine starts 0.3 µs late.
 const RANK_STAGGER_NS: u64 = 20;
@@ -892,14 +897,24 @@ impl Pool {
     fn next_piece(&self, start: &mut usize, rank: usize) -> (*const Job<'static>, usize) {
         loop {
             let mut yielded = std::time::Instant::now();
+            // A worker that finds nothing for WORKER_IDLE sleeps even while
+            // a job or a queue holds the pool: pushes and jobs wake as many
+            // as they want awake, and a stream of short tasks needs a few
+            // (fifteen pollers on the queue's 64-byte messages cost energy,
+            // and in a VM the host time the busy threads need).
+            let mut idle_since = std::time::Instant::now();
             while self.registered.load(Ordering::SeqCst) > 0 || self.lingering() {
                 if let Some(task) = TASKS.pop() {
                     task.run(pool_platform());
                     TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
+                    idle_since = std::time::Instant::now();
                     continue;
                 }
                 if let Some(taken) = self.take_piece(start, rank) {
                     return taken;
+                }
+                if idle_since.elapsed() >= WORKER_IDLE {
+                    break;
                 }
                 poll_pause(&mut yielded);
             }
@@ -913,7 +928,7 @@ impl Pool {
             let mut guard = self.sleep_lock.lock().unwrap();
             self.sleepers.fetch_add(1, Ordering::SeqCst);
             let taken = self.take_piece(start, rank);
-            let waited = taken.is_none() && self.registered.load(Ordering::SeqCst) == 0 && !self.lingering();
+            let waited = taken.is_none() && ((self.registered.load(Ordering::SeqCst) == 0 && !self.lingering()) || TASKS.queued.load(Ordering::SeqCst) == 0);
             if waited {
                 guard = self.posted.wait(guard).unwrap();
                 // Awake: one fewer notified sleeper on the way (a wake
@@ -1093,10 +1108,13 @@ pub(crate) static TASKS: Tasks = Tasks {
 /// wakes it first.
 fn sme2_main() {
     let pool = pool();
+    // Whether the last polling found nothing for WORKER_IDLE: then the
+    // thread sleeps even while the pool is held, as the workers do.
+    let mut idle = false;
     loop {
         {
             let mut asleep = TASKS.sme2_asleep.lock().unwrap();
-            while TASKS.queued.load(Ordering::SeqCst) == 0 && pool.registered.load(Ordering::SeqCst) == 0 {
+            while TASKS.queued.load(Ordering::SeqCst) == 0 && (idle || pool.registered.load(Ordering::SeqCst) == 0) {
                 *asleep = true;
                 TASKS.sme2_sleeps.store(true, Ordering::SeqCst);
                 // A push between the check above and this store sees the
@@ -1110,6 +1128,8 @@ fn sme2_main() {
             TASKS.sme2_sleeps.store(false, Ordering::SeqCst);
         }
         let mut yielded = std::time::Instant::now();
+        let mut idle_since = std::time::Instant::now();
+        idle = false;
         while TASKS.queued.load(Ordering::SeqCst) > 0 || pool.registered.load(Ordering::SeqCst) > 0 {
             match TASKS.pop() {
                 Some(task) => {
@@ -1117,6 +1137,11 @@ fn sme2_main() {
                     task.run(turn.platform());
                     drop(turn);
                     TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
+                    idle_since = std::time::Instant::now();
+                }
+                None if idle_since.elapsed() >= WORKER_IDLE => {
+                    idle = true;
+                    break;
                 }
                 None => poll_pause(&mut yielded),
             }
