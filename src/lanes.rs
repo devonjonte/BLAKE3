@@ -646,9 +646,12 @@ fn merge_to_children(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::C
  * it is about to sleep or knows a sleeper is there.
  */
 struct Pool {
-    slots: [Slot; MAX_JOBS],
+    /// The words each poller reads on every round (slots, `registered`),
+    /// the ones every call or update writes (`callers`, `linger_until`),
+    /// and the sleep counts, each on lines of their own.
+    slots: OwnLine<[Slot; MAX_JOBS]>,
     /// Callers inside hash_over_pool.
-    callers: AtomicUsize,
+    callers: OwnLine<AtomicUsize>,
     cpus: usize,
     /// Whether the SME2 thread runs (this CPU has SME2).
     sme2: bool,
@@ -656,11 +659,11 @@ struct Pool {
     epoch: std::time::Instant,
     /// Workers poll until this time (ns from `epoch`) with no job: a
     /// `Hasher` between multithreaded updates keeps them ready (`linger`).
-    linger_until: std::sync::atomic::AtomicU64,
+    linger_until: OwnLine<std::sync::atomic::AtomicU64>,
     /// Jobs in the slots: workers poll while there are any.
-    registered: AtomicUsize,
+    registered: OwnLine<AtomicUsize>,
     /// Workers asleep on `posted`.
-    sleepers: AtomicUsize,
+    sleepers: OwnLine<AtomicUsize>,
     /// Of those, the ones a caller has asked to wake and that have yet to.
     notified: AtomicUsize,
     /// Of those, the ones still to be woken: woken workers wake them.
@@ -697,14 +700,14 @@ fn pool() -> &'static Pool {
     POOL.get_or_init(|| {
         let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let pool = Pool {
-            slots: std::array::from_fn(|_| Slot { job: AtomicPtr::new(std::ptr::null_mut()), readers: AtomicUsize::new(0) }),
-            callers: AtomicUsize::new(0),
+            slots: OwnLine(std::array::from_fn(|_| Slot { job: AtomicPtr::new(std::ptr::null_mut()), readers: AtomicUsize::new(0) })),
+            callers: OwnLine(AtomicUsize::new(0)),
             cpus,
             sme2: cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect())),
             epoch: std::time::Instant::now(),
-            linger_until: std::sync::atomic::AtomicU64::new(0),
-            registered: AtomicUsize::new(0),
-            sleepers: AtomicUsize::new(0),
+            linger_until: OwnLine(std::sync::atomic::AtomicU64::new(0)),
+            registered: OwnLine(AtomicUsize::new(0)),
+            sleepers: OwnLine(AtomicUsize::new(0)),
             notified: AtomicUsize::new(0),
             owed: AtomicUsize::new(0),
             sleep_lock: Mutex::new(()),
