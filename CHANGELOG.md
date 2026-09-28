@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `Hasher::update_multithreaded` is public: `Hasher::update` over several
+  threads, with the same result. Past a message's first 128 KiB it keeps
+  the worker threads ready for 50 µs after each update of 64 KiB or more,
+  so a long message in 64 KiB pieces hashes about 2.4x as fast as with
+  `update` on an Apple M4 Max, at several times the energy per byte.
+- `Queue` is faster for a stream of inputs: on an Apple M4 Max about 2x for
+  messages one after another and 2.5-4x for batches of 64-byte messages,
+  with the program keeping enough in flight. Worker threads with nothing to
+  take sleep after 50 µs, even while a queue has inputs in flight.
+
 ## 0.3.0
 
 - `Queue`: a stream of inputs hashed behind your program. You hand it your
