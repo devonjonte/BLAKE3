@@ -2253,7 +2253,7 @@ impl Hasher {
                             &self.key,
                             self.chunk_state.chunk_counter,
                             self.chunk_state.flags,
-                            usize::MAX,
+                            if subtree_len < lanes::MIN_SPLIT_LEN { 4 } else { usize::MAX },
                         )
                     }
                     #[cfg(not(feature = "std"))]
