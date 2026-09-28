@@ -1134,6 +1134,13 @@ fn sme2_main() {
         idle = false;
         while TASKS.queued.load(Ordering::SeqCst) > 0 || pool.registered.load(Ordering::SeqCst) > 0 {
             match TASKS.pop() {
+                Some(task) if task.members > 0 && task.batch.is_none() => {
+                    // Short messages side by side run faster on NEON than
+                    // through an SME2 session per task.
+                    task.run(pool_platform());
+                    TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
+                    idle_since = std::time::Instant::now();
+                }
                 Some(task) => {
                     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
                     task.run(turn.platform());
