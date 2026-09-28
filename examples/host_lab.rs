@@ -96,9 +96,48 @@ fn st_run(len: usize, n: usize) -> String {
     format!("hash loop {len} B x{n}: {} ps/B, {} ns/msg at {} MHz", wall * 1000 / (n * len) as u64, wall / n as u64, c.map_or(0, |c| c.mhz()))
 }
 
+/// Submit cost alone: bursts of `flight` pre-filled buffers, each burst's
+/// submits timed (cycles on this thread), then all drained.
+fn burst_run(len: usize, bursts: usize, flight: usize) -> String {
+    let input = vec![7u8; len];
+    let (tx, rx) = mpsc::channel();
+    let mut free: Vec<Vec<u8>> = (0..flight).map(|_| Vec::with_capacity(len)).collect();
+    let queue = Queue::messages(Mode::Hash, Efficiency::Time, Back(tx));
+    let (mut submit_ns, mut submit_cycles, mut drain_ns) = (0u64, 0u64, 0u64);
+    for _ in 0..bursts {
+        for b in &mut free {
+            b.clear();
+            b.extend_from_slice(black_box(&input));
+        }
+        let c0 = clocks::Counts::read();
+        let t = clocks::now();
+        for b in free.drain(..) {
+            queue.submit(b);
+        }
+        submit_ns += clocks::since_ns(t);
+        if let (Some(c0), Some(c1)) = (c0, clocks::Counts::read()) {
+            let c = c1.since(c0);
+            submit_cycles += c.p.cycles + c.e.cycles;
+        }
+        let t = clocks::now();
+        while free.len() < flight {
+            let (b, h) = rx.recv().unwrap();
+            black_box(h);
+            free.push(b);
+        }
+        drain_ns += clocks::since_ns(t);
+    }
+    let n = (bursts * flight) as u64;
+    format!("bursts {len} B, {flight} a burst: submit {} ns and {} cycles per msg; drain {} ns per msg", submit_ns / n, submit_cycles / n, drain_ns / n)
+}
+
 fn main() {
     blake3_servil::initialize_multithreaded();
     spin(300_000_000);
+    for _ in 0..3 {
+        println!("{}", burst_run(64, 200, 1024));
+        println!("{}", burst_run(64, 200, 64));
+    }
     for len in [64usize, 256] {
         for _ in 0..3 {
             println!("{}", st_run(len, 200_000));
