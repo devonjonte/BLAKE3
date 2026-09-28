@@ -884,7 +884,26 @@ pub(crate) struct Task {
     pub(crate) flags: u8,
     pub(crate) out: *mut u8,
     pub(crate) left: *const AtomicUsize,
+    /// With `members` above zero, the task is that many separate short
+    /// messages instead: each one's digest to its `out`, then its `left`
+    /// counted down (the task's own fields unused).
+    pub(crate) members: usize,
+    pub(crate) member: [Member; MEMBERS],
 }
+
+/// The most short messages one task takes: one SME2 group.
+pub(crate) const MEMBERS: usize = 16;
+
+/// A short message in a task of several ([`Task::members`]).
+#[derive(Clone, Copy)]
+pub(crate) struct Member {
+    pub(crate) input: *const u8,
+    pub(crate) len: usize,
+    pub(crate) out: *mut u8,
+    pub(crate) left: *const AtomicUsize,
+}
+
+const NO_MEMBER: Member = Member { input: core::ptr::null(), len: 0, out: core::ptr::null_mut(), left: core::ptr::null() };
 
 // Sound: a task's pointers stay valid until its `left` reaches zero (above).
 unsafe impl Send for Task {}
@@ -893,7 +912,12 @@ impl Task {
     /// A task over `input` at chunk `counter`, its mode, kind, and
     /// destinations still to fill in.
     pub(crate) fn of(input: &[u8], counter: u64) -> Task {
-        Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null() }
+        Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null(), members: 0, member: [NO_MEMBER; MEMBERS] }
+    }
+
+    /// An empty task of short messages in the mode of `key` and `flags`.
+    pub(crate) fn members(key: &crate::CVWords, flags: u8) -> Task {
+        Task { key: *key, flags, ..Task::of(&[], 0) }
     }
 
     /// Hash on `platform` into `out`: for a subtree of two chunks or more at
@@ -901,6 +925,9 @@ impl Task {
     /// values; for any other, its chaining value (first 32 bytes). Then
     /// count down.
     pub(crate) fn run(self, platform: Platform) {
+        if self.members > 0 {
+            return self.run_members(platform);
+        }
         // Sound: the queue keeps these in place until `left` is zero.
         let bytes = unsafe { core::slice::from_raw_parts(self.input, self.len) };
         if let Some(message_len) = self.batch {
@@ -919,6 +946,49 @@ impl Task {
             out[..crate::OUT_LEN].copy_from_slice(&crate::hash_all_at_once::<crate::join::SerialJoin>(bytes, &self.key, self.counter, self.flags, platform).chaining_value());
         }
         unsafe { &*self.left }.fetch_sub(1, Ordering::Release);
+    }
+}
+
+impl Task {
+    /// The members' digests: messages of one block side by side on the
+    /// multi-lane kernels (`hash_many`'s, from a table of pointers); any
+    /// others one at a time.
+    fn run_members(self, platform: Platform) {
+        let members = &self.member[..self.members];
+        // Sound: the queue keeps every member's bytes, `out`, and `left` in
+        // place until its `left` is zero.
+        if members.len() >= 2 && members.iter().all(|m| m.len == crate::BLOCK_LEN) {
+            let table: arrayvec::ArrayVec<&[u8; crate::BLOCK_LEN], MEMBERS> =
+                members.iter().map(|m| unsafe { &*(m.input as *const [u8; crate::BLOCK_LEN]) }).collect();
+            let mut digests = [[0u8; crate::OUT_LEN]; MEMBERS];
+            let flags = self.flags | crate::CHUNK_START | crate::CHUNK_END | crate::ROOT;
+            platform.hash_many::<{ crate::BLOCK_LEN }>(&table, &self.key, 0, crate::IncrementCounter::No, flags, 0, 0, digests[..members.len()].as_flattened_mut());
+            for (m, digest) in members.iter().zip(&digests) {
+                unsafe { core::ptr::copy_nonoverlapping(digest.as_ptr(), m.out, crate::OUT_LEN) };
+                unsafe { &*m.left }.fetch_sub(1, Ordering::Release);
+            }
+            return;
+        }
+        for m in members {
+            let bytes = unsafe { core::slice::from_raw_parts(m.input, m.len) };
+            let hash = crate::hash_serial_on(bytes, &self.key, self.flags, platform);
+            unsafe { core::ptr::copy_nonoverlapping(hash.as_bytes().as_ptr(), m.out, crate::OUT_LEN) };
+            unsafe { &*m.left }.fetch_sub(1, Ordering::Release);
+        }
+    }
+}
+
+/// The threads that hash tasks: the workers, and the SME2 thread where it
+/// runs.
+pub(crate) fn task_threads() -> usize {
+    let pool = pool();
+    pool.cpus - 1 + usize::from(pool.sme2)
+}
+
+impl Tasks {
+    /// Tasks pushed and not yet finished.
+    pub(crate) fn in_flight(&self) -> usize {
+        self.in_flight.load(Ordering::SeqCst)
     }
 }
 
