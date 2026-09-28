@@ -40,7 +40,7 @@
 //! The pool's workers never run user code; the delivery thread does, in
 //! the handler calls.
 
-use crate::lanes::{TASKS, Task};
+use crate::lanes::{OwnLine, TASKS, Task};
 use crate::{CVWords, Hash, Hasher, Mode, OUT_LEN};
 use std::any::Any;
 use std::marker::PhantomData;
@@ -184,19 +184,21 @@ pub struct Queue<H, S = shape::Messages> {
 /// slots go back through `returned`, a batch per delivery round, and the
 /// submitters take the whole batch when their own free slots run out.
 struct Inner<H, I, S> {
-    /// The submitters' side.
-    state: Mutex<State<I>>,
+    /// The submitters' side. It, `returned`, and the delivery thread's own
+    /// fields each on lines of their own: the submitters take the one lock
+    /// and the delivery thread the other for every message.
+    state: OwnLine<Mutex<State<I>>>,
     /// Slots delivered since the submitters last took them.
-    returned: Mutex<Slots<I>>,
+    returned: OwnLine<Mutex<Slots<I>>>,
     /// What the delivery thread alone touches.
-    handling: Mutex<Handling<H>>,
+    handling: OwnLine<Mutex<Handling<H>>>,
     /// The delivery thread's own: the slot it delivered last.
     head: AtomicPtr<Slot<I>>,
     /// The delivery thread's own: the unfinished count of the entry its
     /// last look stopped at, which it polls alone.
     waiting: AtomicPtr<AtomicUsize>,
     /// Whether the delivery thread holds this queue (entries in flight).
-    active: AtomicBool,
+    active: OwnLine<AtomicBool>,
     key: CVWords,
     flags: u8,
     max_threads: usize,
@@ -368,12 +370,12 @@ impl<H: Send + 'static, S: 'static> Queue<H, S> {
         let first = state.free.0.pop().unwrap();
         state.tail = first;
         let inner = Inner::<H, I, S> {
-            state: Mutex::new(state),
-            returned: Mutex::new(returned),
-            handling: Mutex::new(Handling { handler, hasher: Hasher::new_internal(&key, flags) }),
+            state: OwnLine(Mutex::new(state)),
+            returned: OwnLine(Mutex::new(returned)),
+            handling: OwnLine(Mutex::new(Handling { handler, hasher: Hasher::new_internal(&key, flags) })),
             head: AtomicPtr::new(first),
             waiting: AtomicPtr::new(core::ptr::null_mut()),
-            active: AtomicBool::new(false),
+            active: OwnLine(AtomicBool::new(false)),
             key,
             flags,
             max_threads: efficiency.max_threads(),
