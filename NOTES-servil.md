@@ -562,7 +562,32 @@ message in 36 ns, about what a handover's cache lines cost; `Queue::fixed`
 is the API that beats it. Tried and left out: the delivery thread
 closing a part-filled task only after 16 polls (VM level; a program with
 16 buffers in flight is round-trip bound either way); a 64 KiB byte cap
-on message members (4 KiB messages 10-30% slower, jobs 494-497).
+on message members (4 KiB messages 10-30% slower, jobs 494-497); each
+slot on a 128-byte line of its own (jobs 504-507), the delivery thread
+backing off over idle rounds (jobs 534-537), and a short message's digest
+in its slot beside `left` (jobs 544-547): all level on the Mac. So the
+64-byte cell sits at the handover's floor in this harness: the program's
+thread, the bottleneck, spends 25 ns taking a returned buffer from its
+channel and about 40-60 ns in `submit`, mostly lines another core wrote.
+
+**Idle workers sleep** (September 28, night): a worker, and the SME2
+thread, that finds nothing for 50 us (`lanes::WORKER_IDLE`, about a
+wake's cost) sleeps even while a job or a queue holds the pool; pushes
+and jobs wake as many as they want awake. Before, every worker a stream
+woke polled until the stream drained (the queue's first burst of 1024
+64-byte messages pushes about 16 tasks and woke all fifteen). VM probe,
+a million 64-byte messages: user CPU 0.77 -> 0.67-0.72 s at the same
+speed; after hash_multithreaded 8 MiB the process spent 145 us of CPU
+in the next 200 ms, against 748; Mac continuous cells level or better
+(jobs 548-551); perf_regress on the VM: no regression.
+
+**The caller's own pieces on SME2** (September 28, night): run_job's
+caller hashing its later pieces on its own platform (SME2 under the
+turn) instead of NEON: level on the Mac from 1 to 128 MiB (jobs
+529-532); left out. **The split at 512 KiB** (`probe/split-512`): Mac
+after the gap 512 KiB 0.35 -> 0.19-0.24 ns/B and 8192 messages 22.5 ->
+13.3 ns/msg (jobs 538-541), VM 512 KiB 20-30% slower; Zooko's choice of
+768 KiB stands until he decides.
 - Storage is recycled, io_uring style (Zooko: no malloc per submission):
   slots in blocks that never move, results keeping their capacity, lists
   growing only to the program's in-flight high-water mark;
