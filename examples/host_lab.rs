@@ -1,37 +1,75 @@
-use blake3_servil::lanes::probe::*;
-use blake3_servil::{Efficiency, Hash, Mode, PieceHandler, Queue};
-use std::sync::{atomic::Ordering::Relaxed, mpsc};
-enum B { P(Vec<u8>), D(Hash) }
-struct P(mpsc::Sender<B>);
-impl PieceHandler for P {
-    type Buffer = Vec<u8>;
-    fn piece_done(&mut self, b: Vec<u8>) { self.0.send(B::P(b)).unwrap(); }
-    fn finished(&mut self, h: Hash) { self.0.send(B::D(h)).unwrap(); }
+//! Probe (probe/after-gap): what a call costs after the program's thread
+//! slept 1 ms (the benchmark's gap), against the same call back to back,
+//! for hash() at sizes on each side of the kernels' boundaries, and for
+//! SHA-256 (sha2) as the control. Variants after the gap: a few
+//! microseconds of integer work first (does the clock's ramp explain
+//! it?), and one 64-byte hash first (does the first vector work pay?).
+//! Wall time and cycles per core kind (clocks).
+use sha2::Digest;
+use std::hint::black_box;
+
+const GAP: u64 = 1_000_000;
+
+fn spin(iterations: u64) -> u64 {
+    let mut x = 1u64;
+    for i in 0..iterations {
+        x = black_box(x.wrapping_mul(6364136223846793005).wrapping_add(i));
+    }
+    x
 }
+
+fn show(label: &str, b: clocks::Batch) {
+    println!("  {label:<28} {}", b.show());
+}
+
 fn main() {
     blake3_servil::initialize_multithreaded();
-    let input = vec![5u8; 32 << 20];
-    let (tx, rx) = mpsc::channel();
-    let mut free: Vec<Vec<u8>> = (0..4).map(|_| Vec::with_capacity(65536)).collect();
-    let (mut copy_ns, mut wait_ns) = (0u64, 0u64);
-    let t = std::time::Instant::now();
-    for _ in 0..10 {
-        let q = Queue::pieces(Mode::Hash, Efficiency::Time, P(tx.clone()));
-        for piece in input.chunks(65536) {
-            let w = std::time::Instant::now();
-            let mut b = match free.pop() { Some(b) => b, None => loop { if let B::P(b) = rx.recv().unwrap() { break b } } };
-            wait_ns += w.elapsed().as_nanos() as u64;
-            let c = std::time::Instant::now();
-            b.clear(); b.extend_from_slice(piece);
-            copy_ns += c.elapsed().as_nanos() as u64;
-            q.submit(b);
-        }
-        q.finish();
-        loop { match rx.recv().unwrap() { B::P(b) => free.push(b), B::D(_) => break } }
+    let input = vec![7u8; 1 << 20];
+    for len in [64usize, 1024, 2048, 4096, 8192, 16384, 65536] {
+        let m = &input[..len];
+        println!("{len} B");
+        let bb = clocks::measure(5, 2_000_000, || { black_box(blake3_servil::hash(black_box(m))); });
+        show("servil back to back", bb[2]);
+        let calls = 300;
+        show("servil after gap", clocks::measure_after_gaps(calls, GAP, || { black_box(blake3_servil::hash(black_box(m))); }));
+        show("servil after gap+spin 20us", {
+            let mut b = clocks::Batch { calls, wall_ns: 0, counts: None };
+            for _ in 0..calls {
+                std::thread::sleep(std::time::Duration::from_nanos(GAP));
+                black_box(spin(80_000));
+                let t = clocks::now();
+                black_box(blake3_servil::hash(black_box(m)));
+                b.wall_ns += clocks::since_ns(t);
+            }
+            b
+        });
+        show("servil after gap+hash(64)", {
+            let mut b = clocks::Batch { calls, wall_ns: 0, counts: None };
+            for _ in 0..calls {
+                std::thread::sleep(std::time::Duration::from_nanos(GAP));
+                black_box(blake3_servil::hash(black_box(&input[..64])));
+                let t = clocks::now();
+                black_box(blake3_servil::hash(black_box(m)));
+                b.wall_ns += clocks::since_ns(t);
+            }
+            b
+        });
+        show("servil after gap, 2nd call", {
+            let mut b = clocks::Batch { calls, wall_ns: 0, counts: None };
+            for _ in 0..calls {
+                std::thread::sleep(std::time::Duration::from_nanos(GAP));
+                black_box(blake3_servil::hash(black_box(m)));
+                let t = clocks::now();
+                black_box(blake3_servil::hash(black_box(m)));
+                b.wall_ns += clocks::since_ns(t);
+            }
+            b
+        });
+        let bb = clocks::measure(5, 2_000_000, || { black_box(sha2::Sha256::digest(black_box(m))); });
+        show("sha256 back to back", bb[2]);
+        show("sha256 after gap", clocks::measure_after_gaps(calls, GAP, || { black_box(sha2::Sha256::digest(black_box(m))); }));
+        show("spin(1000) after gap", clocks::measure_after_gaps(calls, GAP, || { black_box(spin(1000)); }));
+        let bb = clocks::measure(5, 2_000_000, || { black_box(spin(1000)); });
+        show("spin(1000) back to back", bb[2]);
     }
-    let pieces = 10 * 512;
-    println!("ns/B {:.3}", t.elapsed().as_nanos() as f64 / (10.0 * input.len() as f64));
-    println!("producer per piece: wait {} ns, copy {} ns, submit {} ns", wait_ns / pieces, copy_ns / pieces, SUBMIT_NS.load(Relaxed) / SUBMITS.load(Relaxed));
-    let runs = [RUNS[0].load(Relaxed), RUNS[1].load(Relaxed)];
-    println!("tasks: sme2 thread {} (avg {} ns), workers {} (avg {} ns), push->pop avg {} ns, last done->delivered avg {} ns", runs[0], RUN_NS[0].load(Relaxed) / runs[0].max(1), runs[1], RUN_NS[1].load(Relaxed) / runs[1].max(1), POP_WAIT.load(Relaxed) / (runs[0] + runs[1]), DONE_TO_DELIVERED.load(Relaxed) / DELIVERS.load(Relaxed).max(1));
 }
