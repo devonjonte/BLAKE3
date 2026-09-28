@@ -587,7 +587,10 @@ turn) instead of NEON: level on the Mac from 1 to 128 MiB (jobs
 529-532); left out. **The split at 512 KiB** (`probe/split-512`): Mac
 after the gap 512 KiB 0.35 -> 0.19-0.24 ns/B and 8192 messages 22.5 ->
 13.3 ns/msg (jobs 538-541), VM 512 KiB 20-30% slower; Zooko's choice of
-768 KiB stands until he decides.
+768 KiB stands until he decides. **4 KiB pieces** (`MIN_PIECE_LEN`,
+`probe/piece-4k`, jobs 552-559): streams through a lingering Hasher
+25-70% slower (a 64 KiB job's cut ends in 4 KiB pieces), one message
+level once lingering kept eight workers; left at 8 KiB.
 - Storage is recycled, io_uring style (Zooko: no malloc per submission):
   slots in blocks that never move, results keeping their capacity, lists
   growing only to the program's in-flight high-water mark;
