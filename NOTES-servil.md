@@ -726,6 +726,10 @@ back-to-back effect; not measured natively.
   messages on the VM, every variant.
 - k4 as two NEON pairs and the "minimax" plans (no second scalar chunk):
   E-cores 16-24% faster, P-cores up to 17% slower; the user rejected them.
+  Measured again after the gap (September 28, night, probe/plans-pairs,
+  jobs 568-571; 4 KiB as [2, 2], 8 KiB as [4, 4]): 4 KiB 20% slower at
+  the fast speed and 27-45% faster at the slow one; 8 KiB slower at both
+  (fast 1.13 -> 1.35 ns/B, slow 3.4 -> 4.4). No change.
 - A direct small-tree path (1-2% at 4 KiB) and parents plus root folded
   into k4 (about 3.6%): estimated, not built; complexity for one size.
 - q4 as one quad for the four whole chunks (September 25, 2026): 15%
