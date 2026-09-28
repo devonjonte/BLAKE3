@@ -615,6 +615,23 @@ allocations); dropped unbuilt on the Mac. So the
 thread, the bottleneck, spends 25 ns taking a returned buffer from its
 channel and about 40-60 ns in `submit`, mostly lines another core wrote.
 
+**The 64-byte cell at full clock** (September 28, morning, Mac, the
+fixed benchmark; probe/submit-64, jobs 742, 755, 763; traced run, job
+762). The program's thread stays the bottleneck (busy 99-100%), at 3.76-
+3.90 GHz where SHA-256's lone thread runs at 4.45 (its cluster's other
+cores are busy). Per message it retires 432-484 instructions in every
+sample, and takes 129-579 cycles (median 158): the spread between
+samples, 0.54-2.3 ns/B, is stalls, not clock or core kind (all on P).
+Its fastest samples match SHA-256 (0.54 against 0.55 ns/B). `submit`
+alone, 1024 pre-filled buffers in a burst: 28-34 ns, 100-127 cycles,
+about 320 instructions per message; taking a buffer back from the
+program's channel 10 ns and 122 instructions; the copy 55. So both
+halves have work: `submit`'s instructions (a lock, the slot, the open
+task's member, the link, the `Any` downcast through a call) and its
+stalls. A write prefetch of the slot four submissions ahead
+(probe/slot-prefetch, jobs 758-761): level (old against old moves the
+servil cells up to 23%; SHA-256 in the same runs within 1%).
+
 **A ceiling near one 16 KiB task a microsecond** (September 28, night,
 Mac, jobs 572-587, open): two programs through their own queues move 16
 KiB messages no faster in all than one alone (solo 0.07 ns/B, shared
