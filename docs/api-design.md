@@ -5,65 +5,69 @@ For Zooko and John Servil. A draft for Zooko's review (September 28,
 section). Decisions carry their date; everything else is a proposal, and
 each open question is marked **Q**.
 
-## Three choices lead a user to one call
+## Four questions lead a user to one call
 
-Every user starts with data of some shape and makes three choices
-(Zooko, September 28, 2026). The crate docs open with these choices, so a
-reader learns that the streaming and batch calls exist before reaching
-for a loop over `hash`:
+The crate docs open as a choose-your-own-adventure (Zooko, September 28,
+2026), so a reader learns that the streaming and batch calls exist before
+reaching for a loop over `hash`:
 
-1. **The shape of the data.**
-   - *A complete buffer*: one message, all in memory.
+1. **Can your program use several threads?** A program that cannot gets
+   the single-threaded calls, built for intermittent use; the docs say
+   that the best speed for a continuous load takes several threads.
+2. **What shape is your data?**
+   - *A message in one buffer*: all in memory.
+   - *A message arriving in pieces*.
    - *A batch*: many messages of one length, all in memory.
-   - *An incoming stream*: one message arriving in pieces, or separate
-     messages arriving one after another (the docs name both, so a reader
-     recognises his).
-2. **The load pattern**, asked as: *when one input finishes, is another
-   usually already waiting?*
-   - *Intermittent* (no): the call's one-time cost matters, its latency.
-   - *Continuous* (yes): the repeated cost matters, the throughput.
-   A user who cannot tell chooses intermittent; it is never far wrong,
-   and the continuous calls pay only with enough work in flight. (To be
-   revisited once both columns are implemented, benchmarked, and
-   optimised.)
-3. **The cost to save: time or energy.**
+   Messages arriving one after another, each complete, are the first
+   shape many times over; question 4 sends a continuous stream of them to
+   the queue.
+3. **Do you want to save time or energy?**
+4. **(Several threads only.) When you finish hashing a message, will
+   there typically be another message already ready to be hashed?**
+   - *No, the program goes off and does other things*: intermittent, a
+     synchronous call; its one-time cost (latency) matters.
+   - *Yes, one after another as fast as possible*: continuous, the queue;
+     the repeated cost (throughput) matters.
+   A user who cannot tell answers no; the synchronous call is never far
+   wrong, and the queue pays only with enough work in flight. (To be
+   revisited once both are implemented, benchmarked, and optimised.)
 
-That makes twelve cases. They map onto six calls:
+The answers lead to nine calls:
 
-| shape | intermittent: a synchronous call | continuous: the queue |
-|---|---|---|
-| complete buffer | `hash` / `hash_multithreaded` | the queue, one message per buffer |
-| batch | `hash_many` / `hash_many_multithreaded` | the queue, messages of one length (`Queue::fixed`) |
-| incoming stream | `Hasher::update` / `update_multithreaded`, then `finalize` | the queue, pieces |
+| shape | single-threaded (intermittent) | several threads, intermittent | several threads, continuous |
+|---|---|---|---|
+| message in one buffer | `hash` | `hash_multithreaded` | the queue, one message per buffer |
+| message in pieces | `Hasher::update`, then `finalize` | `update_multithreaded`, then `finalize` | the queue, pieces |
+| batch | `hash_many` | `hash_many_multithreaded` | the queue, messages of one length (`Queue::fixed`) |
 
-A program that receives complete buffers continuously (whole files, one
-after another) has an incoming stream of messages; the table sends it to
-the queue.
+The queue offers the same three shapes as question 2, so each answer
+leads to one obvious call; how the engine shares work between them stays
+inside.
 
-**Time or energy.** In the intermittent column the choice is the thread
-form: `_multithreaded` saves time; the single-threaded form saves energy
-and serves platforms without threads. The continuous column is always
-multithreaded, and each queue takes the choice as an argument
-(`Efficiency::Time` or `Efficiency::Energy`).
+**Time or energy.** Each queue takes the choice as an argument
+(`Efficiency::Time` or `Efficiency::Energy`); the multithreaded
+synchronous calls take it too.
+- **Q** (to settle once both are built and measured): whether the
+  single-threaded calls offer the choice. If the two differ little in
+  practice, single-threaded calls always save time and the choice goes
+  from them.
+- **Q**: what saving energy means for a multithreaded synchronous call. A
+  call with the caller on SME2 and E-core NEON helpers at background QoS
+  hashed 8 MiB 10-27% faster than `hash` for a third less energy
+  (NEXT-STEPS, "the `efficient` module").
 
 **No thread budget** (Zooko, September 28, 2026): the `..._with_budget`
-functions and `Threads::Budget` go; the thread choice is single-threaded
-or multithreaded in the intermittent column, and time or energy in the
-continuous one.
+functions and `Threads::Budget` go.
 
-**`hash` keeps its name** (Zooko, September 28, 2026): complete buffer,
-intermittent is likely the most common case, and `hash` and
+**`hash` keeps its name** (Zooko, September 28, 2026): a message in one
+buffer, intermittent, is likely the most common case, and `hash` and
 `hash_multithreaded` are its natural names. The crate docs lead with the
-choices above, so a reader meets the other shapes first.
+questions above, so a reader meets the other shapes first.
 
-- **Q**: is the single-threaded form the whole intermittent answer to
-  "save energy"? A multithreaded call with the caller on SME2 and E-core
-  NEON helpers at background QoS hashed 8 MiB 10-27% faster than `hash`
-  for a third less energy (NEXT-STEPS, "the `efficient` module").
 - **Q**: the multithreaded `Hasher` form's name (`update_multithreaded`
   is a placeholder).
 
-## The intermittent column: synchronous calls
+## The synchronous calls
 
 Each call returns its result; nothing keeps running for a call that may
 come (AGENTS.md, "Serve real programs"), with one exception:
@@ -89,7 +93,7 @@ i x s, s being `message_len` rounded up to a multiple of 64 (64 for an
 empty message); the caller zeroes the bytes between one message's end and
 the next one's start; any message length.
 
-## The continuous column: the queue
+## The queue
 
 The queue maximises throughput: bytes or messages hashed per second, or
 per joule, by a program that keeps the engine fed. It spends latency to
@@ -151,10 +155,6 @@ let queue = Queue::fixed(64, Mode::Hash, Efficiency::Time, handler);
 queue.submit(buffer, digests);          // the digests' space is the caller's too, returned with the buffer
 ```
 
-- **Q**: merge `Queue::messages` and `Queue::pieces` into one shape? The
-  engine already treats a message as a stream of one piece, and the
-  benchmark below measures the two together.
-
 The handler contract:
 
 1. **Short, never blocking**: a slow handler delays the delivery of every
@@ -193,28 +193,30 @@ rule broken.
 
 ## How the benchmark measures each
 
-The benchmark measures each cell under the conditions its users meet, so
-that it guides us to optimise each one for them (Zooko, September 28,
-2026). Every cell records wall time and cycles; the energy cells also
-record joules.
+The benchmark measures each call only as its contract says users call
+it, so that it guides us to optimise each one for them and flags only
+what users meet (Zooko, September 28, 2026). No synchronous call is
+measured back to back: every one comes after the program has gone off
+and done other things (the gap). Every cell records wall time and
+cycles; the energy cells also record joules.
 
-**The intermittent column: each call on its own** (six use cases: three
+**The synchronous calls: each on its own** (six use cases: three
 shapes, single-threaded and multithreaded). The calls can differ widely
 in speed, and each deserves its own optimisation.
 
 | use case | call pattern | points |
 |---|---|---|
-| complete buffer | one call after an idle gap | one message, 64 B-128 MiB |
-| batch | one call after an idle gap | message counts at 64 B (and **Q**: other lengths, e.g. 256 B leaves) |
-| incoming stream | the first `update` after an idle gap, the rest in swift succession from a producer that copies each 64 KiB piece in (as a read would), then `finalize` | message length, 64 B-128 MiB |
+| message in one buffer | one call after the gap | one message, 64 B-128 MiB |
+| batch | one call after the gap | message counts at 64 B (and **Q**: other lengths, e.g. 256 B leaves) |
+| message in pieces | the first `update` after the gap, the rest in swift succession from a producer that copies each 64 KiB piece in (as a read would), then `finalize` | message length, 64 B-128 MiB |
 
-**The continuous column: two use cases**, each with enough in flight to
+**The queue: two use cases**, each with enough in flight to
 keep the hashing threads busy (about 1 MiB or about 1024 buffers,
 whichever is fewer), timed end to end over many inputs:
 
 | use case | call pattern | points |
 |---|---|---|
-| messages arriving | messages of one length, each read into a free buffer and submitted in pieces of up to 64 KiB (a message up to 64 KiB is one buffer); covers complete buffers and incoming streams | message length, 64 B-128 MiB |
+| messages arriving | messages of one length, each read into a free buffer and submitted in pieces of up to 64 KiB (a message up to 64 KiB is one buffer); covers messages in one buffer and in pieces | message length, 64 B-128 MiB |
 | batches arriving | buffers of fixed-length messages through `Queue::fixed` | message length and messages per buffer |
 
 The other contenders run the same producers through their own calls: a
@@ -222,11 +224,12 @@ one-shot call per message, their incremental API per piece, their batch
 call where they have one (BLAKE3 official through `Platform::hash_many`,
 sixteen a call).
 
-- **Q**: keep back to back as a maintainers' regression check
-  (perf_regress, 3%: small kernel regressions that after idle's noise
-  would hide), outside the graph?
-- **Q**: the length of the idle gap, and whether intermittent calls also
-  get a sweep of shorter gaps.
+- **Q**: the gap: how long, and what the program does in it (sleep, as
+  the after-idle scenario does today for 1 ms, or work that also evicts
+  the caches). Anything we keep ready, such as a `Hasher` lingering
+  between updates, has gone to sleep well before the gap ends.
+- perf_regress follows: it judges the cells above (today it judges back
+  to back at 3% and after idle at 20%).
 - **Q**: the continuous cells under both `Efficiency` settings: time
   cells judged by wall time, energy cells by joules.
 - **Q**: an energy counter in the timing helper, per process and
