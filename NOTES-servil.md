@@ -587,9 +587,15 @@ old -> new: 64 B messages 2.6 -> 1.15 ns/B, 256 B 0.63 -> 0.29, 16 KiB
 0.165 -> 0.072; batches of 16 34 -> 8-19 ns/msg, of 64 21 -> 6.5, of 256
 11 -> 4.2; shared batches of 16 84 -> 12-19. SHA-256 does a 64-byte
 message in 36 ns, about what a handover's cache lines cost; `Queue::fixed`
-is the API that beats it. Tried and left out: the delivery thread
-closing a part-filled task only after 16 polls (VM level; a program with
-16 buffers in flight is round-trip bound either way); a 64 KiB byte cap
+is the API that beats it. The delivery thread closing a part-filled
+task only after 16 polls (`CLOSE_AFTER_POLLS`): first tried on the VM
+alone (level), then on the Mac after a traced run (job 680) showed
+batches of 16 at two speeds, 5.5-8.8 and 30-32 ns/msg, the program's
+thread busy throughout: handing each part-filled task over at once took
+the submitters' lock and made tasks of a few, a loop. Taken (jobs
+701-704): batches of 16 at one speed, 5.2-5.4 ns/msg; of 64, the slow
+speed 15-16 -> 5.4-5.9; 1 KiB messages 0.18-0.22 -> 0.13-0.14 ns/B; VM
+batches of 16 27% faster. Tried and left out: a 64 KiB byte cap
 on message members (4 KiB messages 10-30% slower, jobs 494-497); each
 slot on a 128-byte line of its own (jobs 504-507), the delivery thread
 backing off over idle rounds (jobs 534-537), and a short message's digest
