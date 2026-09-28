@@ -7,24 +7,33 @@
 //! thread and returns; the pool's threads hash the tasks; one delivery
 //! thread hands the results back in order.
 //!
-//! - **Submit.** The submission goes into the queue's list of entries, in
-//!   a box of its own (its bytes, results, and count of unfinished tasks
-//!   stay in place while other threads read and write them). Its tasks are
-//!   the whole subtrees `Hasher::update` would hash in it, in parts of at
-//!   most `lanes::TASK_LEN` (`plan_subtrees`: a piece's chunk counters
-//!   follow from its offset in the message; a message is a stream of one
-//!   piece). They go onto the pool's task list (`lanes::TASKS`), which
-//!   wakes a thread per task in flight, the SME2 thread first.
-//! - **Hash.** The SME2 thread (on SME2) and the workers (on NEON) pop
-//!   tasks; each writes its result into its entry and counts down.
-//! - **Deliver.** The delivery thread takes each queue's front entry once
-//!   its count is zero, replays `Hasher::update` with its results (and for
-//!   a message finalizes), and calls the handler. Entries without tasks it
-//!   hashes itself: those shorter than `TASK_MIN` (hashed faster than
-//!   handed over), batches of fixed-length messages, and everything with
-//!   `Efficiency::Energy`, which the delivery thread hashes alone. While any
-//!   entry is in flight it holds the pool (the threads poll across the gaps
-//!   between tasks); with none it and the pool sleep, so nothing runs
+//! - **Submit.** The submission takes a slot (slots live in blocks that
+//!   never move and are recycled: no allocation after warm-up) and is
+//!   linked at the tail of the queue's chain of entries, in submission
+//!   order. Its tasks are the whole subtrees `Hasher::update` would hash
+//!   in it, in parts of at most `lanes::TASK_LEN` (`plan_subtrees`: a
+//!   piece's chunk counters follow from its offset in the message; a
+//!   message is a stream of one piece). Messages shorter than `TASK_MIN`,
+//!   and `Queue::fixed` batches under `BATCH_TASK_MIN`, go several to a
+//!   task instead (`lanes::Member`), handed over when it is full or when
+//!   the delivery thread waits on it. Tasks go onto the pool's task list
+//!   (`lanes::TASKS`), which wakes a thread per task in flight.
+//! - **Hash.** The SME2 thread and the workers pop tasks; each writes its
+//!   result into its entry and counts it down. The SME2 thread hashes
+//!   subtrees on SME2 and gathered tasks on NEON; the workers on NEON.
+//! - **Deliver.** The delivery thread follows each queue's chain from the
+//!   last entry it delivered, takes each entry once its count is zero,
+//!   replays `Hasher::update` with its results (and for a message
+//!   finalizes), and calls the handler. Entries without tasks it hashes
+//!   itself: pieces shorter than `TASK_MIN` (their bytes join the message
+//!   in order), and everything with `Efficiency::Energy`, which the
+//!   delivery thread hashes alone. The submitters and the delivery thread
+//!   share no lock on these paths: delivered slots go back through
+//!   `returned`, and the queue's hold passes by a store-then-recheck
+//!   handshake (`Inner::activate`, the end of `deliver_with`). While any
+//!   entry is in flight the delivery thread holds the pool (the threads
+//!   poll across the gaps between tasks, and sleep after 50 us with
+//!   nothing to take); with none it and the pool sleep, so nothing runs
 //!   between bursts for work that may come (AGENTS.md, "Serve real
 //!   programs").
 //!
