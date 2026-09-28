@@ -678,7 +678,12 @@ list; a message's round trip averaged 51 us. Tasks of about 100 bytes,
 their members in a queue's fixed set of member blocks
 (candidate/member-blocks, jobs 720-723): 2% faster overall, mixed by
 cell (batches of 4096 7% slower solo, shared 16 KiB 11%), 64 KiB level:
-the task's size is not this ceiling; left out.
+the task's size is not this ceiling; left out. Tasks of 32 KiB
+(probe/task-32k, jobs 724-727): large messages 10% faster solo, batches
+of 1024 18% slower (two tasks now); subtrees of 32 KiB with batch tasks
+kept at 64 KiB (probe/task-32k-subtrees, jobs 728-733, three runs a
+side): 256 KiB-64 MiB messages 4-14% faster solo, 64 KiB 5% slower,
+shared level: a trade, left out.
 
 **Idle workers sleep** (September 28, night): a worker, and the SME2
 thread, that finds nothing for 50 us (`lanes::WORKER_IDLE`, about a
