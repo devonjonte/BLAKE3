@@ -219,10 +219,9 @@ one-shot call per message, their incremental API per piece, their batch
 call where they have one (BLAKE3 official through `Platform::hash_many`,
 sixteen a call).
 
-- **Q**: the gap: how long, and what the program does in it (sleep, as
-  the after-idle scenario does today for 1 ms, or work that also evicts
-  the caches). Anything we keep ready, such as a `Hasher` lingering
-  between updates, has gone to sleep well before the gap ends.
+- The gap: 1 ms, the program asleep (Zooko, September 28, 2026).
+  Anything we keep ready, such as a `Hasher` lingering between updates,
+  has gone to sleep well before the gap ends.
 - perf_regress follows: it judges the cells above (today it judges back
   to back at 3% and after idle at 20%).
 - **Q**: the continuous cells under both `Efficiency` settings: time
