@@ -1188,8 +1188,14 @@ impl Tasks {
         if self.queued.load(Ordering::SeqCst) == 0 {
             return None;
         }
-        // Another thread popping means this one would wait for it: poll on.
-        let mut list = self.list.try_lock().ok()?;
+        // Another thread holding the list means this one would wait for it:
+        // poll on, after a pause, so that pollers leave the lock to a pusher.
+        let Ok(mut list) = self.list.try_lock() else {
+            for _ in 0..64 {
+                std::hint::spin_loop();
+            }
+            return None;
+        };
         let task = list.pop_front()?;
         self.queued.store(list.len(), Ordering::SeqCst);
         Some(task)
