@@ -608,8 +608,9 @@ copied the 2 KiB task into ring slots other cores last read and
 incremented the in-flight count every finishing thread writes). The
 count moved outside the lock (taken: two programs 2.0 -> 1.65 us per
 message in the probe, the benchmark's shared 16 KiB -4%); pollers pausing
-after a failed try_lock helped two programs (2.9 -> 2.0 us) and was left
-out with the rest of that probe; 600-byte tasks (MEMBERS 16) held the
+after a failed try_lock helped two programs (2.9 -> 2.0 us in the probe;
+in the benchmark, probe/poll-pause, jobs 630-633: shared 16 KiB -9%, solo
+16 KiB +3%) and was left out; 600-byte tasks (MEMBERS 16) held the
 lock 137 ns instead of 227. Linking a task's members through their
 entries instead of carrying them (candidate/member-links, tasks of about
 100 bytes; jobs 626-629): 16 KiB messages 6% faster, batches of 4096 3%,
