@@ -905,7 +905,7 @@ pub(crate) struct Task {
     /// With `members` above zero, the task is that many separate short
     /// messages instead (or, with `batch`, batches of that length's
     /// messages): each one's digest (digests) to its `out`, then its
-    /// `left` counted down; `len` sums their bytes.
+    /// `left` counted down (the task's own fields unused).
     pub(crate) members: usize,
     pub(crate) member: [Member; MEMBERS],
 }

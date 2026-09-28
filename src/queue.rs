@@ -284,7 +284,7 @@ impl<I> State<I> {
     /// state's lock is released) when it is full or (with `waited`) when
     /// the delivery thread waits on it; otherwise it goes on filling.
     fn close_open(&mut self, waited: bool) -> Option<Task> {
-        let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS || open.len >= crate::lanes::TASK_LEN);
+        let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS);
         if full || waited { self.open.take() } else { None }
     }
 }
@@ -445,7 +445,6 @@ where
         // stay in place until its delivery, after `left` reaches zero.
         open.member[open.members] = crate::lanes::Member { input, len, out: out.unwrap_or(slot.results.as_mut_ptr() as *mut u8), left: &slot.left };
         open.members += 1;
-        open.len += len;
         let closed = state.close_open(false);
         state.link(slot);
         drop(guard);
