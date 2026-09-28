@@ -910,7 +910,7 @@ pub(crate) struct Task {
 }
 
 /// The most short messages one task takes: one SME2 group.
-pub(crate) const MEMBERS: usize = 16;
+pub(crate) const MEMBERS: usize = 64;
 
 /// A short message in a task of several ([`Task::members`]).
 #[derive(Clone, Copy)]

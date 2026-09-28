@@ -326,6 +326,11 @@ enum PieceItem<B> {
 /// hashed at delivery (a piece's bytes join the message in order).
 const TASK_MIN: usize = crate::SME2_SIZED_LEN;
 
+/// The shortest batch of fixed-length messages hashed as tasks: shorter
+/// ones hash at delivery (Mac, batches of 16 64-byte messages: 34 ns per
+/// message at delivery, 68 as tasks; batches of 64: 21 and 17).
+const BATCH_TASK_MIN: usize = 4096;
+
 impl<H: Send + 'static, S: 'static> Queue<H, S> {
     fn new<I: Send + 'static>(mode: Mode, efficiency: Efficiency, handler: H, message_len: usize) -> Self
     where
@@ -675,10 +680,9 @@ impl<H: FixedHandler> Queue<H, shape::Fixed> {
                 task.out = unsafe { digests.add(index * per_task) } as *mut u8;
                 out.push(task);
             }
-            // Batches the SME2 kernels take hash on the pool (its SME2
-            // thread keeps the unit in its fast state), as do long ones;
-            // the rest at delivery.
-            tasks && (bytes.len() >= TASK_MIN || crate::many::sme2_sized(message_len, bytes.len() / slot))
+            // A batch that costs more to hash than a handover to the pool
+            // (about a microsecond) hashes there; a shorter one at delivery.
+            tasks && bytes.len() >= BATCH_TASK_MIN
         });
     }
 }
