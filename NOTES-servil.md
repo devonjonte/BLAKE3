@@ -635,6 +635,26 @@ back-to-back effect; not measured natively.
 
 ## Tooling and its pitfalls
 
+**Clocks tick at 24 MHz** (41.67 ns) on the M4 Max, for every Darwin
+wall clock and the CPU-time clocks alike (measure-clocks3, results of
+December 7, 2025: timings of a 1.3 us call read 1,208, 1,250, 1,292,
+... ns), and in the VM (`arch_timer` at 24 MHz). A call of a few ticks
+is timed either as a batch or, where each call must come after a gap, as
+a sum of single readings (`clocks::measure_after_gaps`): each reading
+starts at a phase nothing correlates with the call, so the sum's rounding
+averages out; a median or minimum of single readings would keep it.
+After a 1 ms gap the core's clock is anywhere from its lowest to its
+highest, so an after-gap sample's spread is the clock states', far above
+the ticks'. First measurement (VM, quick run, September 28): after the
+gap a 64 B call costs about 500 ns for every hash alike, against about
+40 ns back to back; unexplained (the vCPU's wake, cold caches, the
+clock?), to be measured on the Mac.
+
+**perf_regress's stale parts** (September 28): it still names the
+after-idle scenario and the old use cases, which the benchmark on
+`candidate/benchmark-plan` no longer has; fix it before a code commit
+runs it against that benchmark (bench-hashes NEXT-STEPS, "Resume here").
+
 **perf_regress** (`check` = working tree against HEAD, `compare OLD NEW`,
 `build` = the working tree's bench-hashes for runs by hand): runs A B B
 A A B B A of sha256 (the control), servil, and servil mt at 29 points, 24
