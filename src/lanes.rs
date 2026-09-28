@@ -101,7 +101,7 @@ use std::sync::{Condvar, Mutex, OnceLock};
 /// 130). Zooko chose the length at which it pays on both (September 27,
 /// 2026): hash_multithreaded keeps every user's worst case low, and the
 /// modes built for top speed feed the workers without gaps.
-pub(crate) const MIN_SPLIT_LEN: usize = 768 * 1024;
+pub(crate) const MIN_SPLIT_LEN: usize = 512 * 1024;
 
 /// The shortest whole subtree a lingering Hasher hashes over the pool: a
 /// common read's 64 KiB.
