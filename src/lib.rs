@@ -52,7 +52,7 @@
 //! And by situation:
 //!
 //! - **Input in memory: one call.** [`hash_multithreaded`] on the whole
-//!   input: at [`hash`]'s speed below 768 KiB and faster from there when
+//!   input: at [`hash`]'s speed below 512 KiB and faster from there when
 //!   the program can spare the CPUs (8 MiB: about 6x [`hash`]'s speed on
 //!   an M4 Max). Call [`initialize_multithreaded`] at start-up: the first
 //!   call of a process otherwise runs the startup self-test (below, 0.1 to
@@ -1275,7 +1275,7 @@ pub fn hash(input: &[u8]) -> Hash {
 /// uses other cores (about 2.7x on an Apple M4 Max).
 ///
 /// Returns the same [`Hash`](struct@Hash) as [`hash`] for every input. Inputs below
-/// 768 KiB are hashed on the calling thread alone, at [`hash`]'s speed.
+/// 512 KiB are hashed on the calling thread alone, at [`hash`]'s speed.
 /// The worker threads sleep between calls, so a call wakes them, and
 /// below that length the wake would cost more than the workers give.
 /// Larger inputs are cut into pieces that the calling thread and worker
@@ -1498,7 +1498,7 @@ pub(crate) fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, 
 /// It spends more energy per byte than [`hash_many`] when it uses other
 /// cores.
 ///
-/// Writes the same digests for every batch. Batches under 768 KiB in all are hashed on the calling thread
+/// Writes the same digests for every batch. Batches under 512 KiB in all are hashed on the calling thread
 /// alone, at [`hash_many`]'s speed. Larger batches are cut into ranges of
 /// messages that the calling thread and this crate's worker threads hash
 /// at once, under the same rules as [`hash_multithreaded`]: the workers

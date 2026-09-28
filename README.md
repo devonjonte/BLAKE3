@@ -16,7 +16,7 @@ This is my fork of BLAKE3, for faster hashing on 64-bit Arm, and above all on Ap
 chips; on other CPUs it runs upstream's code. It computes the same digests as the official
 crate, and adds:
 
-- `hash_multithreaded`, which spreads one large input (768 KiB or more) over every core;
+- `hash_multithreaded`, which spreads one large input (512 KiB or more) over every core;
 - `hash_many`, which hashes a batch of equal-length messages (Merkle-tree leaves and nodes,
   for example) in one call;
 - `Hasher::update_multithreaded`, which hashes a message arriving in pieces over every core,

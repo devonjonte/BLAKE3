@@ -53,8 +53,8 @@ fn thread_choices() -> [Threads; 4] {
     [Threads::One, Threads::All, Threads::Budget(1), Threads::Budget(2)]
 }
 
-/// Lengths past the official vectors, around the multithreaded split (768 KiB) and a subtree edge.
-const LARGE: [usize; 5] = [(768 << 10) - 1, 768 << 10, 1 << 20, (1 << 20) + 1, (3 << 20) + 12345];
+/// Lengths past the official vectors, around the multithreaded split (512 KiB) and a subtree edge.
+const LARGE: [usize; 5] = [(512 << 10) - 1, 512 << 10, 1 << 20, (1 << 20) + 1, (3 << 20) + 12345];
 
 // ---------- One-shot, one message ----------
 

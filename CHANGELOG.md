@@ -11,6 +11,9 @@
   messages one after another and 2.5-4x for batches of 64-byte messages,
   with the program keeping enough in flight. Worker threads with nothing to
   take sleep after 50 µs, even while a queue has inputs in flight.
+- `hash_multithreaded` and `hash_many_multithreaded` leave the calling
+  thread from 512 KiB (was 768 KiB): on an Apple M4 Max a 512 KiB input
+  after a pause hashes about 40% faster.
 
 ## 0.3.0
 

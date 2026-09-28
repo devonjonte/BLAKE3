@@ -100,10 +100,11 @@ use std::sync::{Condvar, Mutex, OnceLock};
 /// Measured with 1 ms of sleep before each call, the split came back
 /// sooner from 512 KiB on an M4 Max (136 µs against 158; jobs 364-367)
 /// and from 768 KiB in the VM (146 against 181; 512 KiB 154 against
-/// 130). Zooko chose the length at which it pays on both (September 27,
-/// 2026): hash_multithreaded keeps every user's worst case low, and the
-/// modes built for top speed feed the workers without gaps.
-pub(crate) const MIN_SPLIT_LEN: usize = 768 * 1024;
+/// 130). Zooko chose 512 KiB, where it pays on the Mac (September 28,
+/// 2026; native first): after the gap 512 KiB 0.35 -> 0.19-0.24 ns/B and
+/// 8192 64-byte messages 22.5 -> 13.3 ns/msg (jobs 538-541), the VM's
+/// 512 KiB 20-30% slower than on the caller's thread.
+pub(crate) const MIN_SPLIT_LEN: usize = 512 * 1024;
 
 /// The shortest whole subtree a lingering Hasher hashes over the pool: a
 /// common read's 64 KiB.
