@@ -249,11 +249,15 @@ unsafe impl<I: Send> Send for State<I> {}
 unsafe impl<I: Send> Send for Slots<I> {}
 
 const SLOT_BLOCK: usize = 16;
+pub static TRIP: AtomicUsize = AtomicUsize::new(0);
+pub static TRIPS: AtomicUsize = AtomicUsize::new(0);
+pub fn probe_trip() -> (usize, usize) { (TRIP.swap(0, Ordering::Relaxed), TRIPS.swap(0, Ordering::Relaxed)) }
 
 /// A submission in flight: its item, its tasks' results (none: hashed at
 /// delivery), how many of its tasks are unfinished, and the next entry.
 /// The results keep their capacity from one submission to the next.
 struct Slot<I> {
+    submitted_at: u64,
     item: Option<I>,
     results: Vec<[u8; crate::BLOCK_LEN]>,
     left: AtomicUsize,
@@ -269,7 +273,7 @@ impl<I> State<I> {
     /// `free` and `returned`.
     fn add_block(&mut self, returned: &mut Slots<I>) {
         let most = self.most.max(1);
-        let block = Box::into_raw(Box::new(std::array::from_fn(|_| Slot { item: None, results: Vec::with_capacity(most), left: AtomicUsize::new(0), digest: false, next: AtomicPtr::new(core::ptr::null_mut()) })));
+        let block = Box::into_raw(Box::new(std::array::from_fn(|_| Slot { submitted_at: 0, item: None, results: Vec::with_capacity(most), left: AtomicUsize::new(0), digest: false, next: AtomicPtr::new(core::ptr::null_mut()) })));
         self.blocks.push(block);
         if let Some(room) = &mut self.tasks_room {
             TASKS.make_room(SLOT_BLOCK * most);
@@ -410,6 +414,7 @@ where
         let slot = state.take_slot(&self.returned);
         // Sound: a free slot is this thread's until linked.
         let slot = unsafe { &mut *slot };
+        slot.submitted_at = crate::lanes::probe_now();
         let item = slot.item.insert(item);
         slot.results.clear();
         slot.digest = false;
@@ -553,6 +558,9 @@ where
             let handling = handling.get_or_insert_with(|| self.handling.lock().expect("no lock is poisoned"));
             // Sound: its tasks are finished; it is this thread's now.
             let item = unsafe { (*next).item.take() }.expect("a slot in flight holds its item");
+            let trip = crate::lanes::probe_now() - unsafe { (*next).submitted_at };
+            TRIP.fetch_add(trip as usize, Ordering::Relaxed);
+            TRIPS.fetch_add(1, Ordering::Relaxed);
             deliver(self, handling, item, unsafe { &(*next).results }, unsafe { (*next).digest });
             count += 1;
         }

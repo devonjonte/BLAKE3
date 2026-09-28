@@ -981,6 +981,8 @@ pub(crate) struct Task {
     pub(crate) flags: u8,
     pub(crate) out: *mut u8,
     pub(crate) left: *const AtomicUsize,
+    /// Probe: when the task was pushed (ns from the pool's epoch).
+    pub(crate) pushed_at: u64,
     /// With `members` above zero, the task is that many separate short
     /// messages instead (or, with `batch`, batches of that length's
     /// messages): each one's digest (digests) to its `out`, then its
@@ -1010,7 +1012,7 @@ impl Task {
     /// A task over `input` at chunk `counter`, its mode, kind, and
     /// destinations still to fill in.
     pub(crate) fn of(input: &[u8], counter: u64) -> Task {
-        Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null(), members: 0, member: [NO_MEMBER; MEMBERS] }
+        Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null(), pushed_at: 0, members: 0, member: [NO_MEMBER; MEMBERS] }
     }
 
     /// An empty task of short messages (with `batch`, batches of messages
@@ -1024,6 +1026,18 @@ impl Task {
     /// values; for any other, its chaining value (first 32 bytes). Then
     /// count down.
     pub(crate) fn run(self, platform: Platform) {
+        let start = probe_now();
+        let (pushed, sme2) = (self.pushed_at, matches!(platform, Platform::SME2));
+        self.run_inner(platform);
+        let end = probe_now();
+        let k = usize::from(sme2);
+        PROBE[k][0].fetch_add((start - pushed) as usize, Ordering::Relaxed);
+        PROBE[k][1].fetch_add((end - start) as usize, Ordering::Relaxed);
+        PROBE[k][2].fetch_add(1, Ordering::Relaxed);
+        PROBE[k][3].fetch_max((start - pushed) as usize, Ordering::Relaxed);
+    }
+
+    fn run_inner(self, platform: Platform) {
         if self.members > 0 {
             return self.run_members(platform);
         }
@@ -1108,6 +1122,11 @@ pub(crate) struct Tasks {
     sme2_wake: Condvar,
 }
 
+/// Probe: [NEON, SME2] x [ns waiting, ns hashing, tasks, most ns waiting].
+pub static PROBE: [[AtomicUsize; 4]; 2] = [const { [const { AtomicUsize::new(0) }; 4] }; 2];
+pub fn probe_now() -> u64 { pool().epoch.elapsed().as_nanos() as u64 }
+pub fn probe_take() -> [[usize; 4]; 2] { [0, 1].map(|k| [0, 1, 2, 3].map(|i| PROBE[k][i].swap(0, Ordering::Relaxed))) }
+
 pub(crate) static TASKS: Tasks = Tasks {
     list: OwnLine(Mutex::new(std::collections::VecDeque::new())),
     queued: OwnLine(AtomicUsize::new(0)),
@@ -1188,8 +1207,9 @@ impl Tasks {
         // messages 2.0 -> 1.65 us each on the Mac, probe/submit-16k).
         let pushed = tasks.len();
         let in_flight = self.in_flight.fetch_add(pushed, Ordering::SeqCst) + pushed;
+        let now = probe_now();
         let mut list = lock_polling(&self.list);
-        list.extend(tasks);
+        list.extend(tasks.map(|mut t| { t.pushed_at = now; t }));
         let queued = list.len();
         // The queues made room for every task their entries can have in
         // flight (make_room): no growth here, whatever the threads' timing.

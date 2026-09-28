@@ -225,11 +225,12 @@ mod io;
 mod join;
 #[cfg(feature = "std")]
 mod lanes;
+pub use lanes::{probe_take, probe_now};
 mod many;
 #[cfg(feature = "std")]
 mod queue;
 #[cfg(feature = "std")]
-pub use queue::{Efficiency, FixedHandler, MessageHandler, PieceHandler, Queue, shape};
+pub use queue::{Efficiency, FixedHandler, MessageHandler, PieceHandler, Queue, shape, probe_trip};
 mod self_test;
 
 /// The startup self-test's own time, for probes: it runs again (it has
