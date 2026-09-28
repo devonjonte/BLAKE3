@@ -1125,6 +1125,7 @@ pub(crate) static TASKS: Tasks = Tasks {
 /// while the pool is held or tasks wait, and sleeps otherwise; every push
 /// wakes it first.
 fn sme2_main() {
+    prefer_fast_cores();
     let pool = pool();
     // Whether the last polling found nothing for WORKER_IDLE: then the
     // thread sleeps even while the pool is held, as the workers do.
@@ -1255,7 +1256,22 @@ impl Drop for Hold {
     }
 }
 
+/// Ask the scheduler to keep this thread on the fast cores (macOS:
+/// user-interactive QoS); elsewhere nothing.
+pub(crate) fn prefer_fast_cores() {
+    #[cfg(target_vendor = "apple")]
+    {
+        unsafe extern "C" {
+            fn pthread_set_qos_class_self_np(qos: u32, relpri: i32) -> i32;
+        }
+        const QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;
+        // Sound: a plain call on the calling thread; a refusal changes nothing.
+        let _ = unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) };
+    }
+}
+
 fn worker_main(rank: usize) {
+    prefer_fast_cores();
     let pool = pool();
     let mut start = 0;
     loop {

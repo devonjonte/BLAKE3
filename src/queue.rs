@@ -760,7 +760,7 @@ impl Delivery {
     fn hold(&self, queue: Arc<dyn Deliver>) {
         static STARTED: std::sync::Once = std::sync::Once::new();
         STARTED.call_once(|| {
-            std::thread::Builder::new().name("blake3-servil-queue".into()).spawn(|| DELIVERY.run()).expect("the queue's delivery thread starts");
+            std::thread::Builder::new().name("blake3-servil-queue".into()).spawn(|| { crate::lanes::prefer_fast_cores(); DELIVERY.run() }).expect("the queue's delivery thread starts");
         });
         let mut queues = crate::lanes::lock_polling(&self.queues);
         queues.2 += 1;
