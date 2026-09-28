@@ -516,19 +516,53 @@ it, and the hashing threads must never wait on a handover.
   KiB; 32 level, 16 KiB 50% slower on streams, jobs 468-473); a message is
   a stream of one piece and is finalized at delivery; `Queue::fixed`
   batches are ranges of slots through `hash_many`'s kernels; messages
-  under 16 KiB (`TASK_MIN`) go up to 16 to a task (`lanes::Member`), side
-  by side on the multi-lane kernels when each is one block. A batch goes
-  to the pool when full or when the delivery thread waits on it, outside
-  the queue's lock. No one-shot thresholds (the 768 KiB split is the
-  one-shot calls' business).
+  under 16 KiB (`TASK_MIN`) go up to 64 to a task (`lanes::Member`), side
+  by side on the multi-lane kernels when each is one block, and so do
+  `Queue::fixed` batches under 64 KiB (up to 64 KiB of them). An open
+  task goes to the pool when full or when the delivery thread waits on
+  it, outside the queue's lock. No one-shot thresholds (the 768 KiB split
+  is the one-shot calls' business).
 - One task list (`lanes::TASKS`, a Mutex<VecDeque> polled with try_lock).
   An SME2 thread hashes tasks only on SME2 under the turn; the workers
   only on NEON (Zooko's suggestion). Pushes wake a thread per task in
-  flight, the SME2 thread first.
+  flight, the SME2 thread first. A task costs the list about a
+  microsecond of throughput on the Mac (batches of 16 64-byte messages
+  as a task each: 68 ns per message, twice hashing them at delivery),
+  hence members.
 - One delivery thread holds the pool (`lanes::Hold`) while anything is in
-  flight, takes every ready front entry under one lock, replays, calls
-  handlers, frees the slots under one more lock; it sleeps with nothing
-  in flight.
+  flight and sleeps with nothing in flight. The submitters and it share
+  no lock on their common paths (September 28, night): entries are
+  chained in submission order through each slot's `next` (a submitter
+  links after `State::tail`; the delivery thread follows from the last
+  slot it delivered, which it keeps as the chain's head until the next
+  is delivered); each delivered slot goes back through `returned` before
+  the handler runs (so the slots follow the program's in-flight count,
+  not the threads' timing; handing back a round's slots at its end grew
+  the queue by blocks under `tests/queue_no_alloc.rs`); the queue's hold
+  is an atomic flag with a store-then-recheck handshake (the submitter
+  links then sets it; the delivery thread clears it then looks for a
+  link). The delivery thread waits on the entry it stopped at through
+  that entry's own count, without the lock.
+
+**Where a 64-byte message's time went** (September 28, night; VM probes
+under `perf`, Mac jobs 480-497). The benchmark's program thread is the
+bottleneck for short messages: it never waited for a buffer with 1024 in
+flight. Its `submit` cost 258 ns on the VM: 50000 futex calls per million
+messages (a std Mutex parking the loser of the queue lock, which the
+delivery thread held while each front slot's count missed in its cache),
+the `Arc` clone per call, the delivery thread's polling taking the
+lock's line. After the chain, `lock_polling` (try_lock a while before
+parking), and the borrowed state: 3000 futex calls per million, submit
+about 110 ns (VM) and 63 ns (Mac, probe/queue-submit, job 492: taking a
+returned buffer from the harness's channel another 25 ns). Mac, solo,
+old -> new: 64 B messages 2.6 -> 1.15 ns/B, 256 B 0.63 -> 0.29, 16 KiB
+0.165 -> 0.072; batches of 16 34 -> 8-19 ns/msg, of 64 21 -> 6.5, of 256
+11 -> 4.2; shared batches of 16 84 -> 12-19. SHA-256 does a 64-byte
+message in 36 ns, about what a handover's cache lines cost; `Queue::fixed`
+is the API that beats it. Tried and left out: the delivery thread
+closing a part-filled task only after 16 polls (VM level; a program with
+16 buffers in flight is round-trip bound either way); a 64 KiB byte cap
+on message members (4 KiB messages 10-30% slower, jobs 494-497).
 - Storage is recycled, io_uring style (Zooko: no malloc per submission):
   slots in blocks that never move, results keeping their capacity, lists
   growing only to the program's in-flight high-water mark;
