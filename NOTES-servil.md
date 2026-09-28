@@ -673,7 +673,12 @@ the speed. About eight cores stay busy (CPU time 1.1-1.8 ns per byte):
 each 64 KiB job wakes the workers its eight pieces want, and every woken
 worker polls between updates, hashing on NEON (more energy per byte than
 SME2) when it has a piece. Four workers kept ready instead of eight:
-level. The same probe, the queue: 1 KiB messages 5.5 -> 4.1-4.8 nJ/B at
+level. A lingering update's 64 KiB job on four threads instead of eight
+(probe/linger-4 against probe/energy-final, jobs 617-624): 18% less
+energy (1.55-1.60 against 1.89-1.98 nJ/B) and half the CPU time; in the
+benchmark long streams 7-12% slower solo (128 MiB 0.102 -> 0.114 ns/B)
+and 18-27% shared, 1 MiB 20% faster solo and 256 KiB 20% shared: a
+time-for-energy choice left to Zooko with the bound. The same probe, the queue: 1 KiB messages 5.5 -> 4.1-4.8 nJ/B at
 4x the speed; 64-byte messages 450-470 -> 520-580 nJ per message at 1.4x
 the speed (more threads poll: CPU per message 165 -> 290-325 ns).
 
