@@ -662,6 +662,15 @@ free slots taken oldest-returned first (jobs 651-654: 64 B 9%, 256 B
 5-10%): taken. The pool's slots, `callers`, `linger_until`, `registered`,
 and `sleepers` apart (probe/pool-lines, jobs 671-676): level, left out.
 
+**WORKER_IDLE's length** (jobs 682-693): 200 us level with 50; 15 us
+breaks lingering (workers without a piece sleep between updates: streams
+of 8 MiB 0.115 -> 0.27 ns/B) and read the continuous cells 5-10% faster,
+a gain that vanished when lingering was exempt from it (probe/idle-15-
+linger: level): likely the lingering stream's aftereffect on the cells
+after it in each round (eight cores hashing NEON at high power, then
+polling), not the queue's own. Left at 50 us; lingering's effect on its
+neighbours is one more cost for Zooko's bound.
+
 **The caller's own pieces on SME2** (September 28, night): run_job's
 caller hashing its later pieces on its own platform (SME2 under the
 turn) instead of NEON: level on the Mac from 1 to 128 MiB (jobs
