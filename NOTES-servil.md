@@ -812,6 +812,26 @@ with no length pass (a pass before SME2 kernels cost 25%).
 128 -> 9.7 ns, 256 -> 10.2, 512 and up 12.5); likely the same
 back-to-back effect; not measured natively.
 
+**The trades, measured again on the fixed benchmark** (September 28,
+morning; bench-hashes 92b21b2, whose continuous cells run in a phase of
+their own at full clock; each trade cherry-picked onto c46c57c as
+`trade/<name>`, Mac old/new/new/old full runs, new/old medians of the
+pooled samples, servil mt; `tmp/ab.py`). The calls after the gap move
+by up to 1.9x either way between identical code (their clock states), so
+only the continuous cells and the long streams read here:
+- `trade/members-32k` (messages under 32 KiB gathered, a gathered task
+  up to 256 KiB; jobs 743-746): continuous 16 KiB messages 26% slower
+  solo, 30% faster shared; the other continuous cells level (geometric
+  means solo 1.01, shared 0.98).
+- `trade/subtrees-32k` (subtree tasks of 32 KiB, batch tasks of 64 KiB;
+  jobs 747-750): continuous messages 3% faster (geometric mean, solo and
+  shared), 256 KiB-64 MiB 6-7% faster solo; continuous batches of 64
+  messages 11% slower solo, of 4096 14% slower shared.
+- `trade/linger-4` (a lingering update's job on four threads, 18% less
+  energy in probe/linger-4; jobs 751-754): streams of 4-128 MiB in 64
+  KiB pieces 2-7% slower solo and 15-41% slower shared, 1-2 MiB 13-26%
+  faster; continuous cells level.
+
 ## Rejected (with the reason; do not retry without new evidence)
 
 - **p4 as one NEON quad** (probe/p4-quad, September 27, 2026): four
