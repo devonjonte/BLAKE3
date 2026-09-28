@@ -627,6 +627,19 @@ wake costs before sleeping spends at most twice what knowing the future
 would; a program that stops updating leaves workers polling at most
 50 us.
 
+Its energy (probe/energy-new against probe/energy-old, jobs 560-567;
+`proc_pid_rusage` V6 `ri_energy_nj`, the kernel's estimate; Mac, 32 MiB
+in 64 KiB pieces with a copy per piece): `update` 450-480 pJ/B at 0.28-
+0.30 ns/B; `update_multithreaded` before lingering 405 pJ/B at 0.33,
+lingering 1.7-2.6 nJ/B at 0.13-0.23 ns/B: 4-6x the energy for 1.5-2.6x
+the speed. About eight cores stay busy (CPU time 1.1-1.8 ns per byte):
+each 64 KiB job wakes the workers its eight pieces want, and every woken
+worker polls between updates, hashing on NEON (more energy per byte than
+SME2) when it has a piece. Four workers kept ready instead of eight:
+level. The same probe, the queue: 1 KiB messages 5.5 -> 4.1-4.8 nJ/B at
+4x the speed; 64-byte messages 450-470 -> 520-580 nJ per message at 1.4x
+the speed (more threads poll: CPU per message 165 -> 290-325 ns).
+
 **The feed design, superseded** (candidate/queue-speed, September 28): a
 64-slot ring per queue beside a pool job, an engine thread doing intake,
 helping, and delivery. Lessons kept: the engine as both hasher and
