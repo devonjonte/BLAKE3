@@ -408,7 +408,7 @@ struct Line(AtomicUsize);
 
 /// Any value on a cache line of its own.
 #[repr(align(128))]
-pub(crate) struct OwnLine<T>(T);
+pub(crate) struct OwnLine<T>(pub(crate) T);
 
 impl<T> std::ops::Deref for OwnLine<T> {
     type Target = T;
