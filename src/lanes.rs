@@ -58,8 +58,10 @@
 //! # Waiting
 //!
 //! Nothing keeps a worker awake between calls (AGENTS.md, "Serve real
-//! programs"): a worker polls the slots only while a job is registered,
-//! and sleeps on a condition variable as soon as none is. So every call
+//! programs"): a worker polls the slots only while a job is registered
+//! (or a queue's delivery thread, or a lingering `Hasher`, holds the
+//! pool), and sleeps on a condition variable as soon as none is, or once
+//! it has found nothing to take for [`WORKER_IDLE`]. So every call
 //! meets sleeping workers, and a call wakes only as many as it can use
 //! (its pieces less one, within its thread budget): it wakes one itself,
 //! about 3 µs of the caller's time (a wake of all fifteen at once cost the
