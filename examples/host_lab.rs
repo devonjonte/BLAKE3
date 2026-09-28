@@ -104,10 +104,16 @@ fn burst_run(len: usize, bursts: usize, flight: usize) -> String {
     let mut free: Vec<Vec<u8>> = (0..flight).map(|_| Vec::with_capacity(len)).collect();
     let queue = Queue::messages(Mode::Hash, Efficiency::Time, Back(tx));
     let (mut submit_ns, mut submit_cycles, mut drain_ns) = (0u64, 0u64, 0u64);
+    let (mut submit_ins, mut drain_ins, mut copy_ins) = (0u64, 0u64, 0u64);
     for _ in 0..bursts {
+        let k0 = clocks::Counts::read();
         for b in &mut free {
             b.clear();
             b.extend_from_slice(black_box(&input));
+        }
+        if let (Some(k0), Some(k1)) = (k0, clocks::Counts::read()) {
+            let k = k1.since(k0);
+            copy_ins += k.p.instructions + k.e.instructions;
         }
         let c0 = clocks::Counts::read();
         let t = clocks::now();
@@ -118,7 +124,9 @@ fn burst_run(len: usize, bursts: usize, flight: usize) -> String {
         if let (Some(c0), Some(c1)) = (c0, clocks::Counts::read()) {
             let c = c1.since(c0);
             submit_cycles += c.p.cycles + c.e.cycles;
+            submit_ins += c.p.instructions + c.e.instructions;
         }
+        let d0 = clocks::Counts::read();
         let t = clocks::now();
         while free.len() < flight {
             let (b, h) = rx.recv().unwrap();
@@ -126,9 +134,13 @@ fn burst_run(len: usize, bursts: usize, flight: usize) -> String {
             free.push(b);
         }
         drain_ns += clocks::since_ns(t);
+        if let (Some(d0), Some(d1)) = (d0, clocks::Counts::read()) {
+            let d = d1.since(d0);
+            drain_ins += d.p.instructions + d.e.instructions;
+        }
     }
     let n = (bursts * flight) as u64;
-    format!("bursts {len} B, {flight} a burst: submit {} ns and {} cycles per msg; drain {} ns per msg", submit_ns / n, submit_cycles / n, drain_ns / n)
+    format!("bursts {len} B, {flight} a burst: submit {} ns, {} cycles, {} instructions per msg; drain {} ns, {} instructions per msg; copy {} instructions per msg", submit_ns / n, submit_cycles / n, submit_ins / n, drain_ns / n, drain_ins / n, copy_ins / n)
 }
 
 fn main() {
