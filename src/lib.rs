@@ -220,6 +220,7 @@ mod io;
 mod join;
 #[cfg(feature = "std")]
 mod lanes;
+pub use lanes::probe_push_ns;
 mod many;
 #[cfg(feature = "std")]
 mod queue;

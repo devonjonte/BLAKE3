@@ -1093,6 +1093,10 @@ pub(crate) struct Tasks {
     sme2_wake: Condvar,
 }
 
+pub static PROBE_NS: [AtomicUsize; 4] = [const { AtomicUsize::new(0) }; 4];
+/// Probe: (ns acquiring the list, ns holding it, ns in the wakes, pushes) since the last call.
+pub fn probe_push_ns() -> [usize; 4] { [0, 1, 2, 3].map(|i| PROBE_NS[i].swap(0, Ordering::Relaxed)) }
+
 pub(crate) static TASKS: Tasks = Tasks {
     list: Mutex::new(std::collections::VecDeque::new()),
     queued: AtomicUsize::new(0),
@@ -1167,7 +1171,9 @@ impl Tasks {
     /// thread first, then workers.
     pub(crate) fn push(&self, tasks: impl Iterator<Item = Task>) {
         let pool = pool();
+        let t0 = std::time::Instant::now();
         let mut list = lock_polling(&self.list);
+        let t1 = std::time::Instant::now();
         let before = list.len();
         list.extend(tasks);
         let queued = list.len();
@@ -1177,10 +1183,16 @@ impl Tasks {
         list.reserve(in_flight.saturating_sub(queued));
         self.queued.store(queued, Ordering::SeqCst);
         drop(list);
+        let t2 = std::time::Instant::now();
         if pool.sme2 && self.sme2_sleeps.load(Ordering::SeqCst) && *self.sme2_asleep.lock().unwrap() {
             self.sme2_wake.notify_one();
         }
         pool.wake_for(in_flight.saturating_sub(usize::from(pool.sme2)));
+        let t3 = std::time::Instant::now();
+        PROBE_NS[0].fetch_add((t1 - t0).as_nanos() as usize, Ordering::Relaxed);
+        PROBE_NS[1].fetch_add((t2 - t1).as_nanos() as usize, Ordering::Relaxed);
+        PROBE_NS[2].fetch_add((t3 - t2).as_nanos() as usize, Ordering::Relaxed);
+        PROBE_NS[3].fetch_add(1, Ordering::Relaxed);
     }
 
     /// A waiting task, unless none waits or another thread is taking one.

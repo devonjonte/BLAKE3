@@ -45,6 +45,9 @@ fn main() {
                 });
                 results.push(r);
             }
+            let p = blake3_servil::probe_push_ns();
+            let pushes = p[3].max(1);
+            println!("  push, per push over all runs: acquire {} ns, hold {} ns, wakes {} ns ({} pushes)", p[0] / pushes, p[1] / pushes, p[2] / pushes, pushes);
             let r = &results[1];
             for (c, (per, sub, wait)) in r.iter().enumerate() {
                 println!("{len} B, {copies} program(s), copy {c}: {per} ns/msg, submit {sub} ns, waiting for a buffer {wait} ns");
