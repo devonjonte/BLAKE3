@@ -392,6 +392,16 @@ caller's own pieces on SME2 and no idle pollers beat the pool on both.
 At background QoS the helpers make the call 2.2x faster at about twice
 the energy (NEON on E-cores 225 pJ/B against SME2's 85).
 
+**The energy counter's repeatability** (September 28, night,
+probe/energy-repeat, job 698; `clocks::process_energy_nj`, M4 Max, each
+after 50 ms asleep, two sets of ten): a 100 ms integer spin on a P-core
+1.67-3.09 W, medians 2.90 and 2.97 W; hash over 64 MiB 192-422 pJ/B,
+medians 262 and 267; hash_multithreaded over 64 MiB 281-956 pJ/B, medians
+651 and 685. Single readings spread 1.5-3.4x (the low ones suggest the
+kernel attributes energy late, in lumps); medians of ten agree within
+about 5%. An energy cell needs many repeats and medians, and a check of
+how the counter lags.
+
 **A user's Apple M3 Ultra** (20 P + 8 E cores, two dies, no SME2; fork
 b74b59e, bench d28326e, quiet; kept in the fork's tmp/AppleM3Ultra.darwin25/).
 What it tells us about the machines without SME2 (every M1-M3):
