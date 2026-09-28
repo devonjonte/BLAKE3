@@ -647,6 +647,15 @@ sleepers itself and each woken worker up to three of those owed, instead
 of one and then all the rest: level from 1 to 8 MiB and on batches of
 16384 and 65536 after the gap; left out.
 
+**Hot words on lines of their own** (September 28, night, Mac): the task
+list's lock, its `queued` count, and the in-flight count apart (jobs
+655-664: 16 KiB messages 14% faster solo, 9% shared, 64 B level), the
+queue's submitter lock, returned-slots lock, delivery lock, and `active`
+apart (jobs 665-670: 256 B 5% solo and 11% shared, 1 KiB 6%, 16 KiB 3%),
+free slots taken oldest-returned first (jobs 651-654: 64 B 9%, 256 B
+5-10%): taken. The pool's slots, `callers`, `linger_until`, `registered`,
+and `sleepers` apart (probe/pool-lines, jobs 671-676): level, left out.
+
 **The caller's own pieces on SME2** (September 28, night): run_job's
 caller hashing its later pieces on its own platform (SME2 under the
 turn) instead of NEON: level on the Mac from 1 to 128 MiB (jobs
