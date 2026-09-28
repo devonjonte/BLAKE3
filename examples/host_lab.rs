@@ -1,37 +1,72 @@
-use blake3_servil::lanes::probe::*;
-use blake3_servil::{Efficiency, Hash, Mode, PieceHandler, Queue};
-use std::sync::{atomic::Ordering::Relaxed, mpsc};
-enum B { P(Vec<u8>), D(Hash) }
-struct P(mpsc::Sender<B>);
-impl PieceHandler for P {
+//! Probe (probe/queue-submit): where a program's thread spends its time
+//! per message through Queue::messages with 1024 buffers in flight (the
+//! benchmark's continuous use case): the wait for a returned buffer, the
+//! copy, and submit, each timed; against a loop of hash() over the same
+//! copies. Wall time (clocks).
+use blake3_servil::{Efficiency, Hash, MessageHandler, Mode, Queue};
+use std::hint::black_box;
+use std::sync::mpsc;
+
+struct Back(mpsc::Sender<Vec<u8>>);
+impl MessageHandler for Back {
     type Buffer = Vec<u8>;
-    fn piece_done(&mut self, b: Vec<u8>) { self.0.send(B::P(b)).unwrap(); }
-    fn finished(&mut self, h: Hash) { self.0.send(B::D(h)).unwrap(); }
+    fn hashed(&mut self, buffer: Vec<u8>, hash: Hash) {
+        black_box(hash);
+        self.0.send(buffer).unwrap();
+    }
 }
+
+fn run(len: usize, n: usize, flight: usize, timed: bool) -> (u64, u64, u64, u64) {
+    let input = vec![7u8; len];
+    let (tx, rx) = mpsc::channel();
+    let mut free: Vec<Vec<u8>> = (0..flight).map(|_| vec![0u8; len]).collect();
+    let (mut recv_ns, mut submit_ns, mut waits) = (0, 0, 0);
+    let start = clocks::now();
+    let queue = Queue::messages(Mode::Hash, Efficiency::Time, Back(tx));
+    for _ in 0..n {
+        let t = if timed { Some(clocks::now()) } else { None };
+        let mut b = match free.pop() {
+            Some(b) => b,
+            None => match rx.try_recv() {
+                Ok(b) => b,
+                Err(_) => {
+                    waits += 1;
+                    rx.recv().unwrap()
+                }
+            },
+        };
+        if let Some(t) = t { recv_ns += clocks::since_ns(t); }
+        b.copy_from_slice(&input);
+        let t = if timed { Some(clocks::now()) } else { None };
+        queue.submit(b);
+        if let Some(t) = t { submit_ns += clocks::since_ns(t); }
+    }
+    let mut back = 0;
+    while free.len() + back < flight {
+        rx.recv().unwrap();
+        back += 1;
+    }
+    (clocks::since_ns(start), recv_ns, submit_ns, waits)
+}
+
 fn main() {
     blake3_servil::initialize_multithreaded();
-    let input = vec![5u8; 32 << 20];
-    let (tx, rx) = mpsc::channel();
-    let mut free: Vec<Vec<u8>> = (0..4).map(|_| Vec::with_capacity(65536)).collect();
-    let (mut copy_ns, mut wait_ns) = (0u64, 0u64);
-    let t = std::time::Instant::now();
-    for _ in 0..10 {
-        let q = Queue::pieces(Mode::Hash, Efficiency::Time, P(tx.clone()));
-        for piece in input.chunks(65536) {
-            let w = std::time::Instant::now();
-            let mut b = match free.pop() { Some(b) => b, None => loop { if let B::P(b) = rx.recv().unwrap() { break b } } };
-            wait_ns += w.elapsed().as_nanos() as u64;
-            let c = std::time::Instant::now();
-            b.clear(); b.extend_from_slice(piece);
-            copy_ns += c.elapsed().as_nanos() as u64;
-            q.submit(b);
+    for len in [64usize, 256, 1024] {
+        let n = 200_000;
+        let input = vec![7u8; len];
+        let mut buffer = vec![0u8; len];
+        let start = clocks::now();
+        for _ in 0..n {
+            buffer.copy_from_slice(&input);
+            black_box(blake3_servil::hash(black_box(&buffer)));
         }
-        q.finish();
-        loop { match rx.recv().unwrap() { B::P(b) => free.push(b), B::D(_) => break } }
+        let hash_ns = clocks::since_ns(start) / n as u64;
+        for timed in [false, true] {
+            let mut runs: Vec<_> = (0..7).map(|_| run(len, n, 1024, timed)).collect();
+            runs.sort();
+            let (total, recv, submit, waits) = runs[3];
+            let n = n as u64;
+            println!("{len} B, timed {timed}: {} ns/msg (hash() loop {hash_ns}); take a buffer {} ns, submit {} ns; waits {waits}", total / n, recv / n, submit / n);
+        }
     }
-    let pieces = 10 * 512;
-    println!("ns/B {:.3}", t.elapsed().as_nanos() as f64 / (10.0 * input.len() as f64));
-    println!("producer per piece: wait {} ns, copy {} ns, submit {} ns", wait_ns / pieces, copy_ns / pieces, SUBMIT_NS.load(Relaxed) / SUBMITS.load(Relaxed));
-    let runs = [RUNS[0].load(Relaxed), RUNS[1].load(Relaxed)];
-    println!("tasks: sme2 thread {} (avg {} ns), workers {} (avg {} ns), push->pop avg {} ns, last done->delivered avg {} ns", runs[0], RUN_NS[0].load(Relaxed) / runs[0].max(1), runs[1], RUN_NS[1].load(Relaxed) / runs[1].max(1), POP_WAIT.load(Relaxed) / (runs[0] + runs[1]), DONE_TO_DELIVERED.load(Relaxed) / DELIVERS.load(Relaxed).max(1));
 }
