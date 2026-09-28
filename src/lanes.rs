@@ -965,7 +965,10 @@ impl Pool {
 
 /// The longest part of a queue's input planned as tasks
 /// ([`crate::plan_subtrees`]): a task is a whole subtree within one part.
-pub(crate) const TASK_LEN: usize = 64 * CHUNK_LEN;
+pub(crate) const TASK_LEN: usize = 32 * CHUNK_LEN;
+
+/// The most bytes of fixed-length messages one task hashes.
+pub(crate) const BATCH_TASK_LEN: usize = 64 * CHUNK_LEN;
 
 /// One piece of a queue's work (crate::queue), hashed by whichever thread
 /// pops it from [`TASKS`]: a whole subtree at chunk `counter` of a message,

@@ -308,7 +308,7 @@ impl<I> State<I> {
     fn close_open(&mut self, waited: bool) -> Option<Task> {
         // Small batches fill a task up to a task's bytes (short messages
         // fill all 64 places: 4 KiB messages measured 10-30% slower at 16).
-        let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS || (open.batch.is_some() && open.len >= crate::lanes::TASK_LEN));
+        let full = self.open.as_ref().is_some_and(|open| open.members == crate::lanes::MEMBERS || (open.batch.is_some() && open.len >= crate::lanes::BATCH_TASK_LEN));
         if full || waited { self.open.take() } else { None }
     }
 }
@@ -357,7 +357,7 @@ const TASK_MIN: usize = crate::SME2_SIZED_LEN;
 /// (a task's bytes): shorter ones go several to a task (on the Mac a task
 /// of its own cost a batch of 16 64-byte messages 68 ns per message, twice
 /// hashing it at delivery, and one of 64 messages shared 36-50).
-const BATCH_TASK_MIN: usize = crate::lanes::TASK_LEN;
+const BATCH_TASK_MIN: usize = crate::lanes::BATCH_TASK_LEN;
 
 impl<H: Send + 'static, S: 'static> Queue<H, S> {
     fn new<I: Send + 'static>(mode: Mode, efficiency: Efficiency, handler: H, message_len: usize) -> Self
@@ -729,7 +729,7 @@ impl<H: FixedHandler> Queue<H, shape::Fixed> {
             // The digests' space is the program's, in the slot with its
             // buffer, which stays put until delivery.
             let digests = digests.as_mut().as_mut_ptr();
-            let per_task = (crate::lanes::TASK_LEN / slot).max(1);
+            let per_task = (crate::lanes::BATCH_TASK_LEN / slot).max(1);
             for (index, range) in bytes.chunks(per_task * slot).enumerate() {
                 let mut task = Task::of(range, 0);
                 task.batch = Some(message_len);
