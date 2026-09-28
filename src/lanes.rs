@@ -1134,7 +1134,7 @@ fn sme2_main() {
         idle = false;
         while TASKS.queued.load(Ordering::SeqCst) > 0 || pool.registered.load(Ordering::SeqCst) > 0 {
             match TASKS.pop() {
-                Some(task) if task.members > 0 && task.batch.is_none() => {
+                Some(task) if task.members > 0 => {
                     // Short messages side by side run faster on NEON than
                     // through an SME2 session per task (64-byte messages
                     // 14-15% faster on the Mac); below 16 KiB the other
