@@ -244,8 +244,9 @@ pub(crate) fn linger() {
     pool.wake_for(LINGER_WORKERS);
 }
 
-/// The workers a lingering Hasher keeps ready: a 64 KiB piece's cut.
-const LINGER_WORKERS: usize = 12;
+/// The workers a lingering Hasher keeps ready, and the threads its 64 KiB
+/// jobs use (eight pieces of 8 KiB).
+pub(crate) const LINGER_WORKERS: usize = 8;
 
 /// Whether workers are polling for a lingering Hasher, so a whole subtree
 /// shorter than MIN_SPLIT_LEN pays to go over the pool: lingering, and the
