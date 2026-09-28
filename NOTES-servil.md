@@ -602,6 +602,18 @@ shared 16 KiB 0.142 -> 0.089 ns/B, solo 0.068 -> 0.072 (+6%, fewer tasks
 to spread): a trade for Zooko. Next to look at: the SME2 thread's turn
 per task, the delivery thread's replay per 16 KiB message.
 
+**The SME2 thread and gathered tasks** (September 28, night, Mac, jobs
+588-603). With no SME2 thread (probe/no-sme2-thread, NEON workers
+hashing every task): 64-byte messages 15-20% faster, 16 KiB 10-15%,
+batches of 16 about 10% and of 65536 7%, 1 KiB messages 15-20% slower
+(or noise: 0.12-0.19 across runs), the rest level. Taken: the SME2
+thread runs gathered tasks (short messages, small batches) on NEON
+(64-byte messages 14-15% faster solo and shared, batches of 16 and 64
+10-15%, the rest level; VM no regression). Open for Zooko: whether the
+SME2 thread pays for subtree tasks at all in the time-saving queue
+(16 KiB and 65536-message batches came out faster without it), against
+SME2's lower energy per byte.
+
 **Idle workers sleep** (September 28, night): a worker, and the SME2
 thread, that finds nothing for 50 us (`lanes::WORKER_IDLE`, about a
 wake's cost) sleeps even while a job or a queue holds the pool; pushes
