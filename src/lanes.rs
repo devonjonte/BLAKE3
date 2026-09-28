@@ -241,9 +241,14 @@ pub(crate) fn linger() {
 const LINGER_WORKERS: usize = 8;
 
 /// Whether workers are polling for a lingering Hasher, so a whole subtree
-/// shorter than MIN_SPLIT_LEN pays to go over the pool.
+/// shorter than MIN_SPLIT_LEN pays to go over the pool: lingering, and the
+/// workers it wants awake (a wake takes tens of microseconds to land, and
+/// a job the caller finds alone runs on NEON, slower than its own SME2:
+/// 256 KiB messages in 64 KiB pieces 10% slower on the Mac, jobs 508-511).
 pub(crate) fn lingering() -> bool {
-    pool().lingering()
+    let pool = pool();
+    let wanted = LINGER_WORKERS.min(pool.cpus - 1);
+    wanted > 0 && pool.lingering() && pool.cpus - 1 - pool.sleepers.load(Ordering::SeqCst) >= wanted
 }
 
 /// The two child chaining values of the subtree `input` at chunk
