@@ -675,7 +675,10 @@ impl<H: FixedHandler> Queue<H, shape::Fixed> {
                 task.out = unsafe { digests.add(index * per_task) } as *mut u8;
                 out.push(task);
             }
-            tasks && bytes.len() >= TASK_MIN
+            // Batches the SME2 kernels take hash on the pool (its SME2
+            // thread keeps the unit in its fast state), as do long ones;
+            // the rest at delivery.
+            tasks && (bytes.len() >= TASK_MIN || crate::many::sme2_sized(message_len, bytes.len() / slot))
         });
     }
 }
