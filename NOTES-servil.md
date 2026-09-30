@@ -1257,3 +1257,16 @@ tonight's native measurements use a GitHub-sourced host_lab diagnostic
 that calls the checkout's tool rather than its installed copy. Candidate
 work stays separate from promotion. Bench-hashes NEXT-STEPS holds the
 native and historical validation evidence when it arrives.
+
+### The Python rule's fixed-point boundary (September 30)
+
+The historical report check exposed a rare disagreement between the
+Python and Rust two-speed rules at a ratio boundary. Python carried
+exact Fractions; Rust carried Q64.64 samples and a half-up Q64 midpoint.
+The Python twin now uses the same representation and midpoint. Two
+explicit boundary vectors extend the shared file (13 total). For
+2499/2000, the independently calculated Q64 representation is
+23049206720100084744, 3/288230376151711744000 below the exact ratio;
+against 1 its permille ratio rounds to 1249, so it is one speed. A value
+above that boundary remains two. Seven clocks tests and all 13 Python
+vectors agree. The Rust rule and measured samples are unchanged.

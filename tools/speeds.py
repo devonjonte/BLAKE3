@@ -4,7 +4,8 @@ run at two speeds. perf_regress, losses.py, ab.py, and every scratch probe
 in Python import it; both implementations are held to the vectors in
 clocks/speeds_vectors.txt (`pypy3 tools/speeds.py` checks them).
 
-Samples are exact nanoseconds per unit (Fraction). The rule: sort; a cell
+Samples enter as exact nanoseconds per unit (Fraction), then use the
+same Q64.64 representation and half-up midpoint as Rust. The rule: sort; a cell
 has two speeds when two neighbours in sorted order are GAP_PERMILLE of the
 median or more apart, with MIN_SHARE_PERMILLE of the samples or more on
 each side, and the slower side's median is RATIO_PERMILLE of the faster's
@@ -20,10 +21,21 @@ MIN_SHARE_PERMILLE = 100
 RATIO_PERMILLE = 1250
 
 
+Q64 = 1 << 64
+
+
+def fixed(value):
+    """Rust's per_unit: nearest Q64.64, half up, as an exact Fraction."""
+    value = Fraction(value)
+    assert value >= 0, "a sample is non-negative"
+    n, d = value.numerator, value.denominator
+    return Fraction((n * Q64 * 2 + d) // (2 * d), Q64)
+
+
 def median_of_sorted(v):
     assert v, "a median needs a sample"
     m = len(v) // 2
-    return v[m] if len(v) % 2 else (v[m - 1] + v[m]) / 2
+    return v[m] if len(v) % 2 else fixed((v[m - 1] + v[m]) / 2)
 
 
 def ratio_permille(a, b):
@@ -34,6 +46,7 @@ def ratio_permille(a, b):
 
 def split(v):
     """The index in sorted `v` of the first slow sample, or None for one speed."""
+    v = [fixed(x) for x in v]
     n = len(v)
     assert n > 0, "a split needs a sample"
     median = median_of_sorted(v)
@@ -54,7 +67,7 @@ def split(v):
 
 def speeds(values):
     """[(median, count)], faster first: one speed, or two."""
-    v = sorted(values)
+    v = sorted(fixed(x) for x in values)
     at = split(v)
     parts = [v] if at is None else [v[:at], v[at:]]
     return [(median_of_sorted(p), len(p)) for p in parts]

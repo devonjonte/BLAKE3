@@ -24,3 +24,9 @@
 100/1 -> none
 # fast side under a tenth: 1 of 20 fast
 100/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1, 200/1 -> none
+# Q64.64 ratio boundary: 2499/2000 rounds to 23049206720100084744
+# ticks (3/288230376151711744000 below exact); its ratio rounds to 1249.
+# The Python twin uses that representation, just as Rust does.
+1/1, 2499/2000 -> none
+# A value above that boundary remains two speeds.
+1/1, 124951/100000 -> 1
