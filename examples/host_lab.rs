@@ -19,11 +19,16 @@ fn main() {
     assert!(bench.join(".git").exists(), "runner keeps a benchmark checkout");
     checked(Command::new("git").arg("-C").arg(&bench).args(["fetch", "--quiet", "origin"]));
     let jobs = [
-        ("old-1", "f3515ab", "1820efb", false),
-        ("new-1", "9cf2787", "1820efb", false),
-        ("new-2", "9cf2787", "1820efb", false),
-        ("old-2", "f3515ab", "1820efb", false),
+        ("a1", "805324f", "1820efb", false),
+        ("ap1", "c5ac3a3", "1820efb", false),
+        ("b1", "805324f", "d005716", false),
+        ("bp1", "c5ac3a3", "d005716", false),
+        ("ap2", "c5ac3a3", "1820efb", false),
+        ("a2", "805324f", "1820efb", false),
+        ("bp2", "c5ac3a3", "d005716", false),
+        ("b2", "805324f", "d005716", false),
     ];
+
     let python = "/opt/homebrew/bin/pypy3";
     assert!(Path::new(python).exists(), "Mac runner's PyPy is installed");
     for (label, bench_commit, fork_commit, all) in jobs {
