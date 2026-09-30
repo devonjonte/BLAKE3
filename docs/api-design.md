@@ -259,7 +259,7 @@ records wall time and cycles; energy cells wait for a validated counter.
 **Keeps up: three shapes**, on one thread and several. Whole messages
 and batches use their single-threaded or multithreaded entry points.
 Pieces use `Hasher::update` in both columns. Each message or batch
-comes after the gap. Message lengths: 64 B-128 MiB; batches: 1-262144
+comes after a gap, of each kind. Message lengths: 64 B-128 MiB; batches: 1-262144
 messages of 64 B. Pieces arrive as copied reads of up to 64 KiB, then
 `finalize` returns the digest.
 
@@ -280,15 +280,18 @@ use `hash` or `hash_multithreaded`, pieces `update` or
 `hash_many_multithreaded`. The single-threaded cells also measure the
 one-thread column's answer when it has always more ready.
 
-**The gap** (Zooko, September 28, evening): a complete walk of a fixed
-buffer larger than the caches, then integer work to fill any remaining
-part of 1 ms; write the input (timed separately, outside the hash sample),
-then call. Built with 128 MiB per measuring thread. The gap lasts at
-least 1 ms and at least the complete sweep. This replaces neighbouring
-cells' accidental cache effects with specified work and freshly produced
-input. The memory-working timing helper is
+**The gap**, of two kinds, each measured (Zooko, September 30, 2026;
+`clocks::Gap`). *Amid other work*: a fixed other program (about 1 MiB of
+distinct code, run once), a complete walk of a kept 128 MiB buffer, then
+integer work to fill any remaining part of 1 ms, as on a machine busy
+with other programs. *After idling*: a 1 ms sleep, as a server waiting
+for its next request. Then the program writes the input (timed
+separately, outside the hash sample) and calls. The timing helper is
 `clocks::measure_after_gaps_prepared`; preparation and hashing each carry
-wall time and thread counts separately.
+wall time and thread counts separately. The other code is there because
+a data walk alone left the call's code in the core's instruction cache,
+by an amount the harness's own work decided (bench-hashes NOTES, "The
+cause: where the hash's code is").
 
 - perf_regress judges after-gap synchronous calls at 20%, continuous
   cells at 3% solo and 10% shared.

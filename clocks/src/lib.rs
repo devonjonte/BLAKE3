@@ -38,12 +38,13 @@
 //! ([`measure`]), or, where every call must be timed alone (a call after
 //! a gap), as the sum of many such readings, each starting at a phase
 //! against the ticks that nothing correlates with the call
-//! ([`measure_after_gaps`]): the sum's rounding averages out. A median or
+//! ([`measure_after_gaps_prepared`]): the sum's rounding averages out. A median or
 //! a minimum of single short readings keeps the rounding; take neither.
 
 use std::time::Instant;
 
 pub mod load;
+pub mod other_code;
 pub mod speeds;
 
 /// The wall clock, as reports name it.
@@ -181,33 +182,6 @@ pub fn measure(batches: usize, batch_ns: u64, mut f: impl FnMut()) -> Vec<Batch>
         .collect()
 }
 
-/// `calls` calls of `f`, each after the calling thread has spent `gap_ns`
-/// on other work of its own ([`busy_work`]: integer arithmetic in
-/// registers), as a program that hashes now and then between other work
-/// calls: the pool's workers have fallen asleep, the caller's core stays
-/// busy (Zooko, September 28, 2026: a busy gap for steadier results; an
-/// idle core between calls is left unmeasured). One [`Batch`]: the wall
-/// time inside each call, summed (see "Resolution" above for why a sum),
-/// and the counts around each call alone, summed (their reads outside the
-/// timed interval).
-pub fn measure_after_gaps(calls: u64, gap_ns: u64, mut f: impl FnMut()) -> Batch {
-    assert!(calls > 0, "a measurement takes at least one call");
-    let mut wall_ns = 0;
-    let mut counts: Option<Counts> = Some(Counts::default());
-    let started_ns = load::now_ns();
-    for _ in 0..calls {
-        load::tick();
-        busy_work(gap_ns);
-        let before = Counts::read();
-        let t = now();
-        f();
-        wall_ns += since_ns(t);
-        let call = before.zip(Counts::read()).map(|(before, after)| after.since(before));
-        counts = counts.zip(call).map(|(sum, call)| sum.plus(call));
-    }
-    Batch { calls, wall_ns, counts, started_ns }
-}
-
 /// A measurement with the producer's preparation timed separately.
 /// `calls` contains only the hashing calls; `preparation` contains only
 /// the writes that produce their input. The gap belongs to neither.
@@ -217,44 +191,71 @@ pub struct PreparedBatch {
     pub preparation: Batch,
 }
 
-/// Like [`measure_after_gaps`], with a memory-working gap and a producer
-/// that writes the input before each call. The caller owns `work` and
-/// `input`, keeps them across samples, and chooses `work` larger than the
-/// caches whose previous contents the experiment should displace.
-///
-/// Each gap walks all of `work` at 64-byte intervals, spends any
-/// remaining `gap_ns` on integer work, then warms this helper's own timing
-/// path (the call's code stays cold). A complete walk is the minimum:
-/// on a machine where it takes longer, the gap lasts longer. Preparation
-/// follows the gap, then the call. Both record wall time and thread counts
-/// separately, with counts read outside their wall intervals. Requires
-/// at least one call and a nonempty work buffer.
+/// What a program does between two calls it makes now and then (Zooko,
+/// September 30, 2026: both are measured, and compared).
+#[derive(Clone, Copy, Debug)]
+pub enum Gap<'a> {
+    /// Idling: the thread sleeps, as a network server waits for its next
+    /// packet. The core may slow, power down, or pass the thread to
+    /// another core; the calls after it run at whatever speeds follow.
+    Idle,
+    /// Other work: a fixed other program ([`other_code::run`], about
+    /// 1 MiB of distinct code, which takes the call's code out of the
+    /// core's instruction cache), then a walk of all of this buffer at
+    /// 64-byte intervals (its data out of the caches the buffer
+    /// exceeds), then integer work for the rest of the gap, as on a
+    /// machine busy with other programs. The caller keeps the buffer
+    /// across samples and chooses it larger than those caches.
+    Busy(&'a [u8]),
+}
+
+impl Gap<'_> {
+    /// Spend at least `gap_ns` as this gap describes: an idle gap sleeps
+    /// `gap_ns`; a busy one runs its whole program, even past `gap_ns`.
+    pub fn spend(&self, gap_ns: u64) {
+        match self {
+            Gap::Idle => std::thread::sleep(std::time::Duration::from_nanos(gap_ns)),
+            Gap::Busy(work) => {
+                let started = now();
+                other_code::run();
+                let mut sum = 0u64;
+                for &byte in std::hint::black_box(*work).iter().step_by(64) {
+                    sum = sum.wrapping_add(u64::from(byte));
+                }
+                std::hint::black_box(sum);
+                busy_work(gap_ns.saturating_sub(since_ns(started)));
+            }
+        }
+    }
+}
+
+/// `calls` calls of `f`, each after its own `gap` of at least `gap_ns`
+/// ([`Gap::spend`]), with a producer that writes the input after the gap,
+/// before the call. The gap belongs to neither interval: after it, this
+/// helper warms its own timing path (a counts read, a clock read), so the
+/// interval measures the call, whose code stays as the gap left it. The
+/// preparation and the call each record wall time and thread counts
+/// (counts read outside the wall intervals), summed over the calls (see
+/// "Resolution" above for why a sum). Requires at least one call, and a
+/// nonempty buffer for a busy gap.
 pub fn measure_after_gaps_prepared<T: ?Sized>(
     calls: u64,
+    gap: Gap,
     gap_ns: u64,
-    work: &[u8],
     input: &mut T,
     mut prepare: impl FnMut(&mut T),
     mut f: impl FnMut(&T),
 ) -> PreparedBatch {
     assert!(calls > 0, "a measurement takes at least one call");
-    assert!(!work.is_empty(), "a memory-working gap needs a nonempty work buffer");
+    if let Gap::Busy(work) = gap {
+        assert!(!work.is_empty(), "a busy gap needs a nonempty work buffer");
+    }
     let started_ns = load::now_ns();
     let empty = || Batch { calls, wall_ns: 0, counts: Some(Counts::default()), started_ns };
     let mut measured = PreparedBatch { calls: empty(), preparation: empty() };
     for _ in 0..calls {
         load::tick();
-        let started = now();
-        let mut sum = 0u64;
-        for &byte in std::hint::black_box(work).iter().step_by(64) {
-            sum = sum.wrapping_add(u64::from(byte));
-        }
-        std::hint::black_box(sum);
-        busy_work(gap_ns.saturating_sub(since_ns(started)));
-        // The sweep also evicted this helper's own code. Warm the timing
-        // path (a counts read, a clock read) so the interval measures the
-        // call, and any layout of this crate stays out of it; the call's
-        // code stays cold, as the sweep left it.
+        gap.spend(gap_ns);
         std::hint::black_box(Counts::read());
         std::hint::black_box(since_ns(now()));
 
@@ -443,17 +444,6 @@ mod tests {
     }
 
     #[test]
-    fn calls_after_gaps_sum_their_own_time_alone() {
-        let mut calls = 0;
-        let b = measure_after_gaps(5, 1_000_000, || {
-            calls += 1;
-            std::hint::black_box((0..100u64).sum::<u64>());
-        });
-        assert_eq!((calls, b.calls), (5, 5));
-        assert!(b.wall_ns > 0 && b.wall_ns < 5_000_000, "the sleeps stay out of the sum: {b:?}");
-    }
-
-    #[test]
     fn counts_subtract_and_rate() {
         let later = Counts { p: Level { cycles: 4_400, instructions: 9_000, time_ns: 1_000 }, e: Level::default() };
         let d = later.since(Counts::default());
@@ -464,7 +454,7 @@ mod tests {
         let mut input = 0;
         let mut observed = Vec::new();
         let started = now();
-        let measured = measure_after_gaps_prepared(3, 1_000_000, &[7; 128], &mut input,
+        let measured = measure_after_gaps_prepared(3, Gap::Busy(&[7; 128]), 1_000_000, &mut input,
             |input| { *input += 1; busy_work(100_000); },
             |input| { observed.push(*input); busy_work(50_000); });
         assert_eq!(observed, [1, 2, 3]);
@@ -477,8 +467,18 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "nonempty work buffer")]
-    fn prepared_calls_require_work() {
-        measure_after_gaps_prepared(1, 0, &[], &mut (), |_| {}, |_| {});
+    fn busy_gaps_require_work() {
+        measure_after_gaps_prepared(1, Gap::Busy(&[]), 0, &mut (), |_| {}, |_| {});
+    }
+
+    #[test]
+    fn idle_gaps_sleep_outside_the_intervals() {
+        let mut calls = 0;
+        let started = now();
+        let measured = measure_after_gaps_prepared(5, Gap::Idle, 1_000_000, &mut calls, |c| *c += 1, |_| busy_work(10_000));
+        assert_eq!((calls, measured.calls.calls), (5, 5));
+        assert!(since_ns(started) >= 5_000_000, "each gap sleeps its length");
+        assert!(measured.calls.wall_ns < 5_000_000, "the sleeps stay out of the sum: {measured:?}");
     }
 
 }

@@ -116,7 +116,7 @@ CONTROL = "sha256"
 SUBJECTS = ["blake3-servil-st", "blake3-servil-mt"]
 CONTENDERS = [CONTROL] + SUBJECTS
 # The benchmark's use cases (FROZEN.md, September 28, 2026): the
-# synchronous calls, each after the gap (a memory-working gap of at least 1 ms), and the queue's
+# synchronous calls, each after a gap (amid other work, or after idling), and the queue's
 # continuous ones. Points name the code paths and boundaries, and none of
 # the plateau sizes the published graph needs: one message on the scalar
 # kernel (64 B, 1 KiB), the hybrids (2304 B, 4 KiB, 7935 B: a partial final
@@ -129,17 +129,23 @@ CONTENDERS = [CONTROL] + SUBJECTS
 # (16, 256) and as tasks of their own (4096). A call after the gap costs
 # the gap, so a cell whose calls take under about 2 us (the benchmark's
 # GAP_SAMPLE_NS) costs one gap per call summed: few such points.
-AFTER_GAP = {"OneMessage", "ManyMessages", "Streaming"}
+# The idle use cases make the same calls after 1 ms of sleep (Zooko,
+# September 30, 2026): a few points at the same margin.
+AFTER_GAP = {"OneMessage", "ManyMessages", "Streaming", "IdleOneMessage", "IdleManyMessages", "IdleStreaming"}
 CONTINUOUS = {"ContinuousMessages", "ContinuousBatches", "LentMessages", "LentPieces", "LentBatches"}
 USE_CASES = AFTER_GAP | CONTINUOUS
 # The command line names a point by its use case's prefix and its label
 # (bench-hashes' label_prefix); the samples file by the two apart.
-PREFIX = {"OneMessage": "", "ManyMessages": "", "Streaming": "streamed ", "ContinuousMessages": "continuous ",
+PREFIX = {"OneMessage": "", "ManyMessages": "", "Streaming": "streamed ", "IdleOneMessage": "idle ", "IdleManyMessages": "idle ",
+          "IdleStreaming": "idle streamed ", "ContinuousMessages": "continuous ",
           "ContinuousBatches": "continuous batch ", "LentMessages": "lent ", "LentPieces": "lent streamed ", "LentBatches": "lent batch "}
 POINTS_BY_USE_CASE = {
     "OneMessage": ["64 B", "1 KiB", "2304 B", "4 KiB", "7935 B", "16 KiB", "64 KiB", "256 KiB", "1 MiB", "8 MiB"],
     "ManyMessages": ["1", "4", "16", "64", "1024", "16384"],
     "Streaming": ["64 B", "64 KiB", "1 MiB", "8 MiB"],
+    "IdleOneMessage": ["64 B", "4 KiB", "64 KiB", "1 MiB"],
+    "IdleManyMessages": ["16"],
+    "IdleStreaming": ["64 KiB"],
     "ContinuousMessages": ["64 B", "1 KiB", "16 KiB", "64 KiB", "1 MiB"],
     "ContinuousBatches": ["16", "256", "4096"],
     "LentMessages": ["64 B", "64 KiB", "1 MiB"],
