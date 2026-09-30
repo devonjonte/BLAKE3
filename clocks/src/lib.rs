@@ -210,8 +210,9 @@ pub struct PreparedBatch {
 /// `input`, keeps them across samples, and chooses `work` larger than the
 /// caches whose previous contents the experiment should displace.
 ///
-/// Each gap walks all of `work` at 64-byte intervals, then spends any
-/// remaining `gap_ns` on integer work. A complete walk is the minimum:
+/// Each gap walks all of `work` at 64-byte intervals, spends any
+/// remaining `gap_ns` on integer work, then warms this helper's own timing
+/// path (the call's code stays cold). A complete walk is the minimum:
 /// on a machine where it takes longer, the gap lasts longer. Preparation
 /// follows the gap, then the call. Both record wall time and thread counts
 /// separately, with counts read outside their wall intervals. Requires
@@ -236,6 +237,12 @@ pub fn measure_after_gaps_prepared<T: ?Sized>(
         }
         std::hint::black_box(sum);
         busy_work(gap_ns.saturating_sub(since_ns(started)));
+        // The sweep also evicted this helper's own code. Warm the timing
+        // path (a counts read, a clock read) so the interval measures the
+        // call, and any layout of this crate stays out of it; the call's
+        // code stays cold, as the sweep left it.
+        std::hint::black_box(Counts::read());
+        std::hint::black_box(since_ns(now()));
 
         let before = Counts::read();
         let t = now();
