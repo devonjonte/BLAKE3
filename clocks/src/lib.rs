@@ -196,6 +196,64 @@ pub fn measure_after_gaps(calls: u64, gap_ns: u64, mut f: impl FnMut()) -> Batch
     Batch { calls, wall_ns, counts }
 }
 
+/// A measurement with the producer's preparation timed separately.
+/// `calls` contains only the hashing calls; `preparation` contains only
+/// the writes that produce their input. The gap belongs to neither.
+#[derive(Clone, Copy, Debug)]
+pub struct PreparedBatch {
+    pub calls: Batch,
+    pub preparation: Batch,
+}
+
+/// Like [`measure_after_gaps`], with a memory-working gap and a producer
+/// that writes the input before each call. The caller owns `work` and
+/// `input`, keeps them across samples, and chooses `work` larger than the
+/// caches whose previous contents the experiment should displace.
+///
+/// Each gap walks all of `work` at 64-byte intervals, then spends any
+/// remaining `gap_ns` on integer work. A complete walk is the minimum:
+/// on a machine where it takes longer, the gap lasts longer. Preparation
+/// follows the gap, then the call. Both record wall time and thread counts
+/// separately, with counts read outside their wall intervals. Requires
+/// at least one call and a nonempty work buffer.
+pub fn measure_after_gaps_prepared<T: ?Sized>(
+    calls: u64,
+    gap_ns: u64,
+    work: &[u8],
+    input: &mut T,
+    mut prepare: impl FnMut(&mut T),
+    mut f: impl FnMut(&T),
+) -> PreparedBatch {
+    assert!(calls > 0, "a measurement takes at least one call");
+    assert!(!work.is_empty(), "a memory-working gap needs a nonempty work buffer");
+    let empty = || Batch { calls, wall_ns: 0, counts: Some(Counts::default()) };
+    let mut measured = PreparedBatch { calls: empty(), preparation: empty() };
+    for _ in 0..calls {
+        let started = now();
+        let mut sum = 0u64;
+        for &byte in std::hint::black_box(work).iter().step_by(64) {
+            sum = sum.wrapping_add(u64::from(byte));
+        }
+        std::hint::black_box(sum);
+        busy_work(gap_ns.saturating_sub(since_ns(started)));
+
+        let before = Counts::read();
+        let t = now();
+        prepare(input);
+        measured.preparation.wall_ns += since_ns(t);
+        let counts = before.zip(Counts::read()).map(|(before, after)| after.since(before));
+        measured.preparation.counts = measured.preparation.counts.zip(counts).map(|(sum, call)| sum.plus(call));
+
+        let before = Counts::read();
+        let t = now();
+        f(input);
+        measured.calls.wall_ns += since_ns(t);
+        let counts = before.zip(Counts::read()).map(|(before, after)| after.since(before));
+        measured.calls.counts = measured.calls.counts.zip(counts).map(|(sum, call)| sum.plus(call));
+    }
+    measured
+}
+
 /// Keep the calling thread busy for `ns` of wall time with integer
 /// arithmetic in registers (a multiply-add chain), touching no memory: the
 /// program's own work between calls, which leaves the caches as the call
@@ -380,4 +438,26 @@ mod tests {
         let d = later.since(Counts::default());
         assert_eq!((d.mhz(), d.e_percent()), (4_400, 0));
     }
+    #[test]
+    fn prepared_calls_follow_their_writes_and_exclude_gaps() {
+        let mut input = 0;
+        let mut observed = Vec::new();
+        let started = now();
+        let measured = measure_after_gaps_prepared(3, 1_000_000, &[7; 128], &mut input,
+            |input| { *input += 1; busy_work(100_000); },
+            |input| { observed.push(*input); busy_work(50_000); });
+        assert_eq!(observed, [1, 2, 3]);
+        assert_eq!(measured.calls.calls, 3);
+        assert_eq!(measured.preparation.calls, 3);
+        assert!(measured.calls.wall_ns >= 150_000);
+        assert!(measured.preparation.wall_ns >= 300_000);
+        assert!(since_ns(started) >= 3_000_000 + measured.calls.wall_ns + measured.preparation.wall_ns);
+    }
+
+    #[test]
+    #[should_panic(expected = "nonempty work buffer")]
+    fn prepared_calls_require_work() {
+        measure_after_gaps_prepared(1, 0, &[], &mut (), |_| {}, |_| {});
+    }
+
 }

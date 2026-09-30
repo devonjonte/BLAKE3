@@ -252,54 +252,50 @@ rule broken.
 
 The benchmark measures each call only as its contract says users call
 it, so that it guides us to optimise each one for them and flags only
-what users meet (Zooko, September 28, 2026). No synchronous call is
-measured back to back: every one comes after the program has gone off
-and done other things (the gap). Every cell records wall time and
-cycles; the energy cells also record joules.
+what users meet (Zooko, September 28, 2026). Calls in the keeps-up column follow the program's other work (the gap).
+Calls in the continuous, lent-buffer column run back to back. Every cell
+records wall time and cycles; energy cells wait for a validated counter.
 
-**The synchronous calls: each on its own** (six use cases: three
-shapes, single-threaded and multithreaded). The calls can differ widely
-in speed, and each deserves its own optimisation.
+**Keeps up: three shapes**, on one thread and several. Whole messages
+and batches use their single-threaded or multithreaded entry points.
+Pieces use `Hasher::update` in both columns. Each message or batch
+comes after the gap. Message lengths: 64 B-128 MiB; batches: 1-262144
+messages of 64 B. Pieces arrive as copied reads of up to 64 KiB, then
+`finalize` returns the digest.
 
-| use case | call pattern | points |
-|---|---|---|
-| message in one buffer | one call after the gap | one message, 64 B-128 MiB |
-| batch | one call after the gap | message counts at 64 B (and **Q**: other lengths, e.g. 256 B leaves) |
-| message in pieces | the first `update` after the gap, the rest in swift succession from a producer that copies each 64 KiB piece in (as a read would), then `finalize` | message length, 64 B-128 MiB |
+**Does not keep up, buffers owned: two axes.** Messages of one length,
+64 B-64 MiB, produced into owned buffers: `Queue::messages` up to 64 KiB,
+`Queue::pieces` beyond. Batches of 16-65536 64-byte messages through
+`Queue::fixed`. The program keeps about 1 MiB or 1024 buffers in flight,
+whichever is fewer, with its queue and bounded return channel kept
+across samples. Reads and hashing are timed end to end. The other
+contenders run the same producer through their synchronous calls.
 
-**The queue: two use cases**, each with enough in flight to
-keep the hashing threads busy (about 1 MiB or about 1024 buffers,
-whichever is fewer), timed end to end over many inputs:
+**Does not keep up, buffers lent: three axes.** Whole messages, messages
+in 64 KiB pieces, and batches, at the continuous axes' sizes. Every input
+is read into a kept buffer and lent to a synchronous call until it
+returns; reads and hashing take turns, timed end to end. Whole messages
+use `hash` or `hash_multithreaded`, pieces `update` or
+`update_multithreaded`, and batches `hash_many` or
+`hash_many_multithreaded`. The single-threaded cells also measure the
+one-thread column's answer when it has always more ready.
 
-| use case | call pattern | points |
-|---|---|---|
-| messages | messages of one length, each read into a free buffer and submitted in pieces of up to 64 KiB (a message up to 64 KiB is one buffer); covers messages in one buffer and in pieces | message length, 64 B-128 MiB |
-| batches | buffers of fixed-length messages through `Queue::fixed` | message length and messages per buffer |
+**The gap** (Zooko, September 28, evening): a complete walk of a fixed
+buffer larger than the caches, then integer work to fill any remaining
+part of 1 ms; write the input (timed separately, outside the hash sample),
+then call. Built with 128 MiB per measuring thread. The gap lasts at
+least 1 ms and at least the complete sweep. This replaces neighbouring
+cells' accidental cache effects with specified work and freshly produced
+input. The memory-working timing helper is
+`clocks::measure_after_gaps_prepared`; preparation and hashing each carry
+wall time and thread counts separately.
 
-The other contenders run the same producers through their own calls: a
-one-shot call per message, their incremental API per piece, their batch
-call where they have one (BLAKE3 official through `Platform::hash_many`,
-sixteen a call).
-
-- The gap: 1 ms of the program's own work, integer arithmetic on its
-  thread (Zooko, September 28, 2026, morning; it was 1 ms asleep, whose
-  clock states split every cell). An idle core between calls is left
-  unmeasured. **Decided, to build** (Zooko, September 28, evening): the
-  gap's work also walks a fixed buffer larger than the caches (evicting
-  the hash's code and data, as a program's other work does), then the
-  program writes the input (the read, untimed, so it is in cache as data
-  just produced is), then calls. Deterministic, so as steady as a warm
-  gap, and closer to what users meet; today's gap touches no memory, and
-  a call then meets whatever the benchmark's previous cell left (small
-  cells at two speeds, bench-hashes NOTES, "The busy gap").
-  Anything we keep ready, such as a `Hasher` lingering between updates,
-  has gone to sleep well before the gap ends.
-- perf_regress judges the cells above: the synchronous calls after the
-  gap at 20%, the continuous cells at 3% solo and 10% shared.
-- **Q**: the continuous cells under both `Efficiency` settings: time
-  cells judged by wall time, energy cells by joules.
-- **Q**: an energy counter in the timing helper, per process and
-  repeatable, validated before any energy cell is frozen.
+- perf_regress judges after-gap synchronous calls at 20%, continuous
+  cells at 3% solo and 10% shared.
+- **Q**: continuous cells under both `Efficiency` settings: time cells
+  judged by wall time, energy cells by joules.
+- **Q**: an energy counter, per process and repeatable, validated before
+  energy cells are frozen.
 - **Modes**: keyed and derive-key spot checks at a few sizes in
   perf_regress (same cost as plain; a check that it stays so), no graph
   axis.

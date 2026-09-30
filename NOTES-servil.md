@@ -1221,3 +1221,39 @@ job 307).
 ## Future work
 
 - A GPU kernel (Metal) for large inputs; the VM has no GPU.
+
+## Benchmark/API alignment and the memory-working gap (September 30, 2026)
+
+Zooko's September 28 evening table is now encoded in the benchmark's
+candidate: continuous synchronous calls on lent whole messages, pieces,
+and batches, alongside the queue's owned-buffer cells. After-gap servil
+mt pieces call `update`; continuous lent pieces call
+`update_multithreaded`. Hashing kernels and the pool are unchanged.
+
+`clocks::measure_after_gaps_prepared` owns the measurement order: sweep
+all of a caller-owned buffer at 64-byte intervals, spend any remaining
+part of 1 ms on integer arithmetic, write the input, then call. The
+caller chooses and keeps the work buffer; bench-hashes uses 128 MiB per
+measuring thread, with written physical pages. A complete sweep is the
+minimum gap even when it takes longer than 1 ms. Preparation and hashing
+have separate wall intervals and per-core-kind counts. Seven clocks
+tests pass. The benchmark's trace carries both intervals separately;
+Linux supplies wall time and carries the explicit absence of cycle counts.
+
+`perf_regress` includes eight points on the three lent axes, at the
+continuous margins. The VM check against HEAD passed (four alternating
+pairs, a fifth confirmation pair rejected the remaining noise finding,
+`tmp/benchmark-alignment/perf-check-2.log`). Its first attempt exposed
+an existing graph assumption: a narrowed run selecting only a queue cell
+still selected servil st, which has no cell there, and graph provenance
+panicked. Benchmark graph eligibility now requires two points per shown
+axis and a cell for each selected contender; sparse runs still write
+samples and reports. Two dedicated tests hold those cases.
+
+Mac jobs 776-779 failed before measurements: installed perf_regress.py
+imports speeds.py, which setup-mac.sh had left out. The setup now installs
+that dependency beside it. Zooko can restart the runner in the morning;
+tonight's native measurements use a GitHub-sourced host_lab diagnostic
+that calls the checkout's tool rather than its installed copy. Candidate
+work stays separate from promotion. Bench-hashes NEXT-STEPS holds the
+native and historical validation evidence when it arrives.

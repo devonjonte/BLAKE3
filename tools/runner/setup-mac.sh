@@ -66,13 +66,14 @@ done
 ls -le "$checkout/ghtokenclassic.txt"
 ls -led "$runner/jobs" "$runner/results"
 
-step "runner.py and perf_regress.py installed read-only for benchrunner"
+step "runner.py, perf_regress.py, and speeds.py installed read-only for benchrunner"
 sudo mkdir -p "$installed"
 sudo chown "$(whoami)" "$installed"
 cp "$code/runner.py" "$installed/runner.py"
 cp "$code/../perf_regress.py" "$installed/perf_regress.py"
+cp "$code/../speeds.py" "$installed/speeds.py"
 chmod 755 "$installed"
-chmod 644 "$installed/runner.py" "$installed/perf_regress.py"
+chmod 644 "$installed/runner.py" "$installed/perf_regress.py" "$installed/speeds.py"
 
 step "benchrunner can run PyPy"
 sudo -u benchrunner -H "$pypy" --version
