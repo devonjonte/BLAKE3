@@ -14,6 +14,12 @@
 //! sweep (register work alone), also after the append. Each sample's gap
 //! duration is recorded (the sweep may outlast 1 ms).
 //!
+//! Round two (job 793) dissects "open-close": a path lookup alone (stat),
+//! an fd alone (fstat, dup and close), a regular file, a write to a held
+//! regular file, a yield, 10 ms of register work between the open-close
+//! and the sweep, a 512 MiB sweep after it, and the hash's code warmed at
+//! the gap's end (a call on another buffer of the same length).
+//!
 //! The driver runs three probe processes (the third at user-interactive
 //! QoS) between runs of the benchmark with and without its shared copies.
 use std::cell::Cell;
@@ -22,8 +28,9 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const CONDITIONS: [&str; 12] = ["base", "getpid", "write /dev/null", "open-close", "append file", "fresh 1 MiB",
-    "small String", "write 128 MiB", "read 32 MiB", "read 512 MiB", "no sweep", "append, no sweep"];
+const CONDITIONS: [&str; 13] = ["base", "open-close", "stat path", "fstat fd", "dup-close", "open-close regular file",
+    "write open regular file", "yield", "open-close, 10 ms", "open-close, 512 MiB", "base, warm code", "open-close, warm code",
+    "open-close, no sweep"];
 const LENGTHS: [usize; 3] = [64, 4096, 16384];
 const ROUNDS: usize = 48;
 const CALLS: u64 = 4;
@@ -58,6 +65,9 @@ fn child(index: usize) {
     let source: Vec<u8> = (0..65536usize).map(|i| (i / 8) as u8).collect();
     let mut produced = vec![0u8; 65536];
     let mut devnull = std::fs::OpenOptions::new().write(true).open("/dev/null").unwrap();
+    std::fs::write("regular.txt", b"a regular file\n").unwrap();
+    let mut held = std::fs::OpenOptions::new().create(true).append(true).open("held.txt").unwrap();
+    let spare: Vec<u8> = (0..65536usize).map(|i| (i / 16) as u8).collect();
     let gap_ns = Cell::new(0u64);
     let mut samples: Vec<Vec<clocks::PreparedBatch>> = (0..CONDITIONS.len() * LENGTHS.len()).map(|_| Vec::new()).collect();
     let mut raw = String::from("process;round;condition;length;calls;started_ns;wall_ns;p_cycles;p_instructions;p_time_ns;e_cycles;e_instructions;e_time_ns;prep_wall_ns;gap_ns\n");
@@ -68,36 +78,33 @@ fn child(index: usize) {
             let (c, len) = (slot / LENGTHS.len(), LENGTHS[slot % LENGTHS.len()]);
             let condition = CONDITIONS[c];
             gap_ns.set(0);
-            let before = |devnull: &mut std::fs::File| match condition {
-                "getpid" => { black_box(std::process::id()); }
-                "write /dev/null" => devnull.write_all(b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde\n").unwrap(),
-                "open-close" => drop(black_box(std::fs::File::open("/dev/null").unwrap())),
-                "append file" | "append, no sweep" => std::fs::OpenOptions::new().create(true).append(true).open("appended.txt").unwrap()
-                    .write_all(b"main,4096,0x84286c000,0x842c1a000,0xba2000000,0x16f7adf8f,0x1006b5a78\n").unwrap(),
-                "fresh 1 MiB" => {
-                    let mut fresh: Vec<u8> = Vec::with_capacity(1 << 20);
-                    // Sound: u8 has no invalid values; every byte is written below.
-                    unsafe { fresh.set_len(1 << 20) };
-                    for page in fresh.chunks_mut(16384) { page[0] = 1; }
-                    black_box(&fresh);
+            let before = |devnull: &mut std::fs::File, held: &mut std::fs::File| match condition {
+                "stat path" => { black_box(std::fs::metadata("/dev/null").unwrap()); }
+                "fstat fd" => { black_box(devnull.metadata().unwrap()); }
+                "dup-close" => drop(black_box(devnull.try_clone().unwrap())),
+                "open-close regular file" => drop(black_box(std::fs::File::open("regular.txt").unwrap())),
+                "write open regular file" => held.write_all(b"main,4096,0x84286c000,0x842c1a000,0xba2000000,0x16f7adf8f,0x1006b5a78\n").unwrap(),
+                "yield" => std::thread::yield_now(),
+                c if c.starts_with("open-close") => {
+                    drop(black_box(std::fs::File::open("/dev/null").unwrap()));
+                    if c == "open-close, 10 ms" { clocks::busy_work(10_000_000); }
                 }
-                "small String" => { black_box(format!("{round},{len},{k}")); }
                 _ => {}
             };
             let sweep: &dyn Fn(&mut [u8]) = match condition {
-                "write 128 MiB" => &|w: &mut [u8]| { for byte in black_box(&mut w[..128 << 20]).iter_mut().step_by(64) { *byte = byte.wrapping_add(1); } },
-                "read 32 MiB" => &|w: &mut [u8]| read_sweep(&w[..32 << 20]),
-                "read 512 MiB" => &|w: &mut [u8]| read_sweep(w),
-                "no sweep" | "append, no sweep" => &|_: &mut [u8]| {},
+                "open-close, 512 MiB" => &|w: &mut [u8]| read_sweep(w),
+                "open-close, no sweep" => &|_: &mut [u8]| {},
                 _ => &|w: &mut [u8]| read_sweep(&w[..128 << 20]),
             };
+            let warm = condition.ends_with("warm code");
             let prepare = |buffer: &mut [u8]| buffer.copy_from_slice(black_box(&source[..len]));
             let call = |buffer: &[u8]| { black_box(blake3_servil::hash(black_box(buffer))); };
             let work_ref = &mut work;
             let m = clocks::measure_after(CALLS, || {
-                before(&mut devnull);
+                before(&mut devnull, &mut held);
                 let started = clocks::now();
                 sweep(work_ref);
+                if warm { black_box(blake3_servil::hash(black_box(&spare[..len]))); }
                 clocks::busy_work(1_000_000u64.saturating_sub(clocks::since_ns(started)));
                 gap_ns.set(gap_ns.get() + clocks::since_ns(started));
             }, &mut produced[..len], prepare, call);
