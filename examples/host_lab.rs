@@ -33,6 +33,11 @@
 //! producer's copy just before the call (pthread_cpu_number_np on macOS,
 //! sched_getcpu on Linux); "sleep 1 ms" sleeps before the sweep.
 //!
+//! Round five (job 796): the core's instruction cache. "icache
+//! invalidated" invalidates the instruction-cache lines of this
+//! executable's text before the sweep (macOS sys_icache_invalidate,
+//! Linux __clear_cache: no file, no syscall), with and without the sweep.
+//!
 //! The driver runs three probe processes (the third at user-interactive
 //! QoS) between runs of the benchmark with and without its shared copies.
 use std::cell::Cell;
@@ -40,7 +45,7 @@ use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const CONDITIONS: [&str; 6] = ["base", "open-close", "base, 10 ms", "open-close, 10 ms", "sleep 1 ms", "base, code lines"];
+const CONDITIONS: [&str; 6] = ["base", "open-close", "icache invalidated", "no sweep", "open-close, no sweep", "icache invalidated, no sweep"];
 const LENGTHS: [usize; 3] = [64, 4096, 16384];
 const ROUNDS: usize = 48;
 const CALLS: u64 = 4;
@@ -118,6 +123,23 @@ fn cpu() -> usize {
     }
 }
 
+/// Invalidate the instruction-cache lines of `code`.
+fn invalidate_icache(code: &[u8]) {
+    #[cfg(target_vendor = "apple")]
+    {
+        unsafe extern "C" { fn sys_icache_invalidate(start: *mut std::ffi::c_void, len: usize); }
+        // Sound: invalidating instruction-cache lines changes no memory.
+        unsafe { sys_icache_invalidate(code.as_ptr() as *mut _, code.len()) };
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    {
+        unsafe extern "C" { fn __clear_cache(start: *mut std::ffi::c_void, end: *mut std::ffi::c_void); }
+        let range = code.as_ptr_range();
+        // Sound: cleaning and invalidating cache lines changes no memory.
+        unsafe { __clear_cache(range.start as *mut _, range.end as *mut _) };
+    }
+}
+
 fn read_sweep(work: &[u8]) {
     read_sweep_step(work, 64);
 }
@@ -157,11 +179,11 @@ fn child(index: usize) {
             gap_ns.set(0);
             let before = |_: &mut std::fs::File, _: &mut std::fs::File| {
                 if condition.starts_with("open-close") { drop(black_box(std::fs::File::open("/dev/null").unwrap())); }
-                if condition == "sleep 1 ms" { std::thread::sleep(std::time::Duration::from_millis(1)); }
+                if condition.starts_with("icache invalidated") { invalidate_icache(code); }
                 if condition.ends_with("10 ms") { clocks::busy_work(10_000_000); }
             };
             let sweep: &dyn Fn(&mut [u8]) = &|w: &mut [u8]| {
-                read_sweep(&w[..128 << 20]);
+                if !condition.ends_with("no sweep") { read_sweep(&w[..128 << 20]); }
                 if condition.ends_with("code pages") { read_sweep_step(code, 16384); }
                 if condition.ends_with("code lines") { read_sweep_step(code, 64); }
             };
