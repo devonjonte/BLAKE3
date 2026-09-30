@@ -27,6 +27,12 @@
 //! the unified caches too); and 10 ms of register work before the sweep
 //! without the open-close, to tell time from the open.
 //!
+//! Round four (job 795): does the thread change cores? Each call is
+//! measured alone (four a sample, each after its own gap), with the CPU
+//! the thread ran on at the gap's start, at its end, and at the
+//! producer's copy just before the call (pthread_cpu_number_np on macOS,
+//! sched_getcpu on Linux); "sleep 1 ms" sleeps before the sweep.
+//!
 //! The driver runs three probe processes (the third at user-interactive
 //! QoS) between runs of the benchmark with and without its shared copies.
 use std::cell::Cell;
@@ -34,8 +40,7 @@ use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const CONDITIONS: [&str; 9] = ["base", "open-close", "base, 10 ms", "open-close, 10 ms", "base, code pages",
-    "open-close, code pages", "base, code lines", "open-close, code lines", "base, warm code"];
+const CONDITIONS: [&str; 6] = ["base", "open-close", "base, 10 ms", "open-close, 10 ms", "sleep 1 ms", "base, code lines"];
 const LENGTHS: [usize; 3] = [64, 4096, 16384];
 const ROUNDS: usize = 48;
 const CALLS: u64 = 4;
@@ -95,6 +100,24 @@ fn text() -> &'static [u8] {
     }
 }
 
+/// The CPU the calling thread runs on now.
+fn cpu() -> usize {
+    #[cfg(target_vendor = "apple")]
+    {
+        unsafe extern "C" { fn pthread_cpu_number_np(cpu: *mut usize) -> i32; }
+        let mut n = 0usize;
+        // Sound: `n` is writable.
+        assert_eq!(unsafe { pthread_cpu_number_np(&mut n) }, 0, "pthread_cpu_number_np");
+        n
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    {
+        unsafe extern "C" { fn sched_getcpu() -> i32; }
+        // Sound: a plain query.
+        usize::try_from(unsafe { sched_getcpu() }).expect("sched_getcpu")
+    }
+}
+
 fn read_sweep(work: &[u8]) {
     read_sweep_step(work, 64);
 }
@@ -125,6 +148,7 @@ fn child(index: usize) {
     let mut samples: Vec<Vec<clocks::PreparedBatch>> = (0..CONDITIONS.len() * LENGTHS.len()).map(|_| Vec::new()).collect();
     let mut raw = String::from("process;round;condition;length;calls;started_ns;wall_ns;p_cycles;p_instructions;p_time_ns;e_cycles;e_instructions;e_time_ns;prep_wall_ns;gap_ns\n");
     let n = samples.len();
+    let mut calls_raw = String::from("process;round;condition;length;cpu_gap_start;cpu_gap_end;cpu_prepare;wall_ns;cycles\n");
     for round in 0..ROUNDS {
         for k in 0..n {
             let slot = (k + round * 5) % n;
@@ -133,6 +157,7 @@ fn child(index: usize) {
             gap_ns.set(0);
             let before = |_: &mut std::fs::File, _: &mut std::fs::File| {
                 if condition.starts_with("open-close") { drop(black_box(std::fs::File::open("/dev/null").unwrap())); }
+                if condition == "sleep 1 ms" { std::thread::sleep(std::time::Duration::from_millis(1)); }
                 if condition.ends_with("10 ms") { clocks::busy_work(10_000_000); }
             };
             let sweep: &dyn Fn(&mut [u8]) = &|w: &mut [u8]| {
@@ -141,17 +166,36 @@ fn child(index: usize) {
                 if condition.ends_with("code lines") { read_sweep_step(code, 64); }
             };
             let warm = condition.ends_with("warm code");
-            let prepare = |buffer: &mut [u8]| buffer.copy_from_slice(black_box(&source[..len]));
+            let prep_cpu = Cell::new(0usize);
+            let prepare = |buffer: &mut [u8]| { prep_cpu.set(cpu()); buffer.copy_from_slice(black_box(&source[..len])); };
             let call = |buffer: &[u8]| { black_box(blake3_servil::hash(black_box(buffer))); };
             let work_ref = &mut work;
-            let m = clocks::measure_after(CALLS, || {
-                before(&mut devnull, &mut held);
-                let started = clocks::now();
-                sweep(work_ref);
-                if warm { black_box(blake3_servil::hash(black_box(&spare[..len]))); }
-                clocks::busy_work(1_000_000u64.saturating_sub(clocks::since_ns(started)));
-                gap_ns.set(gap_ns.get() + clocks::since_ns(started));
-            }, &mut produced[..len], prepare, call);
+            let mut m: Option<clocks::PreparedBatch> = None;
+            for _ in 0..CALLS {
+                let (start_cpu, end_cpu) = (Cell::new(0usize), Cell::new(0usize));
+                let one = clocks::measure_after(1, || {
+                    start_cpu.set(cpu());
+                    before(&mut devnull, &mut held);
+                    let started = clocks::now();
+                    sweep(work_ref);
+                    if warm { black_box(blake3_servil::hash(black_box(&spare[..len]))); }
+                    clocks::busy_work(1_000_000u64.saturating_sub(clocks::since_ns(started)));
+                    gap_ns.set(gap_ns.get() + clocks::since_ns(started));
+                    end_cpu.set(cpu());
+                }, &mut produced[..len], &prepare, &call);
+                let c1 = one.calls.counts.unwrap_or_default();
+                calls_raw += &format!("{index};{round};{condition};{len};{};{};{};{};{}\n", start_cpu.get(), end_cpu.get(), prep_cpu.get(),
+                    one.calls.wall_ns, c1.p.cycles + c1.e.cycles);
+                m = Some(match m {
+                    None => one,
+                    Some(sum) => {
+                        let add = |a: clocks::Batch, b: clocks::Batch| clocks::Batch { calls: a.calls + b.calls, wall_ns: a.wall_ns + b.wall_ns,
+                            counts: a.counts.zip(b.counts).map(|(x, y)| x.plus(y)), started_ns: a.started_ns };
+                        clocks::PreparedBatch { calls: add(sum.calls, one.calls), preparation: add(sum.preparation, one.preparation) }
+                    }
+                });
+            }
+            let m = m.unwrap();
             let clocks::Counts { p, e } = m.calls.counts.unwrap_or_default();
             raw += &format!("{index};{round};{condition};{len};{};{};{};{};{};{};{};{};{};{};{}\n", m.calls.calls,
                 m.calls.started_ns, m.calls.wall_ns, p.cycles, p.instructions, p.time_ns, e.cycles, e.instructions, e.time_ns,
@@ -160,6 +204,7 @@ fn child(index: usize) {
         }
     }
     std::fs::write(format!("process-{index}.csv"), raw).unwrap();
+    std::fs::write(format!("calls-{index}.csv"), calls_raw).unwrap();
     let mut report = format!("process {index}; qos {}; load: {}\n", std::env::var_os("PROBE_QOS").is_some(),
         clocks::load::describe(&clocks::load::windows()));
     for (slot, batches) in samples.iter().enumerate() {
