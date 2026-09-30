@@ -17,7 +17,7 @@ Speed is this fork's purpose, so no commit that makes it slower may enter git un
 
 - *Exit 0, no regression:* commit.
 - *Exit 1, a confirmed regression:* the hook aborts the commit. Do not commit around it. Find the cause and fix it, or, when the slowdown is the deliberate price of something worth more (correctness, simplicity with a measured cost), stop and ask the user; if they accept it, commit with `git commit --no-verify` and state the regressed cells, their numbers, and the user's decision in the commit message.
-- *Exit 2, no verdict:* the control (SHA-256, the same code on both sides) moved, so the machine's state changed during the check. Stop whatever else is running and check again.
+- *Exit 2, no verdict:* `clocks` found other programs keeping the machine busy during a run, or the control (SHA-256, the same code on both sides) moved, so the machine's state changed during the check. Stop whatever else is running and check again.
 
 **Releases:** `python3 tools/gen-ver.py X.Y.Z` from a clean tree (Zooko's technique, copied from bench-hashes: a commit setting X.Y.Z, a second setting X.Y.Z+<first commit>, a lightweight tag vX.Y.Z+<first commit>; push `servil`, then the tag by name). Before a release, run `check --against <previous release tag>`. Each commit is checked only against its parent, so slowdowns too small to flag one at a time could add up; the release check sees their sum.
 

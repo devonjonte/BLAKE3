@@ -9,7 +9,8 @@ a commit, measured side by side.
 
 Exit 0: no regression in a cell that holds a change (solo; shared cells
 slower are listed). 1: a confirmed regression in one. 2: no verdict (the
-comparison itself was unreliable, see below).
+comparison itself was unreliable: clocks found other programs keeping the
+machine busy during a run, or the control moved, see below).
 
 `check` builds bench-hashes twice, once against the fork at REV (the old
 side) and once against this working tree (the new side, as a commit object
@@ -105,6 +106,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import speeds  # noqa: E402  (tools/speeds.py: the two-speed rule)
+import samples  # noqa: E402  (tools/samples.py: the one samples-file reader)
 
 # The fork checkout the tool works in (its own, or --root's), and the
 # sides' directories in it.
@@ -569,29 +571,25 @@ def run(exe, points):
 # line), in the order first seen: a check on battery power or in a
 # low-power mode says so beside its verdict.
 POWER_SEEN = []
+# The load lines of the runs that clocks found busy (other programs kept
+# a CPU busy in some window): any one makes the check give no verdict.
+BUSY_RUNS = []
 
 
 def parse(text):
-    cells, header = {}, None
-    for line in text.splitlines():
-        if line.startswith("# power: "):
-            power = line.removeprefix("# power: ")
-            if power not in POWER_SEEN:
-                POWER_SEEN.append(power)
-        if line.startswith("#"):
-            continue
-        if header is None:
-            header = line.split("\t")
-            assert header == ["contender", "scenario", "use_case", "point", "unit", "ns/units"], header
-        elif line:
-            contender, scenario, use_case, point, _unit, values = line.split("\t")
-            # Each sample as measured, ns/units: exact until a ratio is printed.
-            ordered = sorted(Fraction(*map(int, v.split("/"))) for v in values.split(","))
-            # The statistic, and the 90th percentile, which a two-speed
-            # cell's slow speed reaches (reported beside verdicts, never
-            # judged: the rule's calibration is for the 5th percentile).
-            cells[f"{contender}|{scenario}|{use_case}|{point}"] = (
-                ordered[int(QUANTILE * len(ordered))], ordered[int(0.9 * len(ordered))], ordered)
+    run = samples.read(text)
+    if run.power not in POWER_SEEN:
+        POWER_SEEN.append(run.power)
+    if run.busy:
+        BUSY_RUNS.append(run.load)
+    cells = {}
+    for key, values in run.cells.items():
+        # Each sample as measured, ns/units: exact until a ratio is printed.
+        ordered = sorted(values)
+        # The statistic, and the 90th percentile, which a two-speed
+        # cell's slow speed reaches (reported beside verdicts, never
+        # judged: the rule's calibration is for the 5th percentile).
+        cells["|".join(key)] = (ordered[int(QUANTILE * len(ordered))], ordered[int(0.9 * len(ordered))], ordered)
     return cells
 
 
@@ -706,6 +704,12 @@ def compare(old_rev, new):
     measured = pairs(old, new_exe, 0, points, use_cases)
 
     def unreliable(measured):
+        if BUSY_RUNS:
+            print(f"perf_regress: other programs kept the machine busy during {len(BUSY_RUNS)} of the check's runs "
+                  "(clocks' load windows). No verdict (exit 2); run again when nothing else runs on the machine.")
+            for line in BUSY_RUNS:
+                print(f"  {line}")
+            return True
         control = judge(measured, use_cases, [CONTROL])
         if control[0] or control[1]:
             print(f"perf_regress: the control ({CONTROL}, the same code on both sides) moved in "
@@ -794,7 +798,7 @@ def main():
             print(side_bench(args.side, args.commit or working_tree_commit(), shim=False)[0])
             return 0
         code = compare(args.against, None) if args.command == "check" else compare(args.old, args.new)
-        print(f"perf_regress: power during the check: {' / '.join(POWER_SEEN) or 'not reported (an older bench-hashes)'}")
+        print(f"perf_regress: power during the check: {' / '.join(POWER_SEEN)}")
         return code
 
 

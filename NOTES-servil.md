@@ -1298,3 +1298,22 @@ variation, and archaeology conclusively refuting a regression. Those
 checks pass at their thresholds and sampled cells; real-caller behavior
 and smaller differences need direct evidence. Native Mac first, VM after;
 promotion and publication still await validated evidence.
+
+## Load in clocks, and one reader of samples (September 30, 2026)
+
+Zooko asked for load detection as code every measurement runs, after
+the day's Mac jobs ran beside his browser (bench-hashes NOTES, "Load moved
+into clocks", has what the old detector had flagged). `clocks::load`
+reads machine CPU time (Linux `/proc/stat` with steal; macOS
+`host_statistics`, each 32-bit counter differenced on its own) and this
+process's CPU time at most once a second, from `tick()`, which every
+`clocks::measure*` calls outside its timed intervals; `Batch.started_ns`
+places each sample in a window. VM costs: a reading 8.6 us, a tick
+between readings 18 ns (`reading_cost`, an ignored test); the Mac's is
+unmeasured. `tools/samples.py` reads samples v4 only (AGENTS.md,
+"Contracts change everywhere at once"), and perf_regress, ab.py,
+losses.py, and bench-hashes' compare-runs.py and check-report.py all use
+it. perf_regress exits 2 when a run was busy. The VM check on this tree
+passed; both of its sides share the working tree's clocks, so it
+measures no effect of the ticks themselves (outside every interval, one
+reading a second).

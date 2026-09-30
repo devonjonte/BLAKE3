@@ -23,6 +23,11 @@
 //! Read wall time alone inside a timed interval and the counts outside it:
 //! a counts read is a system call.
 //!
+//! **Other programs' load** ([`load`]): every measurement here also records
+//! how many CPUs other programs kept busy, in windows of about a second,
+//! read between samples; each [`Batch`] records when it started, so its
+//! window is known, and a busy window is reported on stderr as it closes.
+//!
 //! **Resolution.** The wall clock steps in ticks of the platform's counter:
 //! 24 MHz, 41.67 ns, on an Apple M4 Max (every Darwin wall clock and the
 //! CPU-time clocks alike; `CLOCK_REALTIME` and `CLOCK_MONOTONIC` in whole
@@ -38,6 +43,7 @@
 
 use std::time::Instant;
 
+pub mod load;
 pub mod speeds;
 
 /// The wall clock, as reports name it.
@@ -119,12 +125,14 @@ impl Counts {
 }
 
 /// One batch of [`measure`]: `calls` calls in `wall_ns`, with the counts
-/// the thread accumulated around it.
+/// the thread accumulated around it, started at `started_ns` ([`load::now_ns`],
+/// the scale of the load windows).
 #[derive(Clone, Copy, Debug)]
 pub struct Batch {
     pub calls: u64,
     pub wall_ns: u64,
     pub counts: Option<Counts>,
+    pub started_ns: u64,
 }
 
 impl Batch {
@@ -159,6 +167,8 @@ pub fn measure(batches: usize, batch_ns: u64, mut f: impl FnMut()) -> Vec<Batch>
     }
     (0..batches)
         .map(|_| {
+            load::tick();
+            let started_ns = load::now_ns();
             let before = Counts::read();
             let t = now();
             for _ in 0..calls {
@@ -166,7 +176,7 @@ pub fn measure(batches: usize, batch_ns: u64, mut f: impl FnMut()) -> Vec<Batch>
             }
             let wall_ns = since_ns(t);
             let counts = before.zip(Counts::read()).map(|(before, after)| after.since(before));
-            Batch { calls, wall_ns, counts }
+            Batch { calls, wall_ns, counts, started_ns }
         })
         .collect()
 }
@@ -184,7 +194,9 @@ pub fn measure_after_gaps(calls: u64, gap_ns: u64, mut f: impl FnMut()) -> Batch
     assert!(calls > 0, "a measurement takes at least one call");
     let mut wall_ns = 0;
     let mut counts: Option<Counts> = Some(Counts::default());
+    let started_ns = load::now_ns();
     for _ in 0..calls {
+        load::tick();
         busy_work(gap_ns);
         let before = Counts::read();
         let t = now();
@@ -193,7 +205,7 @@ pub fn measure_after_gaps(calls: u64, gap_ns: u64, mut f: impl FnMut()) -> Batch
         let call = before.zip(Counts::read()).map(|(before, after)| after.since(before));
         counts = counts.zip(call).map(|(sum, call)| sum.plus(call));
     }
-    Batch { calls, wall_ns, counts }
+    Batch { calls, wall_ns, counts, started_ns }
 }
 
 /// A measurement with the producer's preparation timed separately.
@@ -227,9 +239,11 @@ pub fn measure_after_gaps_prepared<T: ?Sized>(
 ) -> PreparedBatch {
     assert!(calls > 0, "a measurement takes at least one call");
     assert!(!work.is_empty(), "a memory-working gap needs a nonempty work buffer");
-    let empty = || Batch { calls, wall_ns: 0, counts: Some(Counts::default()) };
+    let started_ns = load::now_ns();
+    let empty = || Batch { calls, wall_ns: 0, counts: Some(Counts::default()), started_ns };
     let mut measured = PreparedBatch { calls: empty(), preparation: empty() };
     for _ in 0..calls {
+        load::tick();
         let started = now();
         let mut sum = 0u64;
         for &byte in std::hint::black_box(work).iter().step_by(64) {

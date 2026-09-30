@@ -15,23 +15,20 @@ by its median: read the shares.
 import argparse
 import glob
 import sys
-from fractions import Fraction
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import speeds  # noqa: E402
+import samples  # noqa: E402
 
 
 def load(job):
     found = glob.glob(f"runner/results/{job}-*/benchmark-results/*/bench-hashes.samples.tsv")
     assert len(found) == 1, f"job {job}: expected one samples file, found {found}"
-    cells = {}
-    for line in open(found[0]):
-        if line.startswith("#") or line.startswith("contender"):
-            continue
-        contender, scenario, use_case, point, _unit, values = line.rstrip("\n").split("\t")
-        cells[(contender, scenario, use_case, point)] = [Fraction(*map(int, v.split("/"))) for v in values.split(",") if v]
-    return cells
+    run = samples.read(found[0])
+    if run.busy:
+        print(f"ab: job {job} ran while other programs kept the machine busy: {run.load}")
+    return run.cells
 
 
 def main():
