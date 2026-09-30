@@ -72,6 +72,8 @@ place through a concrete need and a demonstrated benefit. When approaches
 perform similarly, choose the simpler one. Apply this standard to code,
 interfaces, documentation, and performance optimizations.
 
+**Revisit complexity as you learn** (Zooko, September 30, 2026). Complexity is a large cost that never stops being paid, so its benefit is never settled: whenever new information shows a piece of complexity doing less than it was built for, weigh removing it, since its cost may now exceed its benefit. Above all, when you find yourself building a second solution to a problem that an earlier solution already addresses, stop: you are very likely making a mistake. Go back and either make the first solution good enough, or remove it entirely; say which, and why, before building anything.
+
 ## Strategy: the streaming APIs first (Zooko, September 27, 2026)
 
 The users most sensitive to performance, whether they save time or energy, use the streaming APIs: one message of any length after another, a long or endless series of fixed-length messages (batched), a Merkle tree. The streaming APIs are harder to use and built for efficiency; every other API is built for ease of use. So every trade-off goes to the streaming APIs: make them as efficient as we can, in time and in energy, even at a cost to the other APIs. Choosing the efficient API is the caller's job, as Design By Contract puts it (below). We still make every other API as efficient as we can wherever that costs the streaming APIs nothing. This replaces the minimax strategy (judging a design by its worst case over every API and usage), which governed until this date; its history is in the notes.
