@@ -1317,3 +1317,17 @@ it. perf_regress exits 2 when a run was busy. The VM check on this tree
 passed; both of its sides share the working tree's clocks, so it
 measures no effect of the ticks themselves (outside every interval, one
 reading a second).
+
+## Cold calls pay for servil's code size (September 30, 2026, jobs 792-798)
+
+After the benchmark's 128 MiB sweep, a call whose code has left the
+core's L1 instruction cache fetches it from DRAM. For servil's `hash`
+that doubles 4 and 16 KiB (1.6 -> 3.1 us, 4.2 -> 8.7 us in the benchmark;
+3.6 and 7.3 us in the probe with the icache invalidated), where SHA-256
+ring's small code moves about 7%. Warm code: servil ties ring at 4 KiB
+and wins at 16 KiB; cold, it loses both (bench-hashes NOTES, "The cause:
+where the hash's code is", has the experiments). The unrolled hybrids
+(k1-k10, q1-q9, 361 KB) and the SME2 kernels are the candidates: a
+leaner code path for single small messages would serve callers who hash
+now and then. Unmeasured: how many bytes of code each length's path
+fetches.
