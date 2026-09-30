@@ -200,11 +200,10 @@ pub enum Gap<'a> {
     /// another core; the calls after it run at whatever speeds follow.
     Idle,
     /// Other work: a fixed other program ([`other_code::run`], about
-    /// 1 MiB of distinct code, which takes the call's code out of the
-    /// core's instruction cache), then a walk of all of this buffer at
-    /// 64-byte intervals (its data out of the caches the buffer
-    /// exceeds), then integer work for the rest of the gap, as on a
-    /// machine busy with other programs. The caller keeps the buffer
+    /// 1 MiB of distinct code), then a walk of all of this buffer at
+    /// 64-byte intervals, then integer work for the rest of the gap, as
+    /// a program hashes between other tasks, or on a machine busy with
+    /// other programs: their code and data fill the caches. The caller keeps the buffer
     /// across samples and chooses it larger than those caches.
     Busy(&'a [u8]),
 }
@@ -231,9 +230,14 @@ impl Gap<'_> {
 
 /// `calls` calls of `f`, each after its own `gap` of at least `gap_ns`
 /// ([`Gap::spend`]), with a producer that writes the input after the gap,
-/// before the call. The gap belongs to neither interval: after it, this
-/// helper warms its own timing path (a counts read, a clock read), so the
-/// interval measures the call, whose code stays as the gap left it. The
+/// before the call. One more call comes first, gap and all, untimed: each
+/// timed call then follows the same call (Zooko, September 30, 2026). A
+/// gap leaves some of what ran before it in the caches, so a first call
+/// would otherwise carry whatever the caller ran earlier (another
+/// function, another size): bench-hashes NOTES, "Shared after a gap". The
+/// gap belongs to neither interval: after it, this helper warms its own
+/// timing path (a counts read, a clock read), so the interval measures the
+/// call, whose code stays as the gap left it. The
 /// preparation and the call each record wall time and thread counts
 /// (counts read outside the wall intervals), summed over the calls (see
 /// "Resolution" above for why a sum). Requires at least one call, and a
@@ -253,9 +257,14 @@ pub fn measure_after_gaps_prepared<T: ?Sized>(
     let started_ns = load::now_ns();
     let empty = || Batch { calls, wall_ns: 0, counts: Some(Counts::default()), started_ns };
     let mut measured = PreparedBatch { calls: empty(), preparation: empty() };
-    for _ in 0..calls {
+    for call in 0..=calls {
         load::tick();
         gap.spend(gap_ns);
+        if call == 0 {
+            prepare(input);
+            f(input);
+            continue;
+        }
         std::hint::black_box(Counts::read());
         std::hint::black_box(since_ns(now()));
 
@@ -457,12 +466,12 @@ mod tests {
         let measured = measure_after_gaps_prepared(3, Gap::Busy(&[7; 128]), 1_000_000, &mut input,
             |input| { *input += 1; busy_work(100_000); },
             |input| { observed.push(*input); busy_work(50_000); });
-        assert_eq!(observed, [1, 2, 3]);
+        assert_eq!(observed, [1, 2, 3, 4], "one untimed call, then the three timed");
         assert_eq!(measured.calls.calls, 3);
         assert_eq!(measured.preparation.calls, 3);
         assert!(measured.calls.wall_ns >= 150_000);
         assert!(measured.preparation.wall_ns >= 300_000);
-        assert!(since_ns(started) >= 3_000_000 + measured.calls.wall_ns + measured.preparation.wall_ns);
+        assert!(since_ns(started) >= 4_000_000 + measured.calls.wall_ns + measured.preparation.wall_ns);
     }
 
     #[test]
@@ -476,8 +485,8 @@ mod tests {
         let mut calls = 0;
         let started = now();
         let measured = measure_after_gaps_prepared(5, Gap::Idle, 1_000_000, &mut calls, |c| *c += 1, |_| busy_work(10_000));
-        assert_eq!((calls, measured.calls.calls), (5, 5));
-        assert!(since_ns(started) >= 5_000_000, "each gap sleeps its length");
+        assert_eq!((calls, measured.calls.calls), (6, 5), "one untimed call, then the five timed");
+        assert!(since_ns(started) >= 6_000_000, "each gap sleeps its length");
         assert!(measured.calls.wall_ns < 5_000_000, "the sleeps stay out of the sum: {measured:?}");
     }
 

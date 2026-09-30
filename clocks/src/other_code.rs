@@ -1,10 +1,7 @@
 //! A fixed "other program" for the gap between calls (Zooko, September 30,
-//! 2026): a program that hashes now and then runs other code between its
-//! calls, and that code takes the hash's instructions out of the core's
-//! instruction cache. A data sweep alone leaves them there, and whatever
-//! the harness or the kernel happened to run then decided how cold the
-//! next call's code was: 2x on servil's cold 4-16 KiB calls, varying per
-//! process (bench-hashes NOTES, "The cause: where the hash's code is").
+//! 2026): a program that hashes between other tasks, or shares a machine
+//! with other programs, runs other code between its calls, and that code
+//! fills the caches in place of the hash's own instructions.
 //!
 //! [`run`] executes [`FUNCTIONS`] distinct functions once each, about
 //! 1 KiB of machine code apiece (each round loads 64-bit constants unique
