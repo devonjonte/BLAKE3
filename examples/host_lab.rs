@@ -1,38 +1,33 @@
-//! probe/caller-relevance: does the benchmark's cold-call cost describe
-//! real callers? The same calls (servil `hash` at five lengths and
-//! `hash_many` with one 64-byte message), the same producer (a copy into
-//! a kept buffer before each call), and the same timer (clocks), after
-//! seven kinds of caller work between calls, each changing one factor
-//! from "busy 1 ms" (register work, the benchmark's gap without its
-//! sweep):
+//! probe/caller-relevance, factors: which state, left before a 128 MiB
+//! read sweep, reaches the call after it? In the benchmark, appending one
+//! line to a file before each sample's gap doubled servil's cold 4 KiB
+//! call (bench-hashes NOTES, "Cold calls: the harness doubles them").
 //!
-//!   nonstop       no work between calls
-//!   busy 50 us    shorter register work
-//!   busy 1 ms     the base
-//!   sleep 1 ms    the thread waits (I/O) instead of computing
-//!   read 1 MiB    reads 1 MiB of its own data, then register work to 1 ms
-//!   read 8 MiB    8 MiB
-//!   read 128 MiB  128 MiB: the benchmark's gap (clocks::measure_after_gaps_prepared)
-//!   read 128 MiB, sort  then other code: sorts 16 Ki pseudo-random u32s
-//!                 (branchy work that retrains the branch predictors)
+//! Every condition changes one thing from the base: nothing before the
+//! gap, then clocks::measure_after_gaps_prepared's gap (read 128 MiB at
+//! 64-byte steps, register work to 1 ms), then the producer's copy and
+//! the call (servil `hash`, 64 B, 4 KiB, 16 KiB), each timed by clocks.
+//! What runs before the gap: getpid; a write to /dev/null; open and close
+//! /dev/null; append a line to a file (open, write, close); a fresh 1 MiB
+//! heap block written page by page (page faults); a small String. The
+//! gap: writing 128 MiB instead of reading; reading 32 or 512 MiB; no
+//! sweep (register work alone), also after the append. Each sample's gap
+//! duration is recorded (the sweep may outlast 1 ms).
 //!
-//! PROBE_CALLS (default 4) sets the calls per sample: with 1, each call
-//! follows a call of another cell, as the benchmark's one-call samples do.
-//!
-//! Four fresh processes run it in turn, each beside a run of the
-//! benchmark on the same cells (bench-hashes 8ec278d, fork a07a576), so
-//! process-to-process spread and harness effects show side by side. Every
-//! sample (four calls, each after its own gap) is kept raw; summaries go
-//! through clocks::speeds.
+//! The driver runs three probe processes (the third at user-interactive
+//! QoS) between runs of the benchmark with and without its shared copies.
+use std::cell::Cell;
 use std::hint::black_box;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const CONDITIONS: [&str; 8] = ["nonstop", "busy 50 us", "busy 1 ms", "sleep 1 ms", "read 1 MiB", "read 8 MiB", "read 128 MiB", "read 128 MiB, sort"];
-const CELLS: [(&str, usize); 6] = [("hash", 64), ("hash", 1024), ("hash", 4096), ("hash", 16384), ("hash", 65536), ("hash_many 1", 64)];
+const CONDITIONS: [&str; 12] = ["base", "getpid", "write /dev/null", "open-close", "append file", "fresh 1 MiB",
+    "small String", "write 128 MiB", "read 32 MiB", "read 512 MiB", "no sweep", "append, no sweep"];
+const LENGTHS: [usize; 3] = [64, 4096, 16384];
 const ROUNDS: usize = 48;
-fn calls() -> u64 { std::env::var("PROBE_CALLS").map_or(4, |v| v.parse().unwrap()) }
-const BENCH_COMMIT: &str = "eb9e59cc9d65";
+const CALLS: u64 = 4;
+const BENCH_COMMIT: &str = "1f666f952e10";
 const FORK_COMMIT: &str = "a07a576";
 
 fn show(values: &[u128]) -> String {
@@ -46,87 +41,83 @@ fn show(values: &[u128]) -> String {
     }).collect::<Vec<_>>().join(" | ")
 }
 
+fn read_sweep(work: &[u8]) {
+    let mut sum = 0u64;
+    for &byte in black_box(work).iter().step_by(64) {
+        sum = sum.wrapping_add(u64::from(byte));
+    }
+    black_box(sum);
+}
+
 fn child(index: usize) {
+    if std::env::var_os("PROBE_QOS").is_some() {
+        clocks::set_qos(clocks::USER_INTERACTIVE);
+    }
     blake3_servil::initialize();
-    let work: Vec<u8> = (0..128 * 1024 * 1024usize).map(|i| (i / 64) as u8).collect();
+    let mut work: Vec<u8> = (0..512 * 1024 * 1024usize).map(|i| (i / 64) as u8).collect();
     let source: Vec<u8> = (0..65536usize).map(|i| (i / 8) as u8).collect();
     let mut produced = vec![0u8; 65536];
-    let mut digests = [[0u8; 32]; 1];
-    let mut x = 0x9e3779b97f4a7c15u64;
-    let unsorted: Vec<u32> = (0..16384).map(|_| { x ^= x << 13; x ^= x >> 7; x ^= x << 17; x as u32 }).collect();
-    let mut sorting = unsorted.clone();
-    let mut samples: Vec<Vec<clocks::PreparedBatch>> = (0..CONDITIONS.len() * CELLS.len()).map(|_| Vec::new()).collect();
-    let mut raw = String::from("process,round,condition,api,length,calls,started_ns,wall_ns,p_cycles,p_instructions,p_time_ns,e_cycles,e_instructions,e_time_ns,prep_wall_ns\n");
+    let mut devnull = std::fs::OpenOptions::new().write(true).open("/dev/null").unwrap();
+    let gap_ns = Cell::new(0u64);
+    let mut samples: Vec<Vec<clocks::PreparedBatch>> = (0..CONDITIONS.len() * LENGTHS.len()).map(|_| Vec::new()).collect();
+    let mut raw = String::from("process;round;condition;length;calls;started_ns;wall_ns;p_cycles;p_instructions;p_time_ns;e_cycles;e_instructions;e_time_ns;prep_wall_ns;gap_ns\n");
     let n = samples.len();
     for round in 0..ROUNDS {
         for k in 0..n {
             let slot = (k + round * 5) % n;
-            let (c, (api, len)) = (slot / CELLS.len(), CELLS[slot % CELLS.len()]);
-            let prepare = |buffer: &mut [u8]| buffer.copy_from_slice(black_box(&source[..len]));
-            let one = api == "hash_many 1";
-            let mut call = |buffer: &[u8]| {
-                if one {
-                    blake3_servil::hash_many(black_box(buffer), 64, &mut digests);
-                    black_box(digests.as_flattened());
-                } else {
-                    black_box(blake3_servil::hash(black_box(buffer)));
+            let (c, len) = (slot / LENGTHS.len(), LENGTHS[slot % LENGTHS.len()]);
+            let condition = CONDITIONS[c];
+            gap_ns.set(0);
+            let before = |devnull: &mut std::fs::File| match condition {
+                "getpid" => { black_box(std::process::id()); }
+                "write /dev/null" => devnull.write_all(b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde\n").unwrap(),
+                "open-close" => drop(black_box(std::fs::File::open("/dev/null").unwrap())),
+                "append file" | "append, no sweep" => std::fs::OpenOptions::new().create(true).append(true).open("appended.txt").unwrap()
+                    .write_all(b"main,4096,0x84286c000,0x842c1a000,0xba2000000,0x16f7adf8f,0x1006b5a78\n").unwrap(),
+                "fresh 1 MiB" => {
+                    let mut fresh: Vec<u8> = Vec::with_capacity(1 << 20);
+                    // Sound: u8 has no invalid values; every byte is written below.
+                    unsafe { fresh.set_len(1 << 20) };
+                    for page in fresh.chunks_mut(16384) { page[0] = 1; }
+                    black_box(&fresh);
                 }
+                "small String" => { black_box(format!("{round},{len},{k}")); }
+                _ => {}
             };
-            let input = &mut produced[..len];
-            let m = match CONDITIONS[c] {
-                "nonstop" => clocks::measure_after(calls(), || {}, input, prepare, &mut call),
-                "busy 50 us" => clocks::measure_after(calls(), || clocks::busy_work(50_000), input, prepare, &mut call),
-                "busy 1 ms" => clocks::measure_after(calls(), || clocks::busy_work(1_000_000), input, prepare, &mut call),
-                "sleep 1 ms" => clocks::measure_after(calls(), || std::thread::sleep(std::time::Duration::from_millis(1)), input, prepare, &mut call),
-                "read 1 MiB" => clocks::measure_after_gaps_prepared(calls(), 1_000_000, &work[..1 << 20], input, prepare, &mut call),
-                "read 8 MiB" => clocks::measure_after_gaps_prepared(calls(), 1_000_000, &work[..8 << 20], input, prepare, &mut call),
-                "read 128 MiB" => clocks::measure_after_gaps_prepared(calls(), 1_000_000, &work, input, prepare, &mut call),
-                "read 128 MiB, sort" => clocks::measure_after(calls(), || {
-                    let started = clocks::now();
-                    let mut sum = 0u64;
-                    for &byte in black_box(&work[..]).iter().step_by(64) { sum = sum.wrapping_add(u64::from(byte)); }
-                    black_box(sum);
-                    sorting.copy_from_slice(&unsorted);
-                    sorting.sort_unstable();
-                    black_box(&sorting);
-                    clocks::busy_work(1_000_000u64.saturating_sub(clocks::since_ns(started)));
-                }, input, prepare, &mut call),
-                _ => unreachable!(),
+            let sweep: &dyn Fn(&mut [u8]) = match condition {
+                "write 128 MiB" => &|w: &mut [u8]| { for byte in black_box(&mut w[..128 << 20]).iter_mut().step_by(64) { *byte = byte.wrapping_add(1); } },
+                "read 32 MiB" => &|w: &mut [u8]| read_sweep(&w[..32 << 20]),
+                "read 512 MiB" => &|w: &mut [u8]| read_sweep(w),
+                "no sweep" | "append, no sweep" => &|_: &mut [u8]| {},
+                _ => &|w: &mut [u8]| read_sweep(&w[..128 << 20]),
             };
+            let prepare = |buffer: &mut [u8]| buffer.copy_from_slice(black_box(&source[..len]));
+            let call = |buffer: &[u8]| { black_box(blake3_servil::hash(black_box(buffer))); };
+            let work_ref = &mut work;
+            let m = clocks::measure_after(CALLS, || {
+                before(&mut devnull);
+                let started = clocks::now();
+                sweep(work_ref);
+                clocks::busy_work(1_000_000u64.saturating_sub(clocks::since_ns(started)));
+                gap_ns.set(gap_ns.get() + clocks::since_ns(started));
+            }, &mut produced[..len], prepare, call);
             let clocks::Counts { p, e } = m.calls.counts.unwrap_or_default();
-            raw += &format!("{index},{round},{},{api},{len},{},{},{},{},{},{},{},{},{},{}\n", CONDITIONS[c], m.calls.calls,
+            raw += &format!("{index};{round};{condition};{len};{};{};{};{};{};{};{};{};{};{};{}\n", m.calls.calls,
                 m.calls.started_ns, m.calls.wall_ns, p.cycles, p.instructions, p.time_ns, e.cycles, e.instructions, e.time_ns,
-                m.preparation.wall_ns);
+                m.preparation.wall_ns, gap_ns.get());
             samples[slot].push(m);
         }
     }
     std::fs::write(format!("process-{index}.csv"), raw).unwrap();
-    let local = 0u8;
-    std::fs::write(format!("process-{index}-addrs.csv"), format!("produced {:#x}, source {:#x}, work {:#x}, stack {:#x}, hash {:#x}\n",
-        produced.as_ptr() as usize, source.as_ptr() as usize, work.as_ptr() as usize, &raw const local as usize,
-        blake3_servil::hash as fn(&[u8]) -> blake3_servil::Hash as usize)).unwrap();
-
-    let mut report = format!("process {index}; load: {}\n", clocks::load::describe(&clocks::load::windows()));
-    if index == 0 {
-        for batch in clocks::measure(5, 20_000_000, || { black_box(clocks::load::probe_reading()); }) {
-            report += &format!("a load reading: {}\n", batch.show());
-        }
-    }
+    let mut report = format!("process {index}; qos {}; load: {}\n", std::env::var_os("PROBE_QOS").is_some(),
+        clocks::load::describe(&clocks::load::windows()));
     for (slot, batches) in samples.iter().enumerate() {
-        let (c, (api, len)) = (slot / CELLS.len(), CELLS[slot % CELLS.len()]);
+        let (c, len) = (slot / LENGTHS.len(), LENGTHS[slot % LENGTHS.len()]);
         let wall: Vec<u128> = batches.iter().map(|b| clocks::speeds::per_unit(b.calls.wall_ns, b.calls.calls)).collect();
-        let mut line = format!("{api} {len} B, {}: ns/call {}", CONDITIONS[c], show(&wall));
-        if batches.iter().all(|b| b.calls.counts.is_some()) {
-            let cycles: Vec<u128> = batches.iter().map(|b| { let x = b.calls.counts.unwrap(); clocks::speeds::per_unit(x.p.cycles + x.e.cycles, b.calls.calls) }).collect();
-            let instructions: Vec<u128> = batches.iter().map(|b| { let x = b.calls.counts.unwrap(); clocks::speeds::per_unit(x.p.instructions + x.e.instructions, b.calls.calls) }).collect();
-            let mhz: Vec<u128> = batches.iter().filter(|b| { let x = b.calls.counts.unwrap(); x.p.time_ns + x.e.time_ns > 0 }).map(|b| u128::from(b.calls.counts.unwrap().mhz()) << 64).collect();
-            let e_ns: u64 = batches.iter().map(|b| b.calls.counts.unwrap().e.time_ns).sum();
-            let all_ns: u64 = batches.iter().map(|b| { let x = b.calls.counts.unwrap(); x.p.time_ns + x.e.time_ns }).sum();
-            line += &format!("; cycles/call {}; instructions/call {}; MHz {}; E time {}/1000", show(&cycles), show(&instructions),
-                if mhz.is_empty() { "none".into() } else { show(&mhz) }, (e_ns * 1000 + all_ns.max(1) / 2) / all_ns.max(1));
-        }
-        report += &line;
-        report.push('\n');
+        let cycles = if batches.iter().all(|b| b.calls.counts.is_some_and(|x| x.p.cycles + x.e.cycles > 0)) {
+            show(&batches.iter().map(|b| { let x = b.calls.counts.unwrap(); clocks::speeds::per_unit(x.p.cycles + x.e.cycles, b.calls.calls) }).collect::<Vec<_>>())
+        } else { "not counted on this platform".into() };
+        report += &format!("{len} B, {}: ns/call {}; cycles/call {cycles}\n", CONDITIONS[c], show(&wall));
     }
     std::fs::write(format!("process-{index}-report.txt"), &report).unwrap();
     print!("{report}");
@@ -148,27 +139,31 @@ fn main() {
     assert!(bench.join(".git").exists(), "the runner keeps a benchmark checkout");
     checked(Command::new("git").arg("-C").arg(&bench).args(["fetch", "--quiet", "origin"]));
     checked(Command::new("git").arg("-C").arg(&bench).args(["checkout", "--quiet", "--detach", BENCH_COMMIT]));
-    let python = "/opt/homebrew/bin/pypy3";
-    let built = Command::new(python).arg(root.join("tools/perf_regress.py")).arg("--root").arg(root)
+    let built = Command::new("/opt/homebrew/bin/pypy3").arg(root.join("tools/perf_regress.py")).arg("--root").arg(root)
         .args(["build", "--side", "bench", "--commit", FORK_COMMIT]).stderr(Stdio::inherit()).output().expect("build the benchmark");
     assert!(built.status.success(), "the benchmark builds");
     let exe = PathBuf::from(String::from_utf8(built.stdout).expect("a UTF-8 path").trim());
     let me = std::env::current_exe().expect("this probe's executable");
-    // Eight benchmark processes without their shared copies, each logging
-    // its buffers' and code's addresses (HB_ADDRS), between two probes.
-    for (index, name) in [(0, "probe4-0")] {
+    let bench_run = |name: &str, no_duo: bool| {
         let folder = out.join(name);
         std::fs::create_dir(&folder).expect("a fresh folder");
-        checked(Command::new(&me).args(["child", &index.to_string()]).env("PROBE_CALLS", "4").current_dir(&folder));
-    }
-    for repetition in 0..8 {
-        let folder = out.join(format!("bench-noduo-{repetition}"));
+        let mut command = Command::new(&exe);
+        command.current_dir(&folder).args(["--contenders", "blake3-servil-st,sha256-ring",
+            "--points", "64 B,4 KiB,16 KiB", "--rounds", "48", "--trace-clocks"]).arg(folder.join("trace.csv"));
+        if no_duo { command.env("HB_NO_DUO", "1"); }
+        checked(&mut command);
+    };
+    let probe = |index: usize, qos: bool| {
+        let folder = out.join(format!("probe-{index}"));
         std::fs::create_dir(&folder).expect("a fresh folder");
-        checked(Command::new(&exe).current_dir(&folder).env("HB_NO_DUO", "1").env("HB_ADDRS", "1")
-            .args(["--contenders", "blake3-servil-st,sha256-ring", "--points", "64 B,1 KiB,4 KiB,16 KiB,64 KiB,1",
-                "--rounds", "48", "--trace-clocks"]).arg(folder.join("trace.csv")));
-    }
-    let folder = out.join("probe4-1");
-    std::fs::create_dir(&folder).expect("a fresh folder");
-    checked(Command::new(&me).args(["child", "1"]).env("PROBE_CALLS", "4").current_dir(&folder));
+        let mut command = Command::new(&me);
+        command.args(["child", &index.to_string()]).current_dir(&folder);
+        if qos { command.env("PROBE_QOS", "1"); }
+        checked(&mut command);
+    };
+    probe(0, false);
+    bench_run("bench", false);
+    probe(1, false);
+    bench_run("bench-noduo", true);
+    probe(2, true);
 }
