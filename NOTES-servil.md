@@ -1270,3 +1270,31 @@ explicit boundary vectors extend the shared file (13 total). For
 against 1 its permille ratio rounds to 1249, so it is one speed. A value
 above that boundary remains two. Seven clocks tests and all 13 Python
 vectors agree. The Rust rule and measured samples are unchanged.
+
+
+## Context-reset audit (September 30, 2026): timing evidence still open
+
+Current focus: Zooko asks whether large benchmark swings occur in users'
+typical operation. That is unestablished. He rejected aggregation across
+more processes as a substitute for diagnosis. Hold hashing fixed; compare
+representative direct callers with the harness and vary work between
+calls one factor at a time. Measure wall and per-kind counts through
+clocks and use the shared speed/share rule. Cache/TLB/ASLR/code layout
+remain hypotheses. No hashing implementation source changed this session.
+
+**Clocks experiment confound found in the handover audit:**
+perf_regress.py::clocks_patch patches to ROOT/clocks for every build.
+probe/benchmark-alignment descends from 9cea065 (unwarmed helper), so
+job 788's requested 1820efb and d005716 sides both used its unwarmed
+clocks. This job did not test the d005716 warm-up. Production hashing
+provenance alone does not identify that patched helper. The code remains
+committed on the candidate; its native effect is open. Preserve the
+regression tool's intentional common-measurement basis, while building
+actual clocks variants explicitly for any timing-helper A/B.
+
+The benchmark's newest NEXT-STEPS block is the authoritative handover.
+It corrects earlier overclaims of per-process causality, bounds on
+variation, and archaeology conclusively refuting a regression. Those
+checks pass at their thresholds and sampled cells; real-caller behavior
+and smaller differences need direct evidence. Native Mac first, VM after;
+promotion and publication still await validated evidence.
