@@ -13,6 +13,11 @@
 //!   read 1 MiB    reads 1 MiB of its own data, then register work to 1 ms
 //!   read 8 MiB    8 MiB
 //!   read 128 MiB  128 MiB: the benchmark's gap (clocks::measure_after_gaps_prepared)
+//!   read 128 MiB, sort  then other code: sorts 16 Ki pseudo-random u32s
+//!                 (branchy work that retrains the branch predictors)
+//!
+//! PROBE_CALLS (default 4) sets the calls per sample: with 1, each call
+//! follows a call of another cell, as the benchmark's one-call samples do.
 //!
 //! Four fresh processes run it in turn, each beside a run of the
 //! benchmark on the same cells (bench-hashes 8ec278d, fork a07a576), so
@@ -23,12 +28,11 @@ use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const CONDITIONS: [&str; 7] = ["nonstop", "busy 50 us", "busy 1 ms", "sleep 1 ms", "read 1 MiB", "read 8 MiB", "read 128 MiB"];
+const CONDITIONS: [&str; 8] = ["nonstop", "busy 50 us", "busy 1 ms", "sleep 1 ms", "read 1 MiB", "read 8 MiB", "read 128 MiB", "read 128 MiB, sort"];
 const CELLS: [(&str, usize); 6] = [("hash", 64), ("hash", 1024), ("hash", 4096), ("hash", 16384), ("hash", 65536), ("hash_many 1", 64)];
 const ROUNDS: usize = 48;
-const CALLS: u64 = 4;
-const PROCESSES: usize = 4;
-const BENCH_COMMIT: &str = "8ec278d";
+fn calls() -> u64 { std::env::var("PROBE_CALLS").map_or(4, |v| v.parse().unwrap()) }
+const BENCH_COMMIT: &str = "1f666f952e10";
 const FORK_COMMIT: &str = "a07a576";
 
 fn show(values: &[u128]) -> String {
@@ -48,6 +52,9 @@ fn child(index: usize) {
     let source: Vec<u8> = (0..65536usize).map(|i| (i / 8) as u8).collect();
     let mut produced = vec![0u8; 65536];
     let mut digests = [[0u8; 32]; 1];
+    let mut x = 0x9e3779b97f4a7c15u64;
+    let unsorted: Vec<u32> = (0..16384).map(|_| { x ^= x << 13; x ^= x >> 7; x ^= x << 17; x as u32 }).collect();
+    let mut sorting = unsorted.clone();
     let mut samples: Vec<Vec<clocks::PreparedBatch>> = (0..CONDITIONS.len() * CELLS.len()).map(|_| Vec::new()).collect();
     let mut raw = String::from("process,round,condition,api,length,calls,started_ns,wall_ns,p_cycles,p_instructions,p_time_ns,e_cycles,e_instructions,e_time_ns,prep_wall_ns\n");
     let n = samples.len();
@@ -67,13 +74,23 @@ fn child(index: usize) {
             };
             let input = &mut produced[..len];
             let m = match CONDITIONS[c] {
-                "nonstop" => clocks::measure_after(CALLS, || {}, input, prepare, &mut call),
-                "busy 50 us" => clocks::measure_after(CALLS, || clocks::busy_work(50_000), input, prepare, &mut call),
-                "busy 1 ms" => clocks::measure_after(CALLS, || clocks::busy_work(1_000_000), input, prepare, &mut call),
-                "sleep 1 ms" => clocks::measure_after(CALLS, || std::thread::sleep(std::time::Duration::from_millis(1)), input, prepare, &mut call),
-                "read 1 MiB" => clocks::measure_after_gaps_prepared(CALLS, 1_000_000, &work[..1 << 20], input, prepare, &mut call),
-                "read 8 MiB" => clocks::measure_after_gaps_prepared(CALLS, 1_000_000, &work[..8 << 20], input, prepare, &mut call),
-                "read 128 MiB" => clocks::measure_after_gaps_prepared(CALLS, 1_000_000, &work, input, prepare, &mut call),
+                "nonstop" => clocks::measure_after(calls(), || {}, input, prepare, &mut call),
+                "busy 50 us" => clocks::measure_after(calls(), || clocks::busy_work(50_000), input, prepare, &mut call),
+                "busy 1 ms" => clocks::measure_after(calls(), || clocks::busy_work(1_000_000), input, prepare, &mut call),
+                "sleep 1 ms" => clocks::measure_after(calls(), || std::thread::sleep(std::time::Duration::from_millis(1)), input, prepare, &mut call),
+                "read 1 MiB" => clocks::measure_after_gaps_prepared(calls(), 1_000_000, &work[..1 << 20], input, prepare, &mut call),
+                "read 8 MiB" => clocks::measure_after_gaps_prepared(calls(), 1_000_000, &work[..8 << 20], input, prepare, &mut call),
+                "read 128 MiB" => clocks::measure_after_gaps_prepared(calls(), 1_000_000, &work, input, prepare, &mut call),
+                "read 128 MiB, sort" => clocks::measure_after(calls(), || {
+                    let started = clocks::now();
+                    let mut sum = 0u64;
+                    for &byte in black_box(&work[..]).iter().step_by(64) { sum = sum.wrapping_add(u64::from(byte)); }
+                    black_box(sum);
+                    sorting.copy_from_slice(&unsorted);
+                    sorting.sort_unstable();
+                    black_box(&sorting);
+                    clocks::busy_work(1_000_000u64.saturating_sub(clocks::since_ns(started)));
+                }, input, prepare, &mut call),
                 _ => unreachable!(),
             };
             let clocks::Counts { p, e } = m.calls.counts.unwrap_or_default();
@@ -133,11 +150,24 @@ fn main() {
     assert!(built.status.success(), "the benchmark builds");
     let exe = PathBuf::from(String::from_utf8(built.stdout).expect("a UTF-8 path").trim());
     let me = std::env::current_exe().expect("this probe's executable");
-    for index in 0..PROCESSES {
-        checked(Command::new(&me).args(["child", &index.to_string()]).current_dir(&out));
-        let folder = out.join(format!("bench-{index}"));
-        std::fs::create_dir(&folder).expect("a fresh folder");
-        checked(Command::new(&exe).current_dir(&folder).args(["--contenders", "blake3-servil-st,sha256-ring",
-            "--points", "64 B,1 KiB,4 KiB,16 KiB,64 KiB,1", "--rounds", "48", "--trace-clocks"]).arg(folder.join("trace.csv")));
+    // Two repetitions of four runs, each factor varied alone: the probe
+    // with four calls a sample and with one; the benchmark as it is and
+    // without its shared copies (HB_NO_DUO, probe/harness-bisect).
+    for repetition in 0..2 {
+        for (name, calls) in [("probe4", "4"), ("probe1", "1")] {
+            let index = repetition * 2 + usize::from(calls == "1");
+            let folder = out.join(format!("{name}-{repetition}"));
+            std::fs::create_dir(&folder).expect("a fresh folder");
+            checked(Command::new(&me).args(["child", &index.to_string()]).env("PROBE_CALLS", calls).current_dir(&folder));
+        }
+        for (name, no_duo) in [("bench", false), ("bench-noduo", true)] {
+            let folder = out.join(format!("{name}-{repetition}"));
+            std::fs::create_dir(&folder).expect("a fresh folder");
+            let mut command = Command::new(&exe);
+            command.current_dir(&folder).args(["--contenders", "blake3-servil-st,sha256-ring",
+                "--points", "64 B,1 KiB,4 KiB,16 KiB,64 KiB,1", "--rounds", "48", "--trace-clocks"]).arg(folder.join("trace.csv"));
+            if no_duo { command.env("HB_NO_DUO", "1"); }
+            checked(&mut command);
+        }
     }
 }
