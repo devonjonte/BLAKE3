@@ -20,17 +20,22 @@
 //! and the sweep, a 512 MiB sweep after it, and the hash's code warmed at
 //! the gap's end (a call on another buffer of the same length).
 //!
+//! Round three (job 794): code or its translation? After the sweep, read
+//! one byte of each 16 KiB page of this executable's text as data ("code
+//! pages": its page-table entries and TLB entries warm, its instruction
+//! lines still cold), or every 64-byte line of it ("code lines": lines in
+//! the unified caches too); and 10 ms of register work before the sweep
+//! without the open-close, to tell time from the open.
+//!
 //! The driver runs three probe processes (the third at user-interactive
 //! QoS) between runs of the benchmark with and without its shared copies.
 use std::cell::Cell;
 use std::hint::black_box;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const CONDITIONS: [&str; 13] = ["base", "open-close", "stat path", "fstat fd", "dup-close", "open-close regular file",
-    "write open regular file", "yield", "open-close, 10 ms", "open-close, 512 MiB", "base, warm code", "open-close, warm code",
-    "open-close, no sweep"];
+const CONDITIONS: [&str; 9] = ["base", "open-close", "base, 10 ms", "open-close, 10 ms", "base, code pages",
+    "open-close, code pages", "base, code lines", "open-close, code lines", "base, warm code"];
 const LENGTHS: [usize; 3] = [64, 4096, 16384];
 const ROUNDS: usize = 48;
 const CALLS: u64 = 4;
@@ -48,9 +53,55 @@ fn show(values: &[u128]) -> String {
     }).collect::<Vec<_>>().join(" | ")
 }
 
+/// This executable's text segment, as a slice: Mach-O's __TEXT from the
+/// file's load commands plus the slide; Linux's executable mapping that
+/// holds servil's `hash`.
+fn text() -> &'static [u8] {
+    let hash = blake3_servil::hash as fn(&[u8]) -> blake3_servil::Hash as usize;
+    #[cfg(target_vendor = "apple")]
+    {
+        unsafe extern "C" { static _mh_execute_header: u8; }
+        let file = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        let word = |at: usize| u32::from_le_bytes(file[at..at + 4].try_into().unwrap()) as usize;
+        let long = |at: usize| u64::from_le_bytes(file[at..at + 8].try_into().unwrap()) as usize;
+        assert_eq!(word(0), 0xfeedfacf, "a 64-bit Mach-O executable");
+        let (mut at, commands) = (32, word(16));
+        for _ in 0..commands {
+            if word(at) == 0x19 && &file[at + 8..at + 14] == b"__TEXT" && file[at + 14] == 0 {
+                let (vmaddr, vmsize) = (long(at + 24), long(at + 32));
+                let start = &raw const _mh_execute_header as usize;
+                assert!(start <= hash && hash < start + vmsize, "hash lies in __TEXT");
+                let _ = vmaddr;
+                // Sound: __TEXT is mapped readable for its whole vmsize.
+                return unsafe { std::slice::from_raw_parts(start as *const u8, vmsize) };
+            }
+            at += word(at + 4);
+        }
+        panic!("no __TEXT segment");
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    {
+        for line in std::fs::read_to_string("/proc/self/maps").unwrap().lines() {
+            let mut fields = line.split_whitespace();
+            let (range, perms) = (fields.next().unwrap(), fields.next().unwrap());
+            let (a, b) = range.split_once('-').unwrap();
+            let (a, b) = (usize::from_str_radix(a, 16).unwrap(), usize::from_str_radix(b, 16).unwrap());
+            if perms.starts_with("r-x") && a <= hash && hash < b {
+                // Sound: the mapping is readable for its whole length.
+                return unsafe { std::slice::from_raw_parts(a as *const u8, b - a) };
+            }
+        }
+        panic!("no executable mapping holds hash");
+    }
+}
+
 fn read_sweep(work: &[u8]) {
+    read_sweep_step(work, 64);
+}
+
+fn read_sweep_step(work: &[u8], step: usize) {
     let mut sum = 0u64;
-    for &byte in black_box(work).iter().step_by(64) {
+    for &byte in black_box(work).iter().step_by(step) {
         sum = sum.wrapping_add(u64::from(byte));
     }
     black_box(sum);
@@ -68,6 +119,8 @@ fn child(index: usize) {
     std::fs::write("regular.txt", b"a regular file\n").unwrap();
     let mut held = std::fs::OpenOptions::new().create(true).append(true).open("held.txt").unwrap();
     let spare: Vec<u8> = (0..65536usize).map(|i| (i / 16) as u8).collect();
+    let code = text();
+    eprintln!("probe: text {:#x}, {} KiB", code.as_ptr() as usize, code.len() / 1024);
     let gap_ns = Cell::new(0u64);
     let mut samples: Vec<Vec<clocks::PreparedBatch>> = (0..CONDITIONS.len() * LENGTHS.len()).map(|_| Vec::new()).collect();
     let mut raw = String::from("process;round;condition;length;calls;started_ns;wall_ns;p_cycles;p_instructions;p_time_ns;e_cycles;e_instructions;e_time_ns;prep_wall_ns;gap_ns\n");
@@ -78,23 +131,14 @@ fn child(index: usize) {
             let (c, len) = (slot / LENGTHS.len(), LENGTHS[slot % LENGTHS.len()]);
             let condition = CONDITIONS[c];
             gap_ns.set(0);
-            let before = |devnull: &mut std::fs::File, held: &mut std::fs::File| match condition {
-                "stat path" => { black_box(std::fs::metadata("/dev/null").unwrap()); }
-                "fstat fd" => { black_box(devnull.metadata().unwrap()); }
-                "dup-close" => drop(black_box(devnull.try_clone().unwrap())),
-                "open-close regular file" => drop(black_box(std::fs::File::open("regular.txt").unwrap())),
-                "write open regular file" => held.write_all(b"main,4096,0x84286c000,0x842c1a000,0xba2000000,0x16f7adf8f,0x1006b5a78\n").unwrap(),
-                "yield" => std::thread::yield_now(),
-                c if c.starts_with("open-close") => {
-                    drop(black_box(std::fs::File::open("/dev/null").unwrap()));
-                    if c == "open-close, 10 ms" { clocks::busy_work(10_000_000); }
-                }
-                _ => {}
+            let before = |_: &mut std::fs::File, _: &mut std::fs::File| {
+                if condition.starts_with("open-close") { drop(black_box(std::fs::File::open("/dev/null").unwrap())); }
+                if condition.ends_with("10 ms") { clocks::busy_work(10_000_000); }
             };
-            let sweep: &dyn Fn(&mut [u8]) = match condition {
-                "open-close, 512 MiB" => &|w: &mut [u8]| read_sweep(w),
-                "open-close, no sweep" => &|_: &mut [u8]| {},
-                _ => &|w: &mut [u8]| read_sweep(&w[..128 << 20]),
+            let sweep: &dyn Fn(&mut [u8]) = &|w: &mut [u8]| {
+                read_sweep(&w[..128 << 20]);
+                if condition.ends_with("code pages") { read_sweep_step(code, 16384); }
+                if condition.ends_with("code lines") { read_sweep_step(code, 64); }
             };
             let warm = condition.ends_with("warm code");
             let prepare = |buffer: &mut [u8]| buffer.copy_from_slice(black_box(&source[..len]));
