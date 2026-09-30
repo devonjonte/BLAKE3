@@ -32,7 +32,7 @@ const CONDITIONS: [&str; 8] = ["nonstop", "busy 50 us", "busy 1 ms", "sleep 1 ms
 const CELLS: [(&str, usize); 6] = [("hash", 64), ("hash", 1024), ("hash", 4096), ("hash", 16384), ("hash", 65536), ("hash_many 1", 64)];
 const ROUNDS: usize = 48;
 fn calls() -> u64 { std::env::var("PROBE_CALLS").map_or(4, |v| v.parse().unwrap()) }
-const BENCH_COMMIT: &str = "1f666f952e10";
+const BENCH_COMMIT: &str = "eb9e59cc9d65";
 const FORK_COMMIT: &str = "a07a576";
 
 fn show(values: &[u128]) -> String {
@@ -101,6 +101,10 @@ fn child(index: usize) {
         }
     }
     std::fs::write(format!("process-{index}.csv"), raw).unwrap();
+    let local = 0u8;
+    std::fs::write(format!("process-{index}-addrs.csv"), format!("produced {:#x}, source {:#x}, work {:#x}, stack {:#x}, hash {:#x}\n",
+        produced.as_ptr() as usize, source.as_ptr() as usize, work.as_ptr() as usize, &raw const local as usize,
+        blake3_servil::hash as fn(&[u8]) -> blake3_servil::Hash as usize)).unwrap();
 
     let mut report = format!("process {index}; load: {}\n", clocks::load::describe(&clocks::load::windows()));
     if index == 0 {
@@ -150,24 +154,21 @@ fn main() {
     assert!(built.status.success(), "the benchmark builds");
     let exe = PathBuf::from(String::from_utf8(built.stdout).expect("a UTF-8 path").trim());
     let me = std::env::current_exe().expect("this probe's executable");
-    // Two repetitions of four runs, each factor varied alone: the probe
-    // with four calls a sample and with one; the benchmark as it is and
-    // without its shared copies (HB_NO_DUO, probe/harness-bisect).
-    for repetition in 0..2 {
-        for (name, calls) in [("probe4", "4"), ("probe1", "1")] {
-            let index = repetition * 2 + usize::from(calls == "1");
-            let folder = out.join(format!("{name}-{repetition}"));
-            std::fs::create_dir(&folder).expect("a fresh folder");
-            checked(Command::new(&me).args(["child", &index.to_string()]).env("PROBE_CALLS", calls).current_dir(&folder));
-        }
-        for (name, no_duo) in [("bench", false), ("bench-noduo", true)] {
-            let folder = out.join(format!("{name}-{repetition}"));
-            std::fs::create_dir(&folder).expect("a fresh folder");
-            let mut command = Command::new(&exe);
-            command.current_dir(&folder).args(["--contenders", "blake3-servil-st,sha256-ring",
-                "--points", "64 B,1 KiB,4 KiB,16 KiB,64 KiB,1", "--rounds", "48", "--trace-clocks"]).arg(folder.join("trace.csv"));
-            if no_duo { command.env("HB_NO_DUO", "1"); }
-            checked(&mut command);
-        }
+    // Eight benchmark processes without their shared copies, each logging
+    // its buffers' and code's addresses (HB_ADDRS), between two probes.
+    for (index, name) in [(0, "probe4-0")] {
+        let folder = out.join(name);
+        std::fs::create_dir(&folder).expect("a fresh folder");
+        checked(Command::new(&me).args(["child", &index.to_string()]).env("PROBE_CALLS", "4").current_dir(&folder));
     }
+    for repetition in 0..8 {
+        let folder = out.join(format!("bench-noduo-{repetition}"));
+        std::fs::create_dir(&folder).expect("a fresh folder");
+        checked(Command::new(&exe).current_dir(&folder).env("HB_NO_DUO", "1").env("HB_ADDRS", "1")
+            .args(["--contenders", "blake3-servil-st,sha256-ring", "--points", "64 B,1 KiB,4 KiB,16 KiB,64 KiB,1",
+                "--rounds", "48", "--trace-clocks"]).arg(folder.join("trace.csv")));
+    }
+    let folder = out.join("probe4-1");
+    std::fs::create_dir(&folder).expect("a fresh folder");
+    checked(Command::new(&me).args(["child", "1"]).env("PROBE_CALLS", "4").current_dir(&folder));
 }
