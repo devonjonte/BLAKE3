@@ -12,9 +12,9 @@ MARGIN (default 3%, below which run-to-run differences decide); losses
 under the margin are listed as "close". The last line is the score: lost
 cells, the number to drive down.
 
-As in the benchmark's CHECKS, servil meets the single-threaded contenders
-and servil mt meets every contender, servil included (a multithreaded call
-slower than the single-threaded one is a defect, AGENTS.md).
+Servil meets the single-threaded contenders and servil mt meets every
+contender, servil included (a multithreaded call slower than the
+single-threaded one breaks a promise its docs make).
 
 Cells are compared by median, the figure the graph draws. Where servil's
 samples split into two speeds (the benchmark's rule: a gap of 4% of the
