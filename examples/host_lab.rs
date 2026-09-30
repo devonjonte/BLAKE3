@@ -49,7 +49,7 @@ const CONDITIONS: [&str; 6] = ["base", "open-close", "icache invalidated", "no s
 const LENGTHS: [usize; 3] = [64, 4096, 16384];
 const ROUNDS: usize = 48;
 const CALLS: u64 = 4;
-const BENCH_COMMIT: &str = "df0f3356c3a2";
+const BENCH_COMMIT: &str = "710810e237bb";
 const FORK_COMMIT: &str = "a07a576";
 
 fn show(values: &[u128]) -> String {
@@ -279,14 +279,15 @@ fn main() {
         if qos { command.env("PROBE_QOS", "1"); }
         checked(&mut command);
     };
-    // Round six (job 797): the benchmark with its instruction cache
-    // invalidated before each gap (HB_ICACHE), with and without its shared
-    // copies, twice each, beside the benchmark as it is and the probe.
+    // Round seven (job 798): the benchmark with its text read as data
+    // after the sweep, one byte a page (translations warm) or every line
+    // (the code in the unified caches), with and without its shared copies.
     probe(0, false);
     for repetition in 0..2 {
         bench_run(&format!("bench-{repetition}"), &[]);
-        bench_run(&format!("bench-icache-{repetition}"), &["HB_ICACHE"]);
-        bench_run(&format!("bench-icache-noduo-{repetition}"), &["HB_ICACHE", "HB_NO_DUO"]);
+        bench_run(&format!("bench-codepages-{repetition}"), &["HB_CODE_PAGES"]);
+        bench_run(&format!("bench-codelines-{repetition}"), &["HB_CODE_LINES"]);
+        bench_run(&format!("bench-codelines-noduo-{repetition}"), &["HB_CODE_LINES", "HB_NO_DUO"]);
     }
     probe(1, false);
 }
