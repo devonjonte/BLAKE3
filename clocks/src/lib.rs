@@ -234,16 +234,11 @@ pub fn measure_after_gaps_prepared<T: ?Sized>(
     gap_ns: u64,
     work: &[u8],
     input: &mut T,
-    mut prepare: impl FnMut(&mut T),
-    mut f: impl FnMut(&T),
+    prepare: impl FnMut(&mut T),
+    f: impl FnMut(&T),
 ) -> PreparedBatch {
-    assert!(calls > 0, "a measurement takes at least one call");
     assert!(!work.is_empty(), "a memory-working gap needs a nonempty work buffer");
-    let started_ns = load::now_ns();
-    let empty = || Batch { calls, wall_ns: 0, counts: Some(Counts::default()), started_ns };
-    let mut measured = PreparedBatch { calls: empty(), preparation: empty() };
-    for _ in 0..calls {
-        load::tick();
+    measure_after(calls, || {
         let started = now();
         let mut sum = 0u64;
         for &byte in std::hint::black_box(work).iter().step_by(64) {
@@ -251,10 +246,29 @@ pub fn measure_after_gaps_prepared<T: ?Sized>(
         }
         std::hint::black_box(sum);
         busy_work(gap_ns.saturating_sub(since_ns(started)));
-        // The sweep also evicted this helper's own code. Warm the timing
+    }, input, prepare, f)
+}
+
+/// The general form (probe/caller-relevance): before each call, the
+/// caller's `gap` (its work between calls, untimed), then this helper's
+/// timing path warmed, then `prepare` and the call, each timed apart.
+pub fn measure_after<T: ?Sized>(
+    calls: u64,
+    mut gap: impl FnMut(),
+    input: &mut T,
+    mut prepare: impl FnMut(&mut T),
+    mut f: impl FnMut(&T),
+) -> PreparedBatch {
+    assert!(calls > 0, "a measurement takes at least one call");
+    let started_ns = load::now_ns();
+    let empty = || Batch { calls, wall_ns: 0, counts: Some(Counts::default()), started_ns };
+    let mut measured = PreparedBatch { calls: empty(), preparation: empty() };
+    for _ in 0..calls {
+        load::tick();
+        gap();
+        // The gap may have evicted this helper's own code. Warm the timing
         // path (a counts read, a clock read) so the interval measures the
-        // call, and any layout of this crate stays out of it; the call's
-        // code stays cold, as the sweep left it.
+        // call; the call's code stays as the gap left it.
         std::hint::black_box(Counts::read());
         std::hint::black_box(since_ns(now()));
 

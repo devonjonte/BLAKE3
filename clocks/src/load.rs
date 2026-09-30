@@ -119,6 +119,12 @@ static STATE: Mutex<State> = Mutex::new(State { last: None, windows: Vec::new() 
 /// the platform gives no CPU times.
 static DUE_NS: AtomicU64 = AtomicU64::new(0);
 
+/// One machine reading, for timing its cost (probe/caller-relevance).
+#[doc(hidden)]
+pub fn probe_reading() -> bool {
+    Reading::take().is_some()
+}
+
 /// Close the running window if `least_ns` have passed since the last
 /// reading (take the first reading when there is none).
 fn close(state: &mut State, least_ns: u64) {
