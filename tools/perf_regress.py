@@ -696,6 +696,8 @@ def compare(old_rev, new):
     working tree). Returns the exit code."""
     old, old_shim = side_bench("old", old_rev)
     new_exe, new_shim = side_bench("new", working_tree_commit() if new is None else new)
+    # Probe: both sides run the old side's executable (one layout).
+    new_exe = old
     new_name = "the working tree" if new is None else new
     # A shimmed side's cells are not judged, so they are not run: run,
     # they changed the control's next cells (SHA-256 at 64 B 3-6% slower
