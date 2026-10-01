@@ -706,6 +706,10 @@ def compare(old_rev, new):
     print(f"perf_regress: {new_name} against {old_rev}, {PAIRS} alternating pairs, "
           f"use cases {', '.join(sorted(use_cases))}", file=sys.stderr, flush=True)
     measured = pairs(old, new_exe, 0, points, use_cases)
+    # Probe: every after-gap cell's pair ratios (new/old of 5th percentiles).
+    for key in sorted(measured[0][0]):
+        if key.split("|")[2] in AFTER_GAP:
+            print("probe-ratio", key, " ".join(f"{float(r):.3f}" for r in ratios_of(measured, key)), file=sys.stderr)
 
     def unreliable(measured):
         if BUSY_RUNS:
