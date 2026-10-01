@@ -51,8 +51,8 @@ def speeds(values):
 
 def load(path):
     run = samples.read(path)
-    if run.busy or not run.load_observed:
-        raise SystemExit(f"losses: no speed verdict with busy or unobserved load: {run.load}")
+    if run.busy or not run.sample_starts_observed:
+        raise SystemExit(f"losses: no speed verdict with busy or incomplete recorded-start load coverage: {run.load}")
     return {(RENAMED.get(contender, contender), scenario, use_case, point): speeds(values)
             for (contender, scenario, use_case, point), values in run.cells.items()}
 

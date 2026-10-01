@@ -40,9 +40,13 @@ class ReaderAccounting(unittest.TestCase):
         run = samples.read(text + row('128/64,256/128', '999,1000'))
         self.assertTrue(run.load_observed)
         self.assertEqual(run.samples_outside_load_windows(KEY), 1)
+        self.assertFalse(run.sample_starts_observed)
         self.assertEqual(run.samples_in_busy_windows(KEY), 1)
+        covered = samples.read(text + row('128/64,256/128', '998,999'))
+        self.assertTrue(covered.sample_starts_observed)
         run = samples.read(HEADER + row())
         self.assertEqual(run.samples_outside_load_windows(KEY), 1)
+        self.assertFalse(run.sample_starts_observed)
 
     def test_requires_one_start_per_measurement(self):
         with self.assertRaisesRegex(AssertionError, "start for every sample"):

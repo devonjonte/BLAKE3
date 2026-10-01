@@ -28,8 +28,8 @@ def load(job):
     run = samples.read(found[0])
     if run.busy:
         print(f"ab: job {job} ran while other programs kept the machine busy: {run.load}; descriptive values only, no speed evidence")
-    elif not run.load_observed:
-        print(f"ab: job {job} has no load observation; descriptive values only, no speed evidence: {run.load}")
+    elif not run.sample_starts_observed:
+        print(f"ab: job {job} has incomplete recorded-start load coverage; descriptive values only, no speed evidence: {run.load}")
     return run.cells
 
 

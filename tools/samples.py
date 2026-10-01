@@ -12,6 +12,7 @@ verdict, which the file carries on its `# load:` line.
     run.starts[key]   # when each sample started, ms
     run.measured[key] # [(raw ns, raw units)], before Fraction reduces them
     run.load_observed # clocks recorded at least one load window
+    run.sample_starts_observed # every recorded start lies in a window; not full interval coverage
     run.busy          # other programs kept a CPU busy in some window
     run.load, run.power, run.meta["rounds"], run.order (contenders in order)
     run.samples_in_busy_windows(key)  # how many of the cell's samples started in a busy window
@@ -46,8 +47,8 @@ class Run:
 
     @property
     def load(self):
-        """The benchmark's own line: "quiet: ...", "busy: ...", or "not
-        measured on this platform"."""
+        """The benchmark's own line: quiet, busy, or no load observation
+        because duration is insufficient or counters unavailable."""
         return self.meta["load"]
 
     @property
@@ -55,6 +56,12 @@ class Run:
         """Whether clocks recorded any load window; empty includes short runs
         on supported platforms as well as unavailable counters."""
         return bool(self.windows)
+
+    @property
+    def sample_starts_observed(self):
+        """At least one window and every recorded millisecond start in a
+        window. This checks recorded-start coverage, not whole intervals."""
+        return self.load_observed and all(self.samples_outside_load_windows(key) == 0 for key in self.cells)
 
     @property
     def busy(self):

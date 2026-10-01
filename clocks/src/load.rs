@@ -111,34 +111,69 @@ fn between(from: Reading, to: Reading) -> Window {
 
 struct State {
     last: Option<Reading>,
+    // The baseline of the last closed window, retained to observe a short
+    // final tail over a sufficiently long interval rather than a tiny one.
+    previous: Option<Reading>,
     windows: Vec<Window>,
 }
 
-static STATE: Mutex<State> = Mutex::new(State { last: None, windows: Vec::new() });
+static STATE: Mutex<State> = Mutex::new(State { last: None, previous: None, windows: Vec::new() });
 /// The [`now_ns`] at which the next tick reads the machine; u64::MAX where
 /// the platform gives no CPU times.
 static DUE_NS: AtomicU64 = AtomicU64::new(0);
 
 /// Close the running window if `least_ns` have passed since the last
 /// reading (take the first reading when there is none).
-fn close(state: &mut State, least_ns: u64) {
+fn close(state: &mut State, least_ns: u64, finish: bool) {
     let Some(reading) = Reading::take() else {
         DUE_NS.store(u64::MAX, Ordering::Relaxed);
         return;
     };
-    match state.last {
-        Some(last) if reading.at_ns - last.at_ns < least_ns => return,
+    if record(state, reading, least_ns, finish) {
+        DUE_NS.store(reading.at_ns + WINDOW_NS, Ordering::Relaxed);
+    }
+}
+
+/// Record an observation; return whether it advanced the baseline. This
+/// isolated state transition also accepts fixed OS-counter fixtures in tests.
+fn record(state: &mut State, reading: Reading, least_ns: u64, finish: bool) -> bool {
+    if let Some(last) = state.last {
+        assert!(reading.at_ns >= last.at_ns, "load readings move forward");
+    }
+    let window = match state.last {
+        Some(last) if reading.at_ns - last.at_ns < least_ns => {
+            if !finish {
+                return false;
+            }
+            let Some(previous) = state.previous else { return false };
+            let last_window = state.windows.last_mut().expect("a previous reading belongs to a closed window");
+            if last_window.busy() {
+                // Averaging a quiet tail into a busy observation could
+                // erase it. Retain that finding; the run is already busy.
+                return false;
+            }
+            let window = between(previous, reading);
+            *last_window = window;
+            // Seal this window after one extension. Frequent snapshots
+            // must not keep widening its average and hide later bursts.
+            state.previous = None;
+            Some(window)
+        }
         Some(last) => {
             let window = between(last, reading);
-            if window.busy() {
-                eprintln!("clocks: {}; measurements in that time may read slower than this machine runs", describe_window(&window));
-            }
+            state.previous = Some(last);
             state.windows.push(window);
+            Some(window)
         }
-        None => {}
+        None => None,
+    };
+    if let Some(window) = window {
+        if window.busy() {
+            eprintln!("clocks: {}; measurements in that time may read slower than this machine runs", describe_window(&window));
+        }
     }
     state.last = Some(reading);
-    DUE_NS.store(reading.at_ns + WINDOW_NS, Ordering::Relaxed);
+    true
 }
 
 /// Read the machine once a window has passed since the last reading;
@@ -150,17 +185,21 @@ pub fn tick() {
         return;
     }
     if let Ok(mut state) = STATE.try_lock() {
-        close(&mut state, WINDOW_NS);
+        close(&mut state, WINDOW_NS, false);
     }
 }
 
-/// Every window so far, in order, the running one closed first when it
-/// has lasted half a window or more. Empty where the platform gives no
-/// CPU times (Linux and macOS give them).
+/// Every window so far, in order. A final interval of half a window or
+/// more closes normally. A shorter tail extends the last quiet window
+/// once from its original counter baseline, preserving the minimum duration.
+/// Later work starts a new interval; repeated snapshots cannot keep widening
+/// an old average. A busy last window stays intact: averaging it with a quiet tail must
+/// not erase a busy finding. Empty when counters are unavailable or the
+/// process has not yet supplied half a window of observation.
 pub fn windows() -> Vec<Window> {
     let mut state = STATE.lock().expect("load state lock");
     if DUE_NS.load(Ordering::Relaxed) != u64::MAX {
-        close(&mut state, WINDOW_NS / 2);
+        close(&mut state, WINDOW_NS / 2, true);
     }
     state.windows.clone()
 }
@@ -190,10 +229,10 @@ pub fn describe_window(window: &Window) -> String {
 
 /// One line for readers about `windows`: "quiet: other programs kept 0.02
 /// CPUs busy on average, 0.10 in the busiest second", or "busy: ..., busy
-/// in 2 of 40 windows (12.0-13.0 s, 20.1-21.1 s)"; "not measured on this
-/// platform" for none.
+/// in 2 of 40 windows (12.0-13.0 s, 20.1-21.1 s)". Empty windows report
+/// no observation: the process may be too short or counters unavailable.
 pub fn describe(windows: &[Window]) -> String {
-    let Some(first) = windows.first() else { return "not measured on this platform".to_owned() };
+    let Some(first) = windows.first() else { return "not measured: no load window (too short or counters unavailable)".to_owned() };
     let span = windows.last().unwrap().end_ns - first.start_ns;
     let weighted = |pick: fn(&Window) -> u64| {
         let sum: u128 = windows.iter().map(|w| u128::from(pick(w)) * u128::from(w.end_ns - w.start_ns)).sum();
@@ -221,8 +260,8 @@ mod imp {
     /// idle, not waiting on I/O) and stolen by a hypervisor.
     #[derive(Clone, Copy)]
     pub struct CpuTimes {
-        busy: u64,
-        steal: u64,
+        pub(super) busy: u64,
+        pub(super) steal: u64,
     }
 
     fn ticks_per_second() -> u64 {
@@ -318,12 +357,129 @@ mod tests {
 
     #[test]
     fn descriptions_weigh_windows_by_length_and_name_busy_ones() {
-        assert_eq!(describe(&[]), "not measured on this platform");
+        assert_eq!(describe(&[]), "not measured: no load window (too short or counters unavailable)");
         let quiet = [window(0, 1_000_000_000, 100, 0), window(1_000_000_000, 4_000_000_000, 500, 0)];
         assert_eq!(describe(&quiet), "quiet: other programs kept 0.40 CPUs busy on average, 0.50 in the busiest window");
         let busy = [window(0, 1_000_000_000, 1400, 0), window(1_000_000_000, 2_000_000_000, 200, 300)];
         assert_eq!(describe(&busy), "busy: other programs kept 0.80 CPUs busy on average, 1.40 in the busiest window; \
             the hypervisor withheld 0.15 CPUs on average, 0.30 at most; busy in 1 of 2 windows (0.0-1.0 s)");
+    }
+
+    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    mod final_windows {
+        use super::*;
+
+        // The supported platforms' CPU-time counters count 10 ms ticks.
+        // Fixtures exercise the production counter subtraction and rule.
+        fn reading(at_ns: u64, busy_ticks: u64, own_ns: u64) -> Reading {
+            #[cfg(target_os = "linux")]
+            let machine = imp::CpuTimes { busy: busy_ticks, steal: 0 };
+            #[cfg(target_vendor = "apple")]
+            let machine = imp::CpuTimes([u32::try_from(busy_ticks).unwrap(), 0, 0, 0]);
+            Reading { at_ns, machine, own_ns }
+        }
+
+        fn initial() -> State {
+            let mut state = State { last: None, previous: None, windows: Vec::new() };
+            assert!(record(&mut state, reading(0, 0, 0), WINDOW_NS, false));
+            state
+        }
+
+        #[test]
+        fn a_short_process_remains_unobserved() {
+            let mut state = initial();
+            assert!(!record(&mut state, reading(300_000_000, 0, 0), WINDOW_NS / 2, true));
+            assert!(state.windows.is_empty());
+            assert_eq!(state.last.unwrap().at_ns, 0);
+        }
+
+        #[test]
+        fn a_quiet_tail_uses_the_original_counter_baseline() {
+            let mut state = initial();
+            assert!(record(&mut state, reading(1_000_000_000, 60, 400_000_000), WINDOW_NS, false));
+            assert_eq!(state.windows[0].other_milli_cpus, 200);
+            assert!(record(&mut state, reading(1_200_000_000, 72, 500_000_000), WINDOW_NS / 2, true));
+            assert_eq!(state.windows, vec![window(0, 1_200_000_000, 183, 0)]);
+            assert!(state.previous.is_none(), "the extension consumes its original baseline");
+        }
+
+        #[test]
+        fn a_busy_tail_can_make_the_extended_window_busy() {
+            let mut state = initial();
+            record(&mut state, reading(1_000_000_000, 20, 0), WINDOW_NS, false);
+            assert!(!state.windows[0].busy());
+            record(&mut state, reading(1_200_000_000, 180, 0), WINDOW_NS / 2, true);
+            assert_eq!(state.windows, vec![window(0, 1_200_000_000, 1500, 0)]);
+            assert!(state.windows[0].busy());
+        }
+
+        #[test]
+        fn averaging_a_quiet_tail_cannot_erase_a_busy_window() {
+            let mut state = initial();
+            record(&mut state, reading(1_000_000_000, 110, 0), WINDOW_NS, false);
+            let before = state.windows.clone();
+            assert!(before[0].busy());
+            let tail = reading(1_400_000_000, 110, 0);
+            assert!(!between(state.previous.unwrap(), tail).busy(), "the naive merge would erase busy");
+            assert!(!record(&mut state, tail, WINDOW_NS / 2, true));
+            assert_eq!(state.windows, before);
+            assert_eq!(state.last.unwrap().at_ns, 1_000_000_000);
+        }
+
+        #[test]
+        fn earlier_busy_windows_stay_intact_when_the_last_quiet_one_extends() {
+            let mut state = initial();
+            record(&mut state, reading(1_000_000_000, 110, 0), WINDOW_NS, false);
+            record(&mut state, reading(2_000_000_000, 130, 0), WINDOW_NS, false);
+            let first = state.windows[0];
+            assert!(first.busy());
+            record(&mut state, reading(2_200_000_000, 135, 0), WINDOW_NS / 2, true);
+            assert_eq!(state.windows[0], first);
+            assert_eq!(state.windows[1], window(1_000_000_000, 2_200_000_000, 208, 0));
+        }
+
+        #[test]
+        fn repeated_snapshots_and_later_ticks_keep_windows_contiguous() {
+            let mut state = initial();
+            record(&mut state, reading(1_000_000_000, 20, 0), WINDOW_NS, false);
+            record(&mut state, reading(1_200_000_000, 24, 0), WINDOW_NS / 2, true);
+            record(&mut state, reading(1_300_000_000, 26, 0), WINDOW_NS / 2, true);
+            assert_eq!(state.windows.len(), 1);
+            record(&mut state, reading(2_300_000_000, 46, 0), WINDOW_NS, false);
+            record(&mut state, reading(2_400_000_000, 48, 0), WINDOW_NS / 2, true);
+            assert_eq!(state.windows, vec![window(0, 1_200_000_000, 200, 0), window(1_200_000_000, 2_400_000_000, 200, 0)]);
+        }
+
+        #[test]
+        fn frequent_snapshots_do_not_hide_a_half_second_busy_burst() {
+            let mut state = initial();
+            record(&mut state, reading(1_000_000_000, 0, 0), WINDOW_NS, false);
+            record(&mut state, reading(1_100_000_000, 0, 0), WINDOW_NS / 2, true);
+            for i in 1..=5 {
+                // Two CPUs busy from 1.1 s to 1.6 s, while snapshots arrive
+                // every 0.1 s. An indefinitely growing average hides it.
+                record(&mut state, reading(1_100_000_000 + i * 100_000_000, i * 20, 0), WINDOW_NS / 2, true);
+            }
+            assert!(state.windows.iter().any(Window::busy), "the sufficiently long busy observation stays visible");
+            assert_eq!(state.windows[1], window(1_100_000_000, 1_600_000_000, 2000, 0));
+        }
+
+        #[test]
+        fn a_long_final_tail_closes_its_own_window() {
+            let mut state = initial();
+            record(&mut state, reading(1_000_000_000, 20, 0), WINDOW_NS, false);
+            record(&mut state, reading(1_600_000_000, 32, 0), WINDOW_NS / 2, true);
+            assert_eq!(state.windows, vec![window(0, 1_000_000_000, 200, 0), window(1_000_000_000, 1_600_000_000, 200, 0)]);
+        }
+
+        #[test]
+        fn a_tick_keeps_the_existing_minimum_duration() {
+            let mut state = initial();
+            record(&mut state, reading(1_000_000_000, 20, 0), WINDOW_NS, false);
+            let before = state.windows.clone();
+            assert!(!record(&mut state, reading(1_200_000_000, 24, 0), WINDOW_NS, false));
+            assert_eq!(state.windows, before);
+        }
     }
 
     #[cfg(target_vendor = "apple")]

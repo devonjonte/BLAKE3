@@ -544,8 +544,9 @@ def parse(text):
         POWER_SEEN.append(run.power)
     if run.busy:
         BUSY_RUNS.append(run.load)
-    if not run.load_observed:
-        UNOBSERVED_RUNS.append(run.load)
+    if not run.sample_starts_observed:
+        outside = sum(run.samples_outside_load_windows(key) for key in run.cells)
+        UNOBSERVED_RUNS.append(f"{run.load}; {outside} recorded starts outside load windows")
     cells = {}
     for key, values in run.cells.items():
         # Each sample as measured, ns/units: exact until a ratio is printed.
@@ -643,8 +644,8 @@ def compare(old_rev, new):
 
     def unreliable(measured):
         if UNOBSERVED_RUNS:
-            print(f"perf_regress: load was unobserved during {len(UNOBSERVED_RUNS)} of the check's runs "
-                  "(clocks recorded no window). No verdict (exit 2); retain this attempt and "
+            print(f"perf_regress: load observation did not cover every recorded sample start in {len(UNOBSERVED_RUNS)} of the check's runs "
+                  "(missing windows or uncovered starts). No verdict (exit 2); retain this attempt and "
                   "repeat with measurements long enough to observe load on a supported platform.")
             for line in UNOBSERVED_RUNS:
                 print(f"  {line}")
