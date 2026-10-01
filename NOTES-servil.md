@@ -1485,9 +1485,18 @@ up: perf_regress no longer sees a cold call slow down; a cold-path
 regression shows in the benchmark's cells after a gap (with the same
 luck) and in review (the code a call fetches). A check on the VM: 27 s
 with builds, pair 1 8.2 s (21 s before). Open: the run-order effect's
-cause, and layout luck in the nonstop small cells (VM, sha256 lent 64 B
-+8% against a 3% margin; 64-byte function alignment levelled it in one
-pair of builds), to be tested with self-compares.
+cause.
+
+**Function alignment, measured and left out** (Zooko, October 1, 2026:
+not worth its complexity). Every function on a 64-byte boundary
+(`-C llvm-args=-align-all-functions=6`), five pairs of consecutive
+code-changing commits, each built both ways, judged by the control
+(sha256, whose code never changes): on the VM, unaligned, the control
+moved one way through every pair in 1 of 5 (fa1ec7b -> 2cc0c00, +-5%, a
+no-verdict that repeats on every rerun), aligned in none; on the Mac
+(jobs 902-911, bench probe `align-functions-2`, on battery), no control
+cell moved past 3% either way. The Mac's nonstop cells meet no layout
+luck to remove, so the only benefit is fewer stuck checks on the VM.
 
 **The Mac's held 64 B cell (job 852) is layout luck**: the A/Bs of
 7270b21 against fa1ec7b read servil st 64 B after other work x0.93
