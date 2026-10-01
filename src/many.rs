@@ -52,8 +52,13 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
     assert_eq!(Some(input.len()), slot.checked_mul(outputs.len()), "input holds one slot of whole blocks per output");
     debug_assert!(len % BLOCK_LEN == 0 || input.chunks_exact(slot).all(|s| s[len..].iter().all(|&b| b == 0)), "every slot's bytes past its message are zero");
     if len == 0 {
-        outputs.fill(*crate::hash_serial_on(&[], key, flags, platform).as_bytes());
-        return;
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        return hash_long_or_single(input, len, key, flags, outputs, platform);
+        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+        {
+            outputs.fill(*crate::hash_serial_on(&[], key, flags, platform).as_bytes());
+            return;
+        }
     }
     #[cfg(blake3_sme2)]
     if chunked(len) && platform_is_sme2(platform) && (outputs.len() >= 16 || outputs.len() >= sme2_chunked_min(len)) {
@@ -63,15 +68,16 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
     if (CHUNK_LEN + 1..=2 * CHUNK_LEN).contains(&len) && outputs.len() >= 2 && neon_plans() {
         return hash_two_chunks(input, len, key, flags, outputs);
     }
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    if len == 2 * CHUNK_LEN && outputs.len() >= 4 && platform.simd_degree() >= 4 {
-        return hash_two_whole_chunks(input, key, flags, outputs, platform);
-    }
     if outputs.len() < 2 || len > CHUNK_LEN {
-        for (i, output) in outputs.iter_mut().enumerate() {
-            *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        return hash_long_or_single(input, len, key, flags, outputs, platform);
+        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+        {
+            for (i, output) in outputs.iter_mut().enumerate() {
+                *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
+            }
+            return;
         }
-        return;
     }
     let plans = neon_plans();
     let last_len = len - (slot - BLOCK_LEN);
@@ -207,6 +213,24 @@ fn hash_two_chunks(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: 
         let parents: arrayvec::ArrayVec<&[u8; BLOCK_LEN], GROUP> = pairs[..count].iter().collect();
         // Sound: as above.
         unsafe { crate::neon_hybrid::hash_many_last_len(&parents, key, 0, IncrementCounter::No, flags | PARENT, 0, ROOT, BLOCK_LEN, digests.as_flattened_mut()) };
+    }
+}
+
+/// Keep empty/single-message hashing and the long-message tree walk out
+/// of the short batch dispatcher's frame. Each output keeps its own root.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[inline(never)]
+fn hash_long_or_single(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
+    if len == 0 {
+        outputs.fill(*crate::hash_serial_on(&[], key, flags, platform).as_bytes());
+        return;
+    }
+    if len == 2 * CHUNK_LEN && outputs.len() >= 4 && platform.simd_degree() >= 4 {
+        return hash_two_whole_chunks(input, key, flags, outputs, platform);
+    }
+    let slot = slot_len(len);
+    for (i, output) in outputs.iter_mut().enumerate() {
+        *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
     }
 }
 

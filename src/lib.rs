@@ -1459,7 +1459,9 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
 /// hashed several at a time, sixteen per group on SME2, so a batch of them
 /// hashes at a multiple of one [`hash`] call's rate; on Apple M4 and later
 /// so are messages of up to 15 KiB, in batches of about ten or more.
-/// Longer messages cost what [`hash`] costs. On Apple M4 and
+/// With x86 SIMD kernels, four or more 2 KiB messages are also hashed several at a time,
+/// filling SIMD lanes across messages at each chunk index and root.
+/// Other longer messages cost what [`hash`] costs. On Apple M4 and
 /// later, batches that run on SME2 follow [`hash`]'s rule for large
 /// inputs: when several threads hash them at once, one runs at the full
 /// rate and the others at about half of it. Always single-threaded; see [`hash_many_multithreaded`] for
