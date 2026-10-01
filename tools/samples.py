@@ -15,6 +15,7 @@ verdict, which the file carries on its `# load:` line.
     run.busy          # other programs kept a CPU busy in some window
     run.load, run.power, run.meta["rounds"], run.order (contenders in order)
     run.samples_in_busy_windows(key)  # how many of the cell's samples started in a busy window
+    run.samples_outside_load_windows(key)  # recorded starts with no window; not interval coverage
 
 It reads the current format alone, `samples v4` (each sample as
 measured, `ns/units`, its start in ms, the load windows), and stops on
@@ -59,10 +60,19 @@ class Run:
     def busy(self):
         return self.load.startswith("busy")
 
+    def _samples_in_windows(self, key, windows):
+        return sum(any(a <= t < b for a, b in windows) for t in self.starts[key])
+
     def samples_in_busy_windows(self, key):
         """How many of the cell's samples started in a busy window."""
         busy = [(a, b) for a, b, other, steal in self.windows if max(other, steal) >= BUSY]
-        return sum(any(a <= t < b for a, b in busy) for t in self.starts[key])
+        return self._samples_in_windows(key, busy)
+
+    def samples_outside_load_windows(self, key):
+        """Recorded millisecond starts outside every load window. A window
+        holding a rounded start does not certify the whole timed interval."""
+        windows = [(a, b) for a, b, _, _ in self.windows]
+        return len(self.starts[key]) - self._samples_in_windows(key, windows)
 
 
 def read(source):

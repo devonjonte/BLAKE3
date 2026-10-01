@@ -35,6 +35,15 @@ class ReaderAccounting(unittest.TestCase):
         text = HEADER.replace('# load: quiet', '# load: not measured on this platform')
         self.assertFalse(samples.read(text + row()).load_observed)
 
+    def test_start_coverage_is_separate_from_any_observation(self):
+        text = HEADER + '# load windows (start ms-end ms:other milli-CPUs:steal milli-CPUs): 0-1000:1200:0\n'
+        run = samples.read(text + row('128/64,256/128', '999,1000'))
+        self.assertTrue(run.load_observed)
+        self.assertEqual(run.samples_outside_load_windows(KEY), 1)
+        self.assertEqual(run.samples_in_busy_windows(KEY), 1)
+        run = samples.read(HEADER + row())
+        self.assertEqual(run.samples_outside_load_windows(KEY), 1)
+
     def test_requires_one_start_per_measurement(self):
         with self.assertRaisesRegex(AssertionError, "start for every sample"):
             samples.read(HEADER + row("128/64,256/128"))

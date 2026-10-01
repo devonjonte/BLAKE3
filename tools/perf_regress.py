@@ -43,13 +43,11 @@ to back (NOTES-servil.md, "perf_regress"):
   shared cell slower is reported beside an exit 0, and the commit names
   it, its numbers, and the reason the change is worth it (Zooko,
   September 26, 2026).
-* A pair's runs measure only the points where some cell is still open:
-  one whose every pair so far exceeds its margin in one direction, so it
-  could still be called slower or faster. The first pair measures every
-  point; later pairs, fewer. This decides exactly as measuring every
-  point in every pair would, from the pairs a cell's verdict can use.
-* Any slower cell triggers another A B B A A B B A over the points of the
-  slower cells alone; a regression is a cell slower in both.
+* Every pair measures the same selected points, preserving the workload
+  context. Pairs stop when no cell's ratios remain beyond its margin in
+  one direction, so none can still be called slower or faster.
+* Any slower cell triggers another A B B A A B B A over that same full
+  context; a regression is a cell slower in both stages.
 * The control is the same code on both sides. If the rule calls any of
   its cells slower or faster, the comparison is unreliable: no verdict.
 * Every listed cell shows both sides' speeds and shares (tools/speeds.py,
@@ -583,9 +581,9 @@ def speeds_of(measured, key):
 
 def pairs(old, new, start, points, use_cases):
     """PAIRS pairs of (old run, new run) over `points`, the side that runs
-    first alternating, beginning with old when `start` is even. After each
-    pair, the next measures only the points with an open cell (is_open);
-    when none is left, the pairs stop."""
+    first alternating, beginning with old when `start` is even. Every pair
+    measures the same points; when no cell remains open (is_open), pairs
+    stop. Early stopping changes duration, not the selected workload."""
     out = []
     for i in range(PAIRS):
         began = time.monotonic_ns()
@@ -600,12 +598,11 @@ def pairs(old, new, start, points, use_cases):
         still = {argument(key.split("|")[2], key.split("|")[3]) for key in out[0][0]
                  if key.split("|")[2] in use_cases
                  and is_open(ratios_of(out, key), key)}
-        points = [p for p in points if p in still]
         tenths = (time.monotonic_ns() - began + 50_000_000) // 100_000_000
         print(f"perf_regress: pair {start + i + 1} done in {tenths // 10}.{tenths % 10} s "
-              f"({measured_points} points; {len(points)} still open)",
+              f"({measured_points} fixed points; {len(still)} still open)",
               file=sys.stderr, flush=True)
-        if not points:
+        if not still:
             break
     return out
 
@@ -674,11 +671,11 @@ def compare(old_rev, new):
         return 2
     slower, faster, ratio, slow = judge(measured, use_cases, SUBJECTS)
     if slower:
-        # The confirmation measures the slower cells' points alone.
-        again = [p for p in points if p in {argument(key.split("|")[2], key.split("|")[3]) for key in slower}]
-        print(f"perf_regress: {len(slower)} cells slower in {PAIRS} pairs; {PAIRS} more pairs over their "
-              f"{len(again)} points must agree", file=sys.stderr, flush=True)
-        more = pairs(old, new_exe, PAIRS, again, use_cases)
+        # Confirmation retains the initial workload context, including
+        # neighbors whose own ratios no longer need further pairs.
+        print(f"perf_regress: {len(slower)} cells slower in {PAIRS} pairs; {PAIRS} more pairs over the same "
+              f"{len(points)} points must agree", file=sys.stderr, flush=True)
+        more = pairs(old, new_exe, PAIRS, points, use_cases)
         if unreliable(more):
             return 2
         slower2, _, ratio2, _ = judge(more, use_cases, SUBJECTS)

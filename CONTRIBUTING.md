@@ -71,6 +71,11 @@ process supplied no load window. Missing windows include short narrowed or
 confirmation processes on supported platforms. Retain the failed attempt;
 measurements need enough duration to observe load before a speed verdict.
 The current gate supplies no verdict in this case; it adds no padding/retry.
+Each pair and confirmation retains the same selected points, including
+neighbors whose own ratios are already decided. Pairs stop when no cell can
+still flag a change. Fixed selection preserves the workload context; it costs
+more measurement time than narrowing. A recorded window establishes some
+load observation, not complete sample-interval coverage.
 `sh tools/install-git-hooks.sh` installs a pre-commit hook
 that runs it for every commit that touches code. To run the full
 benchmark against your working tree, see bench-hashes' `CONTRIBUTING.md`.
