@@ -306,6 +306,32 @@ fn queue_of_fixed_length_messages_fills_the_callers_digest_space() {
     }
 }
 
+/// Bursts of large batches (4096 messages, 256 KiB, hashed as tasks of
+/// their own), each burst drained and followed by a pause long enough for
+/// the queue to go idle and the pool's workers to sleep: every batch comes
+/// back with its digests. Without SME2 a worker could once sleep on tasks
+/// pushed before the queue's delivery thread held the pool again, and the
+/// burst hung (fork NOTES, "The queue hung without SME2").
+#[test]
+fn bursts_of_large_batches_after_pauses_complete() {
+    let (buffer, messages) = padded_batch(4096, 64);
+    let expected: Vec<[u8; 32]> = messages.iter().map(|message| reference(0, message)).collect();
+    let (tx, rx) = mpsc::channel();
+    let queue = Queue::fixed(64, Mode::Hash, Efficiency::Time, Fixed(tx));
+    let mut buffers = vec![buffer; 4];
+    for burst in 0..400 {
+        for buffer in buffers.drain(..) {
+            queue.submit(buffer, vec![[0u8; 32]; 4096]);
+        }
+        for _ in 0..4 {
+            let (returned, digests) = rx.recv().unwrap();
+            assert!(digests == expected, "burst {burst}");
+            buffers.push(returned);
+        }
+        std::thread::sleep(std::time::Duration::from_micros(200));
+    }
+}
+
 // ---------- The handler contract ----------
 
 /// A handler may submit from inside its call (refill and resubmit): a fixed
