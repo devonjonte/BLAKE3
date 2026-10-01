@@ -190,10 +190,14 @@ pub fn describe_window(window: &Window) -> String {
 
 /// One line for readers about `windows`: "quiet: other programs kept 0.02
 /// CPUs busy on average, 0.10 in the busiest second", or "busy: ..., busy
-/// in 2 of 40 windows (12.0-13.0 s, 20.1-21.1 s)"; "not measured on this
-/// platform" for none.
+/// in 2 of 40 windows (12.0-13.0 s, 20.1-21.1 s)"; for none, "not
+/// measured on this platform", or where the OS counts CPU time "not
+/// measured: the run lasted under half a second" (a window closes after
+/// half a second at the least).
 pub fn describe(windows: &[Window]) -> String {
-    let Some(first) = windows.first() else { return "not measured on this platform".to_owned() };
+    let Some(first) = windows.first() else {
+        return if cfg!(any(target_os = "linux", target_vendor = "apple")) { "not measured: the run lasted under half a second" } else { "not measured on this platform" }.to_owned();
+    };
     let span = windows.last().unwrap().end_ns - first.start_ns;
     let weighted = |pick: fn(&Window) -> u64| {
         let sum: u128 = windows.iter().map(|w| u128::from(pick(w)) * u128::from(w.end_ns - w.start_ns)).sum();
@@ -318,7 +322,8 @@ mod tests {
 
     #[test]
     fn descriptions_weigh_windows_by_length_and_name_busy_ones() {
-        assert_eq!(describe(&[]), "not measured on this platform");
+        let none = if cfg!(any(target_os = "linux", target_vendor = "apple")) { "not measured: the run lasted under half a second" } else { "not measured on this platform" };
+        assert_eq!(describe(&[]), none);
         let quiet = [window(0, 1_000_000_000, 100, 0), window(1_000_000_000, 4_000_000_000, 500, 0)];
         assert_eq!(describe(&quiet), "quiet: other programs kept 0.40 CPUs busy on average, 0.50 in the busiest window");
         let busy = [window(0, 1_000_000_000, 1400, 0), window(1_000_000_000, 2_000_000_000, 200, 300)];
