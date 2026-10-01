@@ -561,8 +561,13 @@ def require_sme2_kernel(exe):
 
 
 def run(exe, points):
-    """One run of `points` in a scratch directory; {"contender|scenario|use_case|point": 5th percentile}."""
+    """One run of `points` in a scratch directory; {"contender|scenario|use_case|point": 5th percentile}.
+    The run executes a fresh copy of `exe`: a file's pages stay where the OS
+    first placed them, and on the Mac a cell after a gap ran up to 49% apart
+    between two builds of the same code for a whole check (job 869), a
+    bias of one side that alternating the sides cannot cancel."""
     with tempfile.TemporaryDirectory() as tmp:
+        exe = shutil.copy2(exe, Path(tmp) / "bench-hashes")
         subprocess.run([exe, "--contenders", ",".join(CONTENDERS), "--points", ",".join(points),
                         "--rounds", str(ROUNDS)], cwd=tmp, env=ENV, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
