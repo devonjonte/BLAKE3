@@ -1331,3 +1331,44 @@ where the hash's code is", has the experiments). The unrolled hybrids
 leaner code path for single small messages would serve callers who hash
 now and then. Unmeasured: how many bytes of code each length's path
 fetches.
+
+## The split below 512 KiB, measured again (October 1, 2026; jobs 841-851)
+
+Zooko asked whether `hash_multithreaded` should use threads below 512
+KiB again, now that minimax is gone. History, from the notes above: the
+split sat at 32 KiB while workers polled between calls; once they slept
+between calls (Serve real programs), a wake cost 15-70 us, more than a
+32 KiB hash, and the split moved to 768 KiB (the worst case of both
+machines, minimax) and then 512 KiB (native first).
+
+Probe branches `probe/split-{32,64,128,256}k` change `MIN_SPLIT_LEN`
+alone. Mac, mains, quiet, two runs a side in mirrored order (base
+846/847, 32 KiB 845/848, 64 KiB 844/849, 128 KiB 843/850, 256 KiB
+842/851; 837-840 ran on battery and are left out), servil st and mt,
+16 KiB-1 MiB and batches of 256-8192, after other work, after idling,
+and nonstop lent. servil st, the control, is level within 1-2% in every
+cell (after idling's two-speed cells within their noise).
+
+- After other work (workers asleep): the length at the split is slower
+  than on the caller's thread: 32 KiB x2.34, 64 KiB x1.92, 128 KiB
+  x1.25-1.29 (a slow speed x1.6-2.6), 256 KiB x1.08 (slow x1.76);
+  batches likewise (512 x2.61 at a 32 KiB split, 1024 x2.14 at 64 KiB,
+  2048 x1.33 at 128 KiB). This breaks "never slower than hash".
+- After idling: as noisy as ever (two speeds), mostly slower below the
+  split (64 KiB x1.8 at 32-64 KiB splits).
+- Nonstop, lent (workers awake from the previous call): 256 KiB x0.81 at
+  every split up to 256 KiB, batches of 4096 x0.81-0.84 (shared
+  x0.41-0.70, shared 256 KiB x0.80-0.86); 64 KiB x1.12-1.14 slower at 32
+  and 64 KiB splits; 1 MiB level.
+- 1 MiB after other work read x0.72-0.79 at 64-256 KiB splits, but only
+  as a new fast speed in 17-42% of samples (0.074-0.093 ns/B); the main
+  speed matched the base (0.109-0.123 against 0.110-0.112). The cut of a
+  1 MiB input does not depend on MIN_SPLIT_LEN: some calls found workers
+  that a neighbouring cell's split left awake. A share, not a speed-up.
+
+Verdict: 512 KiB stays; no constant wins everywhere. The gain is real
+only where workers are already awake (nonstop calls back to back): a
+rule "split from 256 KiB while workers poll, else from 512 KiB" would
+take 256 KiB nonstop x0.81 and its batches, for one branch on state the
+pool already has (`sleepers`). A design decision for Zooko; the queue is
+the API built for that pattern.
