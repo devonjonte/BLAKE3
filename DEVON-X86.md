@@ -38,11 +38,15 @@ on an E core for batches of eight or more. Default/pure suites, published
 vectors, independent alignment/mode tests, concurrency, guard pages and
 ASan support correctness; TSan cannot start in this environment.
 
-The candidate stays under review: retained frozen-workload runs show
-slower queue cells (+7-16%) and variable after-idle cells despite passing
-the diagnostic regression tool. Same-code build/repeat controls demonstrate
-sensitivity; the observed costs remain open before promotion. The linked
-record preserves these findings beside the target gain.
+The candidate stays under review. Follow-up **d772be9** isolates empty/
+single/long-message paths from the short dispatcher's frame (512 to 72
+bytes on the x86 LTO instrument), and **82de0d3** adds fixed published
+anchors for direct portable execution under Miri. [The follow-up record](devon-results/two-chunk-dispatch/README.md)
+retains clean target repeats and a 48-round frozen A/B. The roughly 2.1x
+P-core / 1.76x E-core target gain persists. Broader queue/MT and after-idle
+costs still vary and remain open despite passing diagnostic checks;
+affinity and same-code controls describe sensitivity without erasing
+those costs. No regression-free or promotion claim is made.
 
 ## Measurement scope
 
