@@ -27,7 +27,9 @@ def load(job):
     assert len(found) == 1, f"job {job}: expected one samples file, found {found}"
     run = samples.read(found[0])
     if run.busy:
-        print(f"ab: job {job} ran while other programs kept the machine busy: {run.load}")
+        print(f"ab: job {job} ran while other programs kept the machine busy: {run.load}; descriptive values only, no speed evidence")
+    elif not run.load_observed:
+        print(f"ab: job {job} has no load observation; descriptive values only, no speed evidence: {run.load}")
     return run.cells
 
 

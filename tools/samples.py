@@ -11,6 +11,7 @@ verdict, which the file carries on its `# load:` line.
     run.cells[(contender, scenario, use_case, point)]  # [Fraction ns per unit], in the order taken
     run.starts[key]   # when each sample started, ms
     run.measured[key] # [(raw ns, raw units)], before Fraction reduces them
+    run.load_observed # clocks recorded at least one load window
     run.busy          # other programs kept a CPU busy in some window
     run.load, run.power, run.meta["rounds"], run.order (contenders in order)
     run.samples_in_busy_windows(key)  # how many of the cell's samples started in a busy window
@@ -47,6 +48,12 @@ class Run:
         """The benchmark's own line: "quiet: ...", "busy: ...", or "not
         measured on this platform"."""
         return self.meta["load"]
+
+    @property
+    def load_observed(self):
+        """Whether clocks recorded any load window; empty includes short runs
+        on supported platforms as well as unavailable counters."""
+        return bool(self.windows)
 
     @property
     def busy(self):

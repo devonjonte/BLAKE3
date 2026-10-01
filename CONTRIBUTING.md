@@ -66,8 +66,12 @@ no regression in the single-caller cells (slower cells with two
 benchmark copies running at once are listed; name them in the commit
 message with the change's reason); 1: a confirmed regression, listed; 2:
 no verdict, because
-the machine's load changed during the check (run it again on a quiet
-machine). `sh tools/install-git-hooks.sh` installs a pre-commit hook
+the machine's load changed during the check, the control moved, or a
+process supplied no load window. Missing windows include short narrowed or
+confirmation processes on supported platforms. Retain the failed attempt;
+measurements need enough duration to observe load before a speed verdict.
+The current gate supplies no verdict in this case; it adds no padding/retry.
+`sh tools/install-git-hooks.sh` installs a pre-commit hook
 that runs it for every commit that touches code. To run the full
 benchmark against your working tree, see bench-hashes' `CONTRIBUTING.md`.
 

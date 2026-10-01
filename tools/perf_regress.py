@@ -10,7 +10,8 @@ a commit, measured side by side.
 Exit 0: no regression in a cell that holds a change (solo; shared cells
 slower are listed). 1: a confirmed regression in one. 2: no verdict (the
 comparison itself was unreliable: clocks found other programs keeping the
-machine busy during a run, or the control moved, see below).
+machine busy during a run, a run has no load observation, or the control
+moved, see below).
 
 `check` builds bench-hashes twice, once against the fork at REV (the old
 side) and once against this working tree (the new side, as a commit object
@@ -578,6 +579,9 @@ POWER_SEEN = []
 # The load lines of the runs that clocks found busy (other programs kept
 # a CPU busy in some window): any one makes the check give no verdict.
 BUSY_RUNS = []
+# Empty windows include short processes on supported platforms. Such a
+# run supplies no load observation, including during narrowed confirmation.
+UNOBSERVED_RUNS = []
 
 
 def parse(text):
@@ -586,6 +590,8 @@ def parse(text):
         POWER_SEEN.append(run.power)
     if run.busy:
         BUSY_RUNS.append(run.load)
+    if not run.load_observed:
+        UNOBSERVED_RUNS.append(run.load)
     cells = {}
     for key, values in run.cells.items():
         # Each sample as measured, ns/units: exact until a ratio is printed.
@@ -708,6 +714,13 @@ def compare(old_rev, new):
     measured = pairs(old, new_exe, 0, points, use_cases)
 
     def unreliable(measured):
+        if UNOBSERVED_RUNS:
+            print(f"perf_regress: load was unobserved during {len(UNOBSERVED_RUNS)} of the check's runs "
+                  "(clocks recorded no window). No verdict (exit 2); retain this attempt and "
+                  "repeat with measurements long enough to observe load on a supported platform.")
+            for line in UNOBSERVED_RUNS:
+                print(f"  {line}")
+            return True
         if BUSY_RUNS:
             print(f"perf_regress: other programs kept the machine busy during {len(BUSY_RUNS)} of the check's runs "
                   "(clocks' load windows). No verdict (exit 2); run again when nothing else runs on the machine.")
