@@ -1372,3 +1372,40 @@ rule "split from 256 KiB while workers poll, else from 512 KiB" would
 take 256 KiB nonstop x0.81 and its batches, for one branch on state the
 pool already has (`sleepers`). A design decision for Zooko; the queue is
 the API built for that pattern.
+
+## The queue hung without SME2; hash_multithreaded on one CPU (October 1, 2026)
+
+**The hang** (fix 7270b21). Every Linux CI run since September 30 hung
+in its quick run (x86-64 and arm64 GitHub runners) until cancelled.
+Reproduced in the VM with a NEON-only build (`no_sme2`): 15 of 15 runs
+of the nonstop cells hung, owned 256 KiB messages and batches of 4096
+most often; the SME2 build never did. gdb at the hang: four tasks queued
+and in flight, all fifteen workers asleep, none notified, `registered`
+1 (the delivery thread's hold). Cause: a worker slept when it took no
+piece and either nothing was registered or no task was queued. A
+queue's tasks are pushed (waking workers) before the delivery thread
+takes its hold, on its own thread; a worker woken in between saw nothing
+registered, slept again on the push's wake, and the hold wakes no one.
+On SME2 machines the SME2 thread's own task loop took the tasks. Now a
+worker sleeps only with no piece taken and no task queued, and polls
+while tasks are queued. After: 0 of 15 and 0 of 18 such runs hang;
+every suite passes (both builds). The fork's tests never met it: no
+test runs the queue's large tasks NEON-only under load. Wanted: such a
+test (no_sme2, many 256 KiB submissions), and CI for the fork.
+
+**One CPU** (802b6a5). With every CPU already holding a caller (or one
+CPU: a taskset, or a container's limit, which available_parallelism
+reads), hash_multithreaded hashed on the workers' platform (NEON) where
+hash() takes SME2: 0.252 against 0.166 ns/B at 512 KiB pinned to one
+CPU in the VM. It now calls hash_serial, as the batch path did; 0.165
+against 0.165 after.
+
+**The Mac's verdict on both** (job 852, 7270b21 against fa1ec7b, mains):
+held, one cell: servil st, one 64-byte message after other work, fast
+speed x1.34 and slow x1.17, shares level (4.12 (53%) | 8.14 (47%) ->
+5.53 (56%) | 9.55 (44%) ns/B). That call never enters lanes.rs (hash()
+on 64 bytes runs the one-chunk kernel), and cells under about 1 us after
+a gap move 20% with code layout alone (job 783, ring as servil; "Cold
+calls pay for servil's code size"): layout is the likely cause,
+unproven. Open: a control (the same code laid out differently) before
+any claim that these commits slow nothing.
