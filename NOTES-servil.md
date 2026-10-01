@@ -1499,6 +1499,13 @@ luck) and in review (the code a call fetches). A check on the VM: 27 s
 with builds, pair 1 8.2 s (21 s before). Open: the run-order effect's
 cause.
 
+**The nonstop-only check on identical code** (October 1, 2026): servil
+6afda66 against itself, 8 checks on the Mac (jobs 916-923, mains) and 8
+in the VM: no verdict of any kind, no cell listed slower or faster, no
+control move, in all 16. (One "faster" on servil's lent batches of 16, a
+two-speed cell, came in a VM check of a real change the same day: watch
+for it.)
+
 **Function alignment, measured and left out** (Zooko, October 1, 2026:
 not worth its complexity). Every function on a 64-byte boundary
 (`-C llvm-args=-align-all-functions=6`), five pairs of consecutive
