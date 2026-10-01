@@ -63,6 +63,10 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
     if (CHUNK_LEN + 1..=2 * CHUNK_LEN).contains(&len) && outputs.len() >= 2 && neon_plans() {
         return hash_two_chunks(input, len, key, flags, outputs);
     }
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    if len == 2 * CHUNK_LEN && outputs.len() >= 4 && platform.simd_degree() >= 4 {
+        return hash_two_whole_chunks(input, key, flags, outputs, platform);
+    }
     if outputs.len() < 2 || len > CHUNK_LEN {
         for (i, output) in outputs.iter_mut().enumerate() {
             *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
@@ -203,6 +207,34 @@ fn hash_two_chunks(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: 
         let parents: arrayvec::ArrayVec<&[u8; BLOCK_LEN], GROUP> = pairs[..count].iter().collect();
         // Sound: as above.
         unsafe { crate::neon_hybrid::hash_many_last_len(&parents, key, 0, IncrementCounter::No, flags | PARENT, 0, ROOT, BLOCK_LEN, digests.as_flattened_mut()) };
+    }
+}
+
+/// Two-chunk messages on x86, with each chunk index batched across
+/// messages. A one-message tree has only two chunks and leaves wide SIMD
+/// lanes idle; batching independent messages fills them at both chunk
+/// indices and at the roots. Each second chunk keeps counter 1, and each
+/// root pairs only the two chaining values of its own message.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[inline(never)]
+fn hash_two_whole_chunks(input: &[u8], key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
+    const GROUP: usize = 16;
+    for (messages, digests) in input.chunks(2 * CHUNK_LEN * GROUP).zip(outputs.chunks_mut(GROUP)) {
+        let firsts: arrayvec::ArrayVec<&[u8; CHUNK_LEN], GROUP> = messages.chunks_exact(2 * CHUNK_LEN)
+            .map(|m| m[..CHUNK_LEN].try_into().unwrap()).collect();
+        let seconds: arrayvec::ArrayVec<&[u8; CHUNK_LEN], GROUP> = messages.chunks_exact(2 * CHUNK_LEN)
+            .map(|m| m[CHUNK_LEN..].try_into().unwrap()).collect();
+        let mut cvs = [[0u8; OUT_LEN]; 2 * GROUP];
+        let count = digests.len();
+        platform.hash_many(&firsts, key, 0, IncrementCounter::No, flags, CHUNK_START, CHUNK_END, cvs[..count].as_flattened_mut());
+        platform.hash_many(&seconds, key, 1, IncrementCounter::No, flags, CHUNK_START, CHUNK_END, cvs[count..2 * count].as_flattened_mut());
+        let mut pairs = [[0u8; BLOCK_LEN]; GROUP];
+        for (i, pair) in pairs[..count].iter_mut().enumerate() {
+            pair[..OUT_LEN].copy_from_slice(&cvs[i]);
+            pair[OUT_LEN..].copy_from_slice(&cvs[count + i]);
+        }
+        let parents: arrayvec::ArrayVec<&[u8; BLOCK_LEN], GROUP> = pairs[..count].iter().collect();
+        platform.hash_many(&parents, key, 0, IncrementCounter::No, flags | crate::PARENT | ROOT, 0, 0, digests.as_flattened_mut());
     }
 }
 
@@ -469,6 +501,50 @@ mod test {
             let mut mt = vec![[0u8; OUT_LEN]; count];
             crate::hash_many_multithreaded(&input, len, &mut mt);
             assert_eq!(mt, out, "multithreaded, {count} messages of {len} bytes");
+        }
+    }
+
+    /// Independent reference, all x86 SIMD backends, every byte alignment,
+    /// lane/group boundaries and mode. Sentinels protect both output ends.
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[test]
+    fn two_chunk_batches_match_reference_at_every_alignment() {
+        #[allow(unused_mut)]
+        let mut platforms: Vec<Platform> = [Some(Platform::Portable), Platform::sse2(), Platform::sse41(), Platform::avx2()]
+            .into_iter().flatten().collect();
+        #[cfg(blake3_avx512_ffi)]
+        platforms.extend(Platform::avx512());
+        let key = [0x5Au8; crate::KEY_LEN];
+        let context = "Devon two-chunk batch reference test";
+        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let modes = [(*crate::IV, 0), (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
+            (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL)];
+        for count in [0, 1, 3, 4, 6, 7, 8, 12, 15, 16, 17, 24, 31, 32, 33, 127, 128, 129] {
+            let input = messages(2 * CHUNK_LEN, count);
+            for (mode, (words, flags)) in modes.iter().enumerate() {
+                let expected: Vec<[u8; OUT_LEN]> = input.chunks_exact(2 * CHUNK_LEN).map(|message| {
+                    let mut reference = match mode {
+                        0 => reference_impl::Hasher::new(),
+                        1 => reference_impl::Hasher::new_keyed(&key),
+                        _ => reference_impl::Hasher::new_derive_key(context),
+                    };
+                    reference.update(message);
+                    let mut digest = [0u8; OUT_LEN];
+                    reference.finalize(&mut digest);
+                    digest
+                }).collect();
+                for offset in 0..64 {
+                    let mut unaligned = vec![0u8; input.len() + offset];
+                    unaligned[offset..].copy_from_slice(&input);
+                    for &platform in &platforms {
+                        let mut out = vec![[0xAAu8; OUT_LEN]; count + 2];
+                        hash_many_on(&unaligned[offset..], 2 * CHUNK_LEN, words, *flags, &mut out[1..count + 1], platform);
+                        assert_eq!(out[1..count + 1], expected, "{platform:?}, count {count}, mode {mode}, offset {offset}");
+                        assert_eq!(out[0], [0xAA; OUT_LEN]);
+                        assert_eq!(out[count + 1], [0xAA; OUT_LEN]);
+                    }
+                }
+            }
         }
     }
 
