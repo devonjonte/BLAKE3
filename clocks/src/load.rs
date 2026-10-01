@@ -111,10 +111,12 @@ fn between(from: Reading, to: Reading) -> Window {
 
 struct State {
     last: Option<Reading>,
+    /// The reading the last closed window started at, until a tail joins it.
+    last_start: Option<Reading>,
     windows: Vec<Window>,
 }
 
-static STATE: Mutex<State> = Mutex::new(State { last: None, windows: Vec::new() });
+static STATE: Mutex<State> = Mutex::new(State { last: None, last_start: None, windows: Vec::new() });
 /// The [`now_ns`] at which the next tick reads the machine; u64::MAX where
 /// the platform gives no CPU times.
 static DUE_NS: AtomicU64 = AtomicU64::new(0);
@@ -129,16 +131,21 @@ fn close(state: &mut State, least_ns: u64) {
     match state.last {
         Some(last) if reading.at_ns - last.at_ns < least_ns => return,
         Some(last) => {
-            let window = between(last, reading);
-            if window.busy() {
-                eprintln!("clocks: {}; measurements in that time may read slower than this machine runs", describe_window(&window));
-            }
-            state.windows.push(window);
+            push(state, between(last, reading));
+            state.last_start = Some(last);
         }
         None => {}
     }
     state.last = Some(reading);
     DUE_NS.store(reading.at_ns + WINDOW_NS, Ordering::Relaxed);
+}
+
+/// Add a window, reporting it on stderr when busy.
+fn push(state: &mut State, window: Window) {
+    if window.busy() {
+        eprintln!("clocks: {}; measurements in that time may read slower than this machine runs", describe_window(&window));
+    }
+    state.windows.push(window);
 }
 
 /// Read the machine once a window has passed since the last reading;
@@ -155,12 +162,24 @@ pub fn tick() {
 }
 
 /// Every window so far, in order, the running one closed first when it
-/// has lasted half a window or more. Empty where the platform gives no
-/// CPU times (Linux and macOS give them).
+/// has lasted half a window or more; a shorter one joins the last closed
+/// window, read again from that window's start, so the run's last samples
+/// lie in a window too (once: a tail joins a window that no tail has
+/// joined, so repeated calls never dilute a burst into a longer average).
+/// Empty where the platform gives no CPU times, or before a window has
+/// closed (a run under half a second).
 pub fn windows() -> Vec<Window> {
     let mut state = STATE.lock().expect("load state lock");
     if DUE_NS.load(Ordering::Relaxed) != u64::MAX {
+        let closed = state.windows.len();
         close(&mut state, WINDOW_NS / 2);
+        if state.windows.len() == closed {
+            if let (Some(start), Some(reading)) = (state.last_start.take(), Reading::take()) {
+                state.windows.pop();
+                push(&mut state, between(start, reading));
+                state.last = Some(reading);
+            }
+        }
     }
     state.windows.clone()
 }
@@ -349,12 +368,22 @@ mod tests {
             crate::busy_work(10_000_000);
             tick();
         }
+        let ended = now_ns();
         let windows = windows();
         assert!(!windows.is_empty(), "a window closed");
         for pair in windows.windows(2) {
             assert_eq!(pair[0].end_ns, pair[1].start_ns, "windows follow one another");
         }
         assert!(windows.iter().all(|w| w.end_ns - w.start_ns >= WINDOW_NS / 2), "each window lasts half a window or more");
+        // The tail under half a window joined the last window: it reaches the call.
+        let last = *windows.last().unwrap();
+        assert!(last.end_ns >= ended, "the run's last samples lie in a window");
+        // Once: a later call joins nothing more to it.
+        let tail = now_ns();
+        while now_ns() - tail < WINDOW_NS / 10 {
+            crate::busy_work(10_000_000);
+        }
+        assert_eq!(super::windows().last().copied(), Some(last), "a second call joins nothing more");
     }
 }
 

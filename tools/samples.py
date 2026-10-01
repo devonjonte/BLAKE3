@@ -87,6 +87,7 @@ def read(source):
             continue
         contender, scenario, use_case, point, unit, values, starts = fields
         key = (contender, scenario, use_case, point)
+        assert key not in run.cells, f"a samples file holds each cell once: {key} twice"
         run.cells[key] = [Fraction(*map(int, v.split("/"))) for v in values.split(",")]
         run.units[key] = unit
         run.starts[key] = [int(t) for t in starts.split(",")]
@@ -107,6 +108,13 @@ if __name__ == "__main__":
     key = ("a", "solo", "OneMessage", "64 B")
     assert run.cells[key] == [Fraction(3, 2), Fraction(5)] and run.busy and run.power == "mains power"
     assert run.samples_in_busy_windows(key) == 1 and run.order == ["a"]
+    try:
+        read("# bench-hashes samples v4\n# power: p\n# load: quiet: q\n"
+             "contender\tscenario\tuse_case\tpoint\tunit\tns/units\tstart ms\n"
+             "a\tsolo\tOneMessage\t64 B\tB\t3/2\t0\na\tsolo\tOneMessage\t64 B\tB\t5/1\t1\n")
+        raise SystemExit("samples.py: a cell twice was accepted")
+    except AssertionError:
+        pass
     try:
         read("# bench-hashes samples v3\ncontender\tscenario\tuse_case\tpoint\tunit\tns/units\n")
         raise SystemExit("samples.py: an older format was accepted")

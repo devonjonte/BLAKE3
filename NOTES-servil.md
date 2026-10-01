@@ -29,7 +29,7 @@ tune to the hardware, never to its harness.
 | Regression check | `tools/perf_regress.py`, `tools/perf_bisect.py`, `tools/git-hooks/` | Working tree against HEAD (or two commits), A B B A A B B A, through bench-hashes; mandatory for code commits |
 | Mac runner | `tools/runner/` (README) | Jobs from the VM run natively on the Mac as the `benchrunner` account, code from GitHub |
 | The minimax list | `tools/losses.py SAMPLES.tsv` | Every cell where another contender beats servil or servil mt by more than 3% |
-| Platform facts | `examples/host_lab.rs`, `examples/scaling.rs`, `host-lab-reports/` | Primitives, scaling, idle waiters, SME2 callers, WFE on the machine it runs on |
+| Platform facts | `examples/scaling.rs`, `host-lab-reports/` (the host lab: `examples/host_lab.rs` at 9868745) | Primitives, scaling, idle waiters, SME2 callers, WFE on the machine it runs on |
 
 The generated assembly is committed. Edit the generator and run
 `python3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S`;
@@ -1075,7 +1075,7 @@ kernel probes (wall time swings 2x with the E clock), wall time for the
 SME2 remainder probes, where cycles per ns then exposed the slow state.
 
 **Probes on the Mac**: the runner runs only allow-listed examples, so a
-probe replaces `examples/host_lab.rs` on a `probe/<topic>` branch (never
+probe adds its own `examples/host_lab.rs` on a `probe/<topic>` branch (never
 merged; examples only, so the hook skips it) and runs as a `host_lab`
 job. Measure with `thread_selfcounts` cycles per perf level at
 user-interactive and background QoS; A/B as old / new / new / old jobs,

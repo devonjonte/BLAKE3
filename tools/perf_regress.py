@@ -42,13 +42,14 @@ to back (NOTES-servil.md, "perf_regress"):
   shared cell slower is reported beside an exit 0, and the commit names
   it, its numbers, and the reason the change is worth it (Zooko,
   September 26, 2026).
-* A pair's runs measure only the points where some cell is still open:
+* Every run measures every point, so a cell's neighbours, and what runs
+  before it, stay the same in every run (Devon Jonte found narrowing to
+  the open cells' points moved cells with their neighbours, and left
+  short runs with no load window). The pairs stop once no cell is open:
   one whose every pair so far exceeds its margin in one direction, so it
-  could still be called slower or faster. The first pair measures every
-  point; later pairs, fewer. This decides exactly as measuring every
-  point in every pair would, from the pairs a cell's verdict can use.
-* Any slower cell triggers another A B B A A B B A over the points of the
-  slower cells alone; a regression is a cell slower in both.
+  could still be called slower or faster.
+* Any slower cell triggers another A B B A A B B A over every point; a
+  regression is a cell slower in both.
 * The control is the same code on both sides. If the rule calls any of
   its cells slower or faster, the comparison is unreliable: no verdict.
 * Every listed cell shows both sides' speeds and shares (`bench-hashes
@@ -544,7 +545,8 @@ def run(exe, points):
 # low-power mode says so beside its verdict.
 POWER_SEEN = []
 # The load lines of the runs that clocks found busy (other programs kept
-# a CPU busy in some window): any one makes the check give no verdict.
+# a CPU busy in some window) or did not observe: any one makes the check
+# give no verdict.
 BUSY_RUNS = []
 
 
@@ -552,7 +554,9 @@ def parse(text):
     run = samples.read(text)
     if run.power not in POWER_SEEN:
         POWER_SEEN.append(run.power)
-    if run.busy:
+    # A run with no load window (too short, or no counters) is no evidence
+    # of a quiet machine.
+    if run.busy or run.load.startswith("not measured"):
         BUSY_RUNS.append(run.load)
     cells = Cells()
     for key, values in run.cells.items():
@@ -592,10 +596,11 @@ def speeds_of(exe, measured, key):
 
 
 def pairs(old, new, start, points, use_cases):
-    """PAIRS pairs of (old run, new run) over `points`, the side that runs
-    first alternating, beginning with old when `start` is even. After each
-    pair, the next measures only the points with an open cell (is_open);
-    when none is left, the pairs stop."""
+    """PAIRS pairs of (old run, new run) over `points`, every pair over all
+    of them (a cell's neighbours, and so what runs before it, stay the same
+    in every run), the side that runs first alternating, beginning with old
+    when `start` is even. The pairs stop once no cell is open (is_open):
+    none could then be called slower or faster."""
     out = []
     for i in range(PAIRS):
         began = time.monotonic_ns()
@@ -606,16 +611,11 @@ def pairs(old, new, start, points, use_cases):
             b = run(new, points)
             a = run(old, points)
         out.append((a, b))
-        measured_points = len(points)
-        still = {argument(key.split("|")[2], key.split("|")[3]) for key in out[0][0]
-                 if key.split("|")[2] in use_cases
-                 and is_open(ratios_of(out, key), key)}
-        points = [p for p in points if p in still]
+        still = [key for key in out[0][0] if key.split("|")[2] in use_cases and is_open(ratios_of(out, key), key)]
         tenths = (time.monotonic_ns() - began + 50_000_000) // 100_000_000
         print(f"perf_regress: pair {start + i + 1} done in {tenths // 10}.{tenths % 10} s "
-              f"({measured_points} points; {len(points)} still open)",
-              file=sys.stderr, flush=True)
-        if not points:
+              f"({len(still)} cells still open)", file=sys.stderr, flush=True)
+        if not still:
             break
     return out
 
@@ -656,8 +656,9 @@ def compare(old_rev, new):
 
     def unreliable(measured):
         if BUSY_RUNS:
-            print(f"perf_regress: other programs kept the machine busy during {len(BUSY_RUNS)} of the check's runs "
-                  "(clocks' load windows). No verdict (exit 2); run again when nothing else runs on the machine.")
+            print(f"perf_regress: other programs kept the machine busy, or clocks saw no load window, during "
+                  f"{len(BUSY_RUNS)} of the check's runs. No verdict (exit 2); run again when nothing else runs "
+                  "on the machine.")
             for line in BUSY_RUNS:
                 print(f"  {line}")
             return True
@@ -677,11 +678,9 @@ def compare(old_rev, new):
         return 2
     slower, faster, ratio, slow = judge(measured, use_cases, SUBJECTS)
     if slower:
-        # The confirmation measures the slower cells' points alone.
-        again = [p for p in points if p in {argument(key.split("|")[2], key.split("|")[3]) for key in slower}]
-        print(f"perf_regress: {len(slower)} cells slower in {PAIRS} pairs; {PAIRS} more pairs over their "
-              f"{len(again)} points must agree", file=sys.stderr, flush=True)
-        more = pairs(old, new_exe, PAIRS, again, use_cases)
+        print(f"perf_regress: {len(slower)} cells slower in {PAIRS} pairs; {PAIRS} more pairs must agree",
+              file=sys.stderr, flush=True)
+        more = pairs(old, new_exe, PAIRS, points, use_cases)
         if unreliable(more):
             return 2
         slower2, _, ratio2, _ = judge(more, use_cases, SUBJECTS)
