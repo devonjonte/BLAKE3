@@ -1373,6 +1373,18 @@ take 256 KiB nonstop x0.81 and its batches, for one branch on state the
 pool already has (`sleepers`). A design decision for Zooko; the queue is
 the API built for that pattern.
 
+**Built, measured, dropped** (Zooko, October 1, 2026: every piece earns
+its place). The rule as built (split from 256 KiB when `workers_ready`)
+changed nothing in the VM (old/new, two runs a side: lent 256 KiB 0.2005
+-> 0.2008 ns/B, lent batches of 4096 12.48 -> 12.52 ns/msg, each within
+the same code's spread): a stream of 256 KiB calls never wakes the
+workers, since none of its calls split, so the rule never triggers. The
+measured gain needs every such call to split (the probes fixed the split
+at 256 KiB), or a call that wakes the workers without using them, which
+spends their CPU time for a call that may come (AGENTS.md, "Serve real
+programs"). As built it would help only when other work had just woken
+the workers, and make a 256 KiB cell's speed depend on the cell before it.
+
 ## The queue hung without SME2; hash_multithreaded on one CPU (October 1, 2026)
 
 **The hang** (fix 7270b21). Every Linux CI run since September 30 hung
