@@ -23,7 +23,7 @@ Speed is this fork's purpose, so no commit that makes it slower may enter git un
 
 **Commits that skipped the check** (`--no-verify`, or made where the hook was absent) must be checked before they are pushed: `pypy3 tools/perf_regress.py compare <parent> <commit>` for one, `pypy3 tools/perf_bisect.py <commit> <commit> ...` for a run of them (each against the one before, then the last against the first).
 
-`NOTES-servil.md` ("perf_regress", under "Tooling and its pitfalls") explains the rule, its margins (the synchronous calls after the gap 20%; the queue's continuous cells 3% solo, 10% shared; solo cells hold a change, shared ones are reported), and its measured false-alarm rates and sensitivity on the VM and the Mac.
+`NOTES-servil.md` ("perf_regress", under "Tooling and its pitfalls") explains the rule, its margins (3% solo, 10% shared; solo cells hold a change, shared ones are reported), its measured false-alarm rates and sensitivity on the VM and the Mac, and why it measures the nonstop use cases alone ("perf_regress on the Mac: layout luck per side").
 
 # Branches: candidates, then servil
 
@@ -52,7 +52,7 @@ Every clock read, in the fork, in bench-hashes, and in any scratch probe, goes t
 
 # `perf_regress` and older commits
 
-The benchmark calls the current fork API; `tools/perf_regress.py` shims older commits (renaming their old functions, forwarding or wrapping the new names). A comparison with a wrapped side measures and judges the one-message cells alone. A benchmark change that calls a new fork API needs a shim there. `pypy3 tools/perf_regress.py build` builds bench-hashes against the working tree for runs by hand and prints the executable's path.
+The benchmark calls the current fork API; `tools/perf_regress.py` shims older commits (renaming their old functions, forwarding or wrapping the new names). A comparison with a wrapped side judges the use cases its shims leave as they are. A benchmark change that calls a new fork API needs a shim there. `pypy3 tools/perf_regress.py build` builds bench-hashes against the working tree for runs by hand and prints the executable's path.
 
 # Environment
 

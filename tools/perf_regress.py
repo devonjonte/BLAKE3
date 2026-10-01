@@ -35,12 +35,9 @@ to back (NOTES-servil.md, "perf_regress"):
   them, so a steady drift across the eight runs cancels. A cell (one
   contender, scenario, use case, and point) is slower when, in every
   pair, the new side's 5th percentile exceeds the old side's by more than
-  the cell's margin: for the synchronous calls, each after the gap (a 1
-  ms sleep), 20% (Zooko's start, September 28, 2026; their 5th
-  percentile varies about 7.5% between runs on the VM); for the queue's
-  continuous cells 3% solo, 10% shared (Zooko, September 25, 2026: the
-  recommended usage first, the shared scenario measured and held to a
-  looser line; AGENTS.md).
+  the cell's margin: 3% solo, 10% shared (Zooko, September 25, 2026:
+  the recommended usage first, the shared scenario measured and held to
+  a looser line; AGENTS.md).
 * A regression holds the change (exit 1) when a solo cell is slower; a
   shared cell slower is reported beside an exit 0, and the commit names
   it, its numbers, and the reason the change is worth it (Zooko,
@@ -54,40 +51,35 @@ to back (NOTES-servil.md, "perf_regress"):
   slower cells alone; a regression is a cell slower in both.
 * The control is the same code on both sides. If the rule calls any of
   its cells slower or faster, the comparison is unreliable: no verdict.
-* Two speeds (tools/speeds.py, the rule every measurement uses): a cell
-  of the queue whose pooled samples, on both sides, run at two speeds
-  is also slower
-  (faster) when its slow speed's median, each side's runs pooled over the
-  pairs, moves past the cell's margin; the 5th percentile sees the fast
-  speed alone. A share moved between the speeds is shown, never judged:
-  the same code's shares swing from run to run. Every listed cell shows
-  both sides' speeds and shares, and the median pair ratio of 90th
+* Every listed cell shows both sides' speeds and shares (tools/speeds.py,
+  the rule every measurement uses) and the median pair ratio of 90th
   percentiles.
 
 The rule's calibration (VM, September 26, 2026, on the benchmark of
-then, whose synchronous cells ran back to back and after idle): at a 3%
-margin, false flags before confirmation in 0.07% of cells, none
-confirmed in 25 checks; a solo cell 5% slower caught 81% of the time,
-10% slower 92%; at the 20% margin after a 1 ms sleep, a cell 50% slower
-caught 88% of the time, twice as slow always. On the current use cases
-(VM, September 28, 2026) two checks of unchanged code took 30 and 25 s
+then): at a 3% margin, false flags before confirmation in 0.07% of
+cells, none confirmed in 25 checks; a solo cell 5% slower caught 81% of
+the time, 10% slower 92%. On the use cases of September 28 (VM) two
+checks of unchanged code took 30 and 25 s
 of runs beside about 14 s of builds and called no cell slower after
 confirmation; the continuous batches of 16, a cell of two speeds, came
 out 7.7% faster in one. The current use cases await a calibration of
 their own.
 
 The check measures the points in POINTS_BY_USE_CASE, which cover the
-code paths and boundaries of the benchmark's five use cases; the
-published graph's plateau sizes add run time and no path.
+code paths and boundaries of the benchmark's nonstop use cases; the
+published graph's plateau sizes add run time and no path. The calls
+after a gap are the benchmark's, outside the check: where the linker
+places their code moves them more than any margin could see past.
 
 The benchmark calls the current fork API. Older commits get shims so it
 builds: the one-buffer batch API forwarded from hash_many_equal, or
 copied over the slice API, or one message at a time before batches (a
 comparison with either of those last two judges no batch cells); batch
 kernel reports that take no message length renamed and called through a
-shim that takes it; Stream and Queue, before they existed, over a Hasher
-on the calling thread (no continuous cells judged); and
-Hasher::update_multithreaded, before it was public, as update.
+shim that takes it; Queue, before it existed, over a Hasher on the
+calling thread (no owned-buffer cells judged); and
+Hasher::update_multithreaded, before it was public, as update (judged),
+and before it existed, as update (no pieces judged).
 """
 import argparse
 import fcntl
@@ -115,35 +107,23 @@ CACHE = ROOT / "tmp/perf-ab"
 CONTROL = "sha256"
 SUBJECTS = ["blake3-servil-st", "blake3-servil-mt"]
 CONTENDERS = [CONTROL] + SUBJECTS
-# The benchmark's use cases (FROZEN.md, September 28, 2026): the
-# synchronous calls, each after a gap (amid other work, or after idling), and the queue's
-# continuous ones. Points name the code paths and boundaries, and none of
-# the plateau sizes the published graph needs: one message on the scalar
-# kernel (64 B, 1 KiB), the hybrids (2304 B, 4 KiB, 7935 B: a partial final
-# chunk beside whole ones), the first SME2 group (16 KiB), bulk (64, 256
-# KiB), the multithreaded split (1 MiB) and plateau (8 MiB); batches of
-# one, of the NEON parent plans (4), of a first SME2 group (16), in bulk
-# (64, 1024), and over the pool (16384); a long message in pieces (64
-# MiB, the benchmark's one such point); the queue's short messages (members), a first
-# subtree task (16 KiB), one piece, many pieces, and batches as members
-# (16, 256) and as tasks of their own (4096). A call after the gap costs
-# the gap, so a cell whose calls take under about 2 us (the benchmark's
-# GAP_SAMPLE_NS) costs one gap per call summed: few such points.
-# The idle use cases make the same calls after 1 ms of sleep (Zooko,
-# September 30, 2026): a few points at the same margin.
-AFTER_GAP = {"OneMessage", "ManyMessages", "IdleOneMessage", "IdleManyMessages"}
-CONTINUOUS = {"ContinuousMessages", "ContinuousBatches", "LentMessages", "LentPieces", "LentBatches"}
-USE_CASES = AFTER_GAP | CONTINUOUS
+# The benchmark's nonstop use cases (FROZEN.md): the queue's, owned
+# buffers, and the synchronous calls' on lent buffers. Its calls after a
+# gap are left out: on the Mac where the linker places a cold call's code
+# moves it by up to about 60%, and that luck stays with one side for a
+# whole check (NOTES-servil.md, "perf_regress on the Mac: layout luck per
+# side"). Points name the code paths and boundaries: messages as the
+# queue's members (64 B, 1 KiB), a first subtree task (16 KiB), one piece
+# (64 KiB), many pieces (1 MiB); hash on one message (64 B), bulk (64 KiB),
+# over the pool (1 MiB); a long message in pieces (64 MiB, the benchmark's
+# one such point); batches as members (16, 256) and as tasks of their own
+# (4096).
+USE_CASES = {"ContinuousMessages", "ContinuousBatches", "LentMessages", "LentPieces", "LentBatches"}
 # The command line names a point by its use case's prefix and its label
 # (bench-hashes' label_prefix); the samples file by the two apart.
-PREFIX = {"OneMessage": "", "ManyMessages": "", "IdleOneMessage": "idle ", "IdleManyMessages": "idle ",
-          "ContinuousMessages": "continuous ", "ContinuousBatches": "continuous batch ", "LentMessages": "lent ",
+PREFIX = {"ContinuousMessages": "continuous ", "ContinuousBatches": "continuous batch ", "LentMessages": "lent ",
           "LentPieces": "lent pieces ", "LentBatches": "lent batch "}
 POINTS_BY_USE_CASE = {
-    "OneMessage": ["64 B", "1 KiB", "2304 B", "4 KiB", "7935 B", "16 KiB", "64 KiB", "256 KiB", "1 MiB", "8 MiB"],
-    "ManyMessages": ["1", "4", "16", "64", "1024", "16384"],
-    "IdleOneMessage": ["64 B", "4 KiB", "64 KiB", "1 MiB"],
-    "IdleManyMessages": ["16"],
     "ContinuousMessages": ["64 B", "1 KiB", "16 KiB", "64 KiB", "1 MiB"],
     "ContinuousBatches": ["16", "256", "4096"],
     "LentMessages": ["64 B", "64 KiB", "1 MiB"],
@@ -169,13 +149,9 @@ QUANTILE = 0.05
 PAIRS = 4  # the runs go A B B A A B B A
 
 
-def margin(scenario, use_case):
-    """A cell is slower (faster) past this ratio: calls after the gap 20%
-    (Zooko's start, September 28, 2026; their 5th percentile varies about
-    7.5% between runs on the VM), the continuous cells 3% solo and 10%
-    shared (Zooko, September 25, 2026)."""
-    if use_case in AFTER_GAP:
-        return Fraction(20, 100)
+def margin(scenario):
+    """A cell is slower (faster) past this ratio: 3% solo, 10% shared
+    (Zooko, September 25, 2026)."""
     return Fraction(3, 100) if scenario == "solo" else Fraction(10, 100)
 
 
@@ -272,30 +248,11 @@ pub fn kernel_report_many_multithreaded(_message_len: usize) -> KernelReport {
 '''
 
 
-SHIM_STREAM = r'''
-
-// perf_regress.py shim: the Stream of later commits, over a Hasher on the
-// calling thread, so the current bench-hashes builds against this commit
-// (the check measures no streamed cells).
-#[cfg(feature = "std")]
-pub struct Stream { hasher: Hasher, buffer: Vec<u8> }
-#[cfg(feature = "std")]
-impl Stream {
-    pub fn new() -> Self { Stream { hasher: Hasher::new(), buffer: vec![0; 1 << 16] } }
-    pub fn new_multithreaded() -> Self { Self::new() }
-    pub fn buffer(&mut self) -> &mut [u8] { &mut self.buffer }
-    pub fn filled(&mut self, n: usize) { let b = std::mem::take(&mut self.buffer); self.hasher.update(&b[..n]); self.buffer = b; }
-    pub fn finalize(self) -> Hash { self.hasher.finalize() }
-}
-'''
-
-
 SHIM_QUEUE = r'''
 
 // perf_regress.py shim: the Queue of later commits (plain mode alone),
 // hashing on the calling thread inside submit, so the current bench-hashes
-// builds against this commit (the check measures no streamed or
-// many-inputs cells).
+// builds against this commit (the check judges no owned-buffer cells).
 #[cfg(feature = "std")]
 pub enum Mode<'a> { Hash, Keyed(&'a [u8; 32]), DeriveKey(&'a str) }
 #[cfg(feature = "std")]
@@ -429,7 +386,7 @@ def shimmed_sources(commit):
                 renamed = re.sub(*SLICES_RENAME, text)
                 if renamed != text:
                     out[f"src/{name}"] = renamed
-        shimmed |= {"ManyMessages", "ContinuousBatches"}
+        shimmed |= {"ContinuousBatches", "LentBatches"}
     lib = out.get("src/lib.rs", lib)
     if BATCH_ONE_BUFFER in lib:
         pass
@@ -439,18 +396,17 @@ def shimmed_sources(commit):
         lib += SHIM_SLICES
     else:
         lib = lib + SHIM
-        shimmed |= {"ManyMessages", "ContinuousBatches"}
+        shimmed |= {"ContinuousBatches", "LentBatches"}
     if KERNELS_ONE_BLOCK in lib:
         lib = re.sub(*KERNELS_RENAME, lib) + SHIM_KERNELS
-    if "pub use stream::Stream" not in lib:
-        lib += SHIM_STREAM
     if "pub use queue::" not in lib:
         lib += SHIM_QUEUE
-        shimmed |= CONTINUOUS
+        shimmed |= {"ContinuousMessages", "ContinuousBatches"}
     if "pub(crate) fn update_multithreaded" in lib:
         lib = lib.replace("pub(crate) fn update_multithreaded", "pub fn update_multithreaded")
     elif "fn update_multithreaded" not in lib:
         lib += SHIM_UPDATE_MULTITHREADED
+        shimmed |= {"LentPieces"}
     if lib != git("show", f"{commit}:src/lib.rs"):
         out["src/lib.rs"] = lib
     return out, shimmed
@@ -607,8 +563,7 @@ def ratios_of(measured, key):
 def is_open(ratios, key):
     """Whether a cell with these pair ratios could still be called slower
     or faster: every ratio so far beyond its margin on one side."""
-    _, scenario, use_case, _ = key.split("|")
-    m = margin(scenario, use_case)
+    m = margin(key.split("|")[1])
     return all(r > 1 + m for r in ratios) or all(r < 1 - m for r in ratios)
 
 
@@ -618,28 +573,6 @@ def speeds_of(measured, key):
     old = [x for a, b in measured if key in a for x in a[key][2]]
     new = [x for a, b in measured if key in a for x in b[key][2]]
     return speeds.compare(old, new)
-
-
-def slow_speed_moved(measured, key):
-    """+1 (-1) when both sides ran at two speeds and the slow speed's
-    median moved past the cell's margin slower (faster), else 0. The 5th
-    percentile sees the fast speed alone; this is the check for the slow
-    one. A share moved between the speeds is reported, never judged: the
-    same code's shares swing run to run (tools/ab.py shows how far)."""
-    c = speeds_of(measured, key)
-    # Only a slow speed both sides ran at compares: a side without one
-    # moved its share, which is shown, never judged.
-    if len(c["old"]) < 2 or len(c["new"]) < 2:
-        return 0
-    _, scenario, use_case, _ = key.split("|")
-    # The calls after the gap: their slow speed is, for now, the cell run
-    # before them (a first call after a large one meets cold caches; NOTES,
-    # "The busy gap"), which moves the control past 20%: shown, not judged.
-    if use_case in AFTER_GAP:
-        return 0
-    m = margin(scenario, use_case)
-    r = Fraction(c["slow_permille"], 1000)
-    return 1 if r > 1 + m else -1 if r < 1 - m else 0
 
 
 def pairs(old, new, start, points, use_cases):
@@ -660,7 +593,7 @@ def pairs(old, new, start, points, use_cases):
         measured_points = len(points)
         still = {argument(key.split("|")[2], key.split("|")[3]) for key in out[0][0]
                  if key.split("|")[2] in use_cases
-                 and (is_open(ratios_of(out, key), key) or slow_speed_moved(out, key))}
+                 and is_open(ratios_of(out, key), key)}
         points = [p for p in points if p in still]
         tenths = (time.monotonic_ns() - began + 50_000_000) // 100_000_000
         print(f"perf_regress: pair {start + i + 1} done in {tenths // 10}.{tenths % 10} s "
@@ -686,8 +619,6 @@ def judge(measured, use_cases, contenders):
         slow[key] = statistics.median(b[key][1] / a[key][1] for a, b in measured if key in a)
         if len(ratios) == PAIRS and is_open(ratios, key):
             (slower if ratios[0] > 1 else faster).append(key)
-        elif len(ratios) == PAIRS and slow_speed_moved(measured, key):
-            (slower if slow_speed_moved(measured, key) > 0 else faster).append(key)
     return slower, faster, ratio, slow
 
 

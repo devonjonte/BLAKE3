@@ -942,14 +942,14 @@ clock?), to be measured on the Mac.
 
 **perf_regress** (`check` = working tree against HEAD, `compare OLD NEW`,
 `build` = the working tree's bench-hashes for runs by hand): runs A B B
-A A B B A of sha256 (the control), servil, and servil mt at 28 points
-over the benchmark's five use cases (September 28, night), 24 rounds
-each; a cell is slower when all four pairs' 5th percentiles are more
-than its margin above: 20% for the synchronous calls after the gap
-(solo and shared), 3% solo and 10% shared for the queue's continuous
-cells; the control moving means no verdict. A check takes about 25-30 s
-of runs on the VM beside the builds; the after-gap cells' margin is
-Zooko's start. A first calibration on these use cases (VM, September 28,
+A A B B A of sha256 (the control), servil, and servil mt at 14 points
+over the benchmark's five nonstop use cases, 24 rounds each; a cell is
+slower when all four pairs' 5th percentiles are more than its margin
+above: 3% solo, 10% shared; the control moving means no verdict. Since
+October 1, 2026 it measures no calls after a gap and has no slow-speed
+rule: both gave verdicts on identical code ("perf_regress on the Mac:
+layout luck per side"); the paragraphs below about them are history. A
+first calibration on these use cases (VM, September 28,
 night): four checks of unchanged code, no regression called (one first
 flag the confirmation dropped; one cell called faster, the continuous
 batches of 16, which run at two speeds); a planted slowdown in
@@ -1476,14 +1476,18 @@ compares two-speed nonstop cells' slow medians at the solo margin (3%);
 with one executable on both sides it called lent batches of 16 or shared
 64 B messages faster in 5 of 8 checks (slow x0.70-0.94).
 
-**Open, for Zooko:** (1) cold cells: hold a change only beyond what a
-rebuild alone moves, e.g. a third side (the old commit built at a second
-path) measured in the same check, or several layouts per side; or judge
-them at a margin above layout luck (about 70%), or report them only.
-(2) the slow-speed rule: report it, never hold on it (it detects
-nothing the same executable does not). (3) the run-order effect's cause.
-Until decided, a perf_regress verdict in such a cell is checked by a
-self-compare before anyone acts on it.
+**Decided (Zooko, October 1, 2026; AGENTS.md, "Every piece earns its
+place"):** the slow-speed rule is deleted, and perf_regress measures the
+nonstop use cases alone: telling a 20% change from layout luck of about
++-60% would take a dozen layouts per side or more, a dozen builds, for a
+number that predicts little about a user's own layout. What that gives
+up: perf_regress no longer sees a cold call slow down; a cold-path
+regression shows in the benchmark's cells after a gap (with the same
+luck) and in review (the code a call fetches). A check on the VM: 27 s
+with builds, pair 1 8.2 s (21 s before). Open: the run-order effect's
+cause, and layout luck in the nonstop small cells (VM, sha256 lent 64 B
++8% against a 3% margin; 64-byte function alignment levelled it in one
+pair of builds), to be tested with self-compares.
 
 **The Mac's held 64 B cell (job 852) is layout luck**: the A/Bs of
 7270b21 against fa1ec7b read servil st 64 B after other work x0.93
