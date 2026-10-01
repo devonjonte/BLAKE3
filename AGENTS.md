@@ -67,10 +67,11 @@ Simplicity has several dimensions:
 - **Fewer runtime cases:** fewer branches, special cases, tuning knobs,
   and distinct operating regimes.
 
-Use one clear mechanism wherever it serves. Added complexity earns its
-place through a concrete need and a demonstrated benefit. When approaches
-perform similarly, choose the simpler one. Apply this standard to code,
+Use one clear mechanism wherever it serves. When approaches perform
+similarly, choose the simpler one. Apply this standard to code,
 interfaces, documentation, and performance optimizations.
+
+**Every piece earns its place** (Zooko, October 1, 2026). Each piece of a design (a mechanism, a check, an option, a threshold, a line of output, a paragraph of documentation) adds complexity, and it stays while its demonstrated benefit exceeds its complexity-cost. Weigh it whenever you propose to add, keep, change, or rescue a piece. A piece's cost comes with its presence: every reader reads it, every run carries it, every later change works around it. Its benefit comes with what it reliably delivers: how often it acts, and how often it is right when it does (for a detector, its rate on real changes beside its rate on identical inputs). So an optional, partial, advisory, or unreliable piece carries its whole cost for a share of its benefit, and the design to weigh is the one a change leaves, piece by piece. To rescue a piece that falls short, first estimate from the measurements in hand whether it can earn its place at a cost worth paying; then improve it or remove it, and say which and why.
 
 **Revisit complexity as you learn** (Zooko, September 30, 2026). Complexity is a large cost that never stops being paid, so its benefit is never settled: whenever new information shows a piece of complexity doing less than it was built for, weigh removing it, since its cost may now exceed its benefit. Above all, when you find yourself building a second solution to a problem that an earlier solution already addresses, stop: you are very likely making a mistake. Go back and either make the first solution good enough, or remove it entirely; say which, and why, before building anything.
 
