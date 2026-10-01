@@ -913,7 +913,7 @@ impl Pool {
             // (fifteen pollers on the queue's 64-byte messages cost energy,
             // and in a VM the host time the busy threads need).
             let mut idle_since = std::time::Instant::now();
-            while self.registered.load(Ordering::SeqCst) > 0 || self.lingering() {
+            while self.registered.load(Ordering::SeqCst) > 0 || self.lingering() || TASKS.queued.load(Ordering::SeqCst) > 0 {
                 if let Some(task) = TASKS.pop() {
                     task.run(pool_platform());
                     TASKS.in_flight.fetch_sub(1, Ordering::SeqCst);
@@ -938,7 +938,11 @@ impl Pool {
             let mut guard = self.sleep_lock.lock().unwrap();
             self.sleepers.fetch_add(1, Ordering::SeqCst);
             let taken = self.take_piece(start, rank);
-            let waited = taken.is_none() && ((self.registered.load(Ordering::SeqCst) == 0 && !self.lingering()) || TASKS.queued.load(Ordering::SeqCst) == 0);
+            // Asleep only with nothing to take: no piece, no task queued. A
+            // queue's tasks can be queued while nothing is registered (the
+            // delivery thread takes its hold after the push), and a worker
+            // that slept on them then would use up the push's wake.
+            let waited = taken.is_none() && TASKS.queued.load(Ordering::SeqCst) == 0;
             if waited {
                 guard = self.posted.wait(guard).unwrap();
                 // Awake: one fewer notified sleeper on the way (a wake
