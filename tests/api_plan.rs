@@ -9,6 +9,43 @@
 use blake3_servil::{Efficiency, FixedHandler, Hash, MessageHandler, Mode, PieceHandler, Queue, Threads};
 use std::sync::mpsc;
 
+/// A fresh process initializes the pool under one-CPU affinity. Run the
+/// whole API suite there, covering all modes, queue shapes, resubmission,
+/// concurrent submitters, and bursts after pauses. The parent bounds
+/// liveness independently of receive calls in the existing tests.
+#[cfg(target_os = "linux")]
+#[test]
+fn api_suite_completes_with_one_cpu() {
+    use std::os::unix::process::CommandExt;
+    let mut allowed: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+    assert_eq!(unsafe { libc::sched_getaffinity(0, std::mem::size_of_val(&allowed), &mut allowed) }, 0);
+    let cpu = (0..libc::CPU_SETSIZE as usize).find(|&cpu| unsafe { libc::CPU_ISSET(cpu, &allowed) }).expect("at least one allowed CPU");
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command.args(["--skip", "api_suite_completes_with_one_cpu", "--test-threads=1"]);
+    unsafe {
+        command.pre_exec(move || {
+            let mut one: libc::cpu_set_t = std::mem::zeroed();
+            libc::CPU_ZERO(&mut one);
+            libc::CPU_SET(cpu, &mut one);
+            if libc::sched_setaffinity(0, std::mem::size_of_val(&one), &one) == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+        });
+    }
+    let mut child = command.spawn().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(status.success(), "one-CPU API suite: {status}");
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("one-CPU API suite exceeded its 30-second liveness deadline");
+        }
+        std::thread::park_timeout(std::time::Duration::from_millis(20));
+    }
+}
+
 const KEY: &[u8; 32] = b"whats the Elvish word for friend";
 const CONTEXT: &str = "BLAKE3 2019-12-27 16:29:52 test vectors context";
 
