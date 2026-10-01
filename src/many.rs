@@ -528,6 +528,36 @@ mod test {
         }
     }
 
+    /// Fixed published vectors also exercise the batched tree on the
+    /// portable platform, including under Miri where SIMD/FFI stay out.
+    #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
+    #[test]
+    fn portable_two_chunk_batch_matches_published_vectors() {
+        // test_vectors/test_vectors.json, 2048 bytes, byte i = i % 251.
+        // These anchors are copied from the published file, never generated
+        // by the implementation under test.
+        let key = b"whats the Elvish word for friend";
+        let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
+        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let modes = [(*crate::IV, 0), (crate::platform::words_from_le_bytes_32(key), crate::KEYED_HASH),
+            (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL)];
+        let anchors = [
+            "e776b6028c7cd22a4d0ba182a8bf62205d2ef576467e838ed6f2529b85fba24a",
+            "879cf1fa2ea0e79126cb1063617a05b6ad9d0b696d0d757cf053439f60a99dd1",
+            "7b2945cb4fef70885cc5d78a87bf6f6207dd901ff239201351ffac04e1088a23",
+        ];
+        let message: Vec<u8> = (0..2 * CHUNK_LEN).map(|i| (i % 251) as u8).collect();
+        for count in [4, 17] {
+            let input = message.repeat(count);
+            for ((words, flags), anchor) in modes.iter().zip(anchors) {
+                let expected: [u8; OUT_LEN] = hex::decode(anchor).unwrap().try_into().unwrap();
+                let mut out = vec![[0u8; OUT_LEN]; count];
+                hash_two_whole_chunks(&input, words, *flags, &mut out, Platform::Portable);
+                assert!(out.iter().all(|digest| *digest == expected));
+            }
+        }
+    }
+
     /// Independent reference, all x86 SIMD backends, every byte alignment,
     /// lane/group boundaries and mode. Sentinels protect both output ends.
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
