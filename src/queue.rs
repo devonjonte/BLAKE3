@@ -219,7 +219,11 @@ struct Inner<H, I, S> {
  * after delivery; a block is added only when more submissions are in
  * flight than ever before, and the lists below keep their capacity. So a
  * program cycling a fixed set of buffers makes the queue allocate nothing
- * after its first round.
+ * once as many of its submissions have waited undelivered at once as ever
+ * will: at most every buffer and one more. How many wait depends on how
+ * far the delivery thread trails the program, so the last blocks may come
+ * well after the first round (bench-hashes' producer met one in about one
+ * run of ten).
  */
 struct State<I> {
     /// The slots' blocks, each SLOT_BLOCK slots (from Box::into_raw; freed
