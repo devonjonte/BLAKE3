@@ -51,9 +51,9 @@ to back (NOTES-servil.md, "perf_regress"):
   slower cells alone; a regression is a cell slower in both.
 * The control is the same code on both sides. If the rule calls any of
   its cells slower or faster, the comparison is unreliable: no verdict.
-* Every listed cell shows both sides' speeds and shares (tools/speeds.py,
-  the rule every measurement uses) and the median pair ratio of 90th
-  percentiles.
+* Every listed cell shows both sides' speeds and shares (`bench-hashes
+  compare`, the rule every measurement uses) and the median pair ratio of
+  90th percentiles.
 
 The rule's calibration (VM, September 26, 2026, on the benchmark of
 then): at a 3% margin, false flags before confirmation in 0.07% of
@@ -97,7 +97,6 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import speeds  # noqa: E402  (tools/speeds.py: the two-speed rule)
 import samples  # noqa: E402  (tools/samples.py: the one samples-file reader)
 
 # The fork checkout the tool works in (its own, or --root's), and the
@@ -516,15 +515,28 @@ def require_sme2_kernel(exe):
                            "point CC at a compiler that assembles SME2 (CC=clang-19 in the VM)")
 
 
+class Cells(dict):
+    """A run's cells, {"contender|scenario|use_case|point": (5th percentile,
+    90th percentile, sorted samples)}, and the path of its samples file
+    (kept until the check ends, for `bench-hashes compare`)."""
+    path = None
+
+
+# The samples files of the check's runs.
+RUNS = tempfile.TemporaryDirectory()
+
+
 def run(exe, points):
-    """One run of `points` in a scratch directory; {"contender|scenario|use_case|point": 5th percentile}."""
+    """One run of `points` in a scratch directory; its Cells."""
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run([exe, "--contenders", ",".join(CONTENDERS), "--points", ",".join(points),
                         "--rounds", str(ROUNDS)], cwd=tmp, env=ENV, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         found = list(Path(tmp).glob("benchmark-results/*/bench-hashes.samples.tsv"))
         assert len(found) == 1, f"expected one samples file, found {found}"
-        return parse(found[0].read_text())
+        cells = parse(found[0].read_text())
+        cells.path = shutil.copy(found[0], Path(RUNS.name) / f"run-{len(os.listdir(RUNS.name))}.tsv")
+        return cells
 
 
 # The power states the check's runs reported (bench-hashes' "# power:"
@@ -542,7 +554,7 @@ def parse(text):
         POWER_SEEN.append(run.power)
     if run.busy:
         BUSY_RUNS.append(run.load)
-    cells = {}
+    cells = Cells()
     for key, values in run.cells.items():
         # Each sample as measured, ns/units: exact until a ratio is printed.
         ordered = sorted(values)
@@ -567,12 +579,16 @@ def is_open(ratios, key):
     return all(r > 1 + m for r in ratios) or all(r < 1 - m for r in ratios)
 
 
-def speeds_of(measured, key):
+def speeds_of(exe, measured, key):
     """The key's samples pooled over the pairs that measured it, each side's
-    runs together, compared speed with speed (tools/speeds.py)."""
-    old = [x for a, b in measured if key in a for x in a[key][2]]
-    new = [x for a, b in measured if key in a for x in b[key][2]]
-    return speeds.compare(old, new)
+    runs together, compared speed with speed by `exe compare` (the rule
+    every measurement uses): "old speeds -> new speeds  [ratios]"."""
+    old = [a.path for a, b in measured if key in a]
+    new = [b.path for a, b in measured if key in a]
+    out = subprocess.run([exe, "compare", *old, "--", *new], env=ENV, check=True,
+                         stdout=subprocess.PIPE, text=True).stdout
+    lines = dict(line.split(": ", 1) for line in out.splitlines() if line.startswith(key + ": "))
+    return lines[key]
 
 
 def pairs(old, new, start, points, use_cases):
@@ -680,7 +696,7 @@ def compare(old_rev, new):
             for key in keys:
                 print(f"  {key}: {float(ratio[key] - 1):+.1%}, then {float(ratio2[key] - 1):+.1%} "
                       f"(90th percentile {float(slow[key] - 1):+.1%})")
-                print(f"      speeds: {speeds.describe_comparison(speeds_of(measured + more, key))}")
+                print(f"      speeds: {speeds_of(new_exe, measured + more, key)}")
 
         if held:
             print(f"perf_regress: REGRESSION: {new_name} is slower than {old_rev} in {len(held)} cells that hold a "
@@ -699,7 +715,7 @@ def compare(old_rev, new):
         print(f"perf_regress: the second {PAIRS} pairs did not confirm; no regression")
     for key in sorted(faster):
         print(f"  faster  {key}: {float(ratio[key] - 1):+.1%} (90th percentile {float(slow[key] - 1):+.1%})")
-        print(f"      speeds: {speeds.describe_comparison(speeds_of(measured, key))}")
+        print(f"      speeds: {speeds_of(new_exe, measured, key)}")
     print(f"perf_regress: no regression against {old_rev}")
     return 0
 

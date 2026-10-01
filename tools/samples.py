@@ -1,7 +1,8 @@
 """The one reader of bench-hashes' samples files (`bench-hashes.samples.tsv`)
-for every Python tool: perf_regress, ab.py, losses.py, bench-hashes'
-compare-runs.py and check-report.py, and every scratch analysis. Import
-it; write no parser of your own.
+for every Python tool: perf_regress and every scratch analysis. Import it;
+write no parser of your own. It reads the samples as measured; every rule
+on them (speeds, medians, comparisons) is Rust's, through `bench-hashes
+compare`.
 
 It reads what the benchmark concluded, and recomputes nothing: whether
 other programs kept the machine busy is the Rust `clocks::load` rule's

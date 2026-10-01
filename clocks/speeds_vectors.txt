@@ -1,7 +1,6 @@
 # Samples (ns/units, any order) -> the index in sorted order of the first
 # slow sample under clocks::speeds' rule, or none: one speed. Each case is
-# built so its answer is plain; clocks (Rust) and tools/speeds.py (Python)
-# both read this file.
+# built so its answer is plain (clocks::speeds' tests read this file).
 # one speed, tight
 100/1, 101/1, 102/1, 103/1, 104/1, 105/1, 106/1, 107/1, 108/1, 109/1, 110/1 -> none
 # two speeds, half and half

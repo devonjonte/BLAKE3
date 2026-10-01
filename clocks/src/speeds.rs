@@ -1,6 +1,6 @@
 //! The one way every measurement summarises and compares its samples, in
-//! the fork, bench-hashes, perf_regress (through its Python twin,
-//! `tools/speeds.py`, held to the same vectors), and every probe.
+//! the fork, bench-hashes, and every probe; Python tools reach it through
+//! `bench-hashes compare`.
 //!
 //! **Many cells run at two speeds.** Two copies of an SME2 kernel run at
 //! full speed on two P-clusters and at about half on one; a queue's
@@ -149,9 +149,8 @@ pub fn compare(old: &[u128], new: &[u128]) -> Comparison {
 mod tests {
     use super::*;
 
-    /// The vectors both implementations are held to (tools/speeds.py reads
-    /// the same file): each line a set of samples as ns/units and the split
-    /// the rule gives, built so the answer is plain by construction.
+    /// The rule's vectors: each line a set of samples as ns/units and the
+    /// split the rule gives, built so the answer is plain by construction.
     #[test]
     fn vectors() {
         let text = include_str!("../speeds_vectors.txt");
