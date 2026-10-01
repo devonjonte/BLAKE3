@@ -1433,3 +1433,58 @@ timeout) before, passes after, in the default, no_sme2, and pure builds.
 VM perf_regress: no regression on the third check; the first two gave
 no verdict, the control (sha256 lent 64 B, code unchanged) +6.4% and
 +6.1% on the new side, a finding for the layout question below.
+
+## perf_regress on the Mac: layout luck per side (October 1, 2026, jobs 852-901)
+
+**Finding.** perf_regress's verdicts on the Mac's cold cells (after a
+gap, under about 1 us) and on the nonstop two-speed cells were wrong in
+about one check in five tonight, on identical code as often as on real
+changes. The pair 7270b21 against fa1ec7b: held in 852 (64 B after other
+work, +34%) and 865 (a batch of 4, +44%), passed in 853, 855, 864, 866.
+Self-compares (one commit against itself): held in 880 (lent batches of
+16, via the slow-speed rule: fast x1.31, slow x2.26), 881 (servil st 64 B
+after other work, +54% then +47%, every pair one way, servil mt and
+sha256 the same way), and 883 (lent batches of 16, a share swing); 869
+called the new side 47-49% faster at batches of 16 after other work.
+
+**Cause, for the cold cells: each side's own layout.** The two sides of
+a self-compare are built from different source paths (`tmp/perf-ab/old`,
+`new`), which enter the crates' hashes: in the VM 559 of 2578 functions
+sit at other addresses in one side than the other (0x68-0xa8 apart).
+A cold call fetches its code from DRAM (bench-hashes NOTES, "The cause:
+where the hash's code is"), so its time depends on where that code lies,
+by up to about +-60% at 64 B on the Mac, and that luck stays with a side
+for the whole check: alternating the sides cannot cancel it. Controls:
+- each run from a fresh copy of its executable (probe
+  `perf-regress-fresh-copy`): 881 and 883 still held. Not the file's
+  pages.
+- both sides running one executable (probe `perf-regress-same-exe`,
+  jobs 892-901, 8 valid checks): no cold-cell series one way through
+  all pairs, no hold; with two executables 6 of 16 checks had one.
+- 64-byte function alignment (bench probe `align-functions`): nonstop
+  lent 64 B in the VM level again (sha256 x1.083 -> x0.996), but the
+  Mac's cold cells unchanged (865 held with it).
+
+**A second effect, run order.** In the short later pairs the second
+process of a pair runs 64 B after other work about 1.5x slower than the
+first (one executable, ratios 1.35/0.66, 1.21/0.65, 1.53/0.69 by pair):
+alternation cancels it in the median, but it pushes single pairs past
+the 20% margin, and with layout luck the pairs line up.
+
+**The slow-speed rule fires on identical code.** `slow_speed_moved`
+compares two-speed nonstop cells' slow medians at the solo margin (3%);
+with one executable on both sides it called lent batches of 16 or shared
+64 B messages faster in 5 of 8 checks (slow x0.70-0.94).
+
+**Open, for Zooko:** (1) cold cells: hold a change only beyond what a
+rebuild alone moves, e.g. a third side (the old commit built at a second
+path) measured in the same check, or several layouts per side; or judge
+them at a margin above layout luck (about 70%), or report them only.
+(2) the slow-speed rule: report it, never hold on it (it detects
+nothing the same executable does not). (3) the run-order effect's cause.
+Until decided, a perf_regress verdict in such a cell is checked by a
+self-compare before anyone acts on it.
+
+**The Mac's held 64 B cell (job 852) is layout luck**: the A/Bs of
+7270b21 against fa1ec7b read servil st 64 B after other work x0.93
+(unaligned, jobs 856-859) and x0.88 (aligned, 860-863). No regression.
