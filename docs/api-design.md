@@ -256,12 +256,13 @@ what users meet (Zooko, September 28, 2026). Calls in the keeps-up column follow
 Calls in the continuous, lent-buffer column run back to back. Every cell
 records wall time and cycles; energy cells wait for a validated counter.
 
-**Keeps up: three shapes**, on one thread and several. Whole messages
-and batches use their single-threaded or multithreaded entry points.
-Pieces use `Hasher::update` in both columns. Each message or batch
-comes after a gap, of each kind. Message lengths: 64 B-128 MiB; batches: 1-262144
-messages of 64 B. Pieces arrive as copied reads of up to 64 KiB, then
-`finalize` returns the digest.
+**Keeps up: two shapes measured**, on one thread and several. Whole
+messages and batches use their single-threaded or multithreaded entry
+points. Each message or batch comes after a gap, of each kind. Message
+lengths: 64 B-128 MiB; batches: 1-262144 messages of 64 B. Pieces, which
+use `Hasher::update` in both columns, go unmeasured here: each piece
+costs about what `hash` costs on a buffer that long, and the one-buffer
+cells show it (Zooko, October 1, 2026; bench-hashes FROZEN.md).
 
 **Does not keep up, buffers owned: two axes.** Messages of one length,
 64 B-64 MiB, produced into owned buffers: `Queue::messages` up to 64 KiB,
@@ -271,8 +272,10 @@ whichever is fewer, with its queue and bounded return channel kept
 across samples. Reads and hashing are timed end to end. The other
 contenders run the same producer through their synchronous calls.
 
-**Does not keep up, buffers lent: three axes.** Whole messages, messages
-in 64 KiB pieces, and batches, at the continuous axes' sizes. Every input
+**Does not keep up, buffers lent: three axes.** Whole messages and
+batches at the continuous axes' sizes, and 64 MiB messages in 64 KiB
+pieces (one length: a long message shows the rate a multithreaded
+incremental call sustains, which no one-buffer size predicts). Every input
 is read into a kept buffer and lent to a synchronous call until it
 returns; reads and hashing take turns, timed end to end. Whole messages
 use `hash` or `hash_multithreaded`, pieces `update` or

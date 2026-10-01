@@ -123,33 +123,31 @@ CONTENDERS = [CONTROL] + SUBJECTS
 # chunk beside whole ones), the first SME2 group (16 KiB), bulk (64, 256
 # KiB), the multithreaded split (1 MiB) and plateau (8 MiB); batches of
 # one, of the NEON parent plans (4), of a first SME2 group (16), in bulk
-# (64, 1024), and over the pool (16384); streams of one short piece, one
-# whole piece, and many; the queue's short messages (members), a first
+# (64, 1024), and over the pool (16384); a long message in pieces (64
+# MiB, the benchmark's one such point); the queue's short messages (members), a first
 # subtree task (16 KiB), one piece, many pieces, and batches as members
 # (16, 256) and as tasks of their own (4096). A call after the gap costs
 # the gap, so a cell whose calls take under about 2 us (the benchmark's
 # GAP_SAMPLE_NS) costs one gap per call summed: few such points.
 # The idle use cases make the same calls after 1 ms of sleep (Zooko,
 # September 30, 2026): a few points at the same margin.
-AFTER_GAP = {"OneMessage", "ManyMessages", "Streaming", "IdleOneMessage", "IdleManyMessages", "IdleStreaming"}
+AFTER_GAP = {"OneMessage", "ManyMessages", "IdleOneMessage", "IdleManyMessages"}
 CONTINUOUS = {"ContinuousMessages", "ContinuousBatches", "LentMessages", "LentPieces", "LentBatches"}
 USE_CASES = AFTER_GAP | CONTINUOUS
 # The command line names a point by its use case's prefix and its label
 # (bench-hashes' label_prefix); the samples file by the two apart.
-PREFIX = {"OneMessage": "", "ManyMessages": "", "Streaming": "streamed ", "IdleOneMessage": "idle ", "IdleManyMessages": "idle ",
-          "IdleStreaming": "idle streamed ", "ContinuousMessages": "continuous ",
-          "ContinuousBatches": "continuous batch ", "LentMessages": "lent ", "LentPieces": "lent streamed ", "LentBatches": "lent batch "}
+PREFIX = {"OneMessage": "", "ManyMessages": "", "IdleOneMessage": "idle ", "IdleManyMessages": "idle ",
+          "ContinuousMessages": "continuous ", "ContinuousBatches": "continuous batch ", "LentMessages": "lent ",
+          "LentPieces": "lent pieces ", "LentBatches": "lent batch "}
 POINTS_BY_USE_CASE = {
     "OneMessage": ["64 B", "1 KiB", "2304 B", "4 KiB", "7935 B", "16 KiB", "64 KiB", "256 KiB", "1 MiB", "8 MiB"],
     "ManyMessages": ["1", "4", "16", "64", "1024", "16384"],
-    "Streaming": ["64 B", "64 KiB", "1 MiB", "8 MiB"],
     "IdleOneMessage": ["64 B", "4 KiB", "64 KiB", "1 MiB"],
     "IdleManyMessages": ["16"],
-    "IdleStreaming": ["64 KiB"],
     "ContinuousMessages": ["64 B", "1 KiB", "16 KiB", "64 KiB", "1 MiB"],
     "ContinuousBatches": ["16", "256", "4096"],
     "LentMessages": ["64 B", "64 KiB", "1 MiB"],
-    "LentPieces": ["64 B", "64 KiB", "1 MiB"],
+    "LentPieces": ["64 MiB"],
     "LentBatches": ["16", "4096"],
 }
 
