@@ -202,8 +202,10 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8, max_threads: us
     let pool = pool();
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let _caller = Caller(&pool.callers);
+    // No CPU to spare (every one has a caller, or the process has one
+    // CPU): hash as hash() does, as the batch path does.
     if callers >= pool.cpus {
-        return pool.hash_subtree(input, key, 0, flags).root_hash();
+        return crate::hash_serial(input, key, flags);
     }
     let threads = pool.cpus.min(max_threads);
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
@@ -731,12 +733,6 @@ impl Pool {
     /// Whether workers keep polling with no job (`linger`).
     fn lingering(&self) -> bool {
         (self.epoch.elapsed().as_nanos() as u64) < self.linger_until.load(Ordering::Relaxed)
-    }
-
-    /// Hash a subtree on the pool's platform, on callers and workers alike.
-    /// `input` tiles a valid subtree at `counter`, as hash_all_at_once requires.
-    fn hash_subtree(&self, input: &[u8], key: &crate::CVWords, counter: u64, flags: u8) -> crate::Output {
-        crate::hash_all_at_once::<crate::join::SerialJoin>(input, key, counter, flags, pool_platform())
     }
 
     /// Register `work` of `pieces` pieces, take pieces on this thread until
