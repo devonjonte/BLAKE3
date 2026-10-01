@@ -10,6 +10,7 @@ verdict, which the file carries on its `# load:` line.
     run = samples.read(path)
     run.cells[(contender, scenario, use_case, point)]  # [Fraction ns per unit], in the order taken
     run.starts[key]   # when each sample started, ms
+    run.measured[key] # [(raw ns, raw units)], before Fraction reduces them
     run.busy          # other programs kept a CPU busy in some window
     run.load, run.power, run.meta["rounds"], run.order (contenders in order)
     run.samples_in_busy_windows(key)  # how many of the cell's samples started in a busy window
@@ -30,6 +31,7 @@ class Run:
         self.version = None
         self.meta = {}
         self.cells = {}
+        self.measured = {}
         self.units = {}
         self.starts = {}
         self.order = []
@@ -86,7 +88,11 @@ def read(source):
             continue
         contender, scenario, use_case, point, unit, values, starts = fields
         key = (contender, scenario, use_case, point)
-        run.cells[key] = [Fraction(*map(int, v.split("/"))) for v in values.split(",")]
+        assert key not in run.cells, f"one row per sampled cell; duplicate {key}"
+        measured = [tuple(map(int, v.split("/"))) for v in values.split(",")]
+        assert all(len(v) == 2 and v[0] >= 0 and v[1] > 0 for v in measured), f"nonnegative ns over positive units for {key}"
+        run.measured[key] = measured
+        run.cells[key] = [Fraction(ns, units) for ns, units in measured]
         run.units[key] = unit
         run.starts[key] = [int(t) for t in starts.split(",")]
         assert len(run.starts[key]) == len(run.cells[key]), f"a start for every sample of {key}"
