@@ -33,10 +33,6 @@ pub const GAP_PERMILLE: u64 = 40;
 pub const MIN_SHARE_PERMILLE: usize = 100;
 /// The slower speed's median over the faster's, in permille, at least.
 pub const RATIO_PERMILLE: u64 = 1250;
-/// Bootstrap resamples for a median's 95% interval: the 2.5th and 97.5th
-/// percentiles to within about one rank.
-pub const BOOTSTRAP_RESAMPLES: usize = 400;
-
 /// A sample of `ns` nanoseconds over `units` units, as nanoseconds per unit
 /// in Q64.64, rounded to the nearest representable value. Requires
 /// `units > 0` and `ns < 2^40` (18 minutes).
@@ -59,42 +55,11 @@ pub fn median_of_sorted(sorted: &[u128]) -> u128 {
     }
 }
 
-/// The 95% percentile-bootstrap interval of a sorted, non-empty slice's
-/// median: BOOTSTRAP_RESAMPLES resamples with replacement, each one's
-/// median, their 2.5th and 97.5th percentiles. SplitMix64 seeded by the
-/// sample count makes it reproducible.
-pub fn bootstrap_median_interval(sorted: &[u128]) -> (u128, u128) {
-    let n = sorted.len();
-    assert!(n > 0, "an interval needs a sample");
-    let mut state: u64 = n as u64;
-    let mut next = || {
-        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
-        let mut z = state;
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        z ^ (z >> 31)
-    };
-    let mut medians = Vec::with_capacity(BOOTSTRAP_RESAMPLES);
-    let mut resample = vec![0u128; n];
-    for _ in 0..BOOTSTRAP_RESAMPLES {
-        for slot in resample.iter_mut() {
-            // An index in 0..n by multiply-shift (Lemire).
-            *slot = sorted[((u128::from(next()) * n as u128) >> 64) as usize];
-        }
-        resample.sort_unstable();
-        medians.push(median_of_sorted(&resample));
-    }
-    medians.sort_unstable();
-    (medians[BOOTSTRAP_RESAMPLES * 25 / 1000], medians[BOOTSTRAP_RESAMPLES * 975 / 1000])
-}
-
-/// One speed a cell ran at: its samples' median, that median's 95%
-/// bootstrap interval, and how many samples it holds.
+/// One speed a cell ran at: its samples' median, and how many samples it
+/// holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Speed {
     pub median: u128,
-    pub low: u128,
-    pub high: u128,
     pub count: usize,
 }
 
@@ -123,10 +88,7 @@ pub fn split(sorted: &[u128]) -> Option<usize> {
 
 /// A sorted, non-empty slice's speeds, faster first: one, or two.
 pub fn speeds(sorted: &[u128]) -> Vec<Speed> {
-    let speed = |part: &[u128]| {
-        let (low, high) = bootstrap_median_interval(part);
-        Speed { median: median_of_sorted(part), low, high, count: part.len() }
-    };
+    let speed = |part: &[u128]| Speed { median: median_of_sorted(part), count: part.len() };
     match split(sorted) {
         Some(at) => vec![speed(&sorted[..at]), speed(&sorted[at..])],
         None => vec![speed(sorted)],
