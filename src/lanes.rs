@@ -247,6 +247,15 @@ pub(crate) fn linger() {
     pool.wake_for(LINGER_WORKERS);
 }
 
+/// Whether the pool has a thread that takes queue tasks: a worker, or the
+/// SME2 thread. With one CPU to the process (`available_parallelism`, which
+/// counts its affinity and quota) and no SME2 it has none, and a queue
+/// hashes everything on its delivery thread.
+pub(crate) fn takes_tasks() -> bool {
+    let pool = pool();
+    pool.cpus > 1 || pool.sme2
+}
+
 /// The workers a lingering Hasher keeps ready: a 64 KiB piece's cut.
 const LINGER_WORKERS: usize = 8;
 

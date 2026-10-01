@@ -1409,3 +1409,27 @@ a gap move 20% with code layout alone (job 783, ring as servil; "Cold
 calls pay for servil's code size"): layout is the likely cause,
 unproven. Open: a control (the same code laid out differently) before
 any claim that these commits slow nothing.
+
+## The queue on one CPU (October 1, 2026)
+
+**The hang.** Devon Jonte's audit of bench-hashes (his branch
+`candidate/devon-benchmark-audit`, AUDIT.md; x86-64 Linux) found
+api_plan's bursts and resubmission tests hanging under `taskset -c 0`.
+Reproduced in the VM with `no_sme2` (the SME2 build passes): the pool
+spawns `available_parallelism() - 1` workers, which counts the process's
+affinity and quota, so one CPU gives none, and without SME2 no SME2
+thread either. A `Time` queue still pushed tasks, which nobody took, and
+its delivery thread waited on them forever. Every one-CPU container on
+x86 met it with the first queue entry of 16 KiB or more, or the first
+gathered short message.
+
+**The fix.** A queue hashes as tasks only when the pool has a thread
+to take them (`lanes::takes_tasks`: more than one CPU, or SME2);
+otherwise its delivery thread hashes every entry, as with `Energy`. One
+boolean, `Inner::tasks`, replaces `max_threads` (which only ever answered
+that question). `tests/one_cpu.rs` pins its process to one CPU and runs
+each queue shape against the reference implementation: hangs (60 s
+timeout) before, passes after, in the default, no_sme2, and pure builds.
+VM perf_regress: no regression on the third check; the first two gave
+no verdict, the control (sha256 lent 64 B, code unchanged) +6.4% and
++6.1% on the new side, a finding for the layout question below.

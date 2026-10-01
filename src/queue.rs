@@ -26,8 +26,9 @@
 //!   replays `Hasher::update` with its results (and for a message
 //!   finalizes), and calls the handler. Entries without tasks it hashes
 //!   itself: pieces shorter than `TASK_MIN` (their bytes join the message
-//!   in order), and everything with `Efficiency::Energy`, which the
-//!   delivery thread hashes alone. The submitters and the delivery thread
+//!   in order), and everything with `Efficiency::Energy` or in a pool
+//!   with no thread to take tasks (one CPU to the process, no SME2),
+//!   which the delivery thread hashes alone. The submitters and the delivery thread
 //!   share no lock on these paths: delivered slots go back through
 //!   `returned`, and the queue's hold passes by a store-then-recheck
 //!   handshake (`Inner::activate`, the end of `deliver_with`). While any
@@ -54,15 +55,6 @@ pub enum Efficiency {
     Time,
     /// The least energy: one thread, as [`hash`](crate::hash).
     Energy,
-}
-
-impl Efficiency {
-    fn max_threads(self) -> usize {
-        match self {
-            Efficiency::Time => usize::MAX,
-            Efficiency::Energy => 1,
-        }
-    }
 }
 
 /// The handler of a [`Queue::messages`]: one message per buffer, of any
@@ -211,7 +203,10 @@ struct Inner<H, I, S> {
     active: OwnLine<AtomicBool>,
     key: CVWords,
     flags: u8,
-    max_threads: usize,
+    /// Whether the pool's threads hash this queue's entries (as tasks):
+    /// with `Efficiency::Time` and a pool thread to take them; otherwise
+    /// the delivery thread hashes each entry.
+    tasks: bool,
     /// The fixed-length queue's message length.
     message_len: usize,
     shape: PhantomData<fn() -> S>,
@@ -373,8 +368,9 @@ impl<H: Send + 'static, S: 'static> Queue<H, S> {
         Inner<H, I, S>: Deliver,
     {
         let (key, flags) = mode.key_and_flags();
+        let tasks = efficiency == Efficiency::Time && crate::lanes::takes_tasks();
         let mut returned = Slots(Vec::new());
-        let mut state = State { blocks: Vec::new(), free: Slots(Vec::new()), tail: core::ptr::null_mut(), tasks: Vec::new(), most: 0, plan: Default::default(), open: None, tasks_room: (efficiency.max_threads() > 1).then_some(0) };
+        let mut state = State { blocks: Vec::new(), free: Slots(Vec::new()), tail: core::ptr::null_mut(), tasks: Vec::new(), most: 0, plan: Default::default(), open: None, tasks_room: tasks.then_some(0) };
         state.add_block(&mut returned);
         // The chain starts at a slot delivered already.
         let first = state.free.0.pop().unwrap();
@@ -389,7 +385,7 @@ impl<H: Send + 'static, S: 'static> Queue<H, S> {
             active: OwnLine(AtomicBool::new(false)),
             key,
             flags,
-            max_threads: efficiency.max_threads(),
+            tasks,
             message_len,
             shape: PhantomData,
         };
@@ -663,7 +659,7 @@ impl<H: MessageHandler> Queue<H, shape::Messages> {
     /// Hash `buffer`'s bytes as one message; returns at once.
     pub fn submit(&self, buffer: H::Buffer) {
         let (inner, owner) = self.inner::<H::Buffer>();
-        let tasks = inner.max_threads > 1;
+        let tasks = inner.tasks;
         if tasks && buffer.as_ref().len() < TASK_MIN {
             return inner.submit_member(owner, buffer, None, |buffer| (buffer.as_ref().as_ptr(), buffer.as_ref().len(), None));
         }
@@ -689,7 +685,7 @@ impl<H: PieceHandler> Queue<H, shape::Pieces> {
     /// Append `piece`'s bytes to the message; returns at once.
     pub fn submit(&self, piece: H::Buffer) {
         let (inner, owner) = self.inner::<PieceItem<H::Buffer>>();
-        let tasks = inner.max_threads > 1;
+        let tasks = inner.tasks;
         inner.submit(owner, PieceItem::Piece(piece), |item, plan, out| {
             let PieceItem::Piece(piece) = item else { unreachable!("a piece") };
             let bytes = piece.as_ref();
@@ -724,7 +720,7 @@ impl<H: FixedHandler> Queue<H, shape::Fixed> {
     /// once.
     pub fn submit(&self, buffer: H::Buffer, mut digests: H::Digests) {
         let (inner, owner) = self.inner::<(H::Buffer, H::Digests)>();
-        let (message_len, tasks) = (inner.message_len, inner.max_threads > 1);
+        let (message_len, tasks) = (inner.message_len, inner.tasks);
         let slot = crate::many::slot_len(message_len);
         assert_eq!(Some(buffer.as_ref().len()), slot.checked_mul(digests.as_mut().len()), "the buffer holds one slot of whole blocks per digest");
         let len = buffer.as_ref().len();
