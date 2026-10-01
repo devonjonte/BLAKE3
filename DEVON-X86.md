@@ -29,6 +29,21 @@ no confirmed regression. This diagnostic tool deletes temporary raw
 samples; its full stdout/stderr logs are retained locally. Optimization
 claims use separately retained raw old/new/new/old data and repeat controls.
 
+## Two-chunk batch optimization
+
+`83e7e74` batches 2048-byte x86 messages across existing SIMD kernels.
+[The public evidence](devon-results/two-chunk-x86/README.md) establishes
+roughly 2.0-2.1x throughput on a P core/default affinity and 1.75-1.78x
+on an E core for batches of eight or more. Default/pure suites, published
+vectors, independent alignment/mode tests, concurrency, guard pages and
+ASan support correctness; TSan cannot start in this environment.
+
+The candidate stays under review: retained frozen-workload runs show
+slower queue cells (+7-16%) and variable after-idle cells despite passing
+the diagnostic regression tool. Same-code build/repeat controls demonstrate
+sensitivity; the observed costs remain open before promotion. The linked
+record preserves these findings beside the target gain.
+
 ## Measurement scope
 
 The instrument is Devon's audited bench-hashes at `bd3acd0`, with current
