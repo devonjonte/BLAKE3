@@ -1460,7 +1460,7 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
 /// hashes at a multiple of one [`hash`] call's rate; on Apple M4 and later
 /// so are messages of up to 15 KiB, in batches of about ten or more.
 /// On x86 with four or more SIMD lanes, batches of at least four
-/// 2048-byte messages hash both chunks and their roots across messages.
+/// 2048- or 4096-byte messages hash their chunks and tree levels across messages.
 /// Other longer messages use one [`hash`] path per message. On Apple M4 and
 /// later, batches that run on SME2 follow [`hash`]'s rule for large
 /// inputs: when several threads hash them at once, one runs at the full
@@ -1630,8 +1630,8 @@ pub fn kernel_report() -> KernelReport {
 /// by the batch's length in bytes: `from_len` is the batch's length at
 /// which each kernel starts. Messages of 1 to 16 whole blocks (64 B to
 /// 1 KiB) are hashed several at a time, and on SME2 so are messages of
-/// whole blocks up to 15 KiB. On x86, 2048-byte messages batch both chunks
-/// and their roots from four messages where four SIMD lanes are available;
+/// whole blocks up to 15 KiB. On x86, 2048- and 4096-byte messages batch chunks
+/// and tree levels from four messages where four SIMD lanes are available;
 /// other lengths run [`kernel_report`]'s kernel, one message per call.
 #[cfg(feature = "std")]
 pub fn kernel_report_many(message_len: usize) -> KernelReport {
@@ -1647,11 +1647,11 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
             why: "Messages of this length are hashed one call each, as one input of that length.",
         });
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        if message_len == 2 * CHUNK_LEN && platform.simd_degree() >= 4 {
+        if (message_len == 2 * CHUNK_LEN || message_len == 4 * CHUNK_LEN) && platform.simd_degree() >= 4 {
             kernels.push(Kernel {
                 from_len: 4 * message_len,
                 name: platform.hash_many_name(),
-                why: "From four two-chunk messages, each chunk index is batched across independent messages, then their parent roots; the second chunks keep counter 1.",
+                why: "From four messages, each chunk index is batched across independent messages, then every tree level; chunk indices stay their counters and only the final parents carry ROOT.",
             });
         }
         #[cfg(blake3_neon_hybrid)]
