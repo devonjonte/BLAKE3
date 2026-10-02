@@ -1794,24 +1794,32 @@ What it shows:
   `find | xargs b3sum`; Mac job 1146, quiet): warm Rayon 34.8 ms, the
   pool 26.3 (x0.755), official 52.3; cold Rayon 209, the pool 123
   (x0.589), plain reads 121, official 207. (VM: warm x0.875, cold level.)
-- **The design taken** (candidate/b3sum-pool, Mac jobs 1148-1151, VM
-  runs r5-r9): a file of 64 KiB or more already in the page cache is
-  mapped and hashed in place over the pool; every other input, stdin
-  included, is read in 4 MiB pieces, the first on the calling thread (a
-  file of one piece starts no thread), the rest on a scoped reader thread
-  into the second of two buffers kept for the run, while the calling
-  thread hashes the last piece with update_multithreaded. Residency: 16
-  pages spread over the file (mincore one page at a time), since a whole
-  mincore of 1 GiB cost about 7 ms on macOS. Mac job 1151, fast speeds:
-  warm 1 GiB Rayon 68.6 ms, mapping on the pool 46.1, this 37.3 (28.8
-  GB/s); cold 1 GiB 367, 402, 159 (6.7 GB/s); warm mixed tree 34.3,
-  26.1, 29.8; cold mixed tree 191, 115, 101.
+- **The design taken** (Mac jobs 1148-1160, VM runs r5-r10): a file of
+  512 KiB or more (where the pool takes over) whose first page is in the
+  page cache (mincore) is mapped and hashed in place over the pool; every
+  other input, stdin included, is read in 4 MiB pieces, the first on the
+  calling thread (a file of one piece starts no thread), the rest on a
+  scoped reader thread into the second of two buffers kept for the run,
+  while the calling thread hashes the last piece with update_multithreaded.
+  Mac, fast speeds (job 1158): warm 1 GiB Rayon 68.6 ms, this 37.3 (28.8
+  GB/s; official 1.8.2 45.8); cold 1 GiB 367, 159 (6.7 GB/s); warm mixed
+  tree 34.3, 24.4; cold mixed tree 191, 99.
   - Reads alone (5bd0577) lost warm in the VM (1 GiB 79 ms against 29
     mapped: its page-cache copy, one thread, at 13.6 GB/s).
-  - madvise(WILLNEED) costs about 9 ms at 1 GiB warm on macOS (46.5 with
-    it, 37.3 without); it helps the warm mixed tree (26.9 against 29.8).
-    Open: the warm mixed tree 14% behind the mapping candidate (which
-    advised every file).
+  - Mapping files below 512 KiB lost on the Mac: hashed on one thread, a
+    mapping faults once a 16 KiB page, and each fault puts the SME unit in
+    its slow state (probe/willneed-mechanism, job 1156: 1 GiB on one
+    thread 480 ms mapped, 185 prefaulted; the faults' kernel time alike,
+    the difference user time, 4.5 us a page). Reading them instead: warm
+    mixed tree 29.8 -> 24.4 ms on the Mac, 19.4 -> 20.2 in the VM, where
+    Linux maps many pages a fault.
+  - madvise(WILLNEED) prefaults, at about 260 ns a page on one thread:
+    1 GiB on the pool 32.1 ms without, 39.5 with (the workers fault in
+    parallel, at six times the system time but less wall time).
+  - Residency by one page, not sixteen: at warm 256 MiB about 2% more wall
+    time (mean 11.36-11.56 ms against 11.23-11.33, jobs 1158-1160; CPU
+    time, cycles, and core kinds alike; back with the 15 calls' answers
+    ignored), nothing at other sizes: taken for the simpler code.
   - The per-file reader thread of the first experiment (probe/b3sum-read-
     overlap) cost a tree of small files 3.5x: a thread and two buffers
     per file.
