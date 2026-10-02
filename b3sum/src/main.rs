@@ -188,12 +188,13 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
 }
 
 /// `file` mapped, when it is at least MAP_LEN long and in the page cache
-/// (mincore, at SAMPLED_PAGES pages): hashed in place over the pool, it skips
+/// (its first page, by mincore): hashed in place over the pool, it skips
 /// the copy a read makes, which a reader thread does alone (Linux VM,
 /// 1 GiB in the page cache: 32 ms mapped against 79 ms read; Apple M4 Max
-/// 47 against 50). A file not wholly in the cache is read: a mapping's
-/// page faults fetch it a few pages at a time (Mac, 1 GiB from storage:
-/// 355 ms mapped against 162 ms read).
+/// 37 against 50). A file not in the cache is read: a mapping's page
+/// faults fetch it a few pages at a time (Mac, 1 GiB from storage: 402 ms
+/// mapped against 159 ms read). A file cached only in part may be judged
+/// either way; either way hashes it right.
 #[cfg(unix)]
 fn mapped_if_cached(file: &File) -> Option<memmap2::Mmap> {
     let len = usize::try_from(file.metadata().ok()?.len()).ok()?;
@@ -204,27 +205,11 @@ fn mapped_if_cached(file: &File) -> Option<memmap2::Mmap> {
     // a file another program truncates meanwhile is the caller's risk, as
     // with any mapping (upstream b3sum mapped every file).
     let map = unsafe { memmap2::Mmap::map(file) }.ok()?;
-    // Sound: sysconf is a plain query.
-    let page = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok()?;
-    // Sixteen pages spread over the file stand for it: a whole mincore
-    // walks every page (macOS, 1 GiB: about 7 ms), and a wrong guess costs
-    // only speed.
-    let pages = len.div_ceil(page);
-    for k in 0..SAMPLED_PAGES {
-        let at = pages * k / SAMPLED_PAGES * page;
-        let mut resident = 0u8;
-        // Sound: one page of `map`, from a page boundary inside it.
-        let rc = unsafe { libc::mincore(map.as_ptr().add(at) as *mut libc::c_void, 1, (&mut resident as *mut u8).cast()) };
-        if rc != 0 || resident & 1 == 0 {
-            return None;
-        }
-    }
-    Some(map)
+    let mut resident = 0u8;
+    // Sound: the mapping's first page, from its start.
+    let rc = unsafe { libc::mincore(map.as_ptr() as *mut libc::c_void, 1, (&mut resident as *mut u8).cast()) };
+    (rc == 0 && resident & 1 == 1).then_some(map)
 }
-
-/// The pages a file's residency is judged by.
-#[cfg(unix)]
-const SAMPLED_PAGES: usize = 16;
 
 /// The shortest file mapped when it is in the page cache: where the pool
 /// takes over (the library's 512 KiB). A shorter file is hashed on one
