@@ -9,7 +9,7 @@ fn main() {
     let mut rows = String::new();
     let mut trace = String::from("point,sample,calls,wall_ns,p_cycles,p_instructions,p_ns,e_cycles,e_instructions,e_ns\n");
     let mut point = 0usize;
-    for len in [64usize, 128, 256, 512, 1024, 2048, 2047, 2049] {
+    for len in [64usize, 128, 256, 512, 1024, 2048, 2047, 2049, 4096] {
         for count in [1usize, 3, 4, 6, 8, 12, 16, 24, 64, 128, 129, 1024] {
             // Different bytes per message: byte i = i % 251. Slots are
             // padded with zeros, as the public API requires.
