@@ -1573,6 +1573,20 @@ batch: 256 about 1 us, 4096 about 8.6, 16384 about 5). Cleaning the
 copied lines first (DC CVAU or CVAC) made it slower; tables of 256 or
 512 messages per kernel call (TABLE, 128) level. Left as it is.
 
+## servil ff8f203 against b132f8c, whole, and an open lean (October 2, jobs 1084-1096)
+
+The full Mac record of ff8f203 (job 1084; two busy windows of 204)
+against job 968: 75 of 138 servil cells within 5%, 32 faster, 31 slower,
+the slower ones batches after other work or after idling (layout and
+wake luck, answered by A/Bs above) and the queue's shared batches of 16
+(x2.07, a share swing: the A/B of jobs 1085-1088 reads it x1.01). Open:
+hash_many_multithreaded after other work leans slower, four runs a side
+(jobs 1089-1096): 8192 x1.03, 16384 x1.06, 32768 x1.03, 65536 level at
+its main speed, each side against itself up to x1.065 apart. No change
+of the night touches the pool's batch pieces; a layout or wake-timing
+effect is likely and unshown. Next: a bisect over the night's code
+commits on the cell (perf_bisect), four runs a side.
+
 ## Batch tails, measured again at real gaps (October 2, 2026, job 1001)
 
 Leftovers of 1-4 past whole groups run on NEON and cost far more than
