@@ -940,7 +940,27 @@ gap a 64 B call costs about 500 ns for every hash alike, against about
 40 ns back to back; unexplained (the vCPU's wake, cold caches, the
 clock?), to be measured on the Mac.
 
-**perf_regress** (`check` = working tree against HEAD, `compare OLD NEW`,
+**perf_regress as it is (October 1, 2026, late).** It builds the two sides
+and runs `bench-hashes regress`: alternating pairs, every run over all 14
+nonstop points, each pair's verdict on a cell the fast speeds' ratio
+(clocks::speeds::compare), margins 3% solo and 10% shared, the control,
+no verdict on busy or unobserved load, four confirming pairs (Zooko: one
+statistic for every comparison). Calibration, a slowdown planted in
+`hash()` (probe/plant-32, probe/plant-25; lent 64 B servil st):
+
+| | VM | Mac (jobs 935-952, mains) |
+|---|---|---|
+| identical code | 8 of 8 no hold; 2 listed a cell (a shared +20%, two faster) | 7 of 7 no hold, nothing listed (1 busy) |
+| +9.5% (Mac +9.4-10.2%) | 5 of 5 held, the right cell | 3 of 3 held (2 busy) |
+| +3.8% (Mac +4.0-4.6%) | 0 of 5: the control (sha256 lent 64 B) moved +8.3-8.9% every time | 3 of 4 held (1 busy) |
+
+On the VM the planted code moved SHA-256's code, and with it a small
+nonstop cell, by about 8%: the control turns that into no verdict, never
+a false hold. Decided (Zooko, October 1, 2026): such a VM no-verdict is
+answered by the Mac's verdict; the VM's listed lines on identical code
+(each side built from its own path, laid out apart) are left as they are.
+
+**perf_regress before it** (`check` = working tree against HEAD, `compare OLD NEW`,
 `build` = the working tree's bench-hashes for runs by hand): runs A B B
 A A B B A of sha256 (the control), servil, and servil mt at 14 points
 over the benchmark's five nonstop use cases, 24 rounds each; a cell is
