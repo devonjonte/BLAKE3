@@ -851,6 +851,17 @@ only the continuous cells and the long streams read here:
 
 ## Rejected (with the reason; do not retry without new evidence)
 
+- **The task list back to its ring's start when it empties**
+  (probe/task-ring-clear, October 2, 2026, jobs 1009-1012). The list's
+  room follows every slot (1024 short messages in flight: about 1040
+  tasks of 2.1 KiB, 2.2 MiB), and a VecDeque's head walks all of it;
+  `clear()` on the pop that empties it keeps the live window at the
+  start. Solo level (64 B-64 KiB messages, batches of 16-4096, within
+  each side's own 5-26% spread); shared 64 B and 256 B messages twice as
+  slow (0.637|1.127 -> 1.292|2.304 ns/B): two queues' pushes and the
+  workers' pops then meet on the same few lines, where the walking head
+  spreads them.
+
 - **p4 as one NEON quad** (probe/p4-quad, September 27, 2026): four
   64-byte messages 14% slower on the VM than two pairs.
 - **p4 as two scalar blocks beside a pair: taken after all** (642757f,
