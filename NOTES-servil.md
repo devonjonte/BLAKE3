@@ -1427,8 +1427,12 @@ x0.47-0.59, 4 KiB x0.59, 7935 B x0.50, 8 KiB x0.49-0.64, 16 KiB x0.61
 cell from 2304 B to 16 KiB at one speed (several ran at two before);
 mt alike; SHA-256 ring level. Nonstop lent: 4 KiB x1.023 (st and mt),
 16 KiB x1.057 (st) and x0.969 (mt) on identical code, 1 and 64 KiB
-level. perf_regress on the Mac (job 985): no regression. Open: whether
-lent 4 KiB's +2.3% is the stamp and call (3.5 ns of 1270) or layout.
+level. perf_regress on the Mac (job 985): no regression. The +2.3% at
+lent 4 KiB was the check itself: traced (jobs 1013-1014), 38
+instructions and 85 cycles a call more, of which the read of CNTFRQ_EL0
+cost about 10 cycles on the Mac (probe/stamp-cost, job 1015). Read once
+(a7177c6): lent 4 KiB x0.999 (st) and x0.983 (mt) against 91c4a77,
+1-64 KiB level, the gains after other work unchanged (jobs 1019-1022).
 
 Not prefetched, and so still cold after other work: 1 KiB and below
 (c1, 3.9 KB, ran x0.84-1.10 with two speeds), batches (`hash_many`'s
