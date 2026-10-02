@@ -23,6 +23,10 @@
 //! Read wall time alone inside a timed interval and the counts outside it:
 //! a counts read is a system call.
 //!
+//! **Another program's run** ([`child`]): wall time from its start to its
+//! exit, with the counts the OS keeps for the process (CPU time, peak
+//! memory, reads from storage, and on macOS cycles per core kind).
+//!
 //! **Other programs' load** ([`load`]): every measurement here also records
 //! how many CPUs other programs kept busy, in windows of about a second,
 //! read between samples; each [`Batch`] records when it started, so its
@@ -43,6 +47,7 @@
 
 use std::time::Instant;
 
+pub mod child;
 pub mod load;
 pub mod other_code;
 pub mod speeds;
@@ -393,6 +398,18 @@ mod imp {
     pub fn set_qos(class: u32) {
         // Sound: a plain call on the calling thread.
         assert_eq!(unsafe { pthread_set_qos_class_self_np(class, 0) }, 0, "pthread_set_qos_class_self_np");
+    }
+
+    /// Mach absolute-time ticks as nanoseconds.
+    pub(crate) fn mach_to_ns(mach: u64) -> u64 {
+        static TIMEBASE: OnceLock<(u64, u64)> = OnceLock::new();
+        let (numer, denom) = *TIMEBASE.get_or_init(|| {
+            let mut info = MachTimebaseInfo { numer: 0, denom: 0 };
+            // Sound: `info` is writable.
+            assert_eq!(unsafe { mach_timebase_info(&mut info) }, 0, "mach_timebase_info");
+            (u64::from(info.numer), u64::from(info.denom))
+        });
+        mach * numer / denom
     }
 }
 
