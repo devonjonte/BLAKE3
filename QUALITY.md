@@ -103,7 +103,9 @@ unrolled kernel code.
   (wasmtime), and big-endian and 32-bit targets under qemu.
 - **Miri**, which interprets Rust and stops at undefined behaviour, over
   small versions of the unsafe paths (`test::unsafe_paths`: batches, the
-  pool with two callers, a stream past one buffer) in the `pure` build
+  pool with two callers, a stream past one buffer; and since October 2,
+  `queue::test::test_miri_queue_round_trips`, every shape of queue, in
+  CI's Miri step) in the `pure` build
   (Miri cannot run assembly or SIMD intrinsics): all four tests pass, in
   41 minutes. Miri then reports that the pool's worker threads were still
   running when the program ended; they live for the whole process by
@@ -169,7 +171,7 @@ measures the fork against the official crate and others on your machine.
 
 ## The bugs these steps found
 
-Six, all fixed; none reached the results of a documented function. Each entry
+Seven, all fixed; none reached the results of a documented function. Each entry
 names the commit that introduced the code and the one that fixed it, in
 [github.com/johnservil/BLAKE3](https://github.com/johnservil/BLAKE3).
 
@@ -229,6 +231,19 @@ names the commit that introduced the code and the one that fixed it, in
    the change, about 20 minutes after it reached servil, and fixed in
    5739af6: the bytes read are hashed first. A test with a failing reader
    and a retrying caller fails on a39fb7c and passes now.
+
+7. **A data race in the queue's chain, by Rust's aliasing rules**
+   (`src/queue.rs`, `State::link`). To link a new entry, the submitter
+   made a reference to the whole last slot to store its atomic `next`,
+   while the delivery thread could be taking that slot's buffer, a plain
+   field; and it held the new slot as `&mut` while the delivery thread
+   could already read it. No test saw a wrong digest (the compiled code
+   touched only the atomic), but both are undefined behaviour: the
+   compiler may assume such a reference is not raced. Miri found it in
+   CI, running the queue's allocation test; since 0c928f9 only the field
+   is touched, through the raw pointer, and a queue test small enough
+   for Miri (`test_miri_queue_round_trips`) runs in CI's Miri step,
+   failing on the old code under every seed tried.
 
 ## Formal verification: what we tried and considered
 
