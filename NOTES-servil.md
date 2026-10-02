@@ -1300,7 +1300,93 @@ job 307).
 
 ## Future work
 
+Every open item of the fork and the benchmark, in one list; the older
+blocks of bench-hashes' NEXT-STEPS.md hold each item's evidence. Take an
+item out when it lands or is rejected.
+
+### Speed
+
+- Benchmark and optimize the performance of b3sum.
+- Try putting b3sum on io_uring on Linux.
+- `hash_range(file, offset, len)`: BLAKE3 doing the reads, for files and
+  sockets (api-design.md's third concurrency model).
+- The queue: hand the first message into an empty queue over at once
+  (today it waits about 1 us for company, then a wake of 15-45 us).
+- The queue: delivery on the worker that completes the oldest entry (one
+  handover fewer, no delivery thread polling while entries are in flight).
+- A lock-free task list: shared 16 KiB messages meet a ceiling at its lock
+  ("A ceiling near one 16 KiB task").
+- A second SME2 thread in the pool (two SME units reachable, job 187).
+- Shared lent batches of 64-256: 1.6-1.7x a batch of 16 per message (the
+  SME unit shared).
+- A p4 kinder to E-cores; the E-core cells (2-chunk messages at 4, 1000 B
+  x 4; tails of 1-4 multi-block messages past SME2 groups); 12 messages
+  shared behind BLAKE3 official (25.8 against 21.7 ns/msg).
+- 2-3 KiB against SHA-256: servil ties ring at 4 KiB warm and leads it at
+  16 KiB after other work; below 4 KiB SHA-256 leads. Ideas estimated:
+  parents and root inside k4 (about 3.6%), a direct small-tree path
+  (1-2%), a faster pair chain.
+- SME2 batches from 16 messages when calls have work between them (about
+  12 ns/msg there against the benchmark's 10).
 - A GPU kernel (Metal) for large inputs; the VM has no GPU.
+
+### Interfaces
+
+- A public thread budget for the multithreaded calls (b3sum's
+  `--num-threads` above 1), once a need shows.
+- update_rayon on the fork's pool, one mechanism for multithreading
+  (changes its contract: today it runs on the caller's Rayon pool).
+- The energy-saving form (the `efficient` module): deferred until the
+  benchmark, API, and architecture settle.
+- A Merkle tree API (`servil::merkle`, for users like Remco's WHIR);
+  write its trade-offs up for Zooko before building.
+- The crate docs lead with api-design.md's five questions (they open
+  with "For best performance" by interface and by situation today).
+
+### For Zooko
+
+- The three trades: members-32k, subtrees-32k, linger-4.
+- Lingering's 50 us bound and its energy (4-6x the energy for 2.4x the
+  speed, long messages in 64 KiB pieces).
+- Whether the docs keep the promise that hash_multithreaded runs no
+  slower than hash (untested since the benchmark's servil-only checks
+  left).
+
+### Slowdowns to explain (open, AGENTS: "we own every slowdown")
+
+- The queue's shares swing per run (256 B messages, batches of 16, 1 KiB):
+  set at process start, perhaps thread placement.
+- The queue's cells slow the next cell (about 2% on the VM); a lingering
+  stream slows the cells after it 5-10%.
+- The run-order effect (back-to-back short runs).
+- servil mt's shared queue 64 B and 64 KiB cells read apart on identical
+  code in the VM.
+- The first job of a series ran 5-7% fast on the cores (confirm with
+  cycles).
+- servil's lent 64-256 KiB cells pay about 4x ring's read copy.
+- VM: ring's nonstop batches 30% slower solo in one process of four;
+  SHA-256 slowed beside a second copy at 64-256 B.
+- Which part of the cycles-to-wall-time ratio is ours (SME2 waits, our
+  power draw) and which the machine's (heat, a host, a scheduler).
+- NEON going cold after stretches without vector work; what else enters
+  the SME unit's slow state.
+- The E-core trigger's mechanism.
+- The Mac's serial 128 MiB rise.
+
+### Tooling
+
+- P/E classification of every Mac sample; perf_regress P against P.
+- Host load in the VM (no steal time): a reference loop timed beside the
+  samples would show it.
+- `tools/promote.py` (check the gate, write the note, fast-forward) and a
+  pre-push hook refusing a `servil` tip without both verdicts.
+
+### Docs and others' work
+
+- A fresh reading as the three readers of README, METHODOLOGY, the graph,
+  the guide, and CONTRIBUTING.
+- Devon's BLAKE3#1 (x86 two-chunk batching), once he trims it; judge it
+  by the frozen benchmark.
 
 ## Benchmark/API alignment and the memory-working gap (September 30, 2026)
 
