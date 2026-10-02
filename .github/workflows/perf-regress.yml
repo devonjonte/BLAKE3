@@ -9,8 +9,19 @@ name: perf-regress
 
 on:
   push:
+    # The main line and candidates; probe branches carry experiments.
+    branches:
+      - "servil"
+      - "candidate/**"
+    paths-ignore:
+      - "**.md"
   pull_request:
   workflow_dispatch:
+
+# A newer push to a branch supersedes its running check.
+concurrency:
+  group: perf-regress-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   perf:
