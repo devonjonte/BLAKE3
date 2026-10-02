@@ -54,9 +54,7 @@ struct Inner {
     #[arg(long, value_name("NUM"))]
     num_threads: Option<usize>,
 
-    /// Disable memory mapping
-    ///
-    /// Currently this also disables multithreading.
+    /// No effect: b3sum reads every file, and maps none
     #[arg(long)]
     no_mmap: bool,
 
@@ -145,10 +143,6 @@ impl Args {
         self.inner.tag
     }
 
-    fn no_mmap(&self) -> bool {
-        self.inner.no_mmap
-    }
-
     fn no_names(&self) -> bool {
         self.inner.no_names
     }
@@ -176,16 +170,81 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
         if args.keyed() {
             bail!("Cannot open `-` in keyed mode");
         }
-        hasher.update_reader(io::stdin().lock())?;
-    } else if args.no_mmap() {
-        hasher.update_reader(File::open(path)?)?;
+        update_from(&mut hasher, io::stdin())?;
     } else {
-        // The fast path: Try to mmap the file and hash it with multiple threads.
-        hasher.update_mmap_rayon(path)?;
+        update_from(&mut hasher, File::open(path)?)?;
     }
     let mut output_reader = hasher.finalize_xof();
     output_reader.set_position(args.seek());
     Ok(output_reader)
+}
+
+/// The read size: each piece is hashed over the pool while the next is read.
+const PIECE: usize = 4 << 20;
+
+thread_local! {
+    /// Two pieces' buffers, kept from input to input: small files allocate nothing.
+    static BUFFERS: std::cell::RefCell<[Vec<u8>; 2]> = std::cell::RefCell::new([vec![0; PIECE], vec![0; PIECE]]);
+}
+
+/// Read from `reader` until `buffer` is full or the input ends; how much was read.
+fn fill(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<usize> {
+    let mut filled = 0;
+    while filled < buffer.len() {
+        match reader.read(&mut buffer[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(filled)
+}
+
+/// Hash all of `reader` (a file, or stdin) into `hasher`. Reading beats
+/// mapping a file that is not in the page cache (a read asks the storage
+/// for a whole piece; a mapping's page faults, for a few pages at a time)
+/// and comes close to it for one that is, when the reading overlaps the
+/// hashing: the first piece is read on this thread, and an input longer
+/// than a piece has the rest read on a second thread into the other
+/// buffer while this one hashes the last piece over the pool
+/// (tools/b3sum-bench; NOTES-servil.md, "b3sum, measured").
+fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io::Result<()> {
+    BUFFERS.with_borrow_mut(|[first, second]| {
+        let len = fill(&mut reader, first)?;
+        if len < PIECE {
+            hasher.update_multithreaded(&first[..len]);
+            return Ok(());
+        }
+        std::thread::scope(|scope| {
+            let (free_tx, free_rx) = std::sync::mpsc::sync_channel::<&mut [u8]>(1);
+            let (full_tx, full_rx) = std::sync::mpsc::sync_channel::<(&mut [u8], io::Result<usize>)>(1);
+            let reader = &mut reader;
+            scope.spawn(move || {
+                for buffer in free_rx {
+                    let read = fill(reader, buffer);
+                    // A short piece, or an error, ends the input.
+                    let last = !matches!(read, Ok(n) if n == buffer.len());
+                    if full_tx.send((buffer, read)).is_err() || last {
+                        break;
+                    }
+                }
+            });
+            free_tx.send(&mut second[..]).expect("the reader waits for a buffer");
+            let mut current: &mut [u8] = &mut first[..];
+            loop {
+                hasher.update_multithreaded(current);
+                let (next, read) = full_rx.recv().expect("the reader sends every piece");
+                let len = read?;
+                if len < next.len() {
+                    hasher.update_multithreaded(&next[..len]);
+                    return Ok(());
+                }
+                free_tx.send(current).expect("the reader waits for a buffer");
+                current = next;
+            }
+        })
+    })
 }
 
 fn write_hex_output(mut output: blake3::OutputReader, args: &Args) -> anyhow::Result<()> {
@@ -518,35 +577,32 @@ fn main() -> anyhow::Result<()> {
     if args.num_threads().is_some() {
         eprintln!("{NAME}: warning: --num-threads is no longer supported and is ignored; b3sum chooses its threads itself");
     }
-    let thread_pool = rayon_core::ThreadPoolBuilder::new().build()?;
-    thread_pool.install(|| {
-        let mut files_failed = 0u64;
-        // Note that file_args automatically includes `-` if nothing is given.
-        for path in &args.file_args {
-            if args.check() {
-                check_one_checkfile(path, &args, &mut files_failed)?;
-            } else {
-                // Errors encountered in hashing are tolerated and printed to
-                // stderr. This allows e.g. `b3sum *` to print errors for
-                // non-files and keep going. However, if we encounter any
-                // errors we'll still return non-zero at the end.
-                let result = hash_one_input(path, &args);
-                if let Err(e) = result {
-                    files_failed = files_failed.saturating_add(1);
-                    eprintln!("{}: {}: {}", NAME, path.to_string_lossy(), e);
-                }
+    let mut files_failed = 0u64;
+    // Note that file_args automatically includes `-` if nothing is given.
+    for path in &args.file_args {
+        if args.check() {
+            check_one_checkfile(path, &args, &mut files_failed)?;
+        } else {
+            // Errors encountered in hashing are tolerated and printed to
+            // stderr. This allows e.g. `b3sum *` to print errors for
+            // non-files and keep going. However, if we encounter any
+            // errors we'll still return non-zero at the end.
+            let result = hash_one_input(path, &args);
+            if let Err(e) = result {
+                files_failed = files_failed.saturating_add(1);
+                eprintln!("{}: {}: {}", NAME, path.to_string_lossy(), e);
             }
         }
-        if args.check() && files_failed > 0 {
-            eprintln!(
-                "{}: WARNING: {} computed checksum{} did NOT match",
-                NAME,
-                files_failed,
-                if files_failed == 1 { "" } else { "s" },
-            );
-        }
-        std::process::exit(if files_failed > 0 { 1 } else { 0 });
-    })
+    }
+    if args.check() && files_failed > 0 {
+        eprintln!(
+            "{}: WARNING: {} computed checksum{} did NOT match",
+            NAME,
+            files_failed,
+            if files_failed == 1 { "" } else { "s" },
+        );
+    }
+    std::process::exit(if files_failed > 0 { 1 } else { 0 });
 }
 
 #[cfg(test)]

@@ -704,3 +704,21 @@ fn test_num_threads_is_ignored_with_a_warning() {
     let stderr = std::str::from_utf8(&output.stderr).unwrap();
     assert!(stderr.contains("--num-threads is no longer supported"), "stderr: {stderr}");
 }
+
+/// Inputs around the 4 MiB read piece (one piece, one byte more, two
+/// pieces, and more than two), as files and through stdin: each gives
+/// hash()'s digest.
+#[test]
+fn test_inputs_around_the_read_piece() {
+    let dir = tempfile::tempdir().unwrap();
+    for len in [(3usize << 20) + 12345, 4 << 20, (4 << 20) + 1, 8 << 20, (9 << 20) + 12345] {
+        let path = dir.path().join(format!("input-{len}"));
+        let data: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
+        fs::write(&path, &data).unwrap();
+        let expected = blake3::hash(&data).to_hex().to_string();
+        let output = cmd!(b3sum_exe(), &path).read().unwrap();
+        assert_eq!(&output[..64], expected, "file of {len} bytes");
+        let output = cmd!(b3sum_exe()).stdin_bytes(data).read().unwrap();
+        assert_eq!(&output[..64], expected, "stdin of {len} bytes");
+    }
+}
