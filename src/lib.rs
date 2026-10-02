@@ -1481,6 +1481,36 @@ fn prefetch_kernels(len: usize, platform: Platform) {
     }
 }
 
+/// Prefetch the code a fresh Hasher's update of `len` bytes runs: the
+/// subtrees its loop cuts (next_subtree_len from counter 0, up to the last
+/// chunk, which waits in the chunk state), each one's kernels.
+#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[inline(never)]
+fn prefetch_update_kernels(len: usize, platform: Platform) {
+    if !neon_hybrid::sha3_detected() {
+        return;
+    }
+    let (mut counter, mut left) = (0u64, len);
+    while left > CHUNK_LEN {
+        let subtree = next_subtree_len(counter, left);
+        let chunks = subtree / CHUNK_LEN;
+        #[cfg(blake3_sme2)]
+        if matches!(platform, Platform::SME2) && chunks >= 16 {
+            sme2::prefetch_code();
+            if !sme2::flat_takes(subtree) {
+                neon_hybrid::prefetch_parent_code(16);
+            }
+            counter += chunks as u64;
+            left -= subtree;
+            continue;
+        }
+        neon_hybrid::prefetch_tree_code(chunks.min(16), 0);
+        counter += chunks as u64;
+        left -= subtree;
+    }
+    let _ = platform;
+}
+
 /// How much of a message `Hasher::update_multithreaded` hashes before it
 /// keeps the workers ready between updates: two 64 KiB pieces.
 #[cfg(feature = "std")]
@@ -2109,6 +2139,13 @@ impl Hasher {
     /// Note that the degree of SIMD parallelism that `update` can use is limited by the size of
     /// this input buffer. See [`update_reader`](#method.update_reader).
     pub fn update(&mut self, input: &[u8]) -> &mut Self {
+        // A fresh hasher's first update is a one-shot call's work (a
+        // Hasher per message, the digest traits): it prefetches its code
+        // after a pause, as hash() does.
+        #[cfg(all(blake3_neon_hybrid, feature = "std"))]
+        if self.count() == 0 && (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) && code_may_be_cold() {
+            prefetch_update_kernels(input.len(), self.chunk_state.platform);
+        }
         self.update_with_join::<join::SerialJoin>(input, false)
     }
 
