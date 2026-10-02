@@ -8,20 +8,46 @@ use std::io;
 const MINIMUM_MMAP_SIZE: u64 = 16 * 1024; // 16 KiB
 
 pub(crate) fn copy_wide(mut reader: impl io::Read, hasher: &mut crate::Hasher) -> io::Result<u64> {
-    let mut buffer = [0; 65536];
-    let mut total = 0;
+    // A reader that fills 64 KiB has more: the rest goes through a 1 MiB
+    // buffer, filled before each update. On SME2, 1 MiB pieces hash at the
+    // one-shot rate, where 64 KiB pieces each meet the SME unit's slow
+    // state after the reads between them (M4 Max, Hasher::update 0.204
+    // ns/B in 64 KiB pieces, 0.155 in 1 MiB; NOTES-servil.md).
+    // The first 64 KiB lead the 1 MiB buffer, so its updates stay whole
+    // 1 MiB subtrees (a Hasher's subtrees align to their own size).
+    let mut small = [0; 65536];
+    let n = fill(&mut reader, &mut small)?;
+    if n < small.len() {
+        hasher.update(&small[..n]);
+        return Ok(n as u64);
+    }
+    let mut buffer = std::vec![0; 1 << 20];
+    buffer[..n].copy_from_slice(&small);
+    let (mut start, mut total) = (n, 0u64);
     loop {
-        match reader.read(&mut buffer) {
-            Ok(0) => return Ok(total),
-            Ok(n) => {
-                hasher.update(&buffer[..n]);
-                total += n as u64;
-            }
+        let n = start + fill(&mut reader, &mut buffer[start..])?;
+        hasher.update(&buffer[..n]);
+        total += n as u64;
+        if n < buffer.len() {
+            return Ok(total);
+        }
+        start = 0;
+    }
+}
+
+/// Read into `buffer` until it is full or the reader ends; the bytes read.
+fn fill(reader: &mut impl io::Read, buffer: &mut [u8]) -> io::Result<usize> {
+    let mut filled = 0;
+    while filled < buffer.len() {
+        match reader.read(&mut buffer[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
             // see test_update_reader_interrupted
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         }
     }
+    Ok(filled)
 }
 
 // Try to `mmap` a file, unless it's short enough that ordinary reads are faster, currently 16 KiB.
