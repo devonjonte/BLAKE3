@@ -161,7 +161,7 @@ def benchmark(job, run, work, out):
     fork_commit = hex_commit(job, "fork_commit")
     fork = run.checkouts(fork_commit, hex_commit(job, "bench_commit"))
     # Built in a side directory that owns its lock and target directory (the
-    # fork as it is, no shims); Cargo rebuilds only what changed.
+    # fork as it is); Cargo rebuilds only what changed.
     exe = run.run([sys.executable, str(PERF_REGRESS), "--root", str(fork), "build", "--side", "bench",
                    "--commit", fork_commit], cwd=fork, capture=True).strip().splitlines()[-1]
     # Each run from its result folder: the benchmark writes

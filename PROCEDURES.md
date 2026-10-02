@@ -4,7 +4,7 @@ For the servil team: how things are done in this repository and its guest. The p
 
 # The performance-regression check: every code commit
 
-Speed is this fork's purpose, so no commit that makes it slower may enter git unnoticed. **Every commit that touches `src/`, `c/`, `build.rs`, `Cargo.toml`, or `Cargo.lock` must pass `tools/perf_regress.py check` first.** The check builds bench-hashes against `HEAD` and against the working tree and runs the two builds alternately on this machine (A B B A A B B A, each later pair measuring only the points still undecided: about 20-40 s on the VM, 30-45 s as a Mac job, builds included), so load and drift fall on both sides alike; there are no stored numbers and nothing to keep current, and any machine can run it.
+Speed is this fork's purpose, so no commit that makes it slower may enter git unnoticed. **Every commit that touches `src/`, `c/`, `build.rs`, `Cargo.toml`, or `Cargo.lock` must pass `tools/perf_regress.py check` first.** The check builds bench-hashes against `HEAD` and against the working tree and runs `bench-hashes regress` on the two builds: alternating pairs on this machine, A B B A A B B A, every run over every point, stopping once no cell can be called slower or faster (about 1 minute on the VM, builds included), so load and drift fall on both sides alike; there are no stored numbers and nothing to keep current, and any machine can run it. The rule, its points, and its margins are bench-hashes' (`regress`).
 
 **Install the pre-commit hook once per checkout**, and the check runs by itself on every code commit:
 
@@ -52,7 +52,7 @@ Every clock read, in the fork, in bench-hashes, and in any scratch probe, goes t
 
 # `perf_regress` and older commits
 
-The benchmark calls the current fork API; `tools/perf_regress.py` shims older commits (renaming their old functions, forwarding or wrapping the new names). A comparison with a wrapped side judges the use cases its shims leave as they are. A benchmark change that calls a new fork API needs a shim there. `pypy3 tools/perf_regress.py build` builds bench-hashes against the working tree for runs by hand and prints the executable's path.
+The benchmark calls the current fork API; a commit that predates it fails to build, and is compared with the tools of its own time (AGENTS.md, "Contracts change everywhere at once"). A release check is against the previous promotion of `servil` that the benchmark builds against. `pypy3 tools/perf_regress.py build` builds bench-hashes against the working tree for runs by hand and prints the executable's path.
 
 # Environment
 

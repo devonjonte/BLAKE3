@@ -3,329 +3,43 @@
 a commit, measured side by side.
 
     pypy3 tools/perf_regress.py check                  # against HEAD
-    pypy3 tools/perf_regress.py check --against v0.7.0 # against a release
+    pypy3 tools/perf_regress.py check --against REV    # against a commit
     pypy3 tools/perf_regress.py compare OLD NEW        # two commits
     pypy3 tools/perf_regress.py build                  # bench-hashes against the working tree
 
-Exit 0: no regression in a cell that holds a change (solo; shared cells
-slower are listed). 1: a confirmed regression in one. 2: no verdict (the
-comparison itself was unreliable: clocks found other programs keeping the
-machine busy during a run, or the control moved, see below).
+It builds bench-hashes twice, once against the fork at the old commit and
+once against the new one (for `check`, a commit object made from the
+working tree), the same benchmark source in both, and runs
+`bench-hashes regress OLD NEW`, whose exit it returns: 0, no regression in
+a cell that holds a change (solo; shared cells slower are listed); 1, a
+confirmed regression in one; 2, no verdict (a run's load was busy or
+unobserved, or the control moved). The rule, its points, and its margins
+are bench-hashes' (`regress`, beside POINTS in its src/main.rs), and its
+calibration is in NOTES-servil.md ("perf_regress").
 
-`check` builds bench-hashes twice, once against the fork at REV (the old
-side) and once against this working tree (the new side, as a commit object
-made from it), the same benchmark source in both, and runs the two builds
-in alternating pairs on this machine, one right after the other, each with
-the contenders sha256 (the control), blake3-servil-st, and blake3-servil-mt.
 Each side is a directory under tmp/perf-ab/ that it owns (a fork worktree,
 a copy of bench-hashes with the side's own Cargo.lock, a target
 directory), changed only where its sources differ, so Cargo's freshness
 rebuilds only what changed and nothing tracked is ever written. `build`
-builds the new side alone, for runs by hand.
-Load, thermal state, and drift reach both sides of a pair alike, so there
-is nothing to record, store, or keep current, and any machine can run it.
-
-The rule, calibrated on the 16-vCPU VM with runs of one commit taken back
-to back (NOTES-servil.md, "perf_regress"):
-
-* The statistic is a cell's 5th percentile per run: a low quantile moves
-  when the code does, a median moves with the host.
-* The runs go A B B A A B B A (A the old side): four pairs of neighbours
-  in time, which share the machine's state, each side first in two of
-  them, so a steady drift across the eight runs cancels. A cell (one
-  contender, scenario, use case, and point) is slower when, in every
-  pair, the new side's 5th percentile exceeds the old side's by more than
-  the cell's margin: 3% solo, 10% shared (Zooko, September 25, 2026:
-  the recommended usage first, the shared scenario measured and held to
-  a looser line; AGENTS.md).
-* A regression holds the change (exit 1) when a solo cell is slower; a
-  shared cell slower is reported beside an exit 0, and the commit names
-  it, its numbers, and the reason the change is worth it (Zooko,
-  September 26, 2026).
-* Every run measures every point, so a cell's neighbours, and what runs
-  before it, stay the same in every run (Devon Jonte found narrowing to
-  the open cells' points moved cells with their neighbours, and left
-  short runs with no load window). The pairs stop once no cell is open:
-  one whose every pair so far exceeds its margin in one direction, so it
-  could still be called slower or faster.
-* Any slower cell triggers another A B B A A B B A over every point; a
-  regression is a cell slower in both.
-* The control is the same code on both sides. If the rule calls any of
-  its cells slower or faster, the comparison is unreliable: no verdict.
-* Every listed cell shows both sides' speeds and shares (`bench-hashes
-  compare`, the rule every measurement uses) and the median pair ratio of
-  90th percentiles.
-
-The rule's calibration (VM, September 26, 2026, on the benchmark of
-then): at a 3% margin, false flags before confirmation in 0.07% of
-cells, none confirmed in 25 checks; a solo cell 5% slower caught 81% of
-the time, 10% slower 92%. On the use cases of September 28 (VM) two
-checks of unchanged code took 30 and 25 s
-of runs beside about 14 s of builds and called no cell slower after
-confirmation; the continuous batches of 16, a cell of two speeds, came
-out 7.7% faster in one. The current use cases await a calibration of
-their own.
-
-The check measures the points in POINTS_BY_USE_CASE, which cover the
-code paths and boundaries of the benchmark's nonstop use cases; the
-published graph's plateau sizes add run time and no path. The calls
-after a gap are the benchmark's, outside the check: where the linker
-places their code moves them more than any margin could see past.
-
-The benchmark calls the current fork API. Older commits get shims so it
-builds: the one-buffer batch API forwarded from hash_many_equal, or
-copied over the slice API, or one message at a time before batches (a
-comparison with either of those last two judges no batch cells); batch
-kernel reports that take no message length renamed and called through a
-shim that takes it; Queue, before it existed, over a Hasher on the
-calling thread (no owned-buffer cells judged); and
-Hasher::update_multithreaded, before it was public, as update (judged),
-and before it existed, as update (no pieces judged).
+builds the new side alone, for runs by hand, and prints the executable's
+path.
 """
 import argparse
 import fcntl
-import hashlib
-from fractions import Fraction
 import json
 import os
 import re
 import shutil
-import statistics
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import samples  # noqa: E402  (tools/samples.py: the one samples-file reader)
 
 # The fork checkout the tool works in (its own, or --root's), and the
 # sides' directories in it.
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "tmp/perf-ab"
-CONTROL = "sha256"
-SUBJECTS = ["blake3-servil-st", "blake3-servil-mt"]
-CONTENDERS = [CONTROL] + SUBJECTS
-# The benchmark's nonstop use cases (FROZEN.md): the queue's, owned
-# buffers, and the synchronous calls' on lent buffers. Its calls after a
-# gap are left out: on the Mac where the linker places a cold call's code
-# moves it by up to about 60%, and that luck stays with one side for a
-# whole check (NOTES-servil.md, "perf_regress on the Mac: layout luck per
-# side"). Points name the code paths and boundaries: messages as the
-# queue's members (64 B, 1 KiB), a first subtree task (16 KiB), one piece
-# (64 KiB), many pieces (1 MiB); hash on one message (64 B), bulk (64 KiB),
-# over the pool (1 MiB); a long message in pieces (64 MiB, the benchmark's
-# one such point); batches as members (16, 256) and as tasks of their own
-# (4096).
-USE_CASES = {"ContinuousMessages", "ContinuousBatches", "LentMessages", "LentPieces", "LentBatches"}
-# The command line names a point by its use case's prefix and its label
-# (bench-hashes' label_prefix); the samples file by the two apart.
-PREFIX = {"ContinuousMessages": "continuous ", "ContinuousBatches": "continuous batch ", "LentMessages": "lent ",
-          "LentPieces": "lent pieces ", "LentBatches": "lent batch "}
-POINTS_BY_USE_CASE = {
-    "ContinuousMessages": ["64 B", "1 KiB", "16 KiB", "64 KiB", "1 MiB"],
-    "ContinuousBatches": ["16", "256", "4096"],
-    "LentMessages": ["64 B", "64 KiB", "1 MiB"],
-    "LentPieces": ["64 MiB"],
-    "LentBatches": ["16", "4096"],
-}
 
-
-def argument(use_case, label):
-    """The point's name on the benchmark's command line."""
-    return PREFIX[use_case] + label
-
-
-def points_of(use_cases):
-    return [argument(u, label) for u in sorted(use_cases) for label in POINTS_BY_USE_CASE[u]]
-
-
-# Rounds per run: the variance between processes exceeds a run's sampling
-# noise, so short runs lose little (5% slower caught 81% at 24 rounds, 84%
-# at 48, 61% at 12).
-ROUNDS = 24
-QUANTILE = 0.05
-PAIRS = 4  # the runs go A B B A A B B A
-
-
-def margin(scenario):
-    """A cell is slower (faster) past this ratio: 3% solo, 10% shared
-    (Zooko, September 25, 2026)."""
-    return Fraction(3, 100) if scenario == "solo" else Fraction(10, 100)
-
-
-# Cells whose slowdown holds the change: solo, the recommended usage
-# (Zooko, September 26, 2026); shared cells are reported.
-HOLDING = {"solo"}
-
-# A commit's lib.rs contains one of these, newest first; each names the
-# shim that makes the benchmark build against it, and whether its batch
-# cells are judged.
-BATCH_ONE_BUFFER = "pub fn hash_many(input: &[u8]"
-BATCH_EQUAL = "pub fn hash_many_equal("
-BATCH_SLICES = "pub fn hash_many(inputs: &[&[u8]]"
-
-# The slice API's public names, renamed out of the way (hash_many_slices,
-# ...) in every src/*.rs, definitions and in-crate calls alike.
-SLICES_RENAME = (r"(pub fn |crate::)(hash_many(?:_multithreaded(?:_with_budget)?)?)\(", r"\1\2_slices(")
-
-# The batch kernel reports before they took the message length, renamed
-# out of the way (kernel_report_many_one_block, ...) and called through a
-# shim that takes it (the check reads no kernels).
-KERNELS_ONE_BLOCK = "pub fn kernel_report_many() ->"
-KERNELS_RENAME = (r"\bkernel_report_many(_multithreaded)?\(\)", r"kernel_report_many\1_one_block()")
-
-SHIM_KERNELS = r'''
-
-// perf_regress.py shim: the batch kernel reports of later commits, which
-// take the message length; this commit's describe one-block messages.
-#[cfg(feature = "std")]
-pub fn kernel_report_many(_message_len: usize) -> KernelReport {
-    kernel_report_many_one_block()
-}
-#[cfg(feature = "std")]
-pub fn kernel_report_many_multithreaded(_message_len: usize) -> KernelReport {
-    kernel_report_many_multithreaded_one_block()
-}
-'''
-
-SHIM_FORWARD = r'''
-
-// perf_regress.py shim: the one-buffer batch API under its later names.
-pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    hash_many_equal(input, message_len, out)
-}
-#[cfg(feature = "std")]
-pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    hash_many_equal_multithreaded(input, message_len, out)
-}
-'''
-
-SHIM_SLICES = r'''
-
-// perf_regress.py shim: the one-buffer batch API over the slice API,
-// copying (its batch cells are not judged).
-fn one_buffer_over_slices(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]], f: fn(&[&[u8]], &mut [Hash])) {
-    let inputs: Vec<&[u8]> = (0..out.len()).map(|i| &input[i * message_len..][..message_len]).collect();
-    let mut hashes = vec![Hash::from_bytes([0; OUT_LEN]); out.len()];
-    f(&inputs, &mut hashes);
-    for (o, h) in out.iter_mut().zip(&hashes) {
-        *o = *h.as_bytes();
-    }
-}
-pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    one_buffer_over_slices(input, message_len, out, hash_many_slices)
-}
-#[cfg(feature = "std")]
-pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    one_buffer_over_slices(input, message_len, out, hash_many_multithreaded_slices)
-}
-'''
-
-SHIM = r'''
-
-// perf_regress.py shim: the batch API of later commits, one message at a
-// time, so the current bench-hashes builds against this commit.
-pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    assert_eq!(input.len(), message_len * out.len());
-    for (i, o) in out.iter_mut().enumerate() {
-        *o = *hash(&input[i * message_len..][..message_len]).as_bytes();
-    }
-}
-#[cfg(feature = "std")]
-pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    hash_many(input, message_len, out)
-}
-#[cfg(feature = "std")]
-pub fn kernel_report_many(_message_len: usize) -> KernelReport {
-    kernel_report()
-}
-#[cfg(feature = "std")]
-pub fn kernel_report_many_multithreaded(_message_len: usize) -> KernelReport {
-    kernel_report_multithreaded()
-}
-'''
-
-
-SHIM_QUEUE = r'''
-
-// perf_regress.py shim: the Queue of later commits (plain mode alone),
-// hashing on the calling thread inside submit, so the current bench-hashes
-// builds against this commit (the check judges no owned-buffer cells).
-#[cfg(feature = "std")]
-pub enum Mode<'a> { Hash, Keyed(&'a [u8; 32]), DeriveKey(&'a str) }
-#[cfg(feature = "std")]
-#[derive(Clone, Copy, Debug)]
-pub enum Efficiency { Time, Energy }
-#[cfg(feature = "std")]
-pub trait MessageHandler: Send + 'static {
-    type Buffer: AsRef<[u8]> + Send + 'static;
-    fn hashed(&mut self, buffer: Self::Buffer, hash: Hash);
-}
-#[cfg(feature = "std")]
-pub trait PieceHandler: Send + 'static {
-    type Buffer: AsRef<[u8]> + Send + 'static;
-    fn piece_done(&mut self, buffer: Self::Buffer);
-    fn finished(&mut self, hash: Hash);
-}
-#[cfg(feature = "std")]
-pub trait FixedHandler: Send + 'static {
-    type Buffer: AsRef<[u8]> + Send + 'static;
-    type Digests: AsMut<[[u8; OUT_LEN]]> + Send + 'static;
-    fn hashed(&mut self, buffer: Self::Buffer, digests: Self::Digests);
-}
-#[cfg(feature = "std")]
-pub mod shape { pub struct Messages; pub struct Pieces; pub struct Fixed; }
-#[cfg(feature = "std")]
-pub struct Queue<H, S = shape::Messages> { handler: std::sync::Mutex<(H, Hasher)>, shape: core::marker::PhantomData<S> }
-#[cfg(feature = "std")]
-fn shim_queue<H, S>(mode: Mode, handler: H) -> Queue<H, S> {
-    assert!(matches!(mode, Mode::Hash), "the perf_regress shim hashes in plain mode alone");
-    Queue { handler: std::sync::Mutex::new((handler, Hasher::new())), shape: core::marker::PhantomData }
-}
-#[cfg(feature = "std")]
-impl<H: MessageHandler> Queue<H, shape::Messages> {
-    pub fn messages(mode: Mode, _: Efficiency, handler: H) -> Self { shim_queue(mode, handler) }
-    pub fn submit(&self, buffer: H::Buffer) { let hash = hash(buffer.as_ref()); self.handler.lock().unwrap().0.hashed(buffer, hash); }
-}
-#[cfg(feature = "std")]
-impl<H: PieceHandler> Queue<H, shape::Pieces> {
-    pub fn pieces(mode: Mode, _: Efficiency, handler: H) -> Self { shim_queue(mode, handler) }
-    pub fn submit(&self, piece: H::Buffer) { let mut h = self.handler.lock().unwrap(); h.1.update(piece.as_ref()); h.0.piece_done(piece); }
-    pub fn finish(&self) { let mut h = self.handler.lock().unwrap(); let hash = h.1.finalize(); h.1.reset(); h.0.finished(hash); }
-}
-#[cfg(feature = "std")]
-impl<H: FixedHandler> Queue<H, shape::Fixed> {
-    // Messages a whole number of blocks long (the benchmark's 64 B), one per slot.
-    pub fn fixed(_message_len: usize, mode: Mode, _: Efficiency, handler: H) -> Self { shim_queue(mode, handler) }
-    pub fn submit(&self, buffer: H::Buffer, mut digests: H::Digests) {
-        let out = digests.as_mut();
-        let len = buffer.as_ref().len() / out.len().max(1);
-        for (i, o) in out.iter_mut().enumerate() { *o = *hash(&buffer.as_ref()[i * len..][..len]).as_bytes(); }
-        self.handler.lock().unwrap().0.hashed(buffer, digests);
-    }
-}
-'''
-
-
-SHIM_UPDATE_MULTITHREADED = r'''
-
-// perf_regress.py shim: Hasher::update_multithreaded of later commits, as
-// update on the calling thread.
-#[cfg(feature = "std")]
-impl Hasher {
-    pub fn update_multithreaded(&mut self, input: &[u8]) -> &mut Self { self.update(input) }
-}
-'''
-
-
-# Every command runs in this environment: this one without git's repository
-# variables. Inside a pre-commit hook git sets GIT_INDEX_FILE (for
-# `git commit PATH...`, a temporary index that becomes the commit) and
-# GIT_DIR; `git worktree add` would check out into that index, committing
-# HEAD's tree, and bench-hashes' build script would run git against the
-# fork's repository.
 ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
 
@@ -372,46 +86,6 @@ def write_if_different(path, content):
         path.write_bytes(content)
 
 
-def shimmed_sources(commit):
-    """({path in the fork: its source with the shims this commit needs},
-    the use cases a shim stands in for, which cannot be judged). Each
-    source is derived from the commit's own, so applying the shims again
-    writes nothing."""
-    lib = git("show", f"{commit}:src/lib.rs")
-    out, shimmed = {}, set()
-    if BATCH_SLICES in lib:
-        for name in git("ls-tree", "--name-only", f"{commit}:src").split():
-            if name.endswith(".rs"):
-                text = git("show", f"{commit}:src/{name}")
-                renamed = re.sub(*SLICES_RENAME, text)
-                if renamed != text:
-                    out[f"src/{name}"] = renamed
-        shimmed |= {"ContinuousBatches", "LentBatches"}
-    lib = out.get("src/lib.rs", lib)
-    if BATCH_ONE_BUFFER in lib:
-        pass
-    elif BATCH_EQUAL in lib:
-        lib += SHIM_FORWARD
-    elif BATCH_SLICES in git("show", f"{commit}:src/lib.rs"):
-        lib += SHIM_SLICES
-    else:
-        lib = lib + SHIM
-        shimmed |= {"ContinuousBatches", "LentBatches"}
-    if KERNELS_ONE_BLOCK in lib:
-        lib = re.sub(*KERNELS_RENAME, lib) + SHIM_KERNELS
-    if "pub use queue::" not in lib:
-        lib += SHIM_QUEUE
-        shimmed |= {"ContinuousMessages", "ContinuousBatches"}
-    if "pub(crate) fn update_multithreaded" in lib:
-        lib = lib.replace("pub(crate) fn update_multithreaded", "pub fn update_multithreaded")
-    elif "fn update_multithreaded" not in lib:
-        lib += SHIM_UPDATE_MULTITHREADED
-        shimmed |= {"LentPieces"}
-    if lib != git("show", f"{commit}:src/lib.rs"):
-        out["src/lib.rs"] = lib
-    return out, shimmed
-
-
 def target_root():
     """Cargo's target directory for this checkout (CARGO_TARGET_DIR, or
     bench-hashes/target). Executables live there, where programs run (a
@@ -419,16 +93,16 @@ def target_root():
     return Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "bench-hashes/target"))
 
 
-def side_bench(side, commit, shim=True):
-    """(bench-hashes executable built against the fork at `commit`, the use
-    cases a shim stands in for), built in the side `side` ("old" or
-    "new"): a fork worktree under CACHE/side with a copy of bench-hashes
+def side_bench(side, commit):
+    """The bench-hashes executable built against the fork at `commit`, in
+    the side `side` ("old", "new", or the runner's "bench"): a fork worktree under CACHE/side with a copy of bench-hashes
     inside, and a target directory of its own. Each step changes only what
     differs (the worktree moves only when its commit does, and then git
     rewrites only the files that differ; the copy is written file by file
     where it differs), so Cargo's own freshness decides what to rebuild,
-    and a side whose code is unchanged builds nothing. Without `shim`,
-    the fork is built as it is (for runs of a benchmark that matches it)."""
+    and a side whose code is unchanged builds nothing. A commit whose API
+    the benchmark no longer calls fails to build: compare it with the tools
+    of its own time (AGENTS.md, "Contracts change everywhere at once")."""
     commit = git("rev-parse", f"{commit}^{{commit}}")
     checkout = CACHE / side / "src"
     if not checkout.exists():
@@ -438,11 +112,6 @@ def side_bench(side, commit, shim=True):
         git("worktree", "add", "--detach", str(checkout), commit)
     elif git("rev-parse", "HEAD", cwd=checkout) != commit:
         git("checkout", "--quiet", "--force", "--detach", commit, cwd=checkout)
-    sources, shimmed = shimmed_sources(commit) if shim else ({}, set())
-    # The shims, written where they differ (a moved checkout has none: the
-    # forced checkout reset the files they change).
-    for path, text in sources.items():
-        write_if_different(checkout / path, text.encode())
     # The benchmark as it is now, so only the fork differs between sides;
     # everything but the lock, which the side derives.
     bench, copy = ROOT / "bench-hashes", checkout / "bench-hashes"
@@ -489,7 +158,7 @@ def side_bench(side, commit, shim=True):
             and m["target"]["name"] == "bench-hashes"]
     assert len(exes) == 1, f"expected the bench-hashes executable, found {exes}"
     require_sme2_kernel(exes[0])
-    return exes[0], shimmed
+    return exes[0]
 
 
 def machine_has_sme2():
@@ -516,207 +185,14 @@ def require_sme2_kernel(exe):
                            "point CC at a compiler that assembles SME2 (CC=clang-19 in the VM)")
 
 
-class Cells(dict):
-    """A run's cells, {"contender|scenario|use_case|point": (5th percentile,
-    90th percentile, sorted samples)}, and the path of its samples file
-    (kept until the check ends, for `bench-hashes compare`)."""
-    path = None
-
-
-# The samples files of the check's runs.
-RUNS = tempfile.TemporaryDirectory()
-
-
-def run(exe, points):
-    """One run of `points` in a scratch directory; its Cells."""
-    with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run([exe, "--contenders", ",".join(CONTENDERS), "--points", ",".join(points),
-                        "--rounds", str(ROUNDS)], cwd=tmp, env=ENV, check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        found = list(Path(tmp).glob("benchmark-results/*/bench-hashes.samples.tsv"))
-        assert len(found) == 1, f"expected one samples file, found {found}"
-        cells = parse(found[0].read_text())
-        cells.path = shutil.copy(found[0], Path(RUNS.name) / f"run-{len(os.listdir(RUNS.name))}.tsv")
-        return cells
-
-
-# The power states the check's runs reported (bench-hashes' "# power:"
-# line), in the order first seen: a check on battery power or in a
-# low-power mode says so beside its verdict.
-POWER_SEEN = []
-# The load lines of the runs that clocks found busy (other programs kept
-# a CPU busy in some window) or did not observe: any one makes the check
-# give no verdict.
-BUSY_RUNS = []
-
-
-def parse(text):
-    run = samples.read(text)
-    if run.power not in POWER_SEEN:
-        POWER_SEEN.append(run.power)
-    # A run with no load window (too short, or no counters) is no evidence
-    # of a quiet machine.
-    if run.busy or run.load.startswith("not measured"):
-        BUSY_RUNS.append(run.load)
-    cells = Cells()
-    for key, values in run.cells.items():
-        # Each sample as measured, ns/units: exact until a ratio is printed.
-        ordered = sorted(values)
-        # The statistic, and the 90th percentile, which a two-speed
-        # cell's slow speed reaches (reported beside verdicts, never
-        # judged: the rule's calibration is for the 5th percentile).
-        cells["|".join(key)] = (ordered[int(QUANTILE * len(ordered))], ordered[int(0.9 * len(ordered))], ordered)
-    return cells
-
-
-def ratios_of(measured, key):
-    """The key's new/old ratios of 5th percentiles, one per pair that
-    measured it (a pair measures a cell only while it is open, so these are
-    the first pairs)."""
-    return [b[key][0] / a[key][0] for a, b in measured if key in a]
-
-
-def is_open(ratios, key):
-    """Whether a cell with these pair ratios could still be called slower
-    or faster: every ratio so far beyond its margin on one side."""
-    m = margin(key.split("|")[1])
-    return all(r > 1 + m for r in ratios) or all(r < 1 - m for r in ratios)
-
-
-def speeds_of(exe, measured, key):
-    """The key's samples pooled over the pairs that measured it, each side's
-    runs together, compared speed with speed by `exe compare` (the rule
-    every measurement uses): "old speeds -> new speeds  [ratios]"."""
-    old = [a.path for a, b in measured if key in a]
-    new = [b.path for a, b in measured if key in a]
-    out = subprocess.run([exe, "compare", *old, "--", *new], env=ENV, check=True,
-                         stdout=subprocess.PIPE, text=True).stdout
-    lines = dict(line.split(": ", 1) for line in out.splitlines() if line.startswith(key + ": "))
-    return lines[key]
-
-
-def pairs(old, new, start, points, use_cases):
-    """PAIRS pairs of (old run, new run) over `points`, every pair over all
-    of them (a cell's neighbours, and so what runs before it, stay the same
-    in every run), the side that runs first alternating, beginning with old
-    when `start` is even. The pairs stop once no cell is open (is_open):
-    none could then be called slower or faster."""
-    out = []
-    for i in range(PAIRS):
-        began = time.monotonic_ns()
-        if (start + i) % 2 == 0:
-            a = run(old, points)
-            b = run(new, points)
-        else:
-            b = run(new, points)
-            a = run(old, points)
-        out.append((a, b))
-        still = [key for key in out[0][0] if key.split("|")[2] in use_cases and is_open(ratios_of(out, key), key)]
-        tenths = (time.monotonic_ns() - began + 50_000_000) // 100_000_000
-        print(f"perf_regress: pair {start + i + 1} done in {tenths // 10}.{tenths % 10} s "
-              f"({len(still)} cells still open)", file=sys.stderr, flush=True)
-        if not still:
-            break
-    return out
-
-
-def judge(measured, use_cases, contenders):
-    """(slower, faster, ratio per cell, 90th-percentile ratio per cell): a
-    cell is slower (faster) when every one of PAIRS pairs measured it and
-    each pair's new/old ratio of 5th percentiles exceeds 1 + its scenario's
-    margin (falls below 1 - it)."""
-    slower, faster, ratio, slow = [], [], {}, {}
-    for key in measured[0][0]:
-        contender, _scenario, use_case, _ = key.split("|")
-        if contender not in contenders or use_case not in use_cases:
-            continue
-        ratios = ratios_of(measured, key)
-        ratio[key] = statistics.median(ratios)
-        slow[key] = statistics.median(b[key][1] / a[key][1] for a, b in measured if key in a)
-        if len(ratios) == PAIRS and is_open(ratios, key):
-            (slower if ratios[0] > 1 else faster).append(key)
-    return slower, faster, ratio, slow
-
-
 def compare(old_rev, new):
     """Compare the fork at `old_rev` with `new` (a commit, or None for the
-    working tree). Returns the exit code."""
-    old, old_shim = side_bench("old", old_rev)
-    new_exe, new_shim = side_bench("new", working_tree_commit() if new is None else new)
-    new_name = "the working tree" if new is None else new
-    # A shimmed side's cells are not judged, so they are not run: run,
-    # they changed the control's next cells (SHA-256 at 64 B 3-6% slower
-    # beside servil f70c758's shimmed 256-byte batches, VM).
-    # A use case a side's shim stands in for is neither run nor judged.
-    use_cases = USE_CASES - old_shim - new_shim
-    points = points_of(use_cases)
-    print(f"perf_regress: {new_name} against {old_rev}, {PAIRS} alternating pairs, "
-          f"use cases {', '.join(sorted(use_cases))}", file=sys.stderr, flush=True)
-    measured = pairs(old, new_exe, 0, points, use_cases)
-
-    def unreliable(measured):
-        if BUSY_RUNS:
-            print(f"perf_regress: other programs kept the machine busy, or clocks saw no load window, during "
-                  f"{len(BUSY_RUNS)} of the check's runs. No verdict (exit 2); run again when nothing else runs "
-                  "on the machine.")
-            for line in BUSY_RUNS:
-                print(f"  {line}")
-            return True
-        control = judge(measured, use_cases, [CONTROL])
-        if control[0] or control[1]:
-            print(f"perf_regress: the control ({CONTROL}, the same code on both sides) moved in "
-                  f"{len(control[0]) + len(control[1])} cells: the machine's state changed within pairs. "
-                  "No verdict (exit 2); run again when nothing else runs on the machine. A control that "
-                  "moves on the new side run after run points at the change itself (it alters what its "
-                  "cells leave behind for the next).")
-            for key in sorted(control[0] + control[1]):
-                print(f"  control {key}: {float(control[2][key] - 1):+.1%}")
-            return True
-        return False
-
-    if unreliable(measured):
-        return 2
-    slower, faster, ratio, slow = judge(measured, use_cases, SUBJECTS)
-    if slower:
-        print(f"perf_regress: {len(slower)} cells slower in {PAIRS} pairs; {PAIRS} more pairs must agree",
-              file=sys.stderr, flush=True)
-        more = pairs(old, new_exe, PAIRS, points, use_cases)
-        if unreliable(more):
-            return 2
-        slower2, _, ratio2, _ = judge(more, use_cases, SUBJECTS)
-        confirmed = sorted(set(slower) & set(slower2))
-        # Solo cells hold the change; shared cells are reported (Zooko,
-        # September 26, 2026: a change that slows them has a reason worth
-        # more, which its commit message names beside the cells).
-        held = [key for key in confirmed if key.split("|")[1] in HOLDING]
-        reported = [key for key in confirmed if key not in held]
-
-        def show(keys):
-            for key in keys:
-                print(f"  {key}: {float(ratio[key] - 1):+.1%}, then {float(ratio2[key] - 1):+.1%} "
-                      f"(90th percentile {float(slow[key] - 1):+.1%})")
-                print(f"      speeds: {speeds_of(new_exe, measured + more, key)}")
-
-        if held:
-            print(f"perf_regress: REGRESSION: {new_name} is slower than {old_rev} in {len(held)} cells that hold a "
-                  f"change (solo; 5th percentile, median of pair ratios):")
-            show(held)
-        if reported:
-            print(f"perf_regress: {new_name} is slower than {old_rev} in {len(reported)} shared cells; "
-                  "they do not hold the change: name them, their numbers, and the change's reason "
-                  "in its commit message:")
-            show(reported)
-        if held:
-            return 1
-        if reported:
-            print(f"perf_regress: no regression in a cell that holds a change against {old_rev}")
-            return 0
-        print(f"perf_regress: the second {PAIRS} pairs did not confirm; no regression")
-    for key in sorted(faster):
-        print(f"  faster  {key}: {float(ratio[key] - 1):+.1%} (90th percentile {float(slow[key] - 1):+.1%})")
-        print(f"      speeds: {speeds_of(new_exe, measured, key)}")
-    print(f"perf_regress: no regression against {old_rev}")
-    return 0
+    working tree): bench-hashes regress. Returns its exit code."""
+    old = side_bench("old", old_rev)
+    new_exe = side_bench("new", working_tree_commit() if new is None else new)
+    name = "the working tree" if new is None else new
+    print(f"perf_regress: {name} against {old_rev}", file=sys.stderr, flush=True)
+    return subprocess.run([new_exe, "regress", old, new_exe], env=ENV).returncode
 
 
 def main():
@@ -745,11 +221,9 @@ def main():
         except BlockingIOError:
             sys.exit(f"perf_regress: another perf_regress holds {CACHE / 'lock'}; run one at a time")
         if args.command == "build":
-            print(side_bench(args.side, args.commit or working_tree_commit(), shim=False)[0])
+            print(side_bench(args.side, args.commit or working_tree_commit()))
             return 0
-        code = compare(args.against, None) if args.command == "check" else compare(args.old, args.new)
-        print(f"perf_regress: power during the check: {' / '.join(POWER_SEEN)}")
-        return code
+        return compare(args.against, None) if args.command == "check" else compare(args.old, args.new)
 
 
 if __name__ == "__main__":
