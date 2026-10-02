@@ -1013,6 +1013,7 @@ fn compress_parents_parallel(
 // multithreading parallelism for that update().
 fn compress_subtree_wide<J: join::Join>(
     input: &[u8],
+    ahead: usize,
     key: &CVWords,
     chunk_counter: u64,
     flags: u8,
@@ -1032,7 +1033,7 @@ fn compress_subtree_wide<J: join::Join>(
     if matches!(platform, Platform::SME2) && sme2::flat_takes(input.len()) {
         // Safe: the SME2 platform is selected only where the CPU has it,
         // and `out` holds simd_degree() values, which is sme2::DEGREE.
-        return unsafe { sme2::compress_subtree_flat(input, key, chunk_counter, flags, out) };
+        return unsafe { sme2::compress_subtree_flat(input, ahead, key, chunk_counter, flags, out) };
     }
 
     // With more than simd_degree chunks, we need to recurse. Start by dividing
@@ -1059,8 +1060,8 @@ fn compress_subtree_wide<J: join::Join>(
     // Recurse! For update_rayon(), this is where we take advantage of RayonJoin and use multiple
     // threads.
     let (left_n, right_n) = J::join(
-        || compress_subtree_wide::<J>(left, key, chunk_counter, flags, platform, left_out),
-        || compress_subtree_wide::<J>(right, key, right_chunk_counter, flags, platform, right_out),
+        || compress_subtree_wide::<J>(left, right.len() + ahead, key, chunk_counter, flags, platform, left_out),
+        || compress_subtree_wide::<J>(right, ahead, key, right_chunk_counter, flags, platform, right_out),
     );
 
     // The special case again. If simd_degree=1, then we'll have left_n=1 and
@@ -1105,6 +1106,7 @@ fn compress_subtree_wide<J: join::Join>(
 #[inline(never)]
 fn compress_subtree_to_parent_node<J: join::Join>(
     input: &[u8],
+    ahead: usize,
     key: &CVWords,
     chunk_counter: u64,
     flags: u8,
@@ -1116,12 +1118,12 @@ fn compress_subtree_to_parent_node<J: join::Join>(
     #[cfg(blake3_sme2)]
     if matches!(platform, Platform::SME2) && sme2::flat_takes(input.len()) {
         // Safe: the SME2 platform is selected only where the CPU has it.
-        return unsafe { sme2::compress_subtree_flat_to_parent(input, key, chunk_counter, flags) };
+        return unsafe { sme2::compress_subtree_flat_to_parent(input, ahead, key, chunk_counter, flags) };
     }
     if input.len() <= SMALL_TREE_CHUNKS * CHUNK_LEN {
-        condense_subtree::<J, SMALL_TREE_CHUNKS, { SMALL_TREE_CHUNKS / 2 }>(input, key, chunk_counter, flags, platform)
+        condense_subtree::<J, SMALL_TREE_CHUNKS, { SMALL_TREE_CHUNKS / 2 }>(input, ahead, key, chunk_counter, flags, platform)
     } else {
-        condense_subtree::<J, MAX_SIMD_DEGREE_OR_2, { MAX_SIMD_DEGREE_OR_2 / 2 }>(input, key, chunk_counter, flags, platform)
+        condense_subtree::<J, MAX_SIMD_DEGREE_OR_2, { MAX_SIMD_DEGREE_OR_2 / 2 }>(input, ahead, key, chunk_counter, flags, platform)
     }
 }
 
@@ -1135,6 +1137,7 @@ const SMALL_TREE_CHUNKS: usize = 16;
 #[inline(always)]
 fn condense_subtree<J: join::Join, const CVS: usize, const HALF: usize>(
     input: &[u8],
+    ahead: usize,
     key: &CVWords,
     chunk_counter: u64,
     flags: u8,
@@ -1142,7 +1145,7 @@ fn condense_subtree<J: join::Join, const CVS: usize, const HALF: usize>(
 ) -> [u8; BLOCK_LEN] {
     let mut cv_array = [[0u8; OUT_LEN]; CVS];
     let cv_array = cv_array.as_flattened_mut();
-    let mut num_cvs = compress_subtree_wide::<J>(input, &key, chunk_counter, flags, platform, cv_array);
+    let mut num_cvs = compress_subtree_wide::<J>(input, ahead, &key, chunk_counter, flags, platform, cv_array);
     debug_assert!(num_cvs >= 2);
 
     // If MAX_SIMD_DEGREE is greater than 2 and there's enough input,
@@ -1228,7 +1231,7 @@ fn hash_all_at_once<J: join::Join>(
     Output {
         input_chaining_value: *key,
         block: Aligned64(compress_subtree_to_parent_node::<J>(
-            input, key, chunk_counter, flags, platform,
+            input, 0, key, chunk_counter, flags, platform,
         )),
         block_len: BLOCK_LEN as u8,
         counter: 0,
@@ -2281,7 +2284,7 @@ impl Hasher {
             {
                 // Safe: the SME2 platform is selected only where the CPU has it.
                 let cv = unsafe {
-                    sme2::compress_subtree_flat_to_cv(&input[..subtree_len], &self.key, self.chunk_state.chunk_counter, self.chunk_state.flags)
+                    sme2::compress_subtree_flat_to_cv(&input[..subtree_len], input.len() - subtree_len, &self.key, self.chunk_state.chunk_counter, self.chunk_state.flags)
                 };
                 self.push_cv(&cv, self.chunk_state.chunk_counter);
                 self.chunk_state.chunk_counter += subtree_chunks;
@@ -2326,6 +2329,7 @@ impl Hasher {
                     let own = platform::Sme2Turn::take(self.chunk_state.platform, subtree_len >= SME2_SIZED_LEN);
                     compress_subtree_to_parent_node::<J>(
                         &input[..subtree_len],
+                        input.len() - subtree_len,
                         &self.key,
                         self.chunk_state.chunk_counter,
                         self.chunk_state.flags,
@@ -2334,6 +2338,7 @@ impl Hasher {
                 } else {
                     compress_subtree_to_parent_node::<J>(
                         &input[..subtree_len],
+                        input.len() - subtree_len,
                         &self.key,
                         self.chunk_state.chunk_counter,
                         self.chunk_state.flags,

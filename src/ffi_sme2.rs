@@ -377,12 +377,13 @@ pub fn flat_takes(len: usize) -> bool {
 #[inline(never)]
 pub unsafe fn compress_subtree_flat(
     input: &[u8],
+    ahead: usize,
     key: &CVWords,
     chunk_counter: u64,
     flags: u8,
     out: &mut [u8],
 ) -> usize {
-    unsafe { flat_walk(input, key, chunk_counter, flags, DEGREE, out) }
+    unsafe { flat_walk(input, ahead, key, chunk_counter, flags, DEGREE, out) }
 }
 
 /// The flat walk down to the subtree's two children: what
@@ -393,9 +394,9 @@ pub unsafe fn compress_subtree_flat(
 /// the SME unit in its slow state for the next ones (NOTES-servil.md,
 /// "SME2 remainders"). Unsafe for the reasons of [`compress_subtree_flat`].
 #[inline(never)]
-pub unsafe fn compress_subtree_flat_to_parent(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8) -> [u8; crate::BLOCK_LEN] {
+pub unsafe fn compress_subtree_flat_to_parent(input: &[u8], ahead: usize, key: &CVWords, chunk_counter: u64, flags: u8) -> [u8; crate::BLOCK_LEN] {
     let mut out = [0u8; crate::BLOCK_LEN];
-    unsafe { flat_walk(input, key, chunk_counter, flags, 2, &mut out) };
+    unsafe { flat_walk(input, ahead, key, chunk_counter, flags, 2, &mut out) };
     out
 }
 
@@ -403,21 +404,35 @@ pub unsafe fn compress_subtree_flat_to_parent(input: &[u8], key: &CVWords, chunk
 /// that cannot be the root (input comes before it). Unsafe for the
 /// reasons of [`compress_subtree_flat`].
 #[inline(never)]
-pub unsafe fn compress_subtree_flat_to_cv(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8) -> crate::CVBytes {
+pub unsafe fn compress_subtree_flat_to_cv(input: &[u8], ahead: usize, key: &CVWords, chunk_counter: u64, flags: u8) -> crate::CVBytes {
     let mut out = [0u8; OUT_LEN];
-    unsafe { flat_walk(input, key, chunk_counter, flags, 1, &mut out) };
+    unsafe { flat_walk(input, ahead, key, chunk_counter, flags, 1, &mut out) };
     out
 }
 
 /// The flat walk until `keep` chaining values remain (DEGREE, 2, or 1),
-/// which it copies into `out`.
+/// which it copies into `out`. `ahead` bytes of the caller's input follow
+/// `input` in memory: the walk first prefetches as many of them as it
+/// hashes, into L2 (the next subtree's), so they arrive while it hashes.
+/// The SME unit's loads leave DRAM-resident input to come one stall after
+/// another: hash() of 128 MiB not in the caches, VM, 0.188 -> 0.162 ns/B;
+/// the same in the caches +0.6% (1 MiB 0.153 -> 0.154). Bytes past the
+/// caller's input are never prefetched (a lone 1 MiB from DRAM ran 10%
+/// slower so).
 #[inline(always)]
-unsafe fn flat_walk(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8, keep: usize, out: &mut [u8]) -> usize {
+unsafe fn flat_walk(input: &[u8], ahead: usize, key: &CVWords, chunk_counter: u64, flags: u8, keep: usize, out: &mut [u8]) -> usize {
     assert!(flat_takes(input.len()), "a whole subtree of 32 to 1024 chunks");
     assert!(keep == DEGREE || keep == 2 || keep == 1, "the flat walk keeps DEGREE, 2, or 1 chaining values");
     assert!(out.len() >= keep * OUT_LEN, "room for the chaining values kept");
     assert!(keep < input.len() / CHUNK_LEN, "the flat walk keeps fewer chaining values than its subtree has chunks");
     let n = input.len() / CHUNK_LEN;
+    let mut line = input.as_ptr() as usize + input.len();
+    let end = line + ahead.min(input.len());
+    while line < end {
+        // Sound: a prefetch never faults, whatever the address.
+        unsafe { core::arch::asm!("prfm pldl2keep, [{0}]", in(reg) line, options(nostack, readonly, preserves_flags)) };
+        line += 128;
+    }
     #[cfg(feature = "std")]
     if let Ok(base) = SCRATCH_BLOCK.try_with(|block| block.get() as *mut u8) {
         // Sound: this thread's block outlives the call, and the walk calls
@@ -660,7 +675,7 @@ mod test {
             for keep in [1, 2, DEGREE].into_iter().filter(|&keep| keep < chunks) {
                 let (mut a, mut b) = ([0u8; DEGREE * OUT_LEN], [0u8; DEGREE * OUT_LEN]);
                 unsafe {
-                    flat_walk(data, &key, 7 * chunks as u64, 0, keep, &mut a);
+                    flat_walk(data, 0, &key, 7 * chunks as u64, 0, keep, &mut a);
                     walk_on_stack(data, &key, 7 * chunks as u64, 0, keep, &mut b, chunks);
                 }
                 assert_eq!(a, b, "{chunks} chunks, keeping {keep}");

@@ -292,7 +292,7 @@ pub(crate) fn subtree_children(
     let _caller = Caller(&pool.callers);
     let threads = pool.cpus.min(max_threads);
     if callers >= pool.cpus || threads < 2 {
-        return crate::compress_subtree_to_parent_node::<crate::join::SerialJoin>(input, key, counter, flags, pool_platform());
+        return crate::compress_subtree_to_parent_node::<crate::join::SerialJoin>(input, 0, key, counter, flags, pool_platform());
     }
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
     let (pieces, own) = cut_with_prefix(input.len(), threads, prefix_for(&turn, input.len(), threads));
@@ -1065,7 +1065,7 @@ impl Task {
         // Sound: a subtree's `out` is one 64-byte block.
         let out = unsafe { &mut *(self.out as *mut [u8; crate::BLOCK_LEN]) };
         if self.counter == 0 && self.len > CHUNK_LEN {
-            *out = crate::compress_subtree_to_parent_node::<crate::join::SerialJoin>(bytes, &self.key, 0, self.flags, platform);
+            *out = crate::compress_subtree_to_parent_node::<crate::join::SerialJoin>(bytes, 0, &self.key, 0, self.flags, platform);
         } else {
             out[..crate::OUT_LEN].copy_from_slice(&crate::hash_all_at_once::<crate::join::SerialJoin>(bytes, &self.key, self.counter, self.flags, platform).chaining_value());
         }
