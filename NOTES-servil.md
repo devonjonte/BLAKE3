@@ -1590,11 +1590,15 @@ effect is likely and unshown. Bisected, four runs a side each (jobs
 side at one speed between the old's two. The same commit 3a8327f ran
 16384 at 6.11 (90%) | 7.74 in one session and 5.10 (29%) | 6.67 (71%) in
 the next: the cell's speeds and shares move by session as much as the
-lean, and no commit shifts it consistently. No regression shown. Open,
-as a finding to explain (AGENTS.md, "every cell may run at two speeds"):
-why hash_many_multithreaded of 16384 messages after other work runs at
-session-dependent speeds (the pool's wake and placement are the
-suspects).
+lean, and no commit shifts it consistently. No regression shown.
+Explained (job 1121, traced, four runs): each run's 12 samples spread
+continuously, 4.8-9.0 ns/msg, at a steady caller clock (3.6-3.7 GHz, the
+streaming clock of its SME2 prefix; all on P-cores): a broad spread, not
+two speeds, so the split rule finds one or two by where 12 samples
+fall, and a cell's medians and shares move about 10% from session to
+session. The caller waits on its workers' wakes, which the spread likely
+is. Such a cell needs many more samples than 12, or comparisons within
+one session.
 
 ## Batch tails, measured again at real gaps (October 2, 2026, job 1001)
 
