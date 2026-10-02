@@ -1306,8 +1306,9 @@ item out when it lands or is rejected.
 
 ### Speed
 
-- Optimize b3sum: on the fork's pool, and its ways of reading files
-  (read, mmap, io_uring), measured by `tools/b3sum-bench`.
+- b3sum reading into its own buffers while the pool hashes the last
+  ("b3sum, measured": cold reads at 4.8 GB/s on one thread beat every
+  mapping's 2.7-3.0 on the Mac); the cold 16 MiB cell of the pool.
 - Try putting b3sum on io_uring on Linux.
 - `hash_range(file, offset, len)`: BLAKE3 doing the reads, for files and
   sockets (api-design.md's third concurrency model).
@@ -1706,6 +1707,92 @@ nearly every count (256 B x 19: 184.7 ns/msg at 5, 206.8 at 3, 206.1 at
 1; 1 KiB x 19: 345 / 430 / 431; 64 B level within 5%); 1 and 3 win only
 some back-to-back cells (64 B x 20: 29.6 at 5, 16.1 at 3), which real
 programs rarely make. The thresholds stay.
+
+## Memory: what each call allocates (a survey, October 2, 2026)
+
+For the memory guarantees Zooko asked to document (bench-hashes
+NEXT-STEPS, the current to-do list). Read from the code, not yet measured
+or tested beyond tests/queue_no_alloc.rs:
+- **Nothing on the heap**: hash, keyed_hash, derive_key, hash_with,
+  hash_many, hash_many_with, Hasher::new/update/finalize, OutputReader
+  (the Hasher's chaining-value stack is an ArrayVec inside it).
+- **Per call, freed at return**: hash_multithreaded and
+  hash_many_multithreaded above the split (512 KiB): a Vec of pieces
+  (capacity 64, 16 bytes each) and, for one message, a Vec of chaining
+  values (32 bytes a piece): about 3 KiB. update_multithreaded alike per
+  subtree it sends to the pool. Hasher::update_reader past 64 KiB: a
+  1 MiB buffer (src/io.rs), freed at return; update_mmap*: the mapping.
+- **Once per process**: the pool (its first multithreaded call, or
+  initialize_multithreaded): one thread per CPU beyond the first, and the
+  SME2 thread where SME2 is, each with std's default stack (2 MiB of
+  address space, touched as used); the task list, a VecDeque that grows
+  to the most tasks ever queued at once (each queue makes room for what
+  its entries can have waiting); the queue's delivery thread.
+- **Per queue**: its slots, in blocks that grow to the most submissions
+  in flight at once and then stay (bounded by the program's own buffers),
+  each slot's results Vec sized for its largest submission.
+To settle before documenting: whether the transient Vecs earn their
+place (a fixed array of 64 pieces on the stack would make the
+multithreaded calls allocation-free too), and a test per claim (the
+counting allocator of tests/queue_no_alloc.rs).
+
+## b3sum, measured: tools/b3sum-bench (October 2, 2026, jobs 1136-1137)
+
+`tools/b3sum-bench` (its README says how it measures) runs b3sum builds as
+a user runs them, one process per run, start to exit, on files of 4 KiB
+to 1 GiB and a tree of 1000 x 16 KiB, warm and cold (evicted without
+root). Its counts come from `clocks::child`; on the Mac the per-core-kind
+times from `proc_pid_rusage` add up to `wait4`'s CPU time within 0.1 ms
+(job 1136), and every cold run read its whole input from storage (msync
+MS_INVALIDATE evicts on APFS; posix_fadvise on ext4). Two Mac runs of the
+same code (1136, 1137) agree within 1-3% in nearly every cell (rayon 16
+MiB warm moved a share). The Mac runs through probe/b3sum-bench-mac,
+whose `examples/host_lab.rs` builds the contenders and the tool.
+
+Contenders: "rayon" the fork's b3sum before the move (779cd2d), "pool"
+on the fork's pool with madvise WILLNEED (candidate/b3sum-pool), "read"
+the pool's b3sum with --no-mmap (update_reader, one thread), "official"
+b3sum 1.8.2 from crates.io. Fast speeds, time per run (the Mac's from
+job 1137, quiet; the VM's from three runs of 15 rounds on its ext4 disk,
+the cells in each against Rayon alike):
+
+    warm                 rayon     pool      read      official
+    Mac 4 KiB            1.85 ms   1.58      1.51      1.74
+    Mac 16 MiB           3.31 ms   2.50      4.57      2.65
+    Mac 1 GiB            68.4 ms   45.2      201       45.2   (23.7 GB/s pool)
+    Mac 1000 x 16 KiB    20.9 ms   20.5      19.8      58.4
+    VM 4 KiB             1.02 ms   0.52      -         0.96
+    VM 1 GiB             64.2 ms   28.3      208       41.9   (37.9 GB/s pool)
+    cold
+    Mac 16 MiB           8.13 ms   7.81      6.07      7.99
+    Mac 1 GiB            365 ms    401       224       357
+    VM 16 MiB            4.49 ms   9.05      4.18      4.63
+    VM 1 GiB             89.3 ms   66.0      207       62.4
+
+What it shows:
+- **The pool wins warm.** Large files take two thirds of Rayon's time on
+  the Mac and under half in the VM (Rayon's threads each take the SME2
+  turn, one SME unit between them: probe/rayon-vs-pool, job 1002), level with
+  official on the Mac and ahead of it in the VM; small files gain a
+  quarter to a half (no Rayon pool to start: the fork's Rayon b3sum kept
+  two CPUs busy for a 4 KiB file).
+- **Cold, reading beats mapping.** On the Mac every mapping contender
+  reads 1 GiB at 2.7-3.0 GB/s, the plain reads of `--no-mmap` at 4.8 on
+  one thread; in the VM reads win from 64 KiB to 16 MiB. Page faults
+  bring a mapping's pages in a few at a time; a read of 1 MiB asks the
+  storage for 1 MiB.
+- **Open** (ours, AGENTS "we own every slowdown"): the pool cold, 16 MiB
+  in the VM 2x Rayon's time (about twice its major faults; WILLNEED took
+  2.5x to 2.0x), 1 GiB on the Mac 1.10x. The pool's workers poll while
+  others wait on faults (12-13 CPUs busy in the VM's 16 MiB cell).
+- **The design these point to**: b3sum reads each file into its own
+  buffers, 1 MiB at a time, and hands each to the pool while it reads the
+  next (`Queue::pieces`, or update_multithreaded per piece): reads' cold
+  speed with the pool's warm one. io_uring is the Linux form of the same
+  overlap. Each is a contender for b3sum-bench.
+- Official b3sum's tree of 1000 small files takes 2.8x the fork's time on
+  the Mac (13.6x in the VM), at 3-6 CPUs busy: its Rayon threads spin
+  between files.
 
 ## The split below 512 KiB, measured again (October 1, 2026; jobs 841-851)
 
