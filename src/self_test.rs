@@ -23,6 +23,9 @@
 //! threads wait for it (std::sync::Once). Builds without std, and Miri,
 //! skip it.
 
+// Without std, and under Miri, nothing runs the cases.
+#![cfg_attr(any(not(feature = "std"), miri), allow(dead_code))]
+
 /// One case: an input shape and the entry point that hashes it. Every
 /// case reads its input from the start of the shared buffer, `offset`
 /// bytes in where it has one.
@@ -245,9 +248,10 @@ fn chunk_values(input: &[u8], key: &[u8; 32]) -> std::vec::Vec<u8> {
     let key = crate::platform::words_from_le_bytes_32(key);
     let chunks: std::vec::Vec<&[u8; crate::CHUNK_LEN]> =
         input.chunks_exact(crate::CHUNK_LEN).map(|c| c.try_into().expect("whole chunks")).collect();
-    let mut out = std::vec![0u8; chunks.len() * crate::OUT_LEN];
+    let out = std::vec![0u8; chunks.len() * crate::OUT_LEN];
     #[cfg(blake3_sme2)]
     if chunks.len() % crate::sme2::HYBRID_GROUP == 0 {
+        let mut out = out;
         let turn = crate::platform::Sme2Turn::take(crate::platform::Platform::detect_unchecked(), true);
         if !matches!(turn.platform(), crate::platform::Platform::SME2) {
             return platform_chunk_values(&chunks, &key, out);
@@ -344,7 +348,7 @@ pub(crate) fn run_again() {
     RUNNING.with(|running| running.set(false));
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod test {
     use super::*;
 

@@ -772,6 +772,7 @@ pub unsafe fn hash_messages_raw(table: *const *const u8, count: usize, blocks: u
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::vec::Vec;
     use crate::{CHUNK_END, CHUNK_START, IV, KEYED_HASH, PARENT};
 
     #[test]

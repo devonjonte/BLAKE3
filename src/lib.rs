@@ -166,6 +166,11 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// The tests use std in every build, the no_std one included.
+#[cfg(all(test, not(feature = "std")))]
+#[macro_use]
+extern crate std;
+
 #[cfg(test)]
 mod test;
 
@@ -1350,6 +1355,7 @@ pub enum Mode<'a> {
     DeriveKey(&'a str),
 }
 
+#[cfg(feature = "std")]
 impl Mode<'_> {
     /// The key words and flags this mode hashes with.
     fn key_and_flags(self) -> (CVWords, u8) {

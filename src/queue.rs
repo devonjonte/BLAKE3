@@ -333,6 +333,7 @@ impl<I> State<I> {
 
 impl<I> Drop for State<I> {
     fn drop(&mut self) {
+        DELIVERY.give_room();
         if let Some(room) = self.tasks_room {
             TASKS.give_room(room);
         }
@@ -376,6 +377,7 @@ impl<H: Send + 'static, S: 'static> Queue<H, S> {
         let mut returned = Slots(Vec::new());
         let mut state = State { blocks: Vec::new(), free: Slots(Vec::new()), tail: core::ptr::null_mut(), tasks: Vec::new(), most: 0, plan: Default::default(), open: None, tasks_room: tasks.then_some(0) };
         state.add_block(&mut returned);
+        DELIVERY.make_room();
         // The chain starts at a slot delivered already.
         let first = state.free.0.pop().unwrap();
         state.tail = first;
@@ -754,8 +756,11 @@ impl<H: FixedHandler> Queue<H, shape::Fixed> {
 
 /// The delivery thread's queues in flight, and whether it sleeps.
 struct Delivery {
-    /// The queues handed over, whether the thread sleeps, and how many
-    /// queues it holds (both lists keep room for all of them).
+    /// The queues handed over, whether the thread sleeps, and the room
+    /// both lists keep: two for every queue alive, since a queue handed
+    /// over again while the thread lets it go is held twice for a moment
+    /// (`Inner::activate`). Room made when a queue is made: no allocation
+    /// in flight.
     queues: Mutex<(Vec<Arc<dyn Deliver>>, bool, usize)>,
     wake: Condvar,
 }
@@ -771,13 +776,22 @@ impl Delivery {
             std::thread::Builder::new().name("blake3-servil-queue".into()).spawn(|| DELIVERY.run()).expect("the queue's delivery thread starts");
         });
         let mut queues = crate::lanes::lock_polling(&self.queues);
-        queues.2 += 1;
-        let held = queues.2;
-        queues.0.reserve(held);
         queues.0.push(queue);
         if queues.1 {
             self.wake.notify_one();
         }
+    }
+
+    /// Room for one more queue (`give_room` gives it back).
+    fn make_room(&self) {
+        let mut queues = crate::lanes::lock_polling(&self.queues);
+        queues.2 += 2;
+        let more = queues.2 - queues.0.len();
+        queues.0.reserve(more);
+    }
+
+    fn give_room(&self) {
+        crate::lanes::lock_polling(&self.queues).2 -= 2;
     }
 
     /// Deliver from every queue in flight, in turn; poll while any entry
@@ -807,15 +821,12 @@ impl Delivery {
             }
             hold.get_or_insert_with(crate::lanes::Hold::new);
             let mut delivered = false;
-            let mut idle = 0;
             queues.retain(|queue| {
                 let (any, in_flight) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| queue.deliver())).unwrap_or_else(|_| std::process::abort());
                 delivered |= any;
-                idle += usize::from(!in_flight);
                 in_flight
             });
             let mut held = crate::lanes::lock_polling(&self.queues);
-            held.2 -= idle;
             held.0.append(&mut queues);
             if !delivered {
                 crate::lanes::poll_pause(&mut polled);

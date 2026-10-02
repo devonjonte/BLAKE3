@@ -1311,7 +1311,7 @@ mod guard_pages {
         let mut lens: Vec<usize> = (0..=2 * CHUNK_LEN + 70).collect();
         for chunks in [3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 64, 100, 128, 256, 1024, 1025] {
             for delta in [-65i64, -64, -1, 0, 1, 63, 64, 65] {
-                lens.push((chunks * CHUNK_LEN) as i64 as usize + delta as usize);
+                lens.push(((chunks * CHUNK_LEN) as i64 + delta) as usize);
             }
         }
         for len in lens {

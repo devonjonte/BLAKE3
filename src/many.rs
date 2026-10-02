@@ -435,6 +435,7 @@ fn platform_is_sme2(platform: Platform) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::vec::Vec;
 
     /// `count` deterministic messages of `len` bytes, each in its slot
     /// (slot_len), zero past its end: little-endian 64-bit words `len << 48

@@ -956,7 +956,9 @@ impl Pool {
                 guard = self.posted.wait(guard).unwrap();
                 // Awake: one fewer notified sleeper on the way (a wake
                 // nobody asked for leaves the count where it is).
-                let _ = self.notified.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(1)));
+                // Every write of `notified` holds sleep_lock, as here.
+                let notified = self.notified.load(Ordering::SeqCst);
+                self.notified.store(notified.saturating_sub(1), Ordering::SeqCst);
             }
             self.sleepers.fetch_sub(1, Ordering::SeqCst);
             drop(guard);

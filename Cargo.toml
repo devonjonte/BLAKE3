@@ -118,6 +118,23 @@ no_sme2 = []
 # Document the rayon/mmap methods and the Serialize/Deserialize/Zeroize impls on docs.rs.
 features = ["mmap", "rayon", "serde", "zeroize"]
 
+# The integration tests exercise the pool and the queue, which need std.
+[[test]]
+name = "api_plan"
+required-features = ["std"]
+
+[[test]]
+name = "one_cpu"
+required-features = ["std"]
+
+[[test]]
+name = "queue_no_alloc"
+required-features = ["std"]
+
+[[example]]
+name = "scaling"
+required-features = ["std"]
+
 [dependencies]
 arrayvec = { version = "0.7.4", default-features = false }
 constant_time_eq = { version = "0.4.2", default-features = false }
