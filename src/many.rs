@@ -218,7 +218,19 @@ fn hash_long_or_single(input: &[u8], len: usize, key: &CVWords, flags: u8, outpu
     if outputs.len() >= 4 && platform.simd_degree() >= 4 {
         match len {
             n if n == 2 * CHUNK_LEN => return hash_whole_chunks::<2>(input, key, flags, outputs, platform),
-            n if n == 4 * CHUNK_LEN => return hash_whole_chunks::<4>(input, key, flags, outputs, platform),
+            n if n == 4 * CHUNK_LEN => {
+                // A four-chunk message already fills a four-lane call alone;
+                // batch whole fours of messages and hash the rest singly, so
+                // no chunk index falls to one-lane kernels (6 messages: 12% slower
+                // when batched in full, probe x86_batch_probe 4096x6).
+                let batched = outputs.len() - outputs.len() % 4;
+                let (head, tail) = outputs.split_at_mut(batched);
+                hash_whole_chunks::<4>(&input[..batched * len], key, flags, head, platform);
+                for (i, output) in tail.iter_mut().enumerate() {
+                    *output = *crate::hash_serial_on(&input[(batched + i) * len..][..len], key, flags, platform).as_bytes();
+                }
+                return;
+            }
             _ => {}
         }
     }
