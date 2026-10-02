@@ -102,7 +102,7 @@ pub mod shape {
 }
 
 /// A stream of inputs, hashed behind the program. Built for efficiency
-/// of throughput (see [For best performance](crate#for-best-performance)):
+/// of throughput (see [Which call to use](crate#which-call-to-use)):
 /// the most bytes or messages hashed per second, or per joule, chosen per
 /// queue ([`Efficiency`]). Each submission comes back after a handover, so
 /// a single input takes longer than [`hash`](crate::hash) takes; for the

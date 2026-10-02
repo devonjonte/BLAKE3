@@ -1332,16 +1332,16 @@ item out when it lands or is rejected.
 
 ### Interfaces
 
-- A public thread budget for the multithreaded calls (b3sum's
-  `--num-threads` above 1), once a need shows.
+- A thread budget: `Threads::Budget` is public in `hash_with` and
+  `hash_many_with`, against Zooko's decision of September 28 to remove
+  it (api-design.md, **Q**); b3sum's `--num-threads` above 1 would need
+  one in `update_multithreaded` too.
 - update_rayon on the fork's pool, one mechanism for multithreading
   (changes its contract: today it runs on the caller's Rayon pool).
 - The energy-saving form (the `efficient` module): deferred until the
   benchmark, API, and architecture settle.
 - A Merkle tree API (`servil::merkle`, for users like Remco's WHIR);
   write its trade-offs up for Zooko before building.
-- The crate docs lead with api-design.md's five questions (they open
-  with "For best performance" by interface and by situation today).
 
 ### For Zooko
 

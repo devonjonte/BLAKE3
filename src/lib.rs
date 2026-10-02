@@ -30,67 +30,65 @@
 //! # }
 //! ```
 //!
-//! # For best performance
+//! # Which call to use
 //!
-//! Each hashing interface says what it is built for:
+//! For one message in memory, call [`hash_multithreaded`]: below 512 KiB
+//! it hashes on the calling thread at [`hash`]'s speed, and from there on
+//! other cores too (8 MiB: about 6x [`hash`]'s speed on an Apple M4 Max).
+//! Four questions find the fastest call for every other program:
 //!
-//! - **Ease of use:** [`hash`], [`hash_multithreaded`], [`hash_many`],
-//!   [`hash_many_multithreaded`], their full forms [`hash_with`] and
-//!   [`hash_many_with`], and [`Hasher`]. The multithreaded forms use other
-//!   cores only where waking them pays on every machine measured, run no
-//!   slower than their single-threaded forms, and leave nothing running
-//!   between calls (but for a [`Hasher`] between multithreaded updates,
-//!   which keeps its worker threads ready for 50 µs), at more energy per
-//!   byte (below).
-//! - **Throughput, in time or in energy:** [`Queue`], for a stream of
-//!   inputs. The program hands over its buffers and moves on while the
-//!   crate hashes them, and each comes back through a handler the program
-//!   writes: the most hashed per second (or per joule) for a program that
-//!   keeps enough in flight, at a handover's latency for each input. The
-//!   ease-of-use forms give the lowest latency for one input.
+//! 1. **Can your program use several threads?** If not, the first column
+//!    below is yours.
+//! 2. **What shape is your data?** One message in one buffer; one message
+//!    arriving in pieces; or a batch: many messages of one length, side by
+//!    side in one buffer. Short messages hash fastest as a batch (1024
+//!    messages of 64 bytes: about 5x a loop of [`hash`]).
+//! 3. **Does your thread keep up with its data?** When the next data
+//!    arrives, has your thread finished with the last, its own work to
+//!    read or make it included? An upload over a 100 MB/s network keeps
+//!    up (a 64 KiB piece arrives every 650 µs and hashes in 13 µs); a file
+//!    read from the page cache falls behind (a 64 KiB piece reads in a few
+//!    µs). If you cannot tell, answer yes.
+//! 4. **If it falls behind, whose buffer does the data land in?** If the
+//!    buffer is yours to hand over, a [`Queue`] hashes it on other threads
+//!    while your thread gets the next: the most hashed per second, each
+//!    input back after a handover. If it is lent to you only until your
+//!    call returns, a multithreaded call hashes it, and your thread and
+//!    the hashing take turns.
 //!
-//! And by situation:
+//! | Data | One thread | Keeps up | Falls behind, buffer yours | Falls behind, buffer lent |
+//! |---|---|---|---|---|
+//! | One buffer | [`hash`] | [`hash_multithreaded`] | [`Queue::messages`] | [`hash_multithreaded`] |
+//! | In pieces | [`Hasher::update`] | [`Hasher::update`] | [`Queue::pieces`] | [`Hasher::update_multithreaded`] |
+//! | A batch | [`hash_many`] | [`hash_many_multithreaded`] | [`Queue::fixed`] | [`hash_many_multithreaded`] |
 //!
-//! - **Input in memory: one call.** [`hash_multithreaded`] on the whole
-//!   input: at [`hash`]'s speed below 512 KiB and faster from there when
-//!   the program can spare the CPUs (8 MiB: about 6x [`hash`]'s speed on
-//!   an M4 Max). Call [`initialize_multithreaded`] at start-up: the first
-//!   call of a process otherwise runs the startup self-test (below, 0.1 to
-//!   0.2 ms), and the first multithreaded call that leaves the calling
-//!   thread starts the worker threads, under a millisecond.
-//! - **A stream of inputs (files, records, network objects): a [`Queue`].**
-//!   [`Queue::messages`] for separate inputs, [`Queue::pieces`] for one
-//!   long input arriving in pieces, [`Queue::fixed`] for messages of one
-//!   length.
-//! - **Input arriving, simply: a [`Hasher`].** [`Hasher::update`] takes
-//!   each piece as it arrives, and [`Hasher::update_reader`] reads any
-//!   [`std::io::Read`] through it. [`Hasher::update_multithreaded`]
-//!   spreads a long message's pieces over the worker threads (64 KiB
-//!   pieces of a long message: about 2.4x [`Hasher::update`]'s speed on an
-//!   M4 Max, at several times the energy per byte).
-//! - **Batch small messages of one length with [`hash_many_multithreaded`]**,
-//!   back to back in one buffer, the whole batch in one call: 1024
-//!   messages of 64 bytes hash about 5x faster than in a loop of [`hash`],
-//!   and messages of 128 B to 1 KiB (Merkle-tree leaves) gain alike.
-//! - **Keyed hashing and key derivation** run at the same speed as plain
-//!   hashing in every form: [`keyed_hash`], [`derive_key`], and a [`Mode`]
-//!   for every other one.
-//! - **Make the calls from one thread.** The multithreaded functions
-//!   spread the work themselves. On Apple M4 and later, several threads
-//!   hashing at once share one SME unit: one runs at full speed and the
-//!   others slower.
+//! The queue is built for throughput; every other call is built for ease
+//! of use and the lowest latency for one input. Each call's own
+//! documentation gives its speed, its energy, and its rules. Beside them:
+//!
+//! - **Keyed hashing and key derivation** run at plain hashing's speed in
+//!   every call: [`keyed_hash`], [`derive_key`], and a [`Mode`] for every
+//!   other one ([`hash_with`], [`hash_many_with`], [`Hasher::new_keyed`],
+//!   and each queue).
+//! - **Make the calls from one thread.** The multithreaded calls spread
+//!   the work themselves. On Apple M4 and later, several threads hashing
+//!   at once share one SME unit: one runs at full speed and the others
+//!   slower.
+//! - **Call [`initialize_multithreaded`] at start-up** (or [`initialize`]
+//!   for single-threaded calls), to keep the startup self-test (below) and
+//!   the worker threads' start off the first call.
+//! - **For the least energy**, hash on one thread ([`hash`], or a queue
+//!   with [`Efficiency::Energy`]), at background priority (macOS:
+//!   `QOS_CLASS_BACKGROUND`) when time allows: on an M4 Max, E-cores hash
+//!   a byte for about an eighth of the energy P-cores spend, at a third to
+//!   a quarter of the speed, and multithreaded calls spend about 2.7x the
+//!   energy per byte of [`hash`].
 //! - **Idle time slows the next hash, on the machine's side.** After half
 //!   a millisecond or more without work, an M4 Max runs a core's next
 //!   85 µs or so of work at about a third of its clock (hashing 64 KiB:
 //!   41 µs instead of 13.5), and for longer after 100 ms. A program that
 //!   hashes now and then meets this whatever it calls; spinning instead of
 //!   sleeping lowers the clock too.
-//! - **For the least energy**, hash single-threaded ([`hash`], or a queue
-//!   with [`Efficiency::Energy`]), and at background priority (macOS:
-//!   `QOS_CLASS_BACKGROUND`) when the time allows: on an M4 Max, E-cores
-//!   hash a byte for about an eighth of the energy that P-cores spend, at
-//!   a third to a quarter of the speed, and multithreaded calls spend
-//!   about 2.7x the energy per byte of [`hash`].
 //!
 //! [`kernel_report`] says which code paths run at each input length on
 //! this machine.
@@ -1244,7 +1242,7 @@ fn hash_all_at_once<J: join::Join>(
 
 /// The default hash function.
 ///
-/// Built for ease of use (see [For best performance](crate#for-best-performance)).
+/// Built for ease of use (see [Which call to use](crate#which-call-to-use)).
 ///
 /// For an incremental version that accepts multiple writes, see [`Hasher::new`],
 /// [`Hasher::update`], and [`Hasher::finalize`]. These two lines are equivalent:
@@ -1278,7 +1276,7 @@ pub fn hash(input: &[u8]) -> Hash {
 
 /// The default hash function over several threads.
 ///
-/// Built for ease of use (see [For best performance](crate#for-best-performance)):
+/// Built for ease of use (see [Which call to use](crate#which-call-to-use)):
 /// it uses other cores only where waking them pays on every machine
 /// measured, runs no slower than [`hash`], and leaves nothing running
 /// between calls. It spends more energy per byte than [`hash`] when it
@@ -1403,7 +1401,7 @@ impl Threads {
 /// [`hash`] in any [`Mode`] on any number of [`Threads`]: the full form
 /// behind [`hash`], [`hash_multithreaded`], [`keyed_hash`], and
 /// [`derive_key`], each of whose digests it returns for the same mode.
-/// Built for ease of use (see [For best performance](crate#for-best-performance)).
+/// Built for ease of use (see [Which call to use](crate#which-call-to-use)).
 /// More than one thread follows [`hash_multithreaded`]'s rules.
 ///
 /// ```
@@ -1558,7 +1556,7 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
 }
 
 /// Many messages of one length, each starting at a multiple of 64 bytes.
-/// Built for ease of use (see [For best performance](crate#for-best-performance)).
+/// Built for ease of use (see [Which call to use](crate#which-call-to-use)).
 ///
 /// `out[i]` becomes the [`hash`] of `input[i * stride..][..message_len]`,
 /// where `stride` is `message_len` rounded up to a multiple of 64 (64 for
@@ -1605,7 +1603,7 @@ pub(crate) fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, 
 }
 
 /// [`hash_many`] over several threads, recommended over it. Built for ease
-/// of use (see [For best performance](crate#for-best-performance)): it uses
+/// of use (see [Which call to use](crate#which-call-to-use)): it uses
 /// other cores only where waking them pays on every machine measured, runs
 /// no slower than [`hash_many`], and leaves nothing running between calls.
 /// It spends more energy per byte than [`hash_many`] when it uses other
@@ -1633,8 +1631,8 @@ pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8;
 /// [`hash_many`] in any [`Mode`] on any number of [`Threads`]: the full
 /// form behind [`hash_many`] and [`hash_many_multithreaded`]. `out[i]`
 /// becomes [`hash_with`]'s digest of message i in `mode`, under
-/// [`hash_many`]'s layout. Built for ease of use (see [For best
-/// performance](crate#for-best-performance)). More than one thread follows
+/// [`hash_many`]'s layout. Built for ease of use (see [Which call
+/// to use](crate#which-call-to-use)). More than one thread follows
 /// [`hash_many_multithreaded`]'s rules.
 ///
 /// ```
