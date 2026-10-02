@@ -187,8 +187,8 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
     Ok(output_reader)
 }
 
-/// `file` mapped, when it is at least MAP_LEN long and every page of it is
-/// in the page cache (mincore): hashed in place over the pool, it skips
+/// `file` mapped, when it is at least MAP_LEN long and in the page cache
+/// (mincore, at SAMPLED_PAGES pages): hashed in place over the pool, it skips
 /// the copy a read makes, which a reader thread does alone (Linux VM,
 /// 1 GiB in the page cache: 32 ms mapped against 79 ms read; Apple M4 Max
 /// 47 against 50). A file not wholly in the cache is read: a mapping's
@@ -206,18 +206,25 @@ fn mapped_if_cached(file: &File) -> Option<memmap2::Mmap> {
     let map = unsafe { memmap2::Mmap::map(file) }.ok()?;
     // Sound: sysconf is a plain query.
     let page = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok()?;
-    let mut resident = vec![0u8; len.div_ceil(page)];
-    // Sound: `map` covers `len` bytes from a page boundary, and `resident`
-    // holds one byte per page.
-    let rc = unsafe { libc::mincore(map.as_ptr() as *mut libc::c_void, len, resident.as_mut_ptr().cast()) };
-    if rc != 0 || resident.iter().any(|&page| page & 1 == 0) {
-        return None;
+    // Sixteen pages spread over the file stand for it: a whole mincore
+    // walks every page (macOS, 1 GiB: about 7 ms), and a wrong guess costs
+    // only speed.
+    let pages = len.div_ceil(page);
+    for k in 0..SAMPLED_PAGES {
+        let at = pages * k / SAMPLED_PAGES * page;
+        let mut resident = 0u8;
+        // Sound: one page of `map`, from a page boundary inside it.
+        let rc = unsafe { libc::mincore(map.as_ptr().add(at) as *mut libc::c_void, 1, (&mut resident as *mut u8).cast()) };
+        if rc != 0 || resident & 1 == 0 {
+            return None;
+        }
     }
-    // Resident pages still fault into the mapping one at a time as the
-    // threads first touch them; the hint maps them ahead.
-    let _ = map.advise(memmap2::Advice::WillNeed);
     Some(map)
 }
+
+/// The pages a file's residency is judged by.
+#[cfg(unix)]
+const SAMPLED_PAGES: usize = 16;
 
 /// The shortest file mapped when it is in the page cache: mapping beats
 /// reading from here (Linux VM, a mixed tree of 1000 files warm: 18.5 ms
