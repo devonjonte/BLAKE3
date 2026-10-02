@@ -732,19 +732,35 @@ pub fn sse2_detected() -> bool {
     has_sse2::get()
 }
 
-/// The core's virtual counter and its ticks per second (CNTVCT_EL0 and
-/// CNTFRQ_EL0, which user code reads directly: 24 MHz on Apple's cores):
-/// control, not measurement.
+/// The core's virtual counter (CNTVCT_EL0, which user code reads
+/// directly): control, not measurement.
 #[cfg(all(blake3_neon_hybrid, feature = "std"))]
 #[inline]
-pub(crate) fn counter() -> (u64, u64) {
-    let (now, per_second): (u64, u64);
-    // Sound: both registers are readable at EL0 on every AArch64 OS this
-    // crate builds the hybrids for (Linux, macOS).
-    unsafe {
-        core::arch::asm!("mrs {0}, cntvct_el0", "mrs {1}, cntfrq_el0", out(reg) now, out(reg) per_second, options(nomem, nostack, preserves_flags));
+pub(crate) fn counter() -> u64 {
+    let now: u64;
+    // Sound: readable at EL0 on every AArch64 OS this crate builds the
+    // hybrids for (Linux, macOS).
+    unsafe { core::arch::asm!("mrs {0}, cntvct_el0", out(reg) now, options(nomem, nostack, preserves_flags)) };
+    now
+}
+
+/// The counter's ticks in 100 us (CNTFRQ_EL0 / 10,000: 2400 on Apple's
+/// cores), read once: reading the frequency costs about 10 cycles on an M4
+/// Max (probe/stamp-cost, job 1015), the counter itself next to nothing.
+#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[inline]
+pub(crate) fn ticks_in_100_us() -> u64 {
+    static TICKS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+    let ticks = TICKS.load(core::sync::atomic::Ordering::Relaxed);
+    if ticks != 0 {
+        return ticks;
     }
-    (now, per_second)
+    let per_second: u64;
+    // Sound: as counter().
+    unsafe { core::arch::asm!("mrs {0}, cntfrq_el0", out(reg) per_second, options(nomem, nostack, preserves_flags)) };
+    let ticks = (per_second / 10_000).max(1);
+    TICKS.store(ticks, core::sync::atomic::Ordering::Relaxed);
+    ticks
 }
 
 /// Prefetch code from `start` to `end` into the L2 cache, a line (128

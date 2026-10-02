@@ -1451,9 +1451,9 @@ fn code_may_be_cold() -> bool {
     std::thread_local! {
         static LAST_CALL: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
     }
-    let (now, per_second) = platform::counter();
+    let now = platform::counter();
     let last = LAST_CALL.with(|last| last.replace(now));
-    now.wrapping_sub(last) > per_second / 10_000
+    now.wrapping_sub(last) > platform::ticks_in_100_us()
 }
 
 /// Prefetch the code of the kernels hashing `len` bytes on `platform`
