@@ -738,14 +738,34 @@ fn pool() -> &'static Pool {
         prepare(&pool.finished, &pool.finished_signal);
         prepare(&TASKS.sme2_asleep, &TASKS.sme2_wake);
         drop(TASKS.list.lock());
+        // Every thread counts itself as it starts, before it reaches
+        // pool() (which waits for this creator): the creator returns once
+        // all have, so the pool's start ends inside initialize_multithreaded,
+        // its allocations too (std's thread start allocates 16 bytes for its
+        // stack-overflow handler, which a warm queue's test counted after
+        // initialize_multithreaded returned).
+        static STARTED: AtomicUsize = AtomicUsize::new(0);
+        let threads = usize::from(pool.sme2) + cpus - 1;
         if pool.sme2 {
-            std::thread::Builder::new().name("blake3-sme2".into()).spawn(sme2_main).expect("spawning the SME2 thread");
+            std::thread::Builder::new()
+                .name("blake3-sme2".into())
+                .spawn(|| {
+                    STARTED.fetch_add(1, Ordering::SeqCst);
+                    sme2_main()
+                })
+                .expect("spawning the SME2 thread");
         }
         for worker in 1..cpus {
             std::thread::Builder::new()
                 .name(format!("blake3-worker-{worker}"))
-                .spawn(move || worker_main(worker - 1))
+                .spawn(move || {
+                    STARTED.fetch_add(1, Ordering::SeqCst);
+                    worker_main(worker - 1)
+                })
                 .expect("spawning a BLAKE3 worker");
+        }
+        while STARTED.load(Ordering::SeqCst) < threads {
+            std::thread::yield_now();
         }
         pool
     })
