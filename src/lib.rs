@@ -1448,6 +1448,9 @@ const PREFETCH_BELOW: usize = 64 * 1024;
 /// bytes runs: a one-shot call's (prefetch_kernels), or with `fresh_hasher`
 /// a fresh Hasher's first update's (prefetch_update_kernels).
 #[cfg(all(blake3_neon_hybrid, feature = "std"))]
+// Cold for layout: the path of a chunk or less falls through past its
+// call, on the lines it had before the call existed.
+#[cold]
 #[inline(never)]
 fn prefetch_after_pause(len: usize, platform: Platform, fresh_hasher: bool) {
     if code_may_be_cold() {
