@@ -1,5 +1,31 @@
 # BLAKE3
 
+## Devon's Linux research fork
+
+This branch adds x86 batch optimizations to the servil fork below. On the
+tested i7-12700K Linux host, independently measured batches of 2048-byte
+messages roughly double direct-caller throughput; 4096-byte batches use
+about 30–36% less direct-caller wall time. Producer/digest-handling,
+shared and queued workloads have their own results and costs in the
+[public Linux evidence](https://github.com/devonjonte/bench-hashes/tree/candidate/devon-linux-excellence/audit/results/linux-excellence).
+Queue state variability and observed slowdowns remain open; these targeted
+gains support no broad no-regression or cross-platform claim.
+
+To evaluate this candidate, pin its tested source rather than a moving branch:
+
+```toml
+[dependencies]
+blake3-servil = { git = "https://github.com/devonjonte/BLAKE3", rev = "d0574e7393c1ef25e80bc262e56b9f75e7bbb1aa" }
+```
+
+Cryptographic contracts and digests are unchanged. Published vectors,
+independent references across alignments/modes, default/pure/no_sme2 tests,
+Miri anchors and AddressSanitizer checks pass. This is provisional research,
+not an audited release or a pass of the original benchmark-reliability
+procedure. The new x86 changes are tested on Linux; ARM/macOS remain outside
+this branch's validation. The original servil and upstream descriptions below
+provide background for their own versions.
+
 # Warning
 
 This code is new. An AI wrote it rapidly under Zooko's direction (his guidance is in
@@ -7,8 +33,10 @@ This code is new. An AI wrote it rapidly under Zooko's direction (his guidance i
 It is checked with automated tests against the reference implementation and fixed digests,
 sanitizers, Miri, a few formal proofs, and a self-test that every process runs before its first
 hash; [`QUALITY.md`](QUALITY.md) lists every check, the
-bugs they found, and how to repeat them. It has been tested only on an Apple M4 Max. It has no
-users yet: you would be the first. Use it at your own risk.
+bugs they found, and how to repeat them. The original servil measurements cover an Apple
+M4 Max; Devon's additional validation covers the Linux host described above. Automated
+checks supplement, rather than replace, an independent security audit. Use this research
+candidate at your own risk.
 
 # The servil fork
 
