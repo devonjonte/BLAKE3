@@ -2,10 +2,19 @@ name: tests
 
 on:
   push:
+    # The main line and candidates; probe branches carry experiments.
     branches:
-      - "**"
-    # not on tags
+      - "servil"
+      - "candidate/**"
+    # not on tags; not for commits that change documents alone
+    paths-ignore:
+      - "**.md"
   pull_request:
+
+# A newer push to a branch supersedes its running tests.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   BLAKE3_CI: "1"
