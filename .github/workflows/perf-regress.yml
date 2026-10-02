@@ -31,9 +31,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # bench-hashes' development branch, which calls the fork's API as it
+      # is now (its main calls the API of its last release).
       - uses: actions/checkout@v4
         with:
           repository: johnservil/bench-hashes
+          ref: candidate/benchmark-plan
           path: bench-hashes
       - uses: dtolnay/rust-toolchain@stable
       - name: performance-regression check
