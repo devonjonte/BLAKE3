@@ -48,6 +48,7 @@ use std::time::Instant;
 pub mod load;
 pub mod other_code;
 pub mod speeds;
+pub mod comparison;
 #[cfg(all(target_os = "linux", target_arch = "x86_64", target_pointer_width = "64"))]
 mod linux_counts;
 
