@@ -1516,6 +1516,19 @@ x1.11-1.21 slower and its shared x0.73-0.89 faster, each side against
 itself up to 22% apart in the same cells (old/old 4096 x1.219, new/new
 x1.235): the VM's own spread, no regression shown.
 
+## Lent batches of 1024-4096: the SME unit's state, not the copy (October 2)
+
+Lent batches of 1024 and 4096 64-byte messages run at 12.0-12.2 ns/msg
+on the Mac (256: 10.0, 16384: 10.6; back to back 9.7). The VM, hash_many
+after each of: the producer's copy, integer work as long (no memory), a
+read-only pass, nothing (ns/msg, 4096 messages): 12.87, 12.78, 12.83,
+9.69. Any other work between calls costs the same: the SME unit's slow
+state after work off it (NOTES above, "The slow state, measured
+directly"), held for several microseconds of SME2 work (the excess per
+batch: 256 about 1 us, 4096 about 8.6, 16384 about 5). Cleaning the
+copied lines first (DC CVAU or CVAC) made it slower; tables of 256 or
+512 messages per kernel call (TABLE, 128) level. Left as it is.
+
 ## Batch tails, measured again at real gaps (October 2, 2026, job 1001)
 
 Leftovers of 1-4 past whole groups run on NEON and cost far more than
