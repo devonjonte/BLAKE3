@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- One-shot calls of 1-64 KiB (`hash`, `keyed_hash`, `derive_key`, and
+  `hash_multithreaded` below its split) that follow a pause fetch their
+  code from memory in parallel instead of line by line: on an Apple M4 Max,
+  a call after other work hashes 4 KiB about 40% faster, 8 KiB about 45%,
+  and 16 KiB about 40% (16 KiB now ahead of hardware SHA-256 there). Calls
+  back to back are unchanged.
+- Hashing an input much larger than the caches on one thread (`hash`,
+  `Hasher::update`) keeps its speed: on an Apple M4 Max, 64-128 MiB hash
+  about 10% faster, at the rate of an 8 MiB input.
+- `initialize_multithreaded` returns once every worker thread has
+  started, and a warm `Queue` allocates nothing on macOS too (the standard
+  library there allocates a lock at its first use, which the worker
+  threads met after `initialize_multithreaded` had returned).
+- Builds with an assembler too old for the SHA-3 extension (GNU as before
+  2.30) succeed, without the integer + NEON and SME2 kernels, with a
+  warning; builds for `wasm32-wasip1` pass their tests (`Queue` needs
+  threads, which that target lacks).
+
 - `Hasher::update_multithreaded` is public: `Hasher::update` over several
   threads, with the same result. Past a message's first 128 KiB it keeps
   the worker threads ready for 50 µs after each update of 64 KiB or more,
