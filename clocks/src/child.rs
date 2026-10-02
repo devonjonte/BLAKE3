@@ -48,6 +48,12 @@ pub fn run(command: &mut std::process::Command) -> Run {
     imp::finish(child, started, started_ns)
 }
 
+/// A `struct rusage`'s user and system time, as 64-bit words.
+#[cfg(unix)]
+pub(crate) fn rusage_cpu_ns(words: &[i64; 18]) -> u64 {
+    rusage::cpu_ns(words)
+}
+
 #[cfg(unix)]
 mod rusage {
     /// `struct rusage` as 64-bit words (Linux and macOS, 64-bit): two
@@ -74,7 +80,7 @@ mod rusage {
         sec as u64 * 1_000_000_000 + u64::from(usec as u32) * 1000
     }
 
-    pub fn cpu_ns(w: &Words) -> u64 {
+    pub(crate) fn cpu_ns(w: &Words) -> u64 {
         timeval_ns(w[0], w[1]) + timeval_ns(w[2], w[3])
     }
 
@@ -203,5 +209,16 @@ mod tests {
             assert!(ns * 2 >= cpu && ns <= cpu * 2, "the per-kind times add up to the CPU time: {ok:?}");
         }
         assert!(!run(std::process::Command::new("sh").args(["-c", "exit 3"])).success);
+    }
+
+    /// A reaped child's CPU time counts as this process's own, so the
+    /// load it puts on the machine is never read as other programs'.
+    #[test]
+    #[cfg(unix)]
+    fn a_reaped_childs_cpu_time_is_this_processs() {
+        let before = crate::process_cpu_ns();
+        let child = run(std::process::Command::new("sh").args(["-c", "i=0; while [ $i -lt 50000 ]; do i=$((i+1)); done"]));
+        let after = crate::process_cpu_ns();
+        assert!(after - before >= child.cpu_ns.unwrap(), "{before} {after} {child:?}");
     }
 }
