@@ -7,7 +7,9 @@
   code from memory in parallel instead of line by line: on an Apple M4 Max,
   a call after other work takes about 40% less time at 4 KiB, 45% at
   8 KiB, and 40% at 16 KiB (16 KiB now ahead of hardware SHA-256 there).
-  Calls back to back are unchanged.
+  Calls back to back are unchanged. A `Hasher` used once per message
+  (and the RustCrypto digest traits, which use it) gains the same: 4 KiB
+  27% less time, 8 KiB 35%.
 - Hashing an input much larger than the caches on one thread (`hash`,
   `Hasher::update`) keeps its speed: on an Apple M4 Max, 64-128 MiB take
   about 10% less time, at the rate of an 8 MiB input.

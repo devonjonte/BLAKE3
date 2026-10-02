@@ -1434,6 +1434,16 @@ cost about 10 cycles on the Mac (probe/stamp-cost, job 1015). Read once
 (a7177c6): lent 4 KiB x0.999 (st) and x0.983 (mt) against 91c4a77,
 1-64 KiB level, the gains after other work unchanged (jobs 1019-1022).
 
+**A fresh Hasher's first update too** (7510d44, October 2): a Hasher per
+message (and the digest traits) prefetches the kernels of the subtrees
+its update loop cuts (prefetch_update_kernels: next_subtree_len from
+counter 0, the last chunk left to the chunk state). Mac, probe/hasher-
+prefetch against probe/hasher-prefetch-before (jobs 1025-1028, A B B A,
+mains), after other work, ns/call: 2 KiB 1500-1521 -> 1333-1344, 4 KiB
+2646-2734 -> 1953, 5000 B 3338-3448 -> 2615-2651, 8 KiB 4536-4557 ->
+2963-2968, 16 KiB 5552-5562 -> 4417-4484; nonstop level within 1%.
+perf_regress on the Mac (job 1029): no regression.
+
 Not prefetched, and so still cold after other work: 1 KiB and below
 (c1, 3.9 KB, ran x0.84-1.10 with two speeds), batches (`hash_many`'s
 plans: the batch of 4 after other work still costs more per message
