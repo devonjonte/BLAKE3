@@ -851,6 +851,13 @@ only the continuous cells and the long streams read here:
 
 ## Rejected (with the reason; do not retry without new evidence)
 
+- **A woken worker prefetching a piece's kernels** (probe/wake-prefetch,
+  October 2, 2026, jobs 1032-1035): after its sleep, before its first
+  piece, PRFM over k10, k6, and the parents. hash_multithreaded after
+  other work and after idling, 256 KiB-8 MiB, batches of 8192-65536:
+  level within each side's own spread (512 KiB and 1 MiB move as much
+  old against old). The wake's own 15-70 us dwarfs the code's fetch.
+
 - **The task list back to its ring's start when it empties**
   (probe/task-ring-clear, October 2, 2026, jobs 1009-1012). The list's
   room follows every slot (1024 short messages in flight: about 1040
