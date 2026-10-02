@@ -12,7 +12,7 @@ use blake3_servil::{Efficiency, FixedHandler, Hash, MessageHandler, Mode, PieceH
 use std::sync::mpsc;
 
 unsafe extern "C" {
-    fn sched_setaffinity(pid: i32, cpusetsize: usize, mask: *const u8) -> i32;
+    fn sched_setaffinity(pid: i32, cpusetsize: usize, mask: *const core::ffi::c_ulong) -> i32;
 }
 
 /// Input byte i is i % 251, as the official vectors define their inputs.
@@ -58,9 +58,11 @@ impl FixedHandler for Fixed {
 
 #[test]
 fn every_queue_completes_on_one_cpu() {
-    let mask = [1u8; 1];
-    // Sound: a one-byte mask with CPU 0's bit, for this process.
-    assert_eq!(unsafe { sched_setaffinity(0, mask.len(), mask.as_ptr()) }, 0, "pin the process to CPU 0");
+    // A cpu_set_t is an array of unsigned longs, CPU n at bit n % 64 of
+    // long n / 64 (a byte array would set CPU 56 on big-endian targets).
+    let mask: [core::ffi::c_ulong; 1] = [1];
+    // Sound: one long with CPU 0's bit, for this process.
+    assert_eq!(unsafe { sched_setaffinity(0, core::mem::size_of_val(&mask), mask.as_ptr()) }, 0, "pin the process to CPU 0");
     assert_eq!(std::thread::available_parallelism().unwrap().get(), 1);
     let timeout = std::time::Duration::from_secs(60);
 
