@@ -854,6 +854,7 @@ mod test {
     /// checks the chain's links, the slots' hand-over, and the delivery
     /// thread's reads for data races.
     #[test]
+    #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
     fn test_miri_queue_round_trips() {
         use crate::{Efficiency, Hash, MessageHandler, Mode, PieceHandler, Queue};
         use std::sync::mpsc;
