@@ -310,7 +310,7 @@ impl<I> State<I> {
         }
         let slot = self.free.0.pop().unwrap();
         // Sound: a free slot is untouched by any other thread.
-        unsafe { &*slot }.next.store(core::ptr::null_mut(), Ordering::Relaxed);
+        unsafe { &(*slot).next }.store(core::ptr::null_mut(), Ordering::Relaxed);
         slot
     }
 
@@ -326,12 +326,16 @@ impl<I> State<I> {
 }
 
 impl<I> State<I> {
-    /// Link `slot`, filled, after the chain's last slot.
-    fn link(&mut self, slot: &mut Slot<I>) {
-        let slot = slot as *mut Slot<I>;
+    /// Link `slot`, filled, after the chain's last slot. A raw pointer: once
+    /// linked, the slot is the delivery thread's to read, and a `&mut`
+    /// argument would claim it until this call returns.
+    fn link(&mut self, slot: *mut Slot<I>) {
         // Sound: the tail is linked (or the first, delivered slot), and the
-        // delivery thread hands it back only after this link.
-        unsafe { &*self.tail }.next.store(slot, Ordering::SeqCst);
+        // delivery thread hands it back only after this link. Only its
+        // `next` is touched, through the field alone: the delivery thread
+        // may be taking the slot's item meanwhile, and a reference to the
+        // whole slot would race with that (Miri: undefined behaviour).
+        unsafe { &(*self.tail).next }.store(slot, Ordering::SeqCst);
         self.tail = slot;
     }
 }
@@ -464,7 +468,7 @@ where
         }
         tasks.clear();
         state.tasks = tasks;
-        state.link(slot);
+        state.link(slot as *mut Slot<I>);
         drop(guard);
         self.activate(owner);
     }
@@ -496,7 +500,7 @@ where
         open.members += 1;
         open.len += len;
         let closed = state.close_open(false);
-        state.link(slot);
+        state.link(slot as *mut Slot<I>);
         drop(guard);
         if let Some(task) = closed {
             TASKS.push(core::iter::once(task));
@@ -550,7 +554,7 @@ where
         while count < DELIVER_AT_ONCE {
             // Sound: `head` is this thread's (delivered, not yet handed
             // back), and a linked slot is in flight until delivered here.
-            let next = unsafe { &*head }.next.load(Ordering::SeqCst);
+            let next = unsafe { &(*head).next }.load(Ordering::SeqCst);
             if next.is_null() {
                 break;
             }
@@ -587,7 +591,7 @@ where
         // it sees the link, or the submitter sees `active` clear and hands
         // the queue over again.
         self.active.store(false, Ordering::SeqCst);
-        let linked = !unsafe { &*head }.next.load(Ordering::SeqCst).is_null();
+        let linked = !unsafe { &(*head).next }.load(Ordering::SeqCst).is_null();
         // Relinked and still ours to hold, or handed over again (let this
         // copy go).
         let in_flight = linked && !self.active.swap(true, Ordering::SeqCst);
@@ -844,6 +848,82 @@ impl Delivery {
 #[cfg(test)]
 mod test {
     use crate::lanes::Task;
+
+    /// A few inputs through every shape of queue, each efficiency, against
+    /// hash(): small enough for Miri (the CI's smoketest runs it), which
+    /// checks the chain's links, the slots' hand-over, and the delivery
+    /// thread's reads for data races.
+    #[test]
+    fn test_miri_queue_round_trips() {
+        use crate::{Efficiency, Hash, MessageHandler, Mode, PieceHandler, Queue};
+        use std::sync::mpsc;
+        struct Back(mpsc::Sender<(std::vec::Vec<u8>, Hash)>);
+        impl MessageHandler for Back {
+            type Buffer = std::vec::Vec<u8>;
+            fn hashed(&mut self, buffer: std::vec::Vec<u8>, hash: Hash) {
+                self.0.send((buffer, hash)).unwrap();
+            }
+        }
+        struct Fixed(mpsc::Sender<(std::vec::Vec<u8>, std::vec::Vec<[u8; 32]>)>);
+        impl crate::FixedHandler for Fixed {
+            type Buffer = std::vec::Vec<u8>;
+            type Digests = std::vec::Vec<[u8; 32]>;
+            fn hashed(&mut self, buffer: std::vec::Vec<u8>, digests: std::vec::Vec<[u8; 32]>) {
+                self.0.send((buffer, digests)).unwrap();
+            }
+        }
+        struct Pieces(mpsc::Sender<Option<Hash>>);
+        impl PieceHandler for Pieces {
+            type Buffer = std::vec::Vec<u8>;
+            fn piece_done(&mut self, _: std::vec::Vec<u8>) {
+                self.0.send(None).unwrap();
+            }
+            fn finished(&mut self, hash: Hash) {
+                self.0.send(Some(hash)).unwrap();
+            }
+        }
+        for efficiency in [Efficiency::Time, Efficiency::Energy] {
+            let (sender, back) = mpsc::channel();
+            let queue = Queue::messages(Mode::Hash, efficiency, Back(sender));
+            let inputs: std::vec::Vec<std::vec::Vec<u8>> = (0..6).map(|i| std::vec![i as u8; [0, 1, 64, 65, 1024, 1500][i]]).collect();
+            for input in &inputs {
+                queue.submit(input.clone());
+            }
+            for input in &inputs {
+                let (buffer, hash) = back.recv().unwrap();
+                assert_eq!(&buffer, input, "in order");
+                assert_eq!(hash, crate::hash(input));
+            }
+            let (sender, back) = mpsc::channel();
+            let queue = Queue::pieces(Mode::Hash, efficiency, Pieces(sender));
+            let message = std::vec![7u8; 3000];
+            for piece in message.chunks(700) {
+                queue.submit(piece.to_vec());
+            }
+            queue.finish();
+            let mut done = 0;
+            let hash = loop {
+                match back.recv().unwrap() {
+                    None => done += 1,
+                    Some(hash) => break hash,
+                }
+            };
+            assert_eq!(done, 5);
+            assert_eq!(hash, crate::hash(&message));
+            let (sender, back) = mpsc::channel();
+            let queue = Queue::fixed(64, Mode::Hash, efficiency, Fixed(sender));
+            let batch: std::vec::Vec<u8> = (0..20 * 64).map(|i| (i % 251) as u8).collect();
+            for _ in 0..3 {
+                queue.submit(batch.clone(), std::vec![[0u8; 32]; 20]);
+            }
+            for _ in 0..3 {
+                let (_, digests) = back.recv().unwrap();
+                for (i, digest) in digests.iter().enumerate() {
+                    assert_eq!(digest, crate::hash(&batch[i * 64..][..64]).as_bytes());
+                }
+            }
+        }
+    }
     use crate::platform::Platform;
     use crate::{BLOCK_LEN, CHUNK_LEN, Hasher};
     use std::sync::atomic::AtomicUsize;

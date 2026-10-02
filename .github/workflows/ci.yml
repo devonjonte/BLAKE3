@@ -493,7 +493,11 @@ jobs:
     # Currently the test search "miri" only matches "test_miri_smoketest", but
     # we might add more. If this accidentally picks up anything incompatible or
     # slow, we can narrow it.
+    # The pool's and the queue's threads live for the whole process, and
+    # the queue's test uses several of them.
     - run: cargo miri test miri
+      env:
+        MIRIFLAGS: "-Zmiri-num-cpus=4 -Zmiri-ignore-leaks"
 
   tbb_rust_bindings_tests:
     name: TBB test bindings ${{ matrix.os }}

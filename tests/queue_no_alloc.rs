@@ -6,7 +6,7 @@
 //! it: the harness's notice that a test has run over 60 seconds (a slow
 //! build on a loaded machine) allocates on the main thread. A queue needs
 //! threads, which wasm lacks; there the binary does nothing.
-#![cfg_attr(target_family = "wasm", allow(unused))]
+#![cfg_attr(any(target_family = "wasm", miri), allow(unused))]
 
 use blake3_servil::{Efficiency, FixedHandler, Hash, MessageHandler, Mode, PieceHandler, Queue};
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -97,12 +97,14 @@ fn allocations_after_warm_up(warm: usize, rounds: usize, mut round: impl FnMut()
 }
 
 fn main() {
-    #[cfg(not(target_family = "wasm"))]
+    // Under Miri, test::test_miri_queue_round_trips stands in: this many
+    // rounds would take it hours.
+    #[cfg(not(any(target_family = "wasm", miri)))]
     a_warm_queue_allocates_nothing();
     println!("a warm queue allocates nothing: ok");
 }
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(not(any(target_family = "wasm", miri)))]
 fn a_warm_queue_allocates_nothing() {
     blake3_servil::initialize_multithreaded();
     // The pool's threads settling (their first sleeps) allocate nothing:
