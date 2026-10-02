@@ -1425,9 +1425,12 @@ pub fn hash_with(mode: Mode, threads: Threads, input: &[u8]) -> Hash {
 #[inline]
 fn hash_serial(input: &[u8], key: &CVWords, flags: u8) -> Hash {
     let turn = platform::Sme2Turn::take(Platform::detect(), input.len() >= SME2_SIZED_LEN);
+    // One comparison on the path of a chunk or less: everything else is
+    // out of line, so that path's code stays as small as it was (a call
+    // after other work fetches every line of it from DRAM).
     #[cfg(all(blake3_neon_hybrid, feature = "std"))]
-    if (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) && code_may_be_cold() {
-        prefetch_kernels(input.len(), turn.platform());
+    if (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
+        prefetch_after_pause(input.len(), turn.platform(), false);
     }
     hash_serial_on(input, key, flags, turn.platform())
 }
@@ -1440,6 +1443,21 @@ fn hash_serial(input: &[u8], key: &CVWords, flags: u8) -> Hash {
 /// batches, the queue's tasks) run back to back with their code near.
 #[cfg(all(blake3_neon_hybrid, feature = "std"))]
 const PREFETCH_BELOW: usize = 64 * 1024;
+
+/// After a pause (code_may_be_cold), prefetch the kernels hashing `len`
+/// bytes runs: a one-shot call's (prefetch_kernels), or with `fresh_hasher`
+/// a fresh Hasher's first update's (prefetch_update_kernels).
+#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[inline(never)]
+fn prefetch_after_pause(len: usize, platform: Platform, fresh_hasher: bool) {
+    if code_may_be_cold() {
+        if fresh_hasher {
+            prefetch_update_kernels(len, platform);
+        } else {
+            prefetch_kernels(len, platform);
+        }
+    }
+}
 
 /// Whether this thread's last call in the prefetching range was over
 /// 100 us ago (or never). Calls back to back find their code near, where
@@ -1459,7 +1477,6 @@ fn code_may_be_cold() -> bool {
 /// Prefetch the code of the kernels hashing `len` bytes on `platform`
 /// runs: SME2's from 16 chunks, else the hybrids', chunks to root.
 #[cfg(all(blake3_neon_hybrid, feature = "std"))]
-#[inline(never)]
 fn prefetch_kernels(len: usize, platform: Platform) {
     #[cfg(blake3_sme2)]
     if matches!(platform, Platform::SME2) && len >= SME2_SIZED_LEN {
@@ -1485,7 +1502,6 @@ fn prefetch_kernels(len: usize, platform: Platform) {
 /// subtrees its loop cuts (next_subtree_len from counter 0, up to the last
 /// chunk, which waits in the chunk state), each one's kernels.
 #[cfg(all(blake3_neon_hybrid, feature = "std"))]
-#[inline(never)]
 fn prefetch_update_kernels(len: usize, platform: Platform) {
     if !neon_hybrid::sha3_detected() {
         return;
@@ -2143,8 +2159,8 @@ impl Hasher {
         // Hasher per message, the digest traits): it prefetches its code
         // after a pause, as hash() does.
         #[cfg(all(blake3_neon_hybrid, feature = "std"))]
-        if self.count() == 0 && (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) && code_may_be_cold() {
-            prefetch_update_kernels(input.len(), self.chunk_state.platform);
+        if self.count() == 0 && (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
+            prefetch_after_pause(input.len(), self.chunk_state.platform, true);
         }
         self.update_with_join::<join::SerialJoin>(input, false)
     }
