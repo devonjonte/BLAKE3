@@ -969,7 +969,13 @@ of a CPU just after each build (it scans a newly built program), pi's node
 process about 13% on average, Spotlight, WindowServer, short bursts of
 others, the VM 0.5%. Expect about one Mac check in five to give no verdict
 this way, and run it again (Zooko, October 1, 2026: not ours to chase; it
-slows no user's hashing, and the tools catch it).
+slows no user's hashing, and the tools catch it). Later the same night
+five records in six were busy; a `top` over record job 967 found the
+watching itself: with Activity Monitor open, sysmond takes about 46% of a
+CPU every 2 s, and with pi's node (11-28%) and Wi-Fi's airportd bursts a
+second crossed one CPU. With Activity Monitor closed, job 968 was quiet
+(0.25 CPUs, 0.66 at most). Keep Activity Monitor closed while the Mac
+measures.
 
 **perf_regress before it** (`check` = working tree against HEAD, `compare OLD NEW`,
 `build` = the working tree's bench-hashes for runs by hand): runs A B B
