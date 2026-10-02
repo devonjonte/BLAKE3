@@ -201,6 +201,8 @@ mod neon;
 #[cfg(blake3_neon_hybrid)]
 #[path = "ffi_neon_hybrid.rs"]
 mod neon_hybrid;
+#[cfg(all(blake3_neon, target_arch = "aarch64"))]
+mod neon_xof;
 mod portable;
 #[cfg(blake3_sme2)]
 #[path = "ffi_sme2.rs"]

@@ -599,6 +599,16 @@ impl Platform {
                     counter += (done / BLOCK_LEN) as u64;
                     &mut out[done..]
                 };
+                // Then four at a time on NEON (AArch64), where the platform
+                // has it: CPUs without SME2, and SME2's leftovers.
+                #[cfg(all(blake3_neon, target_arch = "aarch64"))]
+                let out = if !matches!(self, Platform::Portable) {
+                    let done = crate::neon_xof::xof_many(cv, block, block_len, counter, flags, out);
+                    counter += (done / BLOCK_LEN) as u64;
+                    &mut out[done..]
+                } else {
+                    out
+                };
                 // For platforms without an optimized xof_many, fall back to a loop over
                 // compress_xof. This is still faster than portable code.
                 for out_block in out.chunks_exact_mut(BLOCK_LEN) {
