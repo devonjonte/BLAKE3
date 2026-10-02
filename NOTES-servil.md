@@ -1450,6 +1450,14 @@ cost about 10 cycles on the Mac (probe/stamp-cost, job 1015). Read once
 (a7177c6): lent 4 KiB x0.999 (st) and x0.983 (mt) against 91c4a77,
 1-64 KiB level, the gains after other work unchanged (jobs 1019-1022).
 
+**The NEON-only path too** (M1-M3's; probe/neon-only-cold against
+-before, built no_sme2 on the Mac, jobs 1123-1127, two runs a side, the
+after side first): hash() after other work 2 KiB 1286-1292 -> 1182-1224
+ns, 4 KiB 2386-2458 -> 1761-1823, 8 KiB 4172-4281 -> 2688-2740, 16 KiB
+8026-8255 -> 5297-5302, 32 KiB 11833-11896 -> 9099-9141; a Hasher per
+message alike (16 KiB 8094-8386 -> 5391-5427); nonstop level (4 KiB
+1313 -> 1315-1316).
+
 **The short path's layout** (2f46995, f1aafd3, October 2). With the pause
 check inlined into hash_serial, a call of 1 KiB or less (which never
 prefetches) read slower after other work: four runs a side against
