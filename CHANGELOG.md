@@ -6,9 +6,9 @@
   A file already in the page cache is mapped and hashed in place; any
   other input, standard input included, is read 4 MiB at a time while the
   threads hash the last piece. On an Apple M4 Max (tools/b3sum-bench) a
-  1 GiB file in the page cache takes two thirds of the time it did, and
-  one read from storage less than half (355 to 162 ms). `--no-mmap` has
-  no effect.
+  1 GiB file in the page cache takes 37 ms (was 69; official b3sum 1.8.2,
+  46), and one read from storage 159 ms (was 367). `--no-mmap` has no
+  effect.
 - The crate docs say what each call allocates ("Memory"): single-threaded
   calls nothing, multithreaded calls a list of their pieces (48 bytes for
   each 128 KiB of input), a queue up to the buffers you keep in flight, and

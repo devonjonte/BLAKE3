@@ -1794,6 +1794,27 @@ What it shows:
   `find | xargs b3sum`; Mac job 1146, quiet): warm Rayon 34.8 ms, the
   pool 26.3 (x0.755), official 52.3; cold Rayon 209, the pool 123
   (x0.589), plain reads 121, official 207. (VM: warm x0.875, cold level.)
+- **The design taken** (candidate/b3sum-pool, Mac jobs 1148-1151, VM
+  runs r5-r9): a file of 64 KiB or more already in the page cache is
+  mapped and hashed in place over the pool; every other input, stdin
+  included, is read in 4 MiB pieces, the first on the calling thread (a
+  file of one piece starts no thread), the rest on a scoped reader thread
+  into the second of two buffers kept for the run, while the calling
+  thread hashes the last piece with update_multithreaded. Residency: 16
+  pages spread over the file (mincore one page at a time), since a whole
+  mincore of 1 GiB cost about 7 ms on macOS. Mac job 1151, fast speeds:
+  warm 1 GiB Rayon 68.6 ms, mapping on the pool 46.1, this 37.3 (28.8
+  GB/s); cold 1 GiB 367, 402, 159 (6.7 GB/s); warm mixed tree 34.3,
+  26.1, 29.8; cold mixed tree 191, 115, 101.
+  - Reads alone (5bd0577) lost warm in the VM (1 GiB 79 ms against 29
+    mapped: its page-cache copy, one thread, at 13.6 GB/s).
+  - madvise(WILLNEED) costs about 9 ms at 1 GiB warm on macOS (46.5 with
+    it, 37.3 without); it helps the warm mixed tree (26.9 against 29.8).
+    Open: the warm mixed tree 14% behind the mapping candidate (which
+    advised every file).
+  - The per-file reader thread of the first experiment (probe/b3sum-read-
+    overlap) cost a tree of small files 3.5x: a thread and two buffers
+    per file.
 - Official b3sum's tree of 1000 small files takes 2.8x the fork's time on
   the Mac (13.6x in the VM), at 3-6 CPUs busy: its Rayon threads spin
   between files.
