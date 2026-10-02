@@ -1530,6 +1530,11 @@ update. Mac, files in the page cache (probe/reader-buffer against
 probe/reader-buffer-before, A B B A, mains), ns/B: 64 MiB 0.264-0.266 ->
 0.178-0.180, 8 MiB 0.265-0.273 -> 0.204-0.207, 1 MiB 0.347-0.368 ->
 0.270-0.272, 100 KB level (0.37-0.40). VM, 64 MiB: 0.314 -> 0.233.
+As first built (a39fb7c, on servil 9dda4be for about 20 minutes) it
+returned a reader's error before hashing the bytes already in its
+buffer, which a caller retrying after WouldBlock would have lost from the
+digest; 5739af6 hashes them first, and a test with a failing reader and a
+retrying caller holds it (it fails on a39fb7c).
 
 ## Lent batches of 1024-4096: the SME unit's state, not the copy (October 2)
 
