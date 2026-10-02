@@ -1584,8 +1584,17 @@ hash_many_multithreaded after other work leans slower, four runs a side
 (jobs 1089-1096): 8192 x1.03, 16384 x1.06, 32768 x1.03, 65536 level at
 its main speed, each side against itself up to x1.065 apart. No change
 of the night touches the pool's batch pieces; a layout or wake-timing
-effect is likely and unshown. Next: a bisect over the night's code
-commits on the cell (perf_bisect), four runs a side.
+effect is likely and unshown. Bisected, four runs a side each (jobs
+1097-1120): b132f8c -> 3a8327f level (16384 x0.96); 3a8327f -> ff8f203
+16384 x1.053; 3a8327f -> 5739af6 16384 x1.23 fast / x0.94 slow, the new
+side at one speed between the old's two. The same commit 3a8327f ran
+16384 at 6.11 (90%) | 7.74 in one session and 5.10 (29%) | 6.67 (71%) in
+the next: the cell's speeds and shares move by session as much as the
+lean, and no commit shifts it consistently. No regression shown. Open,
+as a finding to explain (AGENTS.md, "every cell may run at two speeds"):
+why hash_many_multithreaded of 16384 messages after other work runs at
+session-dependent speeds (the pool's wake and placement are the
+suspects).
 
 ## Batch tails, measured again at real gaps (October 2, 2026, job 1001)
 
