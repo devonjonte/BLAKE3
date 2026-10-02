@@ -226,11 +226,14 @@ fn mapped_if_cached(file: &File) -> Option<memmap2::Mmap> {
 #[cfg(unix)]
 const SAMPLED_PAGES: usize = 16;
 
-/// The shortest file mapped when it is in the page cache: mapping beats
-/// reading from here (Linux VM, a mixed tree of 1000 files warm: 18.5 ms
-/// from 64 KiB, 20.2 from 1 MiB, 22.5 from 4 MiB).
+/// The shortest file mapped when it is in the page cache: where the pool
+/// takes over (the library's 512 KiB). A shorter file is hashed on one
+/// thread, and a mapping's page faults interrupt it once a page, each
+/// putting the SME unit in its slow state (macOS: 1 GiB on one thread 2.6x
+/// slower mapped than prefaulted, probe/willneed-mechanism, job 1156); a
+/// read's copy into a cached buffer faults nothing.
 #[cfg(unix)]
-const MAP_LEN: usize = 64 << 10;
+const MAP_LEN: usize = 512 << 10;
 
 /// The read size: each piece is hashed over the pool while the next is read.
 const PIECE: usize = 4 << 20;
