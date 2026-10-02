@@ -148,6 +148,18 @@ fn push(state: &mut State, window: Window) {
     state.windows.push(window);
 }
 
+/// Join the final tail using the last window's original counter baseline.
+fn join_tail(state: &mut State, start: Reading, reading: Reading) {
+    if state.windows.last().expect("a tail joins a closed window").busy() {
+        // Keep this observation: a quiet tail could average it below the
+        // busy threshold. The run already has no speed verdict.
+        return;
+    }
+    state.windows.pop();
+    push(state, between(start, reading));
+    state.last = Some(reading);
+}
+
 /// Read the machine once a window has passed since the last reading;
 /// otherwise nothing. Call it outside timed intervals: every measurement
 /// in this crate does. Another thread's tick in progress makes this one
@@ -163,9 +175,10 @@ pub fn tick() {
 
 /// Every window so far, in order, the running one closed first when it
 /// has lasted half a window or more; a shorter one joins the last closed
-/// window, read again from that window's start, so the run's last samples
+/// quiet window, read again from that window's start, so the run's last samples
 /// lie in a window too (once: a tail joins a window that no tail has
 /// joined, so repeated calls never dilute a burst into a longer average).
+/// An observed busy window stays intact; the run already has no speed verdict.
 /// Empty where the platform gives no CPU times, or before a window has
 /// closed (a run under half a second).
 pub fn windows() -> Vec<Window> {
@@ -175,9 +188,7 @@ pub fn windows() -> Vec<Window> {
         close(&mut state, WINDOW_NS / 2);
         if state.windows.len() == closed {
             if let (Some(start), Some(reading)) = (state.last_start.take(), Reading::take()) {
-                state.windows.pop();
-                push(&mut state, between(start, reading));
-                state.last = Some(reading);
+                join_tail(&mut state, start, reading);
             }
         }
     }
@@ -244,8 +255,8 @@ mod imp {
     /// idle, not waiting on I/O) and stolen by a hypervisor.
     #[derive(Clone, Copy)]
     pub struct CpuTimes {
-        busy: u64,
-        steal: u64,
+        pub(super) busy: u64,
+        pub(super) steal: u64,
     }
 
     fn ticks_per_second() -> u64 {
@@ -350,6 +361,46 @@ mod tests {
             the hypervisor withheld 0.15 CPUs on average, 0.30 at most; busy in 1 of 2 windows (0.0-1.0 s)");
     }
 
+    #[cfg(target_os = "linux")]
+    fn tail_fixture(busy: u64, steal: u64, tail_busy: u64, tail_steal: u64) -> State {
+        let start = Reading { at_ns: 0, machine: imp::CpuTimes { busy: 0, steal: 0 }, own_ns: 0 };
+        let last = Reading { at_ns: WINDOW_NS, machine: imp::CpuTimes { busy, steal }, own_ns: 0 };
+        let mut state = State { last: Some(last), last_start: None, windows: vec![between(start, last)] };
+        let tail = Reading { at_ns: WINDOW_NS + 400_000_000, machine: imp::CpuTimes { busy: tail_busy, steal: tail_steal }, own_ns: 0 };
+        join_tail(&mut state, start, tail);
+        state
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn quiet_tail_preserves_observed_other_load() {
+        let state = tail_fixture(110, 0, 110, 0); // 1.10 CPUs, then no other work.
+        assert!(state.windows.iter().any(Window::busy), "a quiet tail preserves the prior busy finding");
+        assert!(describe(&state.windows).starts_with("busy:"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn quiet_tail_preserves_observed_steal() {
+        let state = tail_fixture(0, 110, 0, 110);
+        assert!(state.windows.iter().any(Window::busy), "a quiet tail preserves the prior steal finding");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn quiet_tail_still_extends_a_quiet_window() {
+        let state = tail_fixture(20, 0, 28, 0);
+        assert_eq!(state.windows, vec![window(0, 1_400_000_000, 200, 0)]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn newly_busy_tail_still_marks_the_run_busy() {
+        let state = tail_fixture(20, 0, 160, 0);
+        assert!(state.windows[0].busy());
+        assert_eq!(state.windows[0].end_ns, 1_400_000_000);
+    }
+
     #[cfg(target_vendor = "apple")]
     #[test]
     fn apple_counters_wrap_one_by_one() {
@@ -377,7 +428,7 @@ mod tests {
         assert!(windows.iter().all(|w| w.end_ns - w.start_ns >= WINDOW_NS / 2), "each window lasts half a window or more");
         // The tail under half a window joined the last window: it reaches the call.
         let last = *windows.last().unwrap();
-        assert!(last.end_ns >= ended, "the run's last samples lie in a window");
+        assert!(last.busy() || last.end_ns >= ended, "the tail is covered or the last busy finding is preserved");
         // Once: a later call joins nothing more to it.
         let tail = now_ns();
         while now_ns() - tail < WINDOW_NS / 10 {
