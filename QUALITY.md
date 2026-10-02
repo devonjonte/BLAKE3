@@ -167,7 +167,7 @@ measures the fork against the official crate and others on your machine.
 
 ## The bugs these steps found
 
-Five, all fixed; none reached the results of a documented function. Each entry
+Six, all fixed; none reached the results of a documented function. Each entry
 names the commit that introduced the code and the one that fixed it, in
 [github.com/johnservil/BLAKE3](https://github.com/johnservil/BLAKE3).
 
@@ -218,6 +218,15 @@ names the commit that introduced the code and the one that fixed it, in
    probe with a backtrace per allocation named the SME2 thread's first
    sleep (64 and 48 bytes). Fixed in f75e6a6: the pool makes every one
    of them while it starts.
+
+6. **`update_reader` could lose bytes before an error** (`src/io.rs`,
+   `copy_wide`). Reading through a larger buffer (a39fb7c), it returned a
+   reader's error before hashing the bytes already in its buffer, which
+   the reader had consumed; a caller that retries after `WouldBlock`
+   would have got a wrong digest without any sign. Found on review of
+   the change, about 20 minutes after it reached servil, and fixed in
+   5739af6: the bytes read are hashed first. A test with a failing reader
+   and a retrying caller fails on a39fb7c and passes now.
 
 ## Formal verification: what we tried and considered
 
