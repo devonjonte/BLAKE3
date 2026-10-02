@@ -1441,6 +1441,21 @@ cost about 10 cycles on the Mac (probe/stamp-cost, job 1015). Read once
 (a7177c6): lent 4 KiB x0.999 (st) and x0.983 (mt) against 91c4a77,
 1-64 KiB level, the gains after other work unchanged (jobs 1019-1022).
 
+**The short path's layout** (2f46995, f1aafd3, October 2). With the pause
+check inlined into hash_serial, a call of 1 KiB or less (which never
+prefetches) read slower after other work: four runs a side against
+b132f8c (jobs 1049-1056) 64 B and 128 B x1.21-1.31 (SHA-256 ring
+x1.00-1.08), about one DRAM miss at 64 B. Out of line (2f46995) the check
+cost the short path three instructions, but the compiler made the 1-64
+KiB branch the fall-through, so a short call jumped to a line it never
+touched before; #[cold] on prefetch_after_pause (f1aafd3) puts the call
+after the short path. Four runs a side again (jobs 1057-1064): st 64 B
+x1.08 fast / x0.85 slow, 128-512 B x0.76-0.94, 1 KiB one speed between
+the old two; mt 64-512 B x0.76-0.92, 1 KiB x1.06; ring x0.71-1.17 in the
+same runs; 4 KiB x0.63-0.67 and 8 KiB x0.55 kept; nonstop level. The
+lesson: a branch added to a cold path costs it a line unless the short
+case stays the fall-through.
+
 **A fresh Hasher's first update too** (7510d44, October 2): a Hasher per
 message (and the digest traits) prefetches the kernels of the subtrees
 its update loop cuts (prefetch_update_kernels: next_subtree_len from
