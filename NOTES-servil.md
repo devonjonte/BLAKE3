@@ -1516,6 +1516,21 @@ x1.11-1.21 slower and its shared x0.73-0.89 faster, each side against
 itself up to 22% apart in the same cells (old/old 4096 x1.219, new/new
 x1.235): the VM's own spread, no regression shown.
 
+## update_reader through a 1 MiB buffer (October 2, 2026, jobs 1036-1040)
+
+On SME2, 100 ns of other work before a 64 KiB call costs it 2.3 us (VM:
+hash(64 KiB) back to back 11.5 us, after 100-1000 ns of integer work
+13.9-14.5 us; the Hasher in 64 KiB pieces 13.8 us a piece): the slow
+state again, which every read between updates meets. update_reader (and
+update_mmap's fallback) updated per 64 KiB read; now a reader that fills
+the first 64 KiB goes on into a 1 MiB heap buffer (those 64 KiB at its
+start, so every update is a whole, aligned 1 MiB subtree), filled by as
+many reads as it takes. A shorter reader keeps the stack buffer and one
+update. Mac, files in the page cache (probe/reader-buffer against
+probe/reader-buffer-before, A B B A, mains), ns/B: 64 MiB 0.264-0.266 ->
+0.178-0.180, 8 MiB 0.265-0.273 -> 0.204-0.207, 1 MiB 0.347-0.368 ->
+0.270-0.272, 100 KB level (0.37-0.40). VM, 64 MiB: 0.314 -> 0.233.
+
 ## Lent batches of 1024-4096: the SME unit's state, not the copy (October 2)
 
 Lent batches of 1024 and 4096 64-byte messages run at 12.0-12.2 ns/msg

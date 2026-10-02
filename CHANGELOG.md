@@ -17,6 +17,9 @@
   started, and a warm `Queue` allocates nothing on macOS too (the standard
   library there allocates a lock at its first use, which the worker
   threads met after `initialize_multithreaded` had returned).
+- `Hasher::update_reader` reads in 1 MiB pieces once a reader has more
+  than 64 KiB: on an Apple M4 Max, hashing a file of 8-64 MiB in the page
+  cache takes 23-33% less time.
 - Builds with an assembler too old for the SHA-3 extension (GNU as before
   2.30) succeed, without the integer + NEON and SME2 kernels, with a
   warning; builds for `wasm32-wasip1` pass their tests (`Queue` needs
