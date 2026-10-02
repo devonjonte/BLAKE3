@@ -1463,6 +1463,21 @@ sizes, mt, Hasher in 64 KiB pieces, and SHA-256 ring level.
 perf_regress on the Mac (job 994): no regression. Not carried yet: the
 pool's SME2 prefix (lanes, `ahead` 0) and the queue's tasks.
 
+## Batch tails, measured again at real gaps (October 2, 2026, job 1001)
+
+Leftovers of 1-4 past whole groups run on NEON and cost far more than
+their work (VM, back to back: 32 -> 33 x 64 B 317 -> 782 ns; x 1 KiB
+4.9 -> 6.9 us). probe/tail-pad set the threshold from which the last
+group is padded (both ONE_BLOCK_PAD_AFTER_GROUPS and
+SME2_TAIL_MIN_AFTER_GROUPS) to 5 (servil), 3, and 1, on the Mac, each in
+a process of its own, at 64 B, 256 B, and 1 KiB, 16-129 messages, back
+to back and with the program's work between calls (a read of every digest
+and 2 us of integer work). With work between, 5 is best or level at
+nearly every count (256 B x 19: 184.7 ns/msg at 5, 206.8 at 3, 206.1 at
+1; 1 KiB x 19: 345 / 430 / 431; 64 B level within 5%); 1 and 3 win only
+some back-to-back cells (64 B x 20: 29.6 at 5, 16.1 at 3), which real
+programs rarely make. The thresholds stay.
+
 ## The split below 512 KiB, measured again (October 1, 2026; jobs 841-851)
 
 Zooko asked whether `hash_multithreaded` should use threads below 512
