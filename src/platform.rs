@@ -732,12 +732,27 @@ pub fn sse2_detected() -> bool {
     has_sse2::get()
 }
 
+/// The core's virtual counter and its ticks per second (CNTVCT_EL0 and
+/// CNTFRQ_EL0, which user code reads directly: 24 MHz on Apple's cores):
+/// control, not measurement.
+#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[inline]
+pub(crate) fn counter() -> (u64, u64) {
+    let (now, per_second): (u64, u64);
+    // Sound: both registers are readable at EL0 on every AArch64 OS this
+    // crate builds the hybrids for (Linux, macOS).
+    unsafe {
+        core::arch::asm!("mrs {0}, cntvct_el0", "mrs {1}, cntfrq_el0", out(reg) now, out(reg) per_second, options(nomem, nostack, preserves_flags));
+    }
+    (now, per_second)
+}
+
 /// Prefetch code from `start` to `end` into the L2 cache, a line (128
 /// bytes on Apple's cores) at a time. A call after other work otherwise
 /// fetches its kernel's lines from DRAM one miss after another: hash() of
 /// 8 KiB took 4.8 us so on an M4 Max, and 2.8 with this prefetch (job 971),
 /// where code already near costs it a few cycles a line.
-#[cfg(blake3_neon_hybrid)]
+#[cfg(all(blake3_neon_hybrid, feature = "std"))]
 #[inline]
 pub(crate) fn prefetch_code((start, end): (usize, usize)) {
     debug_assert!(start < end && end - start < 64 * 1024, "a kernel's code");

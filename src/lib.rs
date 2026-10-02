@@ -1422,25 +1422,40 @@ pub fn hash_with(mode: Mode, threads: Threads, input: &[u8]) -> Hash {
 #[inline]
 fn hash_serial(input: &[u8], key: &CVWords, flags: u8) -> Hash {
     let turn = platform::Sme2Turn::take(Platform::detect(), input.len() >= SME2_SIZED_LEN);
-    #[cfg(blake3_neon_hybrid)]
-    if (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
+    #[cfg(all(blake3_neon_hybrid, feature = "std"))]
+    if (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) && code_may_be_cold() {
         prefetch_kernels(input.len(), turn.platform());
     }
     hash_serial_on(input, key, flags, turn.platform())
 }
 
-/// Below this length a one-shot call prefetches its kernels' code: a call
-/// that follows other work then fetches it from DRAM in parallel, not one
-/// miss at a time (M4 Max, after other work: 2 KiB -18%, 4 KiB -32%, 8 KiB
-/// -41%, 16 KiB -24%; 64 KiB level, the hashing's own time dwarfing it;
-/// job 971). The streaming paths (Hasher, batches, the queue's tasks)
-/// keep their code near by running back to back, and skip it.
-#[cfg(blake3_neon_hybrid)]
+/// Below this length a one-shot call that follows a pause prefetches its
+/// kernels' code: after other work the call then fetches it from DRAM in
+/// parallel, not one miss at a time (M4 Max, after other work: 4 KiB
+/// x0.61, 8 KiB x0.51, 16 KiB x0.66; 32 KiB and up level, the hashing's
+/// own time dwarfing it; jobs 971-975). The streaming paths (Hasher,
+/// batches, the queue's tasks) run back to back with their code near.
+#[cfg(all(blake3_neon_hybrid, feature = "std"))]
 const PREFETCH_BELOW: usize = 64 * 1024;
+
+/// Whether this thread's last call in the prefetching range was over
+/// 100 us ago (or never). Calls back to back find their code near, where
+/// the prefetch would cost them 2-4% (jobs 972-975); one that follows a
+/// pause is the one other work may have taken the code from.
+#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[inline]
+fn code_may_be_cold() -> bool {
+    std::thread_local! {
+        static LAST_CALL: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+    }
+    let (now, per_second) = platform::counter();
+    let last = LAST_CALL.with(|last| last.replace(now));
+    now.wrapping_sub(last) > per_second / 10_000
+}
 
 /// Prefetch the code of the kernels hashing `len` bytes on `platform`
 /// runs: SME2's from 16 chunks, else the hybrids', chunks to root.
-#[cfg(blake3_neon_hybrid)]
+#[cfg(all(blake3_neon_hybrid, feature = "std"))]
 #[inline(never)]
 fn prefetch_kernels(len: usize, platform: Platform) {
     #[cfg(blake3_sme2)]

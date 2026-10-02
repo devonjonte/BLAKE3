@@ -393,6 +393,7 @@ const PARENT_PLANS: [&[usize]; 17] = [
     &[8, 8],
 ];
 
+#[cfg(feature = "std")]
 /// Where each kernel's code ends (labels the generator puts after each).
 mod ends {
     unsafe extern "C" {
@@ -425,6 +426,7 @@ mod ends {
     }
 }
 
+#[cfg(feature = "std")]
 /// The code of the chunk kernel for `n` whole chunks (1 to 10), and of
 /// the q kernel for `n` whole chunks and a partial one (1 to 9): start
 /// and end addresses.
@@ -458,6 +460,7 @@ fn chunk_code(n: usize, partial: bool) -> (usize, usize) {
     }
 }
 
+#[cfg(feature = "std")]
 /// The code of the parent kernel for `n` parents (PARENT_KERNELS).
 fn parent_code(n: usize) -> (usize, usize) {
     macro_rules! code {
@@ -478,6 +481,7 @@ fn parent_code(n: usize) -> (usize, usize) {
     }
 }
 
+#[cfg(feature = "std")]
 /// Prefetch the code a tree of `whole` chunks and then `partial` bytes
 /// (under a chunk) runs on the hybrids: the chunk kernels
 /// (`compress_chunks_parallel` and [`hash_chunks_with_partial`] choose
@@ -498,6 +502,7 @@ pub fn prefetch_tree_code(whole: usize, partial: usize) {
     prefetch_parent_code(whole + usize::from(partial > 0));
 }
 
+#[cfg(feature = "std")]
 /// Prefetch the code that merges `values` chaining values to the root:
 /// each level's parent plan (`compress_parents_parallel`), then the scalar
 /// kernel that compresses the root. Requires 2 to 32 values.
@@ -894,6 +899,7 @@ mod test {
     use crate::{CHUNK_END, CHUNK_START, IV, KEYED_HASH, PARENT};
 
     #[test]
+    #[cfg(feature = "std")]
     fn test_kernel_code_ranges() {
         // Each kernel's code runs from its symbol to its end label: present,
         // in order, and under a kernel's size (the largest, q6, is 20 KB).
