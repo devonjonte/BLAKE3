@@ -83,8 +83,9 @@ unrolled kernel code.
   output, flush against an inaccessible page (after the buffer, then
   before it). A kernel that reads or writes a single byte outside its
   buffers crashes the test. They cover `hash` at every length to
-  2 KiB + 70 and around chunk counts up to 1025, and `hash_many` at 15
-  message lengths and 20 counts.
+  2 KiB + 70 and around chunk counts up to 1025, `hash_many` at 15
+  message lengths and 20 counts, and extended output at 10 lengths from
+  three positions.
 - **AddressSanitizer** over the library tests: clean. As a control, a
   deliberate heap overflow in a small program was caught.
 - **ThreadSanitizer** over the pool, stream, and batch tests, 30 runs:
