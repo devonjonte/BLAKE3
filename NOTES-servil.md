@@ -98,8 +98,12 @@ generator, check that existing kernels stay byte-identical unless meant.
 - Extended output (`OutputReader::fill`): whole groups of sixteen blocks
   on SME2 (`blake3_sme2_xof16_512`: one block broadcast, counters per
   lane, both halves of the state, ZA1 transposing each lane's 64 bytes),
-  under the turn; the rest block by block on the portable compressor. VM,
-  0.69 -> 0.156 ns/B from 1 KiB (October 2).
+  under the turn; then groups of eight and four on NEON (src/neon_xof.rs:
+  two independent four-lane states a step, 0.29 ns/B where one ran 0.38),
+  the rest block by block on the portable compressor. Mac (jobs
+  1068-1080, A B B A, mains): SME2 0.69-0.71 -> 0.154-0.155 ns/B from 4
+  KiB; NEON-only builds (M1-M3's path) 0.70-0.72 -> 0.30-0.31, 1 KiB
+  0.80-0.85 -> 0.37-0.38, 256 B 1.07-1.16 -> 0.73-0.74 (October 2).
 - Every SME2-sized call takes the turn first (inputs of 16 chunks, batches
   of 16 messages, extended output of 16 blocks).
 
