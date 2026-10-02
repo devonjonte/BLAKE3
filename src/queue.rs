@@ -885,7 +885,8 @@ mod test {
         for efficiency in [Efficiency::Time, Efficiency::Energy] {
             let (sender, back) = mpsc::channel();
             let queue = Queue::messages(Mode::Hash, efficiency, Back(sender));
-            let inputs: std::vec::Vec<std::vec::Vec<u8>> = (0..6).map(|i| std::vec![i as u8; [0, 1, 64, 65, 1024, 1500][i]]).collect();
+            // 40 KiB: whole subtrees as tasks of the pool's threads.
+            let inputs: std::vec::Vec<std::vec::Vec<u8>> = (0..7).map(|i| std::vec![i as u8; [0, 1, 64, 65, 1024, 1500, 40 << 10][i]]).collect();
             for input in &inputs {
                 queue.submit(input.clone());
             }
@@ -896,20 +897,23 @@ mod test {
             }
             let (sender, back) = mpsc::channel();
             let queue = Queue::pieces(Mode::Hash, efficiency, Pieces(sender));
-            let message = std::vec![7u8; 3000];
-            for piece in message.chunks(700) {
-                queue.submit(piece.to_vec());
-            }
-            queue.finish();
-            let mut done = 0;
-            let hash = loop {
-                match back.recv().unwrap() {
-                    None => done += 1,
-                    Some(hash) => break hash,
+            // Pieces of 700 B (hashed at delivery) and of 20 KiB (tasks).
+            for (len, piece) in [(3000usize, 700usize), (60 << 10, 20 << 10)] {
+                let message = std::vec![7u8; len];
+                for piece in message.chunks(piece) {
+                    queue.submit(piece.to_vec());
                 }
-            };
-            assert_eq!(done, 5);
-            assert_eq!(hash, crate::hash(&message));
+                queue.finish();
+                let mut done = 0;
+                let hash = loop {
+                    match back.recv().unwrap() {
+                        None => done += 1,
+                        Some(hash) => break hash,
+                    }
+                };
+                assert_eq!(done, len.div_ceil(piece));
+                assert_eq!(hash, crate::hash(&message));
+            }
             let (sender, back) = mpsc::channel();
             let queue = Queue::fixed(64, Mode::Hash, efficiency, Fixed(sender));
             let batch: std::vec::Vec<u8> = (0..20 * 64).map(|i| (i % 251) as u8).collect();
