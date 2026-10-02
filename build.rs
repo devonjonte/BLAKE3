@@ -317,6 +317,23 @@ fn build_sme2_assembly() {
     build.compile("blake3_sme2_assembly");
 }
 
+// The integer + NEON kernels need an assembler that knows armv8.2-a+sha3
+// (GNU as 2.30+, LLVM 7+). With an older one the crate builds without them,
+// with a warning: the NEON intrinsics and the portable code serve instead.
+fn c_compiler_supports_sha3() -> bool {
+    let build = new_build();
+    let compiler = build.get_compiler().path().to_owned();
+    let supported = matches!(build.is_flag_supported("-march=armv8.2-a+sha3"), Ok(true));
+    if !supported {
+        warn(&format!(
+            "blake3-servil: {compiler:?} cannot assemble armv8.2-a+sha3, so this build leaves out \
+             the integer + NEON kernels and the SME2 kernel (slower on every AArch64 CPU). GNU as \
+             2.30 or later, or Clang/LLVM 7 or later, builds them."
+        ));
+    }
+    supported
+}
+
 fn build_neon_hybrid_assembly() {
     // Integer + NEON kernels for one to fifteen chunks (and parents). The
     // pair and quad kernels use `xar` from the SHA-3 extension, detected at
@@ -430,7 +447,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         println!("cargo::rustc-cfg=blake3_neon");
         build_neon_c_intrinsics();
-        if is_aarch64() {
+        let hybrid = is_aarch64() && c_compiler_supports_sha3();
+        if hybrid {
             build_neon_hybrid_assembly();
         }
 
@@ -443,7 +461,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // SME2 with 512-bit streaming vectors and the NEON hybrids otherwise.
         let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
         let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-        if is_aarch64() && !is_no_sme2() && (target_vendor == "apple" || target_os == "linux") {
+        if hybrid && !is_no_sme2() && (target_vendor == "apple" || target_os == "linux") {
             if c_compiler_supports_sme2() {
                 build_sme2_assembly();
             }

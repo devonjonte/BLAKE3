@@ -138,6 +138,10 @@ pub mod shape {
 ///    still hashed and comes back through the handler, which lives until
 ///    its last call.
 ///
+/// A queue delivers on a thread of its own, so it needs a target with
+/// threads: on one without them (wasm32-wasip1) the first submission
+/// panics.
+///
 /// A program that allocates nothing once it runs makes its queue once and
 /// keeps it, and carries what comes back to its own thread in a channel
 /// made with room for every buffer it keeps in flight, such as the
@@ -157,6 +161,7 @@ pub mod shape {
 ///     }
 /// }
 ///
+/// # if cfg!(target_family = "wasm") { return; } // a queue needs threads
 /// let in_flight = 2;
 /// let (sender, results) = mpsc::sync_channel(in_flight);
 /// let queue = Queue::messages(Mode::Hash, Efficiency::Time, Digests(sender));

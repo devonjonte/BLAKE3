@@ -3,6 +3,8 @@
 //! allocation in the process, on any thread, is counted, and after warm-up
 //! rounds more rounds of every shape at several sizes must make none. Its
 //! own test binary, so no other test allocates beside it.
+//! (A queue needs threads: none on wasm.)
+#![cfg(not(target_family = "wasm"))]
 
 use blake3_servil::{Efficiency, FixedHandler, Hash, MessageHandler, Mode, PieceHandler, Queue};
 use std::alloc::{GlobalAlloc, Layout, System};

@@ -19,8 +19,8 @@ fn input(len: usize) -> Vec<u8> {
 
 /// (input length, [hash, keyed hash, derived key]) for every official vector.
 fn vectors() -> Vec<(usize, [[u8; 32]; 3])> {
-    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/test_vectors/test_vectors.json")).expect("the official test vectors");
-    let json: serde_json::Value = serde_json::from_str(&text).expect("the vectors are JSON");
+    let text = include_str!("../test_vectors/test_vectors.json");
+    let json: serde_json::Value = serde_json::from_str(text).expect("the vectors are JSON");
     assert_eq!(json["key"], std::str::from_utf8(KEY).unwrap());
     assert_eq!(json["context_string"], CONTEXT);
     let first32 = |hex_text: &serde_json::Value| -> [u8; 32] { hex::decode(&hex_text.as_str().unwrap()[..64]).unwrap().try_into().unwrap() };
@@ -222,6 +222,7 @@ const EFFICIENCIES: [Efficiency; 2] = [Efficiency::Time, Efficiency::Energy];
 /// Messages of many lengths, the vectors' and larger, each its own buffer:
 /// every buffer comes back once, in submission order, with its digest.
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn queue_of_messages_returns_every_buffer_in_order_with_its_digest() {
     let mut lengths: Vec<usize> = vectors().iter().map(|(len, _)| *len).collect();
     lengths.extend(LARGE);
@@ -247,6 +248,7 @@ fn queue_of_messages_returns_every_buffer_in_order_with_its_digest() {
 /// One long message in pieces of odd sizes: each piece comes back, and one
 /// digest arrives after finish, equal to the whole message's.
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn queue_of_pieces_returns_each_piece_and_one_digest() {
     for total in [0usize, 1, 1024, 1025, 100_000, 1 << 20, (3 << 20) + 12345] {
         let data = input(total);
@@ -282,6 +284,7 @@ fn queue_of_pieces_returns_each_piece_and_one_digest() {
 /// Fixed-length messages back to back, several buffers: each buffer comes
 /// back with its digests, written into the space the caller handed over.
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn queue_of_fixed_length_messages_fills_the_callers_digest_space() {
     for (len, per_buffer) in [(64usize, 1usize), (64, 4), (64, 16), (64, 1000), (64, 16384), (256, 50), (1024, 9), (100, 7)] {
         for (m, mode) in modes().into_iter().enumerate() {
@@ -313,6 +316,7 @@ fn queue_of_fixed_length_messages_fills_the_callers_digest_space() {
 /// pushed before the queue's delivery thread held the pool again, and the
 /// burst hung (fork NOTES, "The queue hung without SME2").
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn bursts_of_large_batches_after_pauses_complete() {
     let (buffer, messages) = padded_batch(4096, 64);
     let expected: Vec<[u8; 32]> = messages.iter().map(|message| reference(0, message)).collect();
@@ -337,6 +341,7 @@ fn bursts_of_large_batches_after_pauses_complete() {
 /// A handler may submit from inside its call (refill and resubmit): a fixed
 /// set of four buffers cycles through the queue until 1000 messages are hashed.
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn a_handler_may_resubmit_its_buffer() {
     struct Cycle {
         queue: std::sync::Arc<std::sync::OnceLock<Queue<Cycle>>>,
@@ -373,6 +378,7 @@ fn a_handler_may_resubmit_its_buffer() {
 
 /// Dropping a queue cancels nothing: every buffer in flight still comes back.
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn dropping_a_queue_cancels_nothing() {
     let (tx, rx) = mpsc::channel();
     let queue = Queue::messages(Mode::Hash, Efficiency::Time, Messages(tx));
@@ -390,6 +396,7 @@ fn dropping_a_queue_cancels_nothing() {
 /// Queues on several threads at once, of every shape, share the engine and
 /// each keeps its own order and results.
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn queues_on_several_threads_keep_their_own_order() {
     std::thread::scope(|scope| {
         for t in 0..6usize {
@@ -414,6 +421,7 @@ fn queues_on_several_threads_keep_their_own_order() {
 /// every buffer comes back once, with its digest, and each thread's own
 /// submissions in its order.
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn one_queue_shared_by_several_submitting_threads() {
     let (tx, rx) = mpsc::channel();
     let queue = Queue::messages(Mode::Hash, Efficiency::Time, Messages(tx));
@@ -450,6 +458,7 @@ fn one_queue_shared_by_several_submitting_threads() {
 /// process: the test binary reruns itself with only the panicking test.
 #[cfg(unix)]
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn a_panicking_handler_aborts_the_process() {
     if std::env::var_os("API_PLAN_PANIC_CHILD").is_some() {
         struct Panics;
