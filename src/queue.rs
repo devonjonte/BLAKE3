@@ -767,15 +767,22 @@ struct Delivery {
 
 static DELIVERY: Delivery = Delivery { queues: Mutex::new((Vec::new(), false, 0)), wake: Condvar::new() };
 
+/// Start the delivery thread, once per process: from
+/// `initialize_multithreaded`, or else at a queue's first entry in flight.
+/// It sleeps whenever no queue has an entry in flight.
+pub(crate) fn start_delivery() {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        crate::lanes::prepare(&DELIVERY.queues, &DELIVERY.wake);
+        std::thread::Builder::new().name("blake3-servil-queue".into()).spawn(|| DELIVERY.run()).expect("the queue's delivery thread starts");
+    });
+}
+
 impl Delivery {
     /// Give the delivery thread `queue`, which has just put an entry in
     /// flight; start the thread with the first.
     fn hold(&self, queue: Arc<dyn Deliver>) {
-        static STARTED: std::sync::Once = std::sync::Once::new();
-        STARTED.call_once(|| {
-            crate::lanes::prepare(&self.queues, &self.wake);
-            std::thread::Builder::new().name("blake3-servil-queue".into()).spawn(|| DELIVERY.run()).expect("the queue's delivery thread starts");
-        });
+        start_delivery();
         let mut queues = crate::lanes::lock_polling(&self.queues);
         queues.0.push(queue);
         if queues.1 {

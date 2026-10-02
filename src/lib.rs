@@ -89,6 +89,27 @@
 //! [`kernel_report`] says which code paths run at each input length on
 //! this machine.
 //!
+//! # Memory
+//!
+//! - **Single-threaded calls allocate nothing**: [`hash`], [`keyed_hash`],
+//!   [`derive_key`], [`hash_with`], [`hash_many`], [`hash_many_with`],
+//!   [`Hasher::update`] and [`Hasher::finalize`], and [`OutputReader`].
+//!   [`Hasher::update_reader`] uses a 1 MiB buffer while it reads past
+//!   64 KiB, freed when it returns.
+//! - **Multithreaded calls** allocate nothing below 512 KiB, where they
+//!   hash on the calling thread. Above it they keep a list of the pieces
+//!   they hand out, freed when they return: 48 bytes for each 128 KiB of
+//!   input, and at most 200 bytes for each CPU (1 GiB on 16 CPUs: 390 KiB).
+//! - **A [`Queue`]** allocates when it is made, and as the buffers you keep
+//!   in flight first reach a new number; once it has met your most in
+//!   flight, it allocates nothing.
+//! - **Once per process**: the startup self-test's inputs (freed after it),
+//!   and the threads: a worker per CPU beyond the first, the queue's
+//!   delivery thread, each with the standard library's stack. They come
+//!   at the first call that needs them, or all at once, at start-up, when
+//!   the program calls [`initialize`] (the self-test) or
+//!   [`initialize_multithreaded`] (the self-test and the threads).
+//!
 //! # Startup self-test
 //!
 //! Before a process first hashes, the crate checks itself. It hashes 40
@@ -1321,12 +1342,14 @@ pub fn initialize() {
     self_test::ensure();
 }
 
-/// [`initialize`], and start the worker threads that the multithreaded
-/// forms use, once per process: one per CPU beyond the first, under 1 ms
-/// on an Apple M4 Max. The first multithreaded call that leaves the
-/// calling thread starts them otherwise; call this early to keep that cost
-/// off that call. Later calls return at once. The workers sleep whenever
-/// no call has work for them.
+/// [`initialize`], and start the threads the multithreaded forms and the
+/// [`Queue`] use, once per process: a worker per CPU beyond the first, and
+/// the queue's delivery thread, under 1 ms on an Apple M4 Max. The first
+/// multithreaded call that leaves the calling thread, or a queue's first
+/// submission, starts them otherwise; call this early to keep that cost
+/// and those allocations off them (see [Memory](crate#memory)). Later
+/// calls return at once. The threads sleep whenever no call has work for
+/// them.
 ///
 /// ```
 /// blake3_servil::initialize_multithreaded();
@@ -1337,6 +1360,9 @@ pub fn initialize() {
 pub fn initialize_multithreaded() {
     self_test::ensure();
     lanes::initialize();
+    // A queue needs threads, which wasm32 lacks (its first submission panics).
+    #[cfg(not(target_family = "wasm"))]
+    queue::start_delivery();
 }
 
 /// Which digest a hashing call computes: [`hash`]'s, [`keyed_hash`]'s, or

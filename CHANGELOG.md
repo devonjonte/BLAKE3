@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The crate docs say what each call allocates ("Memory"): single-threaded
+  calls nothing, multithreaded calls a list of their pieces (48 bytes for
+  each 128 KiB of input), a queue up to the buffers you keep in flight, and
+  once per process the self-test and the threads, which `initialize()`
+  and `initialize_multithreaded()` move to start-up.
+  `initialize_multithreaded()` now starts the queue's delivery thread too.
 - Simpler: no thread budgets and no time-or-energy choice. A call's
   threading is in its name, and its one option is the mode. Each one-shot
   call has a full form that takes a `Mode`: `hash_with(mode, input)`,
