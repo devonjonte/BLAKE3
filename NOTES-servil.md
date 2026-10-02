@@ -1424,6 +1424,25 @@ Not prefetched, and so still cold after other work: 1 KiB and below
 plans: the batch of 4 after other work still costs more per message
 than the batch of 2), and the Rust code around the kernels.
 
+What remains, measured (October 2; probe/code-prefetch round two, job
+995; probe/glue-prefetch, VM): c1 prefetched at 64 B-1 KiB gains 2-10%
+(1 KiB 865 -> 844 ns, mostly a minority slow speed gone), less than its
+stamp check costs calls of 50-700 ns: left out. The bound, a whole call
+on another buffer after the gap: 4 KiB 1469 ns against the library's
+2297, 8 KiB 2240 against 3500; a 64-byte call first recovers about 300
+ns of that (c1 and the shared entry code), 2 us of NEON work nothing
+(the vector unit is awake: the producer's copy uses it). The rest, about
+550 ns at 4 KiB, is the multi-chunk path's Rust code (9 KB around
+`hash`, in one place) and frames. Prefetching that 16 KiB of text as
+well made every call 400-500 ns slower: prefetches beyond some number in
+flight appear to be dropped, the kernels' among them. More prefetch
+volume costs; the order and amount matter.
+
+NEON-only builds (M1-M3) lose little as the input leaves the caches
+(VM, no_sme2: 1 MiB 0.236 ns/B, 128 MiB 0.256 repeated, 0.255 from DRAM):
+the core's prefetchers serve NEON loads, so the flat walk's input
+prefetch is SME2's alone.
+
 ## The flat walk prefetches the next subtree (October 2, 2026, jobs 990-994)
 
 servil st's one-shot rate fell as the input left the caches (record
