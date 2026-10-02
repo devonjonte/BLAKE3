@@ -137,6 +137,18 @@ We never write "defensive code" — code that complicates a contract to ease the
 
 **Contracts change everywhere at once** (Zooko, September 30, 2026). When we improve a contract (a function's signature, a data structure, a file format, a tool's output), the same change updates every caller and every reader, in both repositories. Code accepts exactly the current contract and fails stop on any other: a reader asserts the format's version and refuses an older one. Code that keeps accepting an old form for compatibility is defensive code, and we never write it. Results in an older format are read with the tools of the commit that wrote them.
 
+**Mean-summary review branch** (Devon, October 2, 2026): this proposal uses
+shared `clocks::comparison::Work` for primary caller-cost means in every
+consumer. The model-based gate and its pilot scope are in MEAN-PROPOSAL.md
+in the companion benchmark review branch. The older speed-splitting practice
+below describes historical instruments.
+
+**Backward compatibility is a non-requirement.** Compatibility layers add
+cases and obligations over time, contradicting simplicity and Design By
+Contract. Producers and readers adopt one current declared format together;
+changed meanings receive changed names. Historical records retain their
+source-matched tools.
+
 ## Interfaces: fewest new concepts
 
 A highly desirable property of an interface and its contract: the user learns the fewest new concepts. Zero new concepts earns a perfect score. Each new term (a resource unit, a sharing rule, a tuning knob) taxes working memory and needs a place in prediction and control. Prefer familiar concepts the caller already holds (threads, inputs, budgets), keep implementation units unnamed in public docs, and express observable behavior (speed, thread count, fairness beside concurrent calls) in those familiar terms.

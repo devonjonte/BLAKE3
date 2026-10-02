@@ -70,12 +70,21 @@ def working_tree_commit():
 # worktree). The patch changes the lock, so each side's copy owns its own
 # Cargo.lock, derived from the committed one; the committed lock is never
 # written.
-PATCH = 'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'
+def fork_url():
+    """Patch the dependency the selected benchmark actually declares."""
+    manifest = (ROOT / "bench-hashes/Cargo.toml").read_text()
+    found = re.search(r'(?ms)^\[dependencies\.blake3-servil\]\n.*?^git = "([^"]+)"', manifest)
+    assert found, "bench-hashes declares its blake3-servil git dependency"
+    return found.group(1)
+
+
+def fork_patch():
+    return f'patch."{fork_url()}".blake3-servil.path=".."'
 # The instrument is the working tree's on both sides, as the benchmark is:
 # the clocks crate in this checkout.
 # (a function: --root moves ROOT after this module loads).
 def clocks_patch():
-    return f'patch."https://github.com/johnservil/BLAKE3".clocks.path="{ROOT / "clocks"}"'
+    return f'patch."{fork_url()}".clocks.path="{ROOT / "clocks"}"'
 
 
 def write_if_different(path, content):
@@ -142,9 +151,9 @@ def side_bench(side, commit):
     fork_version = re.search(r'(?m)^version = "([^"]+)"', (checkout / "Cargo.toml").read_text()).group(1)
     locked = re.search(r'name = "blake3-servil"\nversion = "([^"]+)"', (copy / "Cargo.lock").read_text()).group(1)
     if locked != fork_version:
-        subprocess.run(["cargo", "--config", PATCH, "--config", clocks_patch(), "update", "--quiet", "-p", "blake3-servil"], cwd=copy, env=env,
+        subprocess.run(["cargo", "--config", fork_patch(), "--config", clocks_patch(), "update", "--quiet", "-p", "blake3-servil"], cwd=copy, env=env,
                        check=True)
-    out = subprocess.run(["cargo", "--config", PATCH, "--config", clocks_patch(), "build", "--release", "--message-format=json-render-diagnostics"],
+    out = subprocess.run(["cargo", "--config", fork_patch(), "--config", clocks_patch(), "build", "--release", "--message-format=json-render-diagnostics"],
                          cwd=copy, env=env, check=True, stdout=subprocess.PIPE, text=True).stdout
     messages = [json.loads(line) for line in out.splitlines()]
     # The fork must come from the side's checkout, never the locked commit.
