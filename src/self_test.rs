@@ -106,6 +106,7 @@ pub(crate) const CASES: &[(Case, &str)] = &[
     (Incremental { len: 5 * KIB + 7, piece: 700 }, "a Hasher fed in uneven pieces"),
     (Incremental { len: 2 * KIB, piece: 63 }, "a Hasher fed less than a block at a time"),
     (Xof { len: 100, skip: 37, out: 300 }, "extended output of several blocks, from an unaligned position"),
+    (Xof { len: 1500, skip: 64, out: 1100 }, "extended output of sixteen blocks and more (the SME2 extended-output kernel)"),
 ];
 
 /// The largest input any case reads, offset included.
@@ -162,7 +163,7 @@ pub(crate) fn chain(
 /// Each case's fold, from the reference implementation (the unit test
 /// `self_test_matches_the_reference` checks them, and prints this table
 /// when it differs).
-const EXPECTED: [u64; 39] = [
+const EXPECTED: [u64; 40] = [
     0x90e4e563714f7c48,
     0x80003c83df0cf1a6,
     0xf4ffcff9e99d31ba,
@@ -202,6 +203,7 @@ const EXPECTED: [u64; 39] = [
     0x9b802b34b48bb23a,
     0x0eaabf3bcc0790e7,
     0x7bf131603d28d0e7,
+    0xa7e6fd013dbeb762,
 ];
 
 /// A case's outputs from this build, through the public entry points.

@@ -95,8 +95,13 @@ generator, check that existing kernels stay byte-identical unless meant.
 - `hash_multithreaded()`: below 64 KiB, `hash()`'s path; from 64 KiB the
   pool on NEON only. Batches: under 64 KiB in all the serial path; else
   the pool in ranges of messages, NEON only.
+- Extended output (`OutputReader::fill`): whole groups of sixteen blocks
+  on SME2 (`blake3_sme2_xof16_512`: one block broadcast, counters per
+  lane, both halves of the state, ZA1 transposing each lane's 64 bytes),
+  under the turn; the rest block by block on the portable compressor. VM,
+  0.69 -> 0.156 ns/B from 1 KiB (October 2).
 - Every SME2-sized call takes the turn first (inputs of 16 chunks, batches
-  of 16 messages).
+  of 16 messages, extended output of 16 blocks).
 
 Mac, solo, ns/B (record e16e836, fork 2a82c8c): servil 64 B .704, 1 KiB
 .680, 2 KiB .458, 3 KiB .333, 4 KiB .318, 8 KiB .255, 16 KiB .223, 1 MiB

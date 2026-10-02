@@ -17,6 +17,9 @@
   started, and a warm `Queue` allocates nothing on macOS too (the standard
   library there allocates a lock at its first use, which the worker
   threads met after `initialize_multithreaded` had returned).
+- Extended output (`OutputReader::fill`, `Hasher::finalize_xof`) of 1 KiB
+  and more runs on SME2, sixteen blocks at a time: about 4.4x as fast on
+  Apple M4 and later (0.69 -> 0.16 ns per byte).
 - `Hasher::update_reader` reads in 1 MiB pieces once a reader has more
   than 64 KiB: on an Apple M4 Max, hashing a file of 8-64 MiB in the page
   cache takes 23-33% less time.

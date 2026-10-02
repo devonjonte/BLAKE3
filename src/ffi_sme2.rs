@@ -554,8 +554,28 @@ pub fn prefetch_code() {
     crate::platform::prefetch_code((ffi::blake3_sme2_hash16_chunks_512 as *const () as usize, &raw const ffi::blake3_sme2_text_end as usize));
 }
 
+/// Fill `out`'s whole groups of sixteen 64-byte blocks with extended
+/// output: block i the compression of `block` under `cv` at `counter + i`
+/// with `flags` (ROOT among them) and `block_len`, both halves of the
+/// state. Returns the bytes filled (a multiple of 1024; the rest is the
+/// caller's). Unsafe because the CPU must have SME2 with 512-bit streaming
+/// vectors (the platform's detect()).
+pub unsafe fn xof_many(cv: &CVWords, block: &[u8; crate::BLOCK_LEN], block_len: u8, counter: u64, flags: u8, out: &mut [u8]) -> usize {
+    let groups = out.len() / (GROUP * crate::BLOCK_LEN);
+    if groups == 0 {
+        return 0;
+    }
+    // Sound: `out` holds `groups` groups of sixteen blocks, and the caller
+    // found SME2.
+    let lanes = unsafe { ffi::blake3_sme2_xof16_512(cv.as_ptr(), block.as_ptr(), counter, flags as u64 | (block_len as u64) << 8, out.as_mut_ptr(), groups as u64) };
+    assert_eq!(lanes, 16, "SME2 streaming vector length changed under us");
+    groups * GROUP * crate::BLOCK_LEN
+}
+
 pub mod ffi {
     unsafe extern "C" {
+        /// Sixteen extended-output blocks per group (see xof_many).
+        pub fn blake3_sme2_xof16_512(cv: *const u32, block: *const u8, counter: u64, flags_len: u64, out: *mut u8, groups: u64) -> u64;
         /// Where c/blake3_sme2_aarch64.S's code ends.
         #[cfg(feature = "std")]
         pub static blake3_sme2_text_end: u8;
@@ -626,6 +646,33 @@ pub mod ffi {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// The extended-output kernel against the portable compressor, block
+    /// by block: counters whose low word wraps inside a group, every flag
+    /// set a mode uses, short and full blocks, one to three groups.
+    #[test]
+    fn test_xof_kernel_matches_portable() {
+        if !crate::platform::sme2_detected() {
+            return;
+        }
+        let cv: CVWords = core::array::from_fn(|i| 0x9E37_79B9u32.wrapping_mul(i as u32 + 1));
+        let mut block = [0u8; crate::BLOCK_LEN];
+        crate::test::paint_test_input(&mut block);
+        for counter in [0u64, 5, 0xFFFF_FFF8, 0x1_FFFF_FFF0, u64::MAX - 100] {
+            for (block_len, flags) in [(64u8, crate::ROOT), (37, crate::ROOT | crate::CHUNK_END), (0, crate::ROOT | crate::KEYED_HASH | crate::PARENT), (64, crate::ROOT | crate::DERIVE_KEY_MATERIAL)] {
+                for groups in 1..=3 {
+                    let mut out = std::vec![0u8; groups * GROUP * crate::BLOCK_LEN + 64];
+                    let done = unsafe { xof_many(&cv, &block, block_len, counter, flags, &mut out) };
+                    assert_eq!(done, groups * GROUP * crate::BLOCK_LEN);
+                    for (i, got) in out[..done].chunks_exact(crate::BLOCK_LEN).enumerate() {
+                        let want = crate::portable::compress_xof(&cv, &block, block_len, counter.wrapping_add(i as u64), flags);
+                        assert_eq!(got, &want[..], "counter {counter} + {i}, block_len {block_len}, flags {flags:#x}");
+                    }
+                    assert_eq!(&out[done..], &[0u8; 64][..], "nothing past the groups");
+                }
+            }
+        }
+    }
 
     /// The flat walk against the reference implementation, at every size
     /// it takes and just around them (the tree walk above it, then the

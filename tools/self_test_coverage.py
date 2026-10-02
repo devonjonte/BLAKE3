@@ -13,7 +13,8 @@ with its hit count, or NOT REACHED. From the fork's checkout, in the VM:
 
 (in the VM after vm/setup.sh; a CARGO_TARGET_DIR changes where the
 binary is). September 26, 2026: all 31
-entries reached on SME2 (the VM).
+entries reached on SME2 (the VM); October 2, 2026: all 32, the
+extended-output kernel among them.
 """
 import collections
 

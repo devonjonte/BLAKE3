@@ -97,7 +97,7 @@
 //!
 //! # Startup self-test
 //!
-//! Before a process first hashes, the crate checks itself. It hashes 39
+//! Before a process first hashes, the crate checks itself. It hashes 40
 //! fixed inputs, chosen so that together they run every one of its
 //! assembly kernels on this machine, at unusual alignments, lengths, and
 //! padding, each input carrying the previous output, and compares each

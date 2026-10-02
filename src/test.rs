@@ -898,6 +898,34 @@ fn test_update_reader() -> Result<(), std::io::Error> {
 }
 
 #[test]
+fn test_long_xof_matches_reference() {
+    // Extended output long enough for the platform's wide xof_many (SME2:
+    // groups of sixteen blocks), from block-aligned and unaligned positions,
+    // in every mode, against the reference implementation.
+    let mut input = [0; 3000];
+    paint_test_input(&mut input);
+    for (mode, len) in [(0, 0usize), (0, 1), (0, 1024), (0, 3000), (1, 100), (2, 777)] {
+        let (mut ours, mut reference) = match mode {
+            0 => (crate::Hasher::new(), reference_impl::Hasher::new()),
+            1 => (crate::Hasher::new_keyed(&TEST_KEY), reference_impl::Hasher::new_keyed(&TEST_KEY)),
+            _ => (crate::Hasher::new_derive_key("long xof"), reference_impl::Hasher::new_derive_key("long xof")),
+        };
+        ours.update(&input[..len]);
+        reference.update(&input[..len]);
+        let mut want = vec![0u8; 5 * 1024 + 300];
+        reference.finalize(&mut want);
+        for (skip, out_len) in [(0usize, 1024usize), (0, 1088), (64, 2048), (37, 4096), (1000, 4300), (0, 5 * 1024 + 300)] {
+            let out_len = out_len.min(want.len() - skip);
+            let mut got = vec![0u8; out_len];
+            let mut reader = ours.finalize_xof();
+            reader.set_position(skip as u64);
+            reader.fill(&mut got);
+            assert_eq!(got, want[skip..][..out_len], "mode {mode}, {len} input bytes, {out_len} bytes from {skip}");
+        }
+    }
+}
+
+#[test]
 #[cfg(feature = "std")]
 fn test_update_reader_keeps_every_byte_across_errors() {
     // A reader that fails (WouldBlock) after given offsets, in short reads,

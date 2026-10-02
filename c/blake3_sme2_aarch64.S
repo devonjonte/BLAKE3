@@ -91,6 +91,8 @@
 .global blake3_sme2_hash16_messages_512
 .global _blake3_sme2_hash16_parents_512
 .global blake3_sme2_hash16_parents_512
+.global _blake3_sme2_xof16_512
+.global blake3_sme2_xof16_512
 // Where this file's code ends, for a caller that prefetches it.
 .global _blake3_sme2_text_end
 .global blake3_sme2_text_end
@@ -864,6 +866,219 @@ blake3_sme2_hash16_parents_512:
     mov     x0, #16
 
 .Lparents_return:
+    smstop  za
+    smstop  sm
+
+    ldp     d8,  d9,  [sp, #0]
+    ldp     d10, d11, [sp, #16]
+    ldp     d12, d13, [sp, #32]
+    ldp     d14, d15, [sp, #48]
+    add     sp, sp, #64
+    ret
+
+/*
+ * Extended-output kernel: sixteen output blocks per group.
+ *
+ * uint64_t blake3_sme2_xof16_512(
+ *     const uint32_t cv[8],
+ *     const uint8_t block[64],
+ *     uint64_t counter,
+ *     uint64_t flags_len,
+ *     uint8_t *out,
+ *     uint64_t groups);
+ *
+ * Output block i (counter + i) is the compression of `block` under `cv`
+ * at that counter, with flags (the low byte of flags_len, ROOT among them)
+ * and block_len (its second byte): words 0..7 are v[i] ^ v[i + 8], words
+ * 8..15 v[i + 8] ^ cv[i]. out receives groups * 1024 bytes: sixteen
+ * 64-byte blocks per group, in counter order.
+ *
+ * Every lane compresses the same block, so the message words are
+ * broadcast; the counters are counter + lane, the high word carrying
+ * where the low word wraps.
+ *
+ * Return value: streaming vector length in 32-bit lanes; work happens
+ * only when it equals 16.
+ */
+.macro STORE_XOF_ROW out_off, selector, slice
+    add     x8, x4, #\out_off
+    st1w    { za1h.s[\selector, \slice] }, p0, [x8]
+.endm
+
+.p2align 4
+_blake3_sme2_xof16_512:
+blake3_sme2_xof16_512:
+    sub     sp, sp, #64
+    stp     d8,  d9,  [sp, #0]
+    stp     d10, d11, [sp, #16]
+    stp     d12, d13, [sp, #32]
+    stp     d14, d15, [sp, #48]
+
+    smstart sm
+    smstart za
+
+    cntw    x8
+    cmp     x8, #16
+    b.eq    .Lxof_vector_length_ok
+
+    mov     x0, x8
+    b       .Lxof_return
+
+.Lxof_vector_length_ok:
+    ptrue   p0.s
+
+    mov     w12, #0
+    mov     w13, #4
+    mov     w14, #8
+    mov     w15, #12
+
+    mov     w8, #0xe667
+    movk    w8, #0x6a09, lsl #16
+    dup     z16.s, w8
+    mov     w8, #0xae85
+    movk    w8, #0xbb67, lsl #16
+    dup     z17.s, w8
+    mov     w8, #0xf372
+    movk    w8, #0x3c6e, lsl #16
+    dup     z18.s, w8
+    mov     w8, #0xf53a
+    movk    w8, #0xa54f, lsl #16
+    dup     z19.s, w8
+    mov     za2h.s[w12, 0:3], { z16.s - z19.s }
+
+    /* Flags in w10, the block length in w11. */
+    and     w10, w3, #0xff
+    ubfx    w11, w3, #8, #8
+
+    cbz     x5, .Lxof_success
+
+.Lxof_group_loop:
+    /* The chaining value, broadcast. */
+    ldr     w8, [x0, #0]
+    dup     z0.s, w8
+    ldr     w8, [x0, #4]
+    dup     z1.s, w8
+    ldr     w8, [x0, #8]
+    dup     z2.s, w8
+    ldr     w8, [x0, #12]
+    dup     z3.s, w8
+    ldr     w8, [x0, #16]
+    dup     z4.s, w8
+    ldr     w8, [x0, #20]
+    dup     z5.s, w8
+    ldr     w8, [x0, #24]
+    dup     z6.s, w8
+    ldr     w8, [x0, #28]
+    dup     z7.s, w8
+
+    /* Counters counter + 0 through counter + 15, with the carry. */
+    index   z12.s, w2, #1
+    lsr     x8, x2, #32
+    dup     z13.s, w8
+    dup     z14.s, w2
+    cmplo   p1.s, p0/z, z12.s, z14.s
+    mov     z15.s, #1
+    add     z13.s, p1/m, z13.s, z15.s
+
+    mov     { z8.s - z11.s }, za2h.s[w12, 0:3]
+    dup     z14.s, w11
+    dup     z15.s, w10
+
+    /* The block's sixteen words, the same in every lane. */
+    ldr     w8, [x1, #0]
+    dup     z16.s, w8
+    ldr     w8, [x1, #4]
+    dup     z17.s, w8
+    ldr     w8, [x1, #8]
+    dup     z18.s, w8
+    ldr     w8, [x1, #12]
+    dup     z19.s, w8
+    ldr     w8, [x1, #16]
+    dup     z20.s, w8
+    ldr     w8, [x1, #20]
+    dup     z21.s, w8
+    ldr     w8, [x1, #24]
+    dup     z22.s, w8
+    ldr     w8, [x1, #28]
+    dup     z23.s, w8
+    ldr     w8, [x1, #32]
+    dup     z24.s, w8
+    ldr     w8, [x1, #36]
+    dup     z25.s, w8
+    ldr     w8, [x1, #40]
+    dup     z26.s, w8
+    ldr     w8, [x1, #44]
+    dup     z27.s, w8
+    ldr     w8, [x1, #48]
+    dup     z28.s, w8
+    ldr     w8, [x1, #52]
+    dup     z29.s, w8
+    ldr     w8, [x1, #56]
+    dup     z30.s, w8
+    ldr     w8, [x1, #60]
+    dup     z31.s, w8
+
+    SEVEN_ROUNDS
+    FEED_FORWARD
+
+    /* Words 8..15: v[i + 8] ^ cv[i] (z16-z23 are free after the rounds). */
+    ldr     w8, [x0, #0]
+    dup     z16.s, w8
+    eor     z8.d, z8.d, z16.d
+    ldr     w8, [x0, #4]
+    dup     z17.s, w8
+    eor     z9.d, z9.d, z17.d
+    ldr     w8, [x0, #8]
+    dup     z18.s, w8
+    eor     z10.d, z10.d, z18.d
+    ldr     w8, [x0, #12]
+    dup     z19.s, w8
+    eor     z11.d, z11.d, z19.d
+    ldr     w8, [x0, #16]
+    dup     z20.s, w8
+    eor     z12.d, z12.d, z20.d
+    ldr     w8, [x0, #20]
+    dup     z21.s, w8
+    eor     z13.d, z13.d, z21.d
+    ldr     w8, [x0, #24]
+    dup     z22.s, w8
+    eor     z14.d, z14.d, z22.d
+    ldr     w8, [x0, #28]
+    dup     z23.s, w8
+    eor     z15.d, z15.d, z23.d
+
+    /* Lane r's sixteen words into ZA1 row r, then one 64-byte row each. */
+    mov     za1v.s[w12, 0:3], { z0.s - z3.s }
+    mov     za1v.s[w13, 0:3], { z4.s - z7.s }
+    mov     za1v.s[w14, 0:3], { z8.s - z11.s }
+    mov     za1v.s[w15, 0:3], { z12.s - z15.s }
+
+    STORE_XOF_ROW    0, w12, 0
+    STORE_XOF_ROW   64, w12, 1
+    STORE_XOF_ROW  128, w12, 2
+    STORE_XOF_ROW  192, w12, 3
+    STORE_XOF_ROW  256, w13, 0
+    STORE_XOF_ROW  320, w13, 1
+    STORE_XOF_ROW  384, w13, 2
+    STORE_XOF_ROW  448, w13, 3
+    STORE_XOF_ROW  512, w14, 0
+    STORE_XOF_ROW  576, w14, 1
+    STORE_XOF_ROW  640, w14, 2
+    STORE_XOF_ROW  704, w14, 3
+    STORE_XOF_ROW  768, w15, 0
+    STORE_XOF_ROW  832, w15, 1
+    STORE_XOF_ROW  896, w15, 2
+    STORE_XOF_ROW  960, w15, 3
+
+    add     x2, x2, #16
+    add     x4, x4, #1024
+    subs    x5, x5, #1
+    b.ne    .Lxof_group_loop
+
+.Lxof_success:
+    mov     x0, #16
+
+.Lxof_return:
     smstop  za
     smstop  sm
 

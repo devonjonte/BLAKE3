@@ -584,6 +584,21 @@ impl Platform {
                 crate::avx512::xof_many(cv, block, block_len, counter, flags, out)
             },
             _ => {
+                // On SME2, whole groups of sixteen blocks on the extended-
+                // output kernel, under the process's turn (M4 Max: 0.70 ns/B
+                // block by block on the portable code); the rest below.
+                #[cfg(blake3_sme2)]
+                let out = {
+                    let turn = Sme2Turn::take(*self, out.len() >= 16 * BLOCK_LEN);
+                    let done = if matches!(turn.platform(), Platform::SME2) {
+                        // Safe: the turn's platform is SME2 only where detect() found it.
+                        unsafe { crate::sme2::xof_many(cv, block, block_len, counter, flags, out) }
+                    } else {
+                        0
+                    };
+                    counter += (done / BLOCK_LEN) as u64;
+                    &mut out[done..]
+                };
                 // For platforms without an optimized xof_many, fall back to a loop over
                 // compress_xof. This is still faster than portable code.
                 for out_block in out.chunks_exact_mut(BLOCK_LEN) {
