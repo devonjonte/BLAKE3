@@ -64,10 +64,15 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
         return hash_two_chunks(input, len, key, flags, outputs);
     }
     if outputs.len() < 2 || len > CHUNK_LEN {
-        for (i, output) in outputs.iter_mut().enumerate() {
-            *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        return hash_long_or_single(input, len, key, flags, outputs, platform);
+        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+        {
+            for (i, output) in outputs.iter_mut().enumerate() {
+                *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
+            }
+            return;
         }
-        return;
     }
     let plans = neon_plans();
     let last_len = len - (slot - BLOCK_LEN);
@@ -203,6 +208,44 @@ fn hash_two_chunks(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: 
         let parents: arrayvec::ArrayVec<&[u8; BLOCK_LEN], GROUP> = pairs[..count].iter().collect();
         // Sound: as above.
         unsafe { crate::neon_hybrid::hash_many_last_len(&parents, key, 0, IncrementCounter::No, flags | PARENT, 0, ROOT, BLOCK_LEN, digests.as_flattened_mut()) };
+    }
+}
+
+/// Keep long-message tree work outside the short-message dispatcher's frame.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[inline(never)]
+fn hash_long_or_single(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
+    if len == 2 * CHUNK_LEN && outputs.len() >= 4 && platform.simd_degree() >= 4 {
+        return hash_two_whole_chunks(input, key, flags, outputs, platform);
+    }
+    let slot = slot_len(len);
+    for (i, output) in outputs.iter_mut().enumerate() {
+        *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
+    }
+}
+
+/// Batch independent two-chunk messages across each chunk index and their
+/// roots. Each second chunk has counter 1; each parent joins its own pair.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[inline(never)]
+fn hash_two_whole_chunks(input: &[u8], key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
+    const GROUP: usize = 16;
+    for (messages, digests) in input.chunks(2 * CHUNK_LEN * GROUP).zip(outputs.chunks_mut(GROUP)) {
+        let firsts: arrayvec::ArrayVec<&[u8; CHUNK_LEN], GROUP> = messages.chunks_exact(2 * CHUNK_LEN)
+            .map(|m| m[..CHUNK_LEN].try_into().unwrap()).collect();
+        let seconds: arrayvec::ArrayVec<&[u8; CHUNK_LEN], GROUP> = messages.chunks_exact(2 * CHUNK_LEN)
+            .map(|m| m[CHUNK_LEN..].try_into().unwrap()).collect();
+        let mut cvs = [[0u8; OUT_LEN]; 2 * GROUP];
+        let count = digests.len();
+        platform.hash_many(&firsts, key, 0, IncrementCounter::No, flags, CHUNK_START, CHUNK_END, cvs[..count].as_flattened_mut());
+        platform.hash_many(&seconds, key, 1, IncrementCounter::No, flags, CHUNK_START, CHUNK_END, cvs[count..2 * count].as_flattened_mut());
+        let mut pairs = [[0u8; BLOCK_LEN]; GROUP];
+        for (i, pair) in pairs[..count].iter_mut().enumerate() {
+            pair[..OUT_LEN].copy_from_slice(&cvs[i]);
+            pair[OUT_LEN..].copy_from_slice(&cvs[count + i]);
+        }
+        let parents: arrayvec::ArrayVec<&[u8; BLOCK_LEN], GROUP> = pairs[..count].iter().collect();
+        platform.hash_many(&parents, key, 0, IncrementCounter::No, flags | crate::PARENT | ROOT, 0, 0, digests.as_flattened_mut());
     }
 }
 
@@ -576,7 +619,7 @@ mod test {
         let context = "Linux whole-block batch dispatch";
         let context_key = crate::hazmat::hash_derive_key_context(context);
         let modes = [(*crate::IV, 0), (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH), (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL)];
-        for len in [128, 256, 512, CHUNK_LEN] {
+        for len in [128, 256, 512, CHUNK_LEN, 2047, 2048, 2049] {
             for count in (0..=33).chain([63, 64, 127, 128, 129, 255]) {
                 let bytes = messages(len, count);
                 for offset in 0..64 {
@@ -601,6 +644,34 @@ mod test {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// Published anchors exercise the two-chunk helper independently of
+    /// SIMD availability, including under Miri on the portable platform.
+    #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
+    #[test]
+    fn portable_two_chunk_batch_matches_published_vectors() {
+        let key = b"whats the Elvish word for friend";
+        let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
+        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let modes = [(*crate::IV, 0), (crate::platform::words_from_le_bytes_32(key), crate::KEYED_HASH),
+            (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL)];
+        // test_vectors/test_vectors.json: 2048 bytes, byte i = i % 251.
+        let anchors = [
+            "e776b6028c7cd22a4d0ba182a8bf62205d2ef576467e838ed6f2529b85fba24a",
+            "879cf1fa2ea0e79126cb1063617a05b6ad9d0b696d0d757cf053439f60a99dd1",
+            "7b2945cb4fef70885cc5d78a87bf6f6207dd901ff239201351ffac04e1088a23",
+        ];
+        let message: Vec<u8> = (0..2 * CHUNK_LEN).map(|i| (i % 251) as u8).collect();
+        for count in [4, 17] {
+            let input = message.repeat(count);
+            for ((words, flags), anchor) in modes.iter().zip(anchors) {
+                let expected: [u8; OUT_LEN] = hex::decode(anchor).unwrap().try_into().unwrap();
+                let mut out = vec![[0u8; OUT_LEN]; count];
+                hash_two_whole_chunks(&input, words, *flags, &mut out, Platform::Portable);
+                assert!(out.iter().all(|digest| *digest == expected));
             }
         }
     }
