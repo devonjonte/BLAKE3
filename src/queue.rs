@@ -774,7 +774,20 @@ pub(crate) fn start_delivery() {
     static STARTED: std::sync::Once = std::sync::Once::new();
     STARTED.call_once(|| {
         crate::lanes::prepare(&DELIVERY.queues, &DELIVERY.wake);
-        std::thread::Builder::new().name("blake3-servil-queue".into()).spawn(|| DELIVERY.run()).expect("the queue's delivery thread starts");
+        // Return once the thread runs, as the pool's threads do: its start
+        // allocates too (std's stack-overflow handler), which a warm queue
+        // must not meet later.
+        static RUNNING: AtomicBool = AtomicBool::new(false);
+        std::thread::Builder::new()
+            .name("blake3-servil-queue".into())
+            .spawn(|| {
+                RUNNING.store(true, Ordering::SeqCst);
+                DELIVERY.run()
+            })
+            .expect("the queue's delivery thread starts");
+        while !RUNNING.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
     });
 }
 
