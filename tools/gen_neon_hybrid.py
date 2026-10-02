@@ -1088,6 +1088,9 @@ def asm_source(kernels):
     for n in names:
         out.append(f".global {n}")
         out.append(f".global _{n}")
+        # Where each kernel's code ends, for a caller that prefetches it.
+        out.append(f".global {n}_end")
+        out.append(f".global _{n}_end")
     for n in GLOBALS:
         out.append(f".global {n}")
     out.append("#ifdef __APPLE__\n.text\n#else\n.section .text\n#endif")
@@ -1100,6 +1103,8 @@ def asm_source(kernels):
                 out.append(ins)
             else:
                 out.append("        " + ins)
+        out.append(f"_{name}_end:")
+        out.append(f"{name}_end:")
         out.append("")
     return "\n".join(out)
 

@@ -393,6 +393,124 @@ const PARENT_PLANS: [&[usize]; 17] = [
     &[8, 8],
 ];
 
+/// Where each kernel's code ends (labels the generator puts after each).
+mod ends {
+    unsafe extern "C" {
+        pub static blake3_hybrid_p2_end: u8;
+        pub static blake3_hybrid_p3_end: u8;
+        pub static blake3_hybrid_p4_end: u8;
+        pub static blake3_hybrid_p5_end: u8;
+        pub static blake3_hybrid_p7_end: u8;
+        pub static blake3_hybrid_p8_end: u8;
+        pub static blake3_hybrid_p9_end: u8;
+        pub static blake3_hybrid_k1_end: u8;
+        pub static blake3_hybrid_k2_end: u8;
+        pub static blake3_hybrid_k3_end: u8;
+        pub static blake3_hybrid_k4_end: u8;
+        pub static blake3_hybrid_k5_end: u8;
+        pub static blake3_hybrid_k6_end: u8;
+        pub static blake3_hybrid_k7_end: u8;
+        pub static blake3_hybrid_k8_end: u8;
+        pub static blake3_hybrid_k9_end: u8;
+        pub static blake3_hybrid_k10_end: u8;
+        pub static blake3_hybrid_q1_end: u8;
+        pub static blake3_hybrid_q2_end: u8;
+        pub static blake3_hybrid_q3_end: u8;
+        pub static blake3_hybrid_q4_end: u8;
+        pub static blake3_hybrid_q5_end: u8;
+        pub static blake3_hybrid_q6_end: u8;
+        pub static blake3_hybrid_q7_end: u8;
+        pub static blake3_hybrid_q8_end: u8;
+        pub static blake3_hybrid_q9_end: u8;
+    }
+}
+
+/// The code of the chunk kernel for `n` whole chunks (1 to 10), and of
+/// the q kernel for `n` whole chunks and a partial one (1 to 9): start
+/// and end addresses.
+fn chunk_code(n: usize, partial: bool) -> (usize, usize) {
+    macro_rules! code {
+        ($kernel:ident, $end:ident) => {
+            (asm::$kernel as *const () as usize, &raw const ends::$end as usize)
+        };
+    }
+    match (n, partial) {
+        (1, false) => code!(blake3_hybrid_k1, blake3_hybrid_k1_end),
+        (2, false) => code!(blake3_hybrid_k2, blake3_hybrid_k2_end),
+        (3, false) => code!(blake3_hybrid_k3, blake3_hybrid_k3_end),
+        (4, false) => code!(blake3_hybrid_k4, blake3_hybrid_k4_end),
+        (5, false) => code!(blake3_hybrid_k5, blake3_hybrid_k5_end),
+        (6, false) => code!(blake3_hybrid_k6, blake3_hybrid_k6_end),
+        (7, false) => code!(blake3_hybrid_k7, blake3_hybrid_k7_end),
+        (8, false) => code!(blake3_hybrid_k8, blake3_hybrid_k8_end),
+        (9, false) => code!(blake3_hybrid_k9, blake3_hybrid_k9_end),
+        (10, false) => code!(blake3_hybrid_k10, blake3_hybrid_k10_end),
+        (1, true) => code!(blake3_hybrid_q1, blake3_hybrid_q1_end),
+        (2, true) => code!(blake3_hybrid_q2, blake3_hybrid_q2_end),
+        (3, true) => code!(blake3_hybrid_q3, blake3_hybrid_q3_end),
+        (4, true) => code!(blake3_hybrid_q4, blake3_hybrid_q4_end),
+        (5, true) => code!(blake3_hybrid_q5, blake3_hybrid_q5_end),
+        (6, true) => code!(blake3_hybrid_q6, blake3_hybrid_q6_end),
+        (7, true) => code!(blake3_hybrid_q7, blake3_hybrid_q7_end),
+        (8, true) => code!(blake3_hybrid_q8, blake3_hybrid_q8_end),
+        (9, true) => code!(blake3_hybrid_q9, blake3_hybrid_q9_end),
+        _ => unreachable!("no kernel for {n} whole chunks (partial: {partial})"),
+    }
+}
+
+/// The code of the parent kernel for `n` parents (PARENT_KERNELS).
+fn parent_code(n: usize) -> (usize, usize) {
+    macro_rules! code {
+        ($kernel:ident, $end:ident) => {
+            (asm::$kernel as *const () as usize, &raw const ends::$end as usize)
+        };
+    }
+    match n {
+        1 => code!(blake3_hybrid_k1, blake3_hybrid_k1_end),
+        2 => code!(blake3_hybrid_p2, blake3_hybrid_p2_end),
+        3 => code!(blake3_hybrid_p3, blake3_hybrid_p3_end),
+        4 => code!(blake3_hybrid_p4, blake3_hybrid_p4_end),
+        5 => code!(blake3_hybrid_p5, blake3_hybrid_p5_end),
+        7 => code!(blake3_hybrid_p7, blake3_hybrid_p7_end),
+        8 => code!(blake3_hybrid_p8, blake3_hybrid_p8_end),
+        9 => code!(blake3_hybrid_p9, blake3_hybrid_p9_end),
+        _ => unreachable!("no parent kernel for {n} parents"),
+    }
+}
+
+/// Prefetch the code a tree of `whole` chunks and then `partial` bytes
+/// (under a chunk) runs on the hybrids: the chunk kernels
+/// (`compress_chunks_parallel` and [`hash_chunks_with_partial`] choose
+/// them from the same plans), then [`prefetch_parent_code`]. Requires 1 to
+/// 16 whole chunks.
+pub fn prefetch_tree_code(whole: usize, partial: usize) {
+    if partial > 0 && partial_pays(whole, partial) {
+        let lead = whole.saturating_sub(9);
+        for &n in CHUNK_PLANS[lead] {
+            crate::platform::prefetch_code(chunk_code(n, false));
+        }
+        crate::platform::prefetch_code(chunk_code(whole - lead, true));
+    } else {
+        for &n in CHUNK_PLANS[whole] {
+            crate::platform::prefetch_code(chunk_code(n, false));
+        }
+    }
+    prefetch_parent_code(whole + usize::from(partial > 0));
+}
+
+/// Prefetch the code that merges `values` chaining values to the root:
+/// each level's parent plan (`compress_parents_parallel`), then the scalar
+/// kernel that compresses the root. Requires 2 to 32 values.
+pub fn prefetch_parent_code(mut values: usize) {
+    while values > 2 {
+        for &n in PARENT_PLANS[values / 2] {
+            crate::platform::prefetch_code(parent_code(n));
+        }
+        values = values / 2 + values % 2;
+    }
+    crate::platform::prefetch_code(parent_code(1));
+}
+
 /// True when the CPU has the SHA-3 extension that provides `xar`. Every
 /// Apple M-series core and every Armv8.2+ core with `FEAT_SHA3` does. The
 /// scalar kernel `k1` needs no extension; it is the pair and quad kernels
@@ -774,6 +892,28 @@ mod test {
     use super::*;
     use std::vec::Vec;
     use crate::{CHUNK_END, CHUNK_START, IV, KEYED_HASH, PARENT};
+
+    #[test]
+    fn test_kernel_code_ranges() {
+        // Each kernel's code runs from its symbol to its end label: present,
+        // in order, and under a kernel's size (the largest, q6, is 20 KB).
+        for partial in [false, true] {
+            for n in 1..=if partial { 9 } else { 10 } {
+                let (start, end) = chunk_code(n, partial);
+                assert!(start < end && end - start < 32 * 1024, "kernel {n} (partial {partial}): {start:#x}..{end:#x}");
+            }
+        }
+        for n in [1, 2, 3, 4, 5, 7, 8, 9] {
+            let (start, end) = parent_code(n);
+            assert!(start < end && end - start < 32 * 1024, "parent kernel {n}: {start:#x}..{end:#x}");
+        }
+        // The plans' mirror takes every shape compress_chunks_parallel does.
+        for whole in 1..=16 {
+            for partial in [0, 1, 63, 64, 65, 500, 1023] {
+                prefetch_tree_code(whole, if whole == 16 { 0 } else { partial });
+            }
+        }
+    }
 
     #[test]
     fn test_hash_many() {

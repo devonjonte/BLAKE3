@@ -1422,7 +1422,45 @@ pub fn hash_with(mode: Mode, threads: Threads, input: &[u8]) -> Hash {
 #[inline]
 fn hash_serial(input: &[u8], key: &CVWords, flags: u8) -> Hash {
     let turn = platform::Sme2Turn::take(Platform::detect(), input.len() >= SME2_SIZED_LEN);
+    #[cfg(blake3_neon_hybrid)]
+    if (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
+        prefetch_kernels(input.len(), turn.platform());
+    }
     hash_serial_on(input, key, flags, turn.platform())
+}
+
+/// Below this length a one-shot call prefetches its kernels' code: a call
+/// that follows other work then fetches it from DRAM in parallel, not one
+/// miss at a time (M4 Max, after other work: 2 KiB -18%, 4 KiB -32%, 8 KiB
+/// -41%, 16 KiB -24%; 64 KiB level, the hashing's own time dwarfing it;
+/// job 971). The streaming paths (Hasher, batches, the queue's tasks)
+/// keep their code near by running back to back, and skip it.
+#[cfg(blake3_neon_hybrid)]
+const PREFETCH_BELOW: usize = 64 * 1024;
+
+/// Prefetch the code of the kernels hashing `len` bytes on `platform`
+/// runs: SME2's from 16 chunks, else the hybrids', chunks to root.
+#[cfg(blake3_neon_hybrid)]
+#[inline(never)]
+fn prefetch_kernels(len: usize, platform: Platform) {
+    #[cfg(blake3_sme2)]
+    if matches!(platform, Platform::SME2) && len >= SME2_SIZED_LEN {
+        sme2::prefetch_code();
+        // Below the flat walk, sixteen chunks' values merge on the hybrids.
+        if !sme2::flat_takes(len) {
+            neon_hybrid::prefetch_parent_code(16);
+        }
+        return;
+    }
+    // Below 16 chunks the SME2 platform runs the hybrids too.
+    #[cfg(blake3_sme2)]
+    let hybrids = matches!(platform, Platform::NEON | Platform::SME2);
+    #[cfg(not(blake3_sme2))]
+    let hybrids = matches!(platform, Platform::NEON);
+    if hybrids && neon_hybrid::sha3_detected() {
+        let whole = (len / CHUNK_LEN).min(16);
+        neon_hybrid::prefetch_tree_code(whole, if whole == 16 { 0 } else { len % CHUNK_LEN });
+    }
 }
 
 /// How much of a message `Hasher::update_multithreaded` hashes before it

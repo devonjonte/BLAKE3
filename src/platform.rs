@@ -732,6 +732,33 @@ pub fn sse2_detected() -> bool {
     has_sse2::get()
 }
 
+/// Prefetch code from `start` to `end` into the L2 cache, a line (128
+/// bytes on Apple's cores) at a time. A call after other work otherwise
+/// fetches its kernel's lines from DRAM one miss after another: hash() of
+/// 8 KiB took 4.8 us so on an M4 Max, and 2.8 with this prefetch (job 971),
+/// where code already near costs it a few cycles a line.
+#[cfg(blake3_neon_hybrid)]
+#[inline]
+pub(crate) fn prefetch_code((start, end): (usize, usize)) {
+    debug_assert!(start < end && end - start < 64 * 1024, "a kernel's code");
+    // Four lines a step (past `end` by up to three: harmless).
+    let mut line = start;
+    while line < end {
+        // Sound: a prefetch never faults, whatever the address.
+        unsafe {
+            core::arch::asm!(
+                "prfm pldl2keep, [{0}]",
+                "prfm pldl2keep, [{0}, #128]",
+                "prfm pldl2keep, [{0}, #256]",
+                "prfm pldl2keep, [{0}, #384]",
+                in(reg) line,
+                options(nostack, readonly, preserves_flags),
+            )
+        };
+        line += 512;
+    }
+}
+
 #[inline(always)]
 pub fn words_from_le_bytes_32(bytes: &[u8; 32]) -> [u32; 8] {
     let mut out = [0; 8];

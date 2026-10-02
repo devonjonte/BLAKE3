@@ -91,6 +91,9 @@
 .global blake3_sme2_hash16_messages_512
 .global _blake3_sme2_hash16_parents_512
 .global blake3_sme2_hash16_parents_512
+// Where this file's code ends, for a caller that prefetches it.
+.global _blake3_sme2_text_end
+.global blake3_sme2_text_end
 
 #ifdef __APPLE__
 .text
@@ -870,3 +873,5 @@ blake3_sme2_hash16_parents_512:
     ldp     d14, d15, [sp, #48]
     add     sp, sp, #64
     ret
+_blake3_sme2_text_end:
+blake3_sme2_text_end:

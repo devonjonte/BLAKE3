@@ -42,56 +42,108 @@
 
 .global blake3_hybrid_p2
 .global _blake3_hybrid_p2
+.global blake3_hybrid_p2_end
+.global _blake3_hybrid_p2_end
 .global blake3_hybrid_p4
 .global _blake3_hybrid_p4
+.global blake3_hybrid_p4_end
+.global _blake3_hybrid_p4_end
 .global blake3_hybrid_p8
 .global _blake3_hybrid_p8
+.global blake3_hybrid_p8_end
+.global _blake3_hybrid_p8_end
 .global blake3_hybrid_p3
 .global _blake3_hybrid_p3
+.global blake3_hybrid_p3_end
+.global _blake3_hybrid_p3_end
 .global blake3_hybrid_p5
 .global _blake3_hybrid_p5
+.global blake3_hybrid_p5_end
+.global _blake3_hybrid_p5_end
 .global blake3_hybrid_p7
 .global _blake3_hybrid_p7
+.global blake3_hybrid_p7_end
+.global _blake3_hybrid_p7_end
 .global blake3_hybrid_p9
 .global _blake3_hybrid_p9
+.global blake3_hybrid_p9_end
+.global _blake3_hybrid_p9_end
 .global blake3_hybrid_k1
 .global _blake3_hybrid_k1
+.global blake3_hybrid_k1_end
+.global _blake3_hybrid_k1_end
 .global blake3_hybrid_k2
 .global _blake3_hybrid_k2
+.global blake3_hybrid_k2_end
+.global _blake3_hybrid_k2_end
 .global blake3_hybrid_k3
 .global _blake3_hybrid_k3
+.global blake3_hybrid_k3_end
+.global _blake3_hybrid_k3_end
 .global blake3_hybrid_k4
 .global _blake3_hybrid_k4
+.global blake3_hybrid_k4_end
+.global _blake3_hybrid_k4_end
 .global blake3_hybrid_k5
 .global _blake3_hybrid_k5
+.global blake3_hybrid_k5_end
+.global _blake3_hybrid_k5_end
 .global blake3_hybrid_k6
 .global _blake3_hybrid_k6
+.global blake3_hybrid_k6_end
+.global _blake3_hybrid_k6_end
 .global blake3_hybrid_k7
 .global _blake3_hybrid_k7
+.global blake3_hybrid_k7_end
+.global _blake3_hybrid_k7_end
 .global blake3_hybrid_k8
 .global _blake3_hybrid_k8
+.global blake3_hybrid_k8_end
+.global _blake3_hybrid_k8_end
 .global blake3_hybrid_k9
 .global _blake3_hybrid_k9
+.global blake3_hybrid_k9_end
+.global _blake3_hybrid_k9_end
 .global blake3_hybrid_k10
 .global _blake3_hybrid_k10
+.global blake3_hybrid_k10_end
+.global _blake3_hybrid_k10_end
 .global blake3_hybrid_q1
 .global _blake3_hybrid_q1
+.global blake3_hybrid_q1_end
+.global _blake3_hybrid_q1_end
 .global blake3_hybrid_q2
 .global _blake3_hybrid_q2
+.global blake3_hybrid_q2_end
+.global _blake3_hybrid_q2_end
 .global blake3_hybrid_q3
 .global _blake3_hybrid_q3
+.global blake3_hybrid_q3_end
+.global _blake3_hybrid_q3_end
 .global blake3_hybrid_q4
 .global _blake3_hybrid_q4
+.global blake3_hybrid_q4_end
+.global _blake3_hybrid_q4_end
 .global blake3_hybrid_q5
 .global _blake3_hybrid_q5
+.global blake3_hybrid_q5_end
+.global _blake3_hybrid_q5_end
 .global blake3_hybrid_q6
 .global _blake3_hybrid_q6
+.global blake3_hybrid_q6_end
+.global _blake3_hybrid_q6_end
 .global blake3_hybrid_q7
 .global _blake3_hybrid_q7
+.global blake3_hybrid_q7_end
+.global _blake3_hybrid_q7_end
 .global blake3_hybrid_q8
 .global _blake3_hybrid_q8
+.global blake3_hybrid_q8_end
+.global _blake3_hybrid_q8_end
 .global blake3_hybrid_q9
 .global _blake3_hybrid_q9
+.global blake3_hybrid_q9_end
+.global _blake3_hybrid_q9_end
 .global blake3_hybrid_c1
 .global _blake3_hybrid_c1
 #ifdef __APPLE__
@@ -521,6 +573,8 @@ blake3_hybrid_p2_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_p2_end:
+blake3_hybrid_p2_end:
 
         .p2align 6
 _blake3_hybrid_p4:
@@ -940,6 +994,8 @@ blake3_hybrid_p4_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_p4_end:
+blake3_hybrid_p4_end:
 
         .p2align 6
 _blake3_hybrid_p8:
@@ -1451,6 +1507,8 @@ blake3_hybrid_p8_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_p8_end:
+blake3_hybrid_p8_end:
 
         .p2align 6
 _blake3_hybrid_p3:
@@ -1827,6 +1885,8 @@ blake3_hybrid_p3_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_p3_end:
+blake3_hybrid_p3_end:
 
         .p2align 6
 _blake3_hybrid_p5:
@@ -2379,6 +2439,8 @@ blake3_hybrid_p5_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_p5_end:
+blake3_hybrid_p5_end:
 
         .p2align 6
 _blake3_hybrid_p7:
@@ -2983,6 +3045,8 @@ blake3_hybrid_p7_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_p7_end:
+blake3_hybrid_p7_end:
 
         .p2align 6
 _blake3_hybrid_p9:
@@ -3639,6 +3703,8 @@ blake3_hybrid_p9_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_p9_end:
+blake3_hybrid_p9_end:
 
         .p2align 6
 _blake3_hybrid_k1:
@@ -3830,6 +3896,8 @@ blake3_hybrid_k1_loop:
         ldp x25, x26, [sp, #48]
         add sp, sp, #1088
         ret
+_blake3_hybrid_k1_end:
+blake3_hybrid_k1_end:
 
         .p2align 6
 _blake3_hybrid_k2:
@@ -4061,6 +4129,8 @@ blake3_hybrid_k2_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_k2_end:
+blake3_hybrid_k2_end:
 
         .p2align 6
 _blake3_hybrid_k3:
@@ -4437,6 +4507,8 @@ blake3_hybrid_k3_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_k3_end:
+blake3_hybrid_k3_end:
 
         .p2align 6
 _blake3_hybrid_k4:
@@ -4856,6 +4928,8 @@ blake3_hybrid_k4_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_k4_end:
+blake3_hybrid_k4_end:
 
         .p2align 6
 _blake3_hybrid_k5:
@@ -5408,6 +5482,8 @@ blake3_hybrid_k5_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_k5_end:
+blake3_hybrid_k5_end:
 
         .p2align 6
 _blake3_hybrid_k6:
@@ -6003,6 +6079,8 @@ blake3_hybrid_k6_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_k6_end:
+blake3_hybrid_k6_end:
 
         .p2align 6
 _blake3_hybrid_k7:
@@ -6607,6 +6685,8 @@ blake3_hybrid_k7_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_k7_end:
+blake3_hybrid_k7_end:
 
         .p2align 6
 _blake3_hybrid_k8:
@@ -7254,6 +7334,8 @@ blake3_hybrid_k8_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_k8_end:
+blake3_hybrid_k8_end:
 
         .p2align 6
 _blake3_hybrid_k9:
@@ -7910,6 +7992,8 @@ blake3_hybrid_k9_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_k9_end:
+blake3_hybrid_k9_end:
 
         .p2align 6
 _blake3_hybrid_k10:
@@ -8609,6 +8693,8 @@ blake3_hybrid_k10_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_k10_end:
+blake3_hybrid_k10_end:
 
         .p2align 6
 _blake3_hybrid_q1:
@@ -9142,6 +9228,8 @@ blake3_hybrid_q1_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_q1_end:
+blake3_hybrid_q1_end:
 
         .p2align 6
 _blake3_hybrid_q2:
@@ -9675,6 +9763,8 @@ blake3_hybrid_q2_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_q2_end:
+blake3_hybrid_q2_end:
 
         .p2align 6
 _blake3_hybrid_q3:
@@ -10330,6 +10420,8 @@ blake3_hybrid_q3_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_q3_end:
+blake3_hybrid_q3_end:
 
         .p2align 6
 _blake3_hybrid_q4:
@@ -11175,6 +11267,8 @@ blake3_hybrid_q4_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_q4_end:
+blake3_hybrid_q4_end:
 
         .p2align 6
 _blake3_hybrid_q5:
@@ -12142,6 +12236,8 @@ blake3_hybrid_q5_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_q5_end:
+blake3_hybrid_q5_end:
 
         .p2align 6
 _blake3_hybrid_q6:
@@ -13075,6 +13171,8 @@ blake3_hybrid_q6_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_q6_end:
+blake3_hybrid_q6_end:
 
         .p2align 6
 _blake3_hybrid_q7:
@@ -14130,6 +14228,8 @@ blake3_hybrid_q7_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_q7_end:
+blake3_hybrid_q7_end:
 
         .p2align 6
 _blake3_hybrid_q8:
@@ -15152,6 +15252,8 @@ blake3_hybrid_q8_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_q8_end:
+blake3_hybrid_q8_end:
 
         .p2align 6
 _blake3_hybrid_q9:
@@ -16296,3 +16398,5 @@ blake3_hybrid_q9_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
+_blake3_hybrid_q9_end:
+blake3_hybrid_q9_end:
