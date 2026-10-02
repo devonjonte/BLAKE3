@@ -1790,6 +1790,10 @@ What it shows:
   next (`Queue::pieces`, or update_multithreaded per piece): reads' cold
   speed with the pool's warm one. io_uring is the Linux form of the same
   overlap. Each is a contender for b3sum-bench.
+- **A mixed tree** (1000 files, 1 KiB-16 MiB, 74 MiB, in one run, as
+  `find | xargs b3sum`; Mac job 1146, quiet): warm Rayon 34.8 ms, the
+  pool 26.3 (x0.755), official 52.3; cold Rayon 209, the pool 123
+  (x0.589), plain reads 121, official 207. (VM: warm x0.875, cold level.)
 - Official b3sum's tree of 1000 small files takes 2.8x the fork's time on
   the Mac (13.6x in the VM), at 3-6 CPUs busy: its Rayon threads spin
   between files.
