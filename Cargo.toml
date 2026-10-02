@@ -129,6 +129,7 @@ required-features = ["std"]
 
 [[test]]
 name = "queue_no_alloc"
+harness = false
 required-features = ["std"]
 
 [[example]]

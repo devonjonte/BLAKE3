@@ -2,9 +2,11 @@
 //! buffers has warmed it up (the io_uring style its design rests on): every
 //! allocation in the process, on any thread, is counted, and after warm-up
 //! rounds more rounds of every shape at several sizes must make none. Its
-//! own test binary, so no other test allocates beside it.
-//! (A queue needs threads: none on wasm.)
-#![cfg(not(target_family = "wasm"))]
+//! own test binary, without libtest's harness, so nothing allocates beside
+//! it: the harness's notice that a test has run over 60 seconds (a slow
+//! build on a loaded machine) allocates on the main thread. A queue needs
+//! threads, which wasm lacks; there the binary does nothing.
+#![cfg_attr(target_family = "wasm", allow(unused))]
 
 use blake3_servil::{Efficiency, FixedHandler, Hash, MessageHandler, Mode, PieceHandler, Queue};
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -94,7 +96,13 @@ fn allocations_after_warm_up(warm: usize, rounds: usize, mut round: impl FnMut()
     ALLOCATIONS.load(Ordering::SeqCst) - before
 }
 
-#[test]
+fn main() {
+    #[cfg(not(target_family = "wasm"))]
+    a_warm_queue_allocates_nothing();
+    println!("a warm queue allocates nothing: ok");
+}
+
+#[cfg(not(target_family = "wasm"))]
 fn a_warm_queue_allocates_nothing() {
     blake3_servil::initialize_multithreaded();
     for efficiency in [Efficiency::Time, Efficiency::Energy] {

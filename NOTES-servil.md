@@ -1170,6 +1170,22 @@ all); marks two-speed cells.
 
 ## Testing
 
+**The suites run in debug builds too, on CI's targets** (October 2,
+2026): the fork's CI (upstream's ci.yml, every branch since 69d90b9)
+runs them in debug on Linux x86-64 and arm64, macOS, Windows, wasm32,
+and cross targets, where overflow checks and slow, loaded runners find
+what release runs on the VM do not: a test's wrapping length overflowed
+(every debug suite failed), and `tests/queue_no_alloc.rs` counted two
+allocations after warm-up on slow builds. Those were libtest's own: its
+notice that a test has run over 60 seconds allocates on the main thread
+(found with a backtrace per counted allocation, the VM's pure debug
+build on four loaded CPUs: 3 of 3 failed before, passes after). The test
+now runs without the harness. A queue held twice for a moment (a
+submitter handing it over again while the delivery thread lets it go)
+could also have grown the delivery thread's lists once; their room is now
+two per queue alive (ad20a52), which closes that case, though it was not
+this failure's cause.
+
     cargo test --release --lib                      # 86 tests
     cargo test --release --features no_sme2 --lib   # 82
     cargo test --release --features pure --lib      # 71
