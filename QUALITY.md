@@ -90,7 +90,7 @@ unrolled kernel code.
 - **ThreadSanitizer** over the pool, stream, and batch tests, 30 runs:
   clean. A deliberate data race in a control program was caught.
 - **Natively on the M4 Max** (October 2, 2026; probe/mac-debug-tests,
-  jobs 996-998): every suite in debug builds (overflow checks and debug
+  jobs 996-998, and again on servil 1d2b652, job 1031): every suite in debug builds (overflow checks and debug
   assertions over the SME2 paths), AddressSanitizer over the library
   tests, the planned API's tests, and the queue's allocation test, and
   ThreadSanitizer over the pool, unsafe-path, and batch tests and the
