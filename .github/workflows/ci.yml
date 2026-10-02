@@ -3,7 +3,7 @@ name: tests
 on:
   push:
     branches:
-      - "*"
+      - "**"
     # not on tags
   pull_request:
 
