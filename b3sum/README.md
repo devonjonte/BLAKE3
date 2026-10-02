@@ -16,7 +16,7 @@ Options:
   -l, --length <LEN>          The number of output bytes, before hex encoding [default: 32]
       --seek <SEEK>           The starting output byte offset, before hex encoding [default: 0]
       --num-threads <NUM>     Ignored, with a warning: b3sum chooses its threads itself
-      --no-mmap               No effect: b3sum reads every file, and maps none
+      --no-mmap               No effect: b3sum chooses between reading and mapping each file
       --no-names              Omit filenames in the output
       --raw                   Write raw output bytes to stdout, rather than hex
       --tag                   Output BSD-style checksums: BLAKE3 ([FILE]) = [HASH]

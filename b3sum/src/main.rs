@@ -54,7 +54,7 @@ struct Inner {
     #[arg(long, value_name("NUM"))]
     num_threads: Option<usize>,
 
-    /// No effect: b3sum reads every file, and maps none
+    /// No effect: b3sum chooses between reading and mapping each file
     #[arg(long)]
     no_mmap: bool,
 
@@ -172,12 +172,52 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
         }
         update_from(&mut hasher, io::stdin())?;
     } else {
-        update_from(&mut hasher, File::open(path)?)?;
+        let file = File::open(path)?;
+        #[cfg(unix)]
+        if let Some(map) = mapped_if_cached(&file) {
+            hasher.update_multithreaded(&map);
+        } else {
+            update_from(&mut hasher, file)?;
+        }
+        #[cfg(not(unix))]
+        update_from(&mut hasher, file)?;
     }
     let mut output_reader = hasher.finalize_xof();
     output_reader.set_position(args.seek());
     Ok(output_reader)
 }
+
+/// `file` mapped, when it is at least MAP_LEN long and every page of it is
+/// in the page cache (mincore): hashed in place over the pool, it skips
+/// the copy a read makes, which a reader thread does alone (Linux VM,
+/// 1 GiB in the page cache: 32 ms mapped against 79 ms read; Apple M4 Max
+/// 47 against 50). A file not wholly in the cache is read: a mapping's
+/// page faults fetch it a few pages at a time (Mac, 1 GiB from storage:
+/// 355 ms mapped against 162 ms read).
+#[cfg(unix)]
+fn mapped_if_cached(file: &File) -> Option<memmap2::Mmap> {
+    let len = usize::try_from(file.metadata().ok()?.len()).ok()?;
+    if len < MAP_LEN {
+        return None;
+    }
+    // Sound: the mapping is read while this process holds the file open;
+    // a file another program truncates meanwhile is the caller's risk, as
+    // with any mapping (upstream b3sum mapped every file).
+    let map = unsafe { memmap2::Mmap::map(file) }.ok()?;
+    // Sound: sysconf is a plain query.
+    let page = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok()?;
+    let mut resident = vec![0u8; len.div_ceil(page)];
+    // Sound: `map` covers `len` bytes from a page boundary, and `resident`
+    // holds one byte per page.
+    let rc = unsafe { libc::mincore(map.as_ptr() as *mut libc::c_void, len, resident.as_mut_ptr().cast()) };
+    (rc == 0 && resident.iter().all(|&page| page & 1 == 1)).then_some(map)
+}
+
+/// The shortest file mapped when it is in the page cache: mapping beats
+/// reading from here (Linux VM, a mixed tree of 1000 files warm: 18.5 ms
+/// from 64 KiB, 20.2 from 1 MiB, 22.5 from 4 MiB).
+#[cfg(unix)]
+const MAP_LEN: usize = 64 << 10;
 
 /// The read size: each piece is hashed over the pool while the next is read.
 const PIECE: usize = 4 << 20;

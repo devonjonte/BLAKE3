@@ -20,6 +20,11 @@ clap = { version = "4.0.8", features = ["derive", "wrap_help"] }
 hex = "0.4.0"
 wild = "2.0.3"
 
+# A file already in the page cache is mapped and hashed in place.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+memmap2 = "0.9"
+
 [dev-dependencies]
 duct = "1.0.0"
 tempfile = "3.1.0"

@@ -2,12 +2,13 @@
 
 ## Unreleased
 
-- `b3sum` hashes on this crate's own worker threads instead of Rayon's,
-  and reads every file instead of mapping it, reading the next 4 MiB while
-  the threads hash the last. On an Apple M4 Max (tools/b3sum-bench), a
-  1 GiB file not in the page cache takes less than half the time it did
-  (355 to 162 ms), and one in the page cache about two thirds. Standard
-  input is hashed over several threads too. `--no-mmap` has no effect.
+- `b3sum` hashes on this crate's own worker threads instead of Rayon's.
+  A file already in the page cache is mapped and hashed in place; any
+  other input, standard input included, is read 4 MiB at a time while the
+  threads hash the last piece. On an Apple M4 Max (tools/b3sum-bench) a
+  1 GiB file in the page cache takes two thirds of the time it did, and
+  one read from storage less than half (355 to 162 ms). `--no-mmap` has
+  no effect.
 - The crate docs say what each call allocates ("Memory"): single-threaded
   calls nothing, multithreaded calls a list of their pieces (48 bytes for
   each 128 KiB of input), a queue up to the buffers you keep in flight, and
