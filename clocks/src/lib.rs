@@ -48,7 +48,7 @@ use std::time::Instant;
 pub mod load;
 pub mod other_code;
 pub mod speeds;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(all(target_os = "linux", target_arch = "x86_64", target_pointer_width = "64"))]
 mod linux_counts;
 
 /// The wall clock, as reports name it.
@@ -441,9 +441,9 @@ mod imp {
 #[cfg(not(target_vendor = "apple"))]
 mod imp {
     pub fn read() -> Option<super::Counts> {
-        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        #[cfg(all(target_os = "linux", target_arch = "x86_64", target_pointer_width = "64"))]
         return super::linux_counts::counts();
-        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+        #[cfg(not(all(target_os = "linux", target_arch = "x86_64", target_pointer_width = "64")))]
         None
     }
 
