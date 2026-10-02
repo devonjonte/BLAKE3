@@ -1428,6 +1428,21 @@ mod test {
     /// `Hasher::update_multithreaded` against `hash`, fed in pieces of
     /// several sizes after a first piece that leaves the counter unaligned
     /// (so `update` shrinks the subtrees it hands the pool), keyed too.
+    /// A long message in 64 KiB pieces through update_multithreaded, past
+    /// the 128 KiB from which the workers linger between updates: each
+    /// update's job lives on the caller's stack until it returns. Small
+    /// enough for Miri (the CI's smoketest runs it).
+    #[test]
+    fn test_miri_update_multithreaded_lingers() {
+        let mut input = vec![0u8; 5 * 64 * 1024];
+        crate::test::paint_test_input(&mut input);
+        let mut hasher = Hasher::new();
+        for piece in input.chunks(64 * 1024) {
+            hasher.update_multithreaded(piece);
+        }
+        assert_eq!(hasher.finalize(), crate::hash(&input));
+    }
+
     #[test]
     fn test_update_multithreaded_matches_hash() {
         let mut input = vec![0u8; (5 * MIN_SPLIT_LEN + 1025).max(3 << 20) + 12345];
