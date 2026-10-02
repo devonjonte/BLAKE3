@@ -249,7 +249,7 @@ fn fill(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<usize> {
 /// hashing: the first piece is read on this thread, and an input longer
 /// than a piece has the rest read on a second thread into the other
 /// buffer while this one hashes the last piece over the pool
-/// (tools/b3sum-bench; NOTES-servil.md, "b3sum, measured").
+/// (`bench-hashes b3sum`; NOTES-servil.md, "b3sum, measured").
 fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io::Result<()> {
     BUFFERS.with_borrow_mut(|[first, second]| {
         let len = fill(&mut reader, first)?;

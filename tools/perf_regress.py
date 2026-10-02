@@ -10,12 +10,11 @@ a commit, measured side by side.
 It builds bench-hashes twice, once against the fork at the old commit and
 once against the new one (for `check`, a commit object made from the
 working tree), the same benchmark source in both, and runs
-`bench-hashes regress OLD NEW`, whose exit it returns: 0, no regression in
-a cell that holds a change (solo; shared cells slower are listed); 1, a
-confirmed regression in one; 2, no verdict (a run's load was busy or
-unobserved, or the control moved). The rule, its points, and its margins
-are bench-hashes' (`regress`, beside POINTS in its src/main.rs), and its
-calibration is in NOTES-servil.md ("perf_regress").
+`bench-hashes regress OLD NEW`, whose exit it returns: 0, no cell slower;
+1, a cell slower; 2, no verdict (a run's load was busy or unobserved). The
+rule, its points, and its margins are bench-hashes' (`regress` in its
+src/main.rs, by clocks::summary), and its calibration is in
+NOTES-servil.md ("The regression check, calibrated").
 
 Each side is a directory under tmp/perf-ab/ that it owns (a fork worktree,
 a copy of bench-hashes with the side's own Cargo.lock, a target

@@ -4,7 +4,7 @@ For the servil team: how things are done in this repository and its guest. The p
 
 # The performance-regression check: every code commit
 
-Speed is this fork's purpose, so no commit that makes it slower may enter git unnoticed. **Every commit that touches `src/`, `c/`, `build.rs`, `Cargo.toml`, or `Cargo.lock` must pass `tools/perf_regress.py check` first.** The check builds bench-hashes against `HEAD` and against the working tree and runs `bench-hashes regress` on the two builds: alternating pairs on this machine, A B B A A B B A, every run over every point, stopping once no cell can be called slower or faster (about 1 minute on the VM, builds included), so load and drift fall on both sides alike; there are no stored numbers and nothing to keep current, and any machine can run it. The rule, its points, and its margins are bench-hashes' (`regress`).
+Speed is this fork's purpose, so no commit that makes it slower may enter git unnoticed. **Every commit that touches `src/`, `c/`, `build.rs`, `Cargo.toml`, or `Cargo.lock` must pass `tools/perf_regress.py check` first.** The check builds bench-hashes against `HEAD` and against the working tree and runs `bench-hashes regress` on the two builds: eight pairs of runs on this machine, one of each side, back to back in alternating order, each over the lent cells (about 30 s in the VM, builds aside), so load and drift fall on both sides alike; there are no stored numbers and nothing to keep current, and any machine can run it. A cell is slower when the median of its pairs' ratios exceeds its margin (3% solo, 10% shared) and an exact sign test agrees (`clocks::summary::verdict`). The rule, its points, and its margins are bench-hashes' (`regress`).
 
 **Install the pre-commit hook once per checkout**, and the check runs by itself on every code commit:
 
@@ -16,14 +16,14 @@ Speed is this fork's purpose, so no commit that makes it slower may enter git un
 **What each result obliges you to do:**
 
 - *Exit 0, no regression:* commit.
-- *Exit 1, a confirmed regression:* the hook aborts the commit. Do not commit around it. Find the cause and fix it, or, when the slowdown is the deliberate price of something worth more (correctness, simplicity with a measured cost), stop and ask the user; if they accept it, commit with `git commit --no-verify` and state the regressed cells, their numbers, and the user's decision in the commit message.
-- *Exit 2, no verdict:* `clocks` found other programs keeping the machine busy during a run (or saw no load window), or the control (SHA-256, the same code on both sides) moved. Stop whatever else is running and check again. On the VM a control that moves the same way in check after check is the change moving SHA-256's code (where the linker places it, about 8% at 64 B): the Mac's verdict decides then (Zooko, October 1, 2026).
+- *Exit 1, a regression:* the hook aborts the commit. Do not commit around it. Find the cause and fix it, or, when the slowdown is the deliberate price of something worth more (correctness, simplicity with a measured cost), stop and ask the user; if they accept it, commit with `git commit --no-verify` and state the regressed cells, their numbers, and the user's decision in the commit message.
+- *Exit 2, no verdict:* `clocks` found other programs keeping the machine busy during a run, or saw no load window. Stop whatever else is running and check again.
 
 **Releases:** `python3 tools/gen-ver.py X.Y.Z` from a clean tree (Zooko's technique, copied from bench-hashes: a commit setting X.Y.Z, a second setting X.Y.Z+<first commit>, a lightweight tag vX.Y.Z+<first commit>; push `servil`, then the tag by name). Before a release, run `check --against <previous release tag>`. Each commit is checked only against its parent, so slowdowns too small to flag one at a time could add up; the release check sees their sum.
 
 **Commits that skipped the check** (`--no-verify`, or made where the hook was absent) must be checked before they are pushed: `pypy3 tools/perf_regress.py compare <parent> <commit>` for one, `pypy3 tools/perf_bisect.py <commit> <commit> ...` for a run of them (each against the one before, then the last against the first).
 
-`NOTES-servil.md` ("perf_regress", under "Tooling and its pitfalls") explains the rule, its margins (3% solo, 10% shared; solo cells hold a change, shared ones are reported), its measured false-alarm rates and sensitivity on the VM and the Mac, and why it measures the nonstop use cases alone ("perf_regress on the Mac: layout luck per side").
+`NOTES-servil.md` ("The regression check, calibrated") gives the rule's measured false holds and sensitivity on the Mac, and why it judges the lent cells alone (the queue's move 6-60% between processes of identical code).
 
 # Branches: candidates, then servil
 

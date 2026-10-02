@@ -1306,9 +1306,9 @@ item out when it lands or is rejected.
 
 ### Speed
 
-- b3sum reading into its own buffers while the pool hashes the last
-  ("b3sum, measured": cold reads at 4.8 GB/s on one thread beat every
-  mapping's 2.7-3.0 on the Mac); the cold 16 MiB cell of the pool.
+- The queue's cells stable enough for the regression check: on identical
+  code their per-process means move 6-60% ("The regression check,
+  calibrated"); the streaming APIs come first, so this is first.
 - Try putting b3sum on io_uring on Linux.
 - `hash_range(file, offset, len)`: BLAKE3 doing the reads, for files and
   sockets (api-design.md's third concurrency model).
@@ -1707,6 +1707,54 @@ nearly every count (256 B x 19: 184.7 ns/msg at 5, 206.8 at 3, 206.1 at
 1; 1 KiB x 19: 345 / 430 / 431; 64 B level within 5%); 1 and 3 win only
 some back-to-back cells (64 B x 20: 29.6 at 5, 16.1 at 3), which real
 programs rarely make. The thresholds stay.
+
+## The regression check, calibrated (October 2, 2026, Mac jobs 1164-1166)
+
+Zooko asked for a summary that is simpler and more reliable than the two
+speeds. Two designs, on four conditions, six repeats each, on the Mac
+(probe/plant-proportional's examples/host_lab.rs drives them;
+bench-hashes probe/summary-calibration holds the second design):
+- **fast**: `regress` as it was, each pair's fast speeds' ratio, four pairs
+  all beyond the margin, four more to confirm, a SHA-256 control;
+- **mean**: eight pairs, each run's mean per cell (total ns over total
+  units), the median of the pairs' ratios beyond the margin and an exact
+  sign test (7 of 8 pairs).
+Conditions: one executable on both sides; the same code with another
+layout (bench-hashes' feature layout-perturb, about 2 KiB of code); and
++3% and +6% planted (B3_PLANT: P of every 100 hash() calls hash twice, in
+one executable, so servil st's lent 64 B, 64 KiB, and 1 MiB move by P%).
+Held / passed / no verdict (busy):
+
+| | fast | mean | fast, aligned | mean, aligned | fast, primed | mean, primed |
+|---|---|---|---|---|---|---|
+| one executable | 0/6/0 | 0/4/2 | 0/5/1 | 0/5/1 | 0/6/0 | 0/5/1 |
+| another layout | 0/6/0 | 1/5/0 | 0/5/1 | 3/2/1 | 0/6/0 | 0/5/1 |
+| +3% | 2/3/1 | 2/3/1 | 2/4/0 | 2/3/1 | 3/3/0 | 4/2/0 |
+| +6% | 5/0/1 | 4/0/2 | 4/0/2 | 5/0/1 | 6/0/0 | 5/0/1 |
+
+- **The fast speeds missed bulk.** At +6% the fast design held 64 B and
+  64 KiB and never 1 MiB (0 of 18); the mean held all three nearly every
+  time.
+- **The queue's cells cannot be judged at 3%.** Every false hold of the
+  mean was a queue cell (continuous messages of 64 B and 1 KiB, batches of
+  4096, lent batches of 16); on identical code their per-process means
+  move 6-60% even as medians of eight pairs. The fast speeds avoided false
+  holds there by ignoring the slow speed's share, which is a real cost to
+  callers. 25 of 34 solo cells kept their null median within 3%.
+- **The shared lent cells** kept their null medians within 8% in all 36
+  checks: at 10% none would have held.
+- **Alignment** (LLVM's -align-all-functions=6, -align-all-nofallthru-
+  blocks=5, the C kernels' -falign-functions=64): no narrower, the binary
+  6% larger. Dropped.
+- **Priming** (Devon Jonte's finding, bench-hashes#4: one untimed batch
+  before each cell's calibration): the queue's 64 B samples grow to their
+  intended length (Mac 176 us before); the queue cells' null spread
+  narrows little.
+Taken (Zooko, October 2): the mean everywhere; the gate as the mean design
+over the lent cells only (the queue's cells out of it, their stability the
+next work), solo at 3% and shared at 10%, with no control and no
+confirmation stage; priming in place of the single-call retiming. A check
+takes about 31 s in the VM (was about 60).
 
 ## Memory: what each call allocates (a survey, October 2, 2026)
 

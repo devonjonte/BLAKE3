@@ -5,7 +5,7 @@
 - `b3sum` hashes on this crate's own worker threads instead of Rayon's.
   A file of 512 KiB or more already in the page cache is mapped and
   hashed in place; any other input, standard input included, is read
-  4 MiB at a time while the threads hash the last piece. On an Apple M4 Max (tools/b3sum-bench) a
+  4 MiB at a time while the threads hash the last piece. On an Apple M4 Max (`bench-hashes b3sum`) a
   1 GiB file in the page cache takes 37 ms (was 69; official b3sum 1.8.2,
   46), and one read from storage 159 ms (was 367). `--no-mmap` has no
   effect.

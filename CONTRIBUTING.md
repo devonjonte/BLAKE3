@@ -68,12 +68,9 @@ pypy3 tools/perf_regress.py compare OLD NEW
 
 It builds the benchmark against both versions of the fork and runs them
 alternately on the same machine, so it needs no stored numbers. Exit 0:
-no regression in the single-caller cells (slower cells with two
-benchmark copies running at once are listed; name them in the commit
-message with the change's reason); 1: a confirmed regression, listed; 2:
-no verdict, because
-the machine's load changed during the check (run it again on a quiet
-machine). `sh tools/install-git-hooks.sh` installs a pre-commit hook
+no cell slower; 1: a regression, its cells listed; 2: no verdict,
+because other programs kept the machine busy during the check (run it
+again on a quiet machine). `sh tools/install-git-hooks.sh` installs a pre-commit hook
 that runs it for every commit that touches code. To run the full
 benchmark against your working tree, see bench-hashes' `CONTRIBUTING.md`.
 
