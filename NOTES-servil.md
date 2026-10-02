@@ -960,6 +960,17 @@ a false hold. Decided (Zooko, October 1, 2026): such a VM no-verdict is
 answered by the Mac's verdict; the VM's listed lines on identical code
 (each side built from its own path, laid out apart) are left as they are.
 
+**Busy windows on the Mac with nothing running** (October 1, 2026): 4 of
+18 calibration checks (jobs 935-952) met a window where other programs kept
+1.1-3.0 CPUs busy, with every app closed but Terminal; the check gave no
+verdict each time, as it should. A `top` record over four more checks (jobs
+955-958, none busy) saw macOS's own work: XprotectService about a quarter
+of a CPU just after each build (it scans a newly built program), pi's node
+process about 13% on average, Spotlight, WindowServer, short bursts of
+others, the VM 0.5%. Expect about one Mac check in five to give no verdict
+this way, and run it again (Zooko, October 1, 2026: not ours to chase; it
+slows no user's hashing, and the tools catch it).
+
 **perf_regress before it** (`check` = working tree against HEAD, `compare OLD NEW`,
 `build` = the working tree's bench-hashes for runs by hand): runs A B B
 A A B B A of sha256 (the control), servil, and servil mt at 14 points
