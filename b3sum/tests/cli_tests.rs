@@ -690,3 +690,17 @@ fn test_globbing() {
         .unwrap();
     assert_eq!(expected, output);
 }
+
+#[test]
+fn test_num_threads_is_ignored_with_a_warning() {
+    let expected = format!("{}  -", blake3::hash(b"foo").to_hex());
+    let output = cmd!(b3sum_exe(), "--num-threads", "3")
+        .stdin_bytes("foo")
+        .stdout_capture()
+        .stderr_capture()
+        .run()
+        .unwrap();
+    assert_eq!(expected, std::str::from_utf8(&output.stdout).unwrap().trim_end());
+    let stderr = std::str::from_utf8(&output.stderr).unwrap();
+    assert!(stderr.contains("--num-threads is no longer supported"), "stderr: {stderr}");
+}

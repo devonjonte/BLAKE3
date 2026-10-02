@@ -1245,8 +1245,8 @@ mod unsafe_paths {
         }
     }
 
-    /// A batch and an input large enough for the pool (64 KiB), from two
-    /// threads at once, with small budgets.
+    /// A batch and an input, from two threads at once through the
+    /// multithreaded full forms.
     #[test]
     #[cfg_attr(target_family = "wasm", ignore = "spawns threads, which this target lacks")]
     fn test_pool_from_two_callers() {
@@ -1256,13 +1256,13 @@ mod unsafe_paths {
         hash_many(&batch, 64, &mut expected);
         let expected_tree = hash(&tree);
         std::thread::scope(|scope| {
-            for budget in [2, 4] {
+            for caller in 0..2 {
                 let (batch, tree, expected) = (&batch, &tree, &expected);
                 scope.spawn(move || {
                     let mut out = vec![[0u8; OUT_LEN]; 1024];
-                    hash_many_with(Mode::Hash, Threads::Budget(budget), batch, 64, &mut out);
-                    assert_eq!(&out, expected, "batch, budget {budget}");
-                    assert_eq!(hash_with(Mode::Hash, Threads::Budget(budget), tree), expected_tree, "tree, budget {budget}");
+                    hash_many_multithreaded_with(Mode::Hash, batch, 64, &mut out);
+                    assert_eq!(&out, expected, "batch, caller {caller}");
+                    assert_eq!(hash_multithreaded_with(Mode::Hash, tree), expected_tree, "tree, caller {caller}");
                 });
             }
         });

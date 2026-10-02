@@ -1306,7 +1306,8 @@ item out when it lands or is rejected.
 
 ### Speed
 
-- Benchmark and optimize the performance of b3sum.
+- Optimize b3sum: on the fork's pool, and its ways of reading files
+  (read, mmap, io_uring), measured by `tools/b3sum-bench`.
 - Try putting b3sum on io_uring on Linux.
 - `hash_range(file, offset, len)`: BLAKE3 doing the reads, for files and
   sockets (api-design.md's third concurrency model).
@@ -1332,22 +1333,19 @@ item out when it lands or is rejected.
 
 ### Interfaces
 
-- A thread budget: `Threads::Budget` is public in `hash_with` and
-  `hash_many_with`, against Zooko's decision of September 28 to remove
-  it (api-design.md, **Q**); b3sum's `--num-threads` above 1 would need
-  one in `update_multithreaded` too.
+- Revisit a possible energy-efficiency option (removed October 2, 2026:
+  its complexity outweighed its likely use; the September 25
+  measurements, "Energy per byte" above, are where to start).
 - update_rayon on the fork's pool, one mechanism for multithreading
   (changes its contract: today it runs on the caller's Rayon pool).
-- The energy-saving form (the `efficient` module): deferred until the
-  benchmark, API, and architecture settle.
 - A Merkle tree API (`servil::merkle`, for users like Remco's WHIR);
   write its trade-offs up for Zooko before building.
 
 ### For Zooko
 
+- Lingering's 50 us bound: about eight cores poll between updates for
+  2.4x the speed of `update` (long messages in 64 KiB pieces).
 - The three trades: members-32k, subtrees-32k, linger-4.
-- Lingering's 50 us bound and its energy (4-6x the energy for 2.4x the
-  speed, long messages in 64 KiB pieces).
 - Whether the docs keep the promise that hash_multithreaded runs no
   slower than hash (untested since the benchmark's servil-only checks
   left).

@@ -6,7 +6,7 @@
 //! reference implementation (reference_impl/). Nothing here computes an
 //! expected answer with this crate.
 
-use blake3_servil::{Efficiency, FixedHandler, Hash, MessageHandler, Mode, PieceHandler, Queue, Threads};
+use blake3_servil::{FixedHandler, Hash, MessageHandler, Mode, PieceHandler, Queue};
 use std::sync::mpsc;
 
 const KEY: &[u8; 32] = b"whats the Elvish word for friend";
@@ -49,9 +49,9 @@ fn modes() -> [Mode<'static>; 3] {
     [Mode::Hash, Mode::Keyed(KEY), Mode::DeriveKey(CONTEXT)]
 }
 
-fn thread_choices() -> [Threads; 4] {
-    [Threads::One, Threads::All, Threads::Budget(1), Threads::Budget(2)]
-}
+/// Each one-shot call's two full forms, single-threaded and multithreaded.
+const HASH_WITH: [(&str, fn(Mode, &[u8]) -> Hash); 2] = [("hash_with", blake3_servil::hash_with), ("hash_multithreaded_with", blake3_servil::hash_multithreaded_with)];
+const HASH_MANY_WITH: [(&str, fn(Mode, &[u8], usize, &mut [[u8; 32]])); 2] = [("hash_many_with", blake3_servil::hash_many_with), ("hash_many_multithreaded_with", blake3_servil::hash_many_multithreaded_with)];
 
 /// Lengths past the official vectors, around the multithreaded split (512 KiB) and a subtree edge.
 const LARGE: [usize; 5] = [(512 << 10) - 1, 512 << 10, 1 << 20, (1 << 20) + 1, (3 << 20) + 12345];
@@ -69,8 +69,8 @@ fn one_message_every_form_matches_the_vectors() {
         assert_eq!(blake3_servil::keyed_hash(KEY, &data), Hash::from(expected[1]), "keyed_hash, {len} bytes");
         assert_eq!(blake3_servil::derive_key(CONTEXT, &data), expected[2], "derive_key, {len} bytes");
         for (m, mode) in modes().into_iter().enumerate() {
-            for threads in thread_choices() {
-                assert_eq!(blake3_servil::hash_with(mode, threads, &data), Hash::from(expected[m]), "hash_with mode {m} {threads:?}, {len} bytes");
+            for (name, form) in HASH_WITH {
+                assert_eq!(form(mode, &data), Hash::from(expected[m]), "{name} mode {m}, {len} bytes");
             }
         }
     }
@@ -124,17 +124,11 @@ fn one_message_large_inputs_match_the_reference() {
         let data = input(len);
         assert_eq!(blake3_servil::hash_multithreaded(&data), Hash::from(reference(0, &data)), "hash_multithreaded, {len} bytes");
         for (m, mode) in modes().into_iter().enumerate() {
-            for threads in thread_choices() {
-                assert_eq!(blake3_servil::hash_with(mode, threads, &data), Hash::from(reference(m, &data)), "hash_with mode {m} {threads:?}, {len} bytes");
+            for (name, form) in HASH_WITH {
+                assert_eq!(form(mode, &data), Hash::from(reference(m, &data)), "{name} mode {m}, {len} bytes");
             }
         }
     }
-}
-
-#[test]
-#[should_panic]
-fn a_budget_of_no_threads_is_refused() {
-    blake3_servil::hash_with(Mode::Hash, Threads::Budget(0), b"abc");
 }
 
 // ---------- One-shot, batches ----------
@@ -165,10 +159,10 @@ fn batches_every_form_match_the_reference() {
         blake3_servil::hash_many_multithreaded(&buffer, len, &mut out);
         assert_eq!(out, expected[0], "hash_many_multithreaded, {count} x {len} B");
         for (m, mode) in modes().into_iter().enumerate() {
-            for threads in thread_choices() {
+            for (name, form) in HASH_MANY_WITH {
                 out.fill([0; 32]);
-                blake3_servil::hash_many_with(mode, threads, &buffer, len, &mut out);
-                assert_eq!(out, expected[m], "hash_many_with mode {m} {threads:?}, {count} x {len} B");
+                form(mode, &buffer, len, &mut out);
+                assert_eq!(out, expected[m], "{name} mode {m}, {count} x {len} B");
             }
         }
     }
@@ -217,8 +211,6 @@ impl FixedHandler for Fixed {
     }
 }
 
-const EFFICIENCIES: [Efficiency; 2] = [Efficiency::Time, Efficiency::Energy];
-
 /// Messages of many lengths, the vectors' and larger, each its own buffer:
 /// every buffer comes back once, in submission order, with its digest.
 #[test]
@@ -227,17 +219,17 @@ fn queue_of_messages_returns_every_buffer_in_order_with_its_digest() {
     let mut lengths: Vec<usize> = vectors().iter().map(|(len, _)| *len).collect();
     lengths.extend(LARGE);
     for (m, mode) in modes().into_iter().enumerate() {
-        for efficiency in EFFICIENCIES {
+        {
             let (tx, rx) = mpsc::channel();
-            let queue = Queue::messages(mode, efficiency, Messages(tx));
+            let queue = Queue::messages(mode, Messages(tx));
             for &len in &lengths {
                 queue.submit(input(len));
             }
             for &len in &lengths {
                 let (buffer, hash) = rx.recv().expect("every buffer comes back");
-                assert_eq!(buffer.len(), len, "submission order, mode {m} {efficiency:?}");
+                assert_eq!(buffer.len(), len, "submission order, mode {m}");
                 assert_eq!(buffer, input(len), "the buffer comes back unchanged");
-                assert_eq!(hash, Hash::from(reference(m, &buffer)), "mode {m} {efficiency:?}, {len} bytes");
+                assert_eq!(hash, Hash::from(reference(m, &buffer)), "mode {m}, {len} bytes");
             }
             drop(queue);
             assert!(rx.try_recv().is_err(), "one call per buffer");
@@ -257,9 +249,9 @@ fn queue_of_pieces_returns_each_piece_and_one_digest() {
                 continue;
             }
             for (m, mode) in modes().into_iter().enumerate() {
-                for efficiency in EFFICIENCIES {
+                {
                     let (tx, rx) = mpsc::channel();
-                    let queue = Queue::pieces(mode, efficiency, Pieces(tx));
+                    let queue = Queue::pieces(mode, Pieces(tx));
                     let pieces: Vec<Vec<u8>> = data.chunks(piece_len).map(<[u8]>::to_vec).collect();
                     for piece in &pieces {
                         queue.submit(piece.clone());
@@ -272,7 +264,7 @@ fn queue_of_pieces_returns_each_piece_and_one_digest() {
                         }
                     }
                     match rx.recv().unwrap() {
-                        PieceEvent::Finished(hash) => assert_eq!(hash, Hash::from(reference(m, &data)), "{total} bytes in {piece_len}-byte pieces, mode {m} {efficiency:?}"),
+                        PieceEvent::Finished(hash) => assert_eq!(hash, Hash::from(reference(m, &data)), "{total} bytes in {piece_len}-byte pieces, mode {m}"),
                         PieceEvent::Piece(_) => panic!("a piece after the last"),
                     }
                 }
@@ -288,9 +280,9 @@ fn queue_of_pieces_returns_each_piece_and_one_digest() {
 fn queue_of_fixed_length_messages_fills_the_callers_digest_space() {
     for (len, per_buffer) in [(64usize, 1usize), (64, 4), (64, 16), (64, 1000), (64, 16384), (256, 50), (1024, 9), (100, 7)] {
         for (m, mode) in modes().into_iter().enumerate() {
-            for efficiency in EFFICIENCIES {
+            {
                 let (tx, rx) = mpsc::channel();
-                let queue = Queue::fixed(len, mode, efficiency, Fixed(tx));
+                let queue = Queue::fixed(len, mode, Fixed(tx));
                 let batches: Vec<(Vec<u8>, Vec<Vec<u8>>)> = (0..3).map(|b| {
                     let (buffer, messages) = padded_batch(per_buffer + b, len);
                     (buffer, messages)
@@ -302,7 +294,7 @@ fn queue_of_fixed_length_messages_fills_the_callers_digest_space() {
                     let (returned, digests) = rx.recv().unwrap();
                     assert_eq!(&returned, buffer, "buffers return in order");
                     let expected: Vec<[u8; 32]> = messages.iter().map(|message| reference(m, message)).collect();
-                    assert_eq!(digests, expected, "{} x {len} B, mode {m} {efficiency:?}", messages.len());
+                    assert_eq!(digests, expected, "{} x {len} B, mode {m}", messages.len());
                 }
             }
         }
@@ -321,7 +313,7 @@ fn bursts_of_large_batches_after_pauses_complete() {
     let (buffer, messages) = padded_batch(4096, 64);
     let expected: Vec<[u8; 32]> = messages.iter().map(|message| reference(0, message)).collect();
     let (tx, rx) = mpsc::channel();
-    let queue = Queue::fixed(64, Mode::Hash, Efficiency::Time, Fixed(tx));
+    let queue = Queue::fixed(64, Mode::Hash, Fixed(tx));
     let mut buffers = vec![buffer; 4];
     for burst in 0..400 {
         for buffer in buffers.drain(..) {
@@ -366,7 +358,7 @@ fn a_handler_may_resubmit_its_buffer() {
     }
     let (tx, rx) = mpsc::channel();
     let cell = std::sync::Arc::new(std::sync::OnceLock::new());
-    let queue = Queue::messages(Mode::Hash, Efficiency::Time, Cycle { queue: cell.clone(), left: 996, seen: Vec::new(), done: tx });
+    let queue = Queue::messages(Mode::Hash, Cycle { queue: cell.clone(), left: 996, seen: Vec::new(), done: tx });
     let _ = cell.set(queue);
     for b in 0..4u8 {
         cell.get().unwrap().submit(vec![b; 1000]);
@@ -381,7 +373,7 @@ fn a_handler_may_resubmit_its_buffer() {
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn dropping_a_queue_cancels_nothing() {
     let (tx, rx) = mpsc::channel();
-    let queue = Queue::messages(Mode::Hash, Efficiency::Time, Messages(tx));
+    let queue = Queue::messages(Mode::Hash, Messages(tx));
     for i in 0..200 {
         queue.submit(input(1000 + i));
     }
@@ -402,7 +394,7 @@ fn queues_on_several_threads_keep_their_own_order() {
         for t in 0..6usize {
             scope.spawn(move || {
                 let (tx, rx) = mpsc::channel();
-                let queue = Queue::messages(if t % 2 == 0 { Mode::Hash } else { Mode::Keyed(KEY) }, if t % 3 == 0 { Efficiency::Energy } else { Efficiency::Time }, Messages(tx));
+                let queue = Queue::messages(if t % 2 == 0 { Mode::Hash } else { Mode::Keyed(KEY) }, Messages(tx));
                 let lengths: Vec<usize> = (0..300).map(|i| (i * 7919 + t * 104729) % 300_000).collect();
                 for &len in &lengths {
                     queue.submit(input(len));
@@ -424,7 +416,7 @@ fn queues_on_several_threads_keep_their_own_order() {
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn one_queue_shared_by_several_submitting_threads() {
     let (tx, rx) = mpsc::channel();
-    let queue = Queue::messages(Mode::Hash, Efficiency::Time, Messages(tx));
+    let queue = Queue::messages(Mode::Hash, Messages(tx));
     const THREADS: usize = 4;
     const EACH: usize = 3000;
     std::thread::scope(|scope| {
@@ -468,7 +460,7 @@ fn a_panicking_handler_aborts_the_process() {
                 panic!("a handler's panic");
             }
         }
-        let queue = Queue::messages(Mode::Hash, Efficiency::Time, Panics);
+        let queue = Queue::messages(Mode::Hash, Panics);
         queue.submit(vec![1u8; 100]);
         std::thread::sleep(std::time::Duration::from_secs(30));
         std::process::exit(0); // reached only if the panic did not abort

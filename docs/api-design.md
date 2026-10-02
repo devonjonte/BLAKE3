@@ -2,7 +2,7 @@
 
 For the servil team. Users read the crate docs: `src/lib.rs`, "Which call
 to use" (four questions and a table that lead to one call), and each
-call's own documentation (its speed, energy, and rules; the batch layout
+call's own documentation (its speed and rules; the batch layout
 in `hash_many`; the handler rules in `Queue`). This file holds the reasons
 behind them, the decisions with their dates, the open questions (each
 marked **Q**), and how the benchmark measures each call. bench-hashes'
@@ -50,21 +50,18 @@ against 42 through `hash`, single-threaded, Mac).
   pieces reliably come in swift succession, which is what lingering
   (below) is for.
 
-**Time or energy.** Each queue takes the choice (`Efficiency::Time` or
-`Efficiency::Energy`); single-threaded calls always save time (Zooko,
-September 28, 2026). The fifth question of the plan, time or energy on
-several threads, waits until the rest settles.
-- **Q**: the plan gives the multithreaded synchronous calls the choice
-  too; today only the queue takes it. What saving energy means for such a
-  call: one with the caller on SME2 and E-core NEON helpers at background
-  QoS hashed 8 MiB 10-27% faster than `hash` for a third less energy
-  (bench-hashes NEXT-STEPS, "the `efficient` module").
-
-**Thread budget.** Decided against (Zooko, September 28, 2026: the
-`..._with_budget` functions and `Threads::Budget` go).
-- **Q**: `Threads::Budget` is still public, in `hash_with` and
-  `hash_many_with`. Remove it, or keep it (b3sum's `--num-threads` is one
-  need; NOTES-servil.md, "Future work").
+**One concept per choice** (Zooko, October 2, 2026). Threading is in a
+call's name (`hash` and `hash_multithreaded`, `hash_many` and
+`hash_many_multithreaded`, `Hasher::update` and `update_multithreaded`;
+the queue always multithreaded), and a call's only option is its mode:
+each one-shot call has a `_with(mode, ...)` form, and each queue takes a
+mode. Two concepts left the API, each costing more than it gave:
+- **Thread budgets** (`Threads::Budget`, earlier the `..._with_budget`
+  functions): few programs need one, and b3sum's `--num-threads`, the one
+  user, now warns that it is ignored.
+- **Time or energy** (`Efficiency` on the queue): few users would want it
+  or know how to choose it. Saving energy stays possible future work
+  (NOTES-servil.md, "Future work").
 
 - **Q**: the multithreaded `Hasher` form's name (`update_multithreaded`
   is a placeholder).
@@ -77,12 +74,11 @@ come (AGENTS.md, "Serve real programs"), with one exception:
 **A `Hasher` between updates may linger** (Zooko, September 28, 2026): a
 message in progress promises more updates, usually in swift succession,
 so `update_multithreaded` keeps its workers ready for 50 us after each
-update of 64 KiB or more (Mac: 2.4x the speed of `update` for 4-6x the
-energy per byte).
+update of 64 KiB or more (Mac: 2.4x the speed of `update`; about eight
+cores poll between updates).
 - **Q**: the bound. A program that keeps a `Hasher` open for a long time
   (one per network connection, say) must leave no workers spinning; 50 us
   is reasoned as a wake's cost.
-- **The energy-saving form does not linger** (Zooko, September 28, 2026).
 
 **Settled, as the code documents them:** initialization (`initialize`,
 `initialize_multithreaded`; September 27), the batch layout (`hash_many`;
@@ -94,8 +90,8 @@ contract violations panic naming the rule broken.
 
 ## The queue
 
-The queue maximises throughput, bytes or messages per second or per
-joule, and spends latency to buy it. It owes that handovers never slow
+The queue maximises throughput, bytes or messages per second, and spends
+latency to buy it. It owes that handovers never slow
 the hashing threads, so its throughput is the hashing's for a program
 that keeps enough in flight (Little's law: in flight = rate x round
 trip). Its handler rules, shapes, and example are in `src/queue.rs`'s
@@ -128,7 +124,7 @@ The benchmark measures each call only as its contract says users call
 it, so that it guides us to optimise each one for them and flags only
 what users meet (Zooko, September 28, 2026). Calls in the keeps-up columns follow the program's other work (the
 gap); calls in the falls-behind columns run back to back. Every cell
-records wall time and cycles; energy cells wait for a validated counter.
+records wall time and cycles.
 
 **Keeps up: two shapes measured**, on one thread and several. Whole
 messages and batches use their single-threaded or multithreaded entry
@@ -172,10 +168,6 @@ cause: where the hash's code is").
 
 - perf_regress judges after-gap synchronous calls at 20%, continuous
   cells at 3% solo and 10% shared.
-- **Q**: continuous cells under both `Efficiency` settings: time cells
-  judged by wall time, energy cells by joules.
-- **Q**: an energy counter, per process and repeatable, validated before
-  energy cells are frozen.
 - **Modes**: keyed and derive-key spot checks at a few sizes in
   perf_regress (same cost as plain; a check that it stays so), no graph
   axis.

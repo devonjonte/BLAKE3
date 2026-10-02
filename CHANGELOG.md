@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Simpler: no thread budgets and no time-or-energy choice. A call's
+  threading is in its name, and its one option is the mode. Each one-shot
+  call has a full form that takes a `Mode`: `hash_with(mode, input)`,
+  `hash_multithreaded_with`, `hash_many_with(mode, input, message_len,
+  out)`, `hash_many_multithreaded_with`. `Threads` and `Efficiency` are
+  gone; the queue's constructors take a mode and a handler
+  (`Queue::messages(mode, handler)`, `Queue::pieces(mode, handler)`,
+  `Queue::fixed(message_len, mode, handler)`), and a queue always hashes
+  on every thread that pays. `b3sum --num-threads` is accepted and
+  ignored, with a warning.
 - One-shot calls of 1-64 KiB (`hash`, `keyed_hash`, `derive_key`, and
   `hash_multithreaded` below its split) that follow a pause fetch their
   code from memory in parallel instead of line by line: on an Apple M4 Max,
@@ -34,7 +44,7 @@
   threads, with the same result. Past a message's first 128 KiB it keeps
   the worker threads ready for 50 µs after each update of 64 KiB or more,
   so a long message in 64 KiB pieces hashes about 2.4x as fast as with
-  `update` on an Apple M4 Max, at several times the energy per byte.
+  `update` on an Apple M4 Max.
 - `Queue` is faster for a stream of inputs: on an Apple M4 Max about 2x for
   messages one after another and 2.5-4x for batches of 64-byte messages,
   with the program keeping enough in flight. Worker threads with nothing to

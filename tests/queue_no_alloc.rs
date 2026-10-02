@@ -8,7 +8,7 @@
 //! threads, which wasm lacks; there the binary does nothing.
 #![cfg_attr(any(target_family = "wasm", miri), allow(unused))]
 
-use blake3_servil::{Efficiency, FixedHandler, Hash, MessageHandler, Mode, PieceHandler, Queue};
+use blake3_servil::{FixedHandler, Hash, MessageHandler, Mode, PieceHandler, Queue};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -111,10 +111,10 @@ fn a_warm_queue_allocates_nothing() {
     // on Apple's systems a Mutex or Condvar allocates at its first use.
     let made = allocations_after_warm_up(0, 1, || std::thread::sleep(std::time::Duration::from_millis(20)));
     assert_eq!(made, 0, "the pool's threads settling after initialize_multithreaded: allocations");
-    for efficiency in [Efficiency::Time, Efficiency::Energy] {
+    {
         for len in [64usize, 1024, 64 << 10, 1 << 20] {
             let back = returned();
-            let queue = Queue::messages(Mode::Hash, efficiency, Messages(back.clone()));
+            let queue = Queue::messages(Mode::Hash, Messages(back.clone()));
             for _ in 0..BUFFERS {
                 back.lock().unwrap().push(vec![7u8; len]);
             }
@@ -122,13 +122,13 @@ fn a_warm_queue_allocates_nothing() {
                 let buffer = take(&back);
                 queue.submit(buffer);
             });
-            assert_eq!(made, 0, "Queue::messages, {len} B, {efficiency:?}: allocations after warm-up");
+            assert_eq!(made, 0, "Queue::messages, {len} B: allocations after warm-up");
         }
 
         for (total, piece) in [(256usize << 10, 64usize << 10), (4 << 20, 64 << 10), (1 << 20, 100_000)] {
             let back = returned();
             let finished = Arc::new(AtomicUsize::new(0));
-            let queue = Queue::pieces(Mode::Keyed(&[3; 32]), efficiency, Pieces(back.clone(), finished.clone()));
+            let queue = Queue::pieces(Mode::Keyed(&[3; 32]), Pieces(back.clone(), finished.clone()));
             for _ in 0..BUFFERS {
                 back.lock().unwrap().push(vec![9u8; piece]);
             }
@@ -148,12 +148,12 @@ fn a_warm_queue_allocates_nothing() {
                     std::hint::spin_loop();
                 }
             });
-            assert_eq!(made, 0, "Queue::pieces, {total} B in {piece} B pieces, {efficiency:?}: allocations after warm-up");
+            assert_eq!(made, 0, "Queue::pieces, {total} B in {piece} B pieces: allocations after warm-up");
         }
 
         for (message_len, count) in [(64usize, 16usize), (64, 16384), (1000, 100)] {
             let back = returned();
-            let queue = Queue::fixed(message_len, Mode::Hash, efficiency, Fixed(back.clone()));
+            let queue = Queue::fixed(message_len, Mode::Hash, Fixed(back.clone()));
             let slot = message_len.next_multiple_of(64);
             for _ in 0..BUFFERS {
                 back.lock().unwrap().push((vec![0u8; slot * count], vec![[0u8; 32]; count]));
@@ -162,7 +162,7 @@ fn a_warm_queue_allocates_nothing() {
                 let (buffer, digests) = take(&back);
                 queue.submit(buffer, digests);
             });
-            assert_eq!(made, 0, "Queue::fixed, {count} x {message_len} B, {efficiency:?}: allocations after warm-up");
+            assert_eq!(made, 0, "Queue::fixed, {count} x {message_len} B: allocations after warm-up");
         }
     }
 }

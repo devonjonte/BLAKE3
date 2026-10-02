@@ -64,12 +64,14 @@
 //!
 //! The queue is built for throughput; every other call is built for ease
 //! of use and the lowest latency for one input. Each call's own
-//! documentation gives its speed, its energy, and its rules. Beside them:
+//! documentation gives its speed and its rules. Beside them:
 //!
 //! - **Keyed hashing and key derivation** run at plain hashing's speed in
 //!   every call: [`keyed_hash`], [`derive_key`], and a [`Mode`] for every
-//!   other one ([`hash_with`], [`hash_many_with`], [`Hasher::new_keyed`],
-//!   and each queue).
+//!   other one: each one-shot call's `_with` form ([`hash_with`],
+//!   [`hash_multithreaded_with`], [`hash_many_with`],
+//!   [`hash_many_multithreaded_with`]), [`Hasher::new_keyed`] and
+//!   [`Hasher::new_derive_key`], and each queue.
 //! - **Make the calls from one thread.** The multithreaded calls spread
 //!   the work themselves. On Apple M4 and later, several threads hashing
 //!   at once share one SME unit: one runs at full speed and the others
@@ -77,12 +79,6 @@
 //! - **Call [`initialize_multithreaded`] at start-up** (or [`initialize`]
 //!   for single-threaded calls), to keep the startup self-test (below) and
 //!   the worker threads' start off the first call.
-//! - **For the least energy**, hash on one thread ([`hash`], or a queue
-//!   with [`Efficiency::Energy`]), at background priority (macOS:
-//!   `QOS_CLASS_BACKGROUND`) when time allows: on an M4 Max, E-cores hash
-//!   a byte for about an eighth of the energy P-cores spend, at a third to
-//!   a quarter of the speed, and multithreaded calls spend about 2.7x the
-//!   energy per byte of [`hash`].
 //! - **Idle time slows the next hash, on the machine's side.** After half
 //!   a millisecond or more without work, an M4 Max runs a core's next
 //!   85 µs or so of work at about a third of its clock (hashing 64 KiB:
@@ -234,7 +230,7 @@ mod many;
 #[cfg(feature = "std")]
 mod queue;
 #[cfg(feature = "std")]
-pub use queue::{Efficiency, FixedHandler, MessageHandler, PieceHandler, Queue, shape};
+pub use queue::{FixedHandler, MessageHandler, PieceHandler, Queue, shape};
 mod self_test;
 
 /// The startup self-test's own time, for probes: it runs again (it has
@@ -1279,8 +1275,7 @@ pub fn hash(input: &[u8]) -> Hash {
 /// Built for ease of use (see [Which call to use](crate#which-call-to-use)):
 /// it uses other cores only where waking them pays on every machine
 /// measured, runs no slower than [`hash`], and leaves nothing running
-/// between calls. It spends more energy per byte than [`hash`] when it
-/// uses other cores (about 2.7x on an Apple M4 Max).
+/// between calls.
 ///
 /// Returns the same [`Hash`](struct@Hash) as [`hash`] for every input. Inputs below
 /// 512 KiB are hashed on the calling thread alone, at [`hash`]'s speed.
@@ -1308,7 +1303,7 @@ pub fn hash(input: &[u8]) -> Hash {
 /// ```
 #[cfg(feature = "std")]
 pub fn hash_multithreaded(input: &[u8]) -> Hash {
-    lanes::hash(input, usize::MAX)
+    lanes::hash(input)
 }
 
 /// Run the startup self-test (see the crate documentation) now, once per
@@ -1358,7 +1353,6 @@ pub enum Mode<'a> {
     DeriveKey(&'a str),
 }
 
-#[cfg(feature = "std")]
 impl Mode<'_> {
     /// The key words and flags this mode hashes with.
     fn key_and_flags(self) -> (CVWords, u8) {
@@ -1370,52 +1364,34 @@ impl Mode<'_> {
     }
 }
 
-/// How many threads a hashing call may use, the calling thread included.
-#[cfg(feature = "std")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Threads {
-    /// The calling thread alone, as [`hash`] and [`hash_many`].
-    One,
-    /// As many as pay, as [`hash_multithreaded`] and
-    /// [`hash_many_multithreaded`].
-    All,
-    /// As many as pay, at most this many at once; at least 1.
-    Budget(usize),
-}
-
-#[cfg(feature = "std")]
-impl Threads {
-    /// The most threads, the caller's included; panics on a budget of 0.
-    fn max_threads(self) -> usize {
-        match self {
-            Threads::One => 1,
-            Threads::All => usize::MAX,
-            Threads::Budget(n) => {
-                assert!(n >= 1, "a thread budget counts the calling thread, so it is at least 1");
-                n
-            }
-        }
-    }
-}
-
-/// [`hash`] in any [`Mode`] on any number of [`Threads`]: the full form
-/// behind [`hash`], [`hash_multithreaded`], [`keyed_hash`], and
-/// [`derive_key`], each of whose digests it returns for the same mode.
-/// Built for ease of use (see [Which call to use](crate#which-call-to-use)).
-/// More than one thread follows [`hash_multithreaded`]'s rules.
+/// [`hash`] in any [`Mode`]: the full form behind [`hash`],
+/// [`keyed_hash`], and [`derive_key`], whose digest it returns for the
+/// same mode. Built for ease of use (see [Which call to
+/// use](crate#which-call-to-use)), on the calling thread alone.
 ///
 /// ```
-/// use blake3_servil::{Mode, Threads};
+/// use blake3_servil::Mode;
+/// let key = [7u8; 32];
+/// assert_eq!(blake3_servil::hash_with(Mode::Keyed(&key), b"foo"), blake3_servil::keyed_hash(&key, b"foo"));
+/// ```
+pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
+    let (key, flags) = mode.key_and_flags();
+    hash_serial(input, &key, flags)
+}
+
+/// [`hash_multithreaded`] in any [`Mode`]: [`hash_with`]'s digest, under
+/// [`hash_multithreaded`]'s rules.
+///
+/// ```
+/// use blake3_servil::Mode;
 /// let key = [7u8; 32];
 /// let input = vec![1u8; 1 << 20];
-/// assert_eq!(blake3_servil::hash_with(Mode::Keyed(&key), Threads::Budget(4), &input), blake3_servil::keyed_hash(&key, &input));
-/// assert_eq!(blake3_servil::hash_with(Mode::Hash, Threads::One, &input), blake3_servil::hash(&input));
+/// assert_eq!(blake3_servil::hash_multithreaded_with(Mode::Keyed(&key), &input), blake3_servil::keyed_hash(&key, &input));
 /// ```
 #[cfg(feature = "std")]
-pub fn hash_with(mode: Mode, threads: Threads, input: &[u8]) -> Hash {
-    let max_threads = threads.max_threads();
+pub fn hash_multithreaded_with(mode: Mode, input: &[u8]) -> Hash {
     let (key, flags) = mode.key_and_flags();
-    lanes::hash_with_key(input, &key, flags, max_threads)
+    lanes::hash_with_key(input, &key, flags)
 }
 
 /// The whole input on the calling thread, in the given mode: the one-chunk
@@ -1606,8 +1582,6 @@ pub(crate) fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, 
 /// of use (see [Which call to use](crate#which-call-to-use)): it uses
 /// other cores only where waking them pays on every machine measured, runs
 /// no slower than [`hash_many`], and leaves nothing running between calls.
-/// It spends more energy per byte than [`hash_many`] when it uses other
-/// cores.
 ///
 /// Writes the same digests for every batch. Batches under 512 KiB in all are hashed on the calling thread
 /// alone, at [`hash_many`]'s speed. Larger batches are cut into ranges of
@@ -1625,29 +1599,42 @@ pub(crate) fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, 
 /// ```
 #[cfg(feature = "std")]
 pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    lanes::hash_many(input, message_len, IV, 0, out, usize::MAX);
+    lanes::hash_many(input, message_len, IV, 0, out);
 }
 
-/// [`hash_many`] in any [`Mode`] on any number of [`Threads`]: the full
-/// form behind [`hash_many`] and [`hash_many_multithreaded`]. `out[i]`
-/// becomes [`hash_with`]'s digest of message i in `mode`, under
-/// [`hash_many`]'s layout. Built for ease of use (see [Which call
-/// to use](crate#which-call-to-use)). More than one thread follows
-/// [`hash_many_multithreaded`]'s rules.
+/// [`hash_many`] in any [`Mode`]: `out[i]` becomes [`hash_with`]'s
+/// digest of message i in `mode`, under [`hash_many`]'s layout, on the
+/// calling thread alone. Built for ease of use (see [Which call to
+/// use](crate#which-call-to-use)).
 ///
 /// ```
-/// use blake3_servil::{Mode, Threads};
+/// use blake3_servil::Mode;
 /// let key = [7u8; 32];
-/// let nodes = vec![1u8; 2000 * 64];
-/// let mut macs = vec![[0u8; 32]; 2000];
-/// blake3_servil::hash_many_with(Mode::Keyed(&key), Threads::Budget(2), &nodes, 64, &mut macs);
+/// let nodes = vec![1u8; 20 * 64];
+/// let mut macs = vec![[0u8; 32]; 20];
+/// blake3_servil::hash_many_with(Mode::Keyed(&key), &nodes, 64, &mut macs);
+/// assert_eq!(macs[5], *blake3_servil::keyed_hash(&key, &[1u8; 64]).as_bytes());
+/// ```
+pub fn hash_many_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
+    let (key, flags) = mode.key_and_flags();
+    hash_many_serial(input, message_len, &key, flags, out);
+}
+
+/// [`hash_many_multithreaded`] in any [`Mode`]: [`hash_many_with`]'s
+/// digests, under [`hash_many_multithreaded`]'s rules.
+///
+/// ```
+/// use blake3_servil::Mode;
+/// let key = [7u8; 32];
+/// let nodes = vec![1u8; 20000 * 64];
+/// let mut macs = vec![[0u8; 32]; 20000];
+/// blake3_servil::hash_many_multithreaded_with(Mode::Keyed(&key), &nodes, 64, &mut macs);
 /// assert_eq!(macs[5], *blake3_servil::keyed_hash(&key, &[1u8; 64]).as_bytes());
 /// ```
 #[cfg(feature = "std")]
-pub fn hash_many_with(mode: Mode, threads: Threads, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    let max_threads = threads.max_threads();
+pub fn hash_many_multithreaded_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
     let (key, flags) = mode.key_and_flags();
-    lanes::hash_many(input, message_len, &key, flags, out, max_threads);
+    lanes::hash_many(input, message_len, &key, flags, out);
 }
 
 /// One kernel [`hash`] runs, from `from_len` input bytes up to the next
@@ -2376,7 +2363,6 @@ impl Hasher {
                             &self.key,
                             self.chunk_state.chunk_counter,
                             self.chunk_state.flags,
-                            usize::MAX,
                         )
                     }
                     #[cfg(not(feature = "std"))]

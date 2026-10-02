@@ -26,7 +26,7 @@
 //! A call registers a *job* (its pieces, a cursor, an active-thread count)
 //! in the pool's slot table, then takes pieces through the cursor until
 //! none remain. It unregisters the job and waits for its active threads
-//! to finish. The same count enforces the call's thread budget. Workers,
+//! to finish. Workers,
 //! started once per process ([`crate::initialize_multithreaded`]), one per CPU beyond
 //! the first, serve the registered jobs round-robin, one piece at a time
 //! through the same cursor. Two callers
@@ -36,10 +36,8 @@
 //!
 //! A call arriving when callers already fill the CPUs hashes its input
 //! whole on its own thread. This check happens once per call; workers
-//! need only the job's cursor and thread budget for each piece. The fixed
-//! pool and the calling threads can overlap; the OS schedules them.
-//! A thread budget ([`crate::Threads::Budget`]) bounds the threads hashing
-//! one call's pieces at once, including its caller.
+//! need only the job's cursor for each piece. The fixed pool and the
+//! calling threads can overlap; the OS schedules them.
 //!
 //! # Kernels
 //!
@@ -63,7 +61,7 @@
 //! pool), and sleeps on a condition variable as soon as none is, or once
 //! it has found nothing to take for [`WORKER_IDLE`]. So every call
 //! meets sleeping workers, and a call wakes only as many as it can use
-//! (its pieces less one, within its thread budget): it wakes one itself,
+//! (its pieces less one): it wakes one itself,
 //! about 3 µs of the caller's time (a wake of all fifteen at once cost the
 //! caller 25-56 µs), and the first to wake wakes the rest. A woken worker
 //! arrives 15-45 µs later on a core whose clock the idle time lowered, so
@@ -177,28 +175,26 @@ fn next_piece_len(remaining: usize, threads: usize) -> usize {
     1 << (usize::BITS - 1 - want.leading_zeros())
 }
 
-/// Hash `input` over the machine's threads, at most `max_threads` of them
-/// holding a piece at once (the caller's included; at least 1).
+/// Hash `input` over the machine's threads.
 #[inline]
-pub(crate) fn hash(input: &[u8], max_threads: usize) -> Hash {
-    hash_with_key(input, crate::IV, 0, max_threads)
+pub(crate) fn hash(input: &[u8]) -> Hash {
+    hash_with_key(input, crate::IV, 0)
 }
 
 /// Hash `input` over the machine's threads in the mode of `key` and
 /// `flags` (IV and 0 for plain hashing).
 #[inline]
-pub(crate) fn hash_with_key(input: &[u8], key: &crate::CVWords, flags: u8, max_threads: usize) -> Hash {
-    assert!(max_threads >= 1, "a hash needs at least the calling thread");
+pub(crate) fn hash_with_key(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
     // The short path first and inline, so a small input costs what hash()
     // costs; everything the pool needs is behind the call below.
-    if input.len() < MIN_SPLIT_LEN || max_threads == 1 {
+    if input.len() < MIN_SPLIT_LEN {
         return crate::hash_serial(input, key, flags);
     }
-    hash_over_pool(input, key, flags, max_threads)
+    hash_over_pool(input, key, flags)
 }
 
 #[inline(never)]
-fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8, max_threads: usize) -> Hash {
+fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
     let pool = pool();
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let _caller = Caller(&pool.callers);
@@ -207,7 +203,7 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8, max_threads: us
     if callers >= pool.cpus {
         return crate::hash_serial(input, key, flags);
     }
-    let threads = pool.cpus.min(max_threads);
+    let threads = pool.cpus;
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
     let (pieces, own) = cut_with_prefix(input.len(), threads, prefix_for(&turn, input.len(), threads));
     let mut cvs = vec![ChainingValue::default(); pieces.len()];
@@ -219,7 +215,7 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8, max_threads: us
         counter: 0,
         flags,
     };
-    pool.run_job(work, pieces.len(), own, turn.platform(), max_threads);
+    pool.run_job(work, pieces.len(), own, turn.platform());
     drop(turn);
     merge_root(&pieces, &mut cvs, key, flags)
 }
@@ -271,8 +267,7 @@ pub(crate) fn lingering() -> bool {
 }
 
 /// The two child chaining values of the subtree `input` at chunk
-/// `counter`, over the machine's threads (at most `max_threads` holding a
-/// piece at once, the caller's included): what
+/// `counter`, over the machine's threads: what
 /// `compress_subtree_to_parent_node` returns for a whole subtree.
 /// Requires a power-of-two number of chunks, at least LINGER_SPLIT_LEN
 /// bytes (MIN_SPLIT_LEN when no Hasher lingers), and `counter` a multiple
@@ -282,23 +277,21 @@ pub(crate) fn subtree_children(
     key: &crate::CVWords,
     counter: u64,
     flags: u8,
-    max_threads: usize,
 ) -> [u8; 2 * crate::OUT_LEN] {
     assert!(input.len().is_power_of_two() && input.len() >= LINGER_SPLIT_LEN, "a whole subtree of at least LINGER_SPLIT_LEN bytes");
     assert_eq!(counter % (input.len() / CHUNK_LEN) as u64, 0, "a subtree starts at a multiple of its chunk count");
-    assert!(max_threads >= 1, "a hash needs at least the calling thread");
     let pool = pool();
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let _caller = Caller(&pool.callers);
-    let threads = pool.cpus.min(max_threads);
-    if callers >= pool.cpus || threads < 2 {
+    let threads = pool.cpus;
+    if callers >= pool.cpus {
         return crate::compress_subtree_to_parent_node::<crate::join::SerialJoin>(input, 0, key, counter, flags, pool_platform());
     }
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
     let (pieces, own) = cut_with_prefix(input.len(), threads, prefix_for(&turn, input.len(), threads));
     let mut cvs = vec![ChainingValue::default(); pieces.len()];
     let work = Work::Tree { input, pieces: &pieces, cvs: cvs.as_mut_ptr(), key: *key, counter, flags };
-    pool.run_job(work, pieces.len(), own, turn.platform(), max_threads);
+    pool.run_job(work, pieces.len(), own, turn.platform());
     drop(turn);
     let count = merge_to_children(&pieces, &mut cvs, key, flags);
     debug_assert_eq!(count, 2);
@@ -308,22 +301,20 @@ pub(crate) fn subtree_children(
     children
 }
 
-/// [`crate::hash_many`] over the machine's threads, at most `max_threads`
-/// holding a range at once (the caller's included; at least 1): below
-/// MIN_SPLIT_LEN of input, or with one message, on this thread.
+/// [`crate::hash_many`] over the machine's threads: below MIN_SPLIT_LEN
+/// of input, or with one message, on this thread.
 #[inline]
-pub(crate) fn hash_many(input: &[u8], message_len: usize, key: &crate::CVWords, flags: u8, outputs: &mut [[u8; crate::OUT_LEN]], max_threads: usize) {
-    assert!(max_threads >= 1, "a hash needs at least the calling thread");
+pub(crate) fn hash_many(input: &[u8], message_len: usize, key: &crate::CVWords, flags: u8, outputs: &mut [[u8; crate::OUT_LEN]]) {
     // The short path first and inline, so a small batch costs what
     // crate::hash_many costs; everything the pool needs is behind the call.
-    if max_threads == 1 || outputs.len() < 2 || input.len() < MIN_SPLIT_LEN {
+    if outputs.len() < 2 || input.len() < MIN_SPLIT_LEN {
         return crate::hash_many_serial(input, message_len, key, flags, outputs);
     }
-    hash_many_over_pool(input, message_len, key, flags, outputs, max_threads)
+    hash_many_over_pool(input, message_len, key, flags, outputs)
 }
 
 #[inline(never)]
-fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, flags: u8, outputs: &mut [[u8; crate::OUT_LEN]], max_threads: usize) {
+fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, flags: u8, outputs: &mut [[u8; crate::OUT_LEN]]) {
     let slot = crate::many::slot_len(message_len);
     assert_eq!(Some(input.len()), slot.checked_mul(outputs.len()), "input holds one slot of whole blocks per output");
     let pool = pool();
@@ -332,9 +323,9 @@ fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, f
     if callers >= pool.cpus {
         return crate::hash_many_serial(input, message_len, key, flags, outputs);
     }
-    let pieces = cut_messages(outputs.len(), slot, pool.cpus.min(max_threads));
+    let pieces = cut_messages(outputs.len(), slot, pool.cpus);
     let work = Work::Messages { input, message_len, key: *key, flags, pieces: &pieces, outputs: outputs.as_mut_ptr() };
-    pool.run_job(work, pieces.len(), 0, pool_platform(), max_threads);
+    pool.run_job(work, pieces.len(), 0, pool_platform());
 }
 
 /// Cut `count` messages in slots of `message_len` bytes into ranges for `threads`
@@ -377,12 +368,11 @@ struct Job<'a> {
     pieces: usize,
     /// The next piece to take.
     cursor: Line,
-    /// Thread reservations, including the caller while it takes pieces.
-    /// Failed reservations undo their increment before releasing the slot
-    /// reader. Accepted reservations stay within max_threads.
+    /// The threads holding the job, the caller's included while it takes
+    /// pieces: a worker counts itself in before taking a piece and out
+    /// after it (or after finding none), so the caller returns once it
+    /// reaches zero.
     active: Line,
-    /// Bound on accepted reservations.
-    max_threads: usize,
 }
 
 /// What a job's pieces are. Piece `i` writes output slot `i` (a chaining
@@ -433,20 +423,6 @@ impl std::ops::Deref for Line {
     type Target = AtomicUsize;
     fn deref(&self) -> &AtomicUsize {
         &self.0
-    }
-}
-
-/// Reserve one thread before taking a piece, staying within the cap.
-/// The caller releases it after the piece, or after finding no piece.
-/// `max_threads` is positive. Failed attempts undo their increment before
-/// returning; only successful attempts may hash a piece.
-fn reserve_thread(active: &AtomicUsize, max_threads: usize) -> bool {
-    debug_assert!(max_threads > 0);
-    if active.fetch_add(1, Ordering::SeqCst) < max_threads {
-        true
-    } else {
-        active.fetch_sub(1, Ordering::SeqCst);
-        false
     }
 }
 
@@ -779,18 +755,16 @@ impl Pool {
 
     /// Register `work` of `pieces` pieces, take pieces on this thread until
     /// none remain, and return once every piece is finished, on whichever
-    /// thread took it. At most `max_threads` threads hold a piece at once.
-    /// The caller first hashes pieces `0..own` on `own_platform`, back to
+    /// thread took it. The caller first hashes pieces `0..own` on `own_platform`, back to
     /// back (the SME2 thread's prefix; the workers' cursor starts after
     /// it), then takes pieces as the workers do.
-    fn run_job(&self, work: Work, pieces: usize, own: usize, own_platform: Platform, max_threads: usize) {
+    fn run_job(&self, work: Work, pieces: usize, own: usize, own_platform: Platform) {
         let job = Job {
             work,
             registered_ns: self.epoch.elapsed().as_nanos() as u64,
             pieces,
             cursor: Line(AtomicUsize::new(own)),
             active: Line(AtomicUsize::new(1)),
-            max_threads,
         };
         let slot = self.register(&job);
         for index in 0..own {
@@ -831,7 +805,7 @@ impl Pool {
             self.slots[i].job.compare_exchange(std::ptr::null_mut(), ptr, Ordering::SeqCst, Ordering::Relaxed).is_ok()
         })?;
         self.registered.fetch_add(1, Ordering::SeqCst);
-        self.wake_for(job.pieces.min(job.max_threads) - 1);
+        self.wake_for(job.pieces - 1);
         Some(slot)
     }
 
@@ -899,7 +873,7 @@ impl Pool {
     }
 
     /// A worker takes one piece from the first job, scanning the slots
-    /// from `start`, that has one and room under its thread cap.
+    /// from `start`, that has one.
     /// The pointer stays valid until
     /// this worker's `piece_done` (see the pool's comment).
     fn take_piece(&self, start: &mut usize, rank: usize) -> Option<(*const Job<'static>, usize)> {
@@ -921,15 +895,13 @@ impl Pool {
                 let job = unsafe { &*ptr };
                 if now.saturating_sub(job.registered_ns) >= rank as u64 * RANK_STAGGER_NS
                     && job.cursor.load(Ordering::SeqCst) < job.pieces
-                    && job.active.load(Ordering::SeqCst) < job.max_threads
                 {
-                    if reserve_thread(&job.active, job.max_threads) {
-                        let index = job.cursor.fetch_add(1, Ordering::SeqCst);
-                        if index < job.pieces {
-                            taken = Some(index);
-                        } else {
-                            job.active.fetch_sub(1, Ordering::SeqCst);
-                        }
+                    job.active.fetch_add(1, Ordering::SeqCst);
+                    let index = job.cursor.fetch_add(1, Ordering::SeqCst);
+                    if index < job.pieces {
+                        taken = Some(index);
+                    } else {
+                        job.active.fetch_sub(1, Ordering::SeqCst);
                     }
                 }
             }
@@ -952,7 +924,7 @@ impl Pool {
             // A worker that finds nothing for WORKER_IDLE sleeps even while
             // a job or a queue holds the pool: pushes and jobs wake as many
             // as they want awake, and a stream of short tasks needs a few
-            // (fifteen pollers on the queue's 64-byte messages cost energy,
+            // (fifteen pollers on the queue's 64-byte messages cost CPU time,
             // and in a VM the host time the busy threads need).
             let mut idle_since = std::time::Instant::now();
             while self.registered.load(Ordering::SeqCst) > 0 || self.lingering() || TASKS.queued.load(Ordering::SeqCst) > 0 {
@@ -1409,17 +1381,17 @@ mod test {
             input.len(),
         ] {
             let want = crate::hash(&input[..len]);
-            assert_eq!(want, hash(&input[..len], usize::MAX), "len = {len}");
+            assert_eq!(want, hash(&input[..len]), "len = {len}");
             let key = [42u8; KEY_LEN];
             assert_eq!(
                 crate::keyed_hash(&key, &input[..len]),
-                hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH, usize::MAX),
+                hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
                 "keyed len = {len}"
             );
             let context_key = hazmat::hash_derive_key_context("lanes test");
             assert_eq!(
                 *Hasher::new_from_context_key(&context_key).update(&input[..len]).finalize().as_bytes(),
-                *hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL, usize::MAX).as_bytes(),
+                *hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL).as_bytes(),
                 "derive len = {len}"
             );
         }
@@ -1525,55 +1497,6 @@ mod test {
         }
     }
 
-    /// All contenders reserve before any release. Exactly cap - 1
-    /// workers fit beside the caller, even when they race for the last place.
-    #[test]
-    #[cfg_attr(target_family = "wasm", ignore = "spawns threads, which this target lacks")]
-    fn test_thread_reservations_obey_cap() {
-        for cap in [1, 2, 3, 8, 17] {
-            let active = AtomicUsize::new(1);
-            let barrier = std::sync::Barrier::new(17);
-            std::thread::scope(|scope| {
-                for _ in 0..16 {
-                    let (active, barrier) = (&active, &barrier);
-                    scope.spawn(move || {
-                        for _ in 0..50 {
-                            barrier.wait();
-                            let reserved = reserve_thread(active, cap);
-                            barrier.wait();
-                            barrier.wait();
-                            if reserved {
-                                active.fetch_sub(1, Ordering::SeqCst);
-                            }
-                            barrier.wait();
-                        }
-                    });
-                }
-                for _ in 0..50 {
-                    barrier.wait();
-                    barrier.wait();
-                    assert_eq!(active.load(Ordering::SeqCst), cap);
-                    barrier.wait();
-                    barrier.wait();
-                    assert_eq!(active.load(Ordering::SeqCst), 1);
-                }
-            });
-        }
-    }
-
-    /// Every thread cap gives hash()'s result, and a cap of one takes the
-    /// serial path without touching the pool.
-    #[test]
-    fn test_budget_caps_agree() {
-        let mut input = vec![0u8; 4 * MIN_SPLIT_LEN + 77];
-        crate::test::paint_test_input(&mut input);
-        let want = crate::hash(&input);
-        assert_eq!(want, hash(&input, 1));
-        for cap in [2, 3, 4, 64, usize::MAX] {
-            assert_eq!(want, hash(&input, cap), "cap = {cap}");
-        }
-    }
-
     /// Many concurrent callers on one process: every result is right, and
     /// each call waits for its workers and leaves every result complete.
     #[test]
@@ -1585,13 +1508,12 @@ mod test {
         let input = &input[..];
         let barrier = std::sync::Barrier::new(32);
         std::thread::scope(|scope| {
-            for i in 0..32 {
-                let cap = [usize::MAX, 3, 2, 5][i % 4];
+            for _ in 0..32 {
                 let barrier = &barrier;
                 scope.spawn(move || {
                     barrier.wait();
                     for _ in 0..20 {
-                        assert_eq!(want, hash(input, cap));
+                        assert_eq!(want, hash(input));
                     }
                 });
             }
@@ -1617,10 +1539,10 @@ mod test {
         assert_eq!(cut_messages(100, crate::BLOCK_LEN, 16).len(), 1);
     }
 
-    /// Every budget gives the single-threaded digests, for one-block
+    /// The pool gives the single-threaded digests, for one-block
     /// messages, whole-block messages, and messages longer than a chunk.
     #[test]
-    fn test_hash_many_budgets_agree() {
+    fn test_hash_many_pool_agrees() {
         let mut buffer = vec![0u8; 4 * MIN_SPLIT_LEN];
         crate::test::paint_test_input(&mut buffer);
         for message_len in [crate::BLOCK_LEN, 256, 100, 3 * CHUNK_LEN + 5] {
@@ -1636,11 +1558,9 @@ mod test {
             for (i, digest) in want.iter().enumerate().take(200) {
                 assert_eq!(*digest, *crate::hash(&input[i * slot..][..message_len]).as_bytes(), "message {i}");
             }
-            for cap in [1, 2, 3, 4, 64, usize::MAX] {
-                let mut got = vec![[0u8; crate::OUT_LEN]; count];
-                hash_many(input, message_len, crate::IV, 0, &mut got, cap);
-                assert_eq!(want, got, "{message_len}-byte messages, cap {cap}");
-            }
+            let mut got = vec![[0u8; crate::OUT_LEN]; count];
+            hash_many(input, message_len, crate::IV, 0, &mut got);
+            assert_eq!(want, got, "{message_len}-byte messages");
         }
     }
 
@@ -1658,17 +1578,16 @@ mod test {
         let barrier = std::sync::Barrier::new(16);
         std::thread::scope(|scope| {
             for i in 0..16 {
-                let cap = [usize::MAX, 3, 2, 5][i % 4];
                 let barrier = &barrier;
                 scope.spawn(move || {
                     barrier.wait();
                     let mut got = vec![[0u8; crate::OUT_LEN]; count];
                     for _ in 0..10 {
                         if i % 2 == 0 {
-                            hash_many(buffer, crate::BLOCK_LEN, crate::IV, 0, &mut got, cap);
+                            hash_many(buffer, crate::BLOCK_LEN, crate::IV, 0, &mut got);
                             assert_eq!(want, &got[..]);
                         } else {
-                            assert_eq!(tree_want, hash(buffer, cap));
+                            assert_eq!(tree_want, hash(buffer));
                         }
                     }
                 });

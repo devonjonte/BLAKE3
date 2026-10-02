@@ -8,7 +8,7 @@
 //! the pool counts the process's affinity).
 #![cfg(target_os = "linux")]
 
-use blake3_servil::{Efficiency, FixedHandler, Hash, MessageHandler, Mode, PieceHandler, Queue};
+use blake3_servil::{FixedHandler, Hash, MessageHandler, Mode, PieceHandler, Queue};
 use std::sync::mpsc;
 
 unsafe extern "C" {
@@ -68,7 +68,7 @@ fn every_queue_completes_on_one_cpu() {
 
     // Messages short (gathered into tasks elsewhere) and long (subtree tasks).
     let (tx, rx) = mpsc::channel();
-    let queue = Queue::messages(Mode::Hash, Efficiency::Time, Messages(tx));
+    let queue = Queue::messages(Mode::Hash, Messages(tx));
     let lens = [0, 64, 1000, 16 << 10, 64 << 10, (1 << 20) + 1];
     for &len in &lens {
         queue.submit(input(len));
@@ -81,7 +81,7 @@ fn every_queue_completes_on_one_cpu() {
 
     // One long message in 64 KiB pieces.
     let (tx, rx) = mpsc::channel();
-    let queue = Queue::pieces(Mode::Hash, Efficiency::Time, Pieces(tx));
+    let queue = Queue::pieces(Mode::Hash, Pieces(tx));
     let message = input(1 << 20);
     for piece in message.chunks(64 << 10) {
         queue.submit(piece.to_vec());
@@ -92,7 +92,7 @@ fn every_queue_completes_on_one_cpu() {
 
     // Batches of 64-byte messages, small (gathered) and large (tasks of their own).
     let (tx, rx) = mpsc::channel();
-    let queue = Queue::fixed(64, Mode::Hash, Efficiency::Time, Fixed(tx));
+    let queue = Queue::fixed(64, Mode::Hash, Fixed(tx));
     for count in [16, 4096] {
         let buffer = input(64 * count);
         queue.submit(buffer.clone(), vec![[0u8; 32]; count]);

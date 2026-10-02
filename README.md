@@ -23,8 +23,8 @@ crate, and adds:
   keeping the cores ready between pieces that come in swift succession;
 - `Queue`, which hashes a stream of inputs behind your program: you hand it your buffers and
   move on, and each comes back hashed through a handler you write;
-- `hash_with` and `hash_many_with`, which take the mode (plain, keyed, or key derivation) and
-  the number of threads as arguments.
+- a `_with` form of each one-shot call (`hash_with`, `hash_multithreaded_with`, `hash_many_with`,
+  `hash_many_multithreaded_with`), which takes the mode: plain, keyed, or key derivation.
 
 To use it, add
 

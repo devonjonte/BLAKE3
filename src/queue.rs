@@ -26,9 +26,9 @@
 //!   replays `Hasher::update` with its results (and for a message
 //!   finalizes), and calls the handler. Entries without tasks it hashes
 //!   itself: pieces shorter than `TASK_MIN` (their bytes join the message
-//!   in order), and everything with `Efficiency::Energy` or in a pool
-//!   with no thread to take tasks (one CPU to the process, no SME2),
-//!   which the delivery thread hashes alone. The submitters and the delivery thread
+//!   in order), and everything in a pool with no thread to take tasks
+//!   (one CPU to the process, no SME2), which the delivery thread hashes
+//!   alone. The submitters and the delivery thread
 //!   share no lock on these paths: delivered slots go back through
 //!   `returned`, and the queue's hold passes by a store-then-recheck
 //!   handshake (`Inner::activate`, the end of `deliver_with`). While any
@@ -47,15 +47,6 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-
-/// What a [`Queue`] spends to hash: time or energy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Efficiency {
-    /// The least time: every thread that pays, as [`hash_multithreaded`](crate::hash_multithreaded).
-    Time,
-    /// The least energy: one thread, as [`hash`](crate::hash).
-    Energy,
-}
 
 /// The handler of a [`Queue::messages`]: one message per buffer, of any
 /// length. See [`Queue`] for the rules every handler follows.
@@ -101,10 +92,10 @@ pub mod shape {
     pub struct Fixed;
 }
 
-/// A stream of inputs, hashed behind the program. Built for efficiency
-/// of throughput (see [Which call to use](crate#which-call-to-use)):
-/// the most bytes or messages hashed per second, or per joule, chosen per
-/// queue ([`Efficiency`]). Each submission comes back after a handover, so
+/// A stream of inputs, hashed behind the program on every thread that
+/// pays. Built for throughput (see [Which call to
+/// use](crate#which-call-to-use)): the most bytes or messages hashed per
+/// second. Each submission comes back after a handover, so
 /// a single input takes longer than [`hash`](crate::hash) takes; for the
 /// lowest latency per input, call the one-shot functions. The queue's
 /// throughput is the hashing's when the program keeps enough in flight to
@@ -149,7 +140,7 @@ pub mod shape {
 /// made:
 ///
 /// ```
-/// use blake3_servil::{Efficiency, Hash, MessageHandler, Mode, Queue};
+/// use blake3_servil::{Hash, MessageHandler, Mode, Queue};
 /// use std::sync::mpsc;
 ///
 /// struct Digests(mpsc::SyncSender<(Vec<u8>, Hash)>);
@@ -164,7 +155,7 @@ pub mod shape {
 /// # if cfg!(target_family = "wasm") { return; } // a queue needs threads
 /// let in_flight = 2;
 /// let (sender, results) = mpsc::sync_channel(in_flight);
-/// let queue = Queue::messages(Mode::Hash, Efficiency::Time, Digests(sender));
+/// let queue = Queue::messages(Mode::Hash, Digests(sender));
 /// queue.submit(b"foo".to_vec());
 /// queue.submit(b"bar".to_vec());
 /// assert_eq!(results.recv().unwrap(), (b"foo".to_vec(), blake3_servil::hash(b"foo")));
@@ -209,8 +200,8 @@ struct Inner<H, I, S> {
     key: CVWords,
     flags: u8,
     /// Whether the pool's threads hash this queue's entries (as tasks):
-    /// with `Efficiency::Time` and a pool thread to take them; otherwise
-    /// the delivery thread hashes each entry.
+    /// when the pool has a thread to take them; otherwise the delivery
+    /// thread hashes each entry.
     tasks: bool,
     /// The fixed-length queue's message length.
     message_len: usize,
@@ -377,12 +368,12 @@ const TASK_MIN: usize = crate::SME2_SIZED_LEN;
 const BATCH_TASK_MIN: usize = crate::lanes::TASK_LEN;
 
 impl<H: Send + 'static, S: 'static> Queue<H, S> {
-    fn new<I: Send + 'static>(mode: Mode, efficiency: Efficiency, handler: H, message_len: usize) -> Self
+    fn new<I: Send + 'static>(mode: Mode, handler: H, message_len: usize) -> Self
     where
         Inner<H, I, S>: Deliver,
     {
         let (key, flags) = mode.key_and_flags();
-        let tasks = efficiency == Efficiency::Time && crate::lanes::takes_tasks();
+        let tasks = crate::lanes::takes_tasks();
         let mut returned = Slots(Vec::new());
         let mut state = State { blocks: Vec::new(), free: Slots(Vec::new()), tail: core::ptr::null_mut(), tasks: Vec::new(), most: 0, plan: Default::default(), open: None, tasks_room: tasks.then_some(0) };
         state.add_block(&mut returned);
@@ -667,8 +658,8 @@ impl<H: FixedHandler> Deliver for Inner<H, (H::Buffer, H::Digests), shape::Fixed
 impl<H: MessageHandler> Queue<H, shape::Messages> {
     /// A queue of messages of any length, one per buffer, each digest in
     /// `mode` delivered to `handler.hashed` with its buffer.
-    pub fn messages(mode: Mode, efficiency: Efficiency, handler: H) -> Self {
-        Self::new::<H::Buffer>(mode, efficiency, handler, 0)
+    pub fn messages(mode: Mode, handler: H) -> Self {
+        Self::new::<H::Buffer>(mode, handler, 0)
     }
 
     /// Hash `buffer`'s bytes as one message; returns at once.
@@ -693,8 +684,8 @@ impl<H: PieceHandler> Queue<H, shape::Pieces> {
     /// `handler.piece_done`, and after [`finish`](Self::finish) the
     /// message's digest in `mode` to `handler.finished`. The next piece
     /// after `finish` starts a new message.
-    pub fn pieces(mode: Mode, efficiency: Efficiency, handler: H) -> Self {
-        Self::new::<PieceItem<H::Buffer>>(mode, efficiency, handler, 0)
+    pub fn pieces(mode: Mode, handler: H) -> Self {
+        Self::new::<PieceItem<H::Buffer>>(mode, handler, 0)
     }
 
     /// Append `piece`'s bytes to the message; returns at once.
@@ -725,8 +716,8 @@ impl<H: FixedHandler> Queue<H, shape::Fixed> {
     /// out as [`hash_many`](crate::hash_many) takes them; their digests in
     /// `mode` come back to `handler.hashed` with the buffer, in the space
     /// the program submitted beside it.
-    pub fn fixed(message_len: usize, mode: Mode, efficiency: Efficiency, handler: H) -> Self {
-        Self::new::<(H::Buffer, H::Digests)>(mode, efficiency, handler, message_len)
+    pub fn fixed(message_len: usize, mode: Mode, handler: H) -> Self {
+        Self::new::<(H::Buffer, H::Digests)>(mode, handler, message_len)
     }
 
     /// Hash the messages in `buffer` into `digests`, one per message: the
@@ -849,14 +840,14 @@ impl Delivery {
 mod test {
     use crate::lanes::Task;
 
-    /// A few inputs through every shape of queue, each efficiency, against
+    /// A few inputs through every shape of queue against
     /// hash(): small enough for Miri (the CI's smoketest runs it), which
     /// checks the chain's links, the slots' hand-over, and the delivery
     /// thread's reads for data races.
     #[test]
     #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
     fn test_miri_queue_round_trips() {
-        use crate::{Efficiency, Hash, MessageHandler, Mode, PieceHandler, Queue};
+        use crate::{Hash, MessageHandler, Mode, PieceHandler, Queue};
         use std::sync::mpsc;
         struct Back(mpsc::Sender<(std::vec::Vec<u8>, Hash)>);
         impl MessageHandler for Back {
@@ -883,9 +874,9 @@ mod test {
                 self.0.send(Some(hash)).unwrap();
             }
         }
-        for efficiency in [Efficiency::Time, Efficiency::Energy] {
+        {
             let (sender, back) = mpsc::channel();
-            let queue = Queue::messages(Mode::Hash, efficiency, Back(sender));
+            let queue = Queue::messages(Mode::Hash, Back(sender));
             // 40 KiB: whole subtrees as tasks of the pool's threads.
             let inputs: std::vec::Vec<std::vec::Vec<u8>> = (0..7).map(|i| std::vec![i as u8; [0, 1, 64, 65, 1024, 1500, 40 << 10][i]]).collect();
             for input in &inputs {
@@ -897,7 +888,7 @@ mod test {
                 assert_eq!(hash, crate::hash(input));
             }
             let (sender, back) = mpsc::channel();
-            let queue = Queue::pieces(Mode::Hash, efficiency, Pieces(sender));
+            let queue = Queue::pieces(Mode::Hash, Pieces(sender));
             // Pieces of 700 B (hashed at delivery) and of 20 KiB (tasks).
             for (len, piece) in [(3000usize, 700usize), (60 << 10, 20 << 10)] {
                 let message = std::vec![7u8; len];
@@ -916,7 +907,7 @@ mod test {
                 assert_eq!(hash, crate::hash(&message));
             }
             let (sender, back) = mpsc::channel();
-            let queue = Queue::fixed(64, Mode::Hash, efficiency, Fixed(sender));
+            let queue = Queue::fixed(64, Mode::Hash, Fixed(sender));
             let batch: std::vec::Vec<u8> = (0..20 * 64).map(|i| (i % 251) as u8).collect();
             for _ in 0..3 {
                 queue.submit(batch.clone(), std::vec![[0u8; 32]; 20]);

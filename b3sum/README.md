@@ -15,7 +15,7 @@ Options:
       --derive-key <CONTEXT>  Use the key derivation mode, with the given context string
   -l, --length <LEN>          The number of output bytes, before hex encoding [default: 32]
       --seek <SEEK>           The starting output byte offset, before hex encoding [default: 0]
-      --num-threads <NUM>     The maximum number of threads to use
+      --num-threads <NUM>     Ignored, with a warning: b3sum chooses its threads itself
       --no-mmap               Disable memory mapping
       --no-names              Omit filenames in the output
       --raw                   Write raw output bytes to stdout, rather than hex

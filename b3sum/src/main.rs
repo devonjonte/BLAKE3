@@ -50,10 +50,7 @@ struct Inner {
     #[arg(long, default_value_t = 0, value_name("SEEK"))]
     seek: u64,
 
-    /// The maximum number of threads to use
-    ///
-    /// By default, this is the number of logical cores. If this flag is
-    /// omitted, or if its value is 0, RAYON_NUM_THREADS is also respected.
+    /// Ignored, with a warning: b3sum chooses its threads itself
     #[arg(long, value_name("NUM"))]
     num_threads: Option<usize>,
 
@@ -518,11 +515,10 @@ fn check_one_checkfile(path: &Path, args: &Args, files_failed: &mut u64) -> anyh
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse()?;
-    let mut thread_pool_builder = rayon_core::ThreadPoolBuilder::new();
-    if let Some(num_threads) = args.num_threads() {
-        thread_pool_builder = thread_pool_builder.num_threads(num_threads);
+    if args.num_threads().is_some() {
+        eprintln!("{NAME}: warning: --num-threads is no longer supported and is ignored; b3sum chooses its threads itself");
     }
-    let thread_pool = thread_pool_builder.build()?;
+    let thread_pool = rayon_core::ThreadPoolBuilder::new().build()?;
     thread_pool.install(|| {
         let mut files_failed = 0u64;
         // Note that file_args automatically includes `-` if nothing is given.
