@@ -1463,6 +1463,20 @@ sizes, mt, Hasher in 64 KiB pieces, and SHA-256 ring level.
 perf_regress on the Mac (job 994): no regression. Not carried yet: the
 pool's SME2 prefix (lanes, `ahead` 0) and the queue's tasks.
 
+## servil 3a8327f against b132f8c, whole (October 2, 2026, jobs 1004-1008)
+
+A full Mac record of the promoted servil (job 1004, `--all`, mains,
+quiet), compared cell by cell with job 968 (b132f8c): the one-shot gains
+above; every cell slower by more than 5% at its fast speed is a batch,
+after other work or after idling (16 messages after other work 28.6 ->
+37.3 ns/msg), or the queue's owned batches (1024 x1.11, 16384 x1.21), on
+a path no change touched. An A/B of those cells, two runs a side in
+mirrored order (jobs 1005-1008): after other work both ways, x0.63 to
+x1.28, st and mt (the same code below the split) apart, which is layout
+and process luck (NOTES above, "perf_regress on the Mac"); owned batches
+x0.96-1.06 and lent x0.99-1.00, each side against itself 5-9% apart
+(owned 1024 x1.055 old/old, x1.083 new/new). No regression.
+
 ## Batch tails, measured again at real gaps (October 2, 2026, job 1001)
 
 Leftovers of 1-4 past whole groups run on NEON and cost far more than
