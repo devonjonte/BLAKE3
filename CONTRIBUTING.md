@@ -39,8 +39,14 @@ cargo test --release --lib
 cargo test --release --lib --features no_sme2
 cargo test --release --lib --features pure
 cargo test --release --doc
+cargo test --release --test '*'     # the planned API and the queue
 cargo test --release --manifest-path test_vectors/Cargo.toml
 ```
+
+CI (`.github/workflows/ci.yml`) runs the suites in debug and release on
+Linux x86-64 and arm64, macOS, Windows, wasm32, and big-endian and 32-bit
+targets under qemu, for `servil`, `candidate/*` branches, and pull
+requests.
 
 The NEON hybrid assembly is generated and committed. Edit
 `tools/gen_neon_hybrid.py`, then run
