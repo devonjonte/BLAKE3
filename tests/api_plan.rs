@@ -479,5 +479,14 @@ fn a_panicking_handler_aborts_the_process() {
         .status()
         .unwrap();
     use std::os::unix::process::ExitStatusExt;
-    assert_eq!(status.signal(), Some(6), "the child aborted (SIGABRT), status {status:?}");
+    // Under a target's runner (cross runs its targets on qemu, named by a
+    // CARGO_TARGET_<triple>_RUNNER variable), the child's abort arrives as
+    // the runner's own exit status; the child still must not have run on
+    // to its exit(0).
+    let emulated = std::env::vars().any(|(name, value)| name.starts_with("CARGO_TARGET_") && name.ends_with("_RUNNER") && !value.is_empty());
+    if emulated {
+        assert!(!status.success(), "the child ended without success under emulation, status {status:?}");
+    } else {
+        assert_eq!(status.signal(), Some(6), "the child aborted (SIGABRT), status {status:?}");
+    }
 }
