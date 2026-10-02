@@ -210,7 +210,13 @@ fn mapped_if_cached(file: &File) -> Option<memmap2::Mmap> {
     // Sound: `map` covers `len` bytes from a page boundary, and `resident`
     // holds one byte per page.
     let rc = unsafe { libc::mincore(map.as_ptr() as *mut libc::c_void, len, resident.as_mut_ptr().cast()) };
-    (rc == 0 && resident.iter().all(|&page| page & 1 == 1)).then_some(map)
+    if rc != 0 || resident.iter().any(|&page| page & 1 == 0) {
+        return None;
+    }
+    // Resident pages still fault into the mapping one at a time as the
+    // threads first touch them; the hint maps them ahead.
+    let _ = map.advise(memmap2::Advice::WillNeed);
+    Some(map)
 }
 
 /// The shortest file mapped when it is in the page cache: mapping beats
