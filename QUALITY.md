@@ -24,7 +24,8 @@ Rust, and its x86 kernels, and adds code of its own:
   `tools/gen_neon_hybrid.py` and `tools/gen_sme2_hybrid.py`;
 - a pool of worker threads for multithreaded hashing (`src/lanes.rs`);
 - batches of many messages in one call (`hash_many`, `src/many.rs`);
-- `Stream`, which hashes behind the caller (`src/stream.rs`).
+- the queue, which hashes the program's buffers behind it and hands
+  each back to a handler (`Queue`, `src/queue.rs`).
 
 Everything below aims at this new code. Much of it is `unsafe`: assembly,
 pointer tables, uninitialised scratch buffers, and threads that share
@@ -57,9 +58,6 @@ among them:
 - the same suites in the builds without SME2 (`no_sme2`) and without any
   SIMD (`pure`).
 
-**The benchmark checks too.** bench-hashes checks every digest it times,
-outside the timed intervals, against its frozen answers.
-
 **Every process checks itself before its first hash.** The tests prove
 the code on our machines; a user's machine may have a compiler that
 miscompiles, a linker that mislinks, or a CPU with a faulty vector or
@@ -91,6 +89,16 @@ unrolled kernel code.
   deliberate heap overflow in a small program was caught.
 - **ThreadSanitizer** over the pool, stream, and batch tests, 30 runs:
   clean. A deliberate data race in a control program was caught.
+- **Natively on the M4 Max** (October 2, 2026; probe/mac-debug-tests,
+  jobs 996-998): every suite in debug builds (overflow checks and debug
+  assertions over the SME2 paths), AddressSanitizer over the library
+  tests, the planned API's tests, and the queue's allocation test, and
+  ThreadSanitizer over the pool, unsafe-path, and batch tests and the
+  planned API's (the queue among them; std itself uninstrumented): all
+  clean.
+- **CI on other targets** (GitHub Actions, every branch): the suites in
+  debug and release on Linux x86-64 and arm64, macOS, Windows, wasm32
+  (wasmtime), and big-endian and 32-bit targets under qemu.
 - **Miri**, which interprets Rust and stops at undefined behaviour, over
   small versions of the unsafe paths (`test::unsafe_paths`: batches, the
   pool with two callers, a stream past one buffer) in the `pure` build
@@ -159,7 +167,7 @@ measures the fork against the official crate and others on your machine.
 
 ## The bugs these steps found
 
-Four, all fixed; none reached the results of a documented function. Each entry
+Five, all fixed; none reached the results of a documented function. Each entry
 names the commit that introduced the code and the one that fixed it, in
 [github.com/johnservil/BLAKE3](https://github.com/johnservil/BLAKE3).
 
@@ -200,6 +208,16 @@ names the commit that introduced the code and the one that fixed it, in
    state cannot occur once a buffer has been handed over. Introduced in
    59ad5c1, found by coverage; fixed in d395f9e: the branch is now a
    fail-stop `expect`.
+
+5. **On macOS a queue could allocate after warm-up** (`src/lanes.rs`).
+   The queue promises no allocation once a program cycling its buffers
+   has warmed it up. Apple's builds of the standard library allocate a
+   `Mutex` or `Condvar` at its first use, and the pool's threads first
+   slept, using theirs, only after `initialize_multithreaded` returned:
+   CI's macOS run of the allocation test counted one allocation, and a
+   probe with a backtrace per allocation named the SME2 thread's first
+   sleep (64 and 48 bytes). Fixed in f75e6a6: the pool makes every one
+   of them while it starts.
 
 ## Formal verification: what we tried and considered
 
@@ -243,6 +261,5 @@ names the commit that introduced the code and the one that fixed it, in
 
 No person has reviewed the code line by line, and nobody has audited it.
 The test suites have run on an Apple M4 Max, under macOS and in a
-Debian 12 AArch64 VM on it (whose SME2 unit the VM exposes); the
-sanitizers, Miri, and Kani in the VM. The fork compiles for x86-64 but
-has not been tested on x86-64 hardware yet.
+Debian 12 AArch64 VM on it (whose SME2 unit the VM exposes), and on
+CI's hosted machines; the sanitizers on both, Miri and Kani in the VM.
