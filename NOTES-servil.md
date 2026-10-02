@@ -1424,6 +1424,26 @@ Not prefetched, and so still cold after other work: 1 KiB and below
 plans: the batch of 4 after other work still costs more per message
 than the batch of 2), and the Rust code around the kernels.
 
+## The flat walk prefetches the next subtree (October 2, 2026, jobs 990-994)
+
+servil st's one-shot rate fell as the input left the caches (record
+968: 8 MiB 0.155 ns/B, 64 MiB 0.171, 128 MiB 0.176; lent 64 MiB 0.190):
+the SME unit's loads do not draw the next lines in as the core's do. The
+tree walk now carries how many bytes of the caller's input follow each
+subtree (`ahead` in compress_subtree_wide and the flat walks; Hasher::
+update passes the rest of its input), and each flat walk first issues
+PRFM PLDL2KEEP over as many of them as it hashes: the next subtree's
+bytes arrive while this one hashes. Nothing past the caller's input
+(prefetching the bytes after a lone 1 MiB input cost it 10% in the VM).
+
+Mac A/B, fe50659 against f75e6a6 (jobs 990-993, mains; 992 met a burst
+of other load, and the quiet runs alone agree): servil st from 1 to 128
+MiB at 0.152-0.156 ns/B; 32 MiB x0.96, 64 MiB x0.91, 128 MiB x0.89;
+lent 16 MiB x0.97, 64 MiB x0.90 (shared alike at the fast speed); in-cache
+sizes, mt, Hasher in 64 KiB pieces, and SHA-256 ring level.
+perf_regress on the Mac (job 994): no regression. Not carried yet: the
+pool's SME2 prefix (lanes, `ahead` 0) and the queue's tasks.
+
 ## The split below 512 KiB, measured again (October 1, 2026; jobs 841-851)
 
 Zooko asked whether `hash_multithreaded` should use threads below 512
