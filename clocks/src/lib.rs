@@ -8,11 +8,13 @@
 //!   over-count, when the thread is interrupted, which a median absorbs.
 //! - **The thread's counts per core kind** ([`Counts`]): cycles,
 //!   instructions, and time on performance and efficiency cores, from
-//!   Apple's `thread_selfcounts(THSC_TIME_CPI_PER_PERF_LEVEL)`. Cycles
-//!   over time is the clock the thread ran at, lower where the core waited
-//!   on the SME unit; the split says which kind of core ran it. Other
-//!   platforms give none ([`Counts::read`] returns `None`), and results
-//!   say so.
+//!   Apple's `thread_selfcounts(THSC_TIME_CPI_PER_PERF_LEVEL)`, or optional
+//!   Linux x86 hybrid `cpu_core`/`cpu_atom` perf PMU groups. Linux records
+//!   user-space cycles/instructions and PMU running time (including kernel
+//!   time while scheduled); their ratio estimates the clock on long batches.
+//!   Counter-read overhead matters on short intervals. The split records
+//!   the core kind. Unsupported PMUs/permissions/platforms return `None`.
+//!   Counts and wall time stay unscaled.
 //!
 //! Thread CPU time (`CLOCK_THREAD_CPUTIME_ID`) is left out: at 1 ms samples
 //! it agrees with the counter and adds an accounting layer to reason about;
@@ -46,6 +48,8 @@ use std::time::Instant;
 pub mod load;
 pub mod other_code;
 pub mod speeds;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod linux_counts;
 
 /// The wall clock, as reports name it.
 #[cfg(target_vendor = "apple")]
@@ -107,9 +111,10 @@ impl Counts {
         Counts { p: level(self.p, other.p), e: level(self.e, other.e) }
     }
 
-    /// Cycles per microsecond of the thread's time on cores, rounded: the
-    /// clock it ran at in MHz (lower where it waited on the SME unit).
-    /// Requires some time counted.
+    /// Cycles per microsecond of recorded time, rounded. On Apple this is
+    /// the thread's CPU time per core kind; Linux uses PMU running time with
+    /// user-space cycles, so the ratio estimates MHz on long batches and
+    /// includes counter-read/kernel overhead. Requires some time counted.
     pub fn mhz(&self) -> u64 {
         let ns = self.p.time_ns + self.e.time_ns;
         assert!(ns > 0, "a clock rate needs some time counted");
@@ -147,7 +152,8 @@ impl Batch {
                     96.. => "E".to_owned(),
                     e => format!("{e}% E"),
                 };
-                format!("{} MHz {kind}", c.mhz())
+                let unit = if cfg!(all(target_os = "linux", target_arch = "x86_64")) { "approx user-rate MHz" } else { "MHz" };
+                format!("{} {unit} {kind}", c.mhz())
             }
             _ => "no cycle counts".to_owned(),
         };
@@ -435,6 +441,9 @@ mod imp {
 #[cfg(not(target_vendor = "apple"))]
 mod imp {
     pub fn read() -> Option<super::Counts> {
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        return super::linux_counts::counts();
+        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
         None
     }
 
