@@ -166,6 +166,15 @@ pub fn measure(batches: usize, batch_ns: u64, mut f: impl FnMut()) -> Vec<Batch>
         f();
         calls += 1;
     }
+    measure_calls(batches, calls, f)
+}
+
+/// `batches` batches of exactly `calls` calls of `f`, with the same clocks,
+/// counts and load observation as [`measure`]. The caller chooses and warms
+/// the workload; this function performs no calibration or warm-up calls.
+/// Fixed work lets a comparison preserve its logical work on both sides.
+pub fn measure_calls(batches: usize, calls: u64, mut f: impl FnMut()) -> Vec<Batch> {
+    assert!(batches > 0 && calls > 0, "a measurement takes positive batches and calls");
     (0..batches)
         .map(|_| {
             load::tick();
@@ -451,6 +460,23 @@ mod tests {
             assert!(b.show().contains("ns/call"));
         }
     }
+
+    #[test]
+    fn fixed_work_counts_exactly_without_calibration_calls() {
+        let mut completed = 0;
+        let batches = measure_calls(3, 7, || { completed += 1; std::hint::black_box(completed); });
+        assert_eq!(completed, 21);
+        assert_eq!(batches.len(), 3);
+        assert!(batches.iter().all(|b| b.calls == 7 && b.wall_ns > 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "positive batches and calls")]
+    fn fixed_work_requires_calls() { measure_calls(3, 0, || {}); }
+
+    #[test]
+    #[should_panic(expected = "positive batches and calls")]
+    fn fixed_work_requires_batches() { measure_calls(0, 3, || {}); }
 
     #[test]
     fn counts_subtract_and_rate() {
