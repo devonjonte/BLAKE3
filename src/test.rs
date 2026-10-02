@@ -1422,4 +1422,25 @@ mod guard_pages {
             }
         }
     }
+
+    #[test]
+    fn test_xof_inside_guard_pages() {
+        // Extended output written flush against a guard page after the
+        // buffer, then before it: the wide xof_many (SME2: groups of
+        // sixteen blocks) writes no byte outside it, from aligned and
+        // unaligned positions.
+        let mut reference = vec![0u8; 5 * 1024 + 200];
+        crate::Hasher::new().update(b"guarded").finalize_xof().fill(&mut reference);
+        for len in [1, 64, 1023, 1024, 1025, 1088, 2048, 3000, 4096, 5 * 1024] {
+            for skip in [0usize, 64, 37] {
+                for at_end in [true, false] {
+                    let mut out = Guarded::new(len, at_end);
+                    let mut reader = crate::Hasher::new().update(b"guarded").finalize_xof();
+                    reader.set_position(skip as u64);
+                    reader.fill(out.bytes());
+                    assert_eq!(out.bytes(), &reference[skip..][..len], "{len} B from {skip}, at end {at_end}");
+                }
+            }
+        }
+    }
 }
