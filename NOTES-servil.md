@@ -1509,6 +1509,13 @@ and process luck (NOTES above, "perf_regress on the Mac"); owned batches
 x0.96-1.06 and lent x0.99-1.00, each side against itself 5-9% apart
 (owned 1024 x1.055 old/old, x1.083 new/new). No regression.
 
+The VM, the same pair (servil b132f8c against 1d2b652, the default
+contenders' run, two a side, A B B A, quiet): batches after other work
+and after idling mostly faster (x0.55-0.90), the queue's solo batches
+x1.11-1.21 slower and its shared x0.73-0.89 faster, each side against
+itself up to 22% apart in the same cells (old/old 4096 x1.219, new/new
+x1.235): the VM's own spread, no regression shown.
+
 ## Batch tails, measured again at real gaps (October 2, 2026, job 1001)
 
 Leftovers of 1-4 past whole groups run on NEON and cost far more than
