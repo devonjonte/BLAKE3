@@ -102,14 +102,15 @@ unrolled kernel code.
   debug and release on Linux x86-64 and arm64, macOS, Windows, wasm32
   (wasmtime), and big-endian and 32-bit targets under qemu.
 - **Miri**, which interprets Rust and stops at undefined behaviour, over
-  small versions of the unsafe paths (`test::unsafe_paths`: batches, the
-  pool with two callers, a stream past one buffer; and since October 2,
-  `queue::test::test_miri_queue_round_trips`, every shape of queue, in
-  CI's Miri step) in the `pure` build
-  (Miri cannot run assembly or SIMD intrinsics): all four tests pass, in
-  41 minutes. Miri then reports that the pool's worker threads were still
-  running when the program ended; they live for the whole process by
-  design, and `-Zmiri-ignore-leaks` accepts that.
+  small versions of the unsafe paths in the `pure` build (Miri cannot run
+  assembly or SIMD intrinsics): `test::unsafe_paths` (batches, the pool
+  with two callers; 13 minutes in the VM) and, since October 2,
+  `queue::test::test_miri_queue_round_trips` (every shape of queue, its
+  short messages gathered and its long ones as the pool's tasks; 5
+  minutes), which CI's Miri step runs: all pass, on six scheduling seeds
+  for the queue. It found bug 7 below. The pool's and the queue's
+  threads live for the whole process by design, and `-Zmiri-ignore-leaks`
+  accepts that.
 - **Coverage.** LLVM's source coverage over the library tests reaches
   93% of lines. The unexercised paths it showed became new tests (the
   guard-page tests among them). The rest is code for platforms the test
@@ -155,7 +156,7 @@ The sanitizers and Miri need nightly Rust
 ```sh
 RUSTFLAGS="-Zsanitizer=address" cargo +nightly test -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
 RUSTFLAGS="-Zsanitizer=thread" cargo +nightly test -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
-MIRIFLAGS="-Zmiri-num-cpus=4 -Zmiri-ignore-leaks" cargo +nightly miri test --features pure --lib -- unsafe_paths test_miri_smoketest
+MIRIFLAGS="-Zmiri-num-cpus=4 -Zmiri-ignore-leaks" cargo +nightly miri test --features pure --lib -- unsafe_paths miri
 ```
 
 (On macOS, use the target `aarch64-apple-darwin`.) The proofs need Kani
