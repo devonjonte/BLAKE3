@@ -11,23 +11,27 @@ pub(crate) fn copy_wide(mut reader: impl io::Read, hasher: &mut crate::Hasher) -
     // A reader that fills 64 KiB has more: the rest goes through a 1 MiB
     // buffer, filled before each update. On SME2, 1 MiB pieces hash at the
     // one-shot rate, where 64 KiB pieces each meet the SME unit's slow
-    // state after the reads between them (M4 Max, Hasher::update 0.204
-    // ns/B in 64 KiB pieces, 0.155 in 1 MiB; NOTES-servil.md).
+    // state after the reads between them (M4 Max, files of 8-64 MiB 23-33%
+    // less time; NOTES-servil.md, "update_reader through a 1 MiB buffer").
     // The first 64 KiB lead the 1 MiB buffer, so its updates stay whole
-    // 1 MiB subtrees (a Hasher's subtrees align to their own size).
+    // 1 MiB subtrees (a Hasher's subtrees align to their own size). Every
+    // byte read is hashed before an error returns: a caller that retries
+    // after one (WouldBlock, say) loses nothing.
     let mut small = [0; 65536];
-    let n = fill(&mut reader, &mut small)?;
-    if n < small.len() {
+    let (n, read) = fill(&mut reader, &mut small);
+    if n < small.len() || read.is_err() {
         hasher.update(&small[..n]);
-        return Ok(n as u64);
+        return read.map(|()| n as u64);
     }
     let mut buffer = std::vec![0; 1 << 20];
     buffer[..n].copy_from_slice(&small);
     let (mut start, mut total) = (n, 0u64);
     loop {
-        let n = start + fill(&mut reader, &mut buffer[start..])?;
+        let (filled, read) = fill(&mut reader, &mut buffer[start..]);
+        let n = start + filled;
         hasher.update(&buffer[..n]);
         total += n as u64;
+        read?;
         if n < buffer.len() {
             return Ok(total);
         }
@@ -35,8 +39,9 @@ pub(crate) fn copy_wide(mut reader: impl io::Read, hasher: &mut crate::Hasher) -
     }
 }
 
-/// Read into `buffer` until it is full or the reader ends; the bytes read.
-fn fill(reader: &mut impl io::Read, buffer: &mut [u8]) -> io::Result<usize> {
+/// Read into `buffer` until it is full, the reader ends, or it fails: the
+/// bytes read, and the error if it failed.
+fn fill(reader: &mut impl io::Read, buffer: &mut [u8]) -> (usize, io::Result<()>) {
     let mut filled = 0;
     while filled < buffer.len() {
         match reader.read(&mut buffer[filled..]) {
@@ -44,10 +49,10 @@ fn fill(reader: &mut impl io::Read, buffer: &mut [u8]) -> io::Result<usize> {
             Ok(n) => filled += n,
             // see test_update_reader_interrupted
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e),
+            Err(e) => return (filled, Err(e)),
         }
     }
-    Ok(filled)
+    (filled, Ok(()))
 }
 
 // Try to `mmap` a file, unless it's short enough that ordinary reads are faster, currently 16 KiB.

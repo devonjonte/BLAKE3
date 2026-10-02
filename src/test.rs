@@ -899,6 +899,47 @@ fn test_update_reader() -> Result<(), std::io::Error> {
 
 #[test]
 #[cfg(feature = "std")]
+fn test_update_reader_keeps_every_byte_across_errors() {
+    // A reader that fails (WouldBlock) after given offsets, in short reads,
+    // and a caller that retries until the end: every byte read before each
+    // error is hashed, inside the first 64 KiB and inside the 1 MiB buffer.
+    use std::io;
+    struct Failing<'a> {
+        slice: &'a [u8],
+        at: usize,
+        fail_at: Vec<usize>,
+    }
+    impl io::Read for Failing<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.fail_at.first() == Some(&self.at) {
+                self.fail_at.remove(0);
+                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            }
+            let next = self.fail_at.first().copied().unwrap_or(usize::MAX);
+            let take = buf.len().min(self.slice.len()).min(next - self.at).min(50_000);
+            buf[..take].copy_from_slice(&self.slice[..take]);
+            self.slice = &self.slice[take..];
+            self.at += take;
+            Ok(take)
+        }
+    }
+    let mut input = vec![0; (3 << 20) + 12345];
+    paint_test_input(&mut input);
+    for fail_at in [vec![], vec![1000], vec![65536], vec![70_000, 1 << 20], vec![10, 2_000_000, 3_000_000]] {
+        let mut reader = Failing { slice: &input, at: 0, fail_at: fail_at.clone() };
+        let mut hasher = crate::Hasher::new();
+        let mut errors = 0;
+        while let Err(e) = hasher.update_reader(&mut reader) {
+            assert_eq!(e.kind(), io::ErrorKind::WouldBlock);
+            errors += 1;
+        }
+        assert_eq!(errors, fail_at.len());
+        assert_eq!(hasher.finalize(), crate::hash(&input), "failing at {fail_at:?}");
+    }
+}
+
+#[test]
+#[cfg(feature = "std")]
 fn test_update_reader_interrupted() -> std::io::Result<()> {
     use std::io;
     struct InterruptingReader<'a> {
