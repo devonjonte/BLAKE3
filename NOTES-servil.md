@@ -1369,6 +1369,45 @@ leaner code path for single small messages would serve callers who hash
 now and then. Unmeasured: how many bytes of code each length's path
 fetches.
 
+## One-shot calls prefetch their code after a pause (October 2, 2026, jobs 971-985)
+
+The remedy for the section above, without making the code smaller:
+`hash_serial` (hash, keyed_hash, derive_key, hash_multithreaded below the
+split), for inputs of 1-64 KiB, issues PRFM PLDL2KEEP over the code its
+path runs, one per 128-byte line, before it hashes. The misses that a
+call after other work met one after another (the next line fetched when
+the core reached it) then overlap. Which code: `neon_hybrid::
+prefetch_tree_code` walks the same plans the hashing takes (chunk
+kernels, each parent level's plan, the root's c1), from 16 chunks the
+SME2 file's 11 KB (and the hybrids' parents below the flat walk). The
+generator puts an end label after each kernel; the SME2 file has one.
+
+It runs only when the thread's previous call in the range came over 100
+us before (a thread-local stamp of CNTVCT_EL0, 3.5 ns): unconditional,
+it cost nonstop calls 2-4% (lent 4 KiB x1.035-1.046, jobs 972-975),
+whose code is near.
+
+Probe (probe/code-prefetch, job 971; each call after the benchmark's
+own busy gap, the prefetch inside the timed call), ns/call: 2 KiB 1479
+-> 1208, 4 KiB 2552|3521 -> 1740, 8 KiB 4802 -> 2833, 16 KiB 6042 ->
+4583, 64 KiB level; cycles alike (8 KiB 21902 -> 13219: stalls gone, the
+clock the same). PLDL2KEEP, PLIL1KEEP, and PLIL2KEEP did the same; plain
+loads of each line recovered a third as much (each load waits).
+Benchmark A/B, f60f9bb against 91c4a77 (jobs 981-984, mains, quiet,
+two runs a side), servil st after other work: 2304 B x0.64-0.86, 3839 B
+x0.47-0.59, 4 KiB x0.59, 7935 B x0.50, 8 KiB x0.49-0.64, 16 KiB x0.61
+(0.282 ns/B, ahead of SHA-256 ring's 0.305 there), 32 KiB x0.98; every
+cell from 2304 B to 16 KiB at one speed (several ran at two before);
+mt alike; SHA-256 ring level. Nonstop lent: 4 KiB x1.023 (st and mt),
+16 KiB x1.057 (st) and x0.969 (mt) on identical code, 1 and 64 KiB
+level. perf_regress on the Mac (job 985): no regression. Open: whether
+lent 4 KiB's +2.3% is the stamp and call (3.5 ns of 1270) or layout.
+
+Not prefetched, and so still cold after other work: 1 KiB and below
+(c1, 3.9 KB, ran x0.84-1.10 with two speeds), batches (`hash_many`'s
+plans: the batch of 4 after other work still costs more per message
+than the batch of 2), and the Rust code around the kernels.
+
 ## The split below 512 KiB, measured again (October 1, 2026; jobs 841-851)
 
 Zooko asked whether `hash_multithreaded` should use threads below 512
