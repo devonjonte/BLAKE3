@@ -21,18 +21,22 @@ Add your own, such as `read="/tmp/b3c/b3sum-abc1234 --no-mmap"`. The first
 contender is the one the others are compared with.
 
 `--files DIR` chooses where the input files live: put them on the storage
-you care about. They are made once (1.3 GiB) and kept. `--quick` runs a
+you care about. They are made once (1.4 GiB) and kept. `--quick` runs a
 smaller set in seconds, as a check. Keep the machine otherwise idle while
 it runs: the report says whether other programs kept it busy.
 
 ## What it measures
 
 **Inputs.** Single files of 4 KiB, 64 KiB, 1 MiB, 16 MiB, 256 MiB, and
-1 GiB, and a tree of 1000 files of 16 KiB passed together, as `b3sum
-$(find src -type f)` passes them. The files' bytes are SplitMix64 output
-(state `0x623373756d62656e ^ length.rotate_left(17) ^ index`, index 0 for
-single files and 1-1000 for the tree), little-endian words; any machine
-makes the same files.
+1 GiB; a tree of 1000 files of 16 KiB passed together, as `b3sum $(find
+src -type f)` passes them; and a mixed tree of 1000 files, 74 MiB in all,
+as a source checkout holds them (300 of 1 KiB, 300 of 4 KiB, 200 of
+16 KiB, 120 of 64 KiB, 60 of 256 KiB, 15 of 1 MiB, 4 of 4 MiB, one of
+16 MiB, their sizes interleaved), hashed in one run as `find . -type f
+-print0 | xargs -0 b3sum` hashes them. Each file holds BLAKE3's extended
+output of its name (its path under the files directory): the same files
+on every machine, and incompressible, so a filesystem or drive that
+compresses reads them in full.
 
 **Page cache.** *Warm*: the files were read moments before, as when you
 hash what you just wrote or downloaded. *Cold*: each file is evicted from

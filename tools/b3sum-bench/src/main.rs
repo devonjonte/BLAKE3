@@ -16,9 +16,6 @@ use clocks::speeds;
 
 /// The samples file's format; a reader accepts this one alone.
 const FORMAT: &str = "b3sum-bench samples v1";
-/// Where the files' bytes come from: SplitMix64 from this seed, each
-/// file's stream seeded by its length and index (README.md).
-const SEED: u64 = 0x6233_7375_6d62_656e; // "b3sumben"
 
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * KIB;
@@ -61,31 +58,56 @@ struct Input {
 }
 
 /// The inputs: single files from a page to a gigabyte (b3sum maps files of
-/// 16 KiB and more; the fork's pool takes 1 MiB and more), and a tree of
-/// small files, as `b3sum $(find src -type f)` hashes one.
+/// 16 KiB and more; the fork's pool takes 1 MiB and more); a tree of small
+/// files of one size, as `b3sum $(find src -type f)` hashes one; and a
+/// tree of mixed sizes, a source checkout's range, one file after another
+/// in a single run as `find . -type f -print0 | xargs -0 b3sum` runs it.
 fn inputs(dir: &Path, quick: bool) -> Vec<Input> {
     let sizes: &[u64] = if quick { &[4 * KIB, MIB, 16 * MIB] } else { &[4 * KIB, 64 * KIB, MIB, 16 * MIB, 256 * MIB, GIB] };
-    let (tree_files, tree_len) = if quick { (100, 16 * KIB) } else { (1000, 16 * KIB) };
     std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("cannot make {}: {e}", dir.display()));
     let mut inputs: Vec<Input> = sizes
         .iter()
         .map(|&len| {
-            let path = dir.join(format!("file-{len}"));
-            ensure_file(&path, len, 0);
-            Input { label: size_label(len), files: vec![path], bytes: len }
+            let name = format!("file-{len}");
+            ensure_file(dir, &name, len);
+            Input { label: size_label(len), files: vec![dir.join(name)], bytes: len }
         })
         .collect();
-    let tree = dir.join(format!("tree-{tree_files}x{tree_len}"));
-    std::fs::create_dir_all(&tree).unwrap();
-    let files: Vec<PathBuf> = (0..tree_files)
-        .map(|i| {
-            let path = tree.join(format!("{i:04}"));
-            ensure_file(&path, tree_len, i + 1);
-            path
-        })
-        .collect();
-    inputs.push(Input { label: format!("{tree_files} x {}", size_label(tree_len)), files, bytes: tree_files * tree_len });
+    let uniform: &[(u64, u64)] = if quick { &[(100, 16 * KIB)] } else { &[(1000, 16 * KIB)] };
+    inputs.push(tree(dir, &format!("tree-{}x{}", uniform[0].0, uniform[0].1), uniform, format!("{} x {}", uniform[0].0, size_label(uniform[0].1))));
+    let mixed: &[(u64, u64)] = if quick { MIXED_QUICK } else { MIXED };
+    let count: u64 = mixed.iter().map(|&(n, _)| n).sum();
+    let bytes: u64 = mixed.iter().map(|&(n, len)| n * len).sum();
+    inputs.push(tree(dir, &format!("mixed-{count}"), mixed, format!("mixed tree, {count} files, {}", size_label_approx(bytes))));
     inputs
+}
+
+/// The mixed tree, (files, bytes each): most files small, most bytes in a
+/// few large ones, as in a source checkout.
+const MIXED: &[(u64, u64)] = &[(300, KIB), (300, 4 * KIB), (200, 16 * KIB), (120, 64 * KIB), (60, 256 * KIB), (15, MIB), (4, 4 * MIB), (1, 16 * MIB)];
+const MIXED_QUICK: &[(u64, u64)] = &[(30, KIB), (30, 4 * KIB), (20, 16 * KIB), (12, 64 * KIB), (6, 256 * KIB), (2, MIB)];
+
+/// A directory of files with the given (count, length) classes, named in
+/// the order b3sum gets them: the sizes interleaved (file j takes the
+/// class of position j x 389 mod count in the classes listed out, 389 and
+/// the counts sharing no factor), as a directory listing mixes them.
+fn tree(dir: &Path, name: &str, classes: &[(u64, u64)], label: String) -> Input {
+    let lengths: Vec<u64> = classes.iter().flat_map(|&(n, len)| std::iter::repeat_n(len, n as usize)).collect();
+    let count = lengths.len() as u64;
+    assert_eq!(gcd(count, 389), 1, "a stride sharing no factor with the count takes every file once");
+    std::fs::create_dir_all(dir.join(name)).unwrap();
+    let mut files = Vec::new();
+    for j in 0..count {
+        let len = lengths[(j * 389 % count) as usize];
+        let file = format!("{name}/{j:04}");
+        ensure_file(dir, &file, len);
+        files.push(dir.join(file));
+    }
+    Input { label, files, bytes: lengths.iter().sum() }
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a } else { gcd(b, a % b) }
 }
 
 fn size_label(len: u64) -> String {
@@ -97,37 +119,37 @@ fn size_label(len: u64) -> String {
     }
 }
 
-/// SplitMix64: the files' bytes, a stream per (length, index).
-fn splitmix(state: &mut u64) -> u64 {
-    *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
-    let mut z = *state;
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    z ^ (z >> 31)
+/// The bytes of the file `name` (its path under the files directory, `/`
+/// between its parts): BLAKE3's extended output of the name, so files are
+/// alike on every machine and incompressible (a filesystem or a drive that
+/// compresses would read zeros from storage almost for free).
+fn contents(name: &str) -> blake3_servil::OutputReader {
+    blake3_servil::Hasher::new().update(name.as_bytes()).finalize_xof()
 }
 
-/// Make `path` hold `len` bytes of its stream, unless it holds them: a file
-/// of the right length whose first eight bytes match is kept (the bytes
+/// Make `dir/name` hold `len` bytes of its contents, unless it holds them: a
+/// file of the right length whose first 32 bytes match is kept (the rest
 /// cannot change a hash's speed; regenerating a gigabyte each run would
 /// only cost time). Written files are synced, so a later eviction finds
 /// them clean.
-fn ensure_file(path: &Path, len: u64, index: u64) {
-    let mut state = SEED ^ len.rotate_left(17) ^ index;
-    let first = splitmix(&mut state.clone()).to_le_bytes();
-    if let Ok(mut file) = File::open(path) {
-        let mut head = [0u8; 8];
-        if file.metadata().map(|m| m.len()).ok() == Some(len) && (len < 8 || (file.read_exact(&mut head).is_ok() && head == first)) {
+fn ensure_file(dir: &Path, name: &str, len: u64) {
+    let path = dir.join(name);
+    let mut first = [0u8; 32];
+    contents(name).fill(&mut first);
+    let head_len = len.min(32) as usize;
+    if let Ok(mut file) = File::open(&path) {
+        let mut head = [0u8; 32];
+        if file.metadata().map(|m| m.len()).ok() == Some(len) && file.read_exact(&mut head[..head_len]).is_ok() && head[..head_len] == first[..head_len] {
             return;
         }
     }
-    let mut file = File::create(path).unwrap_or_else(|e| panic!("cannot write {}: {e}", path.display()));
+    let mut file = File::create(&path).unwrap_or_else(|e| panic!("cannot write {}: {e}", path.display()));
+    let mut reader = contents(name);
     let mut buffer = vec![0u8; MIB as usize];
     let mut left = len;
     while left > 0 {
         let take = left.min(MIB) as usize;
-        for word in buffer[..take.next_multiple_of(8)].chunks_exact_mut(8) {
-            word.copy_from_slice(&splitmix(&mut state).to_le_bytes());
-        }
+        reader.fill(&mut buffer[..take]);
         file.write_all(&buffer[..take]).unwrap();
         left -= take as u64;
     }
@@ -746,14 +768,25 @@ mod tests {
         assert_eq!(times(1500), "x1.50");
     }
 
-    /// The files' bytes come from SplitMix64: its published first outputs
-    /// from state 0 (Vigna's splitmix64.c), so the recipe in README.md
-    /// reproduces them anywhere.
+    /// A file's bytes are BLAKE3's extended output of its name: the empty
+    /// name's first 32 bytes are BLAKE3's published digest of the empty
+    /// input (the official test vectors).
     #[test]
-    fn the_generator_is_splitmix64() {
-        let mut state = 0;
-        let first: Vec<u64> = (0..3).map(|_| splitmix(&mut state)).collect();
-        assert_eq!(first, [0xe220_a839_7b1d_cdaf, 0x6e78_9e6a_a1b9_65f4, 0x06c4_5d18_8009_454f]);
+    fn the_contents_are_blake3_output_of_the_name() {
+        let mut first = [0u8; 32];
+        contents("").fill(&mut first);
+        assert_eq!(blake3_servil::Hash::from(first).to_hex().as_str(), "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
+    }
+
+    /// The mixed tree's interleaving takes every file once.
+    #[test]
+    fn the_mixed_trees_order_is_a_permutation() {
+        for classes in [MIXED, MIXED_QUICK] {
+            let count: u64 = classes.iter().map(|&(n, _)| n).sum();
+            let mut seen: Vec<u64> = (0..count).map(|j| j * 389 % count).collect();
+            seen.sort_unstable();
+            assert_eq!(seen, (0..count).collect::<Vec<_>>());
+        }
     }
 
     #[test]
