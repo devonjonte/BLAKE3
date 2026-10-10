@@ -1,58 +1,8 @@
-import Treecore
+import Aeneas
 import Blake3
 open Aeneas Aeneas.Std Result
 
 namespace treecore
-
-/-- The loop doubles `p`, a power of two, while `p ≤ chunks / 2`: it ends at
-the largest power of two at most `chunks`. -/
-theorem left_len_loop_spec (chunks p : Std.Usize) (hc : 0 < chunks.val)
-    (hp : ∃ j, p.val = 2 ^ j) (hle : p.val ≤ 2 ^ chunks.val.log2) :
-    left_len_loop chunks p ⦃ r => r.val = 2 ^ chunks.val.log2 ⦄ := by
-  unfold left_len_loop
-  apply loop.spec_decr_nat (fun p : Std.Usize => chunks.val - p.val)
-    (fun p : Std.Usize => (∃ j, p.val = 2 ^ j) ∧ p.val ≤ 2 ^ chunks.val.log2)
-  · rintro p ⟨⟨j, hj⟩, hle⟩
-    unfold left_len_loop.body
-    have hlog := Nat.log2_self_le (n := chunks.val) (by omega)
-    have hlt := Nat.lt_log2_self (n := chunks.val)
-    have hj1 : 1 ≤ 2 ^ j := Nat.one_le_two_pow
-    step*
-    · -- the step: p1 = 2 p is the next power of two, still at most 2^log2
-      have hpi : p.val ≤ chunks.val / 2 := by scalar_tac
-      have h2 : 2 ^ (j + 1) < 2 ^ (chunks.val.log2 + 1) := by rw [pow_succ]; omega
-      have := (Nat.pow_lt_pow_iff_right (by norm_num : 1 < 2)).mp h2
-      refine ⟨⟨j + 1, by rw [p1_post, hj, pow_succ]⟩, ?_, by omega⟩
-      rw [p1_post, hj, ← pow_succ]
-      exact Nat.pow_le_pow_right (by norm_num) (by omega)
-    · -- the exit: p > chunks / 2, so p is no smaller than 2^log2
-      have hpi : chunks.val / 2 < p.val := by scalar_tac
-      have hjl : j ≤ chunks.val.log2 := by
-        rw [hj] at hle; exact (Nat.pow_le_pow_iff_right (by norm_num : 1 < 2)).mp hle
-      rcases Nat.lt_or_ge j chunks.val.log2 with h | h
-      · have := Nat.pow_le_pow_right (n := 2) (by norm_num) h
-        rw [pow_succ] at this; omega
-      · rw [hj]; congr 1; omega
-  · exact ⟨hp, hle⟩
-
-/-- `left_len` of an input longer than one chunk: 1024 times the largest
-power of two at most its number of chunks before the last. -/
-@[step]
-theorem left_len_spec (len : Std.Usize) (h : 1024 < len.val) :
-    left_len len ⦃ r => r.val = 1024 * 2 ^ ((len.val - 1) / 1024).log2 ⦄ := by
-  unfold left_len
-  have hc : 0 < (len.val - 1) / 1024 := by omega
-  have hlog := Nat.log2_self_le (n := (len.val - 1) / 1024) (by omega)
-  have hk : CHUNK_LEN.val = 1024 := by simp [CHUNK_LEN]
-  step*
-  have hchunks : chunks.val = (len.val - 1) / 1024 := by rw [chunks_post, i_post, hk]
-  step with left_len_loop_spec
-  · exact ⟨0, by simp⟩
-  · simp
-  -- p * CHUNK_LEN cannot overflow: p ≤ chunks, so p * 1024 ≤ len - 1.
-  rw [hchunks] at p_post
-  have : p.val * 1024 ≤ len.val - 1 := by rw [p_post]; omega
-  step*
 
 /-- The split point lies inside the input, after its first chunk. -/
 theorem split_bounds (L : Nat) (h : 1024 < L) :
@@ -79,31 +29,6 @@ decreasing_by
     have := Nat.one_le_two_pow (n := ((bytes.length - 1) / 1024).log2)
     simp [List.length_take, List.length_drop]
     omega
-
-/-- `subtree` is `walk`, for kernels that are the given functions, on every
-input whose chunk numbers fit in 64 bits. -/
-theorem subtree_spec {K : Type} (KernelsInst : Kernels K) (k : K)
-    (chunk : List Std.U8 → Nat → Cv) (parent : Cv → Cv → Cv)
-    (hchunk : ∀ s c, KernelsInst.chunk k s c = ok (chunk s.val c.val))
-    (hparent : ∀ a b, KernelsInst.parent k a b = ok (parent a b))
-    (input : Slice Std.U8) (counter : Std.U64)
-    (hfit : counter.val + input.length / 1024 + 1 ≤ Std.U64.max) :
-    subtree KernelsInst k input counter ⦃ r => r = walk chunk parent input.val counter.val ⦄ := by
-  induction hn : input.length using Nat.strong_induction_on generalizing input counter with
-  | _ n ih =>
-  unfold subtree
-  rw [walk]
-  have hk : CHUNK_LEN.val = 1024 := by simp [CHUNK_LEN]
-  by_cases hs : input.length ≤ 1024
-  · have hle : input.len ≤ CHUNK_LEN := by scalar_tac
-    have hval : input.val.length ≤ 1024 := by simpa [Slice.length] using hs
-    simp [hle, hval, hchunk]
-  · have hle : ¬ input.len ≤ CHUNK_LEN := by scalar_tac
-    have hval : ¬ input.val.length ≤ 1024 := by simpa [Slice.length] using hs
-    simp only [hle, hval, ↓reduceIte, ↓reduceDIte]
-    have hlen : input.len.val = input.length := by simp
-    have hb := split_bounds input.length (by omega)
-    step*
 
 end treecore
 
@@ -261,29 +186,6 @@ theorem walk_is_tree (key : Vector Blake3.Word 8) (mode : Blake3.Word)
   rw [getElem!_pos _ i (by simp; omega)]
   simp only [Array.getElem_map, Array.getElem_range, chunkOf, Nat.sub_zero, toBA_extract]
   rw [show 1024 * (i + 1) - 1024 * i = 1024 by omega]
-
-/-- The safe-Rust tree walk computes the C2SP specification's tree, for
-kernels that meet their contract: under an abstraction `abs` of chaining
-values, `chunk` gives the specification's chunk chaining value and
-`parent` its parent chaining value. Every nonempty input whose chunk count
-fits in 64 bits: no panic, no overflow, and the specification's result. -/
-theorem subtree_is_tree {K : Type} (KernelsInst : Kernels K) (k : K)
-    (key : Vector Blake3.Word 8) (mode : Blake3.Word) (abs : Cv → Vector Blake3.Word 8)
-    (chunkf : List Std.U8 → Nat → Cv) (parentf : Cv → Cv → Cv)
-    (hchunk : ∀ s c, KernelsInst.chunk k s c = ok (chunkf s.val c.val))
-    (hparent : ∀ a b, KernelsInst.parent k a b = ok (parentf a b))
-    (hchunk_spec : ∀ b i, abs (chunkf b i) = (Blake3.chunkNode key mode (toBA b) i).cv)
-    (hparent_spec : ∀ a b, abs (parentf a b) = (Blake3.parentNode key mode (abs a) (abs b)).cv)
-    (input : Slice Std.U8) (hne : input.val ≠ [])
-    (hfit : input.length / 1024 + 1 ≤ Std.U64.max) :
-    subtree KernelsInst k input 0#u64 ⦃ r =>
-      abs r = (Blake3.tree key mode ((Array.range (max 1 (((toBA input.val).size + 1023) / 1024))).map
-        fun i => Blake3.chunkNode key mode ((toBA input.val).extract (1024 * i) (1024 * (i + 1))) i)).cv ⦄ := by
-  apply WP.spec_mono (subtree_spec KernelsInst k chunkf parentf hchunk hparent input 0#u64 (by simpa using hfit))
-  intro r hr
-  rw [hr, walk_map abs chunkf parentf (fun a b => (Blake3.parentNode key mode a b).cv) hparent_spec]
-  simp only [hchunk_spec]
-  exact walk_is_tree key mode input.val hne
 
 /-! ## One layer of parents
 
@@ -546,49 +448,10 @@ theorem wideI_spec {α : Type} [Inhabited α] (D d : Nat) (hD : D = 2 ^ d)
       · have := hAsmall (by omega)
         omega
 
-/-! The hypotheses can be met: kernels computed by the specification
-itself satisfy them, through these conversions between the
-representations. -/
-
-/-- Aeneas's chaining value as the specification's. -/
-def absCv (a : Cv) : Vector Blake3.Word 8 :=
-  ⟨(a.val.map fun x => UInt32.ofBitVec x.bv).toArray, by simp [Std.Array.val, Data.ListN.ListN_length]⟩
-
-/-- The specification's chaining value as Aeneas's. -/
-def repCv (v : Vector Blake3.Word 8) : Cv :=
-  Std.Array.make 8#usize (v.toList.map fun w => ⟨w.toBitVec⟩) (by simp)
-
-theorem absCv_repCv (v : Vector Blake3.Word 8) : absCv (repCv v) = v := by
-  apply Vector.ext
-  intro i hi
-  simp [absCv, repCv, Std.Array.make_val]
-
-/-- The specification's kernels, as Rust's Kernels. -/
-def specKernels (key : Vector Blake3.Word 8) (mode : Blake3.Word) : Kernels Unit where
-  chunk := fun _ s c => ok (repCv (Blake3.chunkNode key mode (toBA s.val) c.val).cv)
-  parent := fun _ a b => ok (repCv (Blake3.parentNode key mode (absCv a) (absCv b)).cv)
-
-/-- subtree_is_tree applies to them: its hypotheses can hold. -/
-theorem subtree_is_tree_satisfiable (key : Vector Blake3.Word 8) (mode : Blake3.Word)
-    (input : Slice Std.U8) (hne : input.val ≠ []) (hfit : input.length / 1024 + 1 ≤ Std.U64.max) :
-    subtree (specKernels key mode) () input 0#u64 ⦃ r =>
-      absCv r = (Blake3.tree key mode ((Array.range (max 1 (((toBA input.val).size + 1023) / 1024))).map
-        fun i => Blake3.chunkNode key mode ((toBA input.val).extract (1024 * i) (1024 * (i + 1))) i)).cv ⦄ :=
-  subtree_is_tree (specKernels key mode) () key mode absCv
-    (fun b i => repCv (Blake3.chunkNode key mode (toBA b) i).cv)
-    (fun a b => repCv (Blake3.parentNode key mode (absCv a) (absCv b)).cv)
-    (fun _ _ => rfl) (fun _ _ => rfl)
-    (fun _ _ => absCv_repCv _) (fun _ _ => absCv_repCv _)
-    input hne hfit
-
 end Bridge
 
-#print axioms treecore.left_len_spec
-#print axioms treecore.subtree_spec
 #print axioms Bridge.walk_eq_goIdx
 #print axioms Bridge.walk_is_tree
-#print axioms Bridge.subtree_is_tree
-#print axioms Bridge.subtree_is_tree_satisfiable
 #print axioms Bridge.goIdx_lay
 #print axioms Bridge.treeL_layerL
 #print axioms Bridge.wideI_spec

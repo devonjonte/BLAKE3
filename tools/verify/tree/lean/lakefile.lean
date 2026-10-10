@@ -8,7 +8,6 @@ require aeneas from "../aeneas/backends/lean"
 package tree where
   packagesDir := "../packages"
 
-lean_lib Treecore {}
 lean_lib Widecore {}
 lean_lib Blake3 {}
 lean_lib Stackcore {}

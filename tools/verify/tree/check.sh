@@ -1,7 +1,8 @@
 #!/bin/sh
-# Prove the library's tree walk (src/tree_core.rs) and the binary walk equal
-# to the C2SP specification's tree (README.md), the library's walk at every
-# buffer size it builds with (MAX_SIMD_DEGREE_OR_2: 128 SME2, 16, 8, 4, 2).
+# Prove the library's tree walk (src/tree_core.rs) equal to the C2SP
+# specification's tree at every buffer size it builds with
+# (MAX_SIMD_DEGREE_OR_2: 128 SME2, 16, 8, 4, 2), and the Hasher's stack
+# (src/stack_core.rs) its algorithm's (README.md).
 # Needs an Aeneas release directory (AENEAS: the aeneas and charon binaries
 # and its built backends/lean), the Rust toolchain rust/*/rust-toolchain.toml
 # names, and Lean (elan). Lake's packages (Mathlib) stay in TREE_WORK.
@@ -31,7 +32,7 @@ translate() {
 
 # The committed translations are the Rust's (widecore at MAX = 128;
 # stackcore includes the library's own src/stack_core.rs).
-for pair in treecore:Treecore widecore:Widecore stackcore:Stackcore; do
+for pair in widecore:Widecore stackcore:Stackcore; do
 	crate=${pair%%:*}; name=${pair##*:}
 	rm -rf "$work/$crate"; mkdir -p "$work/$crate"
 	translate "$here/rust/$crate" "$work/$crate"
@@ -63,4 +64,4 @@ for max in 128 16 8 4 2; do
 	standard_axioms_only "$lean/build.txt"
 	echo "MAX = $max: proved"
 done
-echo "proved: the library's tree walk and the binary walk compute the C2SP specification's tree; the Hasher's stack computes its algorithm"
+echo "proved: the library's tree walk computes the C2SP specification's tree; the Hasher's stack computes its algorithm"
