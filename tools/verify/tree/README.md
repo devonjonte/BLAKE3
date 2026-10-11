@@ -15,13 +15,20 @@ kernel where it applies. Aeneas translates each crate to Lean
 checks the committed files are the translations), and `check.sh` proves
 the walk at every buffer size the library builds with
 (MAX_SIMD_DEGREE_OR_2: 128, 16, 8, 4, 2). The walk's proofs are in
-`WideProofs.lean`, on lemmas in `Proofs.lean`:
+`WideProofs.lean` and `ChildrenProofs.lean`, on lemmas in `Proofs.lean`:
 
 - **`WideBridge.wide_is_tree`.** For every nonempty input whose chunk
   count fits in 64 bits, `wide` returns without panicking or overflowing.
   Under an abstraction `abs` of chaining values, the specification's tree
   over the values it returns is the specification's tree over the input's
   chunks. Kernels of any power-of-two degree up to 128 qualify.
+- **`ChildrenProof.children_spec`.** `children` (the walk, then a layer of
+  parents at a time until two values are left: the library's
+  `condense_subtree`) returns the chaining values of two of the
+  specification's nodes whose parent is the specification's tree node over
+  the input's chunks; for a whole input, `goIdx_leafN_root` shows that node
+  is `Blake3.tree`'s root. The proof follows the walk's values as nodes
+  (`ChildrenProofs.lean`).
 
 Each rests on Lean's three standard axioms (`propext`, `Classical.choice`,
 `Quot.sound`), printed at the end of each file; `check.sh` fails on any

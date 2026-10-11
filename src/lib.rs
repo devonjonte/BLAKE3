@@ -804,18 +804,6 @@ impl Zeroize for ChunkState {
 
 // IMPLEMENTATION NOTE
 // ===================
-// The recursive function compress_subtree_wide(), implemented below, is the
-// basis of high-performance BLAKE3. We use it both for all-at-once hashing,
-// and for the incremental input with Hasher (though we have to be careful with
-// subtree boundaries in the incremental case). compress_subtree_wide() applies
-// several optimizations at the same time:
-// - Parallel chunk hashing with SIMD.
-// - Parallel parent hashing with SIMD. Note that while SIMD chunk hashing
-//   maxes out at MAX_SIMD_DEGREE*CHUNK_LEN, parallel parent hashing continues
-//   to benefit from larger inputs, because more levels of the tree benefit can
-//   use full-width SIMD vectors for parent hashing. Without parallel parent
-//   hashing, we lose about 10% of overall throughput on AVX2 and AVX-512.
-
 /// Undocumented and unstable, for benchmarks only.
 #[doc(hidden)]
 #[derive(Clone, Copy)]
@@ -983,8 +971,8 @@ fn compress_parents_parallel(
     debug_assert!(num_children <= 2 * MAX_SIMD_DEGREE_OR_2, "too many");
 
     let mut parents_exact = child_chaining_values.chunks_exact(BLOCK_LEN);
-    // Use MAX_SIMD_DEGREE_OR_2 rather than MAX_SIMD_DEGREE here, because of
-    // the requirements of compress_subtree_wide().
+    // Use MAX_SIMD_DEGREE_OR_2 rather than MAX_SIMD_DEGREE here: the walk
+    // (tree_core.rs) returns at least 2 values.
     let mut parents_array = ArrayVec::<&[u8; BLOCK_LEN], MAX_SIMD_DEGREE_OR_2>::new();
     for parent in &mut parents_exact {
         parents_array.push(parent.try_into().unwrap());
@@ -1010,49 +998,18 @@ fn compress_parents_parallel(
     }
 }
 
-// The wide helper function returns (writes out) an array of chaining values
-// and returns the length of that array. The number of chaining values returned
-// is the dynamically detected SIMD degree, at most MAX_SIMD_DEGREE. Or fewer,
-// if the input is shorter than that many chunks. The reason for maintaining a
-// wide array of chaining values going back up the tree, is to allow the
-// implementation to hash as many parents in parallel as possible.
-//
-// As a special case when the SIMD degree is 1, this function will still return
-// at least 2 outputs. This guarantees that this function doesn't perform the
-// root compression. (If it did, it would use the wrong flags, and also we
-// wouldn't be able to implement extendable output.) Note that this function is
-// not used when the whole input is only 1 chunk long; that's a different
-// codepath.
-//
-// Why not just have the caller split the input on the first update(), instead
-// of implementing this special rule? Because we don't want to limit SIMD or
-// multithreading parallelism for that update().
-fn compress_subtree_wide(
-    input: &[u8],
-    ahead: usize,
-    key: &CVWords,
-    chunk_counter: u64,
-    flags: u8,
-    platform: Platform,
-    out: &mut [u8],
-) -> usize {
-    let kernels = tree::PlatformKernels { key, flags, platform };
-    let (cvs, _) = out.as_chunks_mut::<OUT_LEN>();
-    tree::wide(&kernels, input, ahead, chunk_counter, cvs)
-}
-
-// Hash a subtree with compress_subtree_wide(), and then condense the resulting
-// list of chaining values down to a single parent node. Don't compress that
+// Hash a subtree with the walk (tree_core.rs, `children`), condensing its
+// chaining values down to a single parent node. Don't compress that
 // last parent node, however. Instead, return its message bytes (the
 // concatenated chaining values of its children). This is necessary when the
 // first call to update() supplies a complete subtree, because the topmost
 // parent node of that subtree could end up being the root. It's also necessary
 // for extended output in the general case.
 //
-// As with compress_subtree_wide(), this function is not used on inputs of 1
-// chunk or less. That's a different codepath.
+// This function is not used on inputs of 1 chunk or less. That's a
+// different codepath.
 //
-// With the SME2 degree of 128, cv_array and out_array together are 6 KiB.
+// With the SME2 degree of 128, the two arrays of values together are 6 KiB.
 // Kept out of line, that frame belongs to this function alone; inlined into
 // hash() or update(), it would grow their frames past a page, and every call
 // (including the one-chunk path that never touches these arrays) would pay
@@ -1088,7 +1045,7 @@ fn compress_subtree_to_parent_node(
 const SMALL_TREE_CHUNKS: usize = 16;
 
 /// `compress_subtree_to_parent_node` with room for `CVS` chaining values,
-/// which must cover the most `compress_subtree_wide` returns for `input`,
+/// which must cover the most the walk (`tree::wide`) returns for `input`,
 /// and `HALF` = `CVS / 2` parents.
 #[inline(always)]
 fn condense_subtree<const CVS: usize, const HALF: usize>(
@@ -1099,22 +1056,14 @@ fn condense_subtree<const CVS: usize, const HALF: usize>(
     flags: u8,
     platform: Platform,
 ) -> [u8; BLOCK_LEN] {
-    let mut cv_array = [[0u8; OUT_LEN]; CVS];
-    let cv_array = cv_array.as_flattened_mut();
-    let mut num_cvs = compress_subtree_wide(input, ahead, &key, chunk_counter, flags, platform, cv_array);
-    debug_assert!(num_cvs >= 2);
-
-    // If MAX_SIMD_DEGREE is greater than 2 and there's enough input,
-    // compress_subtree_wide() returns more than 2 chaining values. Condense
-    // them into 2 by forming parent nodes repeatedly.
-    let mut out_array = [[0u8; OUT_LEN]; HALF];
-    let out_array = out_array.as_flattened_mut();
-    while num_cvs > 2 {
-        let cv_slice = &cv_array[..num_cvs * OUT_LEN];
-        num_cvs = compress_parents_parallel(cv_slice, key, flags, platform, out_array);
-        cv_array[..num_cvs * OUT_LEN].copy_from_slice(&out_array[..num_cvs * OUT_LEN]);
-    }
-    cv_array[..2 * OUT_LEN].try_into().unwrap()
+    let mut cvs = [[0u8; OUT_LEN]; CVS];
+    let mut next = [[0u8; OUT_LEN]; HALF];
+    let kernels = tree::PlatformKernels { key, flags, platform };
+    let [left, right] = tree::children(&kernels, input, ahead, chunk_counter, &mut cvs, &mut next);
+    let mut block = [0u8; BLOCK_LEN];
+    block[..OUT_LEN].copy_from_slice(&left);
+    block[OUT_LEN..].copy_from_slice(&right);
+    block
 }
 
 // The root hash of an input of one chunk or less, in one kernel call. The
@@ -2427,7 +2376,7 @@ impl HasherCore {
     // coming, so we know none of the merges are root.
     //
     // This setting is different. We want to feed as much input as possible to
-    // compress_subtree_wide(), without setting aside anything for the
+    // the walk (`tree::wide`), without setting aside anything for the
     // chunk_state. If the user gives us 64 KiB, we want to parallelize over
     // all 64 KiB at once as a single subtree, if at all possible.
     //

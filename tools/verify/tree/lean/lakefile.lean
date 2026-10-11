@@ -15,3 +15,4 @@ lean_lib Stackcore {}
 @[default_target] lean_lib WideProofs {}
 @[default_target] lean_lib HasherProofs {}
 @[default_target] lean_lib StackProofs {}
+@[default_target] lean_lib ChildrenProofs {}

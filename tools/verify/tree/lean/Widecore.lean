@@ -130,6 +130,70 @@ def wide
     | some n => ok (n, out1)
 partial_fixpoint
 
+/-- [widecore::children]: loop body 0:
+    Source: 'src/../../../../../../src/tree_core.rs', lines 70:4-73:5
+    Visibility: public -/
+@[rust_loop_body]
+def children_loop.body
+  {K : Type} (KernelsInst : Kernels K) (k : K)
+  (cvs : Slice (Array Std.U8 32#usize)) (next : Slice (Array Std.U8 32#usize))
+  (n : Std.Usize) :
+  Result (ControlFlow ((Slice (Array Std.U8 32#usize)) × (Slice (Array Std.U8
+    32#usize)) × Std.Usize) ((Slice (Array Std.U8 32#usize)) × (Slice (Array
+    Std.U8 32#usize))))
+  := do
+  if n > 2#usize
+  then
+    let s ←
+      core.slice.index.Slice.index
+        (core.slice.index.SliceIndexRangeToUsizeSlice (Array Std.U8 32#usize))
+        cvs { «end» := n }
+    let (n1, next1) ← KernelsInst.parents k s next
+    let (s1, index_mut_back) ←
+      core.slice.index.Slice.index_mut
+        (core.slice.index.SliceIndexRangeToUsizeSlice (Array Std.U8 32#usize))
+        cvs { «end» := n1 }
+    let s2 ←
+      core.slice.index.Slice.index
+        (core.slice.index.SliceIndexRangeToUsizeSlice (Array Std.U8 32#usize))
+        next1 { «end» := n1 }
+    let s3 ←
+      core.slice.Slice.copy_from_slice (Array.Insts.CoreMarkerCopy 32#usize
+        core.marker.CopyU8) s1 s2
+    let cvs1 := index_mut_back s3
+    ok (cont (cvs1, next1, n1))
+  else ok (done (cvs, next))
+
+/-- [widecore::children]: loop 0:
+    Source: 'src/../../../../../../src/tree_core.rs', lines 70:4-73:5
+    Visibility: public -/
+@[rust_loop]
+def children_loop
+  {K : Type} (KernelsInst : Kernels K) (k : K)
+  (cvs : Slice (Array Std.U8 32#usize)) (next : Slice (Array Std.U8 32#usize))
+  (n : Std.Usize) :
+  Result ((Slice (Array Std.U8 32#usize)) × (Slice (Array Std.U8 32#usize)))
+  := do
+  loop
+    (fun (cvs1, next1, n1) => children_loop.body KernelsInst k cvs1 next1 n1)
+    (cvs, next, n)
+
+/-- [widecore::children]:
+    Source: 'src/../../../../../../src/tree_core.rs', lines 68:0-75:1
+    Visibility: public -/
+def children
+  {K : Type} (KernelsInst : Kernels K) (k : K) (input : Slice Std.U8)
+  (ahead : Std.Usize) (counter : Std.U64) (cvs : Slice (Array Std.U8 32#usize))
+  (next : Slice (Array Std.U8 32#usize)) :
+  Result ((Array (Array Std.U8 32#usize) 2#usize) × (Slice (Array Std.U8
+    32#usize)) × (Slice (Array Std.U8 32#usize)))
+  := do
+  let (n, cvs1) ← wide KernelsInst k input ahead counter cvs
+  let (cvs2, next1) ← children_loop KernelsInst k cvs1 next n
+  let a ← Slice.index_usize cvs2 0#usize
+  let a1 ← Slice.index_usize cvs2 1#usize
+  ok (Array.make 2#usize [ a, a1 ], cvs2, next1)
+
 /-- [widecore::OUT_LEN]
     Source: 'src/lib.rs', lines 7:0-7:30
     Visibility: public -/

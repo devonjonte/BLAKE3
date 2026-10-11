@@ -59,3 +59,17 @@ pub fn wide<K: Kernels>(k: &K, input: &[u8], ahead: usize, counter: u64, out: &m
     k.parents(&cvs[..ln + rn], out)
 }
 
+
+/// The chaining values of the root's two children, for `input` of more
+/// than one chunk, its first chunk numbered `counter`: the walk's values,
+/// condensed a layer of parents at a time. `cvs` holds at least
+/// max(degree, 2) values and `next` half that. `ahead` bytes of the
+/// caller's input follow `input`.
+pub fn children<K: Kernels>(k: &K, input: &[u8], ahead: usize, counter: u64, cvs: &mut [Cv], next: &mut [Cv]) -> [Cv; 2] {
+    let mut n = wide(k, input, ahead, counter, cvs);
+    while n > 2 {
+        n = k.parents(&cvs[..n], next);
+        cvs[..n].copy_from_slice(&next[..n]);
+    }
+    [cvs[0], cvs[1]]
+}

@@ -53,8 +53,10 @@ for max in 128 16 8 4 2; do
 	cp "$here"/lean/*.lean "$here/lean/lean-toolchain" "$here/lean/lake-manifest.json" "$lean/"
 	cp "$here/../../../c2sp/BLAKE3/Blake3.lean" "$lean/Blake3.lean"
 	cp "$out/lean/Widecore.lean" "$lean/Widecore.lean"
-	sed -i.orig -e "s/D ≤ 128/D ≤ $max/g" -e "s/256/$((2 * max))/g" "$lean/WideProofs.lean"
-	rm -f "$lean/WideProofs.lean.orig"
+	for f in WideProofs ChildrenProofs; do
+		sed -i.orig -e "s/D ≤ 128/D ≤ $max/g" -e "s/256/$((2 * max))/g" "$lean/$f.lean"
+		rm -f "$lean/$f.lean.orig"
+	done
 	# Mathlib's prebuilt cache, once.
 	[ -d "$work/packages/mathlib/.lake/build" ] || (cd "$lean" && lake exe cache get)
 	(cd "$lean" && lake build) > "$lean/build.txt" 2>&1 || { cat "$lean/build.txt" >&2; exit 1; }
@@ -64,4 +66,4 @@ for max in 128 16 8 4 2; do
 	standard_axioms_only "$lean/build.txt"
 	echo "MAX = $max: proved"
 done
-echo "proved: the library's tree walk computes the C2SP specification's tree; the Hasher's stack computes its algorithm"
+echo "proved: the library's tree walk computes the C2SP specification's tree and its root's children; the Hasher's stack computes its algorithm"

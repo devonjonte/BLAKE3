@@ -136,7 +136,8 @@ library that compute BLAKE3 are proved to compute what
   the calling convention, and takes a path that depends only on lengths.
 - **The tree**: the library's tree walk, which splits an input into
   chunks and combines their chaining values, computes the standard's
-  tree, given kernels that compute the compression function.
+  tree and its root's two children, given kernels that compute the
+  compression function.
 - **The Hasher's stack**: the chaining values a `Hasher` keeps as input
   arrives combine into the standard's tree.
 - **The pool's cuts and the batch tables**: every piece the pool hashes
@@ -175,7 +176,7 @@ the standard's appendix and the official test vectors.
 |---|---|---|
 | The compression proofs' definition is the standard's | `tools/verify/lean/Sound.lean`: `symbolic_is_the_specifications` | Lean |
 | Each kernel and the Rust compression compute that definition | `tools/verify/prove_hybrid.py`, `prove_sme2.py`, `prove_rust.py`: every output word equal to the definition's, which `lean_spec.py` reads from Lean's `compress.json` | Z3 |
-| The tree walk | `tools/verify/tree/lean/WideProofs.lean`: `wide_is_tree` | Lean |
+| The tree walk | `tools/verify/tree/lean/WideProofs.lean`: `wide_is_tree`; `ChildrenProofs.lean`: `children_spec`, `goIdx_leafN_root` (the root's two children) | Lean |
 | The Hasher's stack | `tools/verify/tree/lean/StackProofs.lean`: `merge_spec`, `push_spec`; `HasherProofs.lean`: `merge_push`, `final_output_whole`, `final_output_partial` | Lean |
 | The pool's cuts and the batch tables | the `#[kani::proof]` harnesses in `src/lanes.rs` and `src/many.rs` | Kani |
 | Timing | `tools/verify/prove_timing.py` | Z3 |
