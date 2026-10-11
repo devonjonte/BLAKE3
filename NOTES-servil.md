@@ -2594,3 +2594,29 @@ over one layer of parents is its tree over the layer below. The library
 itself does not yet call `widecore`: making it do so (with SME2's flat
 path and the hybrids' partial chunk as kernels) is the step that puts
 the proof on the code users run, measured on the Mac first.
+
+
+### October 11, 2026: the root's children proved; Arm's specification in Lean (probe)
+
+- `children` (tree_core.rs) condenses the walk's values and is proved
+  (ChildrenProofs.lean) to return the chaining values of two of the
+  specification's nodes whose parent is the specification's tree node over
+  the chunks; for a whole input, `Blake3.tree`'s root. The proof follows the
+  walk's values as the specification's nodes (`wideI_map`, `layerL_map`).
+  Library: condense_subtree calls it (dc53411); VM and Mac (job 1501) pass.
+- The stack change, idle Mac on mains (jobs 1502-1507): nonstop cells within
+  3%, lent cells within 1.3%; the busy runs' slower small cells do not
+  reproduce.
+- Probe probe/sail-lean (tools/verify/sail/README.md): Arm's Sail model,
+  sliced and translated to Lean, proves BLAKE3's G as 14 Arm instructions
+  for any registers and state. Two translation bugs, fixed upstream
+  (sail#1772: tuple assignments to locals dropped; sail-arm#33: MOD as
+  Nat.div); the compiled Lean model agrees with the CPU on 8,000 cases and
+  catches the second. Open: memory (a load's slice brings address
+  translation, 1,461 functions), decoding (Arm's decoder, a 2,542-line
+  chain, over an hour in Lean), UNKNOWN values (the ArchSem interface).
+- Next for `hash` in Lean: the root compression and the one-chunk path. Two
+  performance designs meet it: the multi-chunk buffers kept out of the
+  one-chunk path's frame (`#[inline(never)]`, the 16-chunk small arrays),
+  and SME2's flat walk to the root's children (a hook, or removed if a
+  measurement shows the walk then parents costs nothing).
