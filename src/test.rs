@@ -89,7 +89,7 @@ pub fn test_compress_fn(compress_in_place_fn: CompressInPlaceFn, compress_xof_fn
 
     let mut test_state = initial_state;
     unsafe { compress_in_place_fn(&mut test_state, &block, block_len, counter as u64, flags) };
-    let test_state_bytes = crate::platform::le_bytes_from_words_32(&test_state);
+    let test_state_bytes = crate::hasher::le_bytes(&test_state);
     let test_xof =
         unsafe { compress_xof_fn(&initial_state, &block, block_len, counter as u64, flags) };
 
@@ -775,13 +775,14 @@ const fn test_hash_const_conversions() {
 
 #[test]
 fn test_block_buffer_alignment() {
-    // ChunkState.buf and Output.block are Aligned64 so that wide vector stores
+    // ChunkState.buf and Output.block are 64-byte aligned so that wide vector stores
     // into them (e.g. from memcpy) can store-to-load forward regardless of
-    // stack layout. See the comment on Aligned64 in lib.rs, the measurements in
+    // stack layout. See the comment on Output in chunk_core.rs, the measurements in
     // https://github.com/zooko/bench-hashes/issues/2, and the before/after
     // benchmarks in https://github.com/BLAKE3-team/BLAKE3/pull/582.
     assert_eq!(64, core::mem::align_of::<crate::Aligned64>());
-    assert_eq!(0, core::mem::offset_of!(crate::Aligned64, 0));
+    assert_eq!(64, core::mem::align_of::<crate::Output>());
+    assert_eq!(0, core::mem::offset_of!(crate::Output, block));
     assert_eq!(64, core::mem::align_of::<crate::ChunkState>());
     assert_eq!(0, core::mem::offset_of!(crate::ChunkState, buf));
 }
@@ -796,7 +797,7 @@ fn test_zeroize() {
     assert_eq!(hash.0, [0u8; 32]);
 
     let mut hasher = crate::HasherCore {
-        chunk_state: crate::chunk::ChunkState {
+        chunk_state: crate::hasher::ChunkState {
             cv: [42; 8],
             chunk_counter: 42,
             buf: [42; 64],
@@ -807,7 +808,7 @@ fn test_zeroize() {
         },
         initial_chunk_counter: 42,
         key: [42; 8],
-        cv_stack: crate::stack::CvStack::new(),
+        cv_stack: crate::hasher::CvStack::new(),
     };
     for _ in 0..crate::MAX_DEPTH + 1 {
         hasher.cv_stack.push([42; 32]);
@@ -831,7 +832,7 @@ fn test_zeroize() {
     let mut output_reader = crate::OutputReader {
         inner: crate::Output {
             input_chaining_value: [42; 8],
-            block: crate::Aligned64([42; 64]),
+            block: [42; 64],
             counter: 42,
             block_len: 42,
             flags: 42,

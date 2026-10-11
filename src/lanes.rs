@@ -592,7 +592,7 @@ fn subtree_cv(pieces: &[Piece], cvs: &[ChainingValue], mode: Mode) -> ChainingVa
 fn merge_root(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::CVWords, flags: u8) -> Hash {
     let count = merge_to_children(pieces, cvs, key, flags);
     debug_assert_eq!(count, 2);
-    crate::parent_node_output(&cvs[0], &cvs[1], key, flags, pool_platform()).root_hash()
+    crate::hasher::parent_output(&cvs[0], &cvs[1], key, flags, pool_platform()).root_hash()
 }
 
 /// [`merge_root`] up to the root's two children, left in `cvs[0]` and

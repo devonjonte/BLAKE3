@@ -1,7 +1,8 @@
-// A chunk's state in safe Rust, over its compression kernels: the library
-// includes this file in src/lib.rs (ChunkState), and
-// tools/verify/tree/rust/hashercore includes it too, for Aeneas. It uses
-// BLOCK_LEN, CHUNK_START, and the Hasher's Chunk trait from its includer.
+// A chunk's state and a node's output in safe Rust, over their compression
+// kernels: the library includes this file in src/lib.rs (ChunkState,
+// Output), and tools/verify/tree/rust/hashercore includes it too, for
+// Aeneas. It uses BLOCK_LEN, CHUNK_START, CHUNK_END, PARENT, ROOT, and the
+// Hasher's Chunk trait from its includer.
 
 /// The compression kernels a chunk's state calls.
 pub trait Blocks {
@@ -16,7 +17,7 @@ pub trait Blocks {
 
 /// A chunk's state: the chaining value after its blocks so far but the
 /// last, which waits in `buf` (zero past `buf_len`) for the output. `buf`
-/// comes first and the state is 64-byte aligned, as Aligned64 (lib.rs)
+/// comes first and the state is 64-byte aligned, as Output's block (below)
 /// explains.
 #[repr(C, align(64))]
 pub struct ChunkState<P> {
@@ -77,6 +78,80 @@ impl<P: Blocks> ChunkState<P> {
         }
         self.fill_buf(input);
     }
+}
+
+/// A node: the inputs of its last compression. `block` comes first and the
+/// node is 64-byte aligned: glibc's AVX-512 memcpy writes a 64-byte copy
+/// with a pair of overlapping unaligned 64-byte vector stores, and the
+/// immediate reload of the destination then fails store-to-load forwarding
+/// whenever the stack frame leaves it misaligned (address & 31 != 0). Stack
+/// layout decides which case each process gets, so the same binary hashed
+/// 64-byte inputs 35-45% slower in some processes than in others (Zen 5).
+/// Aligning the block pins every process to the forwarding-friendly case
+/// (https://github.com/zooko/bench-hashes/issues/2,
+/// https://github.com/BLAKE3-team/BLAKE3/pull/582).
+#[repr(C, align(64))]
+pub struct Output<P> {
+    pub block: [u8; BLOCK_LEN],
+    pub input_chaining_value: [u32; 8],
+    pub block_len: u8,
+    pub counter: u64,
+    pub flags: u8,
+    pub platform: P,
+}
+
+/// The bytes of `words`, least significant first.
+pub fn le_bytes(words: &[u32; 8]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    let mut i = 0;
+    while i < 8 {
+        let b = words[i].to_le_bytes();
+        out[4 * i] = b[0];
+        out[4 * i + 1] = b[1];
+        out[4 * i + 2] = b[2];
+        out[4 * i + 3] = b[3];
+        i += 1;
+    }
+    out
+}
+
+impl<P: Blocks> Output<P> {
+    /// The node's chaining value.
+    pub fn chaining_value(&self) -> [u8; 32] {
+        let mut cv = self.input_chaining_value;
+        self.platform.compress_in_place(&mut cv, &self.block, self.block_len, self.counter, self.flags);
+        le_bytes(&cv)
+    }
+
+    /// The first 32 bytes of the root's output (the node the root, its
+    /// counter 0).
+    pub fn root_bytes(&self) -> [u8; 32] {
+        let mut cv = self.input_chaining_value;
+        self.platform.compress_in_place(&mut cv, &self.block, self.block_len, 0, self.flags | ROOT);
+        le_bytes(&cv)
+    }
+}
+
+impl<P: Blocks + Copy> ChunkState<P> {
+    /// The chunk's node.
+    pub fn output(&self) -> Output<P> {
+        Output {
+            block: self.buf,
+            input_chaining_value: self.cv,
+            block_len: self.buf_len,
+            counter: self.chunk_counter,
+            flags: self.flags | self.start_flag() | CHUNK_END,
+            platform: self.platform,
+        }
+    }
+}
+
+/// The parent node of two chaining values.
+pub fn parent_output<P>(left: &[u8; 32], right: &[u8; 32], key: &[u32; 8], flags: u8, platform: P) -> Output<P> {
+    let mut block = [0u8; BLOCK_LEN];
+    block[..32].copy_from_slice(left);
+    block[32..].copy_from_slice(right);
+    Output { block, input_chaining_value: *key, block_len: BLOCK_LEN as u8, counter: 0, flags: flags | PARENT, platform }
 }
 
 /// The chunk state the Hasher's loop (hasher_core.rs) works with.

@@ -146,7 +146,7 @@ pub fn hash1<const N: usize>(
         block_flags = flags;
         slice = &slice[BLOCK_LEN..];
     }
-    *out = crate::platform::le_bytes_from_words_32(&cv);
+    *out = crate::hasher::le_bytes(&cv);
 }
 
 pub fn hash_many<const N: usize>(

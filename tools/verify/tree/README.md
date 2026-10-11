@@ -44,8 +44,9 @@ the walk at every buffer size the library builds with
   `hashercore` includes both): from a new Hasher, after any updates, the
   root's node is the specification's root over all the updates' bytes,
   whose 32-byte output is `Blake3.blake3 key mode` of them. Its hypotheses
-  are the kernels' contracts (`Contracts`, `NodeContracts`), among them the
-  chunk state read as its number and its bytes. Between updates the stack
+  are the kernels' contracts (`Contracts`, `NodeContracts`), each stated
+  through relations: a chunk state stands for its number and its bytes,
+  a node for the specification's node. Between updates the stack
   holds the chaining values of `HasherProof.stackCvs` over the full chunks,
   merged while a chunk is partly filled, and else perhaps with one subtree
   on top not yet merged (`HInv`; `HasherCoreProofs.lean`). `update` there is
@@ -62,6 +63,18 @@ the walk at every buffer size the library builds with
   `inst_len`, `inst_update`, `inst_advance`), it meets the chunk contracts
   of `HasherCoreProof.Contracts`, read through the relation `Rel` (a state
   stands for its chunk's number and bytes).
+- **`OutputProof.hasher_hash`.** The Hasher on the library's kernels
+  (`Kernels` in `src/hasher_core.rs`; `Output`, a node's last compression,
+  in `src/chunk_core.rs`): a new chunk state, any updates, the root's node,
+  and its first 32 bytes are `Blake3.blake3 key mode` of the updates'
+  bytes. `Kernels` meets the Hasher's contracts (`kernels_contracts`,
+  `kernels_node_contracts`), given compression kernels that meet
+  `BlocksContracts` and hooks (the pool and SME2 routes, the bit count, the
+  subtree length) that meet `HookContracts`. On the way: a node's chaining
+  value and root bytes are the specification's (`cv_spec`, `root_spec`), and
+  so are the nodes of a chunk and of a parent (`chunk_output_spec`,
+  `parent_output_spec`); the bytes of words are the specification's
+  `bytesLE` (`le_bytes_spec`).
 
 Each rests on Lean's three standard axioms (`propext`, `Classical.choice`,
 `Quot.sound`), printed at the end of each file; `check.sh` fails on any

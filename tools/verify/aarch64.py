@@ -666,6 +666,10 @@ def step(m, pc, mnem, ops):
         lsb, n = imm(ops[2]), imm(ops[3])
         m.set(ops[0], ZeroExt(w - n, Extract(lsb + n - 1, lsb, m.reg(ops[1]))))
         return None
+    if mnem == "ubfiz":
+        lsb, n = imm(ops[2]), imm(ops[3])
+        m.set(ops[0], ZeroExt(w - n, Extract(n - 1, 0, m.reg(ops[1]))) << lsb)
+        return None
     if mnem == "mov" and ops[0][0] in "wxs":
         if ops[1].startswith("#"):
             m.set(ops[0], BitVecVal(imm(ops[1]) % (1 << w), w))

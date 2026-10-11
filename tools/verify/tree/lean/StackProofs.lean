@@ -43,26 +43,31 @@ theorem merge_short {α : Type} (node : α → α → α) (t : Nat) (l : List α
   | b :: a :: rest, h => simp only [HasherProof.merge]; rw [if_neg (by simp at h; omega)]
 
 /-- One iteration keeps the merge's result: the top two values replaced by
-their parent, below a stack longer than the target. -/
-theorem merge_step (pf : Cv → Cv → Cv) (t : Nat) (l : List Cv) (m : Nat) (hl : m + 2 ≤ l.length) (ht : t < m + 2) :
-    HasherProof.merge pf t ((l.set m (pf l[m] l[m + 1])).take (m + 1)).reverse =
-      HasherProof.merge pf t (l.take (m + 2)).reverse := by
+their parent, below a stack longer than the target; `abs` reads a value,
+`op` the parent of two read values. -/
+theorem merge_step {β : Type} (abs : Cv → β) (op : β → β → β) (t : Nat) (l : List Cv) (m : Nat) (x : Cv)
+    (hl : m + 2 ≤ l.length) (hx : abs x = op (abs l[m]) (abs l[m + 1])) (ht : t < m + 2) :
+    HasherProof.merge op t (((l.set m x).take (m + 1)).reverse.map abs) =
+      HasherProof.merge op t ((l.take (m + 2)).reverse.map abs) := by
   rw [set_take_reverse l m _ hl, take_reverse_top2 l m hl]
+  simp only [List.map_cons]
   conv_rhs => rw [HasherProof.merge]
-  rw [if_pos (by simp; omega)]
+  rw [if_pos (by simp; omega), hx]
 
 /-- The merge loop: on a stack of at most 55 values and a target of at least
-1, it ends, and the values it leaves, top first, are the Hasher
-algorithm's merge of the stack's (HasherProofs.lean), `pf` the parent. -/
-theorem merge_loop_spec {P : Type} (PI : Parent P) (p : P) (pf : Cv → Cv → Cv)
-    (hp : ∀ a b, PI.parent p a b = ok (pf a b))
+1, it ends, and the values it leaves, top first and read by `abs`, are the
+Hasher algorithm's merge of the stack's (HasherProofs.lean), `op` the parent
+of two read values. -/
+theorem merge_loop_spec {P β : Type} (PI : Parent P) (p : P) (abs : Cv → β) (op : β → β → β)
+    (hp : ∀ a b, PI.parent p a b ⦃ v => abs v = op (abs a) (abs b) ⦄)
     (s : CvStack) (target : Std.Usize) (hinv : Inv s) (ht : 1 ≤ target.val) :
     CvStack.merge_loop PI s p target ⦃ r => Inv ⟨r.1, r.2⟩ ∧
-      (vals ⟨r.1, r.2⟩).reverse = HasherProof.merge pf target.val (vals s).reverse ⦄ := by
+      (vals ⟨r.1, r.2⟩).reverse.map abs = HasherProof.merge op target.val ((vals s).reverse.map abs) ⦄ := by
   unfold CvStack.merge_loop
   apply loop.spec_decr_nat (fun st : CvStack => st.len.val)
     (fun st : CvStack => Inv st ∧
-      HasherProof.merge pf target.val (vals st).reverse = HasherProof.merge pf target.val (vals s).reverse)
+      HasherProof.merge op target.val ((vals st).reverse.map abs) =
+        HasherProof.merge op target.val ((vals s).reverse.map abs))
   · rintro st ⟨⟨hlen, hnone⟩, heq⟩
     unfold CvStack.merge_loop.body
     by_cases hgt : st.len > target
@@ -80,37 +85,37 @@ theorem merge_loop_spec {P : Type} (PI : Parent P) (p : P) (pf : Cv → Cv → C
       step as ⟨a, ha⟩
       step as ⟨k, hk, hk1⟩
       step as ⟨b, hb⟩
-      rw [hp]
+      step with hp a b as ⟨c, hc⟩
       step as ⟨x, hx⟩
       step as ⟨i, hi, hi1⟩
       refine ⟨⟨by scalar_tac, by simp⟩, ?_, by scalar_tac⟩
       rw [← heq]
       simp only [vals, harr, hx, Std.Array.set_val_eq]
       obtain ⟨m, hm⟩ : ∃ m, st.len.val = m + 2 := ⟨st.len.val - 2, by omega⟩
-      rw [show i.val = m + 1 by omega, show j.val = m by omega, hm, ha, hb]
-      simp only [show j.val = m by omega, show k.val = m + 1 by omega]
-      exact merge_step pf target.val arr.val m (by omega) (by scalar_tac)
+      rw [show i.val = m + 1 by omega, show j.val = m by omega, hm]
+      simp only [show j.val = m by omega, show k.val = m + 1 by omega] at ha hb
+      exact merge_step abs op target.val arr.val m c (by omega) (by subst ha hb; exact hc) (by scalar_tac)
 
     · -- the loop ends: a stack no longer than its target is left as it is
       have hle : st.len.val ≤ target.val := by scalar_tac
       simp [hgt]
       refine ⟨⟨hlen, hnone⟩, ?_⟩
-      have hvl : (vals st).reverse.length ≤ target.val := by
+      have hvl : ((vals st).reverse.map abs).length ≤ target.val := by
         unfold vals; split <;> simp <;> omega
-      rw [← heq, merge_short pf _ _ hvl]
+      rw [← List.map_reverse, ← List.map_reverse, ← heq, merge_short op _ _ hvl]
   · exact ⟨hinv, rfl⟩
 
 /-- `merge`, as compiled from src/stack_core.rs: on a stack of at most 55
 values and a target of at least 1, it never fails, and its values, top
-first, are the Hasher algorithm's merge of the old ones (HasherProofs.lean),
-`pf` the parent. -/
-theorem merge_spec {P : Type} (PI : Parent P) (p : P) (pf : Cv → Cv → Cv)
-    (hp : ∀ a b, PI.parent p a b = ok (pf a b))
+first and read by `abs`, are the Hasher algorithm's merge of the old ones
+(HasherProofs.lean), `op` the parent of two read values. -/
+theorem merge_spec {P β : Type} (PI : Parent P) (p : P) (abs : Cv → β) (op : β → β → β)
+    (hp : ∀ a b, PI.parent p a b ⦃ v => abs v = op (abs a) (abs b) ⦄)
     (s : CvStack) (target : Std.Usize) (hinv : Inv s) (ht : 1 ≤ target.val) :
     CvStack.merge PI s p target ⦃ s' => Inv s' ∧
-      (vals s').reverse = HasherProof.merge pf target.val (vals s).reverse ⦄ := by
+      (vals s').reverse.map abs = HasherProof.merge op target.val ((vals s).reverse.map abs) ⦄ := by
   unfold CvStack.merge
-  step with merge_loop_spec PI p pf hp s target hinv ht as ⟨o, i, h, h'⟩
+  step with merge_loop_spec PI p abs op hp s target hinv ht as ⟨o, i, h, h'⟩
   exact ⟨h, h'⟩
 
 /-- `push`: on a stack of fewer than 55 values, `cv` goes on top. -/

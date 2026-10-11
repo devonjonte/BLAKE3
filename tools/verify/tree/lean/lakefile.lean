@@ -19,3 +19,4 @@ lean_lib Hashercore {}
 @[default_target] lean_lib HashProofs {}
 @[default_target] lean_lib HasherCoreProofs {}
 @[default_target] lean_lib ChunkProofs {}
+@[default_target] lean_lib OutputProofs {}

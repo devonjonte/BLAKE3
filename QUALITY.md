@@ -141,8 +141,9 @@ library that compute BLAKE3 are proved to compute what
   what it must return in the standard's own terms).
 - **The Hasher, around its kernels**: after any sequence of updates, a
   `Hasher`'s result is the standard's hash of all their bytes, given
-  kernels that meet their contracts. Its stack, its loop over whole
-  subtrees, its final fold, and its chunk state are proved code.
+  compression kernels and hooks (the pool's and SME2's routes) that meet
+  their contracts. Its stack, its loop, its final fold, its chunk state,
+  and its nodes are proved code.
 - **The pool's cuts and the batch tables**: every piece the pool hashes
   is a whole BLAKE3 subtree at its offset, and a batch's pointer table
   points each lane at its own message.
@@ -182,7 +183,7 @@ the standard's appendix and the official test vectors.
 | Each kernel and the Rust compression compute that definition | `tools/verify/prove_hybrid.py`, `prove_sme2.py`, `prove_rust.py`: every output word equal to the definition's, which `lean_spec.py` reads from Lean's `compress.json` | Z3 |
 | The hash, around its kernels | `tools/verify/tree/lean/HashProofs.lean`: `hash_spec`, on `WideProofs.lean` (`wide_is_tree`, the walk) and `ChildrenProofs.lean` (`children_spec`, the root's children) | Lean |
 | A chunk's state, around its compression kernels | `tools/verify/tree/lean/ChunkProofs.lean`: `absorb_spec`, `node_eq` | Lean |
-| The Hasher, around its kernels | `tools/verify/tree/lean/HasherCoreProofs.lean`: `hasher_spec`, on `StackProofs.lean` (`merge_spec`, `push_spec`, the stack's code) and `HasherProofs.lean` (`merge_push`, `final_output_whole`, `final_output_partial`, the algorithm) | Lean |
+| The Hasher, around its kernels | `tools/verify/tree/lean/OutputProofs.lean`: `hasher_hash`, on `HasherCoreProofs.lean`: `hasher_spec`, on `StackProofs.lean` (`merge_spec`, `push_spec`, the stack's code) and `HasherProofs.lean` (`merge_push`, `final_output_whole`, `final_output_partial`, the algorithm) | Lean |
 | The pool's cuts and the batch tables | the `#[kani::proof]` harnesses in `src/lanes.rs` and `src/many.rs` | Kani |
 | Timing | `tools/verify/prove_timing.py` | Z3 |
 

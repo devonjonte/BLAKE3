@@ -266,7 +266,7 @@ fn root(cvs: &[CVBytes], key: &CVWords, flags: u8, platform: Platform) -> Hash {
     let split = left_len(cvs.len());
     let left = subtree(&cvs[..split], key, flags, platform);
     let right = subtree(&cvs[split..], key, flags, platform);
-    crate::parent_node_output(&left, &right, key, flags, platform).root_hash()
+    crate::hasher::parent_output(&left, &right, key, flags, platform).root_hash()
 }
 
 /// A non-root subtree's chaining value.
@@ -277,7 +277,7 @@ fn subtree(cvs: &[CVBytes], key: &CVWords, flags: u8, platform: Platform) -> CVB
     let split = left_len(cvs.len());
     let left = subtree(&cvs[..split], key, flags, platform);
     let right = subtree(&cvs[split..], key, flags, platform);
-    crate::parent_node_output(&left, &right, key, flags, platform).chaining_value()
+    crate::hasher::parent_output(&left, &right, key, flags, platform).chaining_value()
 }
 
 /// The largest power of two below `n` (n of 2 or more).

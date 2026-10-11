@@ -265,7 +265,6 @@ pub fn __self_test_run_again() {
 use arrayvec::{ArrayString, ArrayVec};
 use core::cmp;
 use core::fmt;
-use core::ops::{Deref, DerefMut};
 use platform::{MAX_SIMD_DEGREE, MAX_SIMD_DEGREE_OR_2, Platform};
 #[cfg(feature = "zeroize")]
 use zeroize::Zeroize;
@@ -554,83 +553,29 @@ impl fmt::Display for HexError {
 #[cfg(feature = "std")]
 impl std::error::Error for HexError {}
 
-// A 64-byte block of compression function input, with 64-byte alignment. This
-// is the type of Output.block, and ChunkState (chunk_core.rs) aligns its
-// buf the same way. glibc's AVX-512 memcpy
-// writes a 64-byte copy with a pair of overlapping unaligned 64-byte vector
-// stores, and the immediate reload of the destination then fails
-// store-to-load forwarding whenever the stack frame leaves it misaligned
-// (address & 31 != 0). Stack layout decides which case each process gets, so
-// the same binary hashes 64-byte inputs 35-45% slower in some processes than
-// in others (measured on Zen 5). Aligning ChunkState.buf pins every process
-// to the forwarding-friendly case, and Output.block gets the same alignment
-// so that its residue is pinned as well, rather than frozen at whatever spot
-// the realigned frame happens to give it. Measurements are in
-// https://github.com/zooko/bench-hashes/issues/2 and
-// https://github.com/BLAKE3-team/BLAKE3/pull/582.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+type Output = hasher::Output<Platform>;
+
+/// A block, 64-byte aligned as hasher::Output's is (chunk_core.rs explains).
 #[repr(align(64))]
 struct Aligned64([u8; BLOCK_LEN]);
 
-impl Deref for Aligned64 {
-    type Target = [u8; BLOCK_LEN];
-
-    fn deref(&self) -> &[u8; BLOCK_LEN] {
-        &self.0
+impl Clone for Output {
+    fn clone(&self) -> Self {
+        hasher::Output {
+            block: self.block,
+            input_chaining_value: self.input_chaining_value,
+            block_len: self.block_len,
+            counter: self.counter,
+            flags: self.flags,
+            platform: self.platform,
+        }
     }
-}
-
-impl DerefMut for Aligned64 {
-    fn deref_mut(&mut self) -> &mut [u8; BLOCK_LEN] {
-        &mut self.0
-    }
-}
-
-impl PartialEq<[u8; BLOCK_LEN]> for Aligned64 {
-    fn eq(&self, other: &[u8; BLOCK_LEN]) -> bool {
-        self.0 == *other
-    }
-}
-
-#[cfg(feature = "zeroize")]
-impl Zeroize for Aligned64 {
-    fn zeroize(&mut self) {
-        self.0.zeroize();
-    }
-}
-
-// Each chunk or parent node can produce either a 32-byte chaining value or, by
-// setting the ROOT flag, any number of final output bytes. The Output struct
-// captures the state just prior to choosing between those two possibilities.
-#[derive(Clone)]
-struct Output {
-    input_chaining_value: CVWords,
-    block: Aligned64,
-    block_len: u8,
-    counter: u64,
-    flags: u8,
-    platform: Platform,
 }
 
 impl Output {
-    fn chaining_value(&self) -> CVBytes {
-        let mut cv = self.input_chaining_value;
-        self.platform.compress_in_place(
-            &mut cv,
-            &self.block,
-            self.block_len,
-            self.counter,
-            self.flags,
-        );
-        platform::le_bytes_from_words_32(&cv)
-    }
-
     fn root_hash(&self) -> Hash {
         debug_assert_eq!(self.counter, 0);
-        let mut cv = self.input_chaining_value;
-        self.platform
-            .compress_in_place(&mut cv, &self.block, self.block_len, 0, self.flags | ROOT);
-        Hash(platform::le_bytes_from_words_32(&cv))
+        Hash(self.root_bytes())
     }
 
     fn root_output_block(&self) -> [u8; 2 * OUT_LEN] {
@@ -665,16 +610,9 @@ impl Zeroize for Output {
     }
 }
 
-/// A chunk's state (src/chunk_core.rs, proved in tools/verify/tree).
-mod chunk {
-    use crate::stack::Chunk;
-    use crate::{BLOCK_LEN, CHUNK_START};
-    include!("chunk_core.rs");
-}
+type ChunkState = hasher::ChunkState<Platform>;
 
-type ChunkState = chunk::ChunkState<Platform>;
-
-impl chunk::Blocks for Platform {
+impl hasher::Blocks for Platform {
     #[inline(always)]
     fn compress_in_place(&self, cv: &mut CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8) {
         Platform::compress_in_place(self, cv, block, block_len, counter, flags)
@@ -688,7 +626,7 @@ impl chunk::Blocks for Platform {
 
 impl Clone for ChunkState {
     fn clone(&self) -> Self {
-        chunk::ChunkState {
+        hasher::ChunkState {
             buf: self.buf,
             cv: self.cv,
             chunk_counter: self.chunk_counter,
@@ -710,17 +648,6 @@ impl ChunkState {
         self
     }
 
-    fn output(&self) -> Output {
-        let block_flags = self.flags | self.start_flag() | CHUNK_END;
-        Output {
-            input_chaining_value: self.cv,
-            block: Aligned64(self.buf),
-            block_len: self.buf_len,
-            counter: self.chunk_counter,
-            flags: block_flags,
-            platform: self.platform,
-        }
-    }
 }
 
 // Don't derive(Debug), because the state may be secret.
@@ -1000,9 +927,9 @@ fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8) -> Hash {
         Ok(full) => full,
         Err(_) => {
             let mut block = Aligned64([0; BLOCK_LEN]);
-            block[..tail.len()].copy_from_slice(tail);
+            block.0[..tail.len()].copy_from_slice(tail);
             padded = block;
-            &padded
+            &padded.0
         }
     };
     let mut out = [0u8; OUT_LEN];
@@ -1048,11 +975,9 @@ fn hash_all_at_once(
 
     // Otherwise construct an Output object from the parent node returned by
     // compress_subtree_to_parent_node().
-    Output {
+    hasher::Output {
         input_chaining_value: *key,
-        block: Aligned64(compress_subtree_to_parent_node(
-            input, 0, key, chunk_counter, flags, platform,
-        )),
+        block: compress_subtree_to_parent_node(input, 0, key, chunk_counter, flags, platform),
         block_len: BLOCK_LEN as u8,
         counter: 0,
         flags: flags | PARENT,
@@ -1797,25 +1722,6 @@ pub fn derive_key(context: &str, key_material: &[u8]) -> [u8; OUT_LEN] {
     hash_serial(key_material, &context_key_words, DERIVE_KEY_MATERIAL).0
 }
 
-fn parent_node_output(
-    left_child: &CVBytes,
-    right_child: &CVBytes,
-    key: &CVWords,
-    flags: u8,
-    platform: Platform,
-) -> Output {
-    let mut block = Aligned64([0; BLOCK_LEN]);
-    block[..32].copy_from_slice(left_child);
-    block[32..].copy_from_slice(right_child);
-    Output {
-        input_chaining_value: *key,
-        block,
-        block_len: BLOCK_LEN as u8,
-        counter: 0,
-        flags: flags | PARENT,
-        platform,
-    }
-}
 
 /// A message's hash, fed in pieces: [`update`](Hasher::update) with each
 /// piece, in order, then [`finalize`](Hasher::finalize). The pieces may be
@@ -1883,14 +1789,15 @@ pub(crate) struct HasherCore {
     cv_stack: CvStack,
 }
 
-/// The Hasher's stack and loop (src/stack_core.rs, src/hasher_core.rs,
-/// proved in tools/verify/tree).
-pub(crate) mod stack {
+/// The Hasher's stack, loop, chunk state, and nodes (src/stack_core.rs,
+/// src/hasher_core.rs, src/chunk_core.rs, proved in tools/verify/tree).
+pub(crate) mod hasher {
     use crate::{CVBytes as Cv, MAX_DEPTH};
-    use crate::CHUNK_LEN;
+    use crate::{BLOCK_LEN, CHUNK_END, CHUNK_LEN, CHUNK_START, PARENT, ROOT};
     const DEPTH: usize = MAX_DEPTH + 1;
     include!("stack_core.rs");
     include!("hasher_core.rs");
+    include!("chunk_core.rs");
 
     #[cfg(all(test, feature = "zeroize"))]
     impl CvStack {
@@ -1910,12 +1817,13 @@ pub(crate) mod stack {
         }
     }
 }
-use stack::{CvStack, Parent};
+use hasher::CvStack;
 
-/// The Hasher's kernels on its key and flags: the chunk state's platform
-/// for chunks and parents, `platform` (an SME2 turn's) for whole subtrees,
-/// and with `pooled`, subtrees of lanes::MIN_SPLIT_LEN and more on the pool.
-struct HasherKernels<'a> {
+/// What the Hasher's kernels take from the library (hasher::Hooks): with
+/// `pooled`, subtrees of lanes::MIN_SPLIT_LEN and more on the pool; whole
+/// subtrees on `platform` (an SME2 turn's); `chunk_platform`, the chunk
+/// state's, otherwise.
+struct HasherHooks<'a> {
     key: &'a CVWords,
     flags: u8,
     chunk_platform: Platform,
@@ -1923,14 +1831,7 @@ struct HasherKernels<'a> {
     pooled: bool,
 }
 
-impl Parent for HasherKernels<'_> {
-    #[inline(always)]
-    fn parent(&self, left: &CVBytes, right: &CVBytes) -> CVBytes {
-        parent_node_output(left, right, self.key, self.flags, self.chunk_platform).chaining_value()
-    }
-}
-
-impl stack::Feed<ChunkState> for HasherKernels<'_> {
+impl hasher::Hooks for HasherHooks<'_> {
     #[inline(always)]
     fn ones(&self, x: u64) -> usize {
         x.count_ones() as usize
@@ -1939,21 +1840,6 @@ impl stack::Feed<ChunkState> for HasherKernels<'_> {
     #[inline(always)]
     fn subtree_len(&self, counter: u64, remaining: usize) -> usize {
         next_subtree_len(counter, remaining)
-    }
-
-    #[inline(always)]
-    fn new_chunk(&self, counter: u64) -> ChunkState {
-        ChunkState::new(self.key, counter, self.flags, self.chunk_platform)
-    }
-
-    #[inline(always)]
-    fn chunk_cv(&self, chunk: &ChunkState) -> CVBytes {
-        chunk.output().chaining_value()
-    }
-
-    #[inline(always)]
-    fn whole_chunk_cv(&self, chunk: &[u8], counter: u64) -> CVBytes {
-        ChunkState::new(self.key, counter, self.flags, self.chunk_platform).update(chunk).output().chaining_value()
     }
 
     #[inline(always)]
@@ -1997,20 +1883,18 @@ impl stack::Feed<ChunkState> for HasherKernels<'_> {
     }
 }
 
-impl stack::Nodes<ChunkState, Output> for HasherKernels<'_> {
-    #[inline(always)]
-    fn chunk_node(&self, chunk: &ChunkState) -> Output {
-        chunk.output()
-    }
+/// The Hasher's kernels: chunks, nodes, and parents on the chunk state's
+/// platform, the rest from `hooks`.
+type HasherKernels<'a> = hasher::Kernels<'a, Platform, HasherHooks<'a>>;
 
-    #[inline(always)]
-    fn parent_node(&self, left: &CVBytes, right: &CVBytes) -> Output {
-        parent_node_output(left, right, self.key, self.flags, self.chunk_platform)
-    }
-
-    #[inline(always)]
-    fn node_cv(&self, node: &Output) -> CVBytes {
-        node.chaining_value()
+/// A Hasher's kernels on its key and chunk state (see HasherHooks).
+#[inline(always)]
+fn kernels_on<'a>(key: &'a CVWords, chunk_state: &ChunkState, platform: Platform, pooled: bool) -> HasherKernels<'a> {
+    hasher::Kernels {
+        key,
+        flags: chunk_state.flags,
+        platform: chunk_state.platform,
+        hooks: HasherHooks { key, flags: chunk_state.flags, chunk_platform: chunk_state.platform, platform, pooled },
     }
 }
 
@@ -2368,20 +2252,14 @@ impl HasherCore {
         // use the hazmat module.
         let post_merge_stack_len =
             (chunk_counter - self.initial_chunk_counter).count_ones() as usize;
-        let kernels = HasherKernels {
-            key: &self.key,
-            flags: self.chunk_state.flags,
-            chunk_platform: self.chunk_state.platform,
-            platform: self.chunk_state.platform,
-            pooled: false,
-        };
+        let kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, false);
         self.cv_stack.merge(&kernels, post_merge_stack_len);
     }
 
     /// The kernels on this Hasher's key and flags (see HasherKernels).
     #[inline(always)]
     fn kernels(&self, platform: Platform, pooled: bool) -> HasherKernels<'_> {
-        HasherKernels { key: &self.key, flags: self.chunk_state.flags, chunk_platform: self.chunk_state.platform, platform, pooled }
+        kernels_on(&self.key, &self.chunk_state, platform, pooled)
     }
 
     // In reference_impl.rs, we merge the new CV with existing CVs from the
@@ -2474,34 +2352,22 @@ impl HasherCore {
         #[cfg(not(feature = "std"))]
         let _ = pooled;
         self.assert_room(self.count(), input.len());
-        // The partial chunk first (stack::fill), then whole subtrees and the
-        // last chunk (stack::feed), as src/hasher_core.rs describes.
-        let fill_kernels = HasherKernels {
-            key: &self.key,
-            flags: self.chunk_state.flags,
-            chunk_platform: self.chunk_state.platform,
-            platform: self.chunk_state.platform,
-            pooled,
-        };
-        let rest = stack::fill(&fill_kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, input);
+        // The partial chunk first (hasher::fill), then whole subtrees and the
+        // last chunk (hasher::feed), as src/hasher_core.rs describes.
+        let fill_kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, pooled);
+        let rest = hasher::fill(&fill_kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, input);
         if rest.is_empty() {
             return self;
         }
         // Pooled, the subtrees take the lock one at a time (children).
         let turn = platform::Sme2Turn::take(self.chunk_state.platform, !pooled && rest.len() >= SME2_SIZED_LEN);
-        let kernels = HasherKernels {
-            key: &self.key,
-            flags: self.chunk_state.flags,
-            chunk_platform: self.chunk_state.platform,
-            platform: turn.platform(),
-            pooled,
-        };
-        stack::feed(&kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, rest);
+        let kernels = kernels_on(&self.key, &self.chunk_state, turn.platform(), pooled);
+        hasher::feed(&kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, rest);
         self
     }
 
     pub(crate) fn final_output(&self) -> Output {
-        stack::final_node(&self.kernels(self.chunk_state.platform, false), &self.chunk_state, &self.cv_stack)
+        hasher::final_node(&self.kernels(self.chunk_state.platform, false), &self.chunk_state, &self.cv_stack)
     }
 
     /// The serial update: whole subtrees now, the last chunk kept.

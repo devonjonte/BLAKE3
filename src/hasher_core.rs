@@ -124,3 +124,84 @@ pub fn final_node<C: Chunk, N, K: Nodes<C, N>>(k: &K, chunk: &C, stack: &CvStack
     }
     out
 }
+
+/// What the Hasher's kernels take from the library beyond the compression
+/// function: Feed's methods of those names, as Feed describes them.
+pub trait Hooks {
+    fn ones(&self, x: u64) -> usize;
+    fn subtree_len(&self, counter: u64, remaining: usize) -> usize;
+    fn subtree_cv(&self, input: &[u8], ahead: usize, counter: u64) -> Option<Cv>;
+    fn children(&self, input: &[u8], ahead: usize, counter: u64) -> [Cv; 2];
+}
+
+/// The Hasher's kernels: chunks, nodes, and parents on `key`, `flags`, and
+/// `platform`, and the rest from `hooks`.
+pub struct Kernels<'a, P, H> {
+    pub key: &'a [u32; 8],
+    pub flags: u8,
+    pub platform: P,
+    pub hooks: H,
+}
+
+impl<P: Blocks + Copy, H> Parent for Kernels<'_, P, H> {
+    #[inline(always)]
+    fn parent(&self, left: &Cv, right: &Cv) -> Cv {
+        parent_output(left, right, self.key, self.flags, self.platform).chaining_value()
+    }
+}
+
+impl<P: Blocks + Copy, H: Hooks> Feed<ChunkState<P>> for Kernels<'_, P, H> {
+    #[inline(always)]
+    fn ones(&self, x: u64) -> usize {
+        self.hooks.ones(x)
+    }
+
+    #[inline(always)]
+    fn subtree_len(&self, counter: u64, remaining: usize) -> usize {
+        self.hooks.subtree_len(counter, remaining)
+    }
+
+    #[inline(always)]
+    fn new_chunk(&self, counter: u64) -> ChunkState<P> {
+        ChunkState::new(self.key, counter, self.flags, self.platform)
+    }
+
+    #[inline(always)]
+    fn chunk_cv(&self, chunk: &ChunkState<P>) -> Cv {
+        chunk.output().chaining_value()
+    }
+
+    #[inline(always)]
+    fn whole_chunk_cv(&self, chunk: &[u8], counter: u64) -> Cv {
+        let mut state = ChunkState::new(self.key, counter, self.flags, self.platform);
+        state.absorb(chunk);
+        state.output().chaining_value()
+    }
+
+    #[inline(always)]
+    fn subtree_cv(&self, input: &[u8], ahead: usize, counter: u64) -> Option<Cv> {
+        self.hooks.subtree_cv(input, ahead, counter)
+    }
+
+    #[inline(always)]
+    fn children(&self, input: &[u8], ahead: usize, counter: u64) -> [Cv; 2] {
+        self.hooks.children(input, ahead, counter)
+    }
+}
+
+impl<P: Blocks + Copy, H> Nodes<ChunkState<P>, Output<P>> for Kernels<'_, P, H> {
+    #[inline(always)]
+    fn chunk_node(&self, chunk: &ChunkState<P>) -> Output<P> {
+        chunk.output()
+    }
+
+    #[inline(always)]
+    fn parent_node(&self, left: &Cv, right: &Cv) -> Output<P> {
+        parent_output(left, right, self.key, self.flags, self.platform)
+    }
+
+    #[inline(always)]
+    fn node_cv(&self, node: &Output<P>) -> Cv {
+        node.chaining_value()
+    }
+}

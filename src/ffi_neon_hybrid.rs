@@ -1223,7 +1223,7 @@ mod test {
                 }
                 crate::portable::compress_in_place(&mut cv, &block, part.len() as u8, counter, block_flags);
             }
-            crate::platform::le_bytes_from_words_32(&cv)
+            crate::hasher::le_bytes(&cv)
         };
         for n in (1..16).filter(|&n| partial_covers(n)) {
             let chunks: Vec<&[u8; CHUNK_LEN]> =
@@ -1292,7 +1292,7 @@ mod test {
                     )
                 };
                 assert_eq!(
-                    crate::platform::le_bytes_from_words_32(&want),
+                    crate::hasher::le_bytes(&want),
                     got,
                     "len = {len}, flags = {flags:#x}, counter = {counter}"
                 );

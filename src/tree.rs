@@ -2,7 +2,7 @@
 //! `tools/verify/tree` proves computes the C2SP specification's tree.
 
 use crate::platform::{Platform, MAX_SIMD_DEGREE_OR_2};
-use crate::{CVWords, BLOCK_LEN, CHUNK_LEN, OUT_LEN};
+use crate::{CVWords, CHUNK_LEN, OUT_LEN};
 
 /// A chaining value.
 pub(crate) type Cv = [u8; OUT_LEN];
@@ -71,22 +71,11 @@ impl Kernels for PlatformKernels<'_> {
         #[cfg(blake3_neon_hybrid)]
         return crate::hash_one_chunk_root(input, self.key, self.flags).0;
         #[cfg(not(blake3_neon_hybrid))]
-        return crate::ChunkState::new(self.key, 0, self.flags, self.platform).update(input).output().root_hash().0;
+        return crate::ChunkState::new(self.key, 0, self.flags, self.platform).update(input).output().root_bytes();
     }
 
     #[inline(always)]
     fn parent_root(&self, children: &[Cv; 2]) -> Cv {
-        let mut block = [0u8; BLOCK_LEN];
-        block[..OUT_LEN].copy_from_slice(&children[0]);
-        block[OUT_LEN..].copy_from_slice(&children[1]);
-        let root = crate::Output {
-            input_chaining_value: *self.key,
-            block: crate::Aligned64(block),
-            block_len: BLOCK_LEN as u8,
-            counter: 0,
-            flags: self.flags | crate::PARENT,
-            platform: self.platform,
-        };
-        root.root_hash().0
+        crate::hasher::parent_output(&children[0], &children[1], self.key, self.flags, self.platform).root_bytes()
     }
 }
