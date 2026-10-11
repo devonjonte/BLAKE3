@@ -141,10 +141,8 @@ library that compute BLAKE3 are proved to compute what
   what it must return in the standard's own terms).
 - **The Hasher, around its kernels**: after any sequence of updates, a
   `Hasher`'s result is the standard's hash of all their bytes, given
-  kernels that meet their contracts (its stack, its loop over whole
-  subtrees, and its final fold among the proved code). Its chunk state is
-  proved too: after any bytes, its fields are the standard's chunk node of
-  them, given compression kernels that meet their contracts.
+  kernels that meet their contracts. Its stack, its loop over whole
+  subtrees, its final fold, and its chunk state are proved code.
 - **The pool's cuts and the batch tables**: every piece the pool hashes
   is a whole BLAKE3 subtree at its offset, and a batch's pointer table
   points each lane at its own message.
@@ -156,9 +154,8 @@ before "the library's `hash` returns BLAKE3's hash of its input" is one
 theorem:
 
 - the code that connects the parts: each kernel's Rust wrapper meeting
-  the contract the proofs assume, the chunk state's proof joined to the
-  Hasher's, the `Hasher`'s staging of short updates and its three-line
-  `update_pooled`,
+  the contract the proofs assume, the `Hasher`'s staging of short updates
+  and its three-line `update_pooled`,
   platform detection, the multithreaded paths, and the batch APIs;
 - x86 and other targets, where the fork runs upstream's code;
 - one statement in Lean: the compression proofs reach their verdicts in

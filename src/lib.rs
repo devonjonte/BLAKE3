@@ -667,6 +667,7 @@ impl Zeroize for Output {
 
 /// A chunk's state (src/chunk_core.rs, proved in tools/verify/tree).
 mod chunk {
+    use crate::stack::Chunk;
     use crate::{BLOCK_LEN, CHUNK_START};
     include!("chunk_core.rs");
 }
@@ -1926,29 +1927,6 @@ impl Parent for HasherKernels<'_> {
     #[inline(always)]
     fn parent(&self, left: &CVBytes, right: &CVBytes) -> CVBytes {
         parent_node_output(left, right, self.key, self.flags, self.chunk_platform).chaining_value()
-    }
-}
-
-impl stack::Chunk for ChunkState {
-    #[inline(always)]
-    fn counter(&self) -> u64 {
-        self.chunk_counter
-    }
-
-    #[inline(always)]
-    fn len(&self) -> usize {
-        self.count()
-    }
-
-    #[inline(always)]
-    fn update(&mut self, input: &[u8]) {
-        ChunkState::update(self, input);
-    }
-
-    #[inline(always)]
-    fn advance(&mut self, chunks: u64) {
-        debug_assert_eq!(self.count(), 0);
-        self.chunk_counter += chunks;
     }
 }
 

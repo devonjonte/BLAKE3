@@ -1,5 +1,5 @@
 // The Hasher's stack of chaining values in safe Rust: the library includes
-// this file in src/lib.rs, and tools/verify/tree/rust/stackcore includes it
+// this file in src/lib.rs, and tools/verify/tree/rust/hashercore includes it
 // too, for Aeneas (tools/verify/tree/HasherProofs.lean has the algorithm).
 // It uses Cv and DEPTH from its includer.
 

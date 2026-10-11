@@ -1,7 +1,7 @@
 // A chunk's state in safe Rust, over its compression kernels: the library
 // includes this file in src/lib.rs (ChunkState), and
-// tools/verify/tree/rust/chunkcore includes it too, for Aeneas. It uses
-// BLOCK_LEN and CHUNK_START from its includer.
+// tools/verify/tree/rust/hashercore includes it too, for Aeneas. It uses
+// BLOCK_LEN, CHUNK_START, and the Hasher's Chunk trait from its includer.
 
 /// The compression kernels a chunk's state calls.
 pub trait Blocks {
@@ -76,5 +76,28 @@ impl<P: Blocks> ChunkState<P> {
             input = &input[count * BLOCK_LEN..];
         }
         self.fill_buf(input);
+    }
+}
+
+/// The chunk state the Hasher's loop (hasher_core.rs) works with.
+impl<P: Blocks> Chunk for ChunkState<P> {
+    #[inline(always)]
+    fn counter(&self) -> u64 {
+        self.chunk_counter
+    }
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.count()
+    }
+
+    #[inline(always)]
+    fn update(&mut self, input: &[u8]) {
+        self.absorb(input)
+    }
+
+    #[inline(always)]
+    fn advance(&mut self, chunks: u64) {
+        self.chunk_counter += chunks
     }
 }

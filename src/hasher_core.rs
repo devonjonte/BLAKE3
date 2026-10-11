@@ -1,6 +1,6 @@
 // The Hasher's loop in safe Rust, over its kernels and the stack
 // (stack_core.rs): the library includes this file in src/lib.rs, and
-// tools/verify/tree/rust/stackcore includes it too, for Aeneas. It uses
+// tools/verify/tree/rust/hashercore includes it too, for Aeneas. It uses
 // Cv and CHUNK_LEN from its includer.
 
 /// A chunk's state: its number and the bytes it has so far (at most

@@ -10,8 +10,7 @@ package tree where
 
 lean_lib Widecore {}
 lean_lib Blake3 {}
-lean_lib Stackcore {}
-lean_lib Chunkcore {}
+lean_lib Hashercore {}
 @[default_target] lean_lib Proofs {}
 @[default_target] lean_lib WideProofs {}
 @[default_target] lean_lib HasherProofs {}

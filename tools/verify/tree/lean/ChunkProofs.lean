@@ -1,4 +1,4 @@
-import Chunkcore
+import Hashercore
 import Proofs
 open Aeneas Aeneas.Std Result
 open Bridge
@@ -11,7 +11,7 @@ kernels that meet their contracts, its fields after any bytes `B` are the
 specification's chunk node of `B` (`node_eq`). -/
 
 namespace ChunkProof
-open chunkcore
+open hashercore
 
 /-- The code's 8 words, as the specification's. -/
 def wv (a : Std.Array Std.U32 8#usize) : Vector Blake3.Word 8 :=
@@ -440,6 +440,49 @@ theorem absorb_spec (key : Vector Blake3.Word 8) (mode : Blake3.Word) (t : Nat) 
             | cons _ _ => simp [Slice.length, h']
           omega
 
+/-! ## The Hasher's chunk -/
+
+/-- A chunk state stands for chunk `c` holding the bytes `B`: `CInv`, on a
+platform whose kernels meet their contracts. -/
+def Rel (key : Vector Blake3.Word 8) (mode : Blake3.Word) (st : ChunkState P) (c : Nat) (B : List Std.U8) : Prop :=
+  CInv key mode c B st ∧ BlocksContracts BI st.platform
+
+theorem inst_counter (key : Vector Blake3.Word 8) (mode : Blake3.Word) (st : ChunkState P) (c : Nat)
+    (B : List Std.U8) (h : Rel BI key mode st c B) :
+    (ChunkState.Insts.HashercoreChunk BI).counter st ⦃ u => u.val = c ⦄ := by
+  simp only [ChunkState.Insts.HashercoreChunk, ChunkState.Insts.HashercoreChunk.counter, WP.spec_ok]
+  exact h.1.1.1
+
+theorem inst_len (key : Vector Blake3.Word 8) (mode : Blake3.Word) (st : ChunkState P) (c : Nat)
+    (B : List Std.U8) (h : Rel BI key mode st c B) :
+    (ChunkState.Insts.HashercoreChunk BI).len st ⦃ n => n.val = B.length ⦄ := by
+  obtain ⟨⟨_, _, hlen, hl64, h1024, _⟩, _⟩ := h.1
+  simp only [ChunkState.Insts.HashercoreChunk, ChunkState.Insts.HashercoreChunk.len]
+  unfold ChunkState.count
+  have hB : BLOCK_LEN.val = 64 := by simp [BLOCK_LEN]
+  step*
+  all_goals simp_all [UScalar.cast_val_eq]
+  all_goals scalar_tac
+
+theorem inst_update (key : Vector Blake3.Word 8) (mode : Blake3.Word) (st : ChunkState P) (c : Nat)
+    (B : List Std.U8) (x : Slice Std.U8) (h : Rel BI key mode st c B) (hlen : B.length + x.length ≤ 1024) :
+    (ChunkState.Insts.HashercoreChunk BI).update st x ⦃ st' => Rel BI key mode st' c (B ++ x.val) ⦄ := by
+  simp only [ChunkState.Insts.HashercoreChunk, ChunkState.Insts.HashercoreChunk.update]
+  apply WP.spec_mono (absorb_spec BI key mode c B st h.1 h.2 x hlen)
+  rintro st' ⟨hc, hp⟩
+  exact ⟨hc, hp ▸ h.2⟩
+
+theorem inst_advance (key : Vector Blake3.Word 8) (mode : Blake3.Word) (st : ChunkState P) (c : Nat)
+    (n : Std.U64) (h : Rel BI key mode st c []) (hmax : c + n.val ≤ Std.U64.max) :
+    (ChunkState.Insts.HashercoreChunk BI).advance st n ⦃ st' => Rel BI key mode st' (c + n.val) [] ⦄ := by
+  obtain ⟨⟨⟨hcnt, hfl, hlen, hl64, h1024, hbuf, hcv⟩, hne⟩, hK⟩ := h
+  simp only [ChunkState.Insts.HashercoreChunk, ChunkState.Insts.HashercoreChunk.advance]
+  step as ⟨i, hi⟩
+  have hb0 : st.blocks_compressed.val = 0 := by simp at hlen; omega
+  refine ⟨⟨⟨by simp [hi, hcnt], hfl, hlen, hl64, h1024, hbuf, ?_⟩, hne⟩, hK⟩
+  show wv st.cv = _
+  rw [hcv, hb0]; simp
+
 end
 
 end ChunkProof
@@ -447,3 +490,5 @@ end ChunkProof
 #print axioms ChunkProof.node_eq
 #print axioms ChunkProof.new_spec
 #print axioms ChunkProof.absorb_spec
+#print axioms ChunkProof.inst_len
+#print axioms ChunkProof.inst_advance

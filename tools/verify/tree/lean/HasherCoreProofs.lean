@@ -111,7 +111,7 @@ end
 
 /-! ## The stack's code -/
 
-open stackcore in
+open hashercore in
 /-- A stack no longer than its target: the merge leaves it as it is. -/
 theorem merge_noop_spec {P : Type} (PI : Parent P) (p : P) (s : CvStack) (target : Std.Usize)
     (hle : s.len.val ≤ target.val) :
@@ -151,7 +151,7 @@ theorem ones_lt_55 (c : Nat) (hc : c < 2 ^ 54) : HasherProof.ones c < 55 := by
   omega
 
 /-- The values' count is the stack's length. -/
-theorem vals_length (st : stackcore.CvStack) (hinv : StackProof.Inv st) :
+theorem vals_length (st : hashercore.CvStack) (hinv : StackProof.Inv st) :
     (StackProof.vals st).length = st.len.val := by
   unfold StackProof.vals
   cases h : st.cvs with
@@ -161,7 +161,7 @@ theorem vals_length (st : stackcore.CvStack) (hinv : StackProof.Inv st) :
 section
 variable (key : Vector Blake3.Word 8) (mode : Blake3.Word) (abs : StackProof.Cv → Vector Blake3.Word 8)
 
-open stackcore in
+open hashercore in
 /-- Merging to the 1-bits of `c` leaves the stack merged. -/
 theorem merge_to_spec {P : Type} (PI : Parent P) (p : P) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv)
     (hp : ∀ a b, PI.parent p a b = ok (pf a b))
@@ -190,7 +190,7 @@ theorem merge_to_spec {P : Type} (PI : Parent P) (p : P) (pf : StackProof.Cv →
     unfold Merged
     exact List.reverse_inj.mp this
 
-open stackcore in
+open hashercore in
 /-- `push`: the stack merged to the 1-bits of `c`, then the subtree of the
 next `2 ^ j` chunks on top. -/
 theorem push_spec' {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
@@ -267,27 +267,27 @@ end
 
 /-! ## The kernels' contracts -/
 
-open stackcore in
-/-- The Hasher's kernels meet their contracts: `cs` reads a chunk state as
-its number and its bytes, and `abs` a chaining value as the
-specification's. -/
+open hashercore in
+/-- The Hasher's kernels meet their contracts: `R ch c P` reads a chunk
+state `ch` as chunk number `c` holding the bytes `P`, and `abs` a chaining
+value as the specification's. -/
 structure Contracts {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
     (key : Vector Blake3.Word 8) (mode : Blake3.Word) (abs : StackProof.Cv → Vector Blake3.Word 8)
-    (cs : C → Nat × List Std.U8) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv) : Prop where
-  counter : ∀ ch, CI.counter ch ⦃ u => u.val = (cs ch).1 ⦄
-  len : ∀ ch, CI.len ch ⦃ n => n.val = (cs ch).2.length ⦄
-  update : ∀ ch (x : Slice Std.U8), (cs ch).2.length + x.length ≤ 1024 →
-    CI.update ch x ⦃ ch' => cs ch' = ((cs ch).1, (cs ch).2 ++ x.val) ⦄
-  advance : ∀ ch (n : Std.U64), (cs ch).2 = [] → (cs ch).1 + n.val ≤ Std.U64.max →
-    CI.advance ch n ⦃ ch' => cs ch' = ((cs ch).1 + n.val, []) ⦄
+    (R : C → Nat → List Std.U8 → Prop) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv) : Prop where
+  counter : ∀ ch c P, R ch c P → CI.counter ch ⦃ u => u.val = c ⦄
+  len : ∀ ch c P, R ch c P → CI.len ch ⦃ n => n.val = P.length ⦄
+  update : ∀ ch c P (x : Slice Std.U8), R ch c P → P.length + x.length ≤ 1024 →
+    CI.update ch x ⦃ ch' => R ch' c (P ++ x.val) ⦄
+  advance : ∀ ch c (n : Std.U64), R ch c [] → c + n.val ≤ Std.U64.max →
+    CI.advance ch n ⦃ ch' => R ch' (c + n.val) [] ⦄
   parent : ∀ a b, FI.ParentInst.parent k a b = ok (pf a b)
   parent_spec : ∀ a b, abs (pf a b) = cvOp key mode (abs a) (abs b)
   ones : ∀ x, FI.ones k x ⦃ r => r.val = HasherProof.ones x.val ⦄
   subtree_len : ∀ (c : Std.U64) (r : Std.Usize), 1024 < r.val →
     FI.subtree_len k c r ⦃ q => ∃ j, q.val = 1024 * 2 ^ j ∧ 2 ^ j ∣ c.val ∧ q.val ≤ r.val ⦄
-  new_chunk : ∀ c, FI.new_chunk k c ⦃ ch => cs ch = (c.val, []) ⦄
-  chunk_cv : ∀ ch, (cs ch).2.length = 1024 →
-    FI.chunk_cv k ch ⦃ v => abs v = (Blake3.chunkNode key mode (toBA (cs ch).2) (cs ch).1).cv ⦄
+  new_chunk : ∀ c, FI.new_chunk k c ⦃ ch => R ch c.val [] ⦄
+  chunk_cv : ∀ ch c P, R ch c P → P.length = 1024 →
+    FI.chunk_cv k ch ⦃ v => abs v = (Blake3.chunkNode key mode (toBA P) c).cv ⦄
   whole_chunk_cv : ∀ (x : Slice Std.U8) (c : Std.U64), x.length = 1024 →
     FI.whole_chunk_cv k x c ⦃ v => abs v = (Blake3.chunkNode key mode (toBA x.val) c.val).cv ⦄
   subtree_cv : ∀ (x : Slice Std.U8) (a : Std.Usize) (c : Std.U64), 1024 ≤ x.length →
@@ -318,29 +318,27 @@ end
 section
 variable (key : Vector Blake3.Word 8) (mode : Blake3.Word) (abs : StackProof.Cv → Vector Blake3.Word 8)
 
-open stackcore in
+open hashercore in
 /-- The loop's state: the bytes consumed so far (`M`) and the rest make
 `T`; the chunk is empty and numbered `M`'s chunk count; the stack merged or
 pending; and once nothing is left, a pending subtree follows a chunk. -/
-def FeedInv {C : Type} (cs : C → Nat × List Std.U8) (T : List Std.U8) (st : C × CvStack × Slice Std.U8) : Prop :=
-  ∃ M, M ++ st.2.2.val = T ∧ (cs st.1).2 = [] ∧ M.length = 1024 * (cs st.1).1 ∧ T.length < 1024 * 2 ^ 54 ∧
+def FeedInv {C : Type} (R : C → Nat → List Std.U8 → Prop) (T : List Std.U8) (st : C × CvStack × Slice Std.U8) : Prop :=
+  ∃ M c, R st.1 c [] ∧ M ++ st.2.2.val = T ∧ M.length = 1024 * c ∧ T.length < 1024 * 2 ^ 54 ∧
     StackProof.Inv st.2.1 ∧
-    (Merged key mode abs M (StackProof.vals st.2.1) (cs st.1).1 ∨
-      Pending key mode abs M (StackProof.vals st.2.1) (cs st.1).1) ∧
-    (st.2.2.length = 0 → ((cs st.1).1 = 0 ∧ StackProof.vals st.2.1 = []) ∨
-      PendingPos key mode abs M (StackProof.vals st.2.1) (cs st.1).1)
+    (Merged key mode abs M (StackProof.vals st.2.1) c ∨ Pending key mode abs M (StackProof.vals st.2.1) c) ∧
+    (st.2.2.length = 0 → (c = 0 ∧ StackProof.vals st.2.1 = []) ∨ PendingPos key mode abs M (StackProof.vals st.2.1) c)
 
 /-- A subtree over a slice appended at chunk `c`, as one over the message. -/
 theorem goIdx_tail (M X : List Std.U8) (c n : Nat) (hM : M.length = 1024 * c) (hn : 1 ≤ n) :
     goIdx (leafN key mode X c) (nodeOp key mode) c n = goIdx (leafN key mode (M ++ X) 0) (nodeOp key mode) c n :=
   goIdx_congr _ _ _ c n (fun i hi _ => leafN_tail key mode M X c i hM hi) hn
 
-open stackcore in
+open hashercore in
 /-- The SME2 hook, where the loop asks it (after the first chunk): any value
 it gives is the subtree's. -/
 theorem flat_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
-    (cs : C → Nat × List Std.U8) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv)
-    (hK : Contracts CI FI k key mode abs cs pf) (sub : Slice Std.U8) (ahead : Std.Usize) (counter : Std.U64)
+    (R : C → Nat → List Std.U8 → Prop) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv)
+    (hK : Contracts CI FI k key mode abs R pf) (sub : Slice Std.U8) (ahead : Std.Usize) (counter : Std.U64)
     (hs : 1024 ≤ sub.length) :
     (if counter > 0#u64 then FI.subtree_cv k sub ahead counter else ok none) ⦃ o => ∀ v, o = some v →
       0 < counter.val ∧ abs v = (goIdx (leafN key mode sub.val counter.val) (nodeOp key mode) counter.val
@@ -352,24 +350,24 @@ theorem flat_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
     exact ⟨by scalar_tac, ho v hv⟩
   · simp
 
-open stackcore in
+open hashercore in
 theorem feed_loop_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
-    (cs : C → Nat × List Std.U8) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv)
-    (hK : Contracts CI FI k key mode abs cs pf) (T : List Std.U8)
-    (ch : C) (s : CvStack) (inp : Slice Std.U8) (h : FeedInv key mode abs cs T (ch, s, inp)) :
-    feed_loop CI FI k ch s 0#u64 inp ⦃ r => r.2.2.length ≤ 1024 ∧ FeedInv key mode abs cs T r ⦄ := by
+    (R : C → Nat → List Std.U8 → Prop) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv)
+    (hK : Contracts CI FI k key mode abs R pf) (T : List Std.U8)
+    (ch : C) (s : CvStack) (inp : Slice Std.U8) (h : FeedInv key mode abs R T (ch, s, inp)) :
+    feed_loop CI FI k ch s 0#u64 inp ⦃ r => r.2.2.length ≤ 1024 ∧ FeedInv key mode abs R T r ⦄ := by
   unfold feed_loop
   apply loop.spec_decr_nat (fun st : C × CvStack × Slice Std.U8 => st.2.2.length)
-    (fun st => FeedInv key mode abs cs T st)
-  · rintro ⟨ch, s, inp⟩ ⟨M, hM, hP, hML, htot, hinv, hst, hz⟩
-    simp only at hM hP hML hinv hst hz
+    (fun st => FeedInv key mode abs R T st)
+  · rintro ⟨ch, s, inp⟩ ⟨M, c, hR, hM, hML, htot, hinv, hst, hz⟩
+    simp only at hR hM hML hinv hst hz
     have hC : CHUNK_LEN.val = 1024 := by simp [CHUNK_LEN]
     unfold feed_loop.body
     simp only
     split
     · rename_i hgt
       have hgt' : 1024 < inp.length := by simp only [Slice.length]; scalar_tac
-      step with hK.counter ch as ⟨counter, hcounter⟩
+      step with hK.counter ch c [] hR as ⟨counter, hcounter⟩
       step with hK.subtree_len counter inp.len (by simp only [Slice.length] at hgt'; scalar_tac)
         as ⟨len, j, hlen, hj, hle⟩
       step as ⟨i2, hi2⟩
@@ -383,35 +381,35 @@ theorem feed_loop_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
         rw [hchunks]; simp [hi2, hlen, hC]
       have hcs : sub.length / 1024 + 0 = 2 ^ j := by rw [hsl]; omega
       have hck : chunks (sub.length) = 2 ^ j := by unfold chunks; rw [hsl]; omega
-      have hcv : counter.val = (cs ch).1 := hcounter
-      have hM'L : (M ++ sub.val).length = 1024 * ((cs ch).1 + 2 ^ j) := by
+      have hcv : counter.val = c := hcounter
+      have hM'L : (M ++ sub.val).length = 1024 * (c + 2 ^ j) := by
         rw [List.length_append, hML, show sub.val.length = sub.length from rfl, hsl]; ring
       have hTl : (M ++ sub.val).length ≤ T.length := by
         have hle' : len.val ≤ inp.val.length := by scalar_tac
         rw [← hM, List.length_append, List.length_append, hsv, List.length_take]; omega
-      have hbound : (cs ch).1 + 2 ^ j < 2 ^ 54 := by omega
-      have hst' : Merged key mode abs (M ++ sub.val) (StackProof.vals s) (cs ch).1 ∨
-          Pending key mode abs (M ++ sub.val) (StackProof.vals s) (cs ch).1 := by
+      have hbound : c + 2 ^ j < 2 ^ 54 := by omega
+      have hst' : Merged key mode abs (M ++ sub.val) (StackProof.vals s) c ∨
+          Pending key mode abs (M ++ sub.val) (StackProof.vals s) c := by
         rcases hst with h1 | h1
         · exact Or.inl (merged_append key mode abs M _ _ _ (by omega) h1)
         · exact Or.inr (pending_append key mode abs M _ _ _ (by omega) h1)
       have hsub' : ∀ n, 1 ≤ n → goIdx (leafN key mode sub.val counter.val) (nodeOp key mode) counter.val n =
-          goIdx (leafN key mode (M ++ sub.val) 0) (nodeOp key mode) (cs ch).1 n := by
-        intro n hn; rw [hcv]; exact goIdx_tail key mode M sub.val (cs ch).1 n hML hn
-      step with flat_spec key mode abs CI FI k cs pf hK sub ahead counter (by omega) as ⟨flat, hflat⟩
+          goIdx (leafN key mode (M ++ sub.val) 0) (nodeOp key mode) c n := by
+        intro n hn; rw [hcv]; exact goIdx_tail key mode M sub.val c n hML hn
+      step with flat_spec key mode abs CI FI k R pf hK sub ahead counter (by omega) as ⟨flat, hflat⟩
       apply WP.spec_bind (Pₘ := fun s1 => StackProof.Inv s1 ∧
-        Pending key mode abs (M ++ sub.val) (StackProof.vals s1) ((cs ch).1 + 2 ^ j) ∧
-        (len.val = inp.length → PendingPos key mode abs (M ++ sub.val) (StackProof.vals s1) ((cs ch).1 + 2 ^ j)))
+        Pending key mode abs (M ++ sub.val) (StackProof.vals s1) (c + 2 ^ j) ∧
+        (len.val = inp.length → PendingPos key mode abs (M ++ sub.val) (StackProof.vals s1) (c + 2 ^ j)))
       · cases flat with
         | some cv =>
           obtain ⟨hpos, hv⟩ := hflat cv rfl
           simp only
           apply WP.spec_mono (push_spec' key mode abs CI FI k pf hK.parent hK.parent_spec hK.ones
-            (M ++ sub.val) s hinv (cs ch).1 (by omega) hst' cv j (hcv ▸ hj)
+            (M ++ sub.val) s hinv c (by omega) hst' cv j (hcv ▸ hj)
             (by rw [hv, hck, hsub' _ hj1]) counter hcv)
           rintro s1 ⟨hinv1, hv1⟩
-          exact ⟨hinv1, ⟨(cs ch).1, j, hcv ▸ hj, rfl, hv1⟩,
-            fun _ => ⟨(cs ch).1, j, by omega, hcv ▸ hj, rfl, hv1⟩⟩
+          exact ⟨hinv1, ⟨c, j, hcv ▸ hj, rfl, hv1⟩,
+            fun _ => ⟨c, j, by omega, hcv ▸ hj, rfl, hv1⟩⟩
         | none =>
           simp only
           split
@@ -420,16 +418,16 @@ theorem feed_loop_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
             have hj0 : 2 ^ j = 1 := by rw [hC] at hle1'; omega
             have hsl1 : sub.length = 1024 := by omega
             step with hK.whole_chunk_cv sub counter hsl1 as ⟨a, ha⟩
-            have hx : abs a = (goIdx (leafN key mode (M ++ sub.val) 0) (nodeOp key mode) (cs ch).1 (2 ^ 0)).cv := by
+            have hx : abs a = (goIdx (leafN key mode (M ++ sub.val) 0) (nodeOp key mode) c (2 ^ 0)).cv := by
               rw [ha, pow_zero, goIdx, if_pos (le_refl 1), leafN, chunkOf_tail M sub.val _ _ hML (le_refl _),
                 hcv]
               simp only [chunkOf, Nat.sub_self, Nat.mul_zero, List.drop_zero]
               rw [List.take_of_length_le (by simp only [Slice.length] at hsl1; omega)]
             apply WP.spec_mono (push_spec' key mode abs CI FI k pf hK.parent hK.parent_spec hK.ones
-              (M ++ sub.val) s hinv (cs ch).1 (by omega) hst' a 0 (by simp) hx counter hcv)
+              (M ++ sub.val) s hinv c (by omega) hst' a 0 (by simp) hx counter hcv)
             rintro s1 ⟨hinv1, hv1⟩
             rw [pow_zero] at hv1
-            refine ⟨hinv1, ⟨(cs ch).1, 0, by simp, by rw [hj0, pow_zero], by rw [pow_zero]; exact hv1⟩, ?_⟩
+            refine ⟨hinv1, ⟨c, 0, by simp, by rw [hj0, pow_zero], by rw [pow_zero]; exact hv1⟩, ?_⟩
             intro hall; omega
           · rename_i hgt1
             have hj0 : 1 ≤ j := by
@@ -452,45 +450,45 @@ theorem feed_loop_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
             step as ⟨right, hright⟩
             have hl' : left = x := by rw [hleft]; simp [hxy]
             have hr' : right = y := by rw [hright]; simp [hxy]
-            have hj0d : 2 ^ j0 ∣ (cs ch).1 := by
+            have hj0d : 2 ^ j0 ∣ c := by
               rw [← hcv]; exact Nat.dvd_trans (Nat.pow_dvd_pow 2 (by omega)) hj
             step with push_spec' key mode abs CI FI k pf hK.parent hK.parent_spec hK.ones
-              (M ++ sub.val) s hinv (cs ch).1 (by rw [pow_succ] at hbound; omega) hst' left j0 hj0d
+              (M ++ sub.val) s hinv c (by rw [pow_succ] at hbound; omega) hst' left j0 hj0d
               (by rw [hl', hx, ← hL]) counter hcv as ⟨s2, hinv2, hv2⟩
             step as ⟨i4, hi4⟩
             step as ⟨i5, hi5⟩
-            have hi5v : i5.val = (cs ch).1 + 2 ^ j0 := by
+            have hi5v : i5.val = c + 2 ^ j0 := by
               rw [hi5, hi4, hch, hcv, pow_succ]; omega
             apply WP.spec_mono (push_spec' key mode abs CI FI k pf hK.parent hK.parent_spec hK.ones
-              (M ++ sub.val) s2 hinv2 ((cs ch).1 + 2 ^ j0) (by rw [pow_succ] at hbound; omega)
-              (Or.inr ⟨(cs ch).1, j0, hj0d, rfl, hv2⟩) right j0 (Nat.dvd_add hj0d (dvd_refl _))
+              (M ++ sub.val) s2 hinv2 (c + 2 ^ j0) (by rw [pow_succ] at hbound; omega)
+              (Or.inr ⟨c, j0, hj0d, rfl, hv2⟩) right j0 (Nat.dvd_add hj0d (dvd_refl _))
               (by rw [hr', hy, ← hR]) i5 hi5v)
             rintro s3 ⟨hinv3, hv3⟩
-            have hsum : (cs ch).1 + 2 ^ j0 + 2 ^ j0 = (cs ch).1 + 2 ^ (j0 + 1) := by rw [pow_succ]; omega
-            refine ⟨hinv3, ⟨(cs ch).1 + 2 ^ j0, j0, Nat.dvd_add hj0d (dvd_refl _), hsum, hv3⟩,
-              fun _ => ⟨(cs ch).1 + 2 ^ j0, j0, by have := Nat.one_le_two_pow (n := j0); omega,
+            have hsum : c + 2 ^ j0 + 2 ^ j0 = c + 2 ^ (j0 + 1) := by rw [pow_succ]; omega
+            refine ⟨hinv3, ⟨c + 2 ^ j0, j0, Nat.dvd_add hj0d (dvd_refl _), hsum, hv3⟩,
+              fun _ => ⟨c + 2 ^ j0, j0, by have := Nat.one_le_two_pow (n := j0); omega,
                 Nat.dvd_add hj0d (dvd_refl _), hsum, hv3⟩⟩
       · rintro s1 ⟨hinv1, hp1, hpos1⟩
-        step with hK.advance ch nch hP (by rw [hch]; scalar_tac) as ⟨ch1, hch1⟩
+        step with hK.advance ch c nch hR (by rw [hch]; scalar_tac) as ⟨ch1, hR1⟩
         step as ⟨inp1, hinp1, hinp1l⟩
         have hle' : len.val ≤ inp.val.length := by scalar_tac
-        refine ⟨⟨M ++ sub.val, ?_, by rw [hch1], by rw [hch1, hM'L, hch], htot, hinv1, ?_, ?_⟩, ?_⟩
+        rw [hch] at hR1
+        refine ⟨⟨M ++ sub.val, c + 2 ^ j, hR1, ?_, hM'L, htot, hinv1, Or.inr hp1, ?_⟩, ?_⟩
         · rw [← hM, hinp1, hsv, List.append_assoc, List.take_append_drop]
-        · rw [hch1, hch]; exact Or.inr hp1
-        · intro h0; right; rw [hch1, hch]
+        · intro h0; right
           apply hpos1
           simp only [Slice.length] at h0 hinp1l ⊢; scalar_tac
         · simp only [Slice.length] at hinp1l ⊢; scalar_tac
     · rename_i hle
       simp only [WP.spec_ok]
-      refine ⟨by simp only [Slice.length]; scalar_tac, M, hM, hP, hML, htot, hinv, hst, hz⟩
+      refine ⟨by simp only [Slice.length]; scalar_tac, M, c, hR, hM, hML, htot, hinv, hst, hz⟩
   · exact h
 
 end
 
 /-! ## The root's node -/
 
-open stackcore in
+open hashercore in
 /-- `get`: value `i` of the stack's values. -/
 theorem get_spec (st : CvStack) (hinv : StackProof.Inv st) (i : Std.Usize) (hi : i.val < st.len.val) :
     CvStack.get st i ⦃ v => v = (StackProof.vals st)[i.val]! ⦄ := by
@@ -507,25 +505,25 @@ theorem get_spec (st : CvStack) (hinv : StackProof.Inv st) (i : Std.Usize) (hi :
     rw [getElem!_pos _ i.val hin, List.getElem_take]
     simp_all [getElem!_pos _ i.val (by omega : i.val < a.val.length)]
 
-open stackcore in
+open hashercore in
 /-- The Nodes kernels meet their contracts: `absN` reads a node as the
 specification's. -/
 structure NodeContracts {C K N : Type} (CI : Chunk C) (NI : Nodes K C N) (k : K)
     (key : Vector Blake3.Word 8) (mode : Blake3.Word) (abs : StackProof.Cv → Vector Blake3.Word 8)
-    (cs : C → Nat × List Std.U8) (absN : N → Blake3.Node) : Prop where
-  len : ∀ ch, CI.len ch ⦃ n => n.val = (cs ch).2.length ⦄
-  chunk_node : ∀ ch, NI.chunk_node k ch ⦃ n => absN n = Blake3.chunkNode key mode (toBA (cs ch).2) (cs ch).1 ⦄
+    (R : C → Nat → List Std.U8 → Prop) (absN : N → Blake3.Node) : Prop where
+  len : ∀ ch c P, R ch c P → CI.len ch ⦃ n => n.val = P.length ⦄
+  chunk_node : ∀ ch c P, R ch c P → NI.chunk_node k ch ⦃ n => absN n = Blake3.chunkNode key mode (toBA P) c ⦄
   parent_node : ∀ a b, NI.parent_node k a b ⦃ n => absN n = Blake3.parentNode key mode (abs a) (abs b) ⦄
   node_cv : ∀ n, NI.node_cv k n ⦃ v => abs v = (absN n).cv ⦄
 
 section
 variable (key : Vector Blake3.Word 8) (mode : Blake3.Word) (abs : StackProof.Cv → Vector Blake3.Word 8)
 
-open stackcore in
+open hashercore in
 /-- The fold: each value below `n0`, from the top, the parent's left child. -/
 theorem final_loop_spec {C K N : Type} (CI : Chunk C) (NI : Nodes K C N) (k : K)
-    (cs : C → Nat × List Std.U8) (absN : N → Blake3.Node)
-    (hN : NodeContracts CI NI k key mode abs cs absN)
+    (R : C → Nat → List Std.U8 → Prop) (absN : N → Blake3.Node)
+    (hN : NodeContracts CI NI k key mode abs R absN)
     (st : CvStack) (hinv : StackProof.Inv st) (S : List Blake3.Node)
     (hS : (StackProof.vals st).map abs = S.map Blake3.Node.cv)
     (n0 : Std.Usize) (hn0 : n0.val ≤ st.len.val) (out0 : N) (base : Blake3.Node) (h0 : absN out0 = base) :
@@ -573,30 +571,29 @@ end
 section
 variable (key : Vector Blake3.Word 8) (mode : Blake3.Word) (abs : StackProof.Cv → Vector Blake3.Word 8)
 
-open stackcore in
+open hashercore in
 /-- After the bytes `M`: the chunk holds the bytes after `M`'s last full
 chunks (at most a chunk, all of `M`'s last chunk when it ends one); the
 stack holds the subtrees over the full chunks, merged when a chunk is
 partly filled, and else perhaps with one subtree not yet merged (after at
 least one chunk). -/
-def HInv {C : Type} (cs : C → Nat × List Std.U8) (M : List Std.U8) (ch : C) (st : CvStack) : Prop :=
-  (∃ F, M = F ++ (cs ch).2 ∧ F.length = 1024 * (cs ch).1) ∧ (cs ch).2.length ≤ 1024 ∧
+def HInv {C : Type} (R : C → Nat → List Std.U8 → Prop) (M : List Std.U8) (ch : C) (st : CvStack) : Prop :=
+  ∃ c P, R ch c P ∧ (∃ F, M = F ++ P ∧ F.length = 1024 * c) ∧ P.length ≤ 1024 ∧
     M.length < 1024 * 2 ^ 54 ∧ StackProof.Inv st ∧
-    (0 < (cs ch).2.length → Merged key mode abs M (StackProof.vals st) (cs ch).1) ∧
-    ((cs ch).2 = [] → ((cs ch).1 = 0 ∧ StackProof.vals st = []) ∨
-      PendingPos key mode abs M (StackProof.vals st) (cs ch).1)
+    (0 < P.length → Merged key mode abs M (StackProof.vals st) c) ∧
+    (P = [] → (c = 0 ∧ StackProof.vals st = []) ∨ PendingPos key mode abs M (StackProof.vals st) c)
 
-open stackcore in
+open hashercore in
 /-- `feed`: from the loop's state, the Hasher's. -/
 theorem feed_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
-    (cs : C → Nat × List Std.U8) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv)
-    (hK : Contracts CI FI k key mode abs cs pf) (T : List Std.U8)
-    (ch : C) (s : CvStack) (inp : Slice Std.U8) (h : FeedInv key mode abs cs T (ch, s, inp)) :
-    feed CI FI k ch s 0#u64 inp ⦃ r => HInv key mode abs cs T r.1 r.2 ⦄ := by
+    (R : C → Nat → List Std.U8 → Prop) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv)
+    (hK : Contracts CI FI k key mode abs R pf) (T : List Std.U8)
+    (ch : C) (s : CvStack) (inp : Slice Std.U8) (h : FeedInv key mode abs R T (ch, s, inp)) :
+    feed CI FI k ch s 0#u64 inp ⦃ r => HInv key mode abs R T r.1 r.2 ⦄ := by
   unfold feed
-  step with feed_loop_spec key mode abs CI FI k cs pf hK T ch s inp h as ⟨ch1, s1, inp1, hle, hfi⟩
-  obtain ⟨M, hM, hP, hML, htot, hinv, hst, hz⟩ := hfi
-  simp only at hM hP hML hinv hst hz hle ⊢
+  step with feed_loop_spec key mode abs CI FI k R pf hK T ch s inp h as ⟨ch1, s1, inp1, hle, hfi⟩
+  obtain ⟨M, c, hR, hM, hML, htot, hinv, hst, hz⟩ := hfi
+  simp only at hR hM hML hinv hst hz hle ⊢
   step as ⟨b, hb⟩
   split
   · rename_i hbt
@@ -605,49 +602,46 @@ theorem feed_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
     simp only [WP.spec_ok]
     rw [hv, List.append_nil] at hM
     subst hM
-    refine ⟨⟨M, by rw [hP, List.append_nil], hML⟩, by rw [hP]; simp, htot, hinv, ?_, fun _ => hz h0⟩
-    intro hpos; rw [hP] at hpos; simp at hpos
+    exact ⟨c, [], hR, ⟨M, by simp, hML⟩, by simp, htot, hinv, fun h => by simp at h, fun _ => hz h0⟩
   · rename_i hbf
     have hpos : 0 < inp1.length := by
       by_contra h0; apply hbf; simp_all [Slice.length]
-    step with hK.update ch1 inp1 (by rw [hP]; simpa using hle) as ⟨ch2, hch2⟩
-    step with hK.counter ch2 as ⟨c2, hc2⟩
+    step with hK.update ch1 c [] inp1 hR (by simpa using hle) as ⟨ch2, hR2⟩
+    step with hK.counter ch2 c _ hR2 as ⟨c2, hc2⟩
     step as ⟨i1, hi1⟩
     step with hK.ones i1 as ⟨t, ht⟩
-    have hst' : Merged key mode abs T (StackProof.vals s1) (cs ch1).1 ∨
-        Pending key mode abs T (StackProof.vals s1) (cs ch1).1 := by
+    have hst' : Merged key mode abs T (StackProof.vals s1) c ∨ Pending key mode abs T (StackProof.vals s1) c := by
       rw [← hM]
       rcases hst with h1 | h1
       · exact Or.inl (merged_append key mode abs M _ _ _ (by omega) h1)
       · exact Or.inr (pending_append key mode abs M _ _ _ (by omega) h1)
-    step with merge_to_spec key mode abs FI.ParentInst k pf hK.parent hK.parent_spec T s1 hinv (cs ch1).1 hst' t
-      (by rw [ht, hi1, hc2, hch2]; simp) as ⟨s2, hinv2, hm2⟩
-    refine ⟨⟨M, by rw [hch2, hP, ← hM]; simp, by rw [hch2]; exact hML⟩, by rw [hch2, hP]; simpa using hle,
-      htot, hinv2, fun _ => by rw [hch2]; exact hm2, ?_⟩
-    intro he; rw [hch2, hP] at he; simp at he
+    step with merge_to_spec key mode abs FI.ParentInst k pf hK.parent hK.parent_spec T s1 hinv c hst' t
+      (by rw [ht, hi1, hc2]; simp) as ⟨s2, hinv2, hm2⟩
+    refine ⟨c, inp1.val, by simpa using hR2, ⟨M, hM.symm, hML⟩, by simpa [Slice.length] using hle, htot, hinv2,
+      fun _ => hm2, fun he => ?_⟩
     simp only [Slice.length] at hpos; rw [he] at hpos; simp at hpos
 
-open stackcore in
+open hashercore in
 /-- `fill`: the partial chunk filled from the input; with the rest empty, the
 Hasher's state after all the input, and else the loop's. -/
 theorem fill_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
-    (cs : C → Nat × List Std.U8) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv)
-    (hK : Contracts CI FI k key mode abs cs pf) (M : List Std.U8)
-    (ch : C) (st : CvStack) (h : HInv key mode abs cs M ch st) (input : Slice Std.U8)
+    (R : C → Nat → List Std.U8 → Prop) (pf : StackProof.Cv → StackProof.Cv → StackProof.Cv)
+    (hK : Contracts CI FI k key mode abs R pf) (M : List Std.U8)
+    (ch : C) (st : CvStack) (h : HInv key mode abs R M ch st) (input : Slice Std.U8)
     (hbound : M.length + input.length < 1024 * 2 ^ 54) :
     fill CI FI k ch st 0#u64 input ⦃ r =>
-      (r.1.length = 0 → HInv key mode abs cs (M ++ input.val) r.2.1 r.2.2) ∧
-      (0 < r.1.length → FeedInv key mode abs cs (M ++ input.val) (r.2.1, r.2.2, r.1)) ⦄ := by
-  obtain ⟨⟨F, hF, hFl⟩, hPl, hMl, hinv, hmerged, hempty⟩ := h
+      (r.1.length = 0 → HInv key mode abs R (M ++ input.val) r.2.1 r.2.2) ∧
+      (0 < r.1.length → FeedInv key mode abs R (M ++ input.val) (r.2.1, r.2.2, r.1)) ⦄ := by
+  obtain ⟨c, P, hR, ⟨F, hF, hFl⟩, hPl, hMl, hinv, hmerged, hempty⟩ := h
   have hC : CHUNK_LEN.val = 1024 := by simp [CHUNK_LEN]
   have htot : (M ++ input.val).length < 1024 * 2 ^ 54 := by
     rw [List.length_append]; simpa [Slice.length] using hbound
   unfold fill
-  step with hK.len ch as ⟨i, hi⟩
+  step with hK.len ch c P hR as ⟨i, hi⟩
   split
   · rename_i hi0
-    have hP : (cs ch).2 = [] := by
-      have : (cs ch).2.length = 0 := by rw [← hi]; scalar_tac
+    have hP : P = [] := by
+      have : P.length = 0 := by rw [← hi]; scalar_tac
       exact List.length_eq_zero_iff.mp this
     simp only [WP.spec_ok]
     have hMF : M = F := by rw [hF, hP, List.append_nil]
@@ -655,19 +649,19 @@ theorem fill_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
     · intro h0
       have hv : input.val = [] := by simpa [Slice.length] using h0
       rw [hv, List.append_nil]
-      exact ⟨⟨F, hF, hFl⟩, hPl, hMl, hinv, hmerged, hempty⟩
+      exact ⟨c, P, hR, ⟨F, hF, hFl⟩, hPl, hMl, hinv, hmerged, hempty⟩
     · intro hpos
-      refine ⟨M, rfl, hP, by rw [hMF, hFl], htot, hinv, ?_, fun h0 => by simp only at h0; omega⟩
+      refine ⟨M, c, by rw [← hP]; exact hR, rfl, by rw [hMF, hFl], htot, hinv, ?_, fun h0 => by simp only at h0; omega⟩
       rcases hempty hP with ⟨hc0, hv0⟩ | hpp
       · left; unfold Merged; rw [hv0, hc0]; simp [HasherProof.stackCvs]
       · right; exact pendingPos_pending key mode abs M _ _ hpp
   · rename_i hi0
-    have hPpos : 0 < (cs ch).2.length := by
+    have hPpos : 0 < P.length := by
       have : i.val ≠ 0 := by scalar_tac
       omega
-    have hPl' : (cs ch).2.length ≤ 1024 := hPl
+    have hPl' : P.length ≤ 1024 := hPl
     step as ⟨i1, hi1⟩
-    apply WP.spec_bind (Pₘ := fun take : Std.Usize => take.val = min (1024 - (cs ch).2.length) input.length)
+    apply WP.spec_bind (Pₘ := fun take : Std.Usize => take.val = min (1024 - P.length) input.length)
     · split
       · rename_i hlt
         step as ⟨t, ht⟩
@@ -681,13 +675,13 @@ theorem fill_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
       step*
       have hsl : s.length = take.val := by assumption
       have hsv : s.val = input.val.take take.val := by rw [s_post, List.slice_zero_j]
-      step with hK.update ch s (by rw [hsl, htake]; omega) as ⟨ch1, hch1⟩
+      step with hK.update ch c P s hR (by rw [hsl, htake]; omega) as ⟨ch1, hR1⟩
       step as ⟨rest, hrest, hrestl⟩
       step as ⟨b, hb⟩
       have hinput : input.val = s.val ++ rest.val := by
         rw [hsv, hrest]; simp [List.take_append_drop]
-      have hMF : M ++ s.val = F ++ (cs ch1).2 := by rw [hch1, hF, List.append_assoc]
-      have hst : Merged key mode abs (M ++ s.val) (StackProof.vals st) (cs ch).1 := by
+      have hMF : M ++ s.val = F ++ (P ++ s.val) := by rw [hF, List.append_assoc]
+      have hst : Merged key mode abs (M ++ s.val) (StackProof.vals st) c := by
         exact merged_append key mode abs M _ _ _ (by rw [hF, List.length_append]; omega) (hmerged hPpos)
       split
       · rename_i hbt
@@ -697,41 +691,43 @@ theorem fill_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
         simp only [WP.spec_ok]
         refine ⟨fun _ => ?_, fun hpos => by simp [Slice.length, hr0] at hpos⟩
         rw [hinput, hr0, List.append_nil]
-        refine ⟨⟨F, hMF, by rw [hch1]; exact hFl⟩, ?_, ?_, hinv, fun _ => by rw [hch1]; exact hst, ?_⟩
-        · rw [hch1, List.length_append, show s.val.length = s.length from rfl, hsl, htake]; omega
+        refine ⟨c, P ++ s.val, hR1, ⟨F, hMF, hFl⟩, ?_, ?_, hinv, fun _ => hst, ?_⟩
+        · rw [List.length_append, show s.val.length = s.length from rfl, hsl, htake]; omega
         · have htot' := htot
           rw [hinput, hr0, List.append_nil] at htot'
           exact htot'
-        · intro he; rw [hch1] at he
+        · intro he
           have := congrArg List.length he
           simp only [List.length_append, List.length_nil] at this; omega
       · rename_i hbf
         have hrpos : 0 < rest.length := by
           have : ¬ rest.length = 0 := by rw [← hb]; exact hbf
           omega
-        have htk : take.val = 1024 - (cs ch).2.length := by omega
-        have hP1 : (cs ch1).2.length = 1024 := by
-          rw [hch1, List.length_append, show s.val.length = s.length from rfl, hsl, htk]; omega
-        step with hK.counter ch1 as ⟨cnt, hcnt⟩
-        step with hK.chunk_cv ch1 hP1 as ⟨a, ha⟩
-        have hc1 : (cs ch1).1 = (cs ch).1 := by rw [hch1]
-        have hFP : (F ++ (cs ch1).2).length = 1024 * ((cs ch).1 + 1) := by
+        have htk : take.val = 1024 - P.length := by omega
+        have hP1 : (P ++ s.val).length = 1024 := by
+          rw [List.length_append, show s.val.length = s.length from rfl, hsl, htk]; omega
+        step with hK.counter ch1 c _ hR1 as ⟨cnt, hcnt⟩
+        step with hK.chunk_cv ch1 c _ hR1 hP1 as ⟨a, ha⟩
+        have hc1 : c = c := rfl
+        have hFP : (F ++ (P ++ s.val)).length = 1024 * (c + 1) := by
           rw [List.length_append, hFl, hP1]; ring
-        have hx : abs a = (goIdx (leafN key mode (M ++ s.val) 0) (nodeOp key mode) (cs ch).1 (2 ^ 0)).cv := by
+        have hx : abs a = (goIdx (leafN key mode (M ++ s.val) 0) (nodeOp key mode) c (2 ^ 0)).cv := by
           rw [ha, pow_zero, goIdx, if_pos (le_refl 1), leafN, hMF, hc1]
           simp only [chunkOf, Nat.sub_zero]
           rw [← hFl, List.drop_left, List.take_of_length_le (by omega)]
-        have hle2 : (F ++ (cs ch1).2).length ≤ (M ++ input.val).length := by
+        have hle2 : (F ++ (P ++ s.val)).length ≤ (M ++ input.val).length := by
           rw [← hMF, hinput, ← List.append_assoc]; simp only [List.length_append]; omega
         step with push_spec' key mode abs CI FI k pf hK.parent hK.parent_spec hK.ones (M ++ s.val) st hinv
-          (cs ch).1 (by omega) (Or.inl hst) a 0 (by simp) hx cnt (by rw [hcnt, hc1])
+          c (by omega) (Or.inl hst) a 0 (by simp) hx cnt (by rw [hcnt, hc1])
           as ⟨st1, hinv1, hv1⟩
         step as ⟨i3, hi3⟩
-        step with hK.new_chunk i3 as ⟨ch2, hch2⟩
+        step with hK.new_chunk i3 as ⟨ch2, hR2⟩
         refine ⟨fun h0 => by simp only [Slice.length] at h0 hrpos; omega, fun _ => ?_⟩
-        refine ⟨M ++ s.val, by rw [List.append_assoc, ← hinput], by rw [hch2], ?_, htot, hinv1, ?_, ?_⟩
-        · rw [hch2, hMF, hFP, hi3, hcnt, hc1]
-        · right; rw [hch2, hi3, hcnt, hc1]; exact ⟨(cs ch).1, 0, by simp, rfl, by rw [pow_zero] at hv1 ⊢; exact hv1⟩
+        have hi3v : i3.val = c + 1 := by rw [hi3, hcnt]
+        rw [hi3v] at hR2
+        refine ⟨M ++ s.val, c + 1, hR2, by rw [List.append_assoc, ← hinput], ?_, htot, hinv1, ?_, ?_⟩
+        · rw [hMF, hFP]
+        · right; exact ⟨c, 0, by simp, rfl, by rw [pow_zero] at hv1 ⊢; exact hv1⟩
         · intro h0; simp only [Slice.length] at h0 hrpos; omega
 
 /-- The specification's root node over the bytes `M`. -/
@@ -756,14 +752,14 @@ theorem root_long (M : List Std.U8) (hne : M ≠ []) :
     RootNode key mode M = goIdx (leafN key mode M 0) (nodeOp key mode) 0 (chunks M.length) :=
   (goIdx_leafN_root key mode M hne).symm
 
-open stackcore in
+open hashercore in
 /-- `final_node`: the root's node over all the bytes. -/
 theorem final_node_spec {C K N : Type} (CI : Chunk C) (NI : Nodes K C N) (k : K)
-    (cs : C → Nat × List Std.U8) (absN : N → Blake3.Node)
-    (hN : NodeContracts CI NI k key mode abs cs absN)
-    (M : List Std.U8) (ch : C) (st : CvStack) (h : HInv key mode abs cs M ch st) :
+    (R : C → Nat → List Std.U8 → Prop) (absN : N → Blake3.Node)
+    (hN : NodeContracts CI NI k key mode abs R absN)
+    (M : List Std.U8) (ch : C) (st : CvStack) (h : HInv key mode abs R M ch st) :
     final_node CI NI k ch st ⦃ n => absN n = RootNode key mode M ⦄ := by
-  obtain ⟨⟨F, hF, hFl⟩, hPl, hMl, hinv, hmerged, hempty⟩ := h
+  obtain ⟨c, P, hR, ⟨F, hF, hFl⟩, hPl, hMl, hinv, hmerged, hempty⟩ := h
   have hvl := vals_length st hinv
   unfold final_node
   simp only [CvStack.impl.len, Std.bind_ok]
@@ -771,13 +767,13 @@ theorem final_node_spec {C K N : Type} (CI : Chunk C) (NI : Nodes K C N) (k : K)
   · rename_i hl0
     have hl0' : st.len.val = 0 := by scalar_tac
     have hv : StackProof.vals st = [] := List.length_eq_zero_iff.mp (by omega)
-    have hc0 : (cs ch).1 = 0 := by
-      by_cases hP : (cs ch).2 = []
+    have hc0 : c = 0 := by
+      by_cases hP : P = []
       · rcases hempty hP with ⟨h0, _⟩ | ⟨c', j, hc', _, _, hvm⟩
         · exact h0
         · rw [hv] at hvm; simp at hvm
       · have hm := hmerged (by
-          cases h' : (cs ch).2 with
+          cases h' : P with
           | nil => exact absurd h' hP
           | cons _ _ => simp)
         unfold Merged at hm
@@ -787,36 +783,34 @@ theorem final_node_spec {C K N : Type} (CI : Chunk C) (NI : Nodes K C N) (k : K)
         by_contra hne
         have := HasherProof.ones_pos _ (Nat.pos_of_ne_zero hne); omega
     have hF0 : F = [] := List.length_eq_zero_iff.mp (by rw [hFl, hc0])
-    apply WP.spec_mono (hN.chunk_node ch)
+    apply WP.spec_mono (hN.chunk_node ch c P hR)
     intro n hn
     rw [hn, root_short key mode M (by rw [hF, hF0]; simpa using hPl), hF, hF0, hc0, List.nil_append]
   · rename_i hl0
     have hlpos : 0 < st.len.val := by scalar_tac
-    step with hN.len ch as ⟨j, hj⟩
+    step with hN.len ch c P hR as ⟨j, hj⟩
     split
     · rename_i hjpos
-      have hP : 0 < (cs ch).2.length := by have : 0 < j.val := by scalar_tac
-                                           omega
+      have hP : 0 < P.length := by have : 0 < j.val := (by scalar_tac); omega
       have hm := hmerged hP
-      step with hN.chunk_node ch as ⟨out0, hout0⟩
-      have hSl : (HasherProof.stackCvs (leafN key mode M 0) (nodeOp key mode) (cs ch).1).length = st.len.val := by
+      step with hN.chunk_node ch c P hR as ⟨out0, hout0⟩
+      have hSl : (HasherProof.stackCvs (leafN key mode M 0) (nodeOp key mode) c).length = st.len.val := by
         rw [← hvl, ← List.length_map (f := abs), hm, List.length_map]
-      step with final_loop_spec key mode abs CI NI k cs absN hN st hinv _ hm st.len (le_refl _) out0 _ hout0
+      step with final_loop_spec key mode abs CI NI k R absN hN st hinv _ hm st.len (le_refl _) out0 _ hout0
         as ⟨out, hout⟩
       rw [hout, List.take_of_length_le (by omega)]
       have hMne : M ≠ [] := by
         intro h0; rw [h0] at hF; have := congrArg List.length hF; simp only [List.length_append, List.length_nil] at this; omega
-      have hML : M.length = 1024 * (cs ch).1 + (cs ch).2.length := by rw [hF, List.length_append, hFl]
-      have hleaf : Blake3.chunkNode key mode (toBA (cs ch).2) (cs ch).1 = leafN key mode M 0 (cs ch).1 := by
+      have hML : M.length = 1024 * c + P.length := by rw [hF, List.length_append, hFl]
+      have hleaf : Blake3.chunkNode key mode (toBA P) c = leafN key mode M 0 c := by
         simp only [leafN, chunkOf, Nat.sub_zero]
         rw [hF, ← hFl, List.drop_left, List.take_of_length_le hPl]
       rw [hleaf, root_long key mode M hMne, ← List.foldl_reverse,
         HasherProof.final_output_partial]
       congr 1; unfold chunks; omega
     · rename_i hjz
-      have hP : (cs ch).2 = [] := by
-        have : (cs ch).2.length = 0 := by have : ¬ 0 < j.val := by scalar_tac
-                                          omega
+      have hP : P = [] := by
+        have : P.length = 0 := by have : ¬ 0 < j.val := (by scalar_tac); omega
         exact List.length_eq_zero_iff.mp this
       rcases hempty hP with ⟨_, hv0⟩ | ⟨c', jj, hc'pos, hjj, hcsum, hvm⟩
       · rw [hv0] at hvl; simp at hvl; omega
@@ -856,7 +850,7 @@ theorem final_node_spec {C K N : Type} (CI : Chunk C) (NI : Nodes K C N) (k : K)
           rw [ha1, hval i2 (by rw [vals_length st hinv]; omega)]
           simp [List.getElem_append, hi2, hn1, hlen]
         have hbase : absN out0 = nodeOp key mode z X := by rw [hout0, han, ha1n]; rfl
-        step with final_loop_spec key mode abs CI NI k cs absN hN st hinv _ hvm' n1 (by omega) out0 _ hbase
+        step with final_loop_spec key mode abs CI NI k R absN hN st hinv _ hvm' n1 (by omega) out0 _ hbase
           as ⟨out, hout⟩
         have hn1A : n1.val = A.length := by omega
         rw [hout, hn1A, List.append_assoc, List.take_left]
@@ -865,21 +859,21 @@ theorem final_node_spec {C K N : Type} (CI : Chunk C) (NI : Nodes K C N) (k : K)
         have hMne : M ≠ [] := by
           intro h0; rw [h0] at hF; have := congrArg List.length hF
           simp only [List.length_append, List.length_nil, hP] at this; omega
-        have hML : M.length = 1024 * (cs ch).1 := by rw [hF, hP, List.append_nil, hFl]
+        have hML : M.length = 1024 * c := by rw [hF, hP, List.append_nil, hFl]
         rw [hfold, ← hAz, root_long key mode M hMne, ← List.foldl_reverse,
           HasherProof.final_output_whole _ _ c' jj hjj, hcsum]
         congr 1; unfold chunks; omega
 
 /-! ## Updates, and the result -/
 
-open stackcore in
+open hashercore in
 /-- A new Hasher: an empty chunk numbered 0 and an empty stack. -/
-theorem init_spec {C : Type} (cs : C → Nat × List Std.U8) (ch : C) (hch : cs ch = (0, [])) :
-    HInv key mode abs cs [] ch ⟨none, 0#usize⟩ := by
-  refine ⟨⟨[], by rw [hch]; rfl, by rw [hch]; rfl⟩, by rw [hch]; simp, by simp, ⟨by simp, fun _ => rfl⟩,
-    fun h => by rw [hch] at h; simp at h, fun _ => Or.inl ⟨by rw [hch], rfl⟩⟩
+theorem init_spec {C : Type} (R : C → Nat → List Std.U8 → Prop) (ch : C) (hch : R ch 0 []) :
+    HInv key mode abs R [] ch ⟨none, 0#usize⟩ :=
+  ⟨0, [], hch, ⟨[], rfl, rfl⟩, by simp, by simp, ⟨by simp, fun _ => rfl⟩, fun h => by simp at h,
+    fun _ => Or.inl ⟨rfl, rfl⟩⟩
 
-open stackcore in
+open hashercore in
 /-- One update, as the library's `update_pooled` makes it: `fill`, and when
 input is left, `feed` (on kernels of its own: an SME2 turn's). -/
 def update {C K : Type} (CI : Chunk C) (FI₁ FI₂ : Feed K C) (k₁ k₂ : K) (ch : C) (st : CvStack)
@@ -887,27 +881,27 @@ def update {C K : Type} (CI : Chunk C) (FI₁ FI₂ : Feed K C) (k₁ k₂ : K) 
   let (rest, ch1, st1) ← fill CI FI₁ k₁ ch st 0#u64 input
   if rest.len = 0#usize then ok (ch1, st1) else feed CI FI₂ k₂ ch1 st1 0#u64 rest
 
-open stackcore in
+open hashercore in
 /-- An update keeps the Hasher's state: after it, the state after all the
 bytes so far and the update's. -/
 theorem update_spec {C K : Type} (CI : Chunk C) (FI₁ FI₂ : Feed K C) (k₁ k₂ : K)
-    (cs : C → Nat × List Std.U8) (pf₁ pf₂ : StackProof.Cv → StackProof.Cv → StackProof.Cv)
-    (hK₁ : Contracts CI FI₁ k₁ key mode abs cs pf₁) (hK₂ : Contracts CI FI₂ k₂ key mode abs cs pf₂)
-    (M : List Std.U8) (ch : C) (st : CvStack) (h : HInv key mode abs cs M ch st) (input : Slice Std.U8)
+    (R : C → Nat → List Std.U8 → Prop) (pf₁ pf₂ : StackProof.Cv → StackProof.Cv → StackProof.Cv)
+    (hK₁ : Contracts CI FI₁ k₁ key mode abs R pf₁) (hK₂ : Contracts CI FI₂ k₂ key mode abs R pf₂)
+    (M : List Std.U8) (ch : C) (st : CvStack) (h : HInv key mode abs R M ch st) (input : Slice Std.U8)
     (hbound : M.length + input.length < 1024 * 2 ^ 54) :
-    update CI FI₁ FI₂ k₁ k₂ ch st input ⦃ r => HInv key mode abs cs (M ++ input.val) r.1 r.2 ⦄ := by
+    update CI FI₁ FI₂ k₁ k₂ ch st input ⦃ r => HInv key mode abs R (M ++ input.val) r.1 r.2 ⦄ := by
   unfold update
-  step with fill_spec key mode abs CI FI₁ k₁ cs pf₁ hK₁ M ch st h input hbound as ⟨rest, ch1, st1, h0, hpos⟩
+  step with fill_spec key mode abs CI FI₁ k₁ R pf₁ hK₁ M ch st h input hbound as ⟨rest, ch1, st1, h0, hpos⟩
   split
   · rename_i hz
     simp only [WP.spec_ok]
     exact h0 (by simp only [Slice.length]; scalar_tac)
   · rename_i hnz
-    exact feed_spec key mode abs CI FI₂ k₂ cs pf₂ hK₂ _ ch1 st1 rest
+    exact feed_spec key mode abs CI FI₂ k₂ R pf₂ hK₂ _ ch1 st1 rest
       (hpos (by have : rest.len.val ≠ 0 := by scalar_tac
                 simp only [Slice.length]; scalar_tac))
 
-open stackcore in
+open hashercore in
 /-- Updates with each piece in turn. -/
 def updates {C K : Type} (CI : Chunk C) (FI₁ FI₂ : Feed K C) (k₁ k₂ : K) :
     C → CvStack → List (Slice Std.U8) → Result (C × CvStack)
@@ -916,43 +910,43 @@ def updates {C K : Type} (CI : Chunk C) (FI₁ FI₂ : Feed K C) (k₁ k₂ : K)
     let (ch1, st1) ← update CI FI₁ FI₂ k₁ k₂ ch st x
     updates CI FI₁ FI₂ k₁ k₂ ch1 st1 xs
 
-open stackcore in
+open hashercore in
 theorem updates_spec {C K : Type} (CI : Chunk C) (FI₁ FI₂ : Feed K C) (k₁ k₂ : K)
-    (cs : C → Nat × List Std.U8) (pf₁ pf₂ : StackProof.Cv → StackProof.Cv → StackProof.Cv)
-    (hK₁ : Contracts CI FI₁ k₁ key mode abs cs pf₁) (hK₂ : Contracts CI FI₂ k₂ key mode abs cs pf₂)
-    (pieces : List (Slice Std.U8)) (M : List Std.U8) (ch : C) (st : CvStack) (h : HInv key mode abs cs M ch st)
+    (R : C → Nat → List Std.U8 → Prop) (pf₁ pf₂ : StackProof.Cv → StackProof.Cv → StackProof.Cv)
+    (hK₁ : Contracts CI FI₁ k₁ key mode abs R pf₁) (hK₂ : Contracts CI FI₂ k₂ key mode abs R pf₂)
+    (pieces : List (Slice Std.U8)) (M : List Std.U8) (ch : C) (st : CvStack) (h : HInv key mode abs R M ch st)
     (hbound : M.length + (pieces.map (fun x => x.length)).sum < 1024 * 2 ^ 54) :
     updates CI FI₁ FI₂ k₁ k₂ ch st pieces ⦃ r =>
-      HInv key mode abs cs (M ++ (pieces.map (fun x => x.val)).flatten) r.1 r.2 ⦄ := by
+      HInv key mode abs R (M ++ (pieces.map (fun x => x.val)).flatten) r.1 r.2 ⦄ := by
   induction pieces generalizing M ch st with
   | nil => simp only [updates, WP.spec_ok, List.map_nil, List.flatten_nil, List.append_nil]; exact h
   | cons x xs ih =>
     simp only [List.map_cons, List.sum_cons] at hbound
     unfold updates
-    step with update_spec key mode abs CI FI₁ FI₂ k₁ k₂ cs pf₁ pf₂ hK₁ hK₂ M ch st h x (by omega)
+    step with update_spec key mode abs CI FI₁ FI₂ k₁ k₂ R pf₁ pf₂ hK₁ hK₂ M ch st h x (by omega)
       as ⟨ch1, st1, h1⟩
     have := ih (M ++ x.val) ch1 st1 h1 (by rw [List.length_append]; simp only [Slice.length] at hbound ⊢; omega)
     simpa [List.append_assoc] using this
 
-open stackcore in
+open hashercore in
 /-- The Hasher: a new one, any updates, then its root's node, given kernels
 that meet their contracts: the specification's root over all the updates'
 bytes, whose 32-byte output is `Blake3.blake3 key mode` of them
 (`blake3_root`). -/
 theorem hasher_spec {C K N : Type} (CI : Chunk C) (FI₁ FI₂ : Feed K C) (NI : Nodes K C N) (k₁ k₂ k : K)
-    (cs : C → Nat × List Std.U8) (absN : N → Blake3.Node)
+    (R : C → Nat → List Std.U8 → Prop) (absN : N → Blake3.Node)
     (pf₁ pf₂ : StackProof.Cv → StackProof.Cv → StackProof.Cv)
-    (hK₁ : Contracts CI FI₁ k₁ key mode abs cs pf₁) (hK₂ : Contracts CI FI₂ k₂ key mode abs cs pf₂)
-    (hN : NodeContracts CI NI k key mode abs cs absN)
-    (ch0 : C) (hch0 : cs ch0 = (0, [])) (pieces : List (Slice Std.U8))
+    (hK₁ : Contracts CI FI₁ k₁ key mode abs R pf₁) (hK₂ : Contracts CI FI₂ k₂ key mode abs R pf₂)
+    (hN : NodeContracts CI NI k key mode abs R absN)
+    (ch0 : C) (hch0 : R ch0 0 []) (pieces : List (Slice Std.U8))
     (hbound : (pieces.map (fun x => x.length)).sum < 1024 * 2 ^ 54) :
     (do let (ch, st) ← updates CI FI₁ FI₂ k₁ k₂ ch0 ⟨none, 0#usize⟩ pieces
         final_node CI NI k ch st) ⦃ n =>
       absN n = RootNode key mode (pieces.map (fun x => x.val)).flatten ⦄ := by
-  step with updates_spec key mode abs CI FI₁ FI₂ k₁ k₂ cs pf₁ pf₂ hK₁ hK₂ pieces [] ch0 _
-    (init_spec key mode abs cs ch0 hch0) (by simpa using hbound) as ⟨ch, st, h⟩
+  step with updates_spec key mode abs CI FI₁ FI₂ k₁ k₂ R pf₁ pf₂ hK₁ hK₂ pieces [] ch0 _
+    (init_spec key mode abs R ch0 hch0) (by simpa using hbound) as ⟨ch, st, h⟩
   simp only [List.nil_append] at h
-  exact final_node_spec key mode abs CI NI k cs absN hN _ ch st h
+  exact final_node_spec key mode abs CI NI k R absN hN _ ch st h
 
 /-- The specification's 32-byte hash of the bytes `M`: the output of its root. -/
 theorem blake3_root (M : List Std.U8) :

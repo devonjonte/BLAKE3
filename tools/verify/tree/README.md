@@ -11,7 +11,7 @@ The walk is `src/tree_core.rs`, which the library runs and `rust/widecore`
 includes as it is. It calls its kernels in batches: up to `degree()`
 chunks per call, a layer of parents per call, and SME2's whole-subtree
 kernel where it applies. Aeneas translates each crate to Lean
-(`Widecore.lean`, `Stackcore.lean`; `check.sh` translates them again and
+(`Widecore.lean`, `Hashercore.lean`; `check.sh` translates them again and
 checks the committed files are the translations), and `check.sh` proves
 the walk at every buffer size the library builds with
 (MAX_SIMD_DEGREE_OR_2: 128, 16, 8, 4, 2). The walk's proofs are in
@@ -41,7 +41,7 @@ the walk at every buffer size the library builds with
   (`HashProofs.lean`).
 - **`HasherCoreProof.hasher_spec`.** The Hasher's loop (`src/hasher_core.rs`:
   `fill`, `feed`, and `final_node`, over the stack of `src/stack_core.rs`;
-  `stackcore` includes both): from a new Hasher, after any updates, the
+  `hashercore` includes both): from a new Hasher, after any updates, the
   root's node is the specification's root over all the updates' bytes,
   whose 32-byte output is `Blake3.blake3 key mode` of them. Its hypotheses
   are the kernels' contracts (`Contracts`, `NodeContracts`), among them the
@@ -51,14 +51,17 @@ the walk at every buffer size the library builds with
   on top not yet merged (`HInv`; `HasherCoreProofs.lean`). `update` there is
   the library's `update_pooled`: `fill`, then `feed` when input is left.
 - **`ChunkProof.absorb_spec`, `node_eq`.** A chunk's state
-  (`src/chunk_core.rs`, the library's `ChunkState`; `rust/chunkcore` includes
-  it): after any bytes `B`, its fields are the specification's chunk node of
+  (`src/chunk_core.rs`, the library's `ChunkState`; `rust/hashercore`
+  includes it too): after any bytes `B`, its fields are the specification's chunk node of
   `B` (`node_eq`): the chaining value after the blocks before the last, the
   last block (zero past its length) in `buf`, never empty once a byte has
   come (`CInv`; `new_spec`, `absorb_spec`). Its hypotheses are the
   compression kernels' contracts (`BlocksContracts`: `compress_in_place`
   and `compress_blocks`, stated with the specification's compression
-  function; `ChunkProofs.lean`).
+  function; `ChunkProofs.lean`). As the Hasher's chunk (`inst_counter`,
+  `inst_len`, `inst_update`, `inst_advance`), it meets the chunk contracts
+  of `HasherCoreProof.Contracts`, read through the relation `Rel` (a state
+  stands for its chunk's number and bytes).
 
 Each rests on Lean's three standard axioms (`propext`, `Classical.choice`,
 `Quot.sound`), printed at the end of each file; `check.sh` fails on any
@@ -86,7 +89,7 @@ compression function.
 
 **The Hasher's stack** (`HasherProofs.lean`, the algorithm, and
 `StackProofs.lean`, the code: `src/stack_core.rs`, included as it is by
-`rust/stackcore`, whose `push` and `merge` are proved to compute the
+`rust/hashercore`, whose `push` and `merge` are proved to compute the
 algorithm's, never failing on a stack of at most 55 values). After
 the first c chunks the stack holds one chaining value per 1-bit of c, the
 tree over the aligned power-of-two block it stands for (`stackCvs`):

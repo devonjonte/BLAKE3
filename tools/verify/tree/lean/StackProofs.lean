@@ -1,9 +1,9 @@
 import HasherProofs
-import Stackcore
+import Hashercore
 open Aeneas Aeneas.Std Result
 
 namespace StackProof
-open stackcore
+open hashercore
 
 abbrev Cv := Std.Array Std.U8 32#usize
 
