@@ -19,6 +19,15 @@ set_option maxRecDepth 2048
 
 namespace stackcore
 
+/-- Trait declaration: [stackcore::Chunk]
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 8:0-15:1
+    Visibility: public -/
+structure Chunk (Self : Type) where
+  counter : Self → Result Std.U64
+  len : Self → Result Std.Usize
+  update : Self → Slice Std.U8 → Result Self
+  advance : Self → Std.U64 → Result Self
+
 /-- Trait declaration: [stackcore::Parent]
     Source: 'src/../../../../../../src/stack_core.rs', lines 7:0-9:1
     Visibility: public -/
@@ -26,75 +35,39 @@ structure Parent (Self : Type) where
   parent : Self → Array Std.U8 32#usize → Array Std.U8 32#usize → Result
     (Array Std.U8 32#usize)
 
+/-- Trait declaration: [stackcore::Feed]
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 18:0-38:1
+    Visibility: public -/
+structure Feed (Self : Type) (C : Type) where
+  ParentInst : Parent Self
+  ChunkInst : Chunk C
+  ones : Self → Std.U64 → Result Std.Usize
+  subtree_len : Self → Std.U64 → Std.Usize → Result Std.Usize
+  new_chunk : Self → Std.U64 → Result C
+  chunk_cv : Self → C → Result (Array Std.U8 32#usize)
+  whole_chunk_cv : Self → Slice Std.U8 → Std.U64 → Result (Array Std.U8
+    32#usize)
+  subtree_cv : Self → Slice Std.U8 → Std.Usize → Std.U64 → Result
+    (Option (Array Std.U8 32#usize))
+  children : Self → Slice Std.U8 → Std.Usize → Std.U64 → Result (Array
+    (Array Std.U8 32#usize) 2#usize)
+
+/-- Trait declaration: [stackcore::Nodes]
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 41:0-48:1
+    Visibility: public -/
+structure Nodes (Self : Type) (C : Type) (N : Type) where
+  ChunkInst : Chunk C
+  chunk_node : Self → C → Result N
+  parent_node : Self → Array Std.U8 32#usize → Array Std.U8 32#usize →
+    Result N
+  node_cv : Self → N → Result (Array Std.U8 32#usize)
+
 /-- [stackcore::CvStack]
     Source: 'src/../../../../../../src/stack_core.rs', lines 13:0-16:1
     Visibility: public -/
 structure CvStack where
   cvs : Option (Array (Array Std.U8 32#usize) 55#usize)
   len : Std.Usize
-
-/-- [stackcore::{impl core::clone::Clone for stackcore::CvStack}::clone]:
-    Source: 'src/../../../../../../src/stack_core.rs', lines 19:4-21:5
-    Visibility: public -/
-def CvStack.Insts.CoreCloneClone.clone (self : CvStack) : Result CvStack := do
-  ok self
-
-/-- Trait implementation: [stackcore::{impl core::clone::Clone for stackcore::CvStack}]
-    Source: 'src/../../../../../../src/stack_core.rs', lines 18:0-22:1 -/
-@[reducible]
-def CvStack.Insts.CoreCloneClone : core.clone.Clone CvStack := {
-  clone := CvStack.Insts.CoreCloneClone.clone
-}
-
-/-- [stackcore::{stackcore::CvStack}::new]:
-    Source: 'src/../../../../../../src/stack_core.rs', lines 25:4-27:5
-    Visibility: public -/
-def CvStack.new : Result CvStack := do
-  ok { cvs := none, len := 0#usize }
-
-/-- [stackcore::{stackcore::CvStack}::len]:
-    Source: 'src/../../../../../../src/stack_core.rs', lines 29:4-31:5
-    Visibility: public -/
-def CvStack.impl.len (self : CvStack) : Result Std.Usize := do
-  ok self.len
-
-/-- [stackcore::{stackcore::CvStack}::get]:
-    Source: 'src/../../../../../../src/stack_core.rs', lines 34:4-40:5
-    Visibility: public -/
-def CvStack.get
-  (self : CvStack) (i : Std.Usize) : Result (Array Std.U8 32#usize) := do
-  massert (i < self.len)
-  match self.cvs with
-  | none => fail panic
-  | some cvs => Array.index_usize cvs i
-
-/-- [stackcore::{stackcore::CvStack}::push]:
-    Source: 'src/../../../../../../src/stack_core.rs', lines 43:4-51:5
-    Visibility: public -/
-def CvStack.push
-  (self : CvStack) (cv : Array Std.U8 32#usize) : Result CvStack := do
-  let b := core.option.Option.is_none self.cvs
-  let o ←
-    if b
-    then
-      let a := Array.repeat 32#usize 0#u8
-      let a1 := Array.repeat 55#usize a
-      ok (some a1)
-    else ok self.cvs
-  let o1 ←
-    match o with
-    | none => ok none
-    | some cvs => do
-                  let a ← Array.update cvs self.len cv
-                  ok (some a)
-  let i ← self.len + 1#usize
-  ok { cvs := o1, len := i }
-
-/-- [stackcore::{stackcore::CvStack}::clear]:
-    Source: 'src/../../../../../../src/stack_core.rs', lines 53:4-55:5
-    Visibility: public -/
-def CvStack.clear (self : CvStack) : Result CvStack := do
-  ok { self with len := 0#usize }
 
 /-- [stackcore::{stackcore::CvStack}::merge]: loop body 0:
     Source: 'src/../../../../../../src/stack_core.rs', lines 61:8-68:9
@@ -149,8 +122,275 @@ def CvStack.merge
   let (o, i) ← CvStack.merge_loop ParentInst self p target
   ok { cvs := o, len := i }
 
+/-- [stackcore::{stackcore::CvStack}::push]:
+    Source: 'src/../../../../../../src/stack_core.rs', lines 43:4-51:5
+    Visibility: public -/
+def CvStack.push
+  (self : CvStack) (cv : Array Std.U8 32#usize) : Result CvStack := do
+  let b := core.option.Option.is_none self.cvs
+  let o ←
+    if b
+    then
+      let a := Array.repeat 32#usize 0#u8
+      let a1 := Array.repeat 55#usize a
+      ok (some a1)
+    else ok self.cvs
+  let o1 ←
+    match o with
+    | none => ok none
+    | some cvs => do
+                  let a ← Array.update cvs self.len cv
+                  ok (some a)
+  let i ← self.len + 1#usize
+  ok { cvs := o1, len := i }
+
+/-- [stackcore::push]:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 53:0-56:1
+    Visibility: public -/
+def push
+  {C : Type} {K : Type} (ChunkInst : Chunk C) (FeedInst : Feed K C) (k : K)
+  (stack : CvStack) (initial : Std.U64) (cv : Array Std.U8 32#usize)
+  (counter : Std.U64) :
+  Result CvStack
+  := do
+  let i ← counter - initial
+  let i1 ← FeedInst.ones k i
+  let stack1 ← CvStack.merge FeedInst.ParentInst stack k i1
+  CvStack.push stack1 cv
+
+/-- [stackcore::CHUNK_LEN]
+    Source: 'src/lib.rs', lines 8:0-8:34
+    Visibility: public -/
+@[global_simps, irreducible] def CHUNK_LEN : Std.Usize := 1024#usize
+
+/-- [stackcore::fill]:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 60:0-74:1
+    Visibility: public -/
+def fill
+  {C : Type} {K : Type} (ChunkInst : Chunk C) (FeedInst : Feed K C) (k : K)
+  (chunk : C) (stack : CvStack) (initial : Std.U64) (input : Slice Std.U8) :
+  Result ((Slice Std.U8) × C × CvStack)
+  := do
+  let i ← ChunkInst.len chunk
+  if i = 0#usize
+  then ok (input, chunk, stack)
+  else
+    let i1 ← CHUNK_LEN - i
+    let i2 := Slice.len input
+    let take ← if i1 < i2
+                 then CHUNK_LEN - i
+                 else ok (Slice.len input)
+    let s ←
+      core.slice.index.Slice.index
+        (core.slice.index.SliceIndexRangeToUsizeSlice Std.U8) input
+        { «end» := take }
+    let chunk1 ← ChunkInst.update chunk s
+    let rest ←
+      core.slice.index.Slice.index
+        (core.slice.index.SliceIndexRangeFromUsizeSlice Std.U8) input
+        { start := take }
+    let b ← core.slice.Slice.is_empty rest
+    if b
+    then ok (rest, chunk1, stack)
+    else
+      let counter ← ChunkInst.counter chunk1
+      let a ← FeedInst.chunk_cv k chunk1
+      let stack1 ← push ChunkInst FeedInst k stack initial a counter
+      let i3 ← counter + 1#u64
+      let chunk2 ← FeedInst.new_chunk k i3
+      ok (rest, chunk2, stack1)
+
+/-- [stackcore::feed]: loop body 0:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 80:4-101:5
+    Visibility: public -/
+@[rust_loop_body]
+def feed_loop.body
+  {C : Type} {K : Type} (ChunkInst : Chunk C) (FeedInst : Feed K C) (k : K)
+  (initial : Std.U64) (chunk : C) (stack : CvStack) (input : Slice Std.U8) :
+  Result (ControlFlow (C × CvStack × (Slice Std.U8)) (C × CvStack × (Slice
+    Std.U8)))
+  := do
+  let i := Slice.len input
+  if i > CHUNK_LEN
+  then
+    let counter ← ChunkInst.counter chunk
+    let i1 := Slice.len input
+    let len ← FeedInst.subtree_len k counter i1
+    let i2 ← len / CHUNK_LEN
+    let chunks ← lift (UScalar.cast .U64 i2)
+    let i3 := Slice.len input
+    let ahead ← i3 - len
+    let sub ←
+      core.slice.index.Slice.index
+        (core.slice.index.SliceIndexRangeToUsizeSlice Std.U8) input
+        { «end» := len }
+    let flat ←
+      if counter > initial
+      then FeedInst.subtree_cv k sub ahead counter
+      else ok none
+    let stack1 ←
+      match flat with
+      | none =>
+        if len <= CHUNK_LEN
+        then
+          do
+          let a ← FeedInst.whole_chunk_cv k sub counter
+          push ChunkInst FeedInst k stack initial a counter
+        else
+          do
+          let a ← FeedInst.children k sub ahead counter
+          let left ← Array.index_usize a 0#usize
+          let right ← Array.index_usize a 1#usize
+          let stack2 ← push ChunkInst FeedInst k stack initial left counter
+          let i4 ← chunks / 2#u64
+          let i5 ← counter + i4
+          push ChunkInst FeedInst k stack2 initial right i5
+      | some cv => push ChunkInst FeedInst k stack initial cv counter
+    let chunk1 ← ChunkInst.advance chunk chunks
+    let input1 ←
+      core.slice.index.Slice.index
+        (core.slice.index.SliceIndexRangeFromUsizeSlice Std.U8) input
+        { start := len }
+    ok (cont (chunk1, stack1, input1))
+  else ok (done (chunk, stack, input))
+
+/-- [stackcore::feed]: loop 0:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 80:4-101:5
+    Visibility: public -/
+@[rust_loop]
+def feed_loop
+  {C : Type} {K : Type} (ChunkInst : Chunk C) (FeedInst : Feed K C) (k : K)
+  (chunk : C) (stack : CvStack) (initial : Std.U64) (input : Slice Std.U8) :
+  Result (C × CvStack × (Slice Std.U8))
+  := do
+  loop
+    (fun (chunk1, stack1, input1) => feed_loop.body ChunkInst FeedInst k
+      initial chunk1 stack1 input1)
+    (chunk, stack, input)
+
+/-- [stackcore::feed]:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 78:0-106:1
+    Visibility: public -/
+def feed
+  {C : Type} {K : Type} (ChunkInst : Chunk C) (FeedInst : Feed K C) (k : K)
+  (chunk : C) (stack : CvStack) (initial : Std.U64) (input : Slice Std.U8) :
+  Result (C × CvStack)
+  := do
+  let (chunk1, stack1, input1) ←
+    feed_loop ChunkInst FeedInst k chunk stack initial input
+  let b ← core.slice.Slice.is_empty input1
+  if b
+  then ok (chunk1, stack1)
+  else
+    let chunk2 ← ChunkInst.update chunk1 input1
+    let i ← ChunkInst.counter chunk2
+    let i1 ← i - initial
+    let i2 ← FeedInst.ones k i1
+    let stack2 ← CvStack.merge FeedInst.ParentInst stack1 k i2
+    ok (chunk2, stack2)
+
+/-- [stackcore::{stackcore::CvStack}::get]:
+    Source: 'src/../../../../../../src/stack_core.rs', lines 34:4-40:5
+    Visibility: public -/
+def CvStack.get
+  (self : CvStack) (i : Std.Usize) : Result (Array Std.U8 32#usize) := do
+  massert (i < self.len)
+  match self.cvs with
+  | none => fail panic
+  | some cvs => Array.index_usize cvs i
+
+/-- [stackcore::{stackcore::CvStack}::len]:
+    Source: 'src/../../../../../../src/stack_core.rs', lines 29:4-31:5
+    Visibility: public -/
+def CvStack.impl.len (self : CvStack) : Result Std.Usize := do
+  ok self.len
+
+/-- [stackcore::final_node]: loop body 0:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 121:4-124:5
+    Visibility: public -/
+@[rust_loop_body]
+def final_node_loop.body
+  {C : Type} {N : Type} {K : Type} (NodesInst : Nodes K C N) (k : K)
+  (stack : CvStack) (n : Std.Usize) (out : N) :
+  Result (ControlFlow (Std.Usize × N) N)
+  := do
+  if n > 0#usize
+  then
+    let n1 ← n - 1#usize
+    let a ← CvStack.get stack n1
+    let a1 ← NodesInst.node_cv k out
+    let out1 ← NodesInst.parent_node k a a1
+    ok (cont (n1, out1))
+  else ok (done out)
+
+/-- [stackcore::final_node]: loop 0:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 121:4-124:5
+    Visibility: public -/
+@[rust_loop]
+def final_node_loop
+  {C : Type} {N : Type} {K : Type} (NodesInst : Nodes K C N) (k : K)
+  (stack : CvStack) (n : Std.Usize) (out : N) :
+  Result N
+  := do
+  loop
+    (fun (n1, out1) => final_node_loop.body NodesInst k stack n1 out1)
+    (n, out)
+
+/-- [stackcore::final_node]:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 110:0-126:1
+    Visibility: public -/
+def final_node
+  {C : Type} {N : Type} {K : Type} (ChunkInst : Chunk C) (NodesInst : Nodes K C
+  N) (k : K) (chunk : C) (stack : CvStack) :
+  Result N
+  := do
+  let i ← CvStack.impl.len stack
+  if i = 0#usize
+  then NodesInst.chunk_node k chunk
+  else
+    let i1 ← ChunkInst.len chunk
+    let (n, out) ←
+      if i1 > 0#usize
+      then do
+           let out1 ← NodesInst.chunk_node k chunk
+           ok (i, out1)
+      else
+        do
+        let n1 ← i - 2#usize
+        let a ← CvStack.get stack n1
+        let i2 ← n1 + 1#usize
+        let a1 ← CvStack.get stack i2
+        let out1 ← NodesInst.parent_node k a a1
+        ok (n1, out1)
+    final_node_loop NodesInst k stack n out
+
+/-- [stackcore::{impl core::clone::Clone for stackcore::CvStack}::clone]:
+    Source: 'src/../../../../../../src/stack_core.rs', lines 19:4-21:5
+    Visibility: public -/
+def CvStack.Insts.CoreCloneClone.clone (self : CvStack) : Result CvStack := do
+  ok self
+
+/-- Trait implementation: [stackcore::{impl core::clone::Clone for stackcore::CvStack}]
+    Source: 'src/../../../../../../src/stack_core.rs', lines 18:0-22:1 -/
+@[reducible]
+def CvStack.Insts.CoreCloneClone : core.clone.Clone CvStack := {
+  clone := CvStack.Insts.CoreCloneClone.clone
+}
+
+/-- [stackcore::{stackcore::CvStack}::new]:
+    Source: 'src/../../../../../../src/stack_core.rs', lines 25:4-27:5
+    Visibility: public -/
+def CvStack.new : Result CvStack := do
+  ok { cvs := none, len := 0#usize }
+
+/-- [stackcore::{stackcore::CvStack}::clear]:
+    Source: 'src/../../../../../../src/stack_core.rs', lines 53:4-55:5
+    Visibility: public -/
+def CvStack.clear (self : CvStack) : Result CvStack := do
+  ok { self with len := 0#usize }
+
 /-- [stackcore::DEPTH]
-    Source: 'src/lib.rs', lines 6:0-6:28
+    Source: 'src/lib.rs', lines 7:0-7:28
     Visibility: public -/
 @[global_simps, irreducible] def DEPTH : Std.Usize := 55#usize
 

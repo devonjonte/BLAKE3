@@ -1927,11 +1927,14 @@ pub(crate) struct HasherCore {
     cv_stack: CvStack,
 }
 
-/// The Hasher's stack (src/stack_core.rs, proved in tools/verify/tree).
+/// The Hasher's stack and loop (src/stack_core.rs, src/hasher_core.rs,
+/// proved in tools/verify/tree).
 pub(crate) mod stack {
     use crate::{CVBytes as Cv, MAX_DEPTH};
+    use crate::CHUNK_LEN;
     const DEPTH: usize = MAX_DEPTH + 1;
     include!("stack_core.rs");
+    include!("hasher_core.rs");
 
     #[cfg(all(test, feature = "zeroize"))]
     impl CvStack {
@@ -1953,21 +1956,130 @@ pub(crate) mod stack {
 }
 use stack::{CvStack, Parent};
 
-/// The parent compression on the Hasher's key, flags, and platform.
-struct Parents<'a> {
+/// The Hasher's kernels on its key and flags: the chunk state's platform
+/// for chunks and parents, `platform` (an SME2 turn's) for whole subtrees,
+/// and with `pooled`, subtrees of lanes::MIN_SPLIT_LEN and more on the pool.
+struct HasherKernels<'a> {
     key: &'a CVWords,
     flags: u8,
+    chunk_platform: Platform,
     platform: Platform,
+    pooled: bool,
 }
 
-impl Parent for Parents<'_> {
+impl Parent for HasherKernels<'_> {
     #[inline(always)]
     fn parent(&self, left: &CVBytes, right: &CVBytes) -> CVBytes {
-        parent_node_output(left, right, self.key, self.flags, self.platform).chaining_value()
+        parent_node_output(left, right, self.key, self.flags, self.chunk_platform).chaining_value()
     }
 }
 
+impl stack::Chunk for ChunkState {
+    #[inline(always)]
+    fn counter(&self) -> u64 {
+        self.chunk_counter
+    }
 
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.count()
+    }
+
+    #[inline(always)]
+    fn update(&mut self, input: &[u8]) {
+        ChunkState::update(self, input);
+    }
+
+    #[inline(always)]
+    fn advance(&mut self, chunks: u64) {
+        debug_assert_eq!(self.count(), 0);
+        self.chunk_counter += chunks;
+    }
+}
+
+impl stack::Feed<ChunkState> for HasherKernels<'_> {
+    #[inline(always)]
+    fn ones(&self, x: u64) -> usize {
+        x.count_ones() as usize
+    }
+
+    #[inline(always)]
+    fn subtree_len(&self, counter: u64, remaining: usize) -> usize {
+        next_subtree_len(counter, remaining)
+    }
+
+    #[inline(always)]
+    fn new_chunk(&self, counter: u64) -> ChunkState {
+        ChunkState::new(self.key, counter, self.flags, self.chunk_platform)
+    }
+
+    #[inline(always)]
+    fn chunk_cv(&self, chunk: &ChunkState) -> CVBytes {
+        chunk.output().chaining_value()
+    }
+
+    #[inline(always)]
+    fn whole_chunk_cv(&self, chunk: &[u8], counter: u64) -> CVBytes {
+        ChunkState::new(self.key, counter, self.flags, self.chunk_platform).update(chunk).output().chaining_value()
+    }
+
+    #[inline(always)]
+    #[allow(unused_variables)]
+    fn subtree_cv(&self, input: &[u8], ahead: usize, counter: u64) -> Option<CVBytes> {
+        // After the first input, no subtree is the root: on SME2 the flat
+        // walk runs it down to its own chaining value, so one value goes
+        // on the stack and about one merge runs on the core between SME2
+        // kernels (about 0.2 us of other work between them puts the SME
+        // unit in its slow state; NOTES-servil.md).
+        #[cfg(blake3_sme2)]
+        if !self.pooled && matches!(self.platform, Platform::SME2) && sme2::flat_takes(input.len()) {
+            // Safe: the SME2 platform is selected only where the CPU has it.
+            return Some(unsafe { sme2::compress_subtree_flat_to_cv(input, ahead, self.key, counter, self.flags) });
+        }
+        None
+    }
+
+    #[inline(always)]
+    fn children(&self, input: &[u8], ahead: usize, counter: u64) -> [CVBytes; 2] {
+        #[cfg(feature = "std")]
+        let pool_takes = self.pooled && input.len() >= lanes::MIN_SPLIT_LEN;
+        #[cfg(not(feature = "std"))]
+        let pool_takes = false;
+        let pair = if pool_takes {
+            #[cfg(feature = "std")]
+            {
+                lanes::subtree_children(input, self.key, counter, self.flags)
+            }
+            #[cfg(not(feature = "std"))]
+            unreachable!()
+        } else if self.pooled {
+            // Pooled, the subtrees below take the lock one at a time, and
+            // the pool's own never use SME2.
+            let own = platform::Sme2Turn::take(self.chunk_platform, input.len() >= SME2_SIZED_LEN);
+            compress_subtree_to_parent_node(input, ahead, self.key, counter, self.flags, own.platform())
+        } else {
+            compress_subtree_to_parent_node(input, ahead, self.key, counter, self.flags, self.platform)
+        };
+        [pair[..OUT_LEN].try_into().unwrap(), pair[OUT_LEN..].try_into().unwrap()]
+    }
+}
+
+impl stack::Nodes<ChunkState, Output> for HasherKernels<'_> {
+    #[inline(always)]
+    fn chunk_node(&self, chunk: &ChunkState) -> Output {
+        chunk.output()
+    }
+
+    #[inline(always)]
+    fn parent_node(&self, left: &CVBytes, right: &CVBytes) -> Output {
+        parent_node_output(left, right, self.key, self.flags, self.chunk_platform)
+    }
+
+    #[inline(always)]
+    fn node_cv(&self, node: &Output) -> CVBytes {
+        node.chaining_value()
+    }
+}
 
 impl Hasher {
     fn from_core(core: HasherCore) -> Self {
@@ -2316,14 +2428,27 @@ impl HasherCore {
     // doesn't assume that). The principle is the same: each CV that should
     // remain in the stack is represented by a 1-bit in the total number of
     // chunks (or bytes) so far.
+    #[cfg(feature = "std")]
     fn merge_cv_stack(&mut self, chunk_counter: u64) {
         // Account for non-zero cases of Hasher::set_input_offset, where there are no prior
         // subtrees in the stack. Note that initial_chunk_counter is always 0 for callers who don't
         // use the hazmat module.
         let post_merge_stack_len =
             (chunk_counter - self.initial_chunk_counter).count_ones() as usize;
-        let parents = Parents { key: &self.key, flags: self.chunk_state.flags, platform: self.chunk_state.platform };
-        self.cv_stack.merge(&parents, post_merge_stack_len);
+        let kernels = HasherKernels {
+            key: &self.key,
+            flags: self.chunk_state.flags,
+            chunk_platform: self.chunk_state.platform,
+            platform: self.chunk_state.platform,
+            pooled: false,
+        };
+        self.cv_stack.merge(&kernels, post_merge_stack_len);
+    }
+
+    /// The kernels on this Hasher's key and flags (see HasherKernels).
+    #[inline(always)]
+    fn kernels(&self, platform: Platform, pooled: bool) -> HasherKernels<'_> {
+        HasherKernels { key: &self.key, flags: self.chunk_state.flags, chunk_platform: self.chunk_state.platform, platform, pooled }
     }
 
     // In reference_impl.rs, we merge the new CV with existing CVs from the
@@ -2359,6 +2484,7 @@ impl HasherCore {
     // merging with each of them separately, so that the second CV will always
     // remain unmerged. (That also helps us support extendable output when
     // we're hashing an input all-at-once.)
+    #[cfg(feature = "std")]
     fn push_cv(&mut self, new_cv: &CVBytes, chunk_counter: u64) {
         self.merge_cv_stack(chunk_counter);
         self.cv_stack.push(*new_cv);
@@ -2411,238 +2537,39 @@ impl HasherCore {
 
     /// `update`'s loop; with `pooled`, whole subtrees of
     /// `lanes::MIN_SPLIT_LEN` and more go to the pool.
-    pub(crate) fn update_pooled(&mut self, mut input: &[u8], pooled: bool) -> &mut Self {
+    pub(crate) fn update_pooled(&mut self, input: &[u8], pooled: bool) -> &mut Self {
         #[cfg(not(feature = "std"))]
         let _ = pooled;
         self.assert_room(self.count(), input.len());
-        // If we have some partial chunk bytes in the internal chunk_state, we
-        // need to finish that chunk first.
-        if self.chunk_state.count() > 0 {
-            let want = CHUNK_LEN - self.chunk_state.count();
-            let take = cmp::min(want, input.len());
-            self.chunk_state.update(&input[..take]);
-            input = &input[take..];
-            if !input.is_empty() {
-                // We've filled the current chunk, and there's more input
-                // coming, so we know it's not the root and we can finalize it.
-                // Then we'll proceed to hashing whole chunks below.
-                debug_assert_eq!(self.chunk_state.count(), CHUNK_LEN);
-                let chunk_cv = self.chunk_state.output().chaining_value();
-                self.push_cv(&chunk_cv, self.chunk_state.chunk_counter);
-                self.chunk_state = ChunkState::new(
-                    &self.key,
-                    self.chunk_state.chunk_counter + 1,
-                    self.chunk_state.flags,
-                    self.chunk_state.platform,
-                );
-            } else {
-                return self;
-            }
+        // The partial chunk first (stack::fill), then whole subtrees and the
+        // last chunk (stack::feed), as src/hasher_core.rs describes.
+        let fill_kernels = HasherKernels {
+            key: &self.key,
+            flags: self.chunk_state.flags,
+            chunk_platform: self.chunk_state.platform,
+            platform: self.chunk_state.platform,
+            pooled,
+        };
+        let rest = stack::fill(&fill_kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, input);
+        if rest.is_empty() {
+            return self;
         }
-
-        // Now the chunk_state is clear, and we have more input. If there's
-        // more than a single chunk (so, definitely not the root chunk), hash
-        // the largest whole subtree we can, with the full benefits of SIMD and
-        // multithreading parallelism. Two restrictions:
-        // - The subtree has to be a power-of-2 number of chunks. Only subtrees
-        //   along the right edge can be incomplete, and we don't know where
-        //   the right edge is going to be until we get to finalize().
-        // - The subtree must evenly divide the total number of chunks up until
-        //   this point (if total is not 0). If the current incomplete subtree
-        //   is only waiting for 1 more chunk, we can't hash a subtree of 4
-        //   chunks. We have to complete the current subtree first.
-        // Because we might need to break up the input to form powers of 2, or
-        // to evenly divide what we already have, this part runs in a loop.
-        // Pooled, the subtrees below take the lock one at a time, and the
-        // pool's own never use SME2.
-        let turn = platform::Sme2Turn::take(self.chunk_state.platform, !pooled && input.len() >= SME2_SIZED_LEN);
-        while input.len() > CHUNK_LEN {
-            debug_assert_eq!(self.chunk_state.count(), 0, "no partial chunk data");
-            debug_assert_eq!(CHUNK_LEN.count_ones(), 1, "power of 2 chunk len");
-            // The largest power of two chunks, shrunk until it evenly
-            // divides the count so far (next_subtree_len).
-            // We know that subtree_len itself is a power of 2, so we can use a
-            // bitmasking trick instead of an actual remainder operation. (Note
-            // that if the caller consistently passes power-of-2 inputs of the
-            // same size, as is hopefully typical, this loop condition will
-            // always fail, and subtree_len will always be the full length of
-            // the input.)
-            //
-            // An aside: We don't have to shrink subtree_len quite this much.
-            // For example, if count_so_far is 1, we could pass 2 chunks to
-            // compress_subtree_to_parent_node. Since we'll get 2 CVs back,
-            // we'll still get the right answer in the end, and we might get to
-            // use 2-way SIMD parallelism. The problem with this optimization,
-            // is that it gets us stuck always hashing 2 chunks. The total
-            // number of chunks will remain odd, and we'll never graduate to
-            // higher degrees of parallelism. See
-            // https://github.com/BLAKE3-team/BLAKE3/issues/69.
-            let subtree_len = next_subtree_len(self.chunk_state.chunk_counter, input.len());
-            // The shrunken subtree_len might now be 1 chunk long. If so, hash
-            // that one chunk by itself. Otherwise, compress the subtree into a
-            // pair of CVs.
-            let subtree_chunks = (subtree_len / CHUNK_LEN) as u64;
-            // After the first input, no subtree is the root: on SME2 the flat
-            // walk runs it down to its own chaining value, so one value goes
-            // on the stack and about one merge runs on the core between
-            // SME2 kernels (about 0.2 us of other work between them puts the
-            // SME unit in its slow state; NOTES-servil.md).
-            #[cfg(blake3_sme2)]
-            if !pooled
-                && self.chunk_state.chunk_counter > self.initial_chunk_counter
-                && matches!(turn.platform(), Platform::SME2)
-                && sme2::flat_takes(subtree_len)
-            {
-                // Safe: the SME2 platform is selected only where the CPU has it.
-                let cv = unsafe {
-                    sme2::compress_subtree_flat_to_cv(&input[..subtree_len], input.len() - subtree_len, &self.key, self.chunk_state.chunk_counter, self.chunk_state.flags)
-                };
-                self.push_cv(&cv, self.chunk_state.chunk_counter);
-                self.chunk_state.chunk_counter += subtree_chunks;
-                input = &input[subtree_len..];
-                continue;
-            }
-            if subtree_len <= CHUNK_LEN {
-                debug_assert_eq!(subtree_len, CHUNK_LEN);
-                self.push_cv(
-                    &ChunkState::new(
-                        &self.key,
-                        self.chunk_state.chunk_counter,
-                        self.chunk_state.flags,
-                        self.chunk_state.platform,
-                    )
-                    .update(&input[..subtree_len])
-                    .output()
-                    .chaining_value(),
-                    self.chunk_state.chunk_counter,
-                );
-            } else {
-                // This is the high-performance happy path, though getting here
-                // depends on the caller giving us a long enough input.
-                #[cfg(feature = "std")]
-                let pool_takes = pooled && subtree_len >= lanes::MIN_SPLIT_LEN;
-                #[cfg(not(feature = "std"))]
-                let pool_takes = false;
-                let cv_pair = if pool_takes {
-                    #[cfg(feature = "std")]
-                    {
-                        lanes::subtree_children(
-                            &input[..subtree_len],
-                            &self.key,
-                            self.chunk_state.chunk_counter,
-                            self.chunk_state.flags,
-                        )
-                    }
-                    #[cfg(not(feature = "std"))]
-                    unreachable!()
-                } else if pooled {
-                    let own = platform::Sme2Turn::take(self.chunk_state.platform, subtree_len >= SME2_SIZED_LEN);
-                    compress_subtree_to_parent_node(
-                        &input[..subtree_len],
-                        input.len() - subtree_len,
-                        &self.key,
-                        self.chunk_state.chunk_counter,
-                        self.chunk_state.flags,
-                        own.platform(),
-                    )
-                } else {
-                    compress_subtree_to_parent_node(
-                        &input[..subtree_len],
-                        input.len() - subtree_len,
-                        &self.key,
-                        self.chunk_state.chunk_counter,
-                        self.chunk_state.flags,
-                        turn.platform(),
-                    )
-                };
-                let left_cv = (&cv_pair[..32]).try_into().unwrap();
-                let right_cv = (&cv_pair[32..64]).try_into().unwrap();
-                // Push the two CVs we received into the CV stack in order. Because
-                // the stack merges lazily, this guarantees we aren't merging the
-                // root.
-                self.push_cv(left_cv, self.chunk_state.chunk_counter);
-                self.push_cv(
-                    right_cv,
-                    self.chunk_state.chunk_counter + (subtree_chunks / 2),
-                );
-            }
-            self.chunk_state.chunk_counter += subtree_chunks;
-            input = &input[subtree_len..];
-        }
-
-        // What remains is 1 chunk or less. Add it to the chunk state.
-        debug_assert!(input.len() <= CHUNK_LEN);
-        if !input.is_empty() {
-            self.chunk_state.update(input);
-            // Having added some input to the chunk_state, we know what's in
-            // the CV stack won't become the root node, and we can do an extra
-            // merge. This simplifies finalize().
-            self.merge_cv_stack(self.chunk_state.chunk_counter);
-        }
-
+        // Pooled, the subtrees take the lock one at a time (children).
+        let turn = platform::Sme2Turn::take(self.chunk_state.platform, !pooled && rest.len() >= SME2_SIZED_LEN);
+        let kernels = HasherKernels {
+            key: &self.key,
+            flags: self.chunk_state.flags,
+            chunk_platform: self.chunk_state.platform,
+            platform: turn.platform(),
+            pooled,
+        };
+        stack::feed(&kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, rest);
         self
     }
 
     pub(crate) fn final_output(&self) -> Output {
-        // If the current chunk is the only chunk, that makes it the root node
-        // also. Convert it directly into an Output. Otherwise, we need to
-        // merge subtrees below.
-        if self.cv_stack.len() == 0 {
-            debug_assert_eq!(self.chunk_state.chunk_counter, self.initial_chunk_counter);
-            return self.chunk_state.output();
-        }
-
-        // If there are any bytes in the ChunkState, finalize that chunk and
-        // merge its CV with everything in the CV stack. In that case, the work
-        // we did at the end of update() above guarantees that the stack
-        // doesn't contain any unmerged subtrees that need to be merged first.
-        // (This is important, because if there were two chunk hashes sitting
-        // on top of the stack, they would need to merge with each other, and
-        // merging a new chunk hash into them would be incorrect.)
-        //
-        // If there are no bytes in the ChunkState, we'll merge what's already
-        // in the stack. In this case it's fine if there are unmerged chunks on
-        // top, because we'll merge them with each other. Note that the case of
-        // the empty chunk is taken care of above.
-        let mut output: Output;
-        let mut num_cvs_remaining = self.cv_stack.len();
-        if self.chunk_state.count() > 0 {
-            debug_assert_eq!(
-                self.cv_stack.len(),
-                (self.chunk_state.chunk_counter - self.initial_chunk_counter).count_ones() as usize,
-                "cv stack does not need a merge",
-            );
-            output = self.chunk_state.output();
-        } else {
-            debug_assert!(self.cv_stack.len() >= 2);
-            output = parent_node_output(
-                &self.cv_stack.get(num_cvs_remaining - 2),
-                &self.cv_stack.get(num_cvs_remaining - 1),
-                &self.key,
-                self.chunk_state.flags,
-                self.chunk_state.platform,
-            );
-            num_cvs_remaining -= 2;
-        }
-        while num_cvs_remaining > 0 {
-            output = parent_node_output(
-                &self.cv_stack.get(num_cvs_remaining - 1),
-                &output.chaining_value(),
-                &self.key,
-                self.chunk_state.flags,
-                self.chunk_state.platform,
-            );
-            num_cvs_remaining -= 1;
-        }
-        output
+        stack::final_node(&self.kernels(self.chunk_state.platform, false), &self.chunk_state, &self.cv_stack)
     }
-
-
-
-
-
-
-
 
     /// The serial update: whole subtrees now, the last chunk kept.
     pub(crate) fn update(&mut self, input: &[u8]) -> &mut Self {
