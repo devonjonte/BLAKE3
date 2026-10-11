@@ -15,7 +15,8 @@ kernel where it applies. Aeneas translates each crate to Lean
 checks the committed files are the translations), and `check.sh` proves
 the walk at every buffer size the library builds with
 (MAX_SIMD_DEGREE_OR_2: 128, 16, 8, 4, 2). The walk's proofs are in
-`WideProofs.lean` and `ChildrenProofs.lean`, on lemmas in `Proofs.lean`:
+`WideProofs.lean`, `ChildrenProofs.lean`, and `HashProofs.lean`, on lemmas in
+`Proofs.lean`:
 
 - **`WideBridge.wide_is_tree`.** For every nonempty input whose chunk
   count fits in 64 bits, `wide` returns without panicking or overflowing.
@@ -29,6 +30,15 @@ the walk at every buffer size the library builds with
   the input's chunks; for a whole input, `goIdx_leafN_root` shows that node
   is `Blake3.tree`'s root. The proof follows the walk's values as nodes
   (`ChildrenProofs.lean`).
+- **`HashProof.hash_spec`.** `hash` (`tree_core.rs`; the library's
+  one-shot `hash`, `keyed_hash`, and `derive_key` call it) returns
+  `Blake3.blake3 key mode input 32`, the specification's 32-byte output,
+  for every input whose chunk count fits in 64 bits. Its hypotheses are the
+  kernels' contracts, stated with the specification's own functions:
+  `chunk_root` returns the output of the input's only chunk node,
+  `parent_root` the output of the parent node of the two chaining values,
+  and the SME2 `children` hook, where it answers, the root's children
+  (`HashProofs.lean`).
 
 Each rests on Lean's three standard axioms (`propext`, `Classical.choice`,
 `Quot.sound`), printed at the end of each file; `check.sh` fails on any

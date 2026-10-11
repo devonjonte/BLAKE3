@@ -19,6 +19,14 @@ pub trait Kernels {
     /// kernels have one (None: they have none for it). `ahead` bytes of the
     /// caller's input follow `input`.
     fn subtree(&self, input: &[u8], ahead: usize, counter: u64, out: &mut [Cv]) -> Option<usize>;
+    /// What `root_children` returns for `input`, computed another way where
+    /// the kernels have one (None: they have none for it).
+    fn children(&self, input: &[u8], ahead: usize, counter: u64) -> Option<[Cv; 2]>;
+    /// The root output (32 bytes) of an input of at most CHUNK_LEN bytes:
+    /// its only chunk, numbered 0, as the root.
+    fn chunk_root(&self, input: &[u8]) -> Cv;
+    /// The root output (32 bytes) of the parent of `children`, as the root.
+    fn parent_root(&self, children: &[Cv; 2]) -> Cv;
 }
 
 /// The bytes of the left subtree of an input of `len` > CHUNK_LEN bytes:
@@ -72,4 +80,37 @@ pub fn children<K: Kernels>(k: &K, input: &[u8], ahead: usize, counter: u64, cvs
         cvs[..n].copy_from_slice(&next[..n]);
     }
     [cvs[0], cvs[1]]
+}
+
+/// Inputs of at most this many chunks condense in arrays of this size.
+pub const SMALL: usize = 16;
+
+/// The chaining values of the root's two children, for `input` of more
+/// than one chunk, its first chunk numbered `counter`; `ahead` bytes of the
+/// caller's input follow it. Out of line: its arrays (6 KiB at a degree of
+/// 128) stay out of its callers' frames, and an input of SMALL chunks or
+/// fewer gets arrays of that size.
+#[inline(never)]
+pub fn root_children<K: Kernels>(k: &K, input: &[u8], ahead: usize, counter: u64) -> [Cv; 2] {
+    if let Some(c) = k.children(input, ahead, counter) {
+        return c;
+    }
+    if input.len() <= SMALL * CHUNK_LEN {
+        let mut cvs = [[0u8; OUT_LEN]; SMALL];
+        let mut next = [[0u8; OUT_LEN]; SMALL / 2];
+        children(k, input, ahead, counter, &mut cvs, &mut next)
+    } else {
+        let mut cvs = [[0u8; OUT_LEN]; MAX];
+        let mut next = [[0u8; OUT_LEN]; MAX / 2];
+        children(k, input, ahead, counter, &mut cvs, &mut next)
+    }
+}
+
+/// The hash (the 32-byte root output) of `input`.
+#[inline(always)]
+pub fn hash<K: Kernels>(k: &K, input: &[u8]) -> Cv {
+    if input.len() <= CHUNK_LEN {
+        return k.chunk_root(input);
+    }
+    k.parent_root(&root_children(k, input, 0, 0))
 }

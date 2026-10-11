@@ -2,7 +2,7 @@
 //! `tools/verify/tree` proves computes the C2SP specification's tree.
 
 use crate::platform::{Platform, MAX_SIMD_DEGREE_OR_2};
-use crate::{CVWords, CHUNK_LEN, OUT_LEN};
+use crate::{CVWords, BLOCK_LEN, CHUNK_LEN, OUT_LEN};
 
 /// A chaining value.
 pub(crate) type Cv = [u8; OUT_LEN];
@@ -49,5 +49,44 @@ impl Kernels for PlatformKernels<'_> {
             });
         }
         None
+    }
+
+    #[inline(always)]
+    #[allow(unused_variables)]
+    fn children(&self, input: &[u8], ahead: usize, counter: u64) -> Option<[Cv; 2]> {
+        // Whole subtrees of 32 KiB to 1 MiB on SME2: the flat walk down to
+        // the two children, SME2 alone (see sme2::compress_subtree_flat_to_parent).
+        #[cfg(blake3_sme2)]
+        if matches!(self.platform, Platform::SME2) && crate::sme2::flat_takes(input.len()) {
+            // Safe: the SME2 platform is selected only where the CPU has it.
+            let block = unsafe { crate::sme2::compress_subtree_flat_to_parent(input, ahead, self.key, counter, self.flags) };
+            return Some([block[..OUT_LEN].try_into().unwrap(), block[OUT_LEN..].try_into().unwrap()]);
+        }
+        None
+    }
+
+    #[inline(always)]
+    fn chunk_root(&self, input: &[u8]) -> Cv {
+        // The scalar kernel, on every AArch64 core (crate::hash_one_chunk_root).
+        #[cfg(blake3_neon_hybrid)]
+        return crate::hash_one_chunk_root(input, self.key, self.flags).0;
+        #[cfg(not(blake3_neon_hybrid))]
+        return crate::ChunkState::new(self.key, 0, self.flags, self.platform).update(input).output().root_hash().0;
+    }
+
+    #[inline(always)]
+    fn parent_root(&self, children: &[Cv; 2]) -> Cv {
+        let mut block = [0u8; BLOCK_LEN];
+        block[..OUT_LEN].copy_from_slice(&children[0]);
+        block[OUT_LEN..].copy_from_slice(&children[1]);
+        let root = crate::Output {
+            input_chaining_value: *self.key,
+            block: crate::Aligned64(block),
+            block_len: BLOCK_LEN as u8,
+            counter: 0,
+            flags: self.flags | crate::PARENT,
+            platform: self.platform,
+        };
+        root.root_hash().0
     }
 }

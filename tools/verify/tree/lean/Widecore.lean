@@ -20,7 +20,7 @@ set_option maxRecDepth 2048
 namespace widecore
 
 /-- Trait declaration: [widecore::Kernels]
-    Source: 'src/../../../../../../src/tree_core.rs', lines 8:0-22:1
+    Source: 'src/../../../../../../src/tree_core.rs', lines 8:0-30:1
     Visibility: public -/
 structure Kernels (Self : Type) where
   degree : Self → Result Std.Usize
@@ -31,6 +31,11 @@ structure Kernels (Self : Type) where
   subtree : Self → Slice Std.U8 → Std.Usize → Std.U64 → Slice (Array
     Std.U8 32#usize) → Result ((Option Std.Usize) × (Slice (Array Std.U8
     32#usize)))
+  children : Self → Slice Std.U8 → Std.Usize → Std.U64 → Result (Option
+    (Array (Array Std.U8 32#usize) 2#usize))
+  chunk_root : Self → Slice Std.U8 → Result (Array Std.U8 32#usize)
+  parent_root : Self → Array (Array Std.U8 32#usize) 2#usize → Result
+    (Array Std.U8 32#usize)
 
 /-- [widecore::CHUNK_LEN]
     Source: 'src/lib.rs', lines 6:0-6:34
@@ -38,7 +43,7 @@ structure Kernels (Self : Type) where
 @[global_simps, irreducible] def CHUNK_LEN : Std.Usize := 1024#usize
 
 /-- [widecore::left_len]: loop body 0:
-    Source: 'src/../../../../../../src/tree_core.rs', lines 29:4-31:5
+    Source: 'src/../../../../../../src/tree_core.rs', lines 37:4-39:5
     Visibility: public -/
 @[rust_loop_body]
 def left_len_loop.body
@@ -52,7 +57,7 @@ def left_len_loop.body
   else ok (done p)
 
 /-- [widecore::left_len]: loop 0:
-    Source: 'src/../../../../../../src/tree_core.rs', lines 29:4-31:5
+    Source: 'src/../../../../../../src/tree_core.rs', lines 37:4-39:5
     Visibility: public -/
 @[rust_loop]
 def left_len_loop (chunks : Std.Usize) (p : Std.Usize) : Result Std.Usize := do
@@ -61,7 +66,7 @@ def left_len_loop (chunks : Std.Usize) (p : Std.Usize) : Result Std.Usize := do
     p
 
 /-- [widecore::left_len]:
-    Source: 'src/../../../../../../src/tree_core.rs', lines 26:0-33:1
+    Source: 'src/../../../../../../src/tree_core.rs', lines 34:0-41:1
     Visibility: public -/
 def left_len (len : Std.Usize) : Result Std.Usize := do
   let i ← len - 1#usize
@@ -70,7 +75,7 @@ def left_len (len : Std.Usize) : Result Std.Usize := do
   p * CHUNK_LEN
 
 /-- [widecore::wide]:
-    Source: 'src/../../../../../../src/tree_core.rs', lines 39:0-60:1
+    Source: 'src/../../../../../../src/tree_core.rs', lines 47:0-68:1
     Visibility: public -/
 def wide
   {K : Type} (KernelsInst : Kernels K) (k : K) (input : Slice Std.U8)
@@ -131,7 +136,7 @@ def wide
 partial_fixpoint
 
 /-- [widecore::children]: loop body 0:
-    Source: 'src/../../../../../../src/tree_core.rs', lines 70:4-73:5
+    Source: 'src/../../../../../../src/tree_core.rs', lines 78:4-81:5
     Visibility: public -/
 @[rust_loop_body]
 def children_loop.body
@@ -165,7 +170,7 @@ def children_loop.body
   else ok (done (cvs, next))
 
 /-- [widecore::children]: loop 0:
-    Source: 'src/../../../../../../src/tree_core.rs', lines 70:4-73:5
+    Source: 'src/../../../../../../src/tree_core.rs', lines 78:4-81:5
     Visibility: public -/
 @[rust_loop]
 def children_loop
@@ -179,7 +184,7 @@ def children_loop
     (cvs, next, n)
 
 /-- [widecore::children]:
-    Source: 'src/../../../../../../src/tree_core.rs', lines 68:0-75:1
+    Source: 'src/../../../../../../src/tree_core.rs', lines 76:0-83:1
     Visibility: public -/
 def children
   {K : Type} (KernelsInst : Kernels K) (k : K) (input : Slice Std.U8)
@@ -193,6 +198,59 @@ def children
   let a ← Slice.index_usize cvs2 0#usize
   let a1 ← Slice.index_usize cvs2 1#usize
   ok (Array.make 2#usize [ a, a1 ], cvs2, next1)
+
+/-- [widecore::SMALL]
+    Source: 'src/../../../../../../src/tree_core.rs', lines 86:0-86:28
+    Visibility: public -/
+@[global_simps, irreducible] def SMALL : Std.Usize := 16#usize
+
+/-- [widecore::root_children]:
+    Source: 'src/../../../../../../src/tree_core.rs', lines 94:0-107:1
+    Visibility: public -/
+def root_children
+  {K : Type} (KernelsInst : Kernels K) (k : K) (input : Slice Std.U8)
+  (ahead : Std.Usize) (counter : Std.U64) :
+  Result (Array (Array Std.U8 32#usize) 2#usize)
+  := do
+  let o ← KernelsInst.children k input ahead counter
+  match o with
+  | none =>
+    let i := Slice.len input
+    let i1 ← SMALL * CHUNK_LEN
+    if i <= i1
+    then
+      let a := Array.repeat 32#usize 0#u8
+      let cvs := Array.repeat 16#usize a
+      let a1 := Array.repeat 32#usize 0#u8
+      let next := Array.repeat 8#usize a1
+      let (s, _) ← lift (Array.to_slice_mut cvs)
+      let (s1, _) ← lift (Array.to_slice_mut next)
+      let (c, _, _) ← children KernelsInst k input ahead counter s s1
+      ok c
+    else
+      let a := Array.repeat 32#usize 0#u8
+      let cvs := Array.repeat 128#usize a
+      let a1 := Array.repeat 32#usize 0#u8
+      let next := Array.repeat 64#usize a1
+      let (s, _) ← lift (Array.to_slice_mut cvs)
+      let (s1, _) ← lift (Array.to_slice_mut next)
+      let (c, _, _) ← children KernelsInst k input ahead counter s s1
+      ok c
+  | some c => ok c
+
+/-- [widecore::hash]:
+    Source: 'src/../../../../../../src/tree_core.rs', lines 111:0-116:1
+    Visibility: public -/
+def hash
+  {K : Type} (KernelsInst : Kernels K) (k : K) (input : Slice Std.U8) :
+  Result (Array Std.U8 32#usize)
+  := do
+  let i := Slice.len input
+  if i <= CHUNK_LEN
+  then KernelsInst.chunk_root k input
+  else
+    let a ← root_children KernelsInst k input 0#usize 0#u64
+    KernelsInst.parent_root k a
 
 /-- [widecore::OUT_LEN]
     Source: 'src/lib.rs', lines 7:0-7:30

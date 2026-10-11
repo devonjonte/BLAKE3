@@ -53,7 +53,7 @@ for max in 128 16 8 4 2; do
 	cp "$here"/lean/*.lean "$here/lean/lean-toolchain" "$here/lean/lake-manifest.json" "$lean/"
 	cp "$here/../../../c2sp/BLAKE3/Blake3.lean" "$lean/Blake3.lean"
 	cp "$out/lean/Widecore.lean" "$lean/Widecore.lean"
-	for f in WideProofs ChildrenProofs; do
+	for f in WideProofs ChildrenProofs HashProofs; do
 		sed -i.orig -e "s/D ≤ 128/D ≤ $max/g" -e "s/256/$((2 * max))/g" "$lean/$f.lean"
 		rm -f "$lean/$f.lean.orig"
 	done
@@ -66,4 +66,4 @@ for max in 128 16 8 4 2; do
 	standard_axioms_only "$lean/build.txt"
 	echo "MAX = $max: proved"
 done
-echo "proved: the library's tree walk computes the C2SP specification's tree and its root's children; the Hasher's stack computes its algorithm"
+echo "proved: the library's hash (tree_core.rs) is the C2SP specification's, given kernels that meet their contracts; the Hasher's stack computes its algorithm"

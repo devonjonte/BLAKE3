@@ -67,6 +67,26 @@ theorem goIdx_tree_node (key : Vector Blake3.Word 8) (mode : Blake3.Word) (chunk
     simp only [h, ↓reduceDIte, ↓reduceIte, Blake3.leftCount, nodeOp]
     rw [ih _ (by omega), ih _ (by omega)]
 
+/-- The walk's model returns no more values than chunks. -/
+theorem wideI_le {α : Type} [Inhabited α] (D d : Nat) (hD : D = 2 ^ d) (leaf : Nat → α) (node : α → α → α)
+    (n : Nat) (hn : 1 ≤ n) (start : Nat) : (wideI D leaf node start n).length ≤ n := by
+  induction n using Nat.strong_induction_on generalizing start with
+  | _ n ih =>
+  rw [wideI]
+  split
+  · simp
+  · split
+    · simp
+    · have := Nat.log2_self_le (n := n - 1) (by omega)
+      have := Nat.one_le_two_pow (n := (n - 1).log2)
+      have hk : 2 ^ (n - 1).log2 < n := by omega
+      have ha := ih _ hk (by omega) start
+      have hb := ih (n - 2 ^ (n - 1).log2) (by omega) (by omega) (start + 2 ^ (n - 1).log2)
+      simp only
+      split
+      · simp only [List.length_append]; omega
+      · rw [layerL_length, List.length_append]; omega
+
 /-- The walk's model returns at least two values for two chunks or more. -/
 theorem wideI_two {α : Type} [Inhabited α] (D d : Nat) (hD : D = 2 ^ d) (leaf : Nat → α) (node : α → α → α)
     (n : Nat) (hn : 2 ≤ n) (start : Nat) : 2 ≤ (wideI D leaf node start n).length := by
@@ -104,18 +124,18 @@ theorem children_loop_spec {K : Type} (KI : widecore.Kernels K) (k : K)
         r.2.val.take r.1.val = layerL parentf children.val ⦄)
     (hparent_spec : ∀ a b, abs (parentf a b) = cvOp key mode (abs a) (abs b))
     (R : Blake3.Node) (cvs next : Slice Cv) (n : Std.Usize)
-    (hn2 : 2 ≤ n.val) (hn : n.val ≤ cvs.length) (hcap : cvs.length ≤ 256) (hnext : cvs.length ≤ 2 * next.length)
+    (hn2 : 2 ≤ n.val) (hn : n.val ≤ cvs.length) (hcap : n.val ≤ 256) (hnext : cvs.length ≤ 2 * next.length)
     (N : List Blake3.Node) (hN : N.length = n.val) (hmap : (cvs.val.take n.val).map abs = N.map Blake3.Node.cv)
     (htree : treeL (nodeOp key mode) N = R) :
     widecore.children_loop KI k cvs next n ⦃ r => ∃ M : List Blake3.Node, M.length = 2 ∧
       (r.1.val.take 2).map abs = M.map Blake3.Node.cv ∧ treeL (nodeOp key mode) M = R ⦄ := by
   unfold widecore.children_loop
   apply loop.spec_decr_nat (fun st : Slice Cv × Slice Cv × Std.Usize => st.2.2.val)
-    (fun st : Slice Cv × Slice Cv × Std.Usize => 2 ≤ st.2.2.val ∧ st.2.2.val ≤ st.1.length ∧
+    (fun st : Slice Cv × Slice Cv × Std.Usize => 2 ≤ st.2.2.val ∧ st.2.2.val ≤ st.1.length ∧ st.2.2.val ≤ 256 ∧
       st.1.length = cvs.length ∧ st.2.1.length = next.length ∧
       ∃ N : List Blake3.Node, N.length = st.2.2.val ∧
         (st.1.val.take st.2.2.val).map abs = N.map Blake3.Node.cv ∧ treeL (nodeOp key mode) N = R)
-  · rintro ⟨c, x, m⟩ ⟨hm2, hmc, hcl, hxl, N, hNl, hNmap, hNtree⟩
+  · rintro ⟨c, x, m⟩ ⟨hm2, hmc, hm256, hcl, hxl, N, hNl, hNmap, hNtree⟩
     unfold widecore.children_loop.body
     by_cases hgt : m > 2#usize
     · simp only [hgt, ↓reduceIte]
@@ -137,7 +157,7 @@ theorem children_loop_spec {K : Type} (KI : widecore.Kernels K) (k : K)
         rw [this, List.take_append_of_le_length (by rw [List.length_take, hs3l]; omega),
           List.take_of_length_le (by rw [List.length_take, hs3l]; omega),
           List.take_of_length_le (by rw [hs3l])]
-      refine ⟨by omega, by rw [hcl']; simp [Slice.length] at hmc ⊢; omega, by rw [hcl', hcl],
+      refine ⟨by omega, by rw [hcl']; simp [Slice.length] at hmc ⊢; omega, by simp only at hm256; omega, by rw [hcl', hcl],
         by rw [n1_post1, hxl], ⟨layerL (nodeOp key mode) N, ?_, ?_, ?_⟩, by omega⟩
       · rw [layerL_length, hNl, hn1]
       · rw [htake, layerL_map abs parentf (cvOp key mode) hparent_spec, hNmap,
@@ -146,7 +166,7 @@ theorem children_loop_spec {K : Type} (KI : widecore.Kernels K) (k : K)
     · have hm : m.val = 2 := by scalar_tac
       simp only [hgt, ↓reduceIte, WP.spec_ok]
       exact ⟨N, by simp only at hNl; omega, by rw [← hm]; exact hNmap, hNtree⟩
-  · exact ⟨hn2, hn, rfl, rfl, N, hN, hmap, htree⟩
+  · exact ⟨hn2, hn, hcap, rfl, rfl, N, hN, hmap, htree⟩
 
 /-- The specification's chunk node `i` of bytes whose first chunk is chunk `c`. -/
 def leafN (key : Vector Blake3.Word 8) (mode : Blake3.Word) (bytes : List Std.U8) (c i : Nat) : Blake3.Node :=
@@ -178,7 +198,7 @@ theorem children_spec {K : Type} (KI : widecore.Kernels K) (k : K) (D d : Nat) (
     (input : Slice Std.U8) (ahead : Std.Usize) (counter : Std.U64) (cvs next : Slice Cv)
     (h2 : 1024 < input.length) (hfit : counter.val + input.length / 1024 + 1 ≤ Std.U64.max)
     (hahead : input.length + ahead.val ≤ Std.Usize.max)
-    (hcvs : max D 2 ≤ cvs.length) (hcap : cvs.length ≤ 256) (hnext : cvs.length ≤ 2 * next.length) :
+    (hcvs : min (chunks input.length) (max D 2) ≤ cvs.length) (hnext : cvs.length ≤ 2 * next.length) :
     widecore.children KI k input ahead counter cvs next ⦃ r => ∃ L R : Blake3.Node,
       nodeOp key mode L R = goIdx (leafN key mode input.val counter.val) (nodeOp key mode) counter.val
         (chunks input.length) ∧
@@ -203,12 +223,14 @@ theorem children_spec {K : Type} (KI : widecore.Kernels K) (k : K) (D d : Nat) (
   have hNl : (wideI D (leafN key mode input.val counter.val) (nodeOp key mode) counter.val
       (chunks input.length)).length = n.val := by
     have hle : n.val ≤ cvs1.val.length := by
-      have := hspecC.2.2.1; simp only [Slice.length] at hcl hcvs; omega
+      have := hspecC.2.2.1
+      have := wideI_le D d hD (leafOf chunkf input.val counter.val) parentf (chunks input.length) (by omega) counter.val
+      simp only [Slice.length] at *; omega
     rw [← List.length_map (f := Blake3.Node.cv), ← hmap, List.length_map, List.length_take]
     omega
   step with children_loop_spec KI k key mode abs parentf hparents hparent_spec
     (goIdx (leafN key mode input.val counter.val) (nodeOp key mode) counter.val (chunks input.length))
-    cvs1 next n (by omega) (by omega) (by omega) (by omega) _ hNl hmap hspecN.1 as ⟨cvs2, next1, M, hM2, hMmap, hMtree⟩
+    cvs1 next n (by omega) (by omega) (by have := hspecC.2.2.1; omega) (by omega) _ hNl hmap hspecN.1 as ⟨cvs2, next1, M, hM2, hMmap, hMtree⟩
   obtain ⟨L, R, rfl⟩ : ∃ L R, M = [L, R] := by
     match M, hM2 with
     | [L, R], _ => exact ⟨L, R, rfl⟩

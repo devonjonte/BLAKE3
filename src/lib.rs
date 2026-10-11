@@ -1007,16 +1007,8 @@ fn compress_parents_parallel(
 // for extended output in the general case.
 //
 // This function is not used on inputs of 1 chunk or less. That's a
-// different codepath.
-//
-// With the SME2 degree of 128, the two arrays of values together are 6 KiB.
-// Kept out of line, that frame belongs to this function alone; inlined into
-// hash() or update(), it would grow their frames past a page, and every call
-// (including the one-chunk path that never touches these arrays) would pay
-// for stack probing and zeroing. An input of sixteen chunks or fewer has
-// sixteen chaining values at most, and gets arrays of that size (768 bytes)
-// in place of zeroing 6 KiB for a few chunks.
-#[inline(never)]
+// different codepath. Its arrays live in tree::root_children, out of line.
+#[inline]
 fn compress_subtree_to_parent_node(
     input: &[u8],
     ahead: usize,
@@ -1026,40 +1018,8 @@ fn compress_subtree_to_parent_node(
     platform: Platform,
 ) -> [u8; BLOCK_LEN] {
     debug_assert!(input.len() > CHUNK_LEN);
-    // Whole subtrees of 32 KiB to 1 MiB on SME2: the flat walk down to the
-    // two children, SME2 alone (see sme2::compress_subtree_flat_to_parent).
-    #[cfg(blake3_sme2)]
-    if matches!(platform, Platform::SME2) && sme2::flat_takes(input.len()) {
-        // Safe: the SME2 platform is selected only where the CPU has it.
-        return unsafe { sme2::compress_subtree_flat_to_parent(input, ahead, key, chunk_counter, flags) };
-    }
-    if input.len() <= SMALL_TREE_CHUNKS * CHUNK_LEN {
-        condense_subtree::<SMALL_TREE_CHUNKS, { SMALL_TREE_CHUNKS / 2 }>(input, ahead, key, chunk_counter, flags, platform)
-    } else {
-        condense_subtree::<MAX_SIMD_DEGREE_OR_2, { MAX_SIMD_DEGREE_OR_2 / 2 }>(input, ahead, key, chunk_counter, flags, platform)
-    }
-}
-
-/// Chaining values the small arrays of `compress_subtree_to_parent_node`
-/// hold: an input of this many chunks has no more.
-const SMALL_TREE_CHUNKS: usize = 16;
-
-/// `compress_subtree_to_parent_node` with room for `CVS` chaining values,
-/// which must cover the most the walk (`tree::wide`) returns for `input`,
-/// and `HALF` = `CVS / 2` parents.
-#[inline(always)]
-fn condense_subtree<const CVS: usize, const HALF: usize>(
-    input: &[u8],
-    ahead: usize,
-    key: &CVWords,
-    chunk_counter: u64,
-    flags: u8,
-    platform: Platform,
-) -> [u8; BLOCK_LEN] {
-    let mut cvs = [[0u8; OUT_LEN]; CVS];
-    let mut next = [[0u8; OUT_LEN]; HALF];
     let kernels = tree::PlatformKernels { key, flags, platform };
-    let [left, right] = tree::children(&kernels, input, ahead, chunk_counter, &mut cvs, &mut next);
+    let [left, right] = tree::root_children(&kernels, input, ahead, chunk_counter);
     let mut block = [0u8; BLOCK_LEN];
     block[..OUT_LEN].copy_from_slice(&left);
     block[OUT_LEN..].copy_from_slice(&right);
@@ -1110,10 +1070,9 @@ fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8) -> Hash {
 
 // Hash a whole subtree at its chunk counter (or the whole input at zero).
 // Unlike the wider helpers above, this also handles one chunk or less.
-//
-// Inlined into hash(), keyed_hash(), and derive_key(): the one-chunk path
-// is then a straight line from the public function to the kernel, and the
-// multi-chunk path is one call to compress_subtree_to_parent_node().
+// The pool's pieces (lanes.rs) use it; the one-shot calls go through
+// tree::hash.
+#[cfg(feature = "std")]
 #[inline]
 fn hash_all_at_once(
     input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8, platform: Platform,
@@ -1471,11 +1430,7 @@ pub(crate) const SME2_SIZED_BATCH: usize = 16;
 /// on every platform.
 #[inline]
 fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) -> Hash {
-    #[cfg(blake3_neon_hybrid)]
-    if input.len() <= CHUNK_LEN {
-        return hash_one_chunk_root(input, key, flags);
-    }
-    hash_all_at_once(input, key, 0, flags, platform).root_hash()
+    Hash(tree::hash(&tree::PlatformKernels { key, flags, platform }, input))
 }
 
 /// The hashes of many messages of one length, laid out in one buffer, on
