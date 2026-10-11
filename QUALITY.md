@@ -139,8 +139,10 @@ library that compute BLAKE3 are proved to compute what
   and finishes the root, returns the standard's 32-byte hash of the input,
   given kernels that meet their contracts (each kernel's contract states
   what it must return in the standard's own terms).
-- **The Hasher's stack**: the chaining values a `Hasher` keeps as input
-  arrives combine into the standard's tree.
+- **The Hasher, around its kernels**: after any sequence of updates, a
+  `Hasher`'s result is the standard's hash of all their bytes, given
+  kernels that meet their contracts (its stack, its loop over whole
+  subtrees, and its final fold among the proved code).
 - **The pool's cuts and the batch tables**: every piece the pool hashes
   is a whole BLAKE3 subtree at its offset, and a batch's pointer table
   points each lane at its own message.
@@ -152,8 +154,9 @@ before "the library's `hash` returns BLAKE3's hash of its input" is one
 theorem:
 
 - the code that connects the parts: each kernel's Rust wrapper meeting
-  the contract the hash proof assumes, the rest of the `Hasher`, platform
-  detection, the multithreaded paths, and the batch APIs;
+  the contract the proofs assume (the chunk state among them), the
+  `Hasher`'s staging of short updates and its three-line `update_pooled`,
+  platform detection, the multithreaded paths, and the batch APIs;
 - x86 and other targets, where the fork runs upstream's code;
 - one statement in Lean: the compression proofs reach their verdicts in
   Z3, outside Lean.
@@ -178,7 +181,7 @@ the standard's appendix and the official test vectors.
 | The compression proofs' definition is the standard's | `tools/verify/lean/Sound.lean`: `symbolic_is_the_specifications` | Lean |
 | Each kernel and the Rust compression compute that definition | `tools/verify/prove_hybrid.py`, `prove_sme2.py`, `prove_rust.py`: every output word equal to the definition's, which `lean_spec.py` reads from Lean's `compress.json` | Z3 |
 | The hash, around its kernels | `tools/verify/tree/lean/HashProofs.lean`: `hash_spec`, on `WideProofs.lean` (`wide_is_tree`, the walk) and `ChildrenProofs.lean` (`children_spec`, the root's children) | Lean |
-| The Hasher's stack | `tools/verify/tree/lean/StackProofs.lean`: `merge_spec`, `push_spec`; `HasherProofs.lean`: `merge_push`, `final_output_whole`, `final_output_partial` | Lean |
+| The Hasher, around its kernels | `tools/verify/tree/lean/HasherCoreProofs.lean`: `hasher_spec`, on `StackProofs.lean` (`merge_spec`, `push_spec`, the stack's code) and `HasherProofs.lean` (`merge_push`, `final_output_whole`, `final_output_partial`, the algorithm) | Lean |
 | The pool's cuts and the batch tables | the `#[kani::proof]` harnesses in `src/lanes.rs` and `src/many.rs` | Kani |
 | Timing | `tools/verify/prove_timing.py` | Z3 |
 

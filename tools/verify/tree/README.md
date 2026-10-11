@@ -39,6 +39,17 @@ the walk at every buffer size the library builds with
   `parent_root` the output of the parent node of the two chaining values,
   and the SME2 `children` hook, where it answers, the root's children
   (`HashProofs.lean`).
+- **`HasherCoreProof.hasher_spec`.** The Hasher's loop (`src/hasher_core.rs`:
+  `fill`, `feed`, and `final_node`, over the stack of `src/stack_core.rs`;
+  `stackcore` includes both): from a new Hasher, after any updates, the
+  root's node is the specification's root over all the updates' bytes,
+  whose 32-byte output is `Blake3.blake3 key mode` of them. Its hypotheses
+  are the kernels' contracts (`Contracts`, `NodeContracts`), among them the
+  chunk state read as its number and its bytes. Between updates the stack
+  holds the chaining values of `HasherProof.stackCvs` over the full chunks,
+  merged while a chunk is partly filled, and else perhaps with one subtree
+  on top not yet merged (`HInv`; `HasherCoreProofs.lean`). `update` there is
+  the library's `update_pooled`: `fill`, then `feed` when input is left.
 
 Each rests on Lean's three standard axioms (`propext`, `Classical.choice`,
 `Quot.sound`), printed at the end of each file; `check.sh` fails on any

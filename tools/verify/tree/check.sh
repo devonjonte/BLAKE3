@@ -66,4 +66,4 @@ for max in 128 16 8 4 2; do
 	standard_axioms_only "$lean/build.txt"
 	echo "MAX = $max: proved"
 done
-echo "proved: the library's hash (tree_core.rs) is the C2SP specification's, given kernels that meet their contracts; the Hasher's stack computes its algorithm"
+echo "proved: the library's hash (tree_core.rs) and Hasher (hasher_core.rs) are the C2SP specification's, given kernels that meet their contracts"
