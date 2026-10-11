@@ -555,7 +555,8 @@ impl fmt::Display for HexError {
 impl std::error::Error for HexError {}
 
 // A 64-byte block of compression function input, with 64-byte alignment. This
-// is the type of ChunkState.buf and Output.block. glibc's AVX-512 memcpy
+// is the type of Output.block, and ChunkState (chunk_core.rs) aligns its
+// buf the same way. glibc's AVX-512 memcpy
 // writes a 64-byte copy with a pair of overlapping unaligned 64-byte vector
 // stores, and the immediate reload of the destination then fails
 // store-to-load forwarding whenever the stack frame leaves it misaligned
@@ -664,92 +665,46 @@ impl Zeroize for Output {
     }
 }
 
-#[derive(Clone)]
-struct ChunkState {
-    cv: CVWords,
-    chunk_counter: u64,
-    buf: Aligned64,
-    buf_len: u8,
-    blocks_compressed: u8,
-    flags: u8,
-    platform: Platform,
+/// A chunk's state (src/chunk_core.rs, proved in tools/verify/tree).
+mod chunk {
+    use crate::{BLOCK_LEN, CHUNK_START};
+    include!("chunk_core.rs");
+}
+
+type ChunkState = chunk::ChunkState<Platform>;
+
+impl chunk::Blocks for Platform {
+    #[inline(always)]
+    fn compress_in_place(&self, cv: &mut CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8) {
+        Platform::compress_in_place(self, cv, block, block_len, counter, flags)
+    }
+
+    #[inline(always)]
+    fn compress_blocks(&self, cv: &mut CVWords, blocks: &[u8], count: usize, counter: u64, flags: u8, flags_start: u8) {
+        Platform::compress_blocks(self, cv, blocks, count, counter, flags, flags_start)
+    }
+}
+
+impl Clone for ChunkState {
+    fn clone(&self) -> Self {
+        chunk::ChunkState {
+            buf: self.buf,
+            cv: self.cv,
+            chunk_counter: self.chunk_counter,
+            buf_len: self.buf_len,
+            blocks_compressed: self.blocks_compressed,
+            flags: self.flags,
+            platform: self.platform,
+        }
+    }
 }
 
 impl ChunkState {
-    fn new(key: &CVWords, chunk_counter: u64, flags: u8, platform: Platform) -> Self {
-        Self {
-            cv: *key,
-            chunk_counter,
-            buf: Aligned64([0; BLOCK_LEN]),
-            buf_len: 0,
-            blocks_compressed: 0,
-            flags,
-            platform,
-        }
-    }
-
-    fn count(&self) -> usize {
-        BLOCK_LEN * self.blocks_compressed as usize + self.buf_len as usize
-    }
-
-    fn fill_buf(&mut self, input: &mut &[u8]) {
-        let want = BLOCK_LEN - self.buf_len as usize;
-        let take = cmp::min(want, input.len());
-        self.buf[self.buf_len as usize..][..take].copy_from_slice(&input[..take]);
-        self.buf_len += take as u8;
-        *input = &input[take..];
-    }
-
-    fn start_flag(&self) -> u8 {
-        if self.blocks_compressed == 0 {
-            CHUNK_START
-        } else {
-            0
-        }
-    }
-
     // Try to avoid buffering as much as possible, by compressing directly from
-    // the input slice when full blocks are available.
-    fn update(&mut self, mut input: &[u8]) -> &mut Self {
-        if self.buf_len > 0 {
-            self.fill_buf(&mut input);
-            if !input.is_empty() {
-                debug_assert_eq!(self.buf_len as usize, BLOCK_LEN);
-                let block_flags = self.flags | self.start_flag(); // borrowck
-                self.platform.compress_in_place(
-                    &mut self.cv,
-                    &self.buf,
-                    BLOCK_LEN as u8,
-                    self.chunk_counter,
-                    block_flags,
-                );
-                self.buf_len = 0;
-                self.buf = Aligned64([0; BLOCK_LEN]);
-                self.blocks_compressed += 1;
-            }
-        }
-
-        // Every whole block except the last goes through one kernel call.
-        // The last block stays buffered for output(), which may need it as
-        // the root block.
-        if input.len() > BLOCK_LEN {
-            debug_assert_eq!(self.buf_len, 0);
-            let count = (input.len() - 1) / BLOCK_LEN;
-            let start_flag = self.start_flag(); // borrowck
-            self.platform.compress_blocks(
-                &mut self.cv,
-                input,
-                count,
-                self.chunk_counter,
-                self.flags,
-                start_flag,
-            );
-            self.blocks_compressed += count as u8;
-            input = &input[count * BLOCK_LEN..];
-        }
-
-        self.fill_buf(&mut input);
-        debug_assert!(input.is_empty());
+    // the input slice when full blocks are available (chunk_core.rs).
+    #[inline(always)]
+    fn update(&mut self, input: &[u8]) -> &mut Self {
+        self.absorb(input);
         debug_assert!(self.count() <= CHUNK_LEN);
         self
     }
@@ -758,7 +713,7 @@ impl ChunkState {
         let block_flags = self.flags | self.start_flag() | CHUNK_END;
         Output {
             input_chaining_value: self.cv,
-            block: self.buf,
+            block: Aligned64(self.buf),
             block_len: self.buf_len,
             counter: self.chunk_counter,
             flags: block_flags,

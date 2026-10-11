@@ -782,6 +782,8 @@ fn test_block_buffer_alignment() {
     // benchmarks in https://github.com/BLAKE3-team/BLAKE3/pull/582.
     assert_eq!(64, core::mem::align_of::<crate::Aligned64>());
     assert_eq!(0, core::mem::offset_of!(crate::Aligned64, 0));
+    assert_eq!(64, core::mem::align_of::<crate::ChunkState>());
+    assert_eq!(0, core::mem::offset_of!(crate::ChunkState, buf));
 }
 
 #[cfg(feature = "zeroize")]
@@ -794,10 +796,10 @@ fn test_zeroize() {
     assert_eq!(hash.0, [0u8; 32]);
 
     let mut hasher = crate::HasherCore {
-        chunk_state: crate::ChunkState {
+        chunk_state: crate::chunk::ChunkState {
             cv: [42; 8],
             chunk_counter: 42,
-            buf: crate::Aligned64([42; 64]),
+            buf: [42; 64],
             buf_len: 42,
             blocks_compressed: 42,
             flags: 42,

@@ -11,6 +11,7 @@ package tree where
 lean_lib Widecore {}
 lean_lib Blake3 {}
 lean_lib Stackcore {}
+lean_lib Chunkcore {}
 @[default_target] lean_lib Proofs {}
 @[default_target] lean_lib WideProofs {}
 @[default_target] lean_lib HasherProofs {}
@@ -18,3 +19,4 @@ lean_lib Stackcore {}
 @[default_target] lean_lib ChildrenProofs {}
 @[default_target] lean_lib HashProofs {}
 @[default_target] lean_lib HasherCoreProofs {}
+@[default_target] lean_lib ChunkProofs {}

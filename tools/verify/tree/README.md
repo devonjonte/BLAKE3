@@ -50,6 +50,15 @@ the walk at every buffer size the library builds with
   merged while a chunk is partly filled, and else perhaps with one subtree
   on top not yet merged (`HInv`; `HasherCoreProofs.lean`). `update` there is
   the library's `update_pooled`: `fill`, then `feed` when input is left.
+- **`ChunkProof.absorb_spec`, `node_eq`.** A chunk's state
+  (`src/chunk_core.rs`, the library's `ChunkState`; `rust/chunkcore` includes
+  it): after any bytes `B`, its fields are the specification's chunk node of
+  `B` (`node_eq`): the chaining value after the blocks before the last, the
+  last block (zero past its length) in `buf`, never empty once a byte has
+  come (`CInv`; `new_spec`, `absorb_spec`). Its hypotheses are the
+  compression kernels' contracts (`BlocksContracts`: `compress_in_place`
+  and `compress_blocks`, stated with the specification's compression
+  function; `ChunkProofs.lean`).
 
 Each rests on Lean's three standard axioms (`propext`, `Classical.choice`,
 `Quot.sound`), printed at the end of each file; `check.sh` fails on any

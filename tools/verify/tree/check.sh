@@ -32,7 +32,7 @@ translate() {
 
 # The committed translations are the Rust's (widecore at MAX = 128;
 # stackcore includes the library's own src/stack_core.rs).
-for pair in widecore:Widecore stackcore:Stackcore; do
+for pair in widecore:Widecore stackcore:Stackcore chunkcore:Chunkcore; do
 	crate=${pair%%:*}; name=${pair##*:}
 	rm -rf "$work/$crate"; mkdir -p "$work/$crate"
 	translate "$here/rust/$crate" "$work/$crate"
