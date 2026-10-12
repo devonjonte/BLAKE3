@@ -1,0 +1,7 @@
+[package]
+name = "crypto_hash_blake3"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+blake3-servil = { git = "https://github.com/johnservil/BLAKE3", rev = "7158bb9e478d31c7fc4ac6bbb1c3ba81f68ef6c9" }
