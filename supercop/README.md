@@ -19,8 +19,9 @@ SUPERCOP 20261004 on Debian 12 in a VM on an Apple M4 Max, cycles per call:
 
 SUPERCOP's checksums pass with gcc and clang, and it selects rust_servil on that machine.
 
-It goes in either as a separate implementation, beside the existing `crypto_hash/blake3`
-directories (one new directory, nothing else changes), or as an update to them.
+It is a separate implementation, added beside the existing `crypto_hash/blake3`
+implementations, which it leaves unchanged: they measure the BLAKE3 team's code, which
+remains widely used, supported and distributed.
 
 To try it: unpack SUPERCOP, copy `crypto_hash/blake3/rust_servil` into its
 `crypto_hash/blake3/`, then run `./do-part init` and `./do-part crypto_hash blake3`
