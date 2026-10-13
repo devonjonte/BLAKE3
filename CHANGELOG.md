@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The scalar one-chunk kernel loads each step's four message words before
+  its arithmetic and interleaves the step's four G functions, so in-order
+  cores (Cortex-A53, as in the Raspberry Pi 3) no longer wait on each load:
+  llvm-mca predicts a chunk-or-less message and every single compression
+  about 3x faster there (unmeasured on the hardware); the same size of code,
+  level on the M4 Max VM.
 - The API documentation is rewritten for choosing a call and predicting
   its speed: a table of which call fits which data, and each call's speed
   on an Apple M4 Max.

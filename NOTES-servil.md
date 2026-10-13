@@ -858,6 +858,42 @@ only the continuous cells and the long streams read here:
   KiB pieces 2-7% slower solo and 15-41% slower shared, 1-2 MiB 13-26%
   faster; continuous cells level.
 
+## The scalar kernel's loads before its arithmetic (October 13, 2026)
+
+The rolled scalar kernel (k1, c1: every message of a chunk or less and every
+single compression on AArch64) loaded each message word through the schedule
+table (ldrb, then ldr) right before its add, and every G of a step reused
+one temp (w23). An out-of-order core renames and overlaps them; an in-order
+one (Cortex-A53) waits out each two-load chain. Now each step's eight loads
+come first, into w23, w0, w2, w5 (w0 and w2 are free once block_start has
+moved them into the d row), and the four Gs' arithmetic follows one
+instruction of each in turn. Same instruction count and code size.
+
+llvm-mca (LLVM 19) cycles per compression; the A72 runs the Cortex-A57
+model, the closest LLVM 19 has; the A76 has none and the Neoverse N1 model
+stands for it:
+
+| model | before | after | portable C, gcc -O3 | portable C, clang -O3 |
+|---|---|---|---|---|
+| Cortex-A53 | 2261 | 749 | 629 | 1634 |
+| Cortex-A57 (A72) | 462 | 469 | 400 | 798 |
+| Neoverse N1 (A76) | 301 | 301 | 268 | 586 |
+
+The model attributes 89% of the A53's stalls before to register
+dependencies (`-bottleneck-analysis`). Proved (`prove_hybrid.py`, 327 of 327
+cases); `perf_regress check` on the VM: no cell slower. Unmeasured on any
+of those cores: no machine here has one.
+
+Still open from the same models: the unrolled scalar kernel (`ROLLED_K1 =
+False`) predicts about 13% fewer cycles than the rolled one on the A72 and
+10% on the N1 (409 and 272 against 462 and 301) with calls back to back;
+the rolled one is smaller, which pays after a pause on the M4. And k9 and
+k10 contain no SHA-3 instruction (only the pair units use `xar`), so they
+could serve CPUs without SHA-3, which today run the four-lane C kernel for
+whole chunks: k9 predicts 161 cycles per chunk-block against the C kernel's
+184-198 on the A57 model and 122 against 129-134 on the N1; k10 level; both
+about 4x slower on the A53 (one temp per unit, as in the scalar kernel).
+
 ## Rejected (with the reason; do not retry without new evidence)
 
 - **A woken worker prefetching a piece's kernels** (probe/wake-prefetch,
