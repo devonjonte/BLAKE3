@@ -555,10 +555,6 @@ impl std::error::Error for HexError {}
 
 type Output = hasher::Output<Platform>;
 
-/// A block, 64-byte aligned as hasher::Output's is (chunk_core.rs explains).
-#[repr(align(64))]
-struct Aligned64([u8; BLOCK_LEN]);
-
 impl Clone for Output {
     fn clone(&self) -> Self {
         hasher::Output {
@@ -903,6 +899,10 @@ fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8) -> Hash {
     let blocks = cmp::max(1, input.len().div_ceil(BLOCK_LEN));
     let whole = (blocks - 1) * BLOCK_LEN;
     let tail = &input[whole..];
+    /// The padded last block, 64-byte aligned as hasher::Output's is
+    /// (chunk_core.rs explains).
+    #[repr(align(64))]
+    struct Aligned64([u8; BLOCK_LEN]);
     let padded;
     let last: &[u8; BLOCK_LEN] = match tail.try_into() {
         Ok(full) => full,

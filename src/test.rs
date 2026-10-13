@@ -768,7 +768,6 @@ fn test_block_buffer_alignment() {
     // stack layout. See the comment on Output in chunk_core.rs, the measurements in
     // https://github.com/zooko/bench-hashes/issues/2, and the before/after
     // benchmarks in https://github.com/BLAKE3-team/BLAKE3/pull/582.
-    assert_eq!(64, core::mem::align_of::<crate::Aligned64>());
     assert_eq!(64, core::mem::align_of::<crate::Output>());
     assert_eq!(0, core::mem::offset_of!(crate::Output, block));
     assert_eq!(64, core::mem::align_of::<crate::ChunkState>());
