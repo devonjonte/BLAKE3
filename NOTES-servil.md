@@ -858,6 +858,47 @@ only the continuous cells and the long streams read here:
   KiB pieces 2-7% slower solo and 15-41% slower shared, 1-2 MiB 13-26%
   faster; continuous cells level.
 
+## The scalar kernel's loads before its arithmetic (October 13, 2026)
+
+The rolled scalar kernel (k1, c1: every message of a chunk or less and every
+single compression on AArch64) loaded each message word through the schedule
+table (ldrb, then ldr) right before its add, and every G of a step reused
+one temp (w23). An out-of-order core renames and overlaps them; an in-order
+one (Cortex-A53) waits out each two-load chain. Now each step's eight loads
+come first, into w23, w0, w2, w5 (w0 and w2 are free once block_start has
+moved them into the d row), and the four Gs' arithmetic follows one
+instruction of each in turn. Same instruction count and code size.
+
+llvm-mca (LLVM 19) cycles per compression; the A72 runs the Cortex-A57
+model, the closest LLVM 19 has; the A76 has none and the Neoverse N1 model
+stands for it:
+
+| model | before | after | portable C, gcc -O3 | portable C, clang -O3 |
+|---|---|---|---|---|
+| Cortex-A53 | 2261 | 749 | 629 | 1634 |
+| Cortex-A57 (A72) | 462 | 469 | 400 | 798 |
+| Neoverse N1 (A76) | 301 | 301 | 268 | 586 |
+
+The model attributes 89% of the A53's stalls before to register
+dependencies (`-bottleneck-analysis`). Proved (`prove_hybrid.py`, 327 of 327
+cases); `perf_regress check` on the VM: no cell slower. Unmeasured on any
+of those cores: no machine here has one.
+
+Decided from the same models (Zooko, October 13, 2026):
+- **The scalar kernel stays rolled.** Unrolled (`ROLLED_K1 = False`) predicts
+  about 13% fewer cycles on the A72 and 10% on the N1 with calls back to back
+  (409 and 272 against 462 and 301), the one pattern SUPERCOP measures; the
+  rolled one made `hash` of a chunk or less 25-33% faster now and then on the
+  M4 Max (2-4% slower nonstop), and llvm-mca models no instruction cache, so
+  the cold side on those cores is unknown.
+- **k9 and k10 for CPUs without SHA-3 wait for a machine to measure on.** They
+  contain no SHA-3 instruction (only the pair units use `xar`). k9 predicts
+  161 cycles per chunk-block against the four-lane C kernel's 184-198 on the
+  A57 model, 122 against 129-134 on the N1; k10 level; both about 4x slower on
+  the A53, so they would need a choice by CPU type. The gain is one free
+  scalar chunk beside eight NEON ones: nothing at 1536 or 4096 bytes, and
+  power-of-two subtrees need a walk in groups of 9 to use it.
+
 ## Rejected (with the reason; do not retry without new evidence)
 
 - **A woken worker prefetching a piece's kernels** (probe/wake-prefetch,

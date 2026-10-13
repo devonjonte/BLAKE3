@@ -183,30 +183,6 @@
 // Same, with the input's running pointer in register p.
 // Scalar half-G with the message word's offset from a table: byte i of
 // the round's row at t (register m's number, as SGA's).
-.macro SGA_T a, b, c, d, m, p, t, i
-    ldrb w\m, [\t, #\i]
-    ldr w\m, [\p, x\m]
-    add \a, \a, w\m
-    add \a, \a, \b
-    eor \d, \d, \a
-    ror \d, \d, #16
-    add \c, \c, \d
-    eor \b, \b, \c
-    ror \b, \b, #12
-.endm
-
-.macro SGB_T a, b, c, d, m, p, t, i
-    ldrb w\m, [\t, #\i]
-    ldr w\m, [\p, x\m]
-    add \a, \a, w\m
-    add \a, \a, \b
-    eor \d, \d, \a
-    ror \d, \d, #8
-    add \c, \c, \d
-    eor \b, \b, \c
-    ror \b, \b, #7
-.endm
-
 .macro SGA_R a, b, c, d, m, p, mx
     ldr \m, [\p, #\mx]
     add \a, \a, \m
@@ -3781,22 +3757,150 @@ blake3_hybrid_k1_loop:
         mov w22, w2
         adr x26, blake3_hybrid_k1_schedule
 blake3_hybrid_k1_round:
-        SGA_T w6, w10, w14, w19, 23, x24, x26, 0
-        SGA_T w7, w11, w15, w20, 23, x24, x26, 2
-        SGA_T w8, w12, w16, w21, 23, x24, x26, 4
-        SGA_T w9, w13, w17, w22, 23, x24, x26, 6
-        SGB_T w6, w10, w14, w19, 23, x24, x26, 1
-        SGB_T w7, w11, w15, w20, 23, x24, x26, 3
-        SGB_T w8, w12, w16, w21, 23, x24, x26, 5
-        SGB_T w9, w13, w17, w22, 23, x24, x26, 7
-        SGA_T w6, w11, w16, w22, 23, x24, x26, 8
-        SGA_T w7, w12, w17, w19, 23, x24, x26, 10
-        SGA_T w8, w13, w14, w20, 23, x24, x26, 12
-        SGA_T w9, w10, w15, w21, 23, x24, x26, 14
-        SGB_T w6, w11, w16, w22, 23, x24, x26, 9
-        SGB_T w7, w12, w17, w19, 23, x24, x26, 11
-        SGB_T w8, w13, w14, w20, 23, x24, x26, 13
-        SGB_T w9, w10, w15, w21, 23, x24, x26, 15
+        ldrb w23, [x26, #0]
+        ldrb w0, [x26, #2]
+        ldrb w2, [x26, #4]
+        ldrb w5, [x26, #6]
+        ldr w23, [x24, x23]
+        ldr w0, [x24, x0]
+        ldr w2, [x24, x2]
+        ldr w5, [x24, x5]
+        add w6, w6, w23
+        add w7, w7, w0
+        add w8, w8, w2
+        add w9, w9, w5
+        add w6, w6, w10
+        add w7, w7, w11
+        add w8, w8, w12
+        add w9, w9, w13
+        eor w19, w19, w6
+        eor w20, w20, w7
+        eor w21, w21, w8
+        eor w22, w22, w9
+        ror w19, w19, #16
+        ror w20, w20, #16
+        ror w21, w21, #16
+        ror w22, w22, #16
+        add w14, w14, w19
+        add w15, w15, w20
+        add w16, w16, w21
+        add w17, w17, w22
+        eor w10, w10, w14
+        eor w11, w11, w15
+        eor w12, w12, w16
+        eor w13, w13, w17
+        ror w10, w10, #12
+        ror w11, w11, #12
+        ror w12, w12, #12
+        ror w13, w13, #12
+        ldrb w23, [x26, #1]
+        ldrb w0, [x26, #3]
+        ldrb w2, [x26, #5]
+        ldrb w5, [x26, #7]
+        ldr w23, [x24, x23]
+        ldr w0, [x24, x0]
+        ldr w2, [x24, x2]
+        ldr w5, [x24, x5]
+        add w6, w6, w23
+        add w7, w7, w0
+        add w8, w8, w2
+        add w9, w9, w5
+        add w6, w6, w10
+        add w7, w7, w11
+        add w8, w8, w12
+        add w9, w9, w13
+        eor w19, w19, w6
+        eor w20, w20, w7
+        eor w21, w21, w8
+        eor w22, w22, w9
+        ror w19, w19, #8
+        ror w20, w20, #8
+        ror w21, w21, #8
+        ror w22, w22, #8
+        add w14, w14, w19
+        add w15, w15, w20
+        add w16, w16, w21
+        add w17, w17, w22
+        eor w10, w10, w14
+        eor w11, w11, w15
+        eor w12, w12, w16
+        eor w13, w13, w17
+        ror w10, w10, #7
+        ror w11, w11, #7
+        ror w12, w12, #7
+        ror w13, w13, #7
+        ldrb w23, [x26, #8]
+        ldrb w0, [x26, #10]
+        ldrb w2, [x26, #12]
+        ldrb w5, [x26, #14]
+        ldr w23, [x24, x23]
+        ldr w0, [x24, x0]
+        ldr w2, [x24, x2]
+        ldr w5, [x24, x5]
+        add w6, w6, w23
+        add w7, w7, w0
+        add w8, w8, w2
+        add w9, w9, w5
+        add w6, w6, w11
+        add w7, w7, w12
+        add w8, w8, w13
+        add w9, w9, w10
+        eor w22, w22, w6
+        eor w19, w19, w7
+        eor w20, w20, w8
+        eor w21, w21, w9
+        ror w22, w22, #16
+        ror w19, w19, #16
+        ror w20, w20, #16
+        ror w21, w21, #16
+        add w16, w16, w22
+        add w17, w17, w19
+        add w14, w14, w20
+        add w15, w15, w21
+        eor w11, w11, w16
+        eor w12, w12, w17
+        eor w13, w13, w14
+        eor w10, w10, w15
+        ror w11, w11, #12
+        ror w12, w12, #12
+        ror w13, w13, #12
+        ror w10, w10, #12
+        ldrb w23, [x26, #9]
+        ldrb w0, [x26, #11]
+        ldrb w2, [x26, #13]
+        ldrb w5, [x26, #15]
+        ldr w23, [x24, x23]
+        ldr w0, [x24, x0]
+        ldr w2, [x24, x2]
+        ldr w5, [x24, x5]
+        add w6, w6, w23
+        add w7, w7, w0
+        add w8, w8, w2
+        add w9, w9, w5
+        add w6, w6, w11
+        add w7, w7, w12
+        add w8, w8, w13
+        add w9, w9, w10
+        eor w22, w22, w6
+        eor w19, w19, w7
+        eor w20, w20, w8
+        eor w21, w21, w9
+        ror w22, w22, #8
+        ror w19, w19, #8
+        ror w20, w20, #8
+        ror w21, w21, #8
+        add w16, w16, w22
+        add w17, w17, w19
+        add w14, w14, w20
+        add w15, w15, w21
+        eor w11, w11, w16
+        eor w12, w12, w17
+        eor w13, w13, w14
+        eor w10, w10, w15
+        ror w11, w11, #7
+        ror w12, w12, #7
+        ror w13, w13, #7
+        ror w10, w10, #7
         add x26, x26, #16
         cmp x26, x27
         b.ne blake3_hybrid_k1_round

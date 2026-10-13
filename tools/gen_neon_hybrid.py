@@ -151,17 +151,35 @@ class Scalar:
                 out += self.half_g(half, *q, sched[base + k + half])
         return out
 
-    def half_step_table(self, quads, base, table):
+    def half_step_table(self, quads, base, table, temps):
         """half_step with each message word's offset from the round's row of
         the schedule table at `table` (byte base + k + half), for a kernel
-        whose rounds are a loop."""
-        assert self.preg and not self.spill_d
+        whose rounds are a loop. The four G halves of a step are independent:
+        their eight loads come first, into the four registers `temps`, then
+        their arithmetic, one instruction of each in turn. An in-order core
+        (Cortex-A53) then issues while the loads complete instead of waiting
+        on each one (llvm-mca: 2261 -> 833 cycles per compression on the A53;
+        A72 and Neoverse N1 level)."""
+        assert self.preg and not self.spill_d and len(temps) == 4
         out = []
-        for half in (0, 1):
-            for (ai, bi, ci, di), k in zip(quads, range(0, 8, 2)):
-                a, b, c, d = self.r(ai), self.r(bi), self.r(ci), self.r(di)
-                name = "SGA_T" if half == 0 else "SGB_T"
-                out.append(f"{name} {a}, {b}, {c}, {d}, {self.mtemp[1:]}, {self.preg}, {table}, {base + k + half}")
+        for half, (r1, r2) in ((0, (16, 12)), (1, (8, 7))):
+            gs = [tuple(self.r(i) for i in q) for q in quads]
+            for (k, m) in zip(range(0, 8, 2), temps):
+                out.append(f"ldrb {m}, [{table}, #{base + k + half}]")
+            for m in temps:
+                out.append(f"ldr {m}, [{self.preg}, {x(m)}]")
+            ops = [
+                lambda a, b, c, d, m: f"add {a}, {a}, {m}",
+                lambda a, b, c, d, m: f"add {a}, {a}, {b}",
+                lambda a, b, c, d, m: f"eor {d}, {d}, {a}",
+                lambda a, b, c, d, m: f"ror {d}, {d}, #{r1}",
+                lambda a, b, c, d, m: f"add {c}, {c}, {d}",
+                lambda a, b, c, d, m: f"eor {b}, {b}, {c}",
+                lambda a, b, c, d, m: f"ror {b}, {b}, #{r2}",
+            ]
+            for op in ops:
+                for (a, b, c, d), m in zip(gs, temps):
+                    out.append(op(a, b, c, d, m))
         return out
 
     def prologue(self, ctr=None):
@@ -487,30 +505,6 @@ MACROS = r"""
 // Same, with the input's running pointer in register p.
 // Scalar half-G with the message word's offset from a table: byte i of
 // the round's row at t (register m's number, as SGA's).
-.macro SGA_T a, b, c, d, m, p, t, i
-    ldrb w\m, [\t, #\i]
-    ldr w\m, [\p, x\m]
-    add \a, \a, w\m
-    add \a, \a, \b
-    eor \d, \d, \a
-    ror \d, \d, #16
-    add \c, \c, \d
-    eor \b, \b, \c
-    ror \b, \b, #12
-.endm
-
-.macro SGB_T a, b, c, d, m, p, t, i
-    ldrb w\m, [\t, #\i]
-    ldr w\m, [\p, x\m]
-    add \a, \a, w\m
-    add \a, \a, \b
-    eor \d, \d, \a
-    ror \d, \d, #8
-    add \c, \c, \d
-    eor \b, \b, \c
-    ror \b, \b, #7
-.endm
-
 .macro SGA_R a, b, c, d, m, p, mx
     ldr \m, [\p, #\mx]
     add \a, \a, \m
@@ -787,7 +781,9 @@ def lean_kernel(name, sc, last):
         e(f"adr x26, {name}_schedule")
         e(f"{name}_round:")
         for quads, base in ((COLS, 0), (DIAGS, 8)):
-            L += sc.half_step_table(quads, base, "x26")
+            # w0 and w2 (block length and flags) are free once block_start
+            # has moved them into the d row; w5 until the next block's flags.
+            L += sc.half_step_table(quads, base, "x26", [w(sc.mtemp), "w0", "w2", "w5"])
         e("add x26, x26, #16")
         e("cmp x26, x27")
         e(f"b.ne {name}_round")
