@@ -705,11 +705,6 @@ impl IncrementCounter {
     }
 }
 
-// The largest power of two less than or equal to `n`, used in Hasher::update(). This is similar to
-// left_subtree_len(n), but note that left_subtree_len(n) is strictly less than `n`.
-fn largest_power_of_two_leq(n: usize) -> usize {
-    ((n / 2) + 1).next_power_of_two()
-}
 
 /// Where a stream stands for [`plan_subtrees`]: its chunk counter and the
 /// bytes in its partial chunk (0 to CHUNK_LEN), as a [`Hasher`]'s chunk
@@ -747,26 +742,12 @@ fn plan_part(state: &mut PlanState, piece: &[u8], tasks: &mut Vec<lanes::Task>) 
         state.counter += 1;
     }
     while piece.len() - offset > CHUNK_LEN {
-        let len = next_subtree_len(state.counter, piece.len() - offset);
+        let len = hasher::subtree_len(state.counter, piece.len() - offset);
         tasks.push(lanes::Task::of(&piece[offset..offset + len], state.counter));
         state.counter += (len / CHUNK_LEN) as u64;
         offset += len;
     }
     state.partial = piece.len() - offset;
-}
-
-/// The whole subtree Hasher::update hashes next, from chunk `chunk_counter`
-/// with `remaining` bytes (more than one chunk) to go: the largest power of
-/// two chunks that fits and evenly divides the count so far.
-#[inline(always)]
-fn next_subtree_len(chunk_counter: u64, remaining: usize) -> usize {
-    debug_assert!(remaining > CHUNK_LEN);
-    let mut subtree_len = largest_power_of_two_leq(remaining);
-    let count_so_far = chunk_counter * CHUNK_LEN as u64;
-    while (subtree_len - 1) as u64 & count_so_far != 0 {
-        subtree_len /= 2;
-    }
-    subtree_len
 }
 
 // Use SIMD parallelism to hash up to MAX_SIMD_DEGREE chunks at the same time
@@ -1270,7 +1251,7 @@ fn prefetch_kernels(len: usize, platform: Platform) {
 }
 
 /// Prefetch the code a fresh Hasher's update of `len` bytes runs: the
-/// subtrees its loop cuts (next_subtree_len from counter 0, up to the last
+/// subtrees its loop cuts (hasher::subtree_len from counter 0, up to the last
 /// chunk, which waits in the chunk state), each one's kernels.
 #[cfg(all(blake3_neon_hybrid, feature = "std"))]
 fn prefetch_update_kernels(len: usize, platform: Platform) {
@@ -1279,7 +1260,7 @@ fn prefetch_update_kernels(len: usize, platform: Platform) {
     }
     let (mut counter, mut left) = (0u64, len);
     while left > CHUNK_LEN {
-        let subtree = next_subtree_len(counter, left);
+        let subtree = hasher::subtree_len(counter, left);
         let chunks = subtree / CHUNK_LEN;
         #[cfg(blake3_sme2)]
         if matches!(platform, Platform::SME2) && chunks >= 16 {
@@ -1833,16 +1814,6 @@ struct HasherHooks<'a> {
 
 impl hasher::Hooks for HasherHooks<'_> {
     #[inline(always)]
-    fn ones(&self, x: u64) -> usize {
-        x.count_ones() as usize
-    }
-
-    #[inline(always)]
-    fn subtree_len(&self, counter: u64, remaining: usize) -> usize {
-        next_subtree_len(counter, remaining)
-    }
-
-    #[inline(always)]
     #[allow(unused_variables)]
     fn subtree_cv(&self, input: &[u8], ahead: usize, counter: u64) -> Option<CVBytes> {
         // After the first input, no subtree is the root: on SME2 the flat
@@ -2250,8 +2221,7 @@ impl HasherCore {
         // Account for non-zero cases of Hasher::set_input_offset, where there are no prior
         // subtrees in the stack. Note that initial_chunk_counter is always 0 for callers who don't
         // use the hazmat module.
-        let post_merge_stack_len =
-            (chunk_counter - self.initial_chunk_counter).count_ones() as usize;
+        let post_merge_stack_len = hasher::ones(chunk_counter - self.initial_chunk_counter);
         let kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, false);
         self.cv_stack.merge(&kernels, post_merge_stack_len);
     }
@@ -2327,7 +2297,7 @@ impl HasherCore {
             self.chunk_state = ChunkState::new(&self.key, self.chunk_state.chunk_counter + 1, self.chunk_state.flags, self.chunk_state.platform);
         }
         while input.len() > CHUNK_LEN {
-            let len = next_subtree_len(self.chunk_state.chunk_counter, input.len());
+            let len = hasher::subtree_len(self.chunk_state.chunk_counter, input.len());
             let chunks = (len / CHUNK_LEN) as u64;
             let result = results.next().expect("a result for every planned subtree");
             let counter = self.chunk_state.chunk_counter;

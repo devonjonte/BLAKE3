@@ -69,8 +69,9 @@ the walk at every buffer size the library builds with
   and its first 32 bytes are `Blake3.blake3 key mode` of the updates'
   bytes. `Kernels` meets the Hasher's contracts (`kernels_contracts`,
   `kernels_node_contracts`), given compression kernels that meet
-  `BlocksContracts` and hooks (the pool and SME2 routes, the bit count, the
-  subtree length) that meet `HookContracts`. On the way: a node's chaining
+  `BlocksContracts` and hooks (the pool's and SME2's routes) that meet
+  `HookContracts`; the bit count and the subtree's length are proved code
+  (`ones_spec`, `subtree_len_spec`, HasherCoreProofs.lean). On the way: a node's chaining
   value and root bytes are the specification's (`cv_spec`, `root_spec`), and
   so are the nodes of a chunk and of a parent (`chunk_output_spec`,
   `parent_output_spec`); the bytes of words are the specification's
@@ -79,6 +80,17 @@ the walk at every buffer size the library builds with
 Each rests on Lean's three standard axioms (`propext`, `Classical.choice`,
 `Quot.sound`), printed at the end of each file; `check.sh` fails on any
 other.
+
+**What establishes each contract.** The compression kernels' contracts
+(`BlocksContracts`) are the machine-code proofs of `prove_rust.py`, for
+each platform the library holds on AArch64 (portable, NEON, SME2):
+`in_place` is "compression in place", and `blocks` is "compression of n
+blocks" for n from 1 to 16 and any slice of at least 64 n bytes. Both
+state the same equation over the same definition (`Sound.lean`): the
+chaining value's words, the block's little-endian words, and the
+counter, length, and flags as numbers. The hooks' contracts
+(`HookContracts`: the pool's and SME2's routes) and the one-shot hash's
+kernels (`src/tree.rs`) are next.
 
 **The kernels' contracts are the hypotheses.** `chunks` must return, in
 order, the specification's chaining values of its chunks. `parents` must

@@ -281,12 +281,9 @@ theorem parent_output_spec {P : Type} (left right : Std.Array Std.U8 32#usize) (
 section
 variable {P H : Type} (BI : Blocks P) (cpy : core.marker.Copy P) (HI : Hooks H)
 
-/-- The hooks meet their contracts, as the Hasher's Contracts state them for
-`ones`, `subtree_len`, `subtree_cv`, and `children`. -/
+/-- The hooks (the pool's and SME2's routes) meet their contracts, as the
+Hasher's Contracts state them for `subtree_cv` and `children`. -/
 structure HookContracts (h : H) (key : Vector Blake3.Word 8) (mode : Blake3.Word) : Prop where
-  ones : ∀ x, HI.ones h x ⦃ r => r.val = HasherProof.ones x.val ⦄
-  subtree_len : ∀ (c : Std.U64) (r : Std.Usize), 1024 < r.val →
-    HI.subtree_len h c r ⦃ q => ∃ j, q.val = 1024 * 2 ^ j ∧ 2 ^ j ∣ c.val ∧ q.val ≤ r.val ⦄
   subtree_cv : ∀ (x : Slice Std.U8) (a : Std.Usize) (c : Std.U64), 1024 ≤ x.length →
     HI.subtree_cv h x a c ⦃ o => ∀ v, o = some v →
       cvOf v = (goIdx (leafN key mode x.val c.val) (nodeOp key mode) c.val (chunks x.length)).cv ⦄
@@ -318,8 +315,6 @@ theorem kernels_contracts (k : Kernels P H) (key : Vector Blake3.Word 8) (mode :
   parent := fun a b => by
     have h := kernels_parent_spec BI cpy k hK a b
     rw [hkey, hmode] at h; exact h
-  ones := hH.ones
-  subtree_len := hH.subtree_len
   new_chunk := fun c => by
     apply WP.spec_mono (new_spec BI k.key c k.flags k.platform)
     rintro st ⟨h, hp⟩

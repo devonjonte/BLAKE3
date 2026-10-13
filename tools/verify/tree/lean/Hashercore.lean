@@ -409,13 +409,11 @@ structure Parent (Self : Type) where
     (Array Std.U8 32#usize)
 
 /-- Trait declaration: [hashercore::Feed]
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 18:0-38:1
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 18:0-32:1
     Visibility: public -/
 structure Feed (Self : Type) (C : Type) where
   ParentInst : Parent Self
   ChunkInst : Chunk C
-  ones : Self → Std.U64 → Result Std.Usize
-  subtree_len : Self → Std.U64 → Std.Usize → Result Std.Usize
   new_chunk : Self → Std.U64 → Result C
   chunk_cv : Self → C → Result (Array Std.U8 32#usize)
   whole_chunk_cv : Self → Slice Std.U8 → Std.U64 → Result (Array Std.U8
@@ -426,7 +424,7 @@ structure Feed (Self : Type) (C : Type) where
     (Array Std.U8 32#usize) 2#usize)
 
 /-- Trait declaration: [hashercore::Nodes]
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 41:0-48:1
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 35:0-42:1
     Visibility: public -/
 structure Nodes (Self : Type) (C : Type) (N : Type) where
   ChunkInst : Chunk C
@@ -434,6 +432,82 @@ structure Nodes (Self : Type) (C : Type) (N : Type) where
   parent_node : Self → Array Std.U8 32#usize → Array Std.U8 32#usize →
     Result N
   node_cv : Self → N → Result (Array Std.U8 32#usize)
+
+/-- [hashercore::ones]: loop body 0:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 47:4-50:5
+    Visibility: public -/
+@[rust_loop_body]
+def ones_loop.body
+  (x : Std.U64) (n : Std.Usize) :
+  Result (ControlFlow (Std.U64 × Std.Usize) Std.Usize)
+  := do
+  if x != 0#u64
+  then
+    let i ← x - 1#u64
+    let x1 ← lift (x &&& i)
+    let n1 ← n + 1#usize
+    ok (cont (x1, n1))
+  else ok (done n)
+
+/-- [hashercore::ones]: loop 0:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 47:4-50:5
+    Visibility: public -/
+@[rust_loop]
+def ones_loop (x : Std.U64) (n : Std.Usize) : Result Std.Usize := do
+  loop
+    (fun (x1, n1) => ones_loop.body x1 n1)
+    (x, n)
+
+/-- [hashercore::ones]:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 45:0-52:1
+    Visibility: public -/
+@[reducible]
+def ones (x : Std.U64) : Result Std.Usize := do
+  ones_loop x 0#usize
+
+/-- [hashercore::CHUNK_LEN]
+    Source: 'src/lib.rs', lines 8:0-8:34
+    Visibility: public -/
+@[global_simps, irreducible] def CHUNK_LEN : Std.Usize := 1024#usize
+
+/-- [hashercore::subtree_len]: loop body 0:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 61:4-63:5
+    Visibility: public -/
+@[rust_loop_body]
+def subtree_len_loop.body
+  (so_far : Std.U64) (len : Std.Usize) :
+  Result (ControlFlow Std.Usize Std.Usize)
+  := do
+  let i ← len - 1#usize
+  let i1 ← lift (UScalar.cast .U64 i)
+  let i2 ← lift (i1 &&& so_far)
+  if i2 != 0#u64
+  then let len1 ← len / 2#usize
+       ok (cont len1)
+  else ok (done len)
+
+/-- [hashercore::subtree_len]: loop 0:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 61:4-63:5
+    Visibility: public -/
+@[rust_loop]
+def subtree_len_loop
+  (len : Std.Usize) (so_far : Std.U64) : Result Std.Usize := do
+  loop
+    (fun len1 => subtree_len_loop.body so_far len1)
+    len
+
+/-- [hashercore::subtree_len]:
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 58:0-65:1
+    Visibility: public -/
+def subtree_len
+  (counter : Std.U64) (remaining : Std.Usize) : Result Std.Usize := do
+  let i ← core.num.Usize.BITS - 1#u32
+  let i1 ← lift (core.num.Usize.leading_zeros remaining)
+  let i2 ← i - i1
+  let len ← 1#usize <<< i2
+  let i3 ← lift (UScalar.cast .U64 CHUNK_LEN)
+  let so_far ← counter * i3
+  subtree_len_loop len so_far
 
 /-- [hashercore::CvStack]
     Source: 'src/../../../../../../src/stack_core.rs', lines 13:0-16:1
@@ -518,7 +592,7 @@ def CvStack.push
   ok { cvs := o1, len := i }
 
 /-- [hashercore::push]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 53:0-56:1
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 70:0-73:1
     Visibility: public -/
 def push
   {C : Type} {K : Type} (ChunkInst : Chunk C) (FeedInst : Feed K C) (k : K)
@@ -527,17 +601,12 @@ def push
   Result CvStack
   := do
   let i ← counter - initial
-  let i1 ← FeedInst.ones k i
+  let i1 ← ones i
   let stack1 ← CvStack.merge FeedInst.ParentInst stack k i1
   CvStack.push stack1 cv
 
-/-- [hashercore::CHUNK_LEN]
-    Source: 'src/lib.rs', lines 8:0-8:34
-    Visibility: public -/
-@[global_simps, irreducible] def CHUNK_LEN : Std.Usize := 1024#usize
-
 /-- [hashercore::fill]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 60:0-74:1
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 77:0-91:1
     Visibility: public -/
 def fill
   {C : Type} {K : Type} (ChunkInst : Chunk C) (FeedInst : Feed K C) (k : K)
@@ -574,7 +643,7 @@ def fill
       ok (rest, chunk2, stack1)
 
 /-- [hashercore::feed]: loop body 0:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 80:4-101:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 97:4-118:5
     Visibility: public -/
 @[rust_loop_body]
 def feed_loop.body
@@ -588,7 +657,7 @@ def feed_loop.body
   then
     let counter ← ChunkInst.counter chunk
     let i1 := Slice.len input
-    let len ← FeedInst.subtree_len k counter i1
+    let len ← subtree_len counter i1
     let i2 ← len / CHUNK_LEN
     let chunks ← lift (UScalar.cast .U64 i2)
     let i3 := Slice.len input
@@ -628,7 +697,7 @@ def feed_loop.body
   else ok (done (chunk, stack, input))
 
 /-- [hashercore::feed]: loop 0:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 80:4-101:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 97:4-118:5
     Visibility: public -/
 @[rust_loop]
 def feed_loop
@@ -642,7 +711,7 @@ def feed_loop
     (chunk, stack, input)
 
 /-- [hashercore::feed]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 78:0-106:1
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 95:0-123:1
     Visibility: public -/
 def feed
   {C : Type} {K : Type} (ChunkInst : Chunk C) (FeedInst : Feed K C) (k : K)
@@ -658,7 +727,7 @@ def feed
     let chunk2 ← ChunkInst.update chunk1 input1
     let i ← ChunkInst.counter chunk2
     let i1 ← i - initial
-    let i2 ← FeedInst.ones k i1
+    let i2 ← ones i1
     let stack2 ← CvStack.merge FeedInst.ParentInst stack1 k i2
     ok (chunk2, stack2)
 
@@ -679,7 +748,7 @@ def CvStack.impl.len (self : CvStack) : Result Std.Usize := do
   ok self.len
 
 /-- [hashercore::final_node]: loop body 0:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 121:4-124:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 138:4-141:5
     Visibility: public -/
 @[rust_loop_body]
 def final_node_loop.body
@@ -697,7 +766,7 @@ def final_node_loop.body
   else ok (done out)
 
 /-- [hashercore::final_node]: loop 0:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 121:4-124:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 138:4-141:5
     Visibility: public -/
 @[rust_loop]
 def final_node_loop
@@ -710,7 +779,7 @@ def final_node_loop
     (n, out)
 
 /-- [hashercore::final_node]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 110:0-126:1
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 127:0-143:1
     Visibility: public -/
 def final_node
   {C : Type} {N : Type} {K : Type} (ChunkInst : Chunk C) (NodesInst : Nodes K C
@@ -738,18 +807,16 @@ def final_node
     final_node_loop NodesInst k stack n out
 
 /-- Trait declaration: [hashercore::Hooks]
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 130:0-135:1
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 147:0-150:1
     Visibility: public -/
 structure Hooks (Self : Type) where
-  ones : Self → Std.U64 → Result Std.Usize
-  subtree_len : Self → Std.U64 → Std.Usize → Result Std.Usize
   subtree_cv : Self → Slice Std.U8 → Std.Usize → Std.U64 → Result
     (Option (Array Std.U8 32#usize))
   children : Self → Slice Std.U8 → Std.Usize → Std.U64 → Result (Array
     (Array Std.U8 32#usize) 2#usize)
 
 /-- [hashercore::Kernels]
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 139:0-144:1
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 154:0-159:1
     Visibility: public -/
 structure Kernels (P : Type) (H : Type) where
   key : Array Std.U32 8#usize
@@ -758,7 +825,7 @@ structure Kernels (P : Type) (H : Type) where
   hooks : H
 
 /-- [hashercore::{impl hashercore::Parent for hashercore::Kernels<'_0, P, H>}::parent]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 148:4-150:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 163:4-165:5
     Visibility: public -/
 def Kernels.Insts.HashercoreParent.parent
   {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
@@ -770,7 +837,7 @@ def Kernels.Insts.HashercoreParent.parent
   Output.chaining_value BlocksInst o
 
 /-- Trait implementation: [hashercore::{impl hashercore::Parent for hashercore::Kernels<'_0, P, H>}]
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 146:0-151:1 -/
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 161:0-166:1 -/
 @[reducible]
 def Kernels.Insts.HashercoreParent {P : Type} (H : Type) (BlocksInst : Blocks
   P) (coremarkerCopyInst : core.marker.Copy P) : Parent (Kernels P H) := {
@@ -778,7 +845,7 @@ def Kernels.Insts.HashercoreParent {P : Type} (H : Type) (BlocksInst : Blocks
 }
 
 /-- [hashercore::{impl hashercore::Feed<hashercore::ChunkState<P>> for hashercore::Kernels<'_0, P, H>}::children]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 187:4-189:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 192:4-194:5
     Visibility: public -/
 def Kernels.Insts.HashercoreFeedChunkState.children
   {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
@@ -789,7 +856,7 @@ def Kernels.Insts.HashercoreFeedChunkState.children
   HooksInst.children self.hooks input ahead counter
 
 /-- [hashercore::{impl hashercore::Feed<hashercore::ChunkState<P>> for hashercore::Kernels<'_0, P, H>}::subtree_cv]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 182:4-184:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 187:4-189:5
     Visibility: public -/
 def Kernels.Insts.HashercoreFeedChunkState.subtree_cv
   {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
@@ -800,7 +867,7 @@ def Kernels.Insts.HashercoreFeedChunkState.subtree_cv
   HooksInst.subtree_cv self.hooks input ahead counter
 
 /-- [hashercore::{impl hashercore::Feed<hashercore::ChunkState<P>> for hashercore::Kernels<'_0, P, H>}::whole_chunk_cv]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 175:4-179:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 180:4-184:5
     Visibility: public -/
 def Kernels.Insts.HashercoreFeedChunkState.whole_chunk_cv
   {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
@@ -815,7 +882,7 @@ def Kernels.Insts.HashercoreFeedChunkState.whole_chunk_cv
   Output.chaining_value BlocksInst o
 
 /-- [hashercore::{impl hashercore::Feed<hashercore::ChunkState<P>> for hashercore::Kernels<'_0, P, H>}::chunk_cv]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 170:4-172:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 175:4-177:5
     Visibility: public -/
 def Kernels.Insts.HashercoreFeedChunkState.chunk_cv
   {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
@@ -827,7 +894,7 @@ def Kernels.Insts.HashercoreFeedChunkState.chunk_cv
   Output.chaining_value BlocksInst o
 
 /-- [hashercore::{impl hashercore::Feed<hashercore::ChunkState<P>> for hashercore::Kernels<'_0, P, H>}::new_chunk]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 165:4-167:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 170:4-172:5
     Visibility: public -/
 def Kernels.Insts.HashercoreFeedChunkState.new_chunk
   {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
@@ -837,40 +904,14 @@ def Kernels.Insts.HashercoreFeedChunkState.new_chunk
   := do
   ChunkState.new BlocksInst self.key counter self.flags self.platform
 
-/-- [hashercore::{impl hashercore::Feed<hashercore::ChunkState<P>> for hashercore::Kernels<'_0, P, H>}::subtree_len]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 160:4-162:5
-    Visibility: public -/
-def Kernels.Insts.HashercoreFeedChunkState.subtree_len
-  {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
-  core.marker.Copy P) (HooksInst : Hooks H) (self : Kernels P H)
-  (counter : Std.U64) (remaining : Std.Usize) :
-  Result Std.Usize
-  := do
-  HooksInst.subtree_len self.hooks counter remaining
-
-/-- [hashercore::{impl hashercore::Feed<hashercore::ChunkState<P>> for hashercore::Kernels<'_0, P, H>}::ones]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 155:4-157:5
-    Visibility: public -/
-def Kernels.Insts.HashercoreFeedChunkState.ones
-  {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
-  core.marker.Copy P) (HooksInst : Hooks H) (self : Kernels P H) (x : Std.U64)
-  :
-  Result Std.Usize
-  := do
-  HooksInst.ones self.hooks x
-
 /-- Trait implementation: [hashercore::{impl hashercore::Feed<hashercore::ChunkState<P>> for hashercore::Kernels<'_0, P, H>}]
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 153:0-190:1 -/
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 168:0-195:1 -/
 @[reducible]
 def Kernels.Insts.HashercoreFeedChunkState {P : Type} {H : Type} (BlocksInst :
   Blocks P) (coremarkerCopyInst : core.marker.Copy P) (HooksInst : Hooks H) :
   Feed (Kernels P H) (ChunkState P) := {
   ParentInst := Kernels.Insts.HashercoreParent H BlocksInst coremarkerCopyInst
   ChunkInst := ChunkState.Insts.HashercoreChunk BlocksInst
-  ones := Kernels.Insts.HashercoreFeedChunkState.ones BlocksInst
-    coremarkerCopyInst HooksInst
-  subtree_len := Kernels.Insts.HashercoreFeedChunkState.subtree_len BlocksInst
-    coremarkerCopyInst HooksInst
   new_chunk := Kernels.Insts.HashercoreFeedChunkState.new_chunk BlocksInst
     coremarkerCopyInst HooksInst
   chunk_cv := Kernels.Insts.HashercoreFeedChunkState.chunk_cv BlocksInst
@@ -884,7 +925,7 @@ def Kernels.Insts.HashercoreFeedChunkState {P : Type} {H : Type} (BlocksInst :
 }
 
 /-- [hashercore::{impl hashercore::Nodes<hashercore::ChunkState<P>, hashercore::Output<P>> for hashercore::Kernels<'_0, P, H>}::node_cv]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 204:4-206:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 209:4-211:5
     Visibility: public -/
 def Kernels.Insts.HashercoreNodesChunkStateOutput.node_cv
   {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
@@ -894,7 +935,7 @@ def Kernels.Insts.HashercoreNodesChunkStateOutput.node_cv
   Output.chaining_value BlocksInst node
 
 /-- [hashercore::{impl hashercore::Nodes<hashercore::ChunkState<P>, hashercore::Output<P>> for hashercore::Kernels<'_0, P, H>}::parent_node]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 199:4-201:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 204:4-206:5
     Visibility: public -/
 def Kernels.Insts.HashercoreNodesChunkStateOutput.parent_node
   {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
@@ -905,7 +946,7 @@ def Kernels.Insts.HashercoreNodesChunkStateOutput.parent_node
   parent_output left right self.key self.flags self.platform
 
 /-- [hashercore::{impl hashercore::Nodes<hashercore::ChunkState<P>, hashercore::Output<P>> for hashercore::Kernels<'_0, P, H>}::chunk_node]:
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 194:4-196:5
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 199:4-201:5
     Visibility: public -/
 def Kernels.Insts.HashercoreNodesChunkStateOutput.chunk_node
   {P : Type} {H : Type} (BlocksInst : Blocks P) (coremarkerCopyInst :
@@ -915,7 +956,7 @@ def Kernels.Insts.HashercoreNodesChunkStateOutput.chunk_node
   ChunkState.output BlocksInst coremarkerCopyInst chunk
 
 /-- Trait implementation: [hashercore::{impl hashercore::Nodes<hashercore::ChunkState<P>, hashercore::Output<P>> for hashercore::Kernels<'_0, P, H>}]
-    Source: 'src/../../../../../../src/hasher_core.rs', lines 192:0-207:1 -/
+    Source: 'src/../../../../../../src/hasher_core.rs', lines 197:0-212:1 -/
 @[reducible]
 def Kernels.Insts.HashercoreNodesChunkStateOutput {P : Type} (H : Type)
   (BlocksInst : Blocks P) (coremarkerCopyInst : core.marker.Copy P) : Nodes

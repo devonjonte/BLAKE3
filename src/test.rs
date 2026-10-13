@@ -312,28 +312,16 @@ fn test_counter_words() {
 }
 
 #[test]
-fn test_largest_power_of_two_leq() {
-    let input_output = &[
-        // The zero case is nonsensical, but it does work.
-        (0, 1),
-        (1, 1),
-        (2, 2),
-        (3, 2),
-        (4, 4),
-        (5, 4),
-        (6, 4),
-        (7, 4),
-        (8, 8),
-        // the largest possible usize
-        (usize::MAX, (usize::MAX >> 1) + 1),
-    ];
-    for &(input, output) in input_output {
-        assert_eq!(
-            output,
-            crate::largest_power_of_two_leq(input),
-            "wrong output for n={}",
-            input
-        );
+fn test_subtree_len() {
+    // The largest power of two at most `remaining` dividing the bytes so far.
+    for counter in [0u64, 1, 2, 3, 4, 6, 8, 12, 1 << 20, (1 << 20) + 3, (1 << 54) - 1] {
+        for remaining in [1025usize, 2047, 2048, 2049, 4096, 1 << 20, (1 << 20) + 1, usize::MAX] {
+            let mut want = 1usize;
+            while want <= remaining / 2 && (counter * 1024) % (2 * want as u64) == 0 {
+                want *= 2;
+            }
+            assert_eq!(crate::hasher::subtree_len(counter, remaining), want, "{counter} {remaining}");
+        }
     }
 }
 

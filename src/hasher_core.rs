@@ -16,12 +16,6 @@ pub trait Chunk {
 
 /// The kernels the Hasher's loop calls, beyond the stack's `Parent`.
 pub trait Feed<C: Chunk>: Parent {
-    /// The number of 1-bits of `x`.
-    fn ones(&self, x: u64) -> usize;
-    /// A whole subtree's length to hash next, from chunk `counter` with
-    /// `remaining` (more than CHUNK_LEN) bytes to go: CHUNK_LEN times a
-    /// power of two dividing `counter`, at most `remaining`.
-    fn subtree_len(&self, counter: u64, remaining: usize) -> usize;
     /// An empty chunk, numbered `counter`.
     fn new_chunk(&self, counter: u64) -> C;
     /// A full chunk's chaining value.
@@ -47,11 +41,34 @@ pub trait Nodes<C: Chunk, N> {
     fn node_cv(&self, node: &N) -> Cv;
 }
 
+/// The number of 1-bits of `x` (the compiler emits its popcount).
+pub fn ones(mut x: u64) -> usize {
+    let mut n = 0;
+    while x != 0 {
+        x &= x - 1;
+        n += 1;
+    }
+    n
+}
+
+/// A whole subtree's length to hash next, from chunk `counter` with
+/// `remaining` (more than CHUNK_LEN) bytes to go: the largest power of two
+/// at most `remaining` that divides the bytes so far, CHUNK_LEN times a
+/// power of two dividing `counter`.
+pub fn subtree_len(counter: u64, remaining: usize) -> usize {
+    let mut len = 1usize << (usize::BITS - 1 - remaining.leading_zeros());
+    let so_far = counter * CHUNK_LEN as u64;
+    while (len - 1) as u64 & so_far != 0 {
+        len /= 2;
+    }
+    len
+}
+
 /// `cv`, the subtree from chunk `counter`, onto the stack: the stack's
 /// values merged to the subtrees before it first (lazily: the top value
 /// may still merge with the next).
 pub fn push<C: Chunk, K: Feed<C>>(k: &K, stack: &mut CvStack, initial: u64, cv: Cv, counter: u64) {
-    stack.merge(k, k.ones(counter - initial));
+    stack.merge(k, ones(counter - initial));
     stack.push(cv);
 }
 
@@ -79,7 +96,7 @@ pub fn feed<C: Chunk, K: Feed<C>>(k: &K, chunk: &mut C, stack: &mut CvStack, ini
     let mut input = input;
     while input.len() > CHUNK_LEN {
         let counter = chunk.counter();
-        let len = k.subtree_len(counter, input.len());
+        let len = subtree_len(counter, input.len());
         let chunks = (len / CHUNK_LEN) as u64;
         let ahead = input.len() - len;
         let sub = &input[..len];
@@ -101,7 +118,7 @@ pub fn feed<C: Chunk, K: Feed<C>>(k: &K, chunk: &mut C, stack: &mut CvStack, ini
     }
     if !input.is_empty() {
         chunk.update(input);
-        stack.merge(k, k.ones(chunk.counter() - initial));
+        stack.merge(k, ones(chunk.counter() - initial));
     }
 }
 
@@ -128,8 +145,6 @@ pub fn final_node<C: Chunk, N, K: Nodes<C, N>>(k: &K, chunk: &C, stack: &CvStack
 /// What the Hasher's kernels take from the library beyond the compression
 /// function: Feed's methods of those names, as Feed describes them.
 pub trait Hooks {
-    fn ones(&self, x: u64) -> usize;
-    fn subtree_len(&self, counter: u64, remaining: usize) -> usize;
     fn subtree_cv(&self, input: &[u8], ahead: usize, counter: u64) -> Option<Cv>;
     fn children(&self, input: &[u8], ahead: usize, counter: u64) -> [Cv; 2];
 }
@@ -151,16 +166,6 @@ impl<P: Blocks + Copy, H> Parent for Kernels<'_, P, H> {
 }
 
 impl<P: Blocks + Copy, H: Hooks> Feed<ChunkState<P>> for Kernels<'_, P, H> {
-    #[inline(always)]
-    fn ones(&self, x: u64) -> usize {
-        self.hooks.ones(x)
-    }
-
-    #[inline(always)]
-    fn subtree_len(&self, counter: u64, remaining: usize) -> usize {
-        self.hooks.subtree_len(counter, remaining)
-    }
-
     #[inline(always)]
     fn new_chunk(&self, counter: u64) -> ChunkState<P> {
         ChunkState::new(self.key, counter, self.flags, self.platform)

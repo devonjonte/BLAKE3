@@ -108,6 +108,188 @@ theorem merge_merged
 
 end
 
+/-! ## Two small functions: the bit count and the subtree's length -/
+
+theorem ones_zero : HasherProof.ones 0 = 0 := by rw [HasherProof.ones]; simp
+
+theorem ones_pos' (c : Nat) (h : c ≠ 0) : HasherProof.ones c = 1 + HasherProof.ones (c - 2 ^ c.log2) := by
+  rw [HasherProof.ones, if_neg h]
+
+theorem ones_bit (c : Nat) : HasherProof.ones (2 * c) = HasherProof.ones c ∧
+    HasherProof.ones (2 * c + 1) = HasherProof.ones c + 1 := by
+  induction c using Nat.strong_induction_on with
+  | _ c ih =>
+    by_cases hc : c = 0
+    · subst hc
+      refine ⟨by simp, ?_⟩
+      rw [ones_pos' 1 (by omega)]; simp [ones_zero]
+    · have hl := Nat.log2_self_le hc
+      have hlt := Nat.lt_log2_self (n := c)
+      have hd : c - 2 ^ c.log2 < c := by have := Nat.one_le_two_pow (n := c.log2); omega
+      have e1 : (2 * c).log2 = c.log2 + 1 := Nat.log2_two_mul hc
+      have e2 : (2 * c + 1).log2 = c.log2 + 1 := by
+        rw [Nat.log2_eq_iff (by omega)]; constructor <;> rw [Nat.pow_succ] <;> omega
+      obtain ⟨ih1, ih2⟩ := ih _ hd
+      constructor
+      · rw [ones_pos' _ (by omega), e1, ones_pos' c hc, Nat.pow_succ,
+          show 2 * c - 2 ^ c.log2 * 2 = 2 * (c - 2 ^ c.log2) by omega, ih1]
+      · rw [ones_pos' _ (by omega), e2, ones_pos' c hc, Nat.pow_succ,
+          show 2 * c + 1 - 2 ^ c.log2 * 2 = 2 * (c - 2 ^ c.log2) + 1 by omega, ih2]; omega
+
+/-- Clearing the lowest 1-bit: one fewer. -/
+theorem ones_and_pred (x : Nat) (hx : x ≠ 0) : HasherProof.ones (x &&& (x - 1)) + 1 = HasherProof.ones x := by
+  induction x using Nat.strong_induction_on with
+  | _ x ih =>
+    obtain ⟨y, rfl | rfl⟩ : ∃ y, x = 2 * y ∨ x = 2 * y + 1 := ⟨x / 2, by omega⟩
+    · have hy : y ≠ 0 := by omega
+      have e : 2 * y &&& (2 * y - 1) = 2 * (y &&& (y - 1)) := by
+        rw [show 2 * y - 1 = 2 * (y - 1) + 1 by omega]
+        apply Nat.eq_of_testBit_eq; intro i
+        cases i with
+        | zero => simp [Nat.testBit_zero]
+        | succ i =>
+          rw [Nat.testBit_and, Nat.testBit_succ, Nat.testBit_succ, Nat.testBit_succ,
+            show (2 * (y - 1) + 1) / 2 = y - 1 by omega, show 2 * y / 2 = y by omega,
+            show 2 * (y &&& (y - 1)) / 2 = y &&& (y - 1) by omega, Nat.testBit_and]
+      rw [e, (ones_bit _).1, (ones_bit y).1]
+      exact ih y (by omega) hy
+    · have e : (2 * y + 1) &&& (2 * y + 1 - 1) = 2 * y := by
+        rw [show 2 * y + 1 - 1 = 2 * y by omega]
+        apply Nat.eq_of_testBit_eq; intro i
+        cases i with
+        | zero => simp [Nat.testBit_zero]
+        | succ i =>
+          rw [Nat.testBit_and, Nat.testBit_succ, Nat.testBit_succ,
+            show (2 * y + 1) / 2 = y by omega, show 2 * y / 2 = y by omega, Bool.and_self]
+      rw [e, (ones_bit y).1, (ones_bit y).2]
+
+theorem ones_le (k : Nat) : ∀ c, c < 2 ^ k → HasherProof.ones c ≤ k := by
+  induction k with
+  | zero => intro c hc; have : c = 0 := by simp at hc; omega
+            subst this; simp [ones_zero]
+  | succ k ih =>
+    intro c hc
+    by_cases h0 : c = 0
+    · subst h0; simp [ones_zero]
+    · by_cases hk : c < 2 ^ k
+      · have := ih c hk; omega
+      · have hl : c.log2 = k := by
+          rw [Nat.log2_eq_iff h0]; constructor <;> omega
+        rw [ones_pos' c h0, hl]
+        have := ih (c - 2 ^ k) (by rw [Nat.pow_succ] at hc; omega)
+        omega
+
+open hashercore in
+/-- `ones`, as compiled from src/hasher_core.rs: the number of 1-bits. -/
+theorem ones_spec (x : Std.U64) : ones x ⦃ r => r.val = HasherProof.ones x.val ⦄ := by
+  unfold ones ones_loop
+  apply loop.spec_decr_nat (fun st : Std.U64 × Std.Usize => st.1.val)
+    (fun st => st.2.val + HasherProof.ones st.1.val = HasherProof.ones x.val)
+  · rintro ⟨y, n⟩ hinv
+    simp only at hinv
+    unfold ones_loop.body
+    by_cases hy : y != 0#u64
+    · simp only [hy, ↓reduceIte]
+      have hy0 : y.val ≠ 0 := by simp at hy; scalar_tac
+      have hb : HasherProof.ones x.val ≤ 64 := ones_le 64 _ (by scalar_tac)
+      step as ⟨i, hi⟩
+      step as ⟨y1, hy1⟩
+      have hk := ones_and_pred y.val hy0
+      have hy1' : y1.val = y.val &&& (y.val - 1) := by rw [hy1]; simp [hi]
+      step as ⟨n1, hn1⟩
+      refine ⟨by rw [hn1, hy1']; omega, ?_⟩
+      rw [hy1']; have := Nat.and_le_right (n := y.val) (m := y.val - 1); omega
+    · simp only [hy]
+      have : y.val = 0 := by simp at hy; scalar_tac
+      rw [this, ones_zero] at hinv; simpa using hinv
+  · simp
+
+open hashercore in
+/-- The halving loop: from a power of two `2 ^ k` (`10 ≤ k`) at most `r`,
+halve while it leaves part of the bytes so far, `c * 1024`. -/
+theorem subtree_len_loop_spec (c : Std.U64) (r : Nat) (so_far : Std.U64) (hso : so_far.val = c.val * 1024)
+    (len : Std.Usize) (k : Nat) (hlen : len.val = 2 ^ k) (hk : 10 ≤ k) (hle : len.val ≤ r) :
+    subtree_len_loop len so_far ⦃ q => ∃ j, q.val = 1024 * 2 ^ j ∧ 2 ^ j ∣ c.val ∧ q.val ≤ r ⦄ := by
+  unfold subtree_len_loop
+  apply loop.spec_decr_nat (fun l : Std.Usize => l.val)
+    (fun l => ∃ k, l.val = 2 ^ k ∧ 10 ≤ k ∧ l.val ≤ r)
+  · rintro l ⟨k, hl, hk, hle⟩
+    unfold subtree_len_loop.body
+    have hp : 1 ≤ 2 ^ k := Nat.one_le_two_pow
+    step as ⟨i, hi⟩
+    step as ⟨i1, hi1⟩
+    step as ⟨i2, hi2⟩
+    have hmax : l.val < 2 ^ 64 := by
+      have : l.val < 2 ^ System.Platform.numBits := by scalar_tac
+      rcases System.Platform.numBits_eq with h | h <;> rw [h] at this <;> omega
+    have hi1' : i1.val = 2 ^ k - 1 := by rw [hi1]; simp [hi]; omega
+    have hand : i2.val = (c.val * 1024) % 2 ^ k := by
+      rw [hi2]; simp only [UScalar.val_and, hi1', hso]; rw [Nat.and_comm, Nat.and_two_pow_sub_one_eq_mod]
+    split
+    · rename_i hnz
+      have hk10 : 10 < k := by
+        by_contra h
+        have hk' : k = 10 := by omega
+        have : i2.val = 0 := by rw [hand, hk']; omega
+        simp [this] at hnz
+      step as ⟨l1, hl1⟩
+      refine ⟨⟨k - 1, ?_, by omega, ?_⟩, ?_⟩
+      · rw [hl1, hl, show k = k - 1 + 1 by omega, Nat.pow_succ]; simp
+      · omega
+      · omega
+    · rename_i hz
+      have h0 : (c.val * 1024) % 2 ^ k = 0 := by rw [← hand]; simp at hz; scalar_tac
+      simp only [WP.spec_ok]
+      obtain ⟨m, rfl⟩ : ∃ m, k = m + 10 := ⟨k - 10, by omega⟩
+      have e : (2 : Nat) ^ (m + 10) = 2 ^ m * 1024 := by rw [Nat.pow_add]
+      refine ⟨m, by rw [hl, e]; omega, ?_, hle⟩
+      rw [e] at h0
+      exact (Nat.mul_dvd_mul_iff_right (by omega : 0 < 1024)).mp (Nat.dvd_of_mod_eq_zero h0)
+  · exact ⟨k, hlen, hk, hle⟩
+
+open hashercore in
+/-- `subtree_len`, as compiled from src/hasher_core.rs: from chunk `c`
+(below 2^54) with more than a chunk to go, a chunk times a power of two
+dividing `c`, at most what is left. -/
+theorem subtree_len_spec (c : Std.U64) (r : Std.Usize) (hc : c.val < 2 ^ 54) (hr : 1024 < r.val) :
+    subtree_len c r ⦃ q => ∃ j, q.val = 1024 * 2 ^ j ∧ 2 ^ j ∣ c.val ∧ q.val ≤ r.val ⦄ := by
+  unfold subtree_len
+  have hr0 : r.val ≠ 0 := by omega
+  have hlog10 : 10 ≤ Nat.log 2 r.val := Nat.le_log_of_pow_le (by omega) (by omega)
+  have hpow := Nat.pow_log_le_self 2 hr0
+  have hlt := Nat.lt_pow_succ_log_self (b := 2) (by omega) r.val
+  have hbits := System.Platform.numBits_eq
+  have hrmax : r.val < 2 ^ System.Platform.numBits := by scalar_tac
+  have hlogb : Nat.log 2 r.val < System.Platform.numBits := Nat.log_lt_of_lt_pow hr0 hrmax
+  step as ⟨i, hi, _⟩
+  have hlz : (core.num.Usize.leading_zeros r).val = System.Platform.numBits - Nat.log 2 r.val - 1 := by
+    simp only [core.num.Usize.leading_zeros, BitVec.leadingZeros]
+    have : r.bv ≠ 0 := by intro h; apply hr0; simp [UScalar.val, h]
+    simp only [this, ↓reduceIte, UScalar.val]
+    rw [BitVec.natCast_eq_ofNat, BitVec.toNat_ofNat, Nat.mod_eq_of_lt]
+    have : System.Platform.numBits ≤ 64 := by rcases hbits with h | h <;> omega
+    have : (64 : Nat) < 2 ^ UScalarTy.U32.numBits := by simp
+    omega
+  step as ⟨i1, hi1⟩
+  step as ⟨i2, hi2, _⟩
+  step as ⟨len, hlen, _⟩
+  step as ⟨i3, hi3⟩
+  have hi3' : i3.val = 1024 := by rw [hi3]; simp [CHUNK_LEN]
+  have hmul : c.val * i3.val ≤ Std.U64.max := by rw [hi3']; scalar_tac
+  step as ⟨so_far, hso⟩
+  have hi2' : i2.val = Nat.log 2 r.val := by
+    rw [hi2, hi, hi1, hlz]; simp; omega
+  apply subtree_len_loop_spec c r.val so_far (by rw [hso, hi3']) len (Nat.log 2 r.val)
+    ?_ hlog10 ?_
+  · rw [hlen, hi2', Nat.one_shiftLeft]
+    apply Nat.mod_eq_of_lt
+    have : 2 ^ Nat.log 2 r.val < 2 ^ System.Platform.numBits := Nat.pow_lt_pow_right (by omega) hlogb
+    rw [Usize.size_def, Usize.numBits_def, UScalarTy.Usize_numBits_eq]; exact this
+  · rw [hlen, hi2', Nat.one_shiftLeft, Nat.mod_eq_of_lt (by
+      have : 2 ^ Nat.log 2 r.val < 2 ^ System.Platform.numBits := Nat.pow_lt_pow_right (by omega) hlogb
+      rw [Usize.size_def, Usize.numBits_def, UScalarTy.Usize_numBits_eq]; exact this)]
+    exact hpow
+
 /-! ## The stack's code -/
 
 open hashercore in
@@ -192,7 +374,6 @@ open hashercore in
 next `2 ^ j` chunks on top. -/
 theorem push_spec' {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
     (hp : ∀ a b, FI.ParentInst.parent k a b ⦃ v => abs v = cvOp key mode (abs a) (abs b) ⦄)
-    (hones : ∀ x, FI.ones k x ⦃ r => r.val = HasherProof.ones x.val ⦄)
     (M : List Std.U8) (st : CvStack) (hinv : StackProof.Inv st) (c : Nat) (hc : c < 2 ^ 54)
     (h : Merged key mode abs M (StackProof.vals st) c ∨ Pending key mode abs M (StackProof.vals st) c)
     (cv : StackProof.Cv) (j : Nat) (hj : 2 ^ j ∣ c)
@@ -204,7 +385,7 @@ theorem push_spec' {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
           [(goIdx (leafN key mode M 0) (nodeOp key mode) c (2 ^ j)).cv] ⦄ := by
   unfold push
   step as ⟨i, hi⟩
-  step with hones i as ⟨t, ht⟩
+  step with ones_spec i as ⟨t, ht⟩
   step with merge_to_spec key mode abs FI.ParentInst k hp M st hinv c h t
     (by rw [ht, hi]; simp [hcounter]) as ⟨st1, hinv1, hm1⟩
   have hlen : st1.len.val < 55 := by
@@ -276,9 +457,6 @@ structure Contracts {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
   advance : ∀ ch c (n : Std.U64), R ch c [] → c + n.val ≤ Std.U64.max →
     CI.advance ch n ⦃ ch' => R ch' (c + n.val) [] ⦄
   parent : ∀ a b, FI.ParentInst.parent k a b ⦃ v => abs v = cvOp key mode (abs a) (abs b) ⦄
-  ones : ∀ x, FI.ones k x ⦃ r => r.val = HasherProof.ones x.val ⦄
-  subtree_len : ∀ (c : Std.U64) (r : Std.Usize), 1024 < r.val →
-    FI.subtree_len k c r ⦃ q => ∃ j, q.val = 1024 * 2 ^ j ∧ 2 ^ j ∣ c.val ∧ q.val ≤ r.val ⦄
   new_chunk : ∀ c, FI.new_chunk k c ⦃ ch => R ch c.val [] ⦄
   chunk_cv : ∀ ch c P, R ch c P → P.length = 1024 →
     FI.chunk_cv k ch ⦃ v => abs v = (Blake3.chunkNode key mode (toBA P) c).cv ⦄
@@ -362,7 +540,8 @@ theorem feed_loop_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
     · rename_i hgt
       have hgt' : 1024 < inp.length := by simp only [Slice.length]; scalar_tac
       step with hK.counter ch c [] hR as ⟨counter, hcounter⟩
-      step with hK.subtree_len counter inp.len (by simp only [Slice.length] at hgt'; scalar_tac)
+      step with subtree_len_spec counter inp.len (by
+        have := congrArg List.length hM; simp only [List.length_append] at this; rw [hcounter]; omega) (by simp only [Slice.length] at hgt'; scalar_tac)
         as ⟨len, j, hlen, hj, hle⟩
       step as ⟨i2, hi2⟩
       step as ⟨nch, hchunks⟩
@@ -398,7 +577,7 @@ theorem feed_loop_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
         | some cv =>
           obtain ⟨hpos, hv⟩ := hflat cv rfl
           simp only
-          apply WP.spec_mono (push_spec' key mode abs CI FI k hK.parent hK.ones
+          apply WP.spec_mono (push_spec' key mode abs CI FI k hK.parent
             (M ++ sub.val) s hinv c (by omega) hst' cv j (hcv ▸ hj)
             (by rw [hv, hck, hsub' _ hj1]) counter hcv)
           rintro s1 ⟨hinv1, hv1⟩
@@ -417,7 +596,7 @@ theorem feed_loop_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
                 hcv]
               simp only [chunkOf, Nat.sub_self, Nat.mul_zero, List.drop_zero]
               rw [List.take_of_length_le (by simp only [Slice.length] at hsl1; omega)]
-            apply WP.spec_mono (push_spec' key mode abs CI FI k hK.parent hK.ones
+            apply WP.spec_mono (push_spec' key mode abs CI FI k hK.parent
               (M ++ sub.val) s hinv c (by omega) hst' a 0 (by simp) hx counter hcv)
             rintro s1 ⟨hinv1, hv1⟩
             rw [pow_zero] at hv1
@@ -446,14 +625,14 @@ theorem feed_loop_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
             have hr' : right = y := by rw [hright]; simp [hxy]
             have hj0d : 2 ^ j0 ∣ c := by
               rw [← hcv]; exact Nat.dvd_trans (Nat.pow_dvd_pow 2 (by omega)) hj
-            step with push_spec' key mode abs CI FI k hK.parent hK.ones
+            step with push_spec' key mode abs CI FI k hK.parent
               (M ++ sub.val) s hinv c (by rw [pow_succ] at hbound; omega) hst' left j0 hj0d
               (by rw [hl', hx, ← hL]) counter hcv as ⟨s2, hinv2, hv2⟩
             step as ⟨i4, hi4⟩
             step as ⟨i5, hi5⟩
             have hi5v : i5.val = c + 2 ^ j0 := by
               rw [hi5, hi4, hch, hcv, pow_succ]; omega
-            apply WP.spec_mono (push_spec' key mode abs CI FI k hK.parent hK.ones
+            apply WP.spec_mono (push_spec' key mode abs CI FI k hK.parent
               (M ++ sub.val) s2 hinv2 (c + 2 ^ j0) (by rw [pow_succ] at hbound; omega)
               (Or.inr ⟨c, j0, hj0d, rfl, hv2⟩) right j0 (Nat.dvd_add hj0d (dvd_refl _))
               (by rw [hr', hy, ← hR]) i5 hi5v)
@@ -606,7 +785,7 @@ theorem feed_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
     step with hK.update ch1 c [] inp1 hR (by simpa using hle) as ⟨ch2, hR2⟩
     step with hK.counter ch2 c _ hR2 as ⟨c2, hc2⟩
     step as ⟨i1, hi1⟩
-    step with hK.ones i1 as ⟨t, ht⟩
+    step with ones_spec i1 as ⟨t, ht⟩
     have hst' : Merged key mode abs T (StackProof.vals s1) c ∨ Pending key mode abs T (StackProof.vals s1) c := by
       rw [← hM]
       rcases hst with h1 | h1
@@ -714,7 +893,7 @@ theorem fill_spec {C K : Type} (CI : Chunk C) (FI : Feed K C) (k : K)
           rw [← hFl, List.drop_left, List.take_of_length_le (by omega)]
         have hle2 : (F ++ (P ++ s.val)).length ≤ (M ++ input.val).length := by
           rw [← hMF, hinput, ← List.append_assoc]; simp only [List.length_append]; omega
-        step with push_spec' key mode abs CI FI k hK.parent hK.ones (M ++ s.val) st hinv
+        step with push_spec' key mode abs CI FI k hK.parent (M ++ s.val) st hinv
           c (by omega) (Or.inl hst) a 0 (by simp) hx cnt (by rw [hcnt, hc1])
           as ⟨st1, hinv1, hv1⟩
         step as ⟨i3, hi3⟩
