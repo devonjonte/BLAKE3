@@ -884,15 +884,20 @@ dependencies (`-bottleneck-analysis`). Proved (`prove_hybrid.py`, 327 of 327
 cases); `perf_regress check` on the VM: no cell slower. Unmeasured on any
 of those cores: no machine here has one.
 
-Still open from the same models: the unrolled scalar kernel (`ROLLED_K1 =
-False`) predicts about 13% fewer cycles than the rolled one on the A72 and
-10% on the N1 (409 and 272 against 462 and 301) with calls back to back;
-the rolled one is smaller, which pays after a pause on the M4. And k9 and
-k10 contain no SHA-3 instruction (only the pair units use `xar`), so they
-could serve CPUs without SHA-3, which today run the four-lane C kernel for
-whole chunks: k9 predicts 161 cycles per chunk-block against the C kernel's
-184-198 on the A57 model and 122 against 129-134 on the N1; k10 level; both
-about 4x slower on the A53 (one temp per unit, as in the scalar kernel).
+Decided from the same models (Zooko, October 13, 2026):
+- **The scalar kernel stays rolled.** Unrolled (`ROLLED_K1 = False`) predicts
+  about 13% fewer cycles on the A72 and 10% on the N1 with calls back to back
+  (409 and 272 against 462 and 301), the one pattern SUPERCOP measures; the
+  rolled one made `hash` of a chunk or less 25-33% faster now and then on the
+  M4 Max (2-4% slower nonstop), and llvm-mca models no instruction cache, so
+  the cold side on those cores is unknown.
+- **k9 and k10 for CPUs without SHA-3 wait for a machine to measure on.** They
+  contain no SHA-3 instruction (only the pair units use `xar`). k9 predicts
+  161 cycles per chunk-block against the four-lane C kernel's 184-198 on the
+  A57 model, 122 against 129-134 on the N1; k10 level; both about 4x slower on
+  the A53, so they would need a choice by CPU type. The gain is one free
+  scalar chunk beside eight NEON ones: nothing at 1536 or 4096 bytes, and
+  power-of-two subtrees need a walk in groups of 9 to use it.
 
 ## Rejected (with the reason; do not retry without new evidence)
 
