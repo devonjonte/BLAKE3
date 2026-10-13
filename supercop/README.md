@@ -7,10 +7,15 @@ It builds the blake3-servil crate at a pinned commit (`Cargo.lock`) and calls it
 users do:
 
 ```rust
+static INITIALIZE: std::sync::Once = std::sync::Once::new();
+
 pub fn crypto_hash(out: &mut [u8; 32], m: &[u8]) {
+  INITIALIZE.call_once(blake3_servil::initialize);
   out.copy_from_slice(blake3_servil::hash(m).as_bytes())
 }
 ```
+
+(`initialize()`, once per process, is the crate's contract; SUPERCOP's first call makes it, before anything is timed.)
 
 SUPERCOP builds Rust implementations with cargo, as it does `crypto_hash/sha256/rust_sha2`.
 The crate picks its kernels at run time for each length and CPU; on x86-64 that is
