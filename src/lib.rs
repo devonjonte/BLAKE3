@@ -129,16 +129,8 @@
 //! method for [`Hasher`], and also the [`Read`] and [`Seek`] implementations
 //! for [`OutputReader`].
 //!
-//! The `rayon` feature (disabled by default, but enabled for [docs.rs]) adds
-//! the [`update_rayon`](Hasher::update_rayon) and (in combination with `mmap`
-//! below) [`update_mmap_rayon`](Hasher::update_mmap_rayon) methods for
-//! multithreaded hashing. However, even if this feature is enabled, all other
-//! APIs remain single-threaded.
-//!
 //! The `mmap` feature (disabled by default, but enabled for [docs.rs]) adds the
-//! [`update_mmap`](Hasher::update_mmap) and (in combination with `rayon` above)
-//! [`update_mmap_rayon`](Hasher::update_mmap_rayon) helper methods for
-//! memory-mapped IO.
+//! [`update_mmap`](Hasher::update_mmap) helper method for memory-mapped IO.
 //!
 //! The `zeroize` feature (disabled by default, but enabled for [docs.rs])
 //! implements
@@ -167,9 +159,7 @@
 //! expect breaking changes between patch versions. (The "-preview" feature name
 //! follows the conventions of the RustCrypto [`signature`] crate.)
 //!
-//! [`Hasher::update_rayon`]: struct.Hasher.html#method.update_rayon
 //! [BLAKE3]: https://blake3.io
-//! [Rayon]: https://github.com/rayon-rs/rayon
 //! [docs.rs]: https://docs.rs/
 //! [`Read`]: https://doc.rust-lang.org/std/io/trait.Read.html
 //! [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
@@ -254,7 +244,7 @@ pub mod traits;
 
 #[cfg(feature = "std")]
 mod io;
-mod join;
+mod tree;
 #[cfg(feature = "std")]
 mod lanes;
 mod many;
@@ -275,7 +265,6 @@ pub fn __self_test_run_again() {
 use arrayvec::{ArrayString, ArrayVec};
 use core::cmp;
 use core::fmt;
-use core::ops::{Deref, DerefMut};
 use platform::{MAX_SIMD_DEGREE, MAX_SIMD_DEGREE_OR_2, Platform};
 #[cfg(feature = "zeroize")]
 use zeroize::Zeroize;
@@ -564,82 +553,29 @@ impl fmt::Display for HexError {
 #[cfg(feature = "std")]
 impl std::error::Error for HexError {}
 
-// A 64-byte block of compression function input, with 64-byte alignment. This
-// is the type of ChunkState.buf and Output.block. glibc's AVX-512 memcpy
-// writes a 64-byte copy with a pair of overlapping unaligned 64-byte vector
-// stores, and the immediate reload of the destination then fails
-// store-to-load forwarding whenever the stack frame leaves it misaligned
-// (address & 31 != 0). Stack layout decides which case each process gets, so
-// the same binary hashes 64-byte inputs 35-45% slower in some processes than
-// in others (measured on Zen 5). Aligning ChunkState.buf pins every process
-// to the forwarding-friendly case, and Output.block gets the same alignment
-// so that its residue is pinned as well, rather than frozen at whatever spot
-// the realigned frame happens to give it. Measurements are in
-// https://github.com/zooko/bench-hashes/issues/2 and
-// https://github.com/BLAKE3-team/BLAKE3/pull/582.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+type Output = hasher::Output<Platform>;
+
+/// A block, 64-byte aligned as hasher::Output's is (chunk_core.rs explains).
 #[repr(align(64))]
 struct Aligned64([u8; BLOCK_LEN]);
 
-impl Deref for Aligned64 {
-    type Target = [u8; BLOCK_LEN];
-
-    fn deref(&self) -> &[u8; BLOCK_LEN] {
-        &self.0
+impl Clone for Output {
+    fn clone(&self) -> Self {
+        hasher::Output {
+            block: self.block,
+            input_chaining_value: self.input_chaining_value,
+            block_len: self.block_len,
+            counter: self.counter,
+            flags: self.flags,
+            platform: self.platform,
+        }
     }
-}
-
-impl DerefMut for Aligned64 {
-    fn deref_mut(&mut self) -> &mut [u8; BLOCK_LEN] {
-        &mut self.0
-    }
-}
-
-impl PartialEq<[u8; BLOCK_LEN]> for Aligned64 {
-    fn eq(&self, other: &[u8; BLOCK_LEN]) -> bool {
-        self.0 == *other
-    }
-}
-
-#[cfg(feature = "zeroize")]
-impl Zeroize for Aligned64 {
-    fn zeroize(&mut self) {
-        self.0.zeroize();
-    }
-}
-
-// Each chunk or parent node can produce either a 32-byte chaining value or, by
-// setting the ROOT flag, any number of final output bytes. The Output struct
-// captures the state just prior to choosing between those two possibilities.
-#[derive(Clone)]
-struct Output {
-    input_chaining_value: CVWords,
-    block: Aligned64,
-    block_len: u8,
-    counter: u64,
-    flags: u8,
-    platform: Platform,
 }
 
 impl Output {
-    fn chaining_value(&self) -> CVBytes {
-        let mut cv = self.input_chaining_value;
-        self.platform.compress_in_place(
-            &mut cv,
-            &self.block,
-            self.block_len,
-            self.counter,
-            self.flags,
-        );
-        platform::le_bytes_from_words_32(&cv)
-    }
-
     fn root_hash(&self) -> Hash {
         debug_assert_eq!(self.counter, 0);
-        let mut cv = self.input_chaining_value;
-        self.platform
-            .compress_in_place(&mut cv, &self.block, self.block_len, 0, self.flags | ROOT);
-        Hash(platform::le_bytes_from_words_32(&cv))
+        Hash(self.root_bytes())
     }
 
     fn root_output_block(&self) -> [u8; 2 * OUT_LEN] {
@@ -674,107 +610,44 @@ impl Zeroize for Output {
     }
 }
 
-#[derive(Clone)]
-struct ChunkState {
-    cv: CVWords,
-    chunk_counter: u64,
-    buf: Aligned64,
-    buf_len: u8,
-    blocks_compressed: u8,
-    flags: u8,
-    platform: Platform,
+type ChunkState = hasher::ChunkState<Platform>;
+
+impl hasher::Blocks for Platform {
+    #[inline(always)]
+    fn compress_in_place(&self, cv: &mut CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8) {
+        Platform::compress_in_place(self, cv, block, block_len, counter, flags)
+    }
+
+    #[inline(always)]
+    fn compress_blocks(&self, cv: &mut CVWords, blocks: &[u8], count: usize, counter: u64, flags: u8, flags_start: u8) {
+        Platform::compress_blocks(self, cv, blocks, count, counter, flags, flags_start)
+    }
+}
+
+impl Clone for ChunkState {
+    fn clone(&self) -> Self {
+        hasher::ChunkState {
+            buf: self.buf,
+            cv: self.cv,
+            chunk_counter: self.chunk_counter,
+            buf_len: self.buf_len,
+            blocks_compressed: self.blocks_compressed,
+            flags: self.flags,
+            platform: self.platform,
+        }
+    }
 }
 
 impl ChunkState {
-    fn new(key: &CVWords, chunk_counter: u64, flags: u8, platform: Platform) -> Self {
-        Self {
-            cv: *key,
-            chunk_counter,
-            buf: Aligned64([0; BLOCK_LEN]),
-            buf_len: 0,
-            blocks_compressed: 0,
-            flags,
-            platform,
-        }
-    }
-
-    fn count(&self) -> usize {
-        BLOCK_LEN * self.blocks_compressed as usize + self.buf_len as usize
-    }
-
-    fn fill_buf(&mut self, input: &mut &[u8]) {
-        let want = BLOCK_LEN - self.buf_len as usize;
-        let take = cmp::min(want, input.len());
-        self.buf[self.buf_len as usize..][..take].copy_from_slice(&input[..take]);
-        self.buf_len += take as u8;
-        *input = &input[take..];
-    }
-
-    fn start_flag(&self) -> u8 {
-        if self.blocks_compressed == 0 {
-            CHUNK_START
-        } else {
-            0
-        }
-    }
-
     // Try to avoid buffering as much as possible, by compressing directly from
-    // the input slice when full blocks are available.
-    fn update(&mut self, mut input: &[u8]) -> &mut Self {
-        if self.buf_len > 0 {
-            self.fill_buf(&mut input);
-            if !input.is_empty() {
-                debug_assert_eq!(self.buf_len as usize, BLOCK_LEN);
-                let block_flags = self.flags | self.start_flag(); // borrowck
-                self.platform.compress_in_place(
-                    &mut self.cv,
-                    &self.buf,
-                    BLOCK_LEN as u8,
-                    self.chunk_counter,
-                    block_flags,
-                );
-                self.buf_len = 0;
-                self.buf = Aligned64([0; BLOCK_LEN]);
-                self.blocks_compressed += 1;
-            }
-        }
-
-        // Every whole block except the last goes through one kernel call.
-        // The last block stays buffered for output(), which may need it as
-        // the root block.
-        if input.len() > BLOCK_LEN {
-            debug_assert_eq!(self.buf_len, 0);
-            let count = (input.len() - 1) / BLOCK_LEN;
-            let start_flag = self.start_flag(); // borrowck
-            self.platform.compress_blocks(
-                &mut self.cv,
-                input,
-                count,
-                self.chunk_counter,
-                self.flags,
-                start_flag,
-            );
-            self.blocks_compressed += count as u8;
-            input = &input[count * BLOCK_LEN..];
-        }
-
-        self.fill_buf(&mut input);
-        debug_assert!(input.is_empty());
+    // the input slice when full blocks are available (chunk_core.rs).
+    #[inline(always)]
+    fn update(&mut self, input: &[u8]) -> &mut Self {
+        self.absorb(input);
         debug_assert!(self.count() <= CHUNK_LEN);
         self
     }
 
-    fn output(&self) -> Output {
-        let block_flags = self.flags | self.start_flag() | CHUNK_END;
-        Output {
-            input_chaining_value: self.cv,
-            block: self.buf,
-            block_len: self.buf_len,
-            counter: self.chunk_counter,
-            flags: block_flags,
-            platform: self.platform,
-        }
-    }
 }
 
 // Don't derive(Debug), because the state may be secret.
@@ -814,19 +687,6 @@ impl Zeroize for ChunkState {
 
 // IMPLEMENTATION NOTE
 // ===================
-// The recursive function compress_subtree_wide(), implemented below, is the
-// basis of high-performance BLAKE3. We use it both for all-at-once hashing,
-// and for the incremental input with Hasher (though we have to be careful with
-// subtree boundaries in the incremental case). compress_subtree_wide() applies
-// several optimizations at the same time:
-// - Multithreading with Rayon.
-// - Parallel chunk hashing with SIMD.
-// - Parallel parent hashing with SIMD. Note that while SIMD chunk hashing
-//   maxes out at MAX_SIMD_DEGREE*CHUNK_LEN, parallel parent hashing continues
-//   to benefit from larger inputs, because more levels of the tree benefit can
-//   use full-width SIMD vectors for parent hashing. Without parallel parent
-//   hashing, we lose about 10% of overall throughput on AVX2 and AVX-512.
-
 /// Undocumented and unstable, for benchmarks only.
 #[doc(hidden)]
 #[derive(Clone, Copy)]
@@ -845,11 +705,6 @@ impl IncrementCounter {
     }
 }
 
-// The largest power of two less than or equal to `n`, used in Hasher::update(). This is similar to
-// left_subtree_len(n), but note that left_subtree_len(n) is strictly less than `n`.
-fn largest_power_of_two_leq(n: usize) -> usize {
-    ((n / 2) + 1).next_power_of_two()
-}
 
 /// Where a stream stands for [`plan_subtrees`]: its chunk counter and the
 /// bytes in its partial chunk (0 to CHUNK_LEN), as a [`Hasher`]'s chunk
@@ -887,26 +742,12 @@ fn plan_part(state: &mut PlanState, piece: &[u8], tasks: &mut Vec<lanes::Task>) 
         state.counter += 1;
     }
     while piece.len() - offset > CHUNK_LEN {
-        let len = next_subtree_len(state.counter, piece.len() - offset);
+        let len = hasher::subtree_len(state.counter, piece.len() - offset);
         tasks.push(lanes::Task::of(&piece[offset..offset + len], state.counter));
         state.counter += (len / CHUNK_LEN) as u64;
         offset += len;
     }
     state.partial = piece.len() - offset;
-}
-
-/// The whole subtree Hasher::update hashes next, from chunk `chunk_counter`
-/// with `remaining` bytes (more than one chunk) to go: the largest power of
-/// two chunks that fits and evenly divides the count so far.
-#[inline(always)]
-fn next_subtree_len(chunk_counter: u64, remaining: usize) -> usize {
-    debug_assert!(remaining > CHUNK_LEN);
-    let mut subtree_len = largest_power_of_two_leq(remaining);
-    let count_so_far = chunk_counter * CHUNK_LEN as u64;
-    while (subtree_len - 1) as u64 & count_so_far != 0 {
-        subtree_len /= 2;
-    }
-    subtree_len
 }
 
 // Use SIMD parallelism to hash up to MAX_SIMD_DEGREE chunks at the same time
@@ -994,8 +835,8 @@ fn compress_parents_parallel(
     debug_assert!(num_children <= 2 * MAX_SIMD_DEGREE_OR_2, "too many");
 
     let mut parents_exact = child_chaining_values.chunks_exact(BLOCK_LEN);
-    // Use MAX_SIMD_DEGREE_OR_2 rather than MAX_SIMD_DEGREE here, because of
-    // the requirements of compress_subtree_wide().
+    // Use MAX_SIMD_DEGREE_OR_2 rather than MAX_SIMD_DEGREE here: the walk
+    // (tree_core.rs) returns at least 2 values.
     let mut parents_array = ArrayVec::<&[u8; BLOCK_LEN], MAX_SIMD_DEGREE_OR_2>::new();
     for parent in &mut parents_exact {
         parents_array.push(parent.try_into().unwrap());
@@ -1021,117 +862,18 @@ fn compress_parents_parallel(
     }
 }
 
-// The wide helper function returns (writes out) an array of chaining values
-// and returns the length of that array. The number of chaining values returned
-// is the dynamically detected SIMD degree, at most MAX_SIMD_DEGREE. Or fewer,
-// if the input is shorter than that many chunks. The reason for maintaining a
-// wide array of chaining values going back up the tree, is to allow the
-// implementation to hash as many parents in parallel as possible.
-//
-// As a special case when the SIMD degree is 1, this function will still return
-// at least 2 outputs. This guarantees that this function doesn't perform the
-// root compression. (If it did, it would use the wrong flags, and also we
-// wouldn't be able to implement extendable output.) Note that this function is
-// not used when the whole input is only 1 chunk long; that's a different
-// codepath.
-//
-// Why not just have the caller split the input on the first update(), instead
-// of implementing this special rule? Because we don't want to limit SIMD or
-// multithreading parallelism for that update().
-fn compress_subtree_wide<J: join::Join>(
-    input: &[u8],
-    ahead: usize,
-    key: &CVWords,
-    chunk_counter: u64,
-    flags: u8,
-    platform: Platform,
-    out: &mut [u8],
-) -> usize {
-    // Note that the single chunk case does *not* bump the SIMD degree up to 2
-    // when it is 1. This allows Rayon the option of multithreading even the
-    // 2-chunk case, which can help performance on smaller platforms.
-    if input.len() <= platform.simd_degree() * CHUNK_LEN {
-        return compress_chunks_parallel(input, key, chunk_counter, flags, platform, out);
-    }
-    // Whole subtrees of 32 KiB to 1 MiB on SME2: the flat walk, SME2 alone,
-    // with an integer lane beside its groups from 256 KiB (see
-    // sme2::compress_subtree_flat).
-    #[cfg(blake3_sme2)]
-    if matches!(platform, Platform::SME2) && sme2::flat_takes(input.len()) {
-        // Safe: the SME2 platform is selected only where the CPU has it,
-        // and `out` holds simd_degree() values, which is sme2::DEGREE.
-        return unsafe { sme2::compress_subtree_flat(input, ahead, key, chunk_counter, flags, out) };
-    }
-
-    // With more than simd_degree chunks, we need to recurse. Start by dividing
-    // the input into left and right subtrees. (Note that this is only optimal
-    // as long as the SIMD degree is a power of 2. If we ever get a SIMD degree
-    // of 3 or something, we'll need a more complicated strategy.)
-    debug_assert_eq!(platform.simd_degree().count_ones(), 1, "power of 2");
-    let (left, right) = input.split_at(hazmat::left_subtree_len(input.len() as u64) as usize);
-    let right_chunk_counter = chunk_counter + (left.len() / CHUNK_LEN) as u64;
-
-    // Make space for the child outputs. Here we use MAX_SIMD_DEGREE_OR_2 to
-    // account for the special case of returning 2 outputs when the SIMD degree
-    // is 1.
-    let mut cv_array = [0; 2 * MAX_SIMD_DEGREE_OR_2 * OUT_LEN];
-    let degree = if left.len() == CHUNK_LEN {
-        // The "simd_degree=1 and we're at the leaf nodes" case.
-        debug_assert_eq!(platform.simd_degree(), 1);
-        1
-    } else {
-        cmp::max(platform.simd_degree(), 2)
-    };
-    let (left_out, right_out) = cv_array.split_at_mut(degree * OUT_LEN);
-
-    // Recurse! For update_rayon(), this is where we take advantage of RayonJoin and use multiple
-    // threads.
-    let (left_n, right_n) = J::join(
-        || compress_subtree_wide::<J>(left, right.len() + ahead, key, chunk_counter, flags, platform, left_out),
-        || compress_subtree_wide::<J>(right, ahead, key, right_chunk_counter, flags, platform, right_out),
-    );
-
-    // The special case again. If simd_degree=1, then we'll have left_n=1 and
-    // right_n=1. Rather than compressing them into a single output, return
-    // them directly, to make sure we always have at least two outputs.
-    debug_assert_eq!(left_n, degree);
-    debug_assert!(right_n >= 1 && right_n <= left_n);
-    if left_n == 1 {
-        out[..2 * OUT_LEN].copy_from_slice(&cv_array[..2 * OUT_LEN]);
-        return 2;
-    }
-
-    // Otherwise, do one layer of parent node compression.
-    let num_children = left_n + right_n;
-    compress_parents_parallel(
-        &cv_array[..num_children * OUT_LEN],
-        key,
-        flags,
-        platform,
-        out,
-    )
-}
-
-// Hash a subtree with compress_subtree_wide(), and then condense the resulting
-// list of chaining values down to a single parent node. Don't compress that
+// Hash a subtree with the walk (tree_core.rs, `children`), condensing its
+// chaining values down to a single parent node. Don't compress that
 // last parent node, however. Instead, return its message bytes (the
 // concatenated chaining values of its children). This is necessary when the
 // first call to update() supplies a complete subtree, because the topmost
 // parent node of that subtree could end up being the root. It's also necessary
 // for extended output in the general case.
 //
-// As with compress_subtree_wide(), this function is not used on inputs of 1
-// chunk or less. That's a different codepath.
-//
-// With the SME2 degree of 128, cv_array and out_array together are 6 KiB.
-// Kept out of line, that frame belongs to this function alone; inlined into
-// hash() or update(), it would grow their frames past a page, and every call
-// (including the one-chunk path that never touches these arrays) would pay
-// for stack probing and zeroing. An input of sixteen chunks or fewer has
-// sixteen chaining values at most, and gets arrays of that size (768 bytes)
-// in place of zeroing 6 KiB for a few chunks.
-#[inline(never)]
-fn compress_subtree_to_parent_node<J: join::Join>(
+// This function is not used on inputs of 1 chunk or less. That's a
+// different codepath. Its arrays live in tree::root_children, out of line.
+#[inline]
+fn compress_subtree_to_parent_node(
     input: &[u8],
     ahead: usize,
     key: &CVWords,
@@ -1140,52 +882,12 @@ fn compress_subtree_to_parent_node<J: join::Join>(
     platform: Platform,
 ) -> [u8; BLOCK_LEN] {
     debug_assert!(input.len() > CHUNK_LEN);
-    // Whole subtrees of 32 KiB to 1 MiB on SME2: the flat walk down to the
-    // two children, SME2 alone (see sme2::compress_subtree_flat_to_parent).
-    #[cfg(blake3_sme2)]
-    if matches!(platform, Platform::SME2) && sme2::flat_takes(input.len()) {
-        // Safe: the SME2 platform is selected only where the CPU has it.
-        return unsafe { sme2::compress_subtree_flat_to_parent(input, ahead, key, chunk_counter, flags) };
-    }
-    if input.len() <= SMALL_TREE_CHUNKS * CHUNK_LEN {
-        condense_subtree::<J, SMALL_TREE_CHUNKS, { SMALL_TREE_CHUNKS / 2 }>(input, ahead, key, chunk_counter, flags, platform)
-    } else {
-        condense_subtree::<J, MAX_SIMD_DEGREE_OR_2, { MAX_SIMD_DEGREE_OR_2 / 2 }>(input, ahead, key, chunk_counter, flags, platform)
-    }
-}
-
-/// Chaining values the small arrays of `compress_subtree_to_parent_node`
-/// hold: an input of this many chunks has no more.
-const SMALL_TREE_CHUNKS: usize = 16;
-
-/// `compress_subtree_to_parent_node` with room for `CVS` chaining values,
-/// which must cover the most `compress_subtree_wide` returns for `input`,
-/// and `HALF` = `CVS / 2` parents.
-#[inline(always)]
-fn condense_subtree<J: join::Join, const CVS: usize, const HALF: usize>(
-    input: &[u8],
-    ahead: usize,
-    key: &CVWords,
-    chunk_counter: u64,
-    flags: u8,
-    platform: Platform,
-) -> [u8; BLOCK_LEN] {
-    let mut cv_array = [[0u8; OUT_LEN]; CVS];
-    let cv_array = cv_array.as_flattened_mut();
-    let mut num_cvs = compress_subtree_wide::<J>(input, ahead, &key, chunk_counter, flags, platform, cv_array);
-    debug_assert!(num_cvs >= 2);
-
-    // If MAX_SIMD_DEGREE is greater than 2 and there's enough input,
-    // compress_subtree_wide() returns more than 2 chaining values. Condense
-    // them into 2 by forming parent nodes repeatedly.
-    let mut out_array = [[0u8; OUT_LEN]; HALF];
-    let out_array = out_array.as_flattened_mut();
-    while num_cvs > 2 {
-        let cv_slice = &cv_array[..num_cvs * OUT_LEN];
-        num_cvs = compress_parents_parallel(cv_slice, key, flags, platform, out_array);
-        cv_array[..num_cvs * OUT_LEN].copy_from_slice(&out_array[..num_cvs * OUT_LEN]);
-    }
-    cv_array[..2 * OUT_LEN].try_into().unwrap()
+    let kernels = tree::PlatformKernels { key, flags, platform };
+    let [left, right] = tree::root_children(&kernels, input, ahead, chunk_counter);
+    let mut block = [0u8; BLOCK_LEN];
+    block[..OUT_LEN].copy_from_slice(&left);
+    block[OUT_LEN..].copy_from_slice(&right);
+    block
 }
 
 // The root hash of an input of one chunk or less, in one kernel call. The
@@ -1206,9 +908,9 @@ fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8) -> Hash {
         Ok(full) => full,
         Err(_) => {
             let mut block = Aligned64([0; BLOCK_LEN]);
-            block[..tail.len()].copy_from_slice(tail);
+            block.0[..tail.len()].copy_from_slice(tail);
             padded = block;
-            &padded
+            &padded.0
         }
     };
     let mut out = [0u8; OUT_LEN];
@@ -1232,12 +934,11 @@ fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8) -> Hash {
 
 // Hash a whole subtree at its chunk counter (or the whole input at zero).
 // Unlike the wider helpers above, this also handles one chunk or less.
-//
-// Inlined into hash(), keyed_hash(), and derive_key(): the one-chunk path
-// is then a straight line from the public function to the kernel, and the
-// multi-chunk path is one call to compress_subtree_to_parent_node().
+// The pool's pieces (lanes.rs) use it; the one-shot calls go through
+// tree::hash.
+#[cfg(feature = "std")]
 #[inline]
-fn hash_all_at_once<J: join::Join>(
+fn hash_all_at_once(
     input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8, platform: Platform,
 ) -> Output {
     // The input is a complete subtree at chunk_counter, or the whole
@@ -1255,11 +956,9 @@ fn hash_all_at_once<J: join::Join>(
 
     // Otherwise construct an Output object from the parent node returned by
     // compress_subtree_to_parent_node().
-    Output {
+    hasher::Output {
         input_chaining_value: *key,
-        block: Aligned64(compress_subtree_to_parent_node::<J>(
-            input, 0, key, chunk_counter, flags, platform,
-        )),
+        block: compress_subtree_to_parent_node(input, 0, key, chunk_counter, flags, platform),
         block_len: BLOCK_LEN as u8,
         counter: 0,
         flags: flags | PARENT,
@@ -1552,7 +1251,7 @@ fn prefetch_kernels(len: usize, platform: Platform) {
 }
 
 /// Prefetch the code a fresh Hasher's update of `len` bytes runs: the
-/// subtrees its loop cuts (next_subtree_len from counter 0, up to the last
+/// subtrees its loop cuts (hasher::subtree_len from counter 0, up to the last
 /// chunk, which waits in the chunk state), each one's kernels.
 #[cfg(all(blake3_neon_hybrid, feature = "std"))]
 fn prefetch_update_kernels(len: usize, platform: Platform) {
@@ -1561,7 +1260,7 @@ fn prefetch_update_kernels(len: usize, platform: Platform) {
     }
     let (mut counter, mut left) = (0u64, len);
     while left > CHUNK_LEN {
-        let subtree = next_subtree_len(counter, left);
+        let subtree = hasher::subtree_len(counter, left);
         let chunks = subtree / CHUNK_LEN;
         #[cfg(blake3_sme2)]
         if matches!(platform, Platform::SME2) && chunks >= 16 {
@@ -1593,11 +1292,7 @@ pub(crate) const SME2_SIZED_BATCH: usize = 16;
 /// on every platform.
 #[inline]
 fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) -> Hash {
-    #[cfg(blake3_neon_hybrid)]
-    if input.len() <= CHUNK_LEN {
-        return hash_one_chunk_root(input, key, flags);
-    }
-    hash_all_at_once::<join::SerialJoin>(input, key, 0, flags, platform).root_hash()
+    Hash(tree::hash(&tree::PlatformKernels { key, flags, platform }, input))
 }
 
 /// The hashes of many messages of one length, laid out in one buffer, on
@@ -2008,25 +1703,6 @@ pub fn derive_key(context: &str, key_material: &[u8]) -> [u8; OUT_LEN] {
     hash_serial(key_material, &context_key_words, DERIVE_KEY_MATERIAL).0
 }
 
-fn parent_node_output(
-    left_child: &CVBytes,
-    right_child: &CVBytes,
-    key: &CVWords,
-    flags: u8,
-    platform: Platform,
-) -> Output {
-    let mut block = Aligned64([0; BLOCK_LEN]);
-    block[..32].copy_from_slice(left_child);
-    block[32..].copy_from_slice(right_child);
-    Output {
-        input_chaining_value: *key,
-        block,
-        block_len: BLOCK_LEN as u8,
-        counter: 0,
-        flags: flags | PARENT,
-        platform,
-    }
-}
 
 /// A message's hash, fed in pieces: [`update`](Hasher::update) with each
 /// piece, in order, then [`finalize`](Hasher::finalize). The pieces may be
@@ -2035,9 +1711,7 @@ fn parent_node_output(
 /// A `Hasher` is about 18 KiB (it holds short pieces until it has 16 KiB
 /// to hash at once); box it where that matters.
 ///
-/// The `rayon` and `mmap` Cargo features add methods for multithreading
-/// and memory-mapped files; [`update_multithreaded`](Hasher::update_multithreaded)
-/// needs neither.
+/// The `mmap` Cargo feature adds a method for memory-mapped files.
 ///
 /// When the `traits-preview` Cargo feature is enabled, this type implements
 /// several commonly used traits from the
@@ -2093,7 +1767,106 @@ pub(crate) struct HasherCore {
     // requires a 4th entry, rather than merging everything down to 1, because
     // we don't know whether more input is coming. This is different from how
     // the reference implementation does things.
-    cv_stack: ArrayVec<CVBytes, { MAX_DEPTH + 1 }>,
+    cv_stack: CvStack,
+}
+
+/// The Hasher's stack, loop, chunk state, and nodes (src/stack_core.rs,
+/// src/hasher_core.rs, src/chunk_core.rs, proved in tools/verify/tree).
+pub(crate) mod hasher {
+    use crate::{CVBytes as Cv, MAX_DEPTH};
+    use crate::{BLOCK_LEN, CHUNK_END, CHUNK_LEN, CHUNK_START, PARENT, ROOT};
+    const DEPTH: usize = MAX_DEPTH + 1;
+    include!("stack_core.rs");
+    include!("hasher_core.rs");
+    include!("chunk_core.rs");
+
+    #[cfg(all(test, feature = "zeroize"))]
+    impl CvStack {
+        /// The array, for the zeroize test.
+        pub fn array(&self) -> Option<&[Cv; DEPTH]> {
+            self.cvs.as_ref()
+        }
+    }
+
+    #[cfg(feature = "zeroize")]
+    impl zeroize::Zeroize for CvStack {
+        fn zeroize(&mut self) {
+            if let Some(cvs) = &mut self.cvs {
+                cvs.zeroize();
+            }
+            self.len = 0;
+        }
+    }
+}
+use hasher::CvStack;
+
+/// What the Hasher's kernels take from the library (hasher::Hooks): with
+/// `pooled`, subtrees of lanes::MIN_SPLIT_LEN and more on the pool; whole
+/// subtrees on `platform` (an SME2 turn's); `chunk_platform`, the chunk
+/// state's, otherwise.
+struct HasherHooks<'a> {
+    key: &'a CVWords,
+    flags: u8,
+    chunk_platform: Platform,
+    platform: Platform,
+    pooled: bool,
+}
+
+impl hasher::Hooks for HasherHooks<'_> {
+    #[inline(always)]
+    #[allow(unused_variables)]
+    fn subtree_cv(&self, input: &[u8], ahead: usize, counter: u64) -> Option<CVBytes> {
+        // After the first input, no subtree is the root: on SME2 the flat
+        // walk runs it down to its own chaining value, so one value goes
+        // on the stack and about one merge runs on the core between SME2
+        // kernels (about 0.2 us of other work between them puts the SME
+        // unit in its slow state; NOTES-servil.md).
+        #[cfg(blake3_sme2)]
+        if !self.pooled && matches!(self.platform, Platform::SME2) && sme2::flat_takes(input.len()) {
+            // Safe: the SME2 platform is selected only where the CPU has it.
+            return Some(unsafe { sme2::compress_subtree_flat_to_cv(input, ahead, self.key, counter, self.flags) });
+        }
+        None
+    }
+
+    #[inline(always)]
+    fn children(&self, input: &[u8], ahead: usize, counter: u64) -> [CVBytes; 2] {
+        #[cfg(feature = "std")]
+        let pool_takes = self.pooled && input.len() >= lanes::MIN_SPLIT_LEN;
+        #[cfg(not(feature = "std"))]
+        let pool_takes = false;
+        let pair = if pool_takes {
+            #[cfg(feature = "std")]
+            {
+                lanes::subtree_children(input, self.key, counter, self.flags)
+            }
+            #[cfg(not(feature = "std"))]
+            unreachable!()
+        } else if self.pooled {
+            // Pooled, the subtrees below take the lock one at a time, and
+            // the pool's own never use SME2.
+            let own = platform::Sme2Turn::take(self.chunk_platform, input.len() >= SME2_SIZED_LEN);
+            compress_subtree_to_parent_node(input, ahead, self.key, counter, self.flags, own.platform())
+        } else {
+            compress_subtree_to_parent_node(input, ahead, self.key, counter, self.flags, self.platform)
+        };
+        [pair[..OUT_LEN].try_into().unwrap(), pair[OUT_LEN..].try_into().unwrap()]
+    }
+}
+
+/// The Hasher's kernels: chunks, nodes, and parents on the chunk state's
+/// platform, the rest from `hooks`.
+type HasherKernels<'a> = hasher::Kernels<'a, Platform, HasherHooks<'a>>;
+
+/// A Hasher's kernels on its key and chunk state (see HasherHooks).
+#[inline(always)]
+fn kernels_on<'a>(key: &'a CVWords, chunk_state: &ChunkState, platform: Platform, pooled: bool) -> HasherKernels<'a> {
+    hasher::Kernels {
+        key,
+        flags: chunk_state.flags,
+        platform: chunk_state.platform,
+        hooks: HasherHooks { key, flags: chunk_state.flags, chunk_platform: chunk_state.platform, platform, pooled },
+    }
 }
 
 impl Hasher {
@@ -2121,8 +1894,8 @@ impl Hasher {
     /// (but a fresh hasher's first chunk goes to the core),
     /// and the stage goes to the core as one update, its chunks side by
     /// side in the lanes.
-    fn gather<J: join::Join>(&mut self, input: &[u8], pooled: bool) -> &mut Self {
-        self.gather_part::<J>(input, pooled, false);
+    fn gather(&mut self, input: &[u8], pooled: bool) -> &mut Self {
+        self.gather_part(input, pooled, false);
         self
     }
 
@@ -2130,13 +1903,13 @@ impl Hasher {
     /// whole group (from offset zero) is kept for the caller to hash with
     /// others' (`held_group`), and the rest of `input`
     /// returned; else nothing is left.
-    fn gather_part<'a, J: join::Join>(&mut self, mut input: &'a [u8], pooled: bool, hold: bool) -> &'a [u8] {
+    fn gather_part<'a>(&mut self, mut input: &'a [u8], pooled: bool, hold: bool) -> &'a [u8] {
         self.core.assert_room(self.count(), input.len());
         while !input.is_empty() {
             // Whole groups, and a fresh hasher's first chunk (which hashes
             // serially either way), skip the stage.
             if self.staged == 0 && (input.len() >= STAGE_LEN || self.core.count() + input.len() as u64 <= CHUNK_LEN as u64) {
-                self.core.update_with_join::<J>(input, pooled);
+                self.core.update_pooled(input, pooled);
                 return &[];
             }
             let at = (self.core.initial_chunk_counter * CHUNK_LEN as u64 + self.count()) % STAGE_LEN as u64;
@@ -2154,7 +1927,7 @@ impl Hasher {
             // Sound: the first `staged` bytes were written; the core reads
             // them before the stage is written again.
             let bytes = unsafe { core::slice::from_raw_parts(self.stage.as_ptr() as *const u8, staged) };
-            self.core.update_with_join::<J>(bytes, pooled);
+            self.core.update_pooled(bytes, pooled);
         }
         &[]
     }
@@ -2245,7 +2018,7 @@ impl Hasher {
         if self.count() == 0 && (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
             prefetch_after_pause(input.len(), self.core.chunk_state.platform, true);
         }
-        self.gather::<join::SerialJoin>(input, false)
+        self.gather(input, false)
     }
 
     /// [`update`](Hasher::update), using other CPU cores where that is
@@ -2265,7 +2038,7 @@ impl Hasher {
     /// ```
     #[cfg(feature = "std")]
     pub fn update_multithreaded(&mut self, input: &[u8]) -> &mut Self {
-        self.gather::<join::SerialJoin>(input, true)
+        self.gather(input, true)
     }
 
     /// Finalize the hash state and return the [`Hash`](struct.Hash.html) of
@@ -2324,8 +2097,7 @@ impl Hasher {
     /// [`std::io::Read`](https://doc.rust-lang.org/std/io/trait.Read.html) might be
     /// [`std::fs::File`](https://doc.rust-lang.org/std/fs/struct.File.html), but note that memory
     /// mapping can be faster than this method for hashing large files. See
-    /// [`update_mmap`](Hasher::update_mmap) and [`update_mmap_rayon`](Hasher::update_mmap_rayon),
-    /// which require the `mmap` and (for the latter) `rayon` Cargo features.
+    /// [`update_mmap`](Hasher::update_mmap), which requires the `mmap` Cargo feature.
     ///
     /// This method requires the `std` Cargo feature, which is enabled by default.
     ///
@@ -2348,31 +2120,6 @@ impl Hasher {
         Ok(self)
     }
 
-    /// As [`update`](Hasher::update), but using Rayon-based multithreading
-    /// internally.
-    ///
-    /// This method is gated by the `rayon` Cargo feature, which is disabled by
-    /// default but enabled on [docs.rs](https://docs.rs).
-    ///
-    /// To get any performance benefit from multithreading, the input buffer
-    /// needs to be large. As a rule of thumb on x86_64, `update_rayon` is
-    /// _slower_ than `update` for inputs under 128 KiB. That threshold varies
-    /// quite a lot across different processors, and it's important to benchmark
-    /// your specific use case. See also the performance warning associated with
-    /// [`update_mmap_rayon`](Hasher::update_mmap_rayon).
-    ///
-    /// If you already have a large buffer in memory, and you want to hash it
-    /// with multiple threads, this method is a good option. However, reading a
-    /// file into memory just to call this method can be a performance mistake,
-    /// both because it requires lots of memory and because single-threaded
-    /// reads can be slow. For hashing whole files, see
-    /// [`update_mmap_rayon`](Hasher::update_mmap_rayon), which is gated by both
-    /// the `rayon` and `mmap` Cargo features.
-    #[cfg(feature = "rayon")]
-    pub fn update_rayon(&mut self, input: &[u8]) -> &mut Self {
-        self.gather::<join::RayonJoin>(input, false)
-    }
-
     /// As [`update`](Hasher::update), but reading the contents of a file using memory mapping.
     ///
     /// Not all files can be memory mapped, and memory mapping small files can be slower than
@@ -2383,9 +2130,8 @@ impl Hasher {
     /// Like [`update`](Hasher::update), this method is single-threaded. In this author's
     /// experience, memory mapping improves single-threaded performance by ~10% for large files
     /// that are already in cache. This probably varies between platforms, and as always it's a
-    /// good idea to benchmark your own use case. In comparison, the multithreaded
-    /// [`update_mmap_rayon`](Hasher::update_mmap_rayon) method can have a much larger impact on
-    /// performance.
+    /// good idea to benchmark your own use case. For several threads, map the file and call
+    /// [`update_multithreaded`](Hasher::update_multithreaded) on it.
     ///
     /// There's a correctness reason that this method takes
     /// [`Path`](https://doc.rust-lang.org/stable/std/path/struct.Path.html) instead of
@@ -2424,61 +2170,6 @@ impl Hasher {
         }
         Ok(self)
     }
-
-    /// As [`update_rayon`](Hasher::update_rayon), but reading the contents of a file using
-    /// memory mapping. This is the default behavior of `b3sum`.
-    ///
-    /// For large files that are likely to be in cache, this can be much faster than
-    /// single-threaded hashing. When benchmarks report that BLAKE3 is 10x or 20x faster than other
-    /// cryptographic hashes, this is usually what they're measuring. However...
-    ///
-    /// **Performance Warning:** There are cases where multithreading hurts performance. The worst
-    /// case is [a large file on a spinning disk](https://github.com/BLAKE3-team/BLAKE3/issues/31),
-    /// where simultaneous reads from multiple threads can cause "thrashing" (i.e. the disk spends
-    /// more time seeking around than reading data). Windows tends to be somewhat worse about this,
-    /// in part because it's less likely than Linux to keep very large files in cache. More
-    /// generally, if your CPU cores are already busy, then multithreading will add overhead
-    /// without improving performance. If your code runs in different environments that you don't
-    /// control and can't measure, then unfortunately there's no one-size-fits-all answer for
-    /// whether multithreading is a good idea.
-    ///
-    /// The memory mapping behavior of this function is the same as
-    /// [`update_mmap`](Hasher::update_mmap), and the heuristic for when to fall back to standard
-    /// file IO might change at any time.
-    ///
-    /// This method requires both the `mmap` and `rayon` Cargo features, which are disabled by
-    /// default but enabled on [docs.rs](https://docs.rs).
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use std::io;
-    /// # use std::path::Path;
-    /// # fn main() -> io::Result<()> {
-    /// # #[cfg(feature = "rayon")]
-    /// # {
-    /// let path = Path::new("big_file.dat");
-    /// let mut hasher = blake3_servil::Hasher::new();
-    /// hasher.update_mmap_rayon(path)?;
-    /// println!("{}", hasher.finalize());
-    /// # }
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[cfg(feature = "mmap")]
-    #[cfg(feature = "rayon")]
-    pub fn update_mmap_rayon(
-        &mut self,
-        path: impl AsRef<std::path::Path>,
-    ) -> std::io::Result<&mut Self> {
-        let mut file = std::fs::File::open(path.as_ref())?;
-        if let Some(mmap) = io::maybe_mmap_file(&mut file)? {
-            self.update_rayon(&mmap);
-        } else {
-            io::copy_wide(&file, self)?;
-        }
-        Ok(self)
-    }
 }
 
 impl HasherCore {
@@ -2493,7 +2184,7 @@ impl HasherCore {
             key: *key,
             chunk_state: ChunkState::new(key, 0, flags, platform),
             initial_chunk_counter: 0,
-            cv_stack: ArrayVec::new(),
+            cv_stack: CvStack::new(),
         }
     }
 
@@ -2525,24 +2216,20 @@ impl HasherCore {
     // doesn't assume that). The principle is the same: each CV that should
     // remain in the stack is represented by a 1-bit in the total number of
     // chunks (or bytes) so far.
+    #[cfg(feature = "std")]
     fn merge_cv_stack(&mut self, chunk_counter: u64) {
         // Account for non-zero cases of Hasher::set_input_offset, where there are no prior
         // subtrees in the stack. Note that initial_chunk_counter is always 0 for callers who don't
         // use the hazmat module.
-        let post_merge_stack_len =
-            (chunk_counter - self.initial_chunk_counter).count_ones() as usize;
-        while self.cv_stack.len() > post_merge_stack_len {
-            let right_child = self.cv_stack.pop().unwrap();
-            let left_child = self.cv_stack.pop().unwrap();
-            let parent_output = parent_node_output(
-                &left_child,
-                &right_child,
-                &self.key,
-                self.chunk_state.flags,
-                self.chunk_state.platform,
-            );
-            self.cv_stack.push(parent_output.chaining_value());
-        }
+        let post_merge_stack_len = hasher::ones(chunk_counter - self.initial_chunk_counter);
+        let kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, false);
+        self.cv_stack.merge(&kernels, post_merge_stack_len);
+    }
+
+    /// The kernels on this Hasher's key and flags (see HasherKernels).
+    #[inline(always)]
+    fn kernels(&self, platform: Platform, pooled: bool) -> HasherKernels<'_> {
+        kernels_on(&self.key, &self.chunk_state, platform, pooled)
     }
 
     // In reference_impl.rs, we merge the new CV with existing CVs from the
@@ -2550,7 +2237,7 @@ impl HasherCore {
     // coming, so we know none of the merges are root.
     //
     // This setting is different. We want to feed as much input as possible to
-    // compress_subtree_wide(), without setting aside anything for the
+    // the walk (`tree::wide`), without setting aside anything for the
     // chunk_state. If the user gives us 64 KiB, we want to parallelize over
     // all 64 KiB at once as a single subtree, if at all possible.
     //
@@ -2578,6 +2265,7 @@ impl HasherCore {
     // merging with each of them separately, so that the second CV will always
     // remain unmerged. (That also helps us support extendable output when
     // we're hashing an input all-at-once.)
+    #[cfg(feature = "std")]
     fn push_cv(&mut self, new_cv: &CVBytes, chunk_counter: u64) {
         self.merge_cv_stack(chunk_counter);
         self.cv_stack.push(*new_cv);
@@ -2609,7 +2297,7 @@ impl HasherCore {
             self.chunk_state = ChunkState::new(&self.key, self.chunk_state.chunk_counter + 1, self.chunk_state.flags, self.chunk_state.platform);
         }
         while input.len() > CHUNK_LEN {
-            let len = next_subtree_len(self.chunk_state.chunk_counter, input.len());
+            let len = hasher::subtree_len(self.chunk_state.chunk_counter, input.len());
             let chunks = (len / CHUNK_LEN) as u64;
             let result = results.next().expect("a result for every planned subtree");
             let counter = self.chunk_state.chunk_counter;
@@ -2630,242 +2318,31 @@ impl HasherCore {
 
     /// `update`'s loop; with `pooled`, whole subtrees of
     /// `lanes::MIN_SPLIT_LEN` and more go to the pool.
-    pub(crate) fn update_with_join<J: join::Join>(&mut self, mut input: &[u8], pooled: bool) -> &mut Self {
+    pub(crate) fn update_pooled(&mut self, input: &[u8], pooled: bool) -> &mut Self {
         #[cfg(not(feature = "std"))]
         let _ = pooled;
         self.assert_room(self.count(), input.len());
-        // If we have some partial chunk bytes in the internal chunk_state, we
-        // need to finish that chunk first.
-        if self.chunk_state.count() > 0 {
-            let want = CHUNK_LEN - self.chunk_state.count();
-            let take = cmp::min(want, input.len());
-            self.chunk_state.update(&input[..take]);
-            input = &input[take..];
-            if !input.is_empty() {
-                // We've filled the current chunk, and there's more input
-                // coming, so we know it's not the root and we can finalize it.
-                // Then we'll proceed to hashing whole chunks below.
-                debug_assert_eq!(self.chunk_state.count(), CHUNK_LEN);
-                let chunk_cv = self.chunk_state.output().chaining_value();
-                self.push_cv(&chunk_cv, self.chunk_state.chunk_counter);
-                self.chunk_state = ChunkState::new(
-                    &self.key,
-                    self.chunk_state.chunk_counter + 1,
-                    self.chunk_state.flags,
-                    self.chunk_state.platform,
-                );
-            } else {
-                return self;
-            }
+        // The partial chunk first (hasher::fill), then whole subtrees and the
+        // last chunk (hasher::feed), as src/hasher_core.rs describes.
+        let fill_kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, pooled);
+        let rest = hasher::fill(&fill_kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, input);
+        if rest.is_empty() {
+            return self;
         }
-
-        // Now the chunk_state is clear, and we have more input. If there's
-        // more than a single chunk (so, definitely not the root chunk), hash
-        // the largest whole subtree we can, with the full benefits of SIMD and
-        // multithreading parallelism. Two restrictions:
-        // - The subtree has to be a power-of-2 number of chunks. Only subtrees
-        //   along the right edge can be incomplete, and we don't know where
-        //   the right edge is going to be until we get to finalize().
-        // - The subtree must evenly divide the total number of chunks up until
-        //   this point (if total is not 0). If the current incomplete subtree
-        //   is only waiting for 1 more chunk, we can't hash a subtree of 4
-        //   chunks. We have to complete the current subtree first.
-        // Because we might need to break up the input to form powers of 2, or
-        // to evenly divide what we already have, this part runs in a loop.
-        // Pooled, the subtrees below take the lock one at a time, and the
-        // pool's own never use SME2.
-        let turn = platform::Sme2Turn::take(self.chunk_state.platform, !pooled && input.len() >= SME2_SIZED_LEN);
-        while input.len() > CHUNK_LEN {
-            debug_assert_eq!(self.chunk_state.count(), 0, "no partial chunk data");
-            debug_assert_eq!(CHUNK_LEN.count_ones(), 1, "power of 2 chunk len");
-            // The largest power of two chunks, shrunk until it evenly
-            // divides the count so far (next_subtree_len).
-            // We know that subtree_len itself is a power of 2, so we can use a
-            // bitmasking trick instead of an actual remainder operation. (Note
-            // that if the caller consistently passes power-of-2 inputs of the
-            // same size, as is hopefully typical, this loop condition will
-            // always fail, and subtree_len will always be the full length of
-            // the input.)
-            //
-            // An aside: We don't have to shrink subtree_len quite this much.
-            // For example, if count_so_far is 1, we could pass 2 chunks to
-            // compress_subtree_to_parent_node. Since we'll get 2 CVs back,
-            // we'll still get the right answer in the end, and we might get to
-            // use 2-way SIMD parallelism. The problem with this optimization,
-            // is that it gets us stuck always hashing 2 chunks. The total
-            // number of chunks will remain odd, and we'll never graduate to
-            // higher degrees of parallelism. See
-            // https://github.com/BLAKE3-team/BLAKE3/issues/69.
-            let subtree_len = next_subtree_len(self.chunk_state.chunk_counter, input.len());
-            // The shrunken subtree_len might now be 1 chunk long. If so, hash
-            // that one chunk by itself. Otherwise, compress the subtree into a
-            // pair of CVs.
-            let subtree_chunks = (subtree_len / CHUNK_LEN) as u64;
-            // After the first input, no subtree is the root: on SME2 the flat
-            // walk runs it down to its own chaining value, so one value goes
-            // on the stack and about one merge runs on the core between
-            // SME2 kernels (about 0.2 us of other work between them puts the
-            // SME unit in its slow state; NOTES-servil.md).
-            #[cfg(blake3_sme2)]
-            if !pooled
-                && self.chunk_state.chunk_counter > self.initial_chunk_counter
-                && matches!(turn.platform(), Platform::SME2)
-                && sme2::flat_takes(subtree_len)
-            {
-                // Safe: the SME2 platform is selected only where the CPU has it.
-                let cv = unsafe {
-                    sme2::compress_subtree_flat_to_cv(&input[..subtree_len], input.len() - subtree_len, &self.key, self.chunk_state.chunk_counter, self.chunk_state.flags)
-                };
-                self.push_cv(&cv, self.chunk_state.chunk_counter);
-                self.chunk_state.chunk_counter += subtree_chunks;
-                input = &input[subtree_len..];
-                continue;
-            }
-            if subtree_len <= CHUNK_LEN {
-                debug_assert_eq!(subtree_len, CHUNK_LEN);
-                self.push_cv(
-                    &ChunkState::new(
-                        &self.key,
-                        self.chunk_state.chunk_counter,
-                        self.chunk_state.flags,
-                        self.chunk_state.platform,
-                    )
-                    .update(&input[..subtree_len])
-                    .output()
-                    .chaining_value(),
-                    self.chunk_state.chunk_counter,
-                );
-            } else {
-                // This is the high-performance happy path, though getting here
-                // depends on the caller giving us a long enough input.
-                #[cfg(feature = "std")]
-                let pool_takes = pooled && subtree_len >= lanes::MIN_SPLIT_LEN;
-                #[cfg(not(feature = "std"))]
-                let pool_takes = false;
-                let cv_pair = if pool_takes {
-                    #[cfg(feature = "std")]
-                    {
-                        lanes::subtree_children(
-                            &input[..subtree_len],
-                            &self.key,
-                            self.chunk_state.chunk_counter,
-                            self.chunk_state.flags,
-                        )
-                    }
-                    #[cfg(not(feature = "std"))]
-                    unreachable!()
-                } else if pooled {
-                    let own = platform::Sme2Turn::take(self.chunk_state.platform, subtree_len >= SME2_SIZED_LEN);
-                    compress_subtree_to_parent_node::<J>(
-                        &input[..subtree_len],
-                        input.len() - subtree_len,
-                        &self.key,
-                        self.chunk_state.chunk_counter,
-                        self.chunk_state.flags,
-                        own.platform(),
-                    )
-                } else {
-                    compress_subtree_to_parent_node::<J>(
-                        &input[..subtree_len],
-                        input.len() - subtree_len,
-                        &self.key,
-                        self.chunk_state.chunk_counter,
-                        self.chunk_state.flags,
-                        turn.platform(),
-                    )
-                };
-                let left_cv = (&cv_pair[..32]).try_into().unwrap();
-                let right_cv = (&cv_pair[32..64]).try_into().unwrap();
-                // Push the two CVs we received into the CV stack in order. Because
-                // the stack merges lazily, this guarantees we aren't merging the
-                // root.
-                self.push_cv(left_cv, self.chunk_state.chunk_counter);
-                self.push_cv(
-                    right_cv,
-                    self.chunk_state.chunk_counter + (subtree_chunks / 2),
-                );
-            }
-            self.chunk_state.chunk_counter += subtree_chunks;
-            input = &input[subtree_len..];
-        }
-
-        // What remains is 1 chunk or less. Add it to the chunk state.
-        debug_assert!(input.len() <= CHUNK_LEN);
-        if !input.is_empty() {
-            self.chunk_state.update(input);
-            // Having added some input to the chunk_state, we know what's in
-            // the CV stack won't become the root node, and we can do an extra
-            // merge. This simplifies finalize().
-            self.merge_cv_stack(self.chunk_state.chunk_counter);
-        }
-
+        // Pooled, the subtrees take the lock one at a time (children).
+        let turn = platform::Sme2Turn::take(self.chunk_state.platform, !pooled && rest.len() >= SME2_SIZED_LEN);
+        let kernels = kernels_on(&self.key, &self.chunk_state, turn.platform(), pooled);
+        hasher::feed(&kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, rest);
         self
     }
 
     pub(crate) fn final_output(&self) -> Output {
-        // If the current chunk is the only chunk, that makes it the root node
-        // also. Convert it directly into an Output. Otherwise, we need to
-        // merge subtrees below.
-        if self.cv_stack.is_empty() {
-            debug_assert_eq!(self.chunk_state.chunk_counter, self.initial_chunk_counter);
-            return self.chunk_state.output();
-        }
-
-        // If there are any bytes in the ChunkState, finalize that chunk and
-        // merge its CV with everything in the CV stack. In that case, the work
-        // we did at the end of update() above guarantees that the stack
-        // doesn't contain any unmerged subtrees that need to be merged first.
-        // (This is important, because if there were two chunk hashes sitting
-        // on top of the stack, they would need to merge with each other, and
-        // merging a new chunk hash into them would be incorrect.)
-        //
-        // If there are no bytes in the ChunkState, we'll merge what's already
-        // in the stack. In this case it's fine if there are unmerged chunks on
-        // top, because we'll merge them with each other. Note that the case of
-        // the empty chunk is taken care of above.
-        let mut output: Output;
-        let mut num_cvs_remaining = self.cv_stack.len();
-        if self.chunk_state.count() > 0 {
-            debug_assert_eq!(
-                self.cv_stack.len(),
-                (self.chunk_state.chunk_counter - self.initial_chunk_counter).count_ones() as usize,
-                "cv stack does not need a merge",
-            );
-            output = self.chunk_state.output();
-        } else {
-            debug_assert!(self.cv_stack.len() >= 2);
-            output = parent_node_output(
-                &self.cv_stack[num_cvs_remaining - 2],
-                &self.cv_stack[num_cvs_remaining - 1],
-                &self.key,
-                self.chunk_state.flags,
-                self.chunk_state.platform,
-            );
-            num_cvs_remaining -= 2;
-        }
-        while num_cvs_remaining > 0 {
-            output = parent_node_output(
-                &self.cv_stack[num_cvs_remaining - 1],
-                &output.chaining_value(),
-                &self.key,
-                self.chunk_state.flags,
-                self.chunk_state.platform,
-            );
-            num_cvs_remaining -= 1;
-        }
-        output
+        hasher::final_node(&self.kernels(self.chunk_state.platform, false), &self.chunk_state, &self.cv_stack)
     }
-
-
-
-
-
-
-
 
     /// The serial update: whole subtrees now, the last chunk kept.
     pub(crate) fn update(&mut self, input: &[u8]) -> &mut Self {
-        self.update_with_join::<join::SerialJoin>(input, false)
+        self.update_pooled(input, false)
     }
 
     /// Requires that `len` more bytes after `count` fit the subtree that

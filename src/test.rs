@@ -89,7 +89,7 @@ pub fn test_compress_fn(compress_in_place_fn: CompressInPlaceFn, compress_xof_fn
 
     let mut test_state = initial_state;
     unsafe { compress_in_place_fn(&mut test_state, &block, block_len, counter as u64, flags) };
-    let test_state_bytes = crate::platform::le_bytes_from_words_32(&test_state);
+    let test_state_bytes = crate::hasher::le_bytes(&test_state);
     let test_xof =
         unsafe { compress_xof_fn(&initial_state, &block, block_len, counter as u64, flags) };
 
@@ -312,28 +312,16 @@ fn test_counter_words() {
 }
 
 #[test]
-fn test_largest_power_of_two_leq() {
-    let input_output = &[
-        // The zero case is nonsensical, but it does work.
-        (0, 1),
-        (1, 1),
-        (2, 2),
-        (3, 2),
-        (4, 4),
-        (5, 4),
-        (6, 4),
-        (7, 4),
-        (8, 8),
-        // the largest possible usize
-        (usize::MAX, (usize::MAX >> 1) + 1),
-    ];
-    for &(input, output) in input_output {
-        assert_eq!(
-            output,
-            crate::largest_power_of_two_leq(input),
-            "wrong output for n={}",
-            input
-        );
+fn test_subtree_len() {
+    // The largest power of two at most `remaining` dividing the bytes so far.
+    for counter in [0u64, 1, 2, 3, 4, 6, 8, 12, 1 << 20, (1 << 20) + 3, (1 << 54) - 1] {
+        for remaining in [1025usize, 2047, 2048, 2049, 4096, 1 << 20, (1 << 20) + 1, usize::MAX] {
+            let mut want = 1usize;
+            while want <= remaining / 2 && (counter * 1024) % (2 * want as u64) == 0 {
+                want *= 2;
+            }
+            assert_eq!(crate::hasher::subtree_len(counter, remaining), want, "{counter} {remaining}");
+        }
     }
 }
 
@@ -368,17 +356,6 @@ fn test_compare_reference_impl() {
                 *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap()
             );
             assert_eq!(hasher.finalize(), test_out);
-            // incremental (rayon)
-            #[cfg(feature = "rayon")]
-            {
-                let mut hasher = crate::Hasher::new();
-                hasher.update_rayon(input);
-                assert_eq!(
-                    hasher.finalize(),
-                    *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap()
-                );
-                assert_eq!(hasher.finalize(), test_out);
-            }
             // xof
             let mut extended = [0; OUT];
             hasher.finalize_xof().fill(&mut extended);
@@ -406,17 +383,6 @@ fn test_compare_reference_impl() {
                 *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap()
             );
             assert_eq!(hasher.finalize(), test_out);
-            // incremental (rayon)
-            #[cfg(feature = "rayon")]
-            {
-                let mut hasher = crate::Hasher::new_keyed(&TEST_KEY);
-                hasher.update_rayon(input);
-                assert_eq!(
-                    hasher.finalize(),
-                    *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap()
-                );
-                assert_eq!(hasher.finalize(), test_out);
-            }
             // xof
             let mut extended = [0; OUT];
             hasher.finalize_xof().fill(&mut extended);
@@ -445,20 +411,6 @@ fn test_compare_reference_impl() {
                 hasher.finalize(),
                 *<&[u8; 32]>::try_from(&test_out[..32]).unwrap()
             );
-            // incremental (rayon)
-            #[cfg(feature = "rayon")]
-            {
-                let mut hasher = crate::Hasher::new_derive_key(context);
-                hasher.update_rayon(input);
-                assert_eq!(
-                    hasher.finalize(),
-                    *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap()
-                );
-                assert_eq!(
-                    hasher.finalize(),
-                    *<&[u8; 32]>::try_from(&test_out[..32]).unwrap()
-                );
-            }
             // xof
             let mut extended = [0; OUT];
             hasher.finalize_xof().fill(&mut extended);
@@ -811,13 +763,16 @@ const fn test_hash_const_conversions() {
 
 #[test]
 fn test_block_buffer_alignment() {
-    // ChunkState.buf and Output.block are Aligned64 so that wide vector stores
+    // ChunkState.buf and Output.block are 64-byte aligned so that wide vector stores
     // into them (e.g. from memcpy) can store-to-load forward regardless of
-    // stack layout. See the comment on Aligned64 in lib.rs, the measurements in
+    // stack layout. See the comment on Output in chunk_core.rs, the measurements in
     // https://github.com/zooko/bench-hashes/issues/2, and the before/after
     // benchmarks in https://github.com/BLAKE3-team/BLAKE3/pull/582.
     assert_eq!(64, core::mem::align_of::<crate::Aligned64>());
-    assert_eq!(0, core::mem::offset_of!(crate::Aligned64, 0));
+    assert_eq!(64, core::mem::align_of::<crate::Output>());
+    assert_eq!(0, core::mem::offset_of!(crate::Output, block));
+    assert_eq!(64, core::mem::align_of::<crate::ChunkState>());
+    assert_eq!(0, core::mem::offset_of!(crate::ChunkState, buf));
 }
 
 #[cfg(feature = "zeroize")]
@@ -830,10 +785,10 @@ fn test_zeroize() {
     assert_eq!(hash.0, [0u8; 32]);
 
     let mut hasher = crate::HasherCore {
-        chunk_state: crate::ChunkState {
+        chunk_state: crate::hasher::ChunkState {
             cv: [42; 8],
             chunk_counter: 42,
-            buf: crate::Aligned64([42; 64]),
+            buf: [42; 64],
             buf_len: 42,
             blocks_compressed: 42,
             flags: 42,
@@ -841,8 +796,11 @@ fn test_zeroize() {
         },
         initial_chunk_counter: 42,
         key: [42; 8],
-        cv_stack: [[42; 32]; { crate::MAX_DEPTH + 1 }].into(),
+        cv_stack: crate::hasher::CvStack::new(),
     };
+    for _ in 0..crate::MAX_DEPTH + 1 {
+        hasher.cv_stack.push([42; 32]);
+    }
     hasher.zeroize();
     assert_eq!(hasher.chunk_state.cv, [0; 8]);
     assert_eq!(hasher.chunk_state.chunk_counter, 0);
@@ -856,12 +814,13 @@ fn test_zeroize() {
     ));
     assert_eq!(hasher.initial_chunk_counter, 0);
     assert_eq!(hasher.key, [0; 8]);
-    assert_eq!(&*hasher.cv_stack, &[[0u8; 32]; 0]);
+    assert_eq!(hasher.cv_stack.len(), 0);
+    assert_eq!(hasher.cv_stack.array(), Some(&[[0u8; 32]; crate::MAX_DEPTH + 1]));
 
     let mut output_reader = crate::OutputReader {
         inner: crate::Output {
             input_chaining_value: [42; 8],
-            block: crate::Aligned64([42; 64]),
+            block: [42; 64],
             counter: 42,
             block_len: 42,
             flags: 42,
@@ -1038,29 +997,6 @@ fn test_mmap_virtual_file() -> Result<(), std::io::Error> {
     let mut read_hasher = crate::Hasher::new();
     read_hasher.update_reader(std::fs::File::open(virtual_filepath)?)?;
     assert_eq!(mmap_hasher.finalize(), read_hasher.finalize());
-    Ok(())
-}
-
-#[test]
-#[cfg(feature = "mmap")]
-#[cfg(feature = "rayon")]
-// NamedTempFile isn't Miri-compatible
-#[cfg(not(miri))]
-fn test_mmap_rayon() -> Result<(), std::io::Error> {
-    // This is a brief test, since update_mmap_rayon() is mostly a wrapper around update_rayon(),
-    // which already has substantial testing.
-    use std::io::prelude::*;
-    let mut input = vec![0; 1_000_000];
-    paint_test_input(&mut input);
-    let mut tempfile = tempfile::NamedTempFile::new()?;
-    tempfile.write_all(&input)?;
-    tempfile.flush()?;
-    assert_eq!(
-        crate::Hasher::new()
-            .update_mmap_rayon(tempfile.path())?
-            .finalize(),
-        crate::hash(&input),
-    );
     Ok(())
 }
 

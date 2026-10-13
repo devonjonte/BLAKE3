@@ -851,19 +851,6 @@ pub fn words_from_le_bytes_64(bytes: &[u8; 64]) -> [u32; 16] {
     out
 }
 
-#[inline(always)]
-pub fn le_bytes_from_words_32(words: &[u32; 8]) -> [u8; 32] {
-    let mut out = [0; 32];
-    *<&mut [u8; 4]>::try_from(&mut out[0 * 4..][..4]).unwrap() = words[0].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[1 * 4..][..4]).unwrap() = words[1].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[2 * 4..][..4]).unwrap() = words[2].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[3 * 4..][..4]).unwrap() = words[3].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[4 * 4..][..4]).unwrap() = words[4].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[5 * 4..][..4]).unwrap() = words[5].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[6 * 4..][..4]).unwrap() = words[6].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[7 * 4..][..4]).unwrap() = words[7].to_le_bytes();
-    out
-}
 
 #[inline(always)]
 pub fn le_bytes_from_words_64(words: &[u32; 16]) -> [u8; 64] {

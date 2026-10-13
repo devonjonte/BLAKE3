@@ -36,7 +36,7 @@ Work happens on `candidate/<topic>` branches (`candidate/p-e-classification`, `c
 A candidate reaches `servil` only when all of these hold, and never without the performance check:
 
 1. It is a fast-forward of `servil`'s current tip, so what was measured is exactly what lands. When `servil` has moved, rebase and check again.
-2. Every test suite passes, judged by each suite's exit status (a failing test binary prints no `test result` line, so a list of result lines can hide it): the fork's default, `no_sme2`, and `pure` builds, the integration tests, the official vectors, b3sum's, and the benchmark's own tests. The fork's GitHub CI passes on the candidate's tip: it builds every target with warnings as errors, which the local suites and the Mac's test job do not (an unused import reached `servil` 1352c21 that way, October 5, 2026).
+2. Every test suite passes, judged by each suite's exit status (a failing test binary prints no `test result` line, so a list of result lines can hide it): the fork's default, `no_sme2`, and `pure` builds, the integration tests, the official vectors, b3sum's, and the benchmark's own tests. The fork's GitHub CI passes on the candidate's tip: it builds every target with warnings as errors, which the local suites and the Mac's test job do not (an unused import reached `servil` 1352c21 that way, October 5, 2026). Where the candidate changes the SME2 kernels, the SME2 proofs at every group count pass too: a workflow started by hand (`sme2-every.yml`), kept out of every push for its hours of Arm time.
 3. `pypy3 tools/perf_regress.py compare servil candidate/<topic>` reports no regression on the VM.
 4. The same comparison reports no regression natively on the Mac.
 
@@ -74,6 +74,7 @@ The benchmark calls the current fork API; a commit that predates it fails to bui
 
 ## Building and running
 
+- Use `pypy3` for Python tools wherever it serves. The Z3-heavy proofs in `tools/verify/` use `python3`: their work crosses the ctypes boundary into libz3, and the interpreter comparison favoured CPython. C2SP's submitted scripts keep `python3` for portability.
 - The VM is Debian 12 on AArch64 with 16 vCPUs (inspect `nproc` after a restart). Its CPU exposes SME2 with 512-bit streaming vectors (`/proc/cpuinfo` lists `sme2`), so the fork's kernels run here. Absolute timings differ from Apple hardware; relative comparisons hold.
 - The fork's SME2 kernel is `c/blake3_sme2_aarch64.S`, compiled by the `cc` crate with `-march=armv9-a+sme2`. The system `cc` (GCC 12) and `as` (binutils 2.40) predate SME2, so under them the fork builds without the SME2 kernel and warns (the user's decision, September 25, 2026, for Debian 12 and Raspberry Pi OS users); every VM build takes `CC=clang-19`, which assembles SME2, and `perf_regress` fails stop when a build on an SME2 machine lacks the kernel; `TMPDIR` gives clang a temporary directory that exists in the guest.
 - `vm/setup.sh` configures the guest system for the whole boot, so every `git` and `cargo` command runs as it is: `/etc/gitconfig` includes `vm/home/.gitconfig` (whose `safe.directory` covers the mount's files, which show as uid 501 while the guest runs as uid 0), `$CARGO_HOME/config.toml` sets the target directory and `CC=clang-19`, and the Mac's `HOME` and `TMPDIR`, which the guest's shells inherit, are created in the guest.

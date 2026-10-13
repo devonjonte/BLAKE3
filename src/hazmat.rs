@@ -433,7 +433,7 @@ fn merge_subtrees_inner(
     right_child: &ChainingValue,
     mode: Mode,
 ) -> crate::Output {
-    crate::parent_node_output(
+    crate::hasher::parent_output(
         &left_child,
         &right_child,
         &mode.key_words(),

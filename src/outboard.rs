@@ -61,7 +61,7 @@ fn outboard(mode: Mode, input: &[u8], pooled: bool) -> (Hash, Vec<u8>) {
     let cvs = if pooled { crate::lanes::group_cvs(input, &key, flags) } else { group_cvs(input, 0, &key, flags, platform) };
     let mut out = Vec::with_capacity(64 * (cvs.len() - 1));
     let (left, right) = node(&cvs, chunks, &key, flags, platform, &mut out);
-    (crate::parent_node_output(&left, &right, &key, flags, platform).root_hash(), out)
+    (crate::hasher::parent_output(&left, &right, &key, flags, platform).root_hash(), out)
 }
 
 /// Whether `bytes`, the message's bytes from group `first` on (offset
@@ -235,7 +235,7 @@ impl Verifier {
         for &((_, size, expected), bytes) in nodes {
             let ok = if size > GROUP_CHUNKS {
                 let (left, right): (CVBytes, CVBytes) = (bytes[..32].try_into().unwrap(), bytes[32..].try_into().unwrap());
-                let parent = crate::parent_node_output(&left, &right, &self.key, self.flags, platform);
+                let parent = crate::hasher::parent_output(&left, &right, &self.key, self.flags, platform);
                 match expected {
                     None => parent.root_hash() == self.mode_hash,
                     Some(cv) => parent.chaining_value() == cv,
@@ -292,7 +292,7 @@ fn check(outboard: &[u8], at: usize, g0: u64, size: u64, expected: Option<CVByte
     }
     let pair: &[u8; 64] = outboard[at..at + 64].try_into().unwrap();
     let (left, right): (CVBytes, CVBytes) = (pair[..32].try_into().unwrap(), pair[32..].try_into().unwrap());
-    let parent = crate::parent_node_output(&left, &right, key, flags, platform);
+    let parent = crate::hasher::parent_output(&left, &right, key, flags, platform);
     let ok = match expected {
         None => parent.root_hash() == *hash,
         Some(cv) => parent.chaining_value() == cv,
@@ -325,7 +325,7 @@ fn subtree(cvs: &[CVBytes], size: u64, key: &CVWords, flags: u8, platform: Platf
         return cvs[0];
     }
     let (left, right) = node(cvs, size, key, flags, platform, out);
-    crate::parent_node_output(&left, &right, key, flags, platform).chaining_value()
+    crate::hasher::parent_output(&left, &right, key, flags, platform).chaining_value()
 }
 
 /// Groups hashed in one batch: their chunks in one many-inputs call, then

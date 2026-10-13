@@ -24,7 +24,7 @@ pub const GROUP: usize = 16;
 /// a microsecond on Apple M4, more than a whole group of parent compressions
 /// (~170 ns); eight groups per call amortize it. Measured single-thread
 /// `blake3::hash` on a 64 MiB input: degree 16 → 226 ps/B, 64 → 182, 128 → 167
-/// (NEON: 424). 128 also keeps `compress_subtree_wide`'s stack arrays at 8 KiB.
+/// (NEON: 424). 128 also keeps the walk's (`tree::wide`) stack arrays at 8 KiB.
 pub const DEGREE: usize = 128;
 
 /// Fewest one-block inputs left over after the SME2 groups that go to
@@ -386,7 +386,7 @@ pub fn flat_takes(len: usize) -> bool {
 
 /*
  * A whole subtree of 32 to 1024 chunks, bottom up, on SME2 alone: what
- * `compress_subtree_wide` returns for it, its DEGREE chaining values
+ * the walk (`tree::wide`) returns for it, its DEGREE chaining values
  * (each covering n / DEGREE chunks). The chunks go to the kernel with an
  * integer lane in groups of 18 (8 of them per 144 chunks), the rest to the
  * plain kernel in groups of 16, with nothing left over (n is a multiple of

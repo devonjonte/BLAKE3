@@ -1445,8 +1445,10 @@ item out when it lands or is rejected.
 - Revisit a possible energy-efficiency option (removed October 2, 2026:
   its complexity outweighed its likely use; the September 25
   measurements, "Energy per byte" above, are where to start).
-- update_rayon on the fork's pool, one mechanism for multithreading
-  (changes its contract: today it runs on the caller's Rayon pool).
+- update_rayon removed (Zooko, October 10, 2026): one mechanism for
+  multithreading (`update_multithreaded` and the fork's workers); with it
+  went `update_mmap_rayon`, the `rayon` feature, rayon-core, and the
+  `Join` generic over the tree walk, which only it used.
 - A Merkle tree API (`servil::merkle`, for users like Remco's WHIR);
   write its trade-offs up for Zooko before building.
 
@@ -1492,6 +1494,20 @@ item out when it lands or is rejected.
 - The Mac's serial 128 MiB rise.
 
 ### Tooling
+
+- The Rust that arranges the tree (chunks, parents, the Hasher, batches,
+  the threads' division of work), against the Lean specification for every
+  input: prototype a safe-Rust core of the single-thread tree walk for
+  Aeneas (Rust to Lean), measure its cells, and prove it in Lean against
+  c2sp/BLAKE3 with the kernels as axioms the machine-code proofs discharge.
+- The cross-check compares registers and memory; the flag-setting
+  instructions (cmp, ccmp, tst, cset) want their flags compared too.
+- The SME2 kernels' group loop: show its state at the loop head the same
+  at every iteration but for the advanced pointers and counter, so the
+  proofs (one and two groups) cover any number of groups.
+- The proofs' instruction models replaced by Arm's machine-readable
+  specification (Sail, Isla), or the kernels proved in s2n-bignum's HOL
+  Light model; the C NEON kernel (`c/blake3_neon.c`) proved too.
 
 - P/E classification of every Mac sample; perf_regress P against P.
 - Host load in the VM (no steal time): a reference loop timed beside the
@@ -2110,6 +2126,30 @@ place (a fixed array of 64 pieces on the stack would make the
 multithreaded calls allocation-free too), and a test per claim (the
 counting allocator of tests/queue_no_alloc.rs).
 
+## The assembly kernels proved (October 6, 2026)
+
+`tools/verify` (its README) proves every AArch64 assembly kernel equal to
+BLAKE3's compression for every input: the hybrids at every block count
+(327 cases), SME2's five entry points at the 512-bit vector length (34).
+Symbolic execution of the assembled object over Z3 terms; outputs
+compared in a normal form of our own (`canon.py`: sorted sums and xors,
+whole rotations, byte and lane shuffles undone), since Z3's simplifier
+splits words into bytes differently on each side and its solver cannot
+settle seven rounds; small parameter terms (counter halves, flags) go to
+the solver. Regions check every access; a data-dependent branch, select,
+address, or table index stops a proof, so proved kernels branch on
+lengths alone.
+
+Lessons, for the next tool of this kind: cache Z3 terms by id only while
+holding them (ids are reused, which could equate different terms), and
+give each proof case a fresh process (the caches grow; 16 workers ran the
+VM out of memory). The cross-checks found one model error: a four-
+register ZA move aligns its slice base down to a multiple of four.
+
+Code changed for the proofs: the SME2 message kernel's last-block length
+without a branch (285ecf0; Mac job 1442, no regression), so one proof
+covers every length (199 cases with concrete lengths became 34).
+
 ## How much of a cold one-shot call is its code (October 6, 2026, jobs 1426-1427)
 
 probe/cold-code-share times `hash` after the benchmark's busy gap two
@@ -2467,3 +2507,179 @@ luck to remove, so the only benefit is fewer stuck checks on the VM.
 **The Mac's held 64 B cell (job 852) is layout luck**: the A/Bs of
 7270b21 against fa1ec7b read servil st 64 B after other work x0.93
 (unaligned, jobs 856-859) and x0.88 (aligned, 860-863). No regression.
+
+## Verification work (October 8, 2026)
+
+**The normalizer's length symbols.** `canon.has_data` counted a declared
+length symbol (the induction's iteration `len_k`) as message data. So two
+equal forms of the counter's low half took different routes:
+`Extract(31, 0, counter + 16 len_k)` became a solver leaf, while
+`Extract(31, 0, counter) + 16 Extract(31, 0, len_k)` became round
+arithmetic. Their normal forms then differed. `canon.set_context` now hands
+the path's length symbols to that classification; `test_helpers.py` holds it
+(CI runs it). With the fix, the SME2 group-loop induction proved its old
+harness for every group count (1 path back to the head, 1 out, 66 min). A
+substitution check on the input's upper bits was considered first and
+dropped: it would have added a mechanism before the cause was known
+(AGENTS.md, the orange flag).
+
+**The SME2 induction's harness had a gap; it is closed.** The old harness
+gave every group's table entries the same 16 chunks, so a kernel that
+never advanced its table pointer (`add x0, x0, #0x80` made `#0x0`: every
+group hashing group 0's chunks) was **proved** by it (4852 s). The
+harness now gives group G's chunk for lane l its own offset, 1024 G, in
+lane l's region. Each read must lie inside the current group's chunk,
+group 0 in the runs to the loop's head and K in the step; the solver
+checks this under the path's assumptions. The same mutant is rejected:
+"a read of lane 0 outside the current group's chunk" (4739 s).
+Reusing the chunks' symbols across groups stays sound: a read of another
+group's data fails the check, and register state carried across groups
+is generalized to unknowns. A kernel that preloads the next group would
+fail the check even when right: the proof can be incomplete, never
+unsound. Under the corrected harness the kernel is proved at every group
+count (1 path back to the head, 1 out; 12145 s, 3.4 hours, against 66 min
+for the old harness: every chunk byte is read at a symbolic offset, and
+the solver places it). Its loop's other steps, planted wrong, are
+rejected too: the output pointer's (`add x4, x4, #0x200` made `#0x1e0`,
+"group output 0 is not wholly written", 12438 s) and the counter's (`lsl
+#4` made `lsl #3`, "group output 0, word 0, differs", 12135 s). The proof
+runs as `prove_sme2.py every`, and in CI as a job of its own; the mutants
+were run once (October 8), at 3.4 hours each. A faster form of the check
+(pointers built from the current group, offsets compared by
+simplification first) is saved in `tmp/sme2-fast-harness.patch`: no
+first pass after 69 min, so it was set aside unmeasured.
+
+**The parent kernel at every group count** (`prove_sme2.py
+parents_every`, 66 s). Its loop jumps back past its entry's loads, and
+each iteration preloads the next group's pairs, so the chunk kernel's
+check (every read inside the current group) rejected it, rightly: with
+every group reading the same symbols, a preloading kernel that hashed
+the next group's pairs in place of its own would compute the same terms.
+So each group's words differ: word w of group G is pair_w + G (for each G
+these range over every value). Consecutive groups' words differ by 1, a
+constant, which the generalization keeps as pair_w + K. Two tools
+improved on the way, each with a test in `test_helpers.py`:
+`induction.constant_difference` asks the solver (after a random-point
+screen, and for terms without BLAKE3's xors and rotations) when byte
+shuffles hide a constant difference from Z3's simplifier, and `canon` makes a sum's data-free summands one leaf (K + 1
+against a group number computed from an address). Its loop steps,
+planted wrong, are rejected by the induction: the input step (`add x9,
+x9, #0x400` made `#0x3c0`) and the output step (`#0x200` made `#0x1e0`).
+All suites pass with the changed normalizer (hybrid 327, SME2 34, Rust 24,
+mutants 29).
+
+**The extended-output kernel at every group count** (`prove_sme2.py
+xof_every`, 72 s): 1 path back to the head, 1 out. Its counter step
+(`add x2, x2, #0x10` made `#0xf`) and output step (`#0x400` made `#0x3c0`),
+planted wrong, are rejected by the induction. **The message kernel**
+(`messages_every`, one induction per block count, 2 to 16): its counter
+advances by a parameter, `step`, so the generalization now also takes a
+difference made of parameters alone as the iteration's step (the
+induction's step from K to K + 1 then proves it). All 15 block counts are
+proved at every group count, 123 s (2 blocks) to 3645 s (16), and the
+chunk kernel again on the final code, 5107 s (12145 s before two
+speedups: `induction.forced` and the group check try simplification
+before the solver, and the generalization keeps a hash state only when
+both arrivals hold the same term).
+
+**The Hasher's stack as a plain array, measured** (October 9, VM, wall
+time; the VM reports no per-thread cycles): a Hasher's whole life on 64
+bytes (new, update, finalize) took 59.9 ns with the `ArrayVec` stack and
+69.8 ns with `[CVBytes; 55]` and a length, in all 8 alternating pairs
+(examples/hasher_short.rs on probe/stack-array): zeroing 1.7 KiB in
+`Hasher::new` costs about 10 ns, 16%. The array made at the first push
+instead (`Option<[CVBytes; 55]>` and a length; probe/stack-array): a
+message of one chunk pushes nothing, and a longer one zeroes it once,
+after hashing a chunk. Measured the same way, 3 alternating sets of old
+new new old, means of 6 runs a side: 64 B 61.5 against 60.1 ns, 1025 B
+(one push) 897 against 894, 2 KiB 996 against 997, 8 KiB 2184 against
+2175: no cost seen. So the stack can be plain safe Rust that Aeneas
+translates, as the walk is, with no machine-code proof and no trusted
+contract for `ArrayVec`. The stack then moved into `src/stack_core.rs` (probe/stack-array
+8df858c): the lazy array, push, and merge over a one-method `Parent`
+trait, which `merge_cv_stack` calls. Its suites pass (default, no_sme2,
+pure, zeroize, doc tests, api_plan, vectors, warnings-as-errors builds).
+VM: `hasher_short` 64 B to 64 KiB within 0.3% (64 B 2% faster),
+`perf_regress` no cell slower. Mac (jobs 1480-1489, on battery):
+`perf_regress` no cell slower twice; but the benchmark's servil-st small
+cells read slower in all three alternating pairs (64 B x1.09-1.19, 128 B
+x1.02-1.15, batches of 2 x1.19-1.32), on paths that never touch the
+stack, while `clocks` found the Mac busy (0.6-0.9 CPUs of other
+programs) in each pair, so those runs are no evidence of speed. Open:
+measure again on an idle Mac on mains power; if it holds, its cause
+(code layout from the new module is the first suspect) before the stack
+goes further. Proved as code (e8a75e3): Aeneas translates `src/stack_core.rs` as
+it is (`rust/stackcore` includes it); `StackProofs.lean` proves its
+`merge` computes `HasherProofs.lean`'s merge, never failing, on a stack
+of at most 55 values and a target of at least 1, and its `push` appends.
+The derived `Clone` brought `Option`'s clone in as an external definition
+(a trusted axiom); a clone written by hand copies the array, and the
+translation has none.
+
+**Isla and ZA writes**: the moves into ZA's vertical slices, and
+single-register writes into ZA of either orientation, grow Isla past 98
+GB in under two minutes (the four-register horizontal moves complete in
+about 16 GB): a limit of its symbolic execution here, not a memory need
+just past 50 GB.
+
+**The instruction models against Arm's specification.**
+`tools/verify/isla_check.py` runs each form through Isla on Sail's
+Armv9.4 snapshot. It proves our model equal to Arm's for every input on
+every completing path: the general registers, the NZCV flags (PSTATE's
+1-bit fields), and a vector register's 128 bits. A condition left open
+(csel, ccmp, cset) is checked on each side. It covers 136 of the 137
+forms the proofs use, the flag-setting ones included; Isla cannot run
+`tbl`. It rejects five planted model errors.
+
+The four `dup (element)` forms first disagreed. The cause is in the
+snapshot (isla-snapshots, armv9p4, December 2024): it was compiled with
+Sail's `unsigned_subrange` before Sail's fix (rems-project/sail 1f8f173,
+June 2026, for sail-arm#32), which shifted the selected bits right by
+their high index. `isla_check` applies that one-argument fix itself and
+asserts it finds the unfixed code. With the fix, all four agree; a model
+reading the wrong lane is still rejected. Reported, with the correction:
+[Isla #107](https://github.com/rems-project/isla/issues/107).
+
+**The tree walk in Lean, through Aeneas** (`tools/verify/tree/`). The
+safe-Rust crate `widecore` has the shape of the library's
+`compress_subtree_wide`: chunk and parent kernels behind a trait, a
+256-value stack buffer, the degree-1 case. Aeneas translates it to Lean;
+`wide_is_tree` proves it computes the C2SP specification's tree for every
+nonempty input whose chunk count fits in 64 bits. It returns without
+panicking or overflowing, every buffer is large enough, and the
+`cvs[..ln + rn]` slice reads exactly the two halves' values (the left
+half fills its buffer). Kernels of any power-of-two degree up to 128
+qualify. The kernels' contracts are its hypotheses, which the assembly
+proofs establish, and kernels meeting them exist. Two mutated walks fail
+the proof, one of the binary walk's loop and one of the wide walk's
+degree-1 test. The key lemma, `treeL_layerL`: the specification's tree
+over one layer of parents is its tree over the layer below. The library
+itself does not yet call `widecore`: making it do so (with SME2's flat
+path and the hybrids' partial chunk as kernels) is the step that puts
+the proof on the code users run, measured on the Mac first.
+
+
+### October 11, 2026: the root's children proved; Arm's specification in Lean (probe)
+
+- `children` (tree_core.rs) condenses the walk's values and is proved
+  (ChildrenProofs.lean) to return the chaining values of two of the
+  specification's nodes whose parent is the specification's tree node over
+  the chunks; for a whole input, `Blake3.tree`'s root. The proof follows the
+  walk's values as the specification's nodes (`wideI_map`, `layerL_map`).
+  Library: condense_subtree calls it (dc53411); VM and Mac (job 1501) pass.
+- The stack change, idle Mac on mains (jobs 1502-1507): nonstop cells within
+  3%, lent cells within 1.3%; the busy runs' slower small cells do not
+  reproduce.
+- Probe probe/sail-lean (tools/verify/sail/README.md): Arm's Sail model,
+  sliced and translated to Lean, proves BLAKE3's G as 14 Arm instructions
+  for any registers and state. Two translation bugs, fixed upstream
+  (sail#1772: tuple assignments to locals dropped; sail-arm#33: MOD as
+  Nat.div); the compiled Lean model agrees with the CPU on 8,000 cases and
+  catches the second. Open: memory (a load's slice brings address
+  translation, 1,461 functions), decoding (Arm's decoder, a 2,542-line
+  chain, over an hour in Lean), UNKNOWN values (the ArchSem interface).
+- Next for `hash` in Lean: the root compression and the one-chunk path. Two
+  performance designs meet it: the multi-chunk buffers kept out of the
+  one-chunk path's frame (`#[inline(never)]`, the 16-chunk small arrays),
+  and SME2's flat walk to the root's children (a hook, or removed if a
+  measurement shows the walk then parents costs nothing).

@@ -45,7 +45,7 @@ pub fn parent_cv(
     right_child: &crate::Hash,
     is_root: bool,
 ) -> crate::Hash {
-    let output = crate::parent_node_output(
+    let output = crate::hasher::parent_output(
         left_child.as_bytes(),
         right_child.as_bytes(),
         crate::IV,
