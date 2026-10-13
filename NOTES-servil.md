@@ -858,6 +858,27 @@ only the continuous cells and the long streams read here:
   KiB pieces 2-7% slower solo and 15-41% slower shared, 1-2 MiB 13-26%
   faster; continuous cells level.
 
+## A whole chunk and a partial one, side by side on x86-64 (October 14, 2026)
+
+On x86 a message of one whole chunk and a partial one hashed the two
+chunks one after the other: 16 blocks, then the partial chunk's, then the
+root, each block waiting about 200 cycles on the one before. The AVX2 and
+AVX-512 kernels already hash two inputs side by side, in one register's
+two halves; llvm-mca (LLVM 19) puts a block of both at 0.92-1.09 times a
+block of one (Skylake, Ice Lake, Alder Lake, Zen 2-4), and qemu counts 435
+instructions for it against the one-block kernel's 479. `pair.rs` hashes
+the first blocks of both chunks together (all but the partial chunk's last,
+which alone carries CHUNK_END), then each chunk's rest; it is
+`compress_chunks_parallel`'s x86 counterpart of the NEON hybrids' q
+kernels. SSE4.1 hashes two inputs one after the other, so it is left out.
+Blocks in the longest chain, before -> after: 1536 bytes 25 -> 18, 2047 33
+-> 18. Instructions per hash() call (qemu, AVX2): 1089 bytes 8719 -> 8255,
+1536 11577 -> 8281, 2047 15385 -> 8321; 1088 +11 (the length check).
+Correctness: the x86 suites under qemu's AVX2 (and pair.rs's test of every
+length it takes, in all three modes, against the reference); qemu runs no
+AVX-512, so that path is the AVX-512 kernel's own two-input path, untested
+here. Unmeasured on x86 hardware.
+
 ## Rejected (with the reason; do not retry without new evidence)
 
 - **A woken worker prefetching a piece's kernels** (probe/wake-prefetch,
