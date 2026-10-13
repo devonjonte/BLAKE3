@@ -5,6 +5,7 @@
 //!
 //! ```
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # blake3_servil::initialize();
 //! // Hash an input all at once.
 //! let hash1 = blake3_servil::hash(b"foobarbaz");
 //!
@@ -969,6 +970,7 @@ fn hash_all_at_once(
 /// The hash of `input`, on the calling thread.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// let hash = blake3_servil::hash(b"foo");
 /// # let hash1 = hash;
 ///
@@ -1000,6 +1002,7 @@ pub fn hash(input: &[u8]) -> Hash {
 /// [`Hash`](struct@Hash) as [`hash`], never slower.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// let hash = blake3_servil::hash_multithreaded(&[0u8; 1 << 20]);
 /// assert_eq!(hash, blake3_servil::hash(&[0u8; 1 << 20]));
 /// ```
@@ -1086,6 +1089,7 @@ impl Mode<'_> {
 /// derivation, at [`hash`]'s speed.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::Mode;
 /// let key = [7u8; 32];
 /// assert_eq!(blake3_servil::hash_with(Mode::Keyed(&key), b"foo"), blake3_servil::keyed_hash(&key, b"foo"));
@@ -1098,6 +1102,7 @@ pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
 /// [`hash_multithreaded`] in any [`Mode`], at its speed.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::Mode;
 /// let key = [7u8; 32];
 /// let input = vec![1u8; 1 << 20];
@@ -1308,6 +1313,7 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
 /// (`message_len` 64).
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// let leaves = vec![7u8; 1000 * 256];
 /// let mut hashes = vec![[0u8; 32]; 1000];
 /// blake3_servil::hash_many(&leaves, 256, &mut hashes);
@@ -1356,6 +1362,7 @@ fn hash_many_serial_from(platform: Platform, input: &[u8], message_len: usize, k
 /// hashes, never slower.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// let leaves = vec![7u8; 4096 * 256];
 /// let mut hashes = vec![[0u8; 32]; 4096];
 /// blake3_servil::hash_many_multithreaded(&leaves, 256, &mut hashes);
@@ -1374,6 +1381,7 @@ pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8;
 /// [`hash_many`] in any [`Mode`], at its speed.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::Mode;
 /// let key = [7u8; 32];
 /// let nodes = vec![1u8; 20 * 64];
@@ -1389,6 +1397,7 @@ pub fn hash_many_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[
 /// [`hash_many_multithreaded`] in any [`Mode`], at its speed.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::Mode;
 /// let key = [7u8; 32];
 /// let nodes = vec![1u8; 20000 * 64];
@@ -1630,6 +1639,7 @@ pub fn kernel_report_multithreaded() -> KernelReport {
 /// [`Hasher::update`], and [`Hasher::finalize`]. These two lines are equivalent:
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// # const KEY: &[u8; 32] = &[0; 32];
 /// let mac = blake3_servil::keyed_hash(KEY, b"foo");
 /// # let mac1 = mac;
@@ -1679,6 +1689,7 @@ pub fn keyed_hash(key: &[u8; KEY_LEN], input: &[u8]) -> Hash {
 /// [`Hasher::update`], and [`Hasher::finalize`]. These two statements are equivalent:
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// # const CONTEXT: &str = "example.com 2019-12-25 16:18:03 session tokens v1";
 /// let key = blake3_servil::derive_key(CONTEXT, b"key material, not a password");
 /// # let key1 = key;
@@ -1725,6 +1736,7 @@ pub fn derive_key(context: &str, key_material: &[u8]) -> [u8; OUT_LEN] {
 ///
 /// ```
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # blake3_servil::initialize();
 /// // Hash an input incrementally.
 /// let mut hasher = blake3_servil::Hasher::new();
 /// hasher.update(b"foo");
@@ -2029,6 +2041,7 @@ impl Hasher {
     /// hashes each piece while your thread reads the next.
     ///
     /// ```
+    /// # blake3_servil::initialize();
     /// let input = vec![7u8; 3 << 20];
     /// let mut hasher = blake3_servil::Hasher::new();
     /// for piece in input.chunks(64 * 1024) {
@@ -2107,6 +2120,7 @@ impl Hasher {
     /// # use std::fs::File;
     /// # use std::io;
     /// # fn main() -> io::Result<()> {
+    /// # blake3_servil::initialize();
     /// // Hash standard input.
     /// let mut hasher = blake3_servil::Hasher::new();
     /// hasher.update_reader(std::io::stdin().lock())?;
@@ -2153,6 +2167,7 @@ impl Hasher {
     /// # use std::io;
     /// # use std::path::Path;
     /// # fn main() -> io::Result<()> {
+    /// # blake3_servil::initialize();
     /// let path = Path::new("file.dat");
     /// let mut hasher = blake3_servil::Hasher::new();
     /// hasher.update_mmap(path)?;

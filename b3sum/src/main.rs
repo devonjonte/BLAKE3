@@ -666,6 +666,7 @@ fn check_one_checkfile(path: &Path, args: &Args, files_failed: &mut u64) -> anyh
 }
 
 fn main() -> anyhow::Result<()> {
+    blake3::initialize();
     let args = Args::parse()?;
     if args.num_threads().is_some() {
         eprintln!("{NAME}: warning: --num-threads is no longer supported and is ignored; b3sum chooses its threads itself");
@@ -696,6 +697,7 @@ mod test {
 
     #[test]
     fn test_args() {
+        blake3::initialize();
         crate::Inner::command().debug_assert();
     }
 }

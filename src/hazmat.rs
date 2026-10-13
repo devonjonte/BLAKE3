@@ -49,6 +49,7 @@
 //!
 //! ```
 //! # fn main() {
+//! # blake3_servil::initialize();
 //! use blake3_servil::{Hasher, CHUNK_LEN};
 //! use blake3_servil::hazmat::{merge_subtrees_non_root, merge_subtrees_root, Mode};
 //! use blake3_servil::hazmat::HasherExt; // an extension trait for Hasher
@@ -94,6 +95,7 @@
 //!
 //! ```
 //! # fn main() {
+//! # blake3_servil::initialize();
 //! # use blake3_servil::{Hasher, CHUNK_LEN};
 //! # use blake3_servil::hazmat::{Mode, HasherExt, merge_subtrees_non_root, merge_subtrees_root};
 //! # let chunk0 = [b'a'; CHUNK_LEN];
@@ -127,6 +129,7 @@
 //!
 //! ```should_panic
 //! # fn main() {
+//! # blake3_servil::initialize();
 //! # use blake3_servil::{Hasher, CHUNK_LEN};
 //! # use blake3_servil::hazmat::HasherExt;
 //! # let chunk0 = [b'a'; CHUNK_LEN];
@@ -169,6 +172,7 @@ pub trait HasherExt {
     /// # Example
     ///
     /// ```
+    /// # blake3_servil::initialize();
     /// use blake3_servil::Hasher;
     /// use blake3_servil::hazmat::HasherExt;
     ///
@@ -340,6 +344,7 @@ fn test_max_subtree_len() {
 /// Hash a input of random length as two subtrees:
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// # #[cfg(feature = "std")] {
 /// use blake3_servil::hazmat::{left_subtree_len, merge_subtrees_root, HasherExt, Mode};
 /// use blake3_servil::{Hasher, CHUNK_LEN};
@@ -489,6 +494,7 @@ pub fn merge_subtrees_root(
 /// # Example
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::hazmat::{merge_subtrees_root_xof, HasherExt, Mode};
 /// use blake3_servil::{Hasher, CHUNK_LEN};
 ///
@@ -540,6 +546,7 @@ pub type ContextKey = [u8; KEY_LEN];
 /// # Example
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::Hasher;
 /// use blake3_servil::hazmat::HasherExt;
 ///

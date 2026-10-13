@@ -97,6 +97,7 @@ fn allocations_after_warm_up(warm: usize, rounds: usize, mut round: impl FnMut()
 }
 
 fn main() {
+    blake3_servil::initialize();
     // Under Miri, test::test_miri_queue_round_trips stands in: this many
     // rounds would take it hours.
     #[cfg(not(any(target_family = "wasm", miri)))]
