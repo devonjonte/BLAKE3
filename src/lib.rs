@@ -258,6 +258,7 @@ mod many;
 mod queue;
 #[cfg(feature = "std")]
 pub use queue::{FixedHandler, MessageHandler, PieceHandler, Queue, shape};
+mod pair;
 mod self_test;
 
 /// The startup self-test's own time, for probes: it runs again (it has
@@ -771,6 +772,12 @@ fn compress_chunks_parallel(
     let mut chunks_array = ArrayVec::<&[u8; CHUNK_LEN], MAX_SIMD_DEGREE>::new();
     for chunk in &mut chunks_exact {
         chunks_array.push(chunk.try_into().unwrap());
+    }
+    // A whole chunk and a partial one, on AVX2 or AVX-512: their first
+    // blocks side by side (pair.rs).
+    if pair::takes(platform, input.len()) {
+        out[..2 * OUT_LEN].copy_from_slice(&pair::parent(input, key, chunk_counter, flags, platform));
+        return 2;
     }
     // Whole chunks and a partial one, on the NEON hybrids: where a q kernel
     // covers the count, the partial chunk runs on the scalar units beside

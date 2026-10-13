@@ -18,6 +18,12 @@
   build, saying so. Each call then loads the detected platform instead of
   checking the self-test and detecting the CPU again, so the check costs
   nothing.
+- On x86-64 with AVX2 or AVX-512, a message of 1089 to 2047 bytes (a whole
+  chunk and a partial one, as a 1500-byte packet) hashes the two chunks'
+  first blocks side by side, on the kernels' existing two-input path: the
+  chain of dependent blocks at 1536 bytes falls from 25 to 18, at 2047 from
+  33 to 18 (instructions per call under qemu: 1536 bytes 11577 -> 8281;
+  unmeasured on x86 hardware).
 - The API documentation is rewritten for choosing a call and predicting
   its speed: a table of which call fits which data, and each call's speed
   on an Apple M4 Max.
