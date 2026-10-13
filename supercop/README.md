@@ -25,5 +25,5 @@ remains widely used, supported and distributed.
 
 To try it: unpack SUPERCOP, copy `crypto_hash/blake3/rust_servil` into its
 `crypto_hash/blake3/`, then run `./do-part init` and `./do-part crypto_hash blake3`
-(cargo needs network access to fetch the pinned commit). `sh make-tarball.sh COMMIT`
-writes the tarball for a pushed commit.
+(cargo needs network access to fetch the pinned commit). The tarball beside this file
+holds the same directory; `sh make-tarball.sh COMMIT` makes it for a pushed commit.
