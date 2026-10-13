@@ -1,4 +1,5 @@
 use std::env;
+use std::path::PathBuf;
 
 fn defined(var: &str) -> bool {
     println!("cargo::rerun-if-env-changed={}", var);
@@ -282,6 +283,20 @@ fn build_avx512_assembly() {
     build.compile("blake3_avx512_assembly");
 }
 
+// Whether this build assembles `source` with `flag`, as it will assemble the
+// kernel files: with the caller's CFLAGS, and with the `.arch` directive that
+// opens each kernel file, which reaches the assembler whatever -march the
+// flags end with. A test of the flag alone passes under CFLAGS=-march=native,
+// whose -march overrides the flag, while an assembler that predates the
+// extension still rejects the kernel file's `.arch` line.
+fn assembles(name: &str, flag: &str, source: &str) -> bool {
+    let path = PathBuf::from(env::var("OUT_DIR").unwrap()).join(format!("probe_{name}.S"));
+    std::fs::write(&path, source).unwrap();
+    let mut build = new_build();
+    build.file(&path).flag(flag).cargo_metadata(false).cargo_warnings(false);
+    build.try_compile(&format!("probe_{name}")).is_ok()
+}
+
 // The SME2 assembly implementation needs an assembler that understands
 // `.arch armv9-a+sme2` (Clang/LLVM 17+, Xcode 15+, or binutils 2.41+ with
 // GCC 14+). With an older compiler the crate builds without the SME2 kernel,
@@ -290,9 +305,8 @@ fn build_avx512_assembly() {
 // (Debian 12, Raspberry Pi OS) ship such compilers. Callers who want a
 // NEON-only build regardless say so with the `no_sme2` feature.
 fn c_compiler_supports_sme2() -> bool {
-    let build = new_build();
-    let compiler = build.get_compiler().path().to_owned();
-    let supported = matches!(build.is_flag_supported("-march=armv9-a+sme2"), Ok(true));
+    let compiler = new_build().get_compiler().path().to_owned();
+    let supported = assembles("sme2", "-march=armv9-a+sme2", ".arch armv9-a+sme2\nsmstart sm\nsmstop sm\n");
     if !supported {
         warn(&format!(
             "blake3-servil: {compiler:?} cannot assemble SME2 (-march=armv9-a+sme2), so this \
@@ -321,9 +335,8 @@ fn build_sme2_assembly() {
 // (GNU as 2.30+, LLVM 7+). With an older one the crate builds without them,
 // with a warning: the NEON intrinsics and the portable code serve instead.
 fn c_compiler_supports_sha3() -> bool {
-    let build = new_build();
-    let compiler = build.get_compiler().path().to_owned();
-    let supported = matches!(build.is_flag_supported("-march=armv8.2-a+sha3"), Ok(true));
+    let compiler = new_build().get_compiler().path().to_owned();
+    let supported = assembles("sha3", "-march=armv8.2-a+sha3", ".arch armv8.2-a+sha3\nxar v0.2d, v1.2d, v2.2d, #1\n");
     if !supported {
         warn(&format!(
             "blake3-servil: {compiler:?} cannot assemble armv8.2-a+sha3, so this build leaves out \

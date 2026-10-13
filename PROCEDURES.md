@@ -21,6 +21,8 @@ Speed is this fork's purpose, so no commit that makes it slower may enter git un
 
 **Releases:** `python3 tools/gen-ver.py X.Y.Z` from a clean tree (Zooko's technique, copied from bench-hashes: a commit setting X.Y.Z, a second setting X.Y.Z+<first commit>, a lightweight tag vX.Y.Z+<first commit>; push `servil`, then the tag by name). Before a release, run `check --against <previous release tag>`. Each commit is checked only against its parent, so slowdowns too small to flag one at a time could add up; the release check sees their sum.
 
+**eBASH, after each release:** `sh supercop/make-tarball.sh vX.Y.Z+<commit>` pins SUPERCOP's `crypto_hash/blake3/rust_servil` to the release and writes its tarball into `supercop/`, in place of the last one; commit both, push, and give the user the tarball's URL at that commit (`https://raw.githubusercontent.com/johnservil/BLAKE3/<commit>/supercop/<tarball>`) to send to the eBATS list, ebats at list.cr.yp.to. `supercop/README.md` says what the submission is; NOTES-servil.md, "eBASH", why and what is open.
+
 **Commits that skipped the check** (`--no-verify`, or made where the hook was absent) must be checked before they are pushed: `pypy3 tools/perf_regress.py compare <parent> <commit>` for one, `pypy3 tools/perf_bisect.py <commit> <commit> ...` for a run of them (each against the one before, then the last against the first).
 
 `NOTES-servil.md` ("The regression check, calibrated") gives the rule's measured false holds and sensitivity on the Mac, and why it judges the lent cells alone (the queue's move 6-60% between processes of identical code).

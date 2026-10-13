@@ -8,6 +8,10 @@
   llvm-mca predicts a chunk-or-less message and every single compression
   about 3x faster there (unmeasured on the hardware); the same size of code,
   level on the M4 Max VM.
+- The crate builds with any C compiler and CFLAGS: one whose assembler
+  predates SME2 (GCC 12 with binutils 2.40, as on Debian 12) leaves out the
+  SME2 kernel with a warning even when CFLAGS sets its own -march, such as
+  -march=native, under which the build used to fail.
 - The API documentation is rewritten for choosing a call and predicting
   its speed: a table of which call fits which data, and each call's speed
   on an Apple M4 Max.
