@@ -58,6 +58,7 @@ impl FixedHandler for Fixed {
 
 #[test]
 fn every_queue_completes_on_one_cpu() {
+    blake3_servil::initialize();
     // A cpu_set_t is an array of unsigned longs, CPU n at bit n % 64 of
     // long n / 64 (a byte array would set CPU 56 on big-endian targets).
     let mask: [core::ffi::c_ulong; 1] = [1];

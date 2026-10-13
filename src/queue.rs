@@ -132,6 +132,7 @@ pub mod shape {
 /// blocking the handler:
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::{Hash, MessageHandler, Mode, Queue};
 /// use std::sync::mpsc;
 ///

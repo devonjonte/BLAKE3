@@ -286,6 +286,7 @@ mod tests {
 
     #[test]
     fn run_test_vectors() {
+        blake3::initialize();
         let cases = parse_test_cases();
         let key: &[u8; blake3::KEY_LEN] = cases.key.as_bytes().try_into().unwrap();
         for case in &cases.cases {
@@ -340,6 +341,7 @@ mod tests {
 
     #[test]
     fn test_checked_in_vectors_up_to_date() {
+        blake3::initialize();
         // Replace Windows newlines, in case Git is configured to alter
         // newlines when files are checked out.
         let json = TEST_VECTORS_JSON.replace("\r\n", "\n");

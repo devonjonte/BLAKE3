@@ -51,6 +51,7 @@ fn per_thread(n: usize, len: usize, batch: bool) -> [(u64, String); 2] {
 }
 
 fn main() {
+    blake3_servil::initialize();
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
     let counts: Vec<usize> = [1, 2, 4, 8, 12, 16].into_iter().filter(|&n| n <= cpus).collect();
     println!("platform {}; per thread, median/slowest in ns per unit (the clock each ran at, - without cycle counts)", blake3_servil::kernel_report().platform);

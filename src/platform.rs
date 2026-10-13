@@ -51,8 +51,9 @@ cfg_if::cfg_if! {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[repr(u8)]
 pub enum Platform {
-    Portable,
+    Portable = 1,
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     SSE2,
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -138,10 +139,44 @@ impl Drop for Sme2Turn {
     }
 }
 
+/// The platform `initialize` detected, as its discriminant (1 and up), or 0
+/// before `initialize` has run.
+static DETECTED: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+/// A call before `initialize`: the caller broke the contract. The crate's
+/// own unit tests, many small programs in one, initialize here instead.
+#[cold]
+#[inline(never)]
+fn not_initialized() -> u8 {
+    #[cfg(test)]
+    {
+        crate::initialize();
+        DETECTED.load(core::sync::atomic::Ordering::Relaxed)
+    }
+    #[cfg(not(test))]
+    panic!("blake3-servil: call blake3_servil::initialize() once, before any other call: it runs the startup self-test and detects the CPU")
+}
+
 impl Platform {
+    /// The platform [`initialize`](crate::initialize) detected for this
+    /// process. The caller must have called `initialize` (or
+    /// `initialize_multithreaded`) before: a call before it panics, in every
+    /// build. The check costs nothing extra: it is the load of the platform,
+    /// which every call makes anyway.
+    #[inline]
     pub fn detect() -> Self {
-        crate::self_test::ensure();
-        Self::detect_unchecked()
+        let mut code = DETECTED.load(core::sync::atomic::Ordering::Relaxed);
+        if code == 0 {
+            code = not_initialized();
+        }
+        // Sound: DETECTED holds 0 or a Platform's discriminant (`record`).
+        unsafe { core::mem::transmute::<u8, Platform>(code) }
+    }
+
+    /// Make `self` what [`Platform::detect`] returns from now on, in every
+    /// thread: `initialize` does, once its self-test has passed.
+    pub(crate) fn record(self) {
+        DETECTED.store(self as u8, core::sync::atomic::Ordering::Relaxed);
     }
 
     /// [`Platform::detect`] without the startup self-test.

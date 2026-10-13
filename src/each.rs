@@ -17,6 +17,7 @@ use crate::{CVBytes, CVWords, ChunkState, Hash, Hasher, IncrementCounter, Mode, 
 /// Requires `out.len() == items.len()`.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::Mode;
 /// let items: Vec<Vec<u8>> = (0..100).map(|i| vec![i as u8; 1000 * i]).collect();
 /// let slices: Vec<&[u8]> = items.iter().map(|m| m.as_slice()).collect();
@@ -57,6 +58,7 @@ impl Hasher {
     /// [`update`](Hasher::update) each. Requires each `i < hashers.len()`.
     ///
     /// ```
+    /// # blake3_servil::initialize();
     /// use blake3_servil::Hasher;
     /// let mut hashers = vec![Hasher::new(), Hasher::new()];
     /// Hasher::update_each(&mut hashers, &[(0, b"ab"), (1, b"xyz"), (0, b"c")]);
@@ -197,6 +199,7 @@ const ALONE_CHUNKS: usize = 16;
 /// Requires `out.len() == items.len()`.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::Mode;
 /// let items: Vec<Vec<u8>> = (0..100).map(|i| vec![i as u8; 100 * i]).collect();
 /// let slices: Vec<&[u8]> = items.iter().map(|m| m.as_slice()).collect();

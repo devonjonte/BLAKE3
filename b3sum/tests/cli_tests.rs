@@ -10,6 +10,7 @@ pub fn b3sum_exe() -> PathBuf {
 
 #[test]
 fn test_hash_one() {
+    blake3::initialize();
     let expected = format!("{}  -", blake3::hash(b"foo").to_hex());
     let output = cmd!(b3sum_exe()).stdin_bytes("foo").read().unwrap();
     assert_eq!(&*expected, output);
@@ -17,6 +18,7 @@ fn test_hash_one() {
 
 #[test]
 fn test_hash_one_tag() {
+    blake3::initialize();
     let expected = format!("BLAKE3 (-) = {}", blake3::hash(b"foo").to_hex());
     let output = cmd!(b3sum_exe(), "--tag")
         .stdin_bytes("foo")
@@ -27,6 +29,7 @@ fn test_hash_one_tag() {
 
 #[test]
 fn test_hash_one_raw() {
+    blake3::initialize();
     let expected = blake3::hash(b"foo").as_bytes().to_owned();
     let output = cmd!(b3sum_exe(), "--raw")
         .stdin_bytes("foo")
@@ -39,6 +42,7 @@ fn test_hash_one_raw() {
 
 #[test]
 fn test_hash_many() {
+    blake3::initialize();
     let dir = tempfile::tempdir().unwrap();
     let file1 = dir.path().join("file1");
     fs::write(&file1, b"foo").unwrap();
@@ -67,6 +71,7 @@ fn test_hash_many() {
 
 #[test]
 fn test_hash_many_tag() {
+    blake3::initialize();
     let dir = tempfile::tempdir().unwrap();
     let file1 = dir.path().join("file1");
     fs::write(&file1, b"foo").unwrap();
@@ -89,6 +94,7 @@ fn test_hash_many_tag() {
 
 #[test]
 fn test_missing_files() {
+    blake3::initialize();
     let dir = tempfile::tempdir().unwrap();
     let file1 = dir.path().join("file1");
     fs::write(&file1, b"foo").unwrap();
@@ -120,6 +126,7 @@ fn test_missing_files() {
 
 #[test]
 fn test_hash_length_and_seek() {
+    blake3::initialize();
     let mut expected = [0; 100];
     blake3::Hasher::new()
         .update(b"foo")
@@ -160,6 +167,7 @@ fn test_hash_length_and_seek() {
 
 #[test]
 fn test_keyed() {
+    blake3::initialize();
     let key = [42; blake3::KEY_LEN];
     let f = tempfile::NamedTempFile::new().unwrap();
     f.as_file().write_all(b"foo").unwrap();
@@ -191,6 +199,7 @@ fn test_keyed() {
 
 #[test]
 fn test_derive_key() {
+    blake3::initialize();
     let context = "BLAKE3 2019-12-28 10:28:41 example context";
     let f = tempfile::NamedTempFile::new().unwrap();
     f.as_file().write_all(b"key material").unwrap();
@@ -204,6 +213,7 @@ fn test_derive_key() {
 
 #[test]
 fn test_no_mmap() {
+    blake3::initialize();
     let f = tempfile::NamedTempFile::new().unwrap();
     f.as_file().write_all(b"foo").unwrap();
     f.as_file().flush().unwrap();
@@ -218,6 +228,7 @@ fn test_no_mmap() {
 #[test]
 #[cfg(windows)]
 fn test_null_device_on_windows() {
+    blake3::initialize();
     let expected = blake3::hash(b"").to_hex();
     let output = cmd!(b3sum_exe(), "--no-names", "NUL").read().unwrap();
     assert_eq!(&*expected, output);
@@ -229,6 +240,7 @@ fn test_null_device_on_windows() {
 
 #[test]
 fn test_length_without_value_is_an_error() {
+    blake3::initialize();
     let result = cmd!(b3sum_exe(), "--length")
         .stdin_bytes("foo")
         .stderr_capture()
@@ -238,6 +250,7 @@ fn test_length_without_value_is_an_error() {
 
 #[test]
 fn test_raw_with_multi_files_is_an_error() {
+    blake3::initialize();
     let f1 = tempfile::NamedTempFile::new().unwrap();
     let f2 = tempfile::NamedTempFile::new().unwrap();
 
@@ -255,6 +268,7 @@ fn test_raw_with_multi_files_is_an_error() {
 #[test]
 #[cfg(unix)]
 fn test_newline_and_backslash_escaping_on_unix() {
+    blake3::initialize();
     let empty_hash = blake3::hash(b"").to_hex();
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir(dir.path().join("subdir")).unwrap();
@@ -298,6 +312,7 @@ fn test_newline_and_backslash_escaping_on_unix() {
 #[test]
 #[cfg(windows)]
 fn test_slash_normalization_on_windows() {
+    blake3::initialize();
     let empty_hash = blake3::hash(b"").to_hex();
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir(dir.path().join("subdir")).unwrap();
@@ -334,6 +349,7 @@ fn test_slash_normalization_on_windows() {
 #[test]
 #[cfg(unix)]
 fn test_invalid_unicode_on_unix() {
+    blake3::initialize();
     use std::os::unix::ffi::OsStringExt;
 
     let empty_hash = blake3::hash(b"").to_hex();
@@ -376,6 +392,7 @@ fn test_invalid_unicode_on_unix() {
 #[test]
 #[cfg(windows)]
 fn test_invalid_unicode_on_windows() {
+    blake3::initialize();
     use std::os::windows::ffi::OsStringExt;
 
     let empty_hash = blake3::hash(b"").to_hex();
@@ -419,6 +436,7 @@ fn test_invalid_unicode_on_windows() {
 
 #[test]
 fn test_check() {
+    blake3::initialize();
     // Make a directory full of files, and make sure the b3sum output in that
     // directory is what we expect.
     let a_hash = blake3::hash(b"a").to_hex();
@@ -583,6 +601,7 @@ fn test_check() {
 
 #[test]
 fn test_check_invalid_characters() {
+    blake3::initialize();
     // Check that a null character in the path fails.
     let output = cmd!(b3sum_exe(), "--check")
         .stdin_bytes("0000000000000000000000000000000000000000000000000000000000000000  \0")
@@ -657,6 +676,7 @@ fn test_check_invalid_characters() {
 
 #[test]
 fn test_globbing() {
+    blake3::initialize();
     // On Unix, globbing is provided by the shell. On Windows, globbing is
     // provided by us, using the `wild` crate.
     let dir = tempfile::tempdir().unwrap();
@@ -693,6 +713,7 @@ fn test_globbing() {
 
 #[test]
 fn test_num_threads_is_ignored_with_a_warning() {
+    blake3::initialize();
     let expected = format!("{}  -", blake3::hash(b"foo").to_hex());
     let output = cmd!(b3sum_exe(), "--num-threads", "3")
         .stdin_bytes("foo")
@@ -710,6 +731,7 @@ fn test_num_threads_is_ignored_with_a_warning() {
 /// hash()'s digest.
 #[test]
 fn test_inputs_around_the_read_piece() {
+    blake3::initialize();
     let dir = tempfile::tempdir().unwrap();
     for len in [(3usize << 20) + 12345, 4 << 20, (4 << 20) + 1, 8 << 20, (9 << 20) + 12345] {
         let path = dir.path().join(format!("input-{len}"));

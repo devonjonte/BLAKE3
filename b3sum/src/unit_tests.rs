@@ -2,6 +2,7 @@ use std::path::Path;
 
 #[test]
 fn test_parse_check_line() {
+    blake3::initialize();
     // =========================
     // ===== Success Cases =====
     // =========================
@@ -220,6 +221,7 @@ fn test_parse_check_line() {
 
 #[test]
 fn test_filepath_to_string() {
+    blake3::initialize();
     let output = crate::filepath_to_string(Path::new("foo"));
     assert_eq!(output.filepath_string, "foo");
     assert!(!output.is_escaped);

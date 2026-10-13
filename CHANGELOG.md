@@ -12,6 +12,12 @@
   predates SME2 (GCC 12 with binutils 2.40, as on Debian 12) leaves out the
   SME2 kernel with a warning even when CFLAGS sets its own -march, such as
   -march=native, under which the build used to fail.
+- **Breaking: every program calls `initialize()` (or
+  `initialize_multithreaded()`) once, before any other call.** It runs the
+  startup self-test and detects the CPU; a call before it panics, in every
+  build, saying so. Each call then loads the detected platform instead of
+  checking the self-test and detecting the CPU again, so the check costs
+  nothing.
 - The API documentation is rewritten for choosing a call and predicting
   its speed: a table of which call fits which data, and each call's speed
   on an Apple M4 Max.

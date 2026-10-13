@@ -23,6 +23,7 @@ const GROUP_CHUNKS: u64 = (GROUP_LEN / CHUNK_LEN) as u64;
 /// empty outboard.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::{Mode, outboard_with, verify_range_with, GROUP_LEN};
 /// let input = vec![7u8; 100_000];
 /// let (hash, outboard) = outboard_with(Mode::Hash, &input);
@@ -40,6 +41,7 @@ pub fn outboard_with(mode: Mode, input: &[u8]) -> (Hash, Vec<u8>) {
 /// [`hash_multithreaded`](crate::hash_multithreaded) does.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::Mode;
 /// let input = vec![9u8; 3 << 20];
 /// assert_eq!(blake3_servil::outboard_multithreaded_with(Mode::Hash, &input), blake3_servil::outboard_with(Mode::Hash, &input));
@@ -101,6 +103,7 @@ pub fn verify_range_with(mode: Mode, hash: &Hash, len: u64, outboard: &[u8], fir
 /// [`outboard_with`] costs.
 ///
 /// ```
+/// # blake3_servil::initialize();
 /// use blake3_servil::{Mode, Verifier};
 /// # let (input, encoding) = (vec![5u8; 50_000], blake3_servil::test_encoding(Mode::Hash, &vec![5u8; 50_000]));
 /// let hash = blake3_servil::hash(&input);
