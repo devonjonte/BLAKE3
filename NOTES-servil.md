@@ -898,6 +898,7 @@ Decided from the same models (Zooko, October 13, 2026):
   the A53, so they would need a choice by CPU type. The gain is one free
   scalar chunk beside eight NEON ones: nothing at 1536 or 4096 bytes, and
   power-of-two subtrees need a walk in groups of 9 to use it.
+
 ## eBASH: SUPERCOP measures the crate (October 12, 2026)
 
 eBASH (bench.cr.yp.to) times hashes with SUPERCOP. Our submission is
@@ -952,6 +953,7 @@ the crate runs upstream's code with its runtime choice of SSE4.1, AVX2 or AVX-51
 - Unverified: a throwaway timer outside `clocks` (a C glue since deleted) showed
   the integer + NEON kernels about 2x slower on input never written (every chunk
   on the shared zero page). Measure it with `clocks` before acting.
+
 ## A whole chunk and a partial one, side by side on x86-64 (October 14, 2026)
 
 On x86 a message of one whole chunk and a partial one hashed the two
