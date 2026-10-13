@@ -17,12 +17,12 @@
 //! compiler, and hardware faults hide from ordinary tests. The first case
 //! that differs names the failing path: the cases before it agreed.
 //!
-//! Platform::detect(), which every entry point calls, runs it through
-//! `ensure`, in every build (std or not); other threads wait for it,
-//! spinning (once per process, for 0.1 to 0.2 ms). The cases call the
-//! entry points' bodies from the undetected platform (`hash_serial_from`
-//! and its like), just past detect(), so the test never re-enters its own
-//! check. It allocates nothing: its buffers (about 44 KiB) live on the
+//! `initialize()`, which every program calls before any other call, runs
+//! it through `ensure`, in every build (std or not); other threads calling
+//! it wait, spinning (once per process, for 0.1 to 0.2 ms). The cases call
+//! the entry points' bodies from the undetected platform
+//! (`hash_serial_from` and its like), just past Platform::detect(), which
+//! panics until `initialize` has recorded the platform. It allocates nothing: its buffers (about 44 KiB) live on the
 //! calling thread's stack while it runs. Miri skips it (too slow there).
 
 // Under Miri nothing runs the cases.

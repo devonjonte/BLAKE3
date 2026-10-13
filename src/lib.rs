@@ -5,7 +5,9 @@
 //!
 //! ```
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! # blake3_servil::initialize();
+//! // Once per process, before any other call (see Startup self-test).
+//! blake3_servil::initialize();
+//!
 //! // Hash an input all at once.
 //! let hash1 = blake3_servil::hash(b"foobarbaz");
 //!
@@ -65,9 +67,8 @@
 //! every hash function, since its code and data must come back into the
 //! CPU's caches and a resting core runs slower at first: hashing 64 KiB
 //! after a pause takes about three times as long as nonstop on an Apple M4
-//! Max. Calling [`initialize_multithreaded`] (or [`initialize`]) at
-//! start-up keeps the one-time costs (the self-test and the threads'
-//! start) off the first call.
+//! Max. Calling [`initialize_multithreaded`] in place of [`initialize`]
+//! keeps the threads' one-time start off the first multithreaded call.
 //!
 //! **Apple M4 and later** have one matrix unit that this crate uses for
 //! inputs of 16 KiB and more; when several threads of a program hash such
@@ -102,14 +103,20 @@
 //! - **Once per process**: the startup self-test's buffers, about 45 KiB
 //!   of the calling thread's stack while it runs (it allocates nothing),
 //!   and the threads: a worker per CPU beyond the first, the queue's
-//!   delivery thread, each with the standard library's stack. They come
-//!   at the first call that needs them, or all at once, at start-up, when
-//!   the program calls [`initialize`] (the self-test) or
-//!   [`initialize_multithreaded`] (the self-test and the threads).
+//!   delivery thread, each with the standard library's stack. The
+//!   self-test runs in [`initialize`]; the threads come at the first call
+//!   that needs them, or at start-up, when the program calls
+//!   [`initialize_multithreaded`].
 //!
 //! # Startup self-test
 //!
-//! Before a process first hashes, the crate checks itself. It hashes 40
+//! **Every program calls [`initialize`] (or [`initialize_multithreaded`])
+//! once, before any other call of this crate**: a call before it panics, in
+//! every build, saying so. The check costs nothing: it is part of the
+//! platform load every call makes.
+//!
+//! In `initialize`, the crate checks itself before the process first
+//! hashes. It hashes 40
 //! fixed inputs, chosen so that together they run every one of its
 //! assembly kernels on this machine, at unusual alignments, lengths, and
 //! padding, each input carrying the previous output, and compares each
@@ -117,10 +124,8 @@
 //! build or this CPU computes wrong digests, and stops the program with a
 //! panic naming the code path. The check takes 0.1 to 0.2 ms once per
 //! process (Apple M4 Max, and a Linux VM on it), in every build, with or
-//! without the `std` feature; [`initialize`] (or
-//! [`initialize_multithreaded`]) runs it at start-up, and otherwise the
-//! first call does. Other threads that hash meanwhile wait for it, and
-//! stop with it if it fails. Without `std`, the panic goes to the
+//! without the `std` feature. Other threads that call `initialize`
+//! meanwhile wait for it, and stop with it if it fails. Without `std`, the panic goes to the
 //! program's panic handler, which aborts or halts.
 //!
 //! # Cargo Features
@@ -1026,9 +1031,10 @@ pub fn hash_multithreaded(input: &[u8]) -> Hash {
     lanes::hash(input)
 }
 
-/// Run the startup self-test now (see the crate's documentation), so that
-/// the first hash does not wait for it: under 0.2 ms, once per process.
-/// Later calls return at once.
+/// Run the startup self-test and detect the CPU: every program calls this
+/// (or [`initialize_multithreaded`]) once, before any other call of this
+/// crate, and a call before it panics. Under 0.2 ms, once per process
+/// (see the crate's documentation); later calls return at once.
 ///
 /// ```
 /// blake3_servil::initialize();
@@ -1037,6 +1043,7 @@ pub fn hash_multithreaded(input: &[u8]) -> Hash {
 /// ```
 pub fn initialize() {
     self_test::ensure();
+    platform::Platform::detect_unchecked().record();
 }
 
 /// [`initialize`], and start the threads that the multithreaded calls and
@@ -1052,7 +1059,7 @@ pub fn initialize() {
 /// ```
 #[cfg(feature = "std")]
 pub fn initialize_multithreaded() {
-    self_test::ensure();
+    initialize();
     lanes::initialize();
     // A queue needs threads, which wasm32 lacks (its first submission panics).
     #[cfg(not(target_family = "wasm"))]
