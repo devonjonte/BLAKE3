@@ -242,8 +242,8 @@ whose 15-line loop performs the compressions Lean's proved schedule lists,
 and on `Emit.lean`'s printing of that schedule. Inside the Rust and whole-call proofs each
 assembly kernel runs by the statement its own proof establishes, only
 where the library's bytes of that kernel equal the bytes its proof ran. Each instruction's
-model is checked against the CPU on random states and, for 136 of the
-137 NEON and integer forms and 19 of the 23 streaming forms, proved
+model is checked against the CPU on random states and, for 322 of the
+325 NEON and integer forms and 19 of the 23 streaming forms, proved
 equal to Arm's own specification of the architecture (Sail's Armv9.4,
 run by Isla); the rest, and the matrix unit's loads and stores, are
 checked against the CPU.
@@ -312,6 +312,9 @@ pypy3 tools/verify/prove_rust.py     # ends "363 of 363 cases proved"
 pypy3 tools/verify/prove_timing.py   # ends "2316 of 2316 cases proved"
 pypy3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
+
+GitHub's CI runs each of them on every push that changes the code or the
+verify tools, the longest in pieces (`.github/workflows/long-proofs.yml`).
 
 Each case is proved when Z3 finds no input on which the code and the
 definition differ. Each case prints its verdict; one that fails prints

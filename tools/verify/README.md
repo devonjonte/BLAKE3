@@ -11,7 +11,7 @@ and flags value:
     pypy3 tools/verify/lean/emit.py                   # the definition and schedules, from the Lean specification (needs Lean)
     pypy3 tools/verify/prove_rust.py                  # the Rust paths, compiled: every platform's (363 cases)
     pypy3 tools/verify/prove_timing.py                # whole calls return the standard's result on one path (2316 cases)
-    pypy3 tools/verify/cross_check.py                 # the NEON and integer models against the CPU (and every form the Rust and whole-call proofs run)
+    pypy3 tools/verify/cross_check.py [rust | LENGTH...]  # the NEON and integer models against the CPU (and every form the Rust and whole-call proofs run, or those named)
     pypy3 tools/verify/cross_check_sme.py             # the streaming SVE and SME2 models against the CPU (needs SME2)
     pypy3 tools/verify/mutants.py                     # wrong kernels are rejected
     pypy3 -m unittest discover -s tools/verify -p test_helpers.py  # the normalizer, the induction's generalization, the leak detector
@@ -101,9 +101,11 @@ inputs, pointers are (region, offset) pairs. The run checks:
   affected); the model now does too. `isla_check.py` proves the models
   equal to Arm's own specification (Sail's Armv9.4, run by Isla) for every
   input on every path that completes: the general registers, the flags,
-  and a NEON register's 128 bits. It checks 136 of the 137 forms the
-  proofs use, the flag-setting and conditional ones among them; Isla
-  cannot run `tbl`, which stays checked against the CPU. It then plants
+  and a NEON register's 128 bits. It checks 322 of the 325 forms the
+  proofs use, the flag-setting and conditional ones and the multiplies
+  among them; Isla's symbolic run stops inside Arm's specification for
+  `tbl` with one table register, `addv` and `cnt`, which stay checked
+  against the CPU. It then plants
   model errors and requires each rejected: a carry computed as `>`, `hi`
   ignoring Z, `xar` (NEON and streaming) and a shifted `eor` rotated one
   place off, `dup` reading the wrong lane, a ZA move into the wrong tile.

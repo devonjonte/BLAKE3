@@ -286,7 +286,9 @@ def prove_hash_many(lib, entry, n, size, increment):
     m.contracts = {**sme2_contracts(lib), **hybrid_contracts(lib)}
     import prove_timing
     m.local = lib.syms
-    image_end, initial = prove_timing.process_image(lib, 1)
+    # The state after `initialize()` on a CPU without SME2; the entry names
+    # its platform's kernels itself.
+    image_end, initial = prove_timing.process_image(lib, prove_timing.PLATFORMS["NEON"][0])
     for name in ("image", "text"):
         m.regions[name] = Region(name, image_end, True, initial)
     counter = BitVec("counter", 64)
@@ -510,12 +512,15 @@ def _run(case):
     return line, failed, sorted(aarch64.EXECUTED)
 
 
-def run_cases(so, cases, workers=6):
+def run_cases(so, cases):
     """Each case, (what, function, arguments), its function called with the
     library first, in fresh worker processes; the verdicts printed as they
     finish; the forms they ran gathered into aarch64.EXECUTED. Returns the
-    number that failed."""
+    number that failed and the forms. Six workers at most, one a core, and
+    one for each 7 GiB of memory (the longest whole call's)."""
     import multiprocessing
+    memory = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    workers = max(1, min(6, os.cpu_count(), memory // (7 << 30)))
     failed, ran = 0, set()
     spawn = multiprocessing.get_context("spawn")
     with spawn.Pool(workers, initializer=_start, initargs=(so,), maxtasksperchild=8) as pool:
@@ -528,7 +533,9 @@ def run_cases(so, cases, workers=6):
     return failed, ran
 
 
-def main(exit=True):
+def prove():
+    """Every Rust case: the number that failed and the forms they ran. A
+    passing run is recorded (results.py)."""
     cases = [("portable compression in place", prove_in_place, ("verify_portable_compress_in_place",)),
              ("portable extended output block", prove_xof, ("verify_portable_compress_xof", 0)),
              ("NEON platform's compression in place", prove_in_place, ("verify_neon_compress_in_place",)),
@@ -549,9 +556,12 @@ def main(exit=True):
     failed, ran = run_cases(so, cases)
     if not failed:
         results.save_forms("rust", so, ran)
-    if exit:
-        sys.exit(1 if failed else 0)
-    return failed
+    return failed, ran
+
+
+def main():
+    failed, _ = prove()
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

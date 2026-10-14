@@ -159,21 +159,26 @@ def one_length(lib, n, platform, clocks, call="hash"):
 CALLS = {"hash": None, "keyed_hash": 4097, "derive_key": 4097, "Hasher in two updates": 4097}
 
 
-def main(exit=True):
-    only = [int(a) for a in sys.argv[1:]] if exit else []
+def prove(lengths=()):
+    """The whole-call cases at `lengths` (every length of LENGTHS when
+    none), each call to its longest: the number that failed and the forms
+    they ran. A passing run of every length is recorded (results.py)."""
     cases = [(f"{call}, {platform}, {n} bytes, {when}", one_length,
               (n, code, clocks, "Hasher" if call.startswith("Hasher") else call))
              for call, upto in CALLS.items()
              for platform, (code, longest) in PLATFORMS.items()
-             for n in (only or [n for n in LENGTHS if n <= (upto or longest)])
+             for n in lengths or LENGTHS if n <= (upto or longest)
              for when, clocks in CLOCKS.items()]
     so = prove_rust.build()
     failed, ran = prove_rust.run_cases(so, cases)
-    if not failed and not only:
+    if not failed and not lengths:
         results.save_forms("timing", so, ran)
-    if exit:
-        sys.exit(1 if failed else 0)
-    return failed
+    return failed, ran
+
+
+def main():
+    failed, _ = prove([int(a) for a in sys.argv[1:]])
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

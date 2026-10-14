@@ -216,7 +216,7 @@ def main():
     traced = []
     step = aarch64.step
     aarch64.step = lambda m, pc, mnem, ops: (traced.append(pc), step(m, pc, mnem, ops))[1]
-    prove_timing.prove_length(lib, 2049, 1, (1, 2))
+    prove_timing.prove_length(lib, 2049, prove_timing.PLATFORMS["NEON"][0], (1, 2))
     aarch64.step = step
     ran = set(traced)
     def first_run(pred):
@@ -232,7 +232,7 @@ def main():
         lib.code = dict(original)
         lib.code[addr] = instr
         try:
-            prove_timing.prove_length(lib, 2049, 1, (1, 2))
+            prove_timing.prove_length(lib, 2049, prove_timing.PLATFORMS["NEON"][0], (1, 2))
             print(f"whole-call mutant, {what} at {addr:#x}: PROVED (the proof is vacuous here)")
             failures += 1
         except (Unproved, KeyError) as e:
