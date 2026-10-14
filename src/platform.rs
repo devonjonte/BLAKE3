@@ -52,24 +52,27 @@ cfg_if::cfg_if! {
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
+/// Each platform's discriminant is fixed, the same in every build (0 means
+/// "not yet recorded" to [`Platform::detect`]); tools/verify's whole-call
+/// proofs start from the value `initialize` records.
 pub enum Platform {
     Portable = 1,
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    SSE2,
+    SSE2 = 2,
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    SSE41,
+    SSE41 = 3,
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    AVX2,
+    AVX2 = 4,
     #[cfg(blake3_avx512_ffi)]
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    AVX512,
+    AVX512 = 5,
     #[cfg(blake3_neon)]
-    NEON,
+    NEON = 6,
     #[cfg(blake3_sme2)]
-    SME2,
+    SME2 = 7,
     #[cfg(blake3_wasm32_simd)]
     #[allow(non_camel_case_types)]
-    WASM32_SIMD,
+    WASM32_SIMD = 8,
 }
 
 /// One SME2 call at a time per process (all but always: two calls taking

@@ -121,9 +121,8 @@ inputs, pointers are (region, offset) pairs. The run checks:
 
 Whole calls (`prove_timing.py`, through `rust/src/lib.rs`'s `verify_hash`)
 run the compiled library's `hash` on symbolic message bytes, from the
-process state a hash meets after its first call (the library's file bytes
-and relocated pointers, the self-test passed, SME2's detection cached as
-absent or present). The executor stops at any branch, select, address or
+process state a hash meets after `initialize()` (the library's file bytes
+and relocated pointers, and the platform it recorded: NEON or SME2). The executor stops at any branch, select, address or
 table index that depends on the message, so each length that runs to the
 end runs one path for every message. A planted branch on a message byte,
 and a planted table lookup indexed by one, are rejected. The SME2 path past
