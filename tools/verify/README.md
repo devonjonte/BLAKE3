@@ -132,7 +132,8 @@ inputs, pointers are (region, offset) pairs. The run checks:
   is outside the proof; the Rust callers are covered by tests and Kani.
 
 Whole calls (`prove_timing.py`, through `rust/src/lib.rs`'s `verify_hash`)
-run the compiled library's `hash`, built with its default features as
+run the compiled library's `hash`, built by the compiler
+`rust/rust-toolchain.toml` names, with its default features as
 users build it, on symbolic message bytes: a thread's first call, then its
 second on new bytes: `hash`, `keyed_hash` on a symbolic key, `derive_key`
 with the test vectors' context string, and a `Hasher` given the message in

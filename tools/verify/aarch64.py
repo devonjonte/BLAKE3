@@ -13,6 +13,7 @@ the run. Each model is a few lines, checked against the Arm architecture
 reference manual, and cross-checked on the CPU (cross_check.py).
 """
 
+import os
 import re
 import subprocess
 from z3 import (BitVec, BitVecVal, Concat, Extract, LShR, RotateRight, ZeroExt,
@@ -437,6 +438,13 @@ def add_values(a, b, sub=False):
     return a - b if sub else a + b
 
 
+def workers(most, gib):
+    """Worker processes for cases of up to `gib` GiB each: one a core and
+    one for each `gib` GiB of memory, `most` at most."""
+    memory = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    return max(1, min(most, os.cpu_count(), memory // (gib << 30)))
+
+
 def set_flags_sub(m, a, b, w):
     """NZCV of a - b: concrete, or (on lengths) Z3 conditions."""
     if isinstance(a, Ptr) or isinstance(b, Ptr):
@@ -734,14 +742,15 @@ def step(m, pc, mnem, ops):
             raise Unproved("cset before any comparison")
         m.set(ops[0], BitVecVal(1 if cond(m, ops[1]) else 0, w))
         return None
-    if mnem == "ccmp":
+    if mnem in ("ccmp", "ccmn"):
         # If the condition holds on the current flags, they become those of
-        # the comparison; otherwise the immediate's (n z c v from bit 3 down).
+        # the comparison (ccmn: of the sum); otherwise the immediate's (n z c v
+        # from bit 3 down).
         if m.nzcv is None:
             raise Unproved(f"{mnem} before any comparison")
         if cond(m, ops[3]):
             b = operand_value(m, ops[1], w)
-            set_flags_sub(m, m.reg(ops[0]), b, w)
+            (set_flags_sub if mnem == "ccmp" else set_flags_add)(m, m.reg(ops[0]), b, w)
         else:
             k = imm(ops[2])
             m.nzcv = (bool(k & 8), bool(k & 4), bool(k & 2), bool(k & 1))

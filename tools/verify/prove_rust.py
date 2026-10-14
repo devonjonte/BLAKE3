@@ -40,7 +40,8 @@ STACK = 1 << 20
 
 
 def build():
-    subprocess.run(["cargo", "build", "-q", "--release", "--manifest-path", os.path.join(HERE, "rust", "Cargo.toml")],
+    # In rust/, whose rust-toolchain.toml names the compiler.
+    subprocess.run(["cargo", "build", "-q", "--release"], cwd=os.path.join(HERE, "rust"),
                    env={**os.environ, "CARGO_TARGET_DIR": TARGET}, check=True)
     return os.path.join(TARGET, "release", "libverify_entries.so")
 
@@ -516,11 +517,10 @@ def run_cases(so, cases):
     """Each case, (what, function, arguments), its function called with the
     library first, in fresh worker processes; the verdicts printed as they
     finish; the forms they ran gathered into aarch64.EXECUTED. Returns the
-    number that failed and the forms. Six workers at most, one a core, and
-    one for each 7 GiB of memory (the longest whole call's)."""
+    number that failed and the forms. Up to six workers, 7 GiB each (the
+    longest whole call's)."""
     import multiprocessing
-    memory = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
-    workers = max(1, min(6, os.cpu_count(), memory // (7 << 30)))
+    workers = aarch64.workers(6, 7)
     failed, ran = 0, set()
     spawn = multiprocessing.get_context("spawn")
     with spawn.Pool(workers, initializer=_start, initargs=(so,), maxtasksperchild=8) as pool:

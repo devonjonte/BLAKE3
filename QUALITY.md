@@ -169,7 +169,9 @@ library that compute BLAKE3 are proved to compute what
   `keyed_hash` (for every key), `derive_key`, and a `Hasher` fed its input
   in two updates, at the 142 of those lengths up to 4 KiB. This runs the
   library's own machine code end to end, the dispatch, the walk, the
-  kernels, and the code between them, as users get it.
+  kernels, and the code between them, as users get it from Rust 1.98.1
+  (another compiler's machine code is another program, proved when the
+  pin in `tools/verify/rust/rust-toolchain.toml` moves to it).
 
 Each part but whole calls is proved for every input; whole calls, for
 every input of each length proved. Three things remain before "the

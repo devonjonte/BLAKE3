@@ -29,7 +29,7 @@ import prove_hybrid
 from aarch64 import Machine
 
 SKIP = {"ldr", "ldrb", "ldrh", "ldp", "str", "strb", "strh", "stp", "ldur", "stur", "ld1r", "b", "bl", "b.ne", "cbz", "cbnz",
-        "tbz", "tbnz", "ret", "nop", "adr", "adrp", "cmp", "ccmp", "tst", "cset", "csel", "csinc", "subs", "ands", ".word",
+        "tbz", "tbnz", "ret", "nop", "adr", "adrp", "cmp", "ccmp", "ccmn", "tst", "cset", "csel", "csinc", "subs", "ands", ".word",
         # Control through a register, and reads of the clock and the thread
         # pointer: the runs fix these by their contracts, which random states
         # do not exercise; flags in and out, as cmp and csinc.

@@ -50,4 +50,7 @@ jobs:
     - uses: actions/checkout@v4
     - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pypy3 python3-z3 clang llvm && pypy3 -c "import z3"
     - uses: dtolnay/rust-toolchain@stable
+    - name: the compiler the proofs are of (tools/verify/rust/rust-toolchain.toml)
+      run: rustup toolchain install
+      working-directory: tools/verify/rust
     - run: pypy3 tools/verify/${{ matrix.proof }}
