@@ -1,6 +1,6 @@
 # Style Guides
 
-These style guides read the same in the fork's `AGENTS.md` and in bench-hashes' `AGENTS.md`; a change goes into both.
+These style guides read the same in the `AGENTS.md` of the fork, of bench-hashes, and of Ode; a change goes into all three.
 
 ## Communication
 
