@@ -517,10 +517,9 @@ def run_cases(so, cases):
     """Each case, (what, function, arguments), its function called with the
     library first, in fresh worker processes; the verdicts printed as they
     finish; the forms they ran gathered into aarch64.EXECUTED. Returns the
-    number that failed and the forms. Up to six workers, 7 GiB each (the
-    longest whole call's)."""
+    number that failed and the forms."""
     import multiprocessing
-    workers = aarch64.workers(6, 7)
+    workers = 6
     failed, ran = 0, set()
     spawn = multiprocessing.get_context("spawn")
     with spawn.Pool(workers, initializer=_start, initargs=(so,), maxtasksperchild=8) as pool:

@@ -13,7 +13,6 @@ the run. Each model is a few lines, checked against the Arm architecture
 reference manual, and cross-checked on the CPU (cross_check.py).
 """
 
-import os
 import re
 import subprocess
 from z3 import (BitVec, BitVecVal, Concat, Extract, LShR, RotateRight, ZeroExt,
@@ -436,13 +435,6 @@ def add_values(a, b, sub=False):
             raise Unproved("subtraction of a pointer")
         return add_values(b, a)
     return a - b if sub else a + b
-
-
-def workers(most, gib):
-    """Worker processes for cases of up to `gib` GiB each: one a core and
-    one for each `gib` GiB of memory, `most` at most."""
-    memory = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
-    return max(1, min(most, os.cpu_count(), memory // (gib << 30)))
 
 
 def set_flags_sub(m, a, b, w):

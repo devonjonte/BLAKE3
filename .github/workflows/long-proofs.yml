@@ -1,57 +1,23 @@
 name: proofs that take hours
 
-# Hours of Arm time, split into jobs that each fit GitHub's limit: the SME2
-# kernels at every group count, and the Rust paths and whole calls with
-# the instruction models they run checked against the CPU. Their results
-# change only with the code or the verify tools: run on each push that
-# changes those, and by hand. The chunk and parent kernels' inductions
-# (every, parents_every) are what the SME2 contracts in the Rust and
-# whole-call proofs rest on.
-on:
-  workflow_dispatch:
-  push:
-    paths:
-    - 'c/**'
-    - 'src/**'
-    - 'build.rs'
-    - 'Cargo.toml'
-    - 'tools/verify/**'
-    - '!**/*.md'
+# Hours of Arm time and up to about 60 GB, past GitHub's hosted runners:
+# every SME2 kernel at every group count (the chunk and parent kernels'
+# inductions are what the SME2 contracts in the Rust and whole-call proofs
+# rest on), and the Rust paths and whole calls with the instruction models
+# they run checked against the CPU. It runs on the fork's VM, whose
+# runner takes this one job and exits: tools/runner/long-proofs.sh
+# BRANCH registers it, dispatches this workflow, and runs it, before each
+# promotion that changes the code or the verify tools.
+on: workflow_dispatch
 
 jobs:
   long_proofs:
-    name: ${{ matrix.proof }}
-    runs-on: ubuntu-24.04-arm
-    # The longest, the chunk kernel at every group count, about 3 hours on
-    # the M4 Max's VM.
-    timeout-minutes: 350
-    env:
-      # The Rust paths' build assembles the SME2 kernels, which GCC 13 cannot.
-      CC: clang
-    strategy:
-      fail-fast: false
-      matrix:
-        # The whole-call lengths are prove_timing.py's LENGTHS, in pieces.
-        proof:
-        - prove_sme2.py every
-        - prove_sme2.py parents_every xof_every messages_every:2 messages_every:3 messages_every:4 messages_every:5
-        - prove_sme2.py messages_every:6 messages_every:7 messages_every:8 messages_every:9
-        - prove_sme2.py messages_every:10 messages_every:11 messages_every:12
-        - prove_sme2.py messages_every:13 messages_every:14
-        - prove_sme2.py messages_every:15 messages_every:16
-        - cross_check.py rust
-        - cross_check.py $(seq 0 64)
-        - cross_check.py $(seq 65 129)
-        - cross_check.py 1023 1024 1025 2047 2048 2049
-        - cross_check.py 3071 3072 3073 4095 4096 4097
-        - cross_check.py 8191 8192 8193 16383 16384 16385
-        - cross_check.py 32767 32768 32769
-        - cross_check.py 65535 65536
+    name: the long proofs, on the fork's VM
+    runs-on: vm-long
+    timeout-minutes: 1440
     steps:
     - uses: actions/checkout@v4
-    - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pypy3 python3-z3 clang llvm && pypy3 -c "import z3"
-    - uses: dtolnay/rust-toolchain@stable
-    - name: the compiler the proofs are of (tools/verify/rust/rust-toolchain.toml)
-      run: rustup toolchain install
-      working-directory: tools/verify/rust
-    - run: pypy3 tools/verify/${{ matrix.proof }}
+    - name: every SME2 kernel, the chunk, parent, extended-output, and message kernels at every group count
+      run: pypy3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof every parents_every xof_every messages_every
+    - name: the Rust paths and whole calls proved; the instruction models agree with the CPU
+      run: pypy3 tools/verify/cross_check.py

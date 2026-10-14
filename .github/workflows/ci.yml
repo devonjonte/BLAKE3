@@ -400,7 +400,7 @@ jobs:
     - name: every hybrid kernel equals BLAKE3's compression
       run: pypy3 tools/verify/prove_hybrid.py
     - name: every SME2 kernel equals BLAKE3's compression
-      run: pypy3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof  # the inductions, the Rust paths, whole calls: long-proofs.yml
+      run: pypy3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof  # the inductions, the Rust paths, whole calls: long-proofs.yml, on the VM
     - name: the proofs reject wrong kernels
       run: pypy3 tools/verify/mutants.py
 

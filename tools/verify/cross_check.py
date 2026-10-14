@@ -3,12 +3,10 @@ instruction form the proved kernels use (its mnemonic, arrangement, and
 immediates as they occur), executed natively on random register states
 and by the model, must agree bit for bit.
 
-    pypy3 tools/verify/cross_check.py [rust | LENGTH...]
+    pypy3 tools/verify/cross_check.py
 
-The forms are the hybrid kernels' file's and those the proofs run: with
-no argument, the Rust proofs' and the whole-call proofs' at every length;
-with `rust`, the Rust proofs' alone; with lengths, the whole-call proofs'
-at those lengths alone (CI's long-proofs.yml runs it in such pieces).
+The forms are the hybrid kernels' file's and those the Rust and
+whole-call proofs run.
 
 Loads, stores, and branches are not checked here: the proofs check every
 address against its region, and their models are a few lines each.
@@ -103,22 +101,17 @@ def model(mnem, text, xs, vs):
             [aarch64.concrete(m.v[i][l]) for i in range(4) for l in range(4)])
 
 
-def proved_forms(which):
-    """The instruction forms the proofs `which` names run: `rust`, the Rust
-    proofs; whole-call lengths, the whole-call proofs at them; none, both at
-    every length, from their last passing runs on this library with these
-    tools (results.py) where recorded. Stops if one fails."""
+def proved_forms():
+    """Every instruction form the Rust and whole-call proofs run: from their
+    last passing runs on this library with these tools (results.py), or by
+    running them. Stops if one fails."""
     import prove_rust
     import prove_timing
     import results
-    if which == ["rust"] or not which:
-        kinds = [("rust", prove_rust.prove)] + ([("timing", prove_timing.prove)] if not which else [])
-    else:
-        kinds = [(None, lambda: prove_timing.prove([int(n) for n in which]))]
     so = prove_rust.build()
     forms = set()
-    for kind, prove in kinds:
-        got = results.load_forms(kind, so) if kind else None
+    for kind, prove in (("rust", prove_rust.prove), ("timing", prove_timing.prove)):
+        got = results.load_forms(kind, so)
         if got is None:
             failed, got = prove()
             if failed:
@@ -132,8 +125,9 @@ def proved_forms(which):
 
 def main():
     rounds = 200
-    # The hybrid kernels' file, and every instruction the proofs named run.
-    proved_forms(sys.argv[1:])
+    # The hybrid kernels' file, and every instruction the Rust proofs and the
+    # whole-call proofs run.
+    proved_forms()
     # The streaming instructions the runs met: each one of the SME2 kernels'
     # file, whose forms cross_check_sme.py checks.
     import prove_sme2

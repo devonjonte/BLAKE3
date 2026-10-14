@@ -669,8 +669,7 @@ def main():
     failed = 0
     # A fresh process per case: the normal forms' caches keep their terms
     # alive (canon.py), so a worker that kept them would only grow.
-    # Up to four at once, 14 GiB each (the chunk kernel's induction, 13 GB).
-    with multiprocessing.Pool(aarch64.workers(4, 14), maxtasksperchild=1) as pool:
+    with multiprocessing.Pool(min(4, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
         for (name, _, _), verdict in pool.imap_unordered(prove_case, todo):
             print(f"{name}: {verdict}", flush=True)
             failed += verdict.startswith("NOT")
