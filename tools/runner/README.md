@@ -25,7 +25,7 @@ Nobody can log in to it; `sudo -u benchrunner` runs commands as it.
 
 ## Setting up and starting
 
-    sh ~/piplayground/blake3-servil/tools/runner/setup-mac.sh
+    sh ~/piplayground/blake3-servil/blake3-servil/tools/runner/setup-mac.sh
 
 Run it as yourself; it asks for sudo when it needs it. It makes the
 account's home private, installs PyPy when absent, and gives the account

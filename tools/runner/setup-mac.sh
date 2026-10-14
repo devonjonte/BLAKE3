@@ -2,7 +2,7 @@
 # Sets up the benchmark runner for the hidden `benchrunner` account, then
 # starts it. Run as yourself on the Mac (it asks for sudo when it needs it):
 #
-#     sh ~/piplayground/blake3-servil/tools/runner/setup-mac.sh
+#     sh ~/piplayground/blake3-servil/blake3-servil/tools/runner/setup-mac.sh
 #
 # Safe to run again: steps already done are skipped, and runner.py is
 # copied afresh each time, so this is also how to start the runner after a
@@ -60,8 +60,12 @@ step "the exchange folder: jobs/ yours, results/ the runner's"
 chmod 600 "$checkout/ghtokenclassic.txt"
 mkdir -p "$runner/jobs" "$runner/results"
 sudo chown benchrunner "$runner/results"
-for dir in ~ ~/piplayground "$checkout"; do
+# benchrunner passes through every folder from your home down to the checkout.
+dir=$checkout
+while :; do
     ls -led "$dir" | grep -q "benchrunner allow search" || chmod +a "benchrunner allow search" "$dir"
+    [ "$dir" = "$HOME" ] || [ "$dir" = / ] && break
+    dir=$(dirname "$dir")
 done
 ls -le "$checkout/ghtokenclassic.txt"
 ls -led "$runner/jobs" "$runner/results"
