@@ -2745,3 +2745,22 @@ the proof on the code users run, measured on the Mac first.
   one-chunk path's frame (`#[inline(never)]`, the 16-chunk small arrays),
   and SME2's flat walk to the root's children (a hook, or removed if a
   measurement shows the walk then parents costs nothing).
+
+### October 14, 2026: the whole-call results from Lean; option 3 for SME2's counts
+
+- `whole.py`'s chunk and tree rules (40 lines transcribing the standard)
+  left the trusted base: `lean/Schedule.lean`'s `sched n` lists the
+  compressions BLAKE3 performs on `n` bytes, each word named by its source,
+  and `run_eq` (ScheduleProofs.lean, standard axioms) proves performing
+  them is `Blake3.blake3`'s 32-byte output for every key, mode, and input.
+  Emit.lean prints the whole-call lengths' schedules (schedules.json,
+  161 KB, CI diffs it); whole.py's loop performs them. The proof follows
+  the specification's recursion: each subtree's entries end with its
+  `tree.go` node (`sub`), a chunk's chain is `chunkNode`'s fold (`chain`).
+  The schedule is also the natural target of an every-length proof: the
+  machine code's chunk loop against `sched`'s chunk entries.
+- Option 3 (Zooko): prove_sme2's always-run cases include the chunk and
+  parent inductions over every group count (`every`, `parents_every`), and
+  GROUPS is their range, 1 to 2^40; the 3-8 group cases are gone.
+- QUALITY said `hash` was proved at 306 lengths: 153, on each of two
+  platforms.

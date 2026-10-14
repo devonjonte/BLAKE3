@@ -1,7 +1,8 @@
 """Regression tests for the proofs' helpers: the normalizer's proof
-context (canon.py) and the induction's generalization (induction.py).
+context (canon.py), the induction's generalization (induction.py), and the
+timing proof's leak detector (aarch64.py).
 
-    python3 -m unittest discover -s tools/verify -p test_helpers.py
+    pypy3 -m unittest discover -s tools/verify -p test_helpers.py
 """
 
 import unittest
@@ -54,3 +55,60 @@ class GeneralizationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeakTests(unittest.TestCase):
+    """The timing proof's detector: a run stops where the message steers
+    a branch or an address, and runs on where only lengths do."""
+
+    def run_code(self, code):
+        import aarch64
+        from aarch64 import Machine, Region, Ptr
+        msg = [BitVec(f"msg{i}", 8) for i in range(16)]
+        m = Machine(code, {"input": Region("input", 16, False, lambda o: msg[o]),
+                           "table": Region("table", 256, False, lambda o: BitVec(f"t{o}", 8))})
+        m.x = {i: BitVec(f"x{i}_in", 64) for i in range(31)}
+        m.x[0], m.x[1], m.x[30] = Ptr("input", 0), Ptr("table", 0), Ptr("return", 0)
+        m.x["sp"] = Ptr("stack", 0)
+        return aarch64.run(m, 0)
+
+    def test_branch_on_a_message_byte_stops(self):
+        from aarch64 import Unproved
+        code = {0: ("ldrb", ["w8", "[x0, #3]"]), 4: ("cbz", ["w8", "c <x>"]), 8: ("nop", []), 12: ("ret", [])}
+        with self.assertRaisesRegex(Unproved, "depends on data"):
+            self.run_code(code)
+
+    def test_table_index_from_a_message_byte_stops(self):
+        from aarch64 import Unproved
+        code = {0: ("ldrb", ["w8", "[x0, #3]"]), 4: ("ldrb", ["w9", "[x1, x8]"]), 8: ("ret", [])}
+        with self.assertRaisesRegex(Unproved, "address depends on data"):
+            self.run_code(code)
+
+    def test_message_data_without_steering_runs(self):
+        code = {0: ("ldrb", ["w8", "[x0, #3]"]), 4: ("eor", ["w8", "w8", "#0x5a"]), 8: ("ret", [])}
+        self.run_code(code)
+
+
+class WholeTests(unittest.TestCase):
+    def test_whole_matches_the_official_vectors(self):
+        """whole.py, the results whole calls are proved to return, computes
+        the official test vectors (hash, keyed_hash, derive_key) from
+        concrete bytes, at each vector's length that lean/schedules.json
+        holds."""
+        import json, os
+        from z3 import BitVecVal, simplify
+        import whole
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "test_vectors", "test_vectors.json")
+        for case in json.load(open(path))["cases"]:
+            n = case["input_len"]
+            if str(n) not in whole.schedules():
+                continue
+            import lean_spec as spec
+            vectors = json.load(open(path))
+            data = [BitVecVal(i % 251, 8) for i in range(n)]
+            key = [simplify(x) for x in spec.words([BitVecVal(b, 8) for b in vectors["key"].encode()])]
+            for mode, words in (("hash", whole.hash32(data)),
+                                ("keyed_hash", whole.hash32(data, key, whole.KEYED_HASH)),
+                                ("derive_key", whole.derive_key32(vectors["context_string"], data))):
+                got = b"".join(simplify(x).as_long().to_bytes(4, "little") for x in words).hex()
+                self.assertEqual(got, case[mode][:64], f"{mode}, {n} bytes")

@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-blake3-servil = { path = "../../..", default-features = false }
+blake3-servil = { path = "../../.." }
 
 [profile.release]
 panic = "abort"

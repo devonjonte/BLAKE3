@@ -3,8 +3,8 @@ compression function (tools/verify/README.md), at the 512-bit streaming
 vector length of Apple M4 (`cntw` = 16; the kernels return at once on any
 other).
 
-    python3 tools/verify/prove_sme2.py [KERNEL...]
-    python3 tools/verify/prove_sme2.py every   # the chunk kernel at every group count (3.5 hours)
+    pypy3 tools/verify/prove_sme2.py [KERNEL...]
+    pypy3 tools/verify/prove_sme2.py every   # the chunk kernel at every group count (3.5 hours)
 """
 
 import os
@@ -54,6 +54,20 @@ def check_out(out, start, cvs):
                 raise Unproved(f"output {i}, word {w} differs from the specification")
 
 
+def chunk_cvs(chunks, key, counters, flags, start, end):
+    """The chunk kernel's statement: prove_hybrid's table_cvs for chunks of
+    16 whole blocks, chunk i at counters[i]. The proof below and
+    prove_rust's contract for the kernel both state it with this."""
+    return prove_hybrid.table_cvs(chunks, key, counters, flags, start, end, BitVecVal(64, 8), 16)
+
+
+def parent_cvs(pairs, key, counter, flags, n):
+    """The parent kernel's statement: block i of `pairs` (64 bytes) under
+    `key` at `counter`, block length 64, the 32-bit `flags`."""
+    return [spec.compress(spec.words(key), spec.words(pairs[64 * i:64 * i + 64]), counter, BitVecVal(64, 32), flags)[:8]
+            for i in range(n)]
+
+
 def prove_chunks(obj, groups, stored, at, check=True):
     """hash16_chunks_512(inputs, key, counter, flags, out, groups), or with
     `at` hash16_chunks_at_512 (x2 a table of a counter per group): 16
@@ -90,17 +104,8 @@ def prove_chunks(obj, groups, stored, at, check=True):
         raise Unproved(f"returned {m.x[0]}, not 16")
     if not check:
         return m.steps
-    zero = BitVecVal(0, 8)
-    cvs = []
-    for i in range(kept):
-        g, lane = divmod(i, 16)
-        c = (counters[g] if at else counter + 16 * g) + lane
-        cv = spec.words(key)
-        for b in range(16):
-            f = ZeroExt(24, flags | (start if b == 0 else zero) | (end if b == 15 else zero))
-            cv = spec.compress(cv, spec.words(chunks[i][64 * b:64 * b + 64]), c, BitVecVal(64, 32), f)[:8]
-        cvs.append(cv)
-    check_out(m.regions["out"], 0, cvs)
+    cs = [(counters[i // 16] if at else counter + 16 * (i // 16)) + i % 16 for i in range(kept)]
+    check_out(m.regions["out"], 0, chunk_cvs(chunks[:kept], key, cs, flags, start, end))
     return m.steps
 
 
@@ -172,8 +177,7 @@ def prove_parents(obj, groups, check=True):
         raise Unproved(f"returned {m.x[0]}, not 16")
     if not check:
         return m.steps
-    cvs = [spec.compress(spec.words(key), spec.words(pairs[64 * i:64 * i + 64]), counter, BitVecVal(64, 32), flags)[:8] for i in range(n)]
-    check_out(m.regions["out"], 0, cvs)
+    check_out(m.regions["out"], 0, parent_cvs(pairs, key, counter, flags, n))
     return m.steps
 
 
@@ -593,6 +597,14 @@ def prove_xof_every(obj):
     return f"{kinds['head']} paths back to the group loop's head, {kinds['return']} out of it"
 
 
+# The group counts the always-run cases prove the chunk and parent kernels
+# at: 1 and 2 by the concrete cases, 2 to 2^40 by the inductions over the
+# group loop (every, parents_every), which run with them. prove_rust.py's
+# contracts stand in for the kernels at these counts alone.
+GROUPS = range(1, (1 << 40) + 1)
+ALWAYS = ("every", "parents_every")
+
+
 def cases(only):
     out = []
     for groups in (1, 2):
@@ -604,12 +616,13 @@ def cases(only):
         out.append(("messages", 1, (5, stored)))
     out.append(("messages", 2, (3, 7)))
     out += [("parents", 1, None), ("parents", 2, None), ("xof", 1, None), ("xof", 2, None)]
-    # Hours long: run when named.
+    # The inductions: every and parents_every always (the contracts rest on
+    # them; the chunk kernel's takes hours); the rest when named.
     out += [("every", None, None), ("parents_every", None, None), ("xof_every", None, None)]
     out += [(f"messages_every", None, blocks) for blocks in range(2, 17)]
     # A name selects its cases; name:N the one whose argument is N.
     named = lambda c: c[0] in only or f"{c[0]}:{c[2]}" in only
-    return [c for c in out if (named(c) if only else not c[0].endswith("every"))]
+    return [c for c in out if (named(c) if only else not c[0].endswith("every") or c[0] in ALWAYS)]
 
 
 OBJ = None

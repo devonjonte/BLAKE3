@@ -3,7 +3,7 @@ instruction form the proved kernels use (its mnemonic, arrangement, and
 immediates as they occur), executed natively on random register states
 and by the model, must agree bit for bit.
 
-    python3 tools/verify/cross_check.py [ROUNDS]
+    pypy3 tools/verify/cross_check.py [ROUNDS]
 
 Loads, stores, and branches are not checked here: the proofs check every
 address against its region, and their models are a few lines each.
@@ -24,7 +24,18 @@ import prove_hybrid
 from aarch64 import Machine
 
 SKIP = {"ldr", "ldrb", "ldrh", "ldp", "str", "strb", "strh", "stp", "ldur", "stur", "ld1r", "b", "bl", "b.ne", "cbz", "cbnz",
-        "tbz", "tbnz", "ret", "nop", "adr", "adrp", "cmp", "ccmp", "tst", "cset", "csel", "csinc", "subs", "ands", ".word"}
+        "tbz", "tbnz", "ret", "nop", "adr", "adrp", "cmp", "ccmp", "tst", "cset", "csel", "csinc", "subs", "ands", ".word",
+        # Control through a register, and reads of the clock and the thread
+        # pointer: the runs fix these by their contracts, which random states
+        # do not exercise; flags in and out, as cmp and csinc.
+        "br", "blr", "mrs", "cmn", "adds", "cinc"}
+
+
+def streaming(mnem, ops):
+    """Whether an instruction is a streaming one (SVE or SME registers):
+    cross_check_sme.py's, which checks every form of the SME2 kernels' file."""
+    return (re.match(r"(smst|rdsvl|addsvl|addspl|addvl|addpl|cnt[bhwd]$|inc[bhwd]$|dec[bhwd]$)", mnem) is not None
+            or any(re.search(r"\b(z\d+|za\w*|p\d+)\b", o) for o in ops))
 
 
 def forms(instructions):
@@ -33,7 +44,7 @@ def forms(instructions):
     vectors), immediates kept."""
     seen = {}
     for mnem, ops in instructions:
-        if (mnem in SKIP or mnem.startswith("b.") or "sp" in ops
+        if (mnem in SKIP or mnem.startswith("b.") or "sp" in ops or streaming(mnem, ops)
                 or any("[" in o and not re.search(r"\.[sd]\[\d+\]$", o) for o in ops)):
             continue
         names = {}
@@ -87,14 +98,40 @@ def model(mnem, text, xs, vs):
             [aarch64.concrete(m.v[i][l]) for i in range(4) for l in range(4)])
 
 
+def proved_forms():
+    """Every instruction form the Rust and whole-call proofs run: from their
+    last passing runs on this library with these tools (results.py), or by
+    running them. Stops if one fails."""
+    import prove_rust
+    import prove_timing
+    import results
+    so = prove_rust.build()
+    forms = set()
+    for kind, module in (("rust", prove_rust), ("timing", prove_timing)):
+        got = results.load_forms(kind, so)
+        if got is None:
+            if module.main(exit=False):
+                sys.exit("a proof above failed")
+            got = results.load_forms(kind, so)
+        else:
+            print(f"the {kind} proofs passed on this library with these tools: their forms reused (results.py)", flush=True)
+        forms |= got
+    aarch64.EXECUTED.update(forms)
+    return forms
+
+
 def main():
     rounds = int(sys.argv[1]) if len(sys.argv) > 1 else 200
     # The hybrid kernels' file, and every instruction the Rust proofs and the
     # timing proof run.
-    import prove_rust
-    import prove_timing
-    if prove_rust.main(exit=False) or prove_timing.main(exit=False):
-        sys.exit("a proof above failed")
+    proved_forms()
+    # The streaming instructions the runs met: each one of the SME2 kernels'
+    # file, whose forms cross_check_sme.py checks.
+    import prove_sme2
+    sme_file = {(mn, tuple(o)) for mn, o in aarch64.disassemble(prove_sme2.assemble(), 0, 1 << 30, llvm=True).values()}
+    outside = sorted(f for f in aarch64.EXECUTED if streaming(*f) and f not in sme_file)
+    if outside:
+        sys.exit(f"streaming instructions outside the SME2 kernels' file: {outside[:5]}")
     obj = prove_hybrid.assemble()
     fl = forms(list(aarch64.disassemble(obj, 0, 1 << 30).values()) + sorted(aarch64.EXECUTED))
     lib = build(fl)

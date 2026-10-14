@@ -100,7 +100,7 @@ _context = {"assumptions": [], "points": [], "lengths": set()}
 def set_context(assumptions, lengths):
     """Compare under `assumptions` on the symbols named `lengths`; the
     normal forms and their caches start afresh."""
-    _ids.clear(); _nodes.clear(); _memo.clear(); _arith.clear(); _data.clear(); _leaves.clear()
+    _ids.clear(); _nodes.clear(); _memo.clear(); _arith.clear(); _data.clear(); _leaves.clear(); _leaf_terms.clear()
     points = []
     if assumptions:
         s = Solver()
@@ -142,7 +142,26 @@ def leaf(t):
             return n
     n = intern(("leaf", t.sexpr()))
     _leaves.setdefault(key, []).append((t, n))
+    _leaf_terms[n] = t
     return n
+
+
+_leaf_terms = {}   # leaf id -> its simplified term
+
+
+def constants_merged(ids, op, unit):
+    """`ids` with their data-free leaves (constants and parameters) made one
+    leaf, combined by `op` (a sum's or an xor's), left out when it is `unit`'s
+    value: however the summands were nested or folded, one normal form."""
+    free = [x for x in ids if x in _leaf_terms and not has_data(_leaf_terms[x])]
+    if len(free) < 2 and not (free and is_bv_value(_leaf_terms[free[0]]) and _leaf_terms[free[0]].as_long() == unit):
+        return ids
+    r = _leaf_terms[free[0]]
+    for x in free[1:]:
+        r = op(r, _leaf_terms[x])
+    r = simplify(r)
+    rest = [x for x in ids if x not in free]
+    return rest if is_bv_value(r) and r.as_long() == unit else rest + [leaf(r)]
 
 
 def summands(t):
@@ -174,6 +193,20 @@ def pieces(t):
         from z3 import BitVecVal
         return [(BitVecVal(0, n), n - 1, 0)] + pieces(t.arg(0))
     return [(t, t.size() - 1, 0)]
+
+
+def xors(t):
+    """The terms an xor combines, through nested xors."""
+    if t.decl().kind() == Z3_OP_BXOR:
+        return [x for c in t.children() for x in xors(c)]
+    return [t]
+
+
+def xor_all(ts):
+    r = ts[0]
+    for x in ts[1:]:
+        r = r ^ x
+    return r
 
 
 def merged(ps):
@@ -223,21 +256,35 @@ def _canon(t):
             (data if has_data(c) else rest).append(c)
         if len(rest) > 1:
             rest = [simplify(sum(rest[1:], rest[0]))]
+        if rest and is_bv_value(simplify(rest[0])) and simplify(rest[0]).as_long() == 0:
+            rest = []
         if not data:
             return leaf(t)
         terms = []
         for c in data + rest:
             n = canon(c)
             terms.extend(node(n)[1] if node(n)[0] == "add" else [n])
-        return intern(("add", tuple(sorted(terms))))
+        terms = constants_merged(terms, lambda a, b: a + b, 0)
+        return terms[0] if len(terms) == 1 else intern(("add", tuple(sorted(terms))))
     if kind == Z3_OP_BXOR:
+        # As for sums: the operands without data become one leaf, their xor,
+        # left out when it is zero (a kernel may fold constants the
+        # specification xors apart).
+        data, rest = [], []
+        for c in xors(t):
+            (data if has_data(c) else rest).append(c)
+        if rest:
+            r = simplify(rest[0] if len(rest) == 1 else xor_all(rest))
+            rest = [] if is_bv_value(r) and r.as_long() == 0 else [r]
         seen = {}
-        for c in t.children():
+        for c in data + rest:
             n = canon(c)
             for x in (node(n)[1] if node(n)[0] == "xor" else [n]):
                 seen[x] = seen.get(x, 0) ^ 1
-        odd = sorted(x for x, o in seen.items() if o)
-        return odd[0] if len(odd) == 1 else intern(("xor", tuple(odd)))
+        odd = constants_merged([x for x, o in seen.items() if o], lambda a, b: a ^ b, 0)
+        if not odd:
+            return leaf(BitVecVal(0, t.size()))
+        return odd[0] if len(odd) == 1 else intern(("xor", tuple(sorted(odd))))
     if kind in (Z3_OP_ROTATE_RIGHT, Z3_OP_ROTATE_LEFT, Z3_OP_EXT_ROTATE_RIGHT, Z3_OP_EXT_ROTATE_LEFT):
         if kind in (Z3_OP_EXT_ROTATE_RIGHT, Z3_OP_EXT_ROTATE_LEFT):
             amount = simplify(t.arg(1))

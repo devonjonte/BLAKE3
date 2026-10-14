@@ -6,7 +6,7 @@ that write it), and in the model; the registers and tiles must agree.
 Needs a CPU with SME2 at a 512-bit vector length (Apple M4, or a VM on
 it); elsewhere it says so and exits 0.
 
-    python3 tools/verify/cross_check_sme.py [ROUNDS]
+    pypy3 tools/verify/cross_check_sme.py [ROUNDS]
 """
 
 import ctypes

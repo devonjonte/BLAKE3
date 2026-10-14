@@ -61,6 +61,21 @@ def compress(cv, block, counter, block_len, flags):
     return [substitute(w, *pairs) for w in outs]
 
 
+def join(parts):
+    """The term whose bytes, least significant first, are `parts`: the
+    term itself when they are its every byte in order (an identity), else
+    their concatenation."""
+    from z3 import is_app_of, Z3_OP_EXTRACT
+    first = parts[0]
+    if is_app_of(first, Z3_OP_EXTRACT):
+        whole = first.arg(0)
+        if whole.size() == 8 * len(parts) and all(
+                is_app_of(b, Z3_OP_EXTRACT) and b.arg(0).eq(whole) and b.params() == [8 * i + 7, 8 * i]
+                for i, b in enumerate(parts)):
+            return whole
+    return Concat(*reversed(parts)) if len(parts) > 1 else first
+
+
 def words(byte_terms):
     """Little-endian 32-bit words from 8-bit terms (section 2.1)."""
-    return [Concat(*reversed(byte_terms[4 * i:4 * i + 4])) for i in range(len(byte_terms) // 4)]
+    return [join(byte_terms[4 * i:4 * i + 4]) for i in range(len(byte_terms) // 4)]

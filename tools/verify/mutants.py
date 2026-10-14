@@ -2,7 +2,7 @@
 proved kernel, and its proof must fail. A proof that passed a mutant would
 be vacuous.
 
-    python3 tools/verify/mutants.py
+    pypy3 tools/verify/mutants.py
 """
 
 import os
@@ -208,6 +208,35 @@ def main():
         except (Unproved, KeyError) as e:
             print(f"induction mutant, {what} at {a:#x}: rejected ({e})")
     prove_rust.loop_head = find
+    # Whole calls of `hash` (prove_timing.py): a wrong instruction among
+    # those a call of 2049 bytes runs (chunks, a parent, the root), and the
+    # proof of its result must fail.
+    import prove_timing
+    lib.code = dict(original)
+    traced = []
+    step = aarch64.step
+    aarch64.step = lambda m, pc, mnem, ops: (traced.append(pc), step(m, pc, mnem, ops))[1]
+    prove_timing.prove_length(lib, 2049, 1, (1, 2))
+    aarch64.step = step
+    ran = set(traced)
+    def first_run(pred):
+        return next(a for a, (m, o) in sorted(original.items()) if a in ran and pred(m, o))
+    whole_mutants = []
+    a = first_run(lambda m, o: m == "ror" and len(o) == 3 and o[2].startswith("#"))
+    whole_mutants.append(("a rotation one bit off", a, ("ror", original[a][1][:2] + [f"#{aarch64.imm(original[a][1][2]) + 1}"])))
+    a = first_run(lambda m, o: m == "orr" and len(o) == 3 and o[2] == "#0xc")
+    whole_mutants.append(("the root flag left out (PARENT | ROOT made PARENT)", a, ("orr", original[a][1][:2] + ["#0x4"])))
+    a = first_run(lambda m, o: m == "movk" and o[1] == "#0x6a09")
+    whole_mutants.append(("a bit of the IV flipped", a, ("movk", [original[a][1][0], "#0x6a08", original[a][1][2]])))
+    for what, addr, instr in whole_mutants:
+        lib.code = dict(original)
+        lib.code[addr] = instr
+        try:
+            prove_timing.prove_length(lib, 2049, 1, (1, 2))
+            print(f"whole-call mutant, {what} at {addr:#x}: PROVED (the proof is vacuous here)")
+            failures += 1
+        except (Unproved, KeyError) as e:
+            print(f"whole-call mutant, {what} at {addr:#x}: rejected ({e})")
     sys.exit(1 if failures else 0)
 
 
