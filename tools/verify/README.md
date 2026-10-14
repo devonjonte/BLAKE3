@@ -1,6 +1,7 @@
 # Proofs of the compression code
 
-These tools prove every assembly kernel on AArch64, and the library's Rust
+These tools prove every assembly kernel on AArch64 but the SME2 hybrid
+(`c/blake3_sme2_hybrid_aarch64.S`), and the library's Rust
 compression code, equal to the compression function of the Lean
 specification of BLAKE3 (`c2sp/BLAKE3/`), for every input, key, counter,
 and flags value:
