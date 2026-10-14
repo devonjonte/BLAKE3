@@ -7,7 +7,7 @@ take no branch, select, address, or table index that depends on those
 bytes: the executor stops at the first. So each length's run is one path,
 the same for every message: the instructions and the addresses they touch
 depend on the length alone. The process's state is the one a hash meets
-after its first call: the self-test passed, SME2's detection cached.
+after `initialize()`: the platform it detected recorded.
 
     python3 tools/verify/prove_timing.py [LENGTH...]
 """
@@ -30,19 +30,20 @@ import prove_rust
 LENGTHS = sorted(set(list(range(0, 130)) + [1023, 1024, 1025, 2047, 2048, 2049, 3071, 3072, 3073]
                      + [2 ** k + d for k in range(12, 17) for d in (-1, 0, 1)]))
 
-# The platforms: SME2's cached detection (1 no, 2 yes), and the longest
+# The platforms: the discriminant `initialize()` records for each
+# (src/platform.rs: NEON 6, SME2 7), and the longest
 # input each is proved to (the SME2 path's pointer table, built in vector
 # lanes, is past what the executor models).
-PLATFORMS = {"NEON": (1, 1 << 16), "SME2": (2, 4096)}
+PLATFORMS = {"NEON": (6, 1 << 16), "SME2": (7, 4096)}
 
 
-def process_image(lib, sme2_cache):
+def process_image(lib, platform):
     """The library as loaded: its file bytes, its relocated pointers, and
-    `.bss`, zero but the self-test's state (passed) and SME2's cache."""
+    `.bss`, zero but the platform `initialize()` recorded."""
     sections = subprocess.run(["readelf", "-SW", lib.so], capture_output=True, text=True, check=True).stdout
     bss = re.search(r"\.bss\s+NOBITS\s+([0-9a-f]+)\s+[0-9a-f]+\s+([0-9a-f]+)", sections)
     end = int(bss.group(1), 16) + int(bss.group(2), 16)
-    fixed = {lib.syms[lib.symbol("9self_test5STATE")]: 2, lib.syms[lib.symbol("13sme2_detected5CACHE")]: sme2_cache}
+    fixed = {lib.syms[lib.symbol("8platform8DETECTED")]: platform}
     pointers = {}
     for line in subprocess.run(["readelf", "-rW", lib.so], capture_output=True, text=True, check=True).stdout.splitlines():
         f = line.split()
@@ -57,12 +58,12 @@ def process_image(lib, sme2_cache):
     return end, initial
 
 
-def prove_length(lib, n, sme2_cache):
+def prove_length(lib, n, platform):
     message = byte_symbols("msg", n)
     regions = {"input": Region("input", n, False, lambda o: message[o]), "out": Region("out", 32, True, None)}
     m = prove_rust.machine(lib, regions)
     m.local = lib.syms
-    end, initial = process_image(lib, sme2_cache)
+    end, initial = process_image(lib, platform)
     for name in ("image", "text"):
         # Writable: the statics in .data and .bss are.
         m.regions[name] = Region(name, end, True, initial)
@@ -75,16 +76,16 @@ def main(exit=True):
     lib = prove_rust.Library(prove_rust.build())
     only = [int(a) for a in sys.argv[1:]] if exit else []
     failed = total = 0
-    for platform, (cache, longest) in PLATFORMS.items():
+    for name, (code, longest) in PLATFORMS.items():
         for n in only or [n for n in LENGTHS if n <= longest]:
             total += 1
             t = time.time()
             try:
-                steps = prove_length(lib, n, cache)
-                print(f"{platform}, {n} bytes: one path, {steps} instructions ({time.time() - t:.1f} s)", flush=True)
+                steps = prove_length(lib, n, code)
+                print(f"{name}, {n} bytes: one path, {steps} instructions ({time.time() - t:.1f} s)", flush=True)
             except Unproved as e:
                 failed += 1
-                print(f"{platform}, {n} bytes: NOT PROVED: {e}", flush=True)
+                print(f"{name}, {n} bytes: NOT PROVED: {e}", flush=True)
     print(f"{total - failed} of {total} lengths proved")
     if exit:
         sys.exit(1 if failed else 0)
