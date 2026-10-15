@@ -6,7 +6,7 @@ manual's pseudocode for the arrangement the kernels use; others stop the
 run."""
 
 import re
-from z3 import BitVecVal, Concat, Extract, RotateRight, LShR, If, is_app_of, is_bv_value, Z3_OP_CONCAT
+from z3 import BitVecVal, Concat, Extract, RotateRight, LShR, If, ZeroExt, is_app_of, is_bv_value, Z3_OP_CONCAT
 import aarch64
 from aarch64 import Unproved
 import canon
@@ -20,6 +20,42 @@ def arrangement(op):
 def lanes(m, op):
     """The NEON register: the low four lanes of its Z register."""
     return m.v[int(re.match(r"[vqdsb](\d+)", op).group(1))][:4]
+
+
+class PtrLane:
+    """Half of a pointer in a .2d element: `half` 0 its low 32 bits, 1 its
+    high. A pointer stays one in a vector through `dup` and the addition of
+    a constant, and a store writes it as memory holds pointers; any other
+    use stops the run."""
+    def __init__(self, ptr, half):
+        self.ptr, self.half = ptr, half
+
+    def size(self):
+        return 32
+
+
+def pointer_pair(lo, hi):
+    """The pointer a .2d element holds, or None for data; part of one stops the run."""
+    if isinstance(lo, PtrLane) and isinstance(hi, PtrLane) and (lo.half, hi.half) == (0, 1) and lo.ptr is hi.ptr:
+        return lo.ptr
+    if isinstance(lo, PtrLane) or isinstance(hi, PtrLane):
+        raise Unproved("part of a pointer in a vector element")
+    return None
+
+
+def store_lanes(m, addr, ls):
+    """Lanes to memory from `addr`: a .2d element holding a pointer as the
+    pointer, the rest as data."""
+    i = 0
+    while i < len(ls):
+        if isinstance(ls[i], PtrLane):
+            if i % 2 or i + 1 >= len(ls):
+                raise Unproved("part of a pointer stored from a vector")
+            m.store(addr + 4 * i, pointer_pair(ls[i], ls[i + 1]), 8)
+            i += 2
+        else:
+            m.store(addr + 4 * i, ls[i], 4)
+            i += 1
 
 
 def put(m, op, ls):
@@ -64,6 +100,15 @@ def step(m, pc, mnem, ops):
         a, b = lanes(m, ops[1]), lanes(m, ops[2])
         out = []
         for (alo, ahi), (blo, bhi) in zip(pairs(a), pairs(b)):
+            pa, pb = pointer_pair(alo, ahi), pointer_pair(blo, bhi)
+            if pa is not None or pb is not None:
+                # A pointer plus a constant offset: the pointer, moved.
+                k = aarch64.concrete(Concat(bhi, blo) if pa is not None else Concat(ahi, alo))
+                if (pa is not None and pb is not None) or k is None:
+                    raise Unproved("a vector pointer plus a non-constant")
+                q = (pa if pa is not None else pb) + k
+                out += [PtrLane(q, 0), PtrLane(q, 1)]
+                continue
             v = Concat(ahi, alo) + Concat(bhi, blo)
             out += [Extract(31, 0, v), Extract(63, 32, v)]
         put(m, ops[0], out)
@@ -186,6 +231,28 @@ def step(m, pc, mnem, ops):
             out += [Extract(31, 0, v), Extract(63, 32, v)]
         put(m, ops[0], out)
         return True
+    if mnem == "cnt" and da == "8b":
+        # Each of the low 8 bytes' 1-bits counted; the upper 64 bits zero.
+        def byte(i):
+            l = lanes(m, ops[1])[i // 4]
+            return Extract(8 * (i % 4) + 7, 8 * (i % 4), l)
+        counts = []
+        for i in range(8):
+            b = byte(i)
+            c = BitVecVal(0, 8)
+            for k in range(8):
+                c = c + ZeroExt(7, Extract(k, k, b))
+            counts.append(c)
+        put(m, ops[0], [Concat(*reversed(counts[0:4])), Concat(*reversed(counts[4:8])), BitVecVal(0, 32), BitVecVal(0, 32)])
+        return True
+    if mnem == "addv" and ops[0].startswith("b") and arrangement(ops[1])[1] == "8b":
+        # The sum of the low 8 bytes, modulo 256, into byte 0; the rest zero.
+        ls = lanes(m, ops[1])
+        total = BitVecVal(0, 8)
+        for i in range(8):
+            total = total + Extract(8 * (i % 4) + 7, 8 * (i % 4), ls[i // 4])
+        put(m, ops[0], [ZeroExt(24, total), BitVecVal(0, 32), BitVecVal(0, 32), BitVecVal(0, 32)])
+        return True
     if mnem == "uxtl" and da == "2d" and arrangement(ops[1])[1] == "2s":
         a = lanes(m, ops[1])
         put(m, ops[0], [a[0], BitVecVal(0, 32), a[1], BitVecVal(0, 32)])
@@ -258,7 +325,8 @@ def step(m, pc, mnem, ops):
     if mnem == "dup" and da == "2d" and ops[1][0] == "x":
         x = m.reg(ops[1])
         if isinstance(x, aarch64.Ptr):
-            raise Unproved("a pointer duplicated into a vector")
+            put(m, ops[0], [PtrLane(x, 0), PtrLane(x, 1)] * 2)
+            return True
         lo, hi = Extract(31, 0, x), Extract(63, 32, x)
         put(m, ops[0], [lo, hi, lo, hi])
         return True
@@ -306,9 +374,7 @@ def step(m, pc, mnem, ops):
             ls = [m.load(addr + 4 * i, 4) for i in range(n // 4)]
             put(m, ops[0], ls + [BitVecVal(0, 32)] * (4 - len(ls)))
         else:
-            ls = lanes(m, ops[0])
-            for i in range(n // 4):
-                m.store(addr + 4 * i, ls[i], 4)
+            store_lanes(m, addr, lanes(m, ops[0])[:n // 4])
         if wb:
             m.set(wb, new)
         return True
@@ -321,9 +387,7 @@ def step(m, pc, mnem, ops):
                 ls = [m.load(a + 4 * i, 4) for i in range(n // 4)]
                 put(m, r, ls + [BitVecVal(0, 32)] * (4 - len(ls)))
             else:
-                ls = lanes(m, r)
-                for i in range(n // 4):
-                    m.store(a + 4 * i, ls[i], 4)
+                store_lanes(m, a, lanes(m, r)[:n // 4])
         if wb:
             m.set(wb, new)
         return True

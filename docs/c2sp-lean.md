@@ -74,7 +74,7 @@ theorems fail), and parents without the mode flag (the keyed example's hash diff
 `c2sp/pr/` holds it: `PULL_REQUEST.md` (its title and description) and
 `0001-BLAKE3-add-a-Lean-specification-definitive-where-the.patch` (one commit on C2SP/C2SP main
 at a293183, with the `BLAKE3:` prefix the manual asks for; a clone with the branch `BLAKE3-lean` is
-in `/workspace/tmp/C2SP`). It adds `BLAKE3/` (the files of `c2sp/BLAKE3/`, identical) and one
+in `/workspace/blake3-servil/tmp/C2SP`). It adds `BLAKE3/` (the files of `c2sp/BLAKE3/`, identical) and one
 paragraph in the introduction of `BLAKE3.md` that points at it and makes the Lean definitive where
 the two differ (Zooko, October 7, 2026), as `kopis.md` does. It is saved, unsubmitted.
 

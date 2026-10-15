@@ -16,7 +16,7 @@ reference manual, and cross-checked on the CPU (cross_check.py).
 import re
 import subprocess
 from z3 import (BitVec, BitVecVal, Concat, Extract, LShR, RotateRight, ZeroExt,
-                SignExt, simplify, is_bv_value, BoolRef, Not, And, Or, If, UGE, ULE, Solver, unsat,
+                SignExt, ULT, simplify, is_bv_value, BoolRef, Not, And, Or, If, UGE, ULE, Solver, unsat,
                 is_true, is_false, Z3_OP_UNINTERPRETED)
 
 
@@ -209,6 +209,17 @@ class Machine:
         if any(isinstance(p, tuple) for p in parts):
             raise Unproved(f"partial read of a stored pointer at {addr}")
         return Concat(*reversed(parts)) if n > 1 else parts[0]
+
+    def load_raw(self, addr):
+        """The byte at `addr` as memory holds it: data, or a stored pointer's piece."""
+        r = self.access(addr, 1, False)
+        k = key(addr.offset)
+        b = r.bytes.get(k)
+        if b is None:
+            if r.initial is None or not isinstance(k, int):
+                raise Unproved(f"read of unwritten {addr}")
+            b = r.initial(k)
+        return b
 
     def store(self, addr, val, n):
         r = self.access(addr, n, True)
@@ -448,6 +459,27 @@ def set_flags_sub(m, a, b, w):
     m.nzcv = (bool(r & top), r == 0, x >= y, bool(((x ^ y) & (x ^ r)) & top))
 
 
+def set_flags_add(m, a, b, w):
+    """NZCV of a + b (Arm's AddWithCarry, carry in 0): concrete, or (on
+    lengths) Z3 conditions."""
+    if isinstance(a, Ptr) or isinstance(b, Ptr):
+        raise Unproved(f"flags of the sum {a} + {b}")
+    x, y = concrete(a), concrete(b)
+    top = 1 << (w - 1)
+    if x is None or y is None:
+        if not (lengths_only(m, a) or x is not None) or not (lengths_only(m, b) or y is not None):
+            raise Unproved("a condition depends on data")
+        x, y = Extract(w - 1, 0, a) if a.size() > w else a, Extract(w - 1, 0, b) if b.size() > w else b
+        r = x + y
+        hi = lambda t: Extract(w - 1, w - 1, t) == 1
+        m.nzcv = (hi(r), r == 0, ULT(r, x), hi(~(x ^ y) & (x ^ r)))
+        return
+    mask = (1 << w) - 1
+    x, y = x & mask, y & mask
+    r = (x + y) & mask
+    m.nzcv = (bool(r & top), r == 0, x + y > mask, bool(~(x ^ y) & (x ^ r) & top))
+
+
 def symbolic_flags(m, a, b, w):
     """NZCV of a - b on lengths, as Z3 conditions."""
     x, y = Extract(w - 1, 0, a) if a.size() > w else a, Extract(w - 1, 0, b) if b.size() > w else b
@@ -531,20 +563,74 @@ def library_call(m, name):
         for i in range(n):
             m.store(m.x[0] + i, byte, 1)
         return
+    if name == "pthread_key_create":
+        # pthread_key_create(key, destructor): a new key to *key (1: std
+        # keeps 0 for "none yet"); 0.
+        m.store(m.x[0], BitVecVal(1, 32), 4)
+        m.x[0] = BitVecVal(0, 64)
+        return
+    if name in ("pthread_setspecific", "pthread_getspecific"):
+        # This thread's value for a key (concrete): set (returning 0) or got
+        # (none yet: 0).
+        k = concrete(m.x[0])
+        if k is None:
+            raise Unproved(f"{name} of a data-dependent key")
+        table = m.__dict__.setdefault("specific", {})
+        if name == "pthread_setspecific":
+            table[k] = m.x[1]
+            m.x[0] = BitVecVal(0, 64)
+        else:
+            m.x[0] = table.get(k, BitVecVal(0, 64))
+        return
+    if name in ("posix_memalign", "malloc"):
+        # posix_memalign(memptr, align, size) and malloc(size): a new block
+        # of `size` bytes (concrete), its base aligned to `align` (malloc's
+        # 16; a power of two up to a page), its bytes indeterminate (each a
+        # fresh value, data: one that steered the run would stop it); its
+        # address to *memptr and 0, or returned. (A failed allocation aborts
+        # the process: Rust's allocator never returns it.)
+        align, size = (concrete(m.x[1]), concrete(m.x[2])) if name == "posix_memalign" else (16, concrete(m.x[0]))
+        if size is None or align is None or align & (align - 1) or align > 4096:
+            raise Unproved(f"{name} of a data-dependent size or alignment")
+        m.blocks = getattr(m, "blocks", 0) + 1
+        block = f"heap{m.blocks}"
+        m.regions[block] = Region(block, size, True, (lambda b: lambda o: BitVec(f"{b}_{o}", 8))(block))
+        m.regions[block].align = align
+        if name == "malloc":
+            m.x[0] = Ptr(block, 0)
+        else:
+            m.store(m.x[0], Ptr(block, 0), 8)
+            m.x[0] = BitVecVal(0, 64)
+        return
+    if name == "free":
+        # free(p): a block (or null) given back; the run reads it no more.
+        p = m.x[0]
+        if not (isinstance(p, Ptr) and p.region.startswith("heap") and p.offset == 0 or concrete(p) == 0):
+            raise Unproved(f"free of {p}")
+        if isinstance(p, Ptr):
+            del m.regions[p.region]
+        return
     if name not in ("memcpy", "memmove"):
         raise Unproved(f"a call of {name}, which is not modelled")
     n = concrete(m.x[2])
     if n is None:
         raise Unproved(f"{name} of a data-dependent length")
     dst, src = m.x[0], m.x[1]
-    data = [m.load(src + i, 1) for i in range(n)]
+    # Byte by byte as memory holds them: a stored pointer's pieces copied as pieces.
+    data = [m.load_raw(src + i) for i in range(n)]
+    if n:
+        m.access(dst, n, True)
     for i, b in enumerate(data):
-        m.store(dst + i, b, 1)
+        m.regions[dst.region].bytes[key((dst + i).offset)] = b
     m.x[0] = dst
 
 
 # Loads and stores with an unscaled offset: the same access as the scaled form.
-UNSCALED = {"ldur": "ldr", "stur": "str", "ldurb": "ldrb", "sturb": "strb", "ldurh": "ldrh", "sturh": "strh"}
+UNSCALED = {"ldur": "ldr", "stur": "str", "ldurb": "ldrb", "sturb": "strb", "ldurh": "ldrh", "sturh": "strh",
+            # Acquire and release order other threads' views; one thread's run sees plain accesses.
+            "ldar": "ldr", "stlr": "str", "ldarb": "ldrb", "stlrb": "strb",
+            # An exclusive load: a plain one (its store, below, always succeeds).
+            "ldxr": "ldr", "ldaxr": "ldr", "ldxrb": "ldrb", "ldaxrb": "ldrb"}
 
 
 def step(m, pc, mnem, ops):
@@ -558,18 +644,39 @@ def step(m, pc, mnem, ops):
         b = shifted(m, ops[2:], w)
         r = add_values(a, b, sub=mnem.startswith("sub"))
         if mnem.endswith("s"):
-            set_flags_sub(m, a, b if mnem.startswith("sub") else -b, w)
+            (set_flags_sub if mnem.startswith("sub") else set_flags_add)(m, a, b, w)
         m.set(ops[0], r)
         return None
     if mnem == "cmp":
         set_flags_sub(m, m.reg(ops[0]), shifted(m, ops[1:], w), w)
         return None
+    if mnem == "cmn":
+        # The flags of a + b, as adds sets them.
+        set_flags_add(m, m.reg(ops[0]), shifted(m, ops[1:], w), w)
+        return None
+    if mnem in ("umull", "umaddl") and ops[0][0] == "x":
+        # The 64-bit product of two w registers, unsigned (plus an x register).
+        a, b = m.reg(ops[1]), m.reg(ops[2])
+        p = ZeroExt(32, a) * ZeroExt(32, b)
+        m.set(ops[0], p if mnem == "umull" else add_values(m.reg(ops[3]), p))
+        return None
+    if mnem in ("mul", "madd", "msub"):
+        a, b = m.reg(ops[1]), m.reg(ops[2])
+        if isinstance(a, Ptr) or isinstance(b, Ptr):
+            raise Unproved(f"{mnem} of a pointer")
+        if mnem == "mul":
+            m.set(ops[0], a * b)
+        else:
+            m.set(ops[0], add_values(m.reg(ops[3]), a * b, sub=mnem == "msub"))
+        return None
     if mnem == "and" and ops[1][0] in "wx" and isinstance(m.reg(ops[1]), Ptr) and len(ops) == 3 and ops[2].startswith("#"):
-        # A stack address aligned down to a power of two up to a page: the
-        # stack's base is taken page-aligned, so the offset aligns the same way.
+        # A stack or heap address aligned down to a power of two up to its
+        # base's alignment (the stack's a page, a block's what it asked
+        # for), so the offset aligns the same way.
         a, mask = m.reg(ops[1]), imm(ops[2]) % (1 << 64)
         align = (1 << 64) - mask
-        if not (a.region == "stack" and isinstance(a.offset, int) and align & (align - 1) == 0 and align <= 4096):
+        base_align = 4096 if a.region == "stack" else getattr(m.regions.get(a.region), "align", 0)
+        if not (isinstance(a.offset, int) and align & (align - 1) == 0 and align <= base_align):
             raise Unproved(f"and of the pointer {a} with {ops[2]}")
         aligned = Ptr("stack", a.offset & mask)
         if ops[0] == "sp":
@@ -627,14 +734,15 @@ def step(m, pc, mnem, ops):
             raise Unproved("cset before any comparison")
         m.set(ops[0], BitVecVal(1 if cond(m, ops[1]) else 0, w))
         return None
-    if mnem == "ccmp":
+    if mnem in ("ccmp", "ccmn"):
         # If the condition holds on the current flags, they become those of
-        # the comparison; otherwise the immediate's (n z c v from bit 3 down).
+        # the comparison (ccmn: of the sum); otherwise the immediate's (n z c v
+        # from bit 3 down).
         if m.nzcv is None:
             raise Unproved(f"{mnem} before any comparison")
         if cond(m, ops[3]):
             b = operand_value(m, ops[1], w)
-            set_flags_sub(m, m.reg(ops[0]), b, w)
+            (set_flags_sub if mnem == "ccmp" else set_flags_add)(m, m.reg(ops[0]), b, w)
         else:
             k = imm(ops[2])
             m.nzcv = (bool(k & 8), bool(k & 4), bool(k & 2), bool(k & 1))
@@ -718,6 +826,17 @@ def step(m, pc, mnem, ops):
                 raise Unproved("csinc of a pointer")
             m.set(ops[0], b + 1)
         return None
+    if mnem == "cinc":
+        # cinc d, n, c: n + 1 if c holds, else n.
+        if m.nzcv is None:
+            raise Unproved("cinc before any comparison")
+        a = m.reg(ops[1])
+        if cond(m, ops[2]):
+            if isinstance(a, Ptr):
+                raise Unproved("cinc of a pointer")
+            a = a + 1
+        m.set(ops[0], a)
+        return None
     if mnem == "adr":
         m.set(ops[0], Ptr("text", int(ops[1].split()[0], 16)))
         return None
@@ -725,6 +844,54 @@ def step(m, pc, mnem, ops):
         # The page of a read-only constant: the image region (image_bytes).
         m.set(ops[0], Ptr("image", int(ops[1].split()[0], 16) & ~0xfff))
         return None
+    if mnem == "mrs":
+        # The clock the run fixes (`m.clock`: the virtual counter and its
+        # frequency), and the thread pointer: the start of this thread's
+        # TLS block (Variant I: its variables from offset 16).
+        if ops[1] == "tpidr_el0":
+            m.set(ops[0], Ptr("tls", 0))
+        elif ops[1] in getattr(m, "clock", {}):
+            m.set(ops[0], BitVecVal(m.clock[ops[1]], 64))
+        else:
+            raise Unproved(f"a read of {ops[1]}")
+        return None
+    if mnem == "prfm":
+        # A prefetch: no effect the program can see.
+        return None
+    if mnem == "umulh":
+        a, b = m.reg(ops[1]), m.reg(ops[2])
+        if isinstance(a, Ptr) or isinstance(b, Ptr):
+            raise Unproved("umulh of a pointer")
+        m.set(ops[0], Extract(127, 64, ZeroExt(64, a) * ZeroExt(64, b)))
+        return None
+    if mnem == "blr" and isinstance(m.reg(ops[0]), Ptr) and m.reg(ops[0]).region == "tlsdesc":
+        # A TLS descriptor's resolver, as the dynamic linker binds it for
+        # static TLS: x0, the descriptor, returns its second word, the
+        # variable's offset from the thread pointer; no other register changes.
+        m.set("x0", m.load(add_values(m.reg("x0"), BitVecVal(8, 64)), 8))
+        return None
+    if mnem == "br":
+        # A jump through a computed code address (a jump table's target).
+        t = m.reg(ops[0])
+        if isinstance(t, Ptr) and not isinstance(t.offset, int):
+            t = Ptr(t.region, concrete(t.offset))
+        if not (isinstance(t, Ptr) and t.region in ("image", "text", "code") and isinstance(t.offset, int)
+                and t.offset in m.code):
+            raise Unproved(f"a jump through {t}, which is not code of the image")
+        return t.offset
+    if mnem == "blr":
+        # A call through a pointer the image holds (a table of functions):
+        # the function at that address, as a direct call.
+        t = m.reg(ops[0])
+        if not (isinstance(t, Ptr) and t.region in ("image", "text") and isinstance(t.offset, int) and t.offset in m.code):
+            raise Unproved(f"a call through {t}, which is not a function of the image")
+        contract = getattr(m, "contracts", {}).get(t.offset)
+        if contract is not None:
+            contract(m)
+            clobber(m, keep_x0=True)
+            return None
+        m.x[30] = Ptr("code", pc + 4)
+        return t.offset
     if mnem == "bl":
         target = int(ops[0].split()[0], 16)
         name = getattr(m, "plt", {}).get(target)
@@ -739,8 +906,11 @@ def step(m, pc, mnem, ops):
             return None
         contract = getattr(m, "contracts", {}).get(target)
         if contract is not None:
+            # The callee by its proved statement: the contract writes what
+            # the callee writes and sets x0; the rest the convention lets
+            # change is fresh.
             contract(m)
-            clobber(m)
+            clobber(m, keep_x0=True)
             return None
         m.x[30] = Ptr("code", pc + 4)
         return target
@@ -763,6 +933,24 @@ def step(m, pc, mnem, ops):
         else:
             val = m.reg(ops[0])
             m.store(addr, val if isinstance(val, Ptr) or 8 * n == w else Extract(8 * n - 1, 0, val), n)
+        if wb:
+            m.set(wb, new)
+        return None
+    if mnem in ("stxr", "stlxr", "stxrb", "stlxrb"):
+        # An exclusive store: one thread's run holds the monitor, so it
+        # stores and reports success (0).
+        n = 1 if mnem.endswith("b") else width(ops[1]) // 8
+        addr, _, _ = mem_operand(m, ops, 2)
+        val = m.reg(ops[1])
+        m.store(addr, val if isinstance(val, Ptr) or 8 * n == width(ops[1]) else Extract(8 * n - 1, 0, val), n)
+        m.set(ops[0], BitVecVal(0, 32))
+        return None
+    if mnem == "ldrsw" and ops[0][0] == "x":
+        addr, wb, new = mem_operand(m, ops, 1)
+        val = m.load(addr, 4)
+        if isinstance(val, Ptr):
+            raise Unproved("a sign-extended load of a pointer")
+        m.set(ops[0], SignExt(32, val))
         if wb:
             m.set(wb, new)
         return None

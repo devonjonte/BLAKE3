@@ -2,7 +2,7 @@
 BLAKE3's compression function, for every input, key, counter, and flags,
 at every block count they take (tools/verify/README.md).
 
-    python3 tools/verify/prove_hybrid.py [KERNEL...]
+    pypy3 tools/verify/prove_hybrid.py [KERNEL...]
 
 Assembles the file, disassembles each kernel, and runs it symbolically
 (aarch64.py). For each block count it checks that the output equals the
@@ -39,6 +39,8 @@ def same(a, b):
     """Whether two terms are equal for every value of their symbols: by
     normal form (canon.py); two small terms with no rounds in them, by the
     solver."""
+    if a.eq(b):
+        return True      # one term (Z3 shares structurally equal terms)
     if canon.canon(a) == canon.canon(b):
         return True
     if canon.has_arith(a) or canon.has_arith(b):
@@ -134,6 +136,29 @@ def prove_c1(obj, blocks, alias):
     return m.steps
 
 
+def table_cvs(inputs, key, counters, flags, start, end, last_len, blocks):
+    """The statement of every kernel that hashes inputs of whole blocks (the
+    k and p kernels here; prove_sme2's chunk kernel): input i (`blocks`
+    blocks of bytes) hashed from `key` at counters[i] (in simplest form),
+    the first block with flags | start, the last with flags | end and block
+    length last_len (8 bits); its 8-word chaining value. The proofs and
+    prove_rust's contracts for the kernels all state it with this, so the
+    terms each builds are one."""
+    zero = BitVecVal(0, 8)
+    cvs = []
+    words = [simplify(x) for x in spec.words(key)]
+    for data, c in zip(inputs, counters):
+        cv = words
+        c = simplify(c)
+        for b in range(blocks):
+            block = spec.words(data[64 * b:64 * b + 64])
+            f = simplify(ZeroExt(24, flags | (start if b == 0 else zero) | (end if b == blocks - 1 else zero)))
+            length = simplify(ZeroExt(24, last_len)) if b == blocks - 1 else BitVecVal(64, 32)
+            cv = spec.compress(cv, block, c, length, f)[:8]
+        cvs.append(cv)
+    return cvs
+
+
 def prove_table(obj, name, n, blocks, per_input_counter):
     """kernel(inputs, blocks, key, counter, packed, out) (the file's
     header): input i, at inputs[i], is `blocks` blocks hashed from key at
@@ -160,15 +185,10 @@ def prove_table(obj, name, n, blocks, per_input_counter):
     out = m.regions["out"]
     if any(i not in out.bytes for i in range(32 * n)):
         raise Unproved("the output is not wholly written")
-    zero = BitVecVal(0, 8)
+    cvs = table_cvs(inputs, key, [counter + i if per_input_counter else counter for i in range(n)],
+                    flags, start, end, last_len, blocks)
     for i in range(n):
-        cv = spec.words(key)
-        c = counter + i if per_input_counter else counter
-        for b in range(blocks):
-            block = spec.words(inputs[i][64 * b:64 * b + 64])
-            f = ZeroExt(24, flags | (start if b == 0 else zero) | (end if b == blocks - 1 else zero))
-            length = ZeroExt(24, last_len) if b == blocks - 1 else BitVecVal(64, 32)
-            cv = spec.compress(cv, block, c, length, f)[:8]
+        cv = cvs[i]
         got = spec.words([out.bytes[32 * i + j] for j in range(32)])
         for w in range(8):
             if not same(got[w], cv[w]):

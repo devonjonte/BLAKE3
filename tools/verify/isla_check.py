@@ -16,7 +16,7 @@ bits, the V register the NEON instructions write; a flag in PSTATE's
 1-bit field, and a condition the inputs leave open (csel, ccmp, cset) on
 each of its two sides.
 
-    python3 tools/verify/isla_check.py
+    pypy3 tools/verify/isla_check.py
 
 Needs Isla (github.com/rems-project/isla, `isla-footprint`), the Armv9.4
 snapshot (isla-snapshots, `armv9p4.ir`), and Isla's source (its
@@ -44,7 +44,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from z3 import BitVec, BitVecSort, BitVecVal, BoolSort, Const, Extract, Not, Or, Solver, is_true, parse_smt2_string, sat, unsat
+from z3 import BitVec, BitVecSort, BitVecVal, BoolSort, BoolVal, Const, Extract, Not, Or, Solver, is_true, parse_smt2_string, sat, \
+    simplify, substitute, unsat
 import aarch64
 
 FOOTPRINT = os.environ.get("ISLA_FOOTPRINT", "/tmp/target/release/isla-footprint")
@@ -168,10 +169,14 @@ def query(trace, model_outputs, lanes=4, extra=lambda xin: []):
     low 512 bits, the model's sixteen 32-bit lanes; a flag is PSTATE's 1-bit
     field."""
     decls, conds, xin, xout, zin, zout = {}, [], {}, {}, None, None
+    defs = []           # the trace's definitions, in order
     fin, fout, zain, zaout = {}, {}, None, None
 
     def term(expr):
-        f = parse_smt2_string(f"(assert (= {expr} {expr}))", decls=decls)
+        # Only the declarations the expression names: handing Z3 every one
+        # each time cost time in proportion to the trace's length.
+        used = {n: decls[n] for n in set(re.findall(r"[^\s()|]+", expr)) if n in decls}
+        f = parse_smt2_string(f"(assert (= {expr} {expr}))", decls=used)
         return f[0].arg(0)
 
     def field(ev, name):
@@ -196,6 +201,7 @@ def query(trace, model_outputs, lanes=4, extra=lambda xin: []):
                 continue        # an enumeration or struct: left out
             decls[name] = Const(name, t.sort())
             conds.append(decls[name] == t)
+            defs.append((decls[name], t))
             continue
         m = re.match(r"\(assert (.*)\)$", ev, re.S)
         if m:
@@ -291,8 +297,15 @@ def query(trace, model_outputs, lanes=4, extra=lambda xin: []):
                 return f"Arm's model writes flags {sorted(fout)}, ours all four"
             pairs += [(f"flag {f}", fout[f] == 1, g) for f, g in zip(FLAGS, gotf)]
         # One query: does any written value differ? Its model names one.
+        # Arm's values with the trace's definitions substituted (from the
+        # last, each naming only earlier ones) and simplified: Z3 then sees
+        # through a product's low half (`mul`'s 64 bits of a 128-bit product),
+        # which as equations it searches for hours.
+        differ = Or([want != got for _, want, got in pairs]) if pairs else BoolVal(False)
+        for c, t in reversed(defs):
+            differ = substitute(differ, (c, t))
         s.push()
-        s.add(Or([want != got for _, want, got in pairs]) if pairs else False)
+        s.add(simplify(differ))
         result = s.check()
         if result != unsat:
             names = [what for what, want, got in pairs
@@ -450,10 +463,7 @@ def streaming_forms():
 def all_forms():
     import cross_check
     import prove_hybrid
-    import prove_rust
-    import prove_timing
-    if prove_rust.main(exit=False) or prove_timing.main(exit=False):
-        sys.exit("a proof above failed")
+    cross_check.proved_forms()
     obj = prove_hybrid.assemble()
     forms = cross_check.forms(list(aarch64.disassemble(obj, 0, 1 << 30).values()) + sorted(aarch64.EXECUTED))
     return forms
@@ -519,12 +529,18 @@ MUTANTS = [
 ]
 
 
+# Workers start as fresh interpreters: forked from main, after the proofs
+# that list the forms, each would inherit their tens of gigabytes, which
+# pypy's collector then copies page by page.
+SPAWN = multiprocessing.get_context("spawn")
+
+
 def main():
     write_config()
     write_snapshot()
     forms = all_forms()
     bad = 0
-    with multiprocessing.Pool(min(6, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
+    with SPAWN.Pool(min(6, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
         for instruction, verdict in pool.imap_unordered(check_form, forms):
             print(f"{instruction}: {verdict}", flush=True)
             bad += not verdict.startswith("equal")
@@ -532,7 +548,7 @@ def main():
     write_streaming_config()
     streaming = streaming_forms()
     sbad = 0
-    with multiprocessing.Pool(min(6, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
+    with SPAWN.Pool(min(6, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
         for instruction, verdict in pool.imap_unordered(check_streaming_form, streaming):
             print(f"{instruction}: {verdict}", flush=True)
             sbad += not verdict.startswith("equal")
@@ -540,7 +556,7 @@ def main():
     bad += sbad
     # The check rejects wrong models.
     accepted = 0
-    with multiprocessing.Pool(min(6, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
+    with SPAWN.Pool(min(6, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
         for what, rejected in pool.imap_unordered(mutant, range(len(MUTANTS))):
             print(f"wrong model, {what}: {'rejected' if rejected else 'ACCEPTED'}", flush=True)
             accepted += not rejected

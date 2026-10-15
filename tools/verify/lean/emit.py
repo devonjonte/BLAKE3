@@ -1,6 +1,6 @@
 """Write the proofs' definition of BLAKE3's compression from the Lean specification.
 
-    python3 tools/verify/lean/emit.py
+    pypy3 tools/verify/lean/emit.py
 
 1. Inserts the generated section of c2sp/BLAKE3/Blake3.lean (generate.py's
    translation of BLAKE3.md) into Generic.lean, verbatim, and checks it is
@@ -11,6 +11,10 @@
    writes compress.json: the compression's 16 output words as a graph of
    additions, xors, rotations, the counter's words, and constants over the
    inputs h0-h7, m0-m15, t, len, flags. tools/verify/lean_spec.py reads it.
+   It also writes schedules.json: for each input length the whole-call
+   proofs use (prove_timing.py's, and its context string's), the
+   compressions BLAKE3 performs (Schedule.lean, proved by
+   ScheduleProofs.lean's run_eq). tools/verify/whole.py reads it.
 """
 
 import os
@@ -34,7 +38,11 @@ def main():
     new = generate.splice(open(path).read(), text)
     with open(path, "w") as f:
         f.write(new)
-    for args in (["build"], ["env", "lean", "--run", "Emit.lean", "compress.json", "samples.json"]):
+    sys.path.insert(0, os.path.dirname(HERE))
+    import prove_timing
+    lengths = sorted(set(prove_timing.LENGTHS) | {len(prove_timing.CONTEXT.encode())})
+    for args in (["build"], ["env", "lean", "--run", "Emit.lean", "compress.json", "samples.json", "schedules.json",
+                             *map(str, lengths)]):
         r = subprocess.run(["lake", *args], cwd=HERE, capture_output=True, text=True)
         if r.returncode:
             sys.exit(f"emit.py: lake {' '.join(args)} failed:\n{r.stdout[-3000:]}{r.stderr[-2000:]}")
@@ -48,7 +56,6 @@ def main():
             if not lines or any(set(l.split("[", 1)[1].rstrip("]").split(", ")) - standard for l in lines):
                 sys.exit("emit.py: a theorem depends on more than Lean's standard axioms")
     # The graph, read as lean_spec.py reads it, at the specification's own sample outputs.
-    sys.path.insert(0, os.path.dirname(HERE))
     import json
     import lean_spec
     from z3 import BitVecVal, simplify
@@ -62,7 +69,8 @@ def main():
     os.remove(os.path.join(HERE, "samples.json"))
     print("emit.py: Generic.lean holds the specification's text; Bridge.lean and Sound.lean prove what"
           " Emit.lean writes is the specification's compression; compress.json written, and read by"
-          " lean_spec.py it agrees with the specification at the samples")
+          " lean_spec.py it agrees with the specification at the samples; ScheduleProofs.lean proves"
+          " the schedules schedules.json holds")
 
 
 if __name__ == "__main__":
