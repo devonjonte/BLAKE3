@@ -3,7 +3,10 @@
 //! the same messages, already in memory, in each; neither copies.
 //!
 //!   stream_probe samples API OUT [LEN...]
-//!       (API batch-queue | batch-stream: LEN is a batch's 64-byte messages,
+//!       (API collection-each | collection-stream: LEN 0 git objects, 1
+//!       Nix files, hash_each_multithreaded_with against a stream;
+//!       stream-mixed | queue-mixed: lengths from 1 byte to LEN;
+//!       batch-queue | batch-stream: LEN is a batch's 64-byte messages,
 //!       Queue::fixed against a stream of each batch's messages; written: each message read straight into the stream's bytes
 //!       (submit_with); rounds: each round of messages read into the program's
 //!       buffers, then a stream of them; queue-read: each read into a free
@@ -38,7 +41,14 @@ type Sample = (u64, u64, u64);
 /// One mode's batches at messages of `len` bytes (1 MiB: 64 a batch).
 fn solo(api: &str, len: usize) -> Vec<Sample> {
     let per_call = if len >= 1 << 20 { 64 } else { PER_CALL };
-    let messages: Vec<Vec<u8>> = (0..per_call).map(|m| (0..len).map(|i| ((i + m) % 251) as u8).collect()).collect();
+    // API-mixed: lengths spread from 1 byte to LEN, a fixed sequence.
+    let (api, mixed) = match api.strip_suffix("-mixed") {
+        Some(api) => (api, true),
+        None => (api, false),
+    };
+    let length = |m: usize| if mixed { (m * 2_654_435_761 % len) + 1 } else { len };
+    let messages: Vec<Vec<u8>> = (0..per_call).map(|m| (0..length(m)).map(|i| ((i + m) % 251) as u8).collect()).collect();
+    let bytes: usize = messages.iter().map(|m| m.len()).sum();
     let batches = match api {
         "stream" => blake3_servil::stream(blake3_servil::Mode::Hash, |s| {
             let b = clocks::measure(64, 2_000_000, || {
@@ -137,7 +147,7 @@ fn solo(api: &str, len: usize) -> Vec<Sample> {
         }
         _ => panic!("solo and two: stream | queue"),
     };
-    batches.iter().map(|b| (b.wall_ns, b.calls * (per_call * len) as u64, b.started_ns / 1_000_000)).collect()
+    batches.iter().map(|b| (b.wall_ns, b.calls * bytes as u64, b.started_ns / 1_000_000)).collect()
 }
 
 struct BatchBack(mpsc::SyncSender<(Vec<u8>, Vec<[u8; 32]>)>);
@@ -226,6 +236,85 @@ fn batches(api: &str, n: usize) -> Vec<Sample> {
     batches.iter().map(|b| (b.wall_ns, b.calls * (per_call * len) as u64, b.started_ns / 1_000_000)).collect()
 }
 
+/// bench-hashes' collections (Collection): (count, length) classes.
+const COLLECTIONS: [&[(usize, usize)]; 2] = [
+    &[
+        (1, 24),
+        (13, 48),
+        (12, 96),
+        (42, 192),
+        (182, 384),
+        (237, 768),
+        (135, 1536),
+        (141, 3072),
+        (173, 6144),
+        (447, 12288),
+        (321, 24576),
+        (231, 49152),
+        (84, 98304),
+        (22, 196608),
+        (4, 393216),
+        (3, 786432),
+    ],
+    &[
+        (6, 1),
+        (1, 6),
+        (1, 12),
+        (4, 24),
+        (11, 48),
+        (44, 96),
+        (139, 192),
+        (133, 384),
+        (439, 768),
+        (428, 1536),
+        (264, 3072),
+        (179, 6144),
+        (130, 12288),
+        (96, 24576),
+        (70, 49152),
+        (46, 98304),
+        (31, 196608),
+        (17, 393216),
+        (9, 786432),
+    ],
+];
+
+/// Collection `index` (0 git objects, 1 Nix files) in memory, every item
+/// hashed in one call: hash_each_multithreaded_with, or a stream of them.
+fn collection(api: &str, index: usize) -> Vec<Sample> {
+    let lengths: Vec<usize> = COLLECTIONS[index].iter().flat_map(|&(n, len)| std::iter::repeat_n(len, n)).collect();
+    let count = lengths.len();
+    let items: Vec<Vec<u8>> = (0..count).map(|j| (0..lengths[j * 389 % count]).map(|i| ((i + j) % 251) as u8).collect()).collect();
+    let slices: Vec<&[u8]> = items.iter().map(|m| m.as_slice()).collect();
+    let bytes: usize = lengths.iter().sum();
+    let mut digests = vec![[0u8; 32]; count];
+    let batches = match api {
+        "collection-each" => clocks::measure(16, 2_000_000, || blake3_servil::hash_each_multithreaded_with(blake3_servil::Mode::Hash, &slices, &mut digests)),
+        "collection-stream" => clocks::measure(16, 2_000_000, || {
+            let mut k = 0;
+            blake3_servil::stream(blake3_servil::Mode::Hash, |s| {
+                for item in &slices {
+                    s.submit(item, |d| {
+                        for h in d {
+                            digests[k] = *h.as_bytes();
+                            k += 1;
+                        }
+                    });
+                }
+                s.finish(|d| {
+                    for h in d {
+                        digests[k] = *h.as_bytes();
+                        k += 1;
+                    }
+                });
+            });
+        }),
+        _ => panic!("collection-each | collection-stream"),
+    };
+    std::hint::black_box(&digests);
+    batches.iter().map(|b| (b.wall_ns, b.calls * bytes as u64, b.started_ns / 1_000_000)).collect()
+}
+
 /// One message at a time after a 1 ms idle gap, its digest awaited: a
 /// server's request, a wait, the next.
 fn lone(api: &str, len: usize) -> Vec<Sample> {
@@ -287,6 +376,7 @@ fn main() {
     let scenarios: &[&str] = match api {
         "new" => &["lone"],
         "rounds" | "queue-read" | "written" | "batch-queue" | "batch-stream" => &["solo", "two"],
+        mixed if mixed.ends_with("-mixed") || mixed.starts_with("collection") => &["solo", "two"],
         _ => &["solo", "two", "lone"],
     };
     let (mut rows, mut busy) = (String::new(), String::new());
@@ -295,6 +385,13 @@ fn main() {
             let before = clocks::threads::snapshot();
             let started = clocks::now();
             let samples = match scenario {
+                "solo" if api.starts_with("collection") => collection(api, len),
+                "two" if api.starts_with("collection") => std::thread::scope(|t| {
+                    let other = t.spawn(|| collection(api, len));
+                    let mut samples = collection(api, len);
+                    samples.extend(other.join().unwrap());
+                    samples
+                }),
                 "solo" if api.starts_with("batch") => batches(api, len),
                 "two" if api.starts_with("batch") => std::thread::scope(|t| {
                     let other = t.spawn(|| batches(api, len));
