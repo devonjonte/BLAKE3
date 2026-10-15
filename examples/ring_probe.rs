@@ -367,7 +367,22 @@ fn main() {
                     *free.borrow_mut() = Some(rx.recv().unwrap());
                 }).calls.wall_ns
             }
-            _ => panic!("sporadic-hash | sporadic-ring | sporadic-queue LEN"),
+            "channel" => {
+                // The handover alone: a thread that returns each buffer it
+                // receives, both sides asleep between messages.
+                let (to_tx, to_rx) = mpsc::sync_channel::<Vec<u8>>(1);
+                let (back_tx, back_rx) = mpsc::sync_channel::<Vec<u8>>(1);
+                std::thread::spawn(move || { for b in to_rx { back_tx.send(b).unwrap(); } });
+                let free = std::cell::RefCell::new(Some(vec![0u8; len]));
+                let mut unit = ();
+                clocks::measure_after_gaps_prepared(calls, clocks::Gap::Idle, 1_000_000, &mut unit, |_| {}, |_| {
+                    let mut buf = free.borrow_mut().take().unwrap();
+                    buf.copy_from_slice(&source);
+                    to_tx.send(buf).unwrap();
+                    *free.borrow_mut() = Some(back_rx.recv().unwrap());
+                }).calls.wall_ns
+            }
+            _ => panic!("sporadic-hash | sporadic-ring | sporadic-queue | sporadic-channel LEN"),
         };
         println!("{mode} {len} B: {:.1} us a message", ns as f64 / calls as f64 / 1000.0);
         return;
