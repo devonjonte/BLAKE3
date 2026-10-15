@@ -15,7 +15,6 @@ on:
       - "candidate/**"
     paths-ignore:
       - "**.md"
-  pull_request:
   workflow_dispatch:
 
 # A newer push to a branch supersedes its running check.
@@ -42,7 +41,7 @@ jobs:
       - name: performance-regression check
         shell: bash
         env:
-          AGAINST: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'HEAD~1' }}
+          AGAINST: HEAD~1
         run: |
           set +e
           python3 tools/perf_regress.py check --against "$AGAINST"
