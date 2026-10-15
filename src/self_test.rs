@@ -4,11 +4,19 @@
 //! implementation's (checked in below, verified by a unit test). A
 //! miscompiled kernel, a faulty vector or matrix unit, or a broken build
 //! then stops the program with a message naming the path, instead of
-//! producing wrong digests. It takes 0.1 to 0.2 ms, once (Apple M4 Max:
+//! producing wrong digests. Its purpose is the build and the machine
+//! (a miscompilation, a faulty unit, a binary on a CPU it was not built
+//! for, tampering that breaks the digests); what the code computes is the
+//! tests' and the proofs' to establish. So each kernel runs once, on a
+//! small input. On AArch64 it takes 0.1 to 0.2 ms, once (Apple M4 Max:
 //! 93 µs warm, 140-200 µs in a fresh process; the VM: 95 and 125): most
 //! of it is running every assembly kernel, 390 KB of unrolled code, whose
 //! first fetch dominates the fresh-process cost (Zooko chose this budget
 //! over a smaller one that leaves kernels out, September 26, 2026).
+//! Elsewhere seven cases reach every x86 kernel: about 25 µs in a fresh
+//! process on an i7-12700K's performance core, 13 µs warm (43 and 24 on
+//! an efficiency core), from 109 and 90 (210 and 182) with the AArch64
+//! list.
 //!
 //! As Niels Ferguson suggested, the cases chain: each writes the first 32
 //! bytes of its output over the start of the next case's input (and keys
@@ -45,7 +53,8 @@ pub(crate) enum Case {
     /// the previous case's output: on SME2, one call of the kernel with
     /// integer lanes beside the matrix unit (18 chunks a group), which
     /// hash() reaches only from 256 KiB; elsewhere the platform's chunk
-    /// kernels, with the same values.
+    /// kernels, with the same values. Only the AArch64 list has one.
+    #[cfg_attr(not(target_arch = "aarch64"), allow(dead_code))]
     ChunkValues { chunks: usize },
     /// keyed_hash() of `len` bytes, keyed by the previous case's output.
     Keyed { len: usize },
@@ -70,6 +79,7 @@ const KIB: usize = 1024;
 /// them with gdb breakpoints). The hybrids' k kernels hash whole chunks at
 /// rising counters, so only whole inputs reach them; batches of one-chunk
 /// messages, all at counter 0, take the parent plans (p).
+#[cfg(target_arch = "aarch64")]
 pub(crate) const CASES: &[(Case, &str)] = &[
     (Hash { offset: 0, len: 0 }, "the empty input"),
     (Hash { offset: 1, len: 63 }, "one partial block, unaligned"),
@@ -113,18 +123,47 @@ pub(crate) const CASES: &[(Case, &str)] = &[
     (Xof { len: 1500, skip: 64, out: 1100 }, "extended output of sixteen blocks and more (the SME2 extended-output kernel)"),
 ];
 
-/// The largest input any case reads, offset included.
-pub(crate) const INPUT_LEN: usize = 32 * KIB + 8;
+/// The cases elsewhere (x86-64, x86, wasm32, portable builds), each kernel
+/// and each of the Rust paths around them once, on a small input: x86's
+/// assembly has one-block, extended-output, and many-input kernels
+/// (compress_in_place, compress_xof, hash_many, and on AVX-512 xof_many),
+/// which these reach on every x86 platform (tools/self_test_coverage.py,
+/// AVX2: all 3 of its entries), with pair.rs's two-input path, the tree,
+/// the Hasher, a batch and its tail, and the three modes. The logic around
+/// the kernels is the tests' and the proofs' to establish; this checks the
+/// build and the machine running it.
+#[cfg(not(target_arch = "aarch64"))]
+pub(crate) const CASES: &[(Case, &str)] = &[
+    (Hash { offset: 1, len: 65 }, "a block and a byte, unaligned: the one-block kernel"),
+    (Keyed { len: KIB + 476 }, "keyed, a chunk and a partial one: the two-input path (AVX2, AVX-512)"),
+    (Hash { offset: 3, len: 16 * KIB + 65 }, "sixteen chunks and a block, unaligned: the widest chunk kernel, its parents, the tree"),
+    (Many { offset: 1, len: 64, count: 17 }, "seventeen 64-byte messages: the batch kernel, full groups and a tail"),
+    (Derive { len: 1 }, "key derivation"),
+    (Incremental { len: 2 * KIB + 1, piece: 700 }, "a Hasher fed in uneven pieces"),
+    (Xof { len: 100, skip: 37, out: 1100 }, "seventeen blocks and more of extended output, from an unaligned position: the extended-output kernels"),
+];
 
-/// The most output any case writes (the second extended output's).
+/// The largest input any case reads, offset included.
+#[cfg(target_arch = "aarch64")]
+pub(crate) const INPUT_LEN: usize = 32 * KIB + 8;
+#[cfg(not(target_arch = "aarch64"))]
+pub(crate) const INPUT_LEN: usize = 16 * KIB + 68;
+
+/// The most output any case writes (an extended output's).
 pub(crate) const OUTPUT_LEN: usize = 1100;
 
-/// The largest batch a Many case lays out, offset included (ten one-chunk
-/// messages).
+/// The largest batch a Many case lays out, offset included (AArch64: ten
+/// one-chunk messages; elsewhere seventeen of 64 bytes).
+#[cfg(target_arch = "aarch64")]
 const BATCH_LEN: usize = 10 * KIB;
+#[cfg(not(target_arch = "aarch64"))]
+const BATCH_LEN: usize = 17 * 64 + 1;
 
 /// The most messages a Many case holds.
+#[cfg(target_arch = "aarch64")]
 const BATCH_COUNT: usize = 21;
+#[cfg(not(target_arch = "aarch64"))]
+const BATCH_COUNT: usize = 17;
 
 /// Fill `input` with the starting bytes: little-endian words i * 0x9E3779B97F4A7C15.
 pub(crate) fn fill(input: &mut [u8]) {
@@ -178,6 +217,7 @@ pub(crate) fn chain(
 /// Each case's fold, from the reference implementation (the unit test
 /// `self_test_matches_the_reference` checks them, and prints this table
 /// when it differs).
+#[cfg(target_arch = "aarch64")]
 const EXPECTED: [u64; 40] = [
     0x90e4e563714f7c48,
     0x80003c83df0cf1a6,
@@ -219,6 +259,17 @@ const EXPECTED: [u64; 40] = [
     0x0eaabf3bcc0790e7,
     0x7bf131603d28d0e7,
     0xa7e6fd013dbeb762,
+];
+
+#[cfg(not(target_arch = "aarch64"))]
+const EXPECTED: [u64; 7] = [
+    0x64e806087be9bc85,
+    0x9da981564c48565d,
+    0x62f3a113bda8855d,
+    0x5d9614a093427254,
+    0x62a5120f324d771b,
+    0x30eca016ed7bc416,
+    0xa51f30a2eb0a32d5,
 ];
 
 /// A case's outputs from this build, into `out`, through the entry points'
@@ -325,6 +376,7 @@ fn chunk_values(platform: Platform, input: &[u8], key: &[u8; 32], out: &mut [u8]
 
 /// Run every case and panic on the first that differs from the reference.
 fn run() {
+    compiled_features_present();
     let platform = Platform::detect_unchecked();
     chain(
         |case, input, previous, out| outputs(platform, case, input, previous, out),
@@ -338,6 +390,32 @@ fn run() {
             );
         },
     );
+}
+
+/// Stop when this binary was compiled to assume an instruction that this
+/// CPU runs as another one instead of trapping: x86's LZCNT and TZCNT
+/// (BMI1) run as BSR and BSF on CPUs without them (Intel before Haswell),
+/// silently giving other values (QEMU's Ivy Bridge: leading_zeros(1 << 20)
+/// is 20, not 43). Every other instruction the compiler could assume traps
+/// on a CPU without it (SIGILL), which already stops the program. The
+/// check reads the CPU (CPUID) only in a build that assumes them.
+fn compiled_features_present() {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        #[cfg(target_arch = "x86")]
+        use core::arch::x86::__cpuid_count;
+        #[cfg(target_arch = "x86_64")]
+        use core::arch::x86_64::__cpuid_count;
+        let lacks = |feature: &str| -> ! {
+            panic!("blake3-servil: this binary was compiled for CPUs with {feature}, which this CPU lacks, and here it would compute wrong digests; build it for this CPU")
+        };
+        if cfg!(target_feature = "lzcnt") && __cpuid_count(0x8000_0001, 0).ecx & (1 << 5) == 0 {
+            lacks("LZCNT");
+        }
+        if cfg!(target_feature = "bmi1") && __cpuid_count(7, 0).ebx & (1 << 3) == 0 {
+            lacks("BMI1 (TZCNT)");
+        }
+    }
 }
 
 /// The self-test's progress in this process.
