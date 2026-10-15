@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `Hasher::update_reader_multithreaded` reads a stream as b3sum does:
+  past the first 64 KiB, 4 MiB pieces read on a second thread while the
+  calling one hashes the last over the pool. b3sum now uses it for stdin
+  and for files of 4 MiB or more it reads, and reads shorter files whole
+  into one buffer kept from file to file (its own pipeline is gone).
 - `Verifier::update_multithreaded` checks a piece's groups over this
   crate's threads when the piece holds 512 KiB of them or more: a 64 MiB
   encoding verifies at 0.105-0.112 ns/B in 1-4 MiB pieces, from

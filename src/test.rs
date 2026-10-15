@@ -922,6 +922,39 @@ fn test_update_reader_keeps_every_byte_across_errors() {
         assert_eq!(errors, fail_at.len());
         assert_eq!(hasher.finalize(), crate::hash(&input), "failing at {fail_at:?}");
     }
+    // update_reader_multithreaded: the same, in pieces of 4 MiB read on a
+    // second thread, failing inside the first 64 KiB, the first piece, and
+    // later pieces.
+    let mut input = vec![0; (9 << 20) + 12345];
+    paint_test_input(&mut input);
+    for fail_at in [vec![], vec![1000], vec![65536], vec![70_000, 4 << 20], vec![10, 5_000_000, 9_000_000], vec![(4 << 20) + 1]] {
+        let mut reader = Failing { slice: &input, at: 0, fail_at: fail_at.clone() };
+        let mut hasher = crate::Hasher::new();
+        let mut errors = 0;
+        while let Err(e) = hasher.update_reader_multithreaded(&mut reader) {
+            assert_eq!(e.kind(), io::ErrorKind::WouldBlock);
+            errors += 1;
+        }
+        assert_eq!(errors, fail_at.len());
+        assert_eq!(hasher.finalize(), crate::hash(&input), "multithreaded, failing at {fail_at:?}");
+    }
+}
+
+#[test]
+#[cfg(feature = "std")]
+fn test_update_reader_multithreaded_lengths() {
+    // Every length where the pipeline changes course: inside the first 64
+    // KiB, the first 4 MiB piece, and the pieces after it.
+    let mut input = vec![0; (9 << 20) + 7];
+    paint_test_input(&mut input);
+    for len in [0, 1, 65535, 65536, 65537, (4 << 20) - 1, 4 << 20, (4 << 20) + 1, (8 << 20) + 65536, input.len()] {
+        let mut hasher = crate::Hasher::new();
+        hasher.update_reader_multithreaded(&input[..len]).unwrap();
+        assert_eq!(hasher.finalize(), crate::hash(&input[..len]), "{len} bytes");
+        let mut keyed = crate::Hasher::new_keyed(&TEST_KEY);
+        keyed.update(&input[..100]).update_reader_multithreaded(&input[100..len.max(100)]).unwrap();
+        assert_eq!(keyed.finalize(), crate::keyed_hash(&TEST_KEY, &input[..len.max(100)]), "keyed, {len} bytes after 100");
+    }
 }
 
 #[test]

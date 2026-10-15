@@ -2214,6 +2214,30 @@ impl Hasher {
         Ok(self)
     }
 
+    /// [`update_reader`](Hasher::update_reader) over this crate's threads,
+    /// for a long stream (a pipe, a socket, a file not in the page cache):
+    /// past the first 64 KiB it reads 4 MiB pieces on a second thread while
+    /// this one hashes the last piece with
+    /// [`update_multithreaded`](Hasher::update_multithreaded), as `b3sum`
+    /// does. It uses two 4 MiB buffers while it reads past 64 KiB, freed
+    /// when it returns. Every byte read is hashed before an error returns.
+    ///
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    /// # blake3_servil::initialize_multithreaded();
+    /// let mut hasher = blake3_servil::Hasher::new();
+    /// hasher.update_reader_multithreaded(std::io::stdin())?;
+    /// println!("{}", hasher.finalize());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "std")]
+    pub fn update_reader_multithreaded(&mut self, reader: impl std::io::Read + Send) -> std::io::Result<&mut Self> {
+        lanes::require();
+        io::copy_wide_multithreaded(reader, self)?;
+        Ok(self)
+    }
+
     /// As [`update`](Hasher::update), but reading the contents of a file using memory mapping.
     ///
     /// Not all files can be memory mapped, and memory mapping small files can be slower than
