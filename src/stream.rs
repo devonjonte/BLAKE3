@@ -93,40 +93,59 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 pub fn stream<'env, T>(mode: Mode, body: impl for<'s> FnOnce(&'s mut Stream<'env>) -> T) -> T {
     crate::lanes::require();
     let (key, flags) = mode.key_and_flags();
-    let mut stream = Stream {
-        key,
-        flags,
-        entries: std::vec![Entry { len: 0, piece: None, first: 0 }; ENTRIES].into_boxed_slice(),
-        outs: (0..ENTRIES).map(|_| Out(UnsafeCell::new([0; OUT_LEN]))).collect(),
-        pieces_out: (0..ENTRIES).map(|_| OwnLine(Out(UnsafeCell::new([0; 64])))).collect(),
-        lefts: (0..ENTRIES).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
-        open_first: 0,
-        next: 0,
-        delivered: 0,
-        open: None,
-        stack: Vec::with_capacity(64),
-        pieces: 0,
-        env: PhantomData,
-    };
-    // Every entry may be a task in flight at once.
-    TASKS.make_room(ENTRIES);
+    let s = SPARE.with(|spare| spare.take()).unwrap_or_else(Storage::new);
+    let mut stream = Stream { key, flags, s, open_first: 0, next: 0, delivered: 0, open: None, stack: Vec::with_capacity(64), pieces: 0, env: PhantomData };
     let result = body(&mut stream);
     assert_eq!(stream.delivered, stream.next, "a stream's body calls finish last");
     result
 }
 
-/// The messages of one [`stream`] call, borrowed for its scope.
-pub struct Stream<'env> {
-    key: CVWords,
-    flags: u8,
+/// A stream's entries, and room for their tasks in the pool's list: kept
+/// for the thread's next stream (a stream of one message up to 4 KiB
+/// after a 1 ms pause: 55 us with 248 KiB allocated and faulted in each
+/// time, 4-5 us with the spare; one stream kept open, 2.6-4 us. i7-12700K).
+struct Storage {
     entries: Box<[Entry]>,
     outs: Box<[Out<OUT_LEN>]>,
     pieces_out: Box<[OwnLine<Out<64>>]>,
     /// For a task's first entry, the count of the task's entries still
     /// unhashed: on lines of their own (128 bytes, as the adjacent-line
     /// prefetcher pairs lines), so that the program polling one shares no
-    /// line with the threads writing digests.
+    /// line with the threads writing digests. Zero between streams.
     lefts: Box<[OwnLine<AtomicUsize>]>,
+}
+
+std::thread_local! {
+    /// The storage of this thread's last stream.
+    static SPARE: core::cell::Cell<Option<Storage>> = const { core::cell::Cell::new(None) };
+}
+
+impl Storage {
+    fn new() -> Storage {
+        // Every entry may be a task in flight at once.
+        TASKS.make_room(ENTRIES);
+        Storage {
+            entries: std::vec![Entry { len: 0, piece: None, first: 0 }; ENTRIES].into_boxed_slice(),
+            outs: (0..ENTRIES).map(|_| Out(UnsafeCell::new([0; OUT_LEN]))).collect(),
+            pieces_out: (0..ENTRIES).map(|_| OwnLine(Out(UnsafeCell::new([0; 64])))).collect(),
+            lefts: (0..ENTRIES).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
+        }
+    }
+}
+
+impl Drop for Storage {
+    /// Give back its room (none for the empty storage a stream leaves).
+    fn drop(&mut self) {
+        TASKS.give_room(self.lefts.len());
+    }
+}
+
+/// The messages of one [`stream`] call, borrowed for its scope.
+pub struct Stream<'env> {
+    key: CVWords,
+    flags: u8,
+    /// Its own until the stream ends (then the thread's spare).
+    s: Storage,
     /// The open task's first entry.
     open_first: usize,
     /// Entries submitted, and entries handed back (each counts on).
@@ -162,8 +181,8 @@ impl<'env> Stream<'env> {
                 self.open_first = entry;
             }
             let first = self.open_first;
-            self.entries[entry].first = first;
-            let member = Member { input: message.as_ptr(), len: message.len(), out: self.outs[entry].0.get() as *mut u8, left: &*self.lefts[first] };
+            self.s.entries[entry].first = first;
+            let member = Member { input: message.as_ptr(), len: message.len(), out: self.s.outs[entry].0.get() as *mut u8, left: &*self.s.lefts[first] };
             open.member[open.members] = member;
             open.members += 1;
             open.len += member.len;
@@ -177,12 +196,12 @@ impl<'env> Stream<'env> {
             let counter = (i * PIECE / CHUNK_LEN) as u64;
             let entry = self.add_entry(piece.len(), Some((counter, i + 1 == pieces)), &mut digest);
             // A piece is a task of its own: a whole subtree at `counter`.
-            self.lefts[entry].store(1, Ordering::Relaxed);
+            self.s.lefts[entry].store(1, Ordering::Relaxed);
             let task = Task {
                 key: self.key,
                 flags: self.flags,
-                out: self.pieces_out[entry].0.0.get() as *mut u8,
-                left: &*self.lefts[entry],
+                out: self.s.pieces_out[entry].0.0.get() as *mut u8,
+                left: &*self.s.lefts[entry],
                 ..Task::of(piece, counter)
             };
             TASKS.push(core::iter::once(task));
@@ -221,7 +240,7 @@ impl<'env> Stream<'env> {
             self.wait_for_room(digest);
         }
         let index = self.next % ENTRIES;
-        self.entries[index] = Entry { len, piece, first: index };
+        self.s.entries[index] = Entry { len, piece, first: index };
         self.next += 1;
         index
     }
@@ -241,7 +260,7 @@ impl<'env> Stream<'env> {
     fn publish(&mut self) {
         if let Some(task) = self.open.take() {
             // Before the push, whose lock orders it before the threads' reads.
-            self.lefts[self.open_first].store(task.members, Ordering::Relaxed);
+            self.s.lefts[self.open_first].store(task.members, Ordering::Relaxed);
             TASKS.push(core::iter::once(task));
         }
     }
@@ -251,17 +270,17 @@ impl<'env> Stream<'env> {
         let mut count = 0;
         while self.delivered < self.next {
             let index = self.delivered % ENTRIES;
-            let Entry { len, piece, first } = self.entries[index];
-            if self.lefts[first].load(Ordering::Acquire) != 0 {
+            let Entry { len, piece, first } = self.s.entries[index];
+            if self.s.lefts[first].load(Ordering::Acquire) != 0 {
                 break;
             }
             self.delivered += 1;
             count += 1;
             // Sound: the task wrote its outs before counting `left` down.
             match piece {
-                None => digest(Hash(unsafe { *self.outs[index].0.get() })),
+                None => digest(Hash(unsafe { *self.s.outs[index].0.get() })),
                 Some((counter, last)) => {
-                    let out = unsafe { *self.pieces_out[index].0.0.get() };
+                    let out = unsafe { *self.s.pieces_out[index].0.0.get() };
                     let (key, flags, platform) = (self.key, self.flags, Platform::detect());
                     let parent = |left: &CVBytes, right: &CVBytes| crate::hasher::parent_output(left, right, &key, flags, platform);
                     let cv: CVBytes = if counter == 0 && len > CHUNK_LEN {
@@ -295,19 +314,22 @@ impl<'env> Stream<'env> {
 
 impl Drop for Stream<'_> {
     /// Wait for every task still reading the messages (also when the body
-    /// panicked), and give back the stream's room in the task list. A
-    /// stream lives only inside [`stream`], which owns it, so this runs
-    /// before the scope ends.
+    /// panicked), then keep the storage as the thread's spare. A stream
+    /// lives only inside [`stream`], which owns it, so this runs before the
+    /// scope ends.
     fn drop(&mut self) {
         self.publish();
-        for left in self.lefts.iter() {
+        for i in self.delivered..self.next {
+            let left = &self.s.lefts[self.s.entries[i % ENTRIES].first];
             while left.load(Ordering::Acquire) != 0 {
                 if !crate::lanes::run_one_task() {
                     core::hint::spin_loop();
                 }
             }
         }
-        TASKS.give_room(ENTRIES);
+        let empty = Storage { entries: Box::new([]), outs: Box::new([]), pieces_out: Box::new([]), lefts: Box::new([]) };
+        let s = core::mem::replace(&mut self.s, empty);
+        SPARE.with(|spare| spare.set(Some(s)));
     }
 }
 
