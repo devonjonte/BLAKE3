@@ -74,18 +74,32 @@ pub enum Verdict {
     Level,
 }
 
+/// The ratios the pairs leave plausible for the cell's median ratio (new
+/// over old, permille): the sign test's interval, the [`least_count`]-th
+/// ratio from each end, about 90% two-sided (each side one-sided p <= 5%).
+/// A median ratio outside it is one the sign test rejects. `None` when the
+/// pairs are too few for the test to reject anything.
+pub fn interval_permille(ratios: &[u64]) -> Option<(u64, u64)> {
+    let n = ratios.len();
+    let k = least_count(n);
+    if k > n {
+        return None;
+    }
+    let mut sorted = ratios.to_vec();
+    sorted.sort_unstable();
+    Some((sorted[n - k], sorted[k - 1]))
+}
+
 /// A cell's verdict from its pairs' ratios (new over old, permille): slower
-/// when the median exceeds 1000 + `margin_permille` and at least
-/// [`least_count`] of the pairs are above 1000; faster alike, below.
+/// when the median exceeds 1000 + `margin_permille` and the whole
+/// [`interval_permille`] lies above 1000 (at least [`least_count`] pairs
+/// slower); faster alike, below.
 pub fn verdict(ratios: &[u64], margin_permille: u64) -> Verdict {
     let median = median_permille(ratios);
-    let k = least_count(ratios.len());
-    if median > 1000 + margin_permille && ratios.iter().filter(|&&r| r > 1000).count() >= k {
-        Verdict::Slower
-    } else if median + margin_permille < 1000 && ratios.iter().filter(|&&r| r < 1000).count() >= k {
-        Verdict::Faster
-    } else {
-        Verdict::Level
+    match interval_permille(ratios) {
+        Some((low, _)) if median > 1000 + margin_permille && low > 1000 => Verdict::Slower,
+        Some((_, high)) if median + margin_permille < 1000 && high < 1000 => Verdict::Faster,
+        _ => Verdict::Level,
     }
 }
 
@@ -125,5 +139,29 @@ mod tests {
         let wild = [1200, 1300, 1040, 1035, 1045, 1033, 970, 980];
         assert_eq!(verdict(&wild, 30), Verdict::Level);
         assert_eq!(verdict(&[940, 950, 960, 955, 945, 1010, 950, 948], 30), Verdict::Faster);
+    }
+
+    /// The interval is the sign test inverted: over every set of up to 9
+    /// pairs from a few ratios, the verdict through it equals the counts'.
+    #[test]
+    fn the_interval_is_the_sign_test() {
+        let values = [940u64, 990, 1000, 1010, 1060];
+        for n in 1..=9usize {
+            for code in 0..values.len().pow(n as u32) {
+                let ratios: Vec<u64> = (0..n).map(|i| values[code / values.len().pow(i as u32) % values.len()]).collect();
+                let k = least_count(n);
+                let median = median_permille(&ratios);
+                let counted = if median > 1030 && ratios.iter().filter(|&&r| r > 1000).count() >= k {
+                    Verdict::Slower
+                } else if median + 30 < 1000 && ratios.iter().filter(|&&r| r < 1000).count() >= k {
+                    Verdict::Faster
+                } else {
+                    Verdict::Level
+                };
+                assert_eq!(verdict(&ratios, 30), counted, "{ratios:?}");
+            }
+        }
+        assert_eq!(interval_permille(&[1010, 1020, 1030, 1040, 1050, 1060, 1070, 1080]), Some((1020, 1070)));
+        assert_eq!(interval_permille(&[1000; 4]), None);
     }
 }
