@@ -138,7 +138,7 @@ pub(crate) const CASES: &[(Case, &str)] = &[
     (Keyed { len: KIB + 476 }, "keyed, a chunk and a partial one: the two-input path (AVX2, AVX-512)"),
     (Hash { offset: 3, len: 16 * KIB + 65 }, "sixteen chunks and a block, unaligned: the widest chunk kernel, its parents, the tree"),
     (Many { offset: 1, len: 64, count: 17 }, "seventeen 64-byte messages: the batch kernel, full groups and a tail"),
-    (Derive { len: 1 }, "key derivation"),
+    (Derive { len: 64 }, "key derivation over a block holding all of the previous output"),
     (Incremental { len: 2 * KIB + 1, piece: 700 }, "a Hasher fed in uneven pieces"),
     (Xof { len: 100, skip: 37, out: 1100 }, "seventeen blocks and more of extended output, from an unaligned position: the extended-output kernels"),
 ];
@@ -267,9 +267,9 @@ const EXPECTED: [u64; 7] = [
     0x9da981564c48565d,
     0x62f3a113bda8855d,
     0x5d9614a093427254,
-    0x62a5120f324d771b,
-    0x30eca016ed7bc416,
-    0xa51f30a2eb0a32d5,
+    0xa490fa2cd0d99099,
+    0x9c21ca988aea1930,
+    0x6a799e32b257a426,
 ];
 
 /// A case's outputs from this build, into `out`, through the entry points'
