@@ -410,13 +410,17 @@ fn compiled_features_present() {
         use core::arch::x86::__cpuid_count;
         #[cfg(target_arch = "x86_64")]
         use core::arch::x86_64::__cpuid_count;
+        // Sound: every CPU this code runs on has CPUID. Unsafe to call
+        // before Rust 1.87 (the MSRV is older), safe after.
+        #[allow(unused_unsafe)]
+        let cpuid = |leaf, sub| unsafe { __cpuid_count(leaf, sub) };
         let lacks = |feature: &str| -> ! {
             panic!("blake3-servil: this binary was compiled for CPUs with {feature}, which this CPU lacks, and here it would compute wrong digests; build it for this CPU")
         };
-        if cfg!(target_feature = "lzcnt") && __cpuid_count(0x8000_0001, 0).ecx & (1 << 5) == 0 {
+        if cfg!(target_feature = "lzcnt") && cpuid(0x8000_0001, 0).ecx & (1 << 5) == 0 {
             lacks("LZCNT");
         }
-        if cfg!(target_feature = "bmi1") && __cpuid_count(7, 0).ebx & (1 << 3) == 0 {
+        if cfg!(target_feature = "bmi1") && cpuid(7, 0).ebx & (1 << 3) == 0 {
             lacks("BMI1 (TZCNT)");
         }
     }
