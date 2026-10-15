@@ -266,13 +266,28 @@ pub(crate) fn across_from(len: usize, platform: Platform) -> Option<usize> {
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[inline(never)]
 fn hash_across(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
-    const GROUP: usize = 16;
     let slot = slot_len(len);
+    for (group, digests) in outputs.chunks_mut(ACROSS_GROUP).enumerate() {
+        let messages: arrayvec::ArrayVec<&[u8], ACROSS_GROUP> = (0..digests.len()).map(|m| &input[(group * ACROSS_GROUP + m) * slot..][..len]).collect();
+        hash_group_across(&messages, len, key, flags, digests, platform);
+    }
+}
+
+/// The most messages [`hash_group_across`] takes at once: the widest lanes.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+pub(crate) const ACROSS_GROUP: usize = 16;
+
+/// [`hash_across`] for up to ACROSS_GROUP messages of `len` bytes each,
+/// wherever each lies (a batch's slots, or a queue's members).
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+pub(crate) fn hash_group_across(messages: &[&[u8]], len: usize, key: &CVWords, flags: u8, digests: &mut [[u8; OUT_LEN]], platform: Platform) {
+    const GROUP: usize = ACROSS_GROUP;
     let (full, chunks) = (len / CHUNK_LEN, len.div_ceil(CHUNK_LEN));
     assert!(full >= 1 && chunks >= 2 && chunks < ACROSS_CHUNKS, "messages of 2 chunks to under ACROSS_CHUNKS");
-    for (group, digests) in outputs.chunks_mut(GROUP).enumerate() {
+    assert!(messages.len() <= GROUP && messages.len() == digests.len() && messages.iter().all(|m| m.len() == len), "up to ACROSS_GROUP messages of len bytes, a digest each");
+    {
         let count = digests.len();
-        let message = |m: usize| &input[(group * GROUP + m) * slot..][..len];
+        let message = |m: usize| messages[m];
         // cvs[chunk][message]
         let mut cvs = [[[0u8; OUT_LEN]; GROUP]; ACROSS_CHUNKS];
         for k in 0..full {
