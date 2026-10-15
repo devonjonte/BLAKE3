@@ -2799,3 +2799,20 @@ function of where their input lies (region, offset, counter, flags): the
 walk's correctness is about which bytes reach which kernel and how the
 results combine, which such terms carry at any size, and the Lean side
 already states the contracts that way (`subtree_cv`, `children`).
+
+### October 15, 2026: the flat walk with kernels as uninterpreted functions (probe)
+
+`tmp/night/probe_uf.py` runs the library's `hash()` on SME2 with the
+chunk kernel's result for each chunk as CH_j(offset, counter, flags, key)
+and the parent kernel's as PA_j(children's words, key, counter, flags),
+uninterpreted (prove_sme2's always-run statements tie each to the
+specification's compression of the bytes there; the input region is
+read-only), and compares the output with the specification's tree over
+those terms under the real root compression. Each distinct application
+becomes four fresh bytes on both sides (keyed by its simplified text),
+so `canon` compares the root as it compares any whole call. Proved:
+32 KiB in 2.0 s, 64 KiB in 2.5 s, 128 KiB in 3.6 s (with full terms,
+32 KiB took over 26 minutes); two chunks swapped in the expected tree are
+rejected. From 256 KiB the walk calls the hybrid kernel, which needs its
+contract in this form once its proof lands (the other agent's
+candidate/prove-sme2-hybrid-every).
