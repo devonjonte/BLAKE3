@@ -118,7 +118,7 @@ pub fn stream<'env, T>(mode: Mode, body: impl for<'s> FnOnce(&'s mut Stream<'env
     let mut stream = Stream {
         key,
         flags,
-        s,
+        s: core::mem::ManuallyDrop::new(s),
         open_first: 0,
         next: 0,
         delivered: 0,
@@ -140,9 +140,11 @@ pub fn stream<'env, T>(mode: Mode, body: impl for<'s> FnOnce(&'s mut Stream<'env
 /// time, 4-5 us with the spare; one stream kept open, 2.6-4 us. i7-12700K).
 struct Storage {
     entries: Box<[Entry]>,
-    /// The bytes of messages written in place ([`Stream::submit_with`]),
-    /// each at a 64-byte boundary, in the order of their entries.
-    ring: Box<[UnsafeCell<u8>]>,
+    /// RING_BYTES for messages written in place ([`Stream::submit_with`])
+    /// and batches' digests, each at a 64-byte boundary, in the order of
+    /// their entries: an allocation of its own, reached by pointer alone
+    /// (the program writes some bytes while threads read others).
+    ring: *mut u8,
     outs: Box<[Out<OUT_LEN>]>,
     pieces_out: Box<[OwnLine<Out<64>>]>,
     /// For a task's first entry, the count of the task's entries still
@@ -163,13 +165,8 @@ impl Storage {
         TASKS.make_room(ENTRIES);
         Storage {
             entries: std::vec![Entry { len: 0, kind: Kind::Message, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
-            ring: {
-                // Zeroed, untouched pages: only the bytes written in place
-                // are faulted in.
-                let bytes = std::vec![0u8; RING_BYTES].into_boxed_slice();
-                // Sound: UnsafeCell<u8> is u8's layout (repr(transparent)).
-                unsafe { Box::from_raw(Box::into_raw(bytes) as *mut [UnsafeCell<u8>]) }
-            },
+            // Zeroed, untouched pages: only the bytes used are faulted in.
+            ring: Box::into_raw(std::vec![0u8; RING_BYTES].into_boxed_slice()) as *mut u8,
             outs: (0..ENTRIES).map(|_| Out(UnsafeCell::new([0; OUT_LEN]))).collect(),
             pieces_out: (0..ENTRIES).map(|_| OwnLine(Out(UnsafeCell::new([0; 64])))).collect(),
             lefts: (0..ENTRIES).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
@@ -177,10 +174,22 @@ impl Storage {
     }
 }
 
+impl Storage {
+    /// The ring's byte at `at`.
+    fn ring_at(&self, at: usize) -> *mut u8 {
+        debug_assert!(at <= RING_BYTES);
+        // Sound: `at` is in the ring.
+        unsafe { self.ring.add(at) }
+    }
+}
+
 impl Drop for Storage {
-    /// Give back its room (none for the empty storage a stream leaves).
+    /// Give back its room and its ring.
     fn drop(&mut self) {
-        TASKS.give_room(self.lefts.len());
+        TASKS.give_room(ENTRIES);
+        // Sound: the ring is Storage::new's allocation, and no task reads it
+        // (a stream's storage drops only after its tasks are done).
+        drop(unsafe { Box::from_raw(core::ptr::slice_from_raw_parts_mut(self.ring, RING_BYTES)) });
     }
 }
 
@@ -194,7 +203,7 @@ pub struct Stream<'env> {
     key: CVWords,
     flags: u8,
     /// Its own until the stream ends (then the thread's spare).
-    s: Storage,
+    s: core::mem::ManuallyDrop<Storage>,
     /// The open task's first entry.
     open_first: usize,
     /// Entries submitted, and entries handed back (each counts on).
@@ -246,7 +255,7 @@ impl<'env> Stream<'env> {
             let at = self.reserve(part_len, &mut digest);
             // Sound: [at, at + part_len) is reserved and free (no entry in
             // flight holds it), and `&mut self` keeps every other writer out.
-            let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring[at].get(), part_len) };
+            let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring_at(at), part_len) };
             fill(i * PIECE, room);
             let end = self.head;
             self.add_part(room.as_ptr(), part_len, part_kind(i, pieces), end, &mut digest);
@@ -282,7 +291,7 @@ impl<'env> Stream<'env> {
             let part_count = (count - first).min(per_part);
             let bytes_at = self.reserve(part_count * slot, &mut digest);
             // Sound: as in submit_with.
-            let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring[bytes_at].get(), part_count * slot) };
+            let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring_at(bytes_at), part_count * slot) };
             fill(first * slot, room);
             crate::many::assert_slots(room, message_len, part_count);
             let at = self.reserve(part_count * OUT_LEN, &mut digest);
@@ -300,7 +309,7 @@ impl<'env> Stream<'env> {
         let entry = self.add_entry(len, kind, ring_end, digest);
         let (batch, out) = match kind {
             Kind::Message => (None, self.s.outs[entry].0.get() as *mut u8),
-            Kind::Batch { message_len, at, .. } => (Some(message_len), self.s.ring[at].get()),
+            Kind::Batch { message_len, at, .. } => (Some(message_len), self.s.ring_at(at)),
             Kind::Piece { counter, .. } => {
                 self.s.lefts[entry].store(1, Ordering::Relaxed);
                 // Sound: the bytes stay in place until the entry is handed back.
@@ -444,7 +453,7 @@ impl<'env> Stream<'env> {
             // Hash is [u8; 32] (repr(transparent)).
             match kind {
                 Kind::Message => unreachable!(),
-                Kind::Batch { count, at, .. } => digest(unsafe { core::slice::from_raw_parts(self.s.ring[at].get() as *const Hash, count) }),
+                Kind::Batch { count, at, .. } => digest(unsafe { core::slice::from_raw_parts(self.s.ring_at(at) as *const Hash, count) }),
                 Kind::Piece { counter, last } => {
                     let out = unsafe { *self.s.pieces_out[index].0.0.get() };
                     let (key, flags, platform) = (self.key, self.flags, Platform::detect());
@@ -483,7 +492,7 @@ impl<'env> Stream<'env> {
         if run.1 > 0 {
             // Sound: their tasks are done (deliver), Out<32> is [u8; 32] and
             // so is Hash (both repr(transparent)), side by side in `outs`.
-            digest(unsafe { core::slice::from_raw_parts(self.s.outs[run.0].0.get() as *const Hash, run.1) });
+            digest(unsafe { core::slice::from_raw_parts((self.s.outs.as_ptr() as *const Hash).add(run.0), run.1) });
         }
     }
 }
@@ -503,8 +512,8 @@ impl Drop for Stream<'_> {
                 }
             }
         }
-        let empty = Storage { entries: Box::new([]), ring: Box::new([]), outs: Box::new([]), pieces_out: Box::new([]), lefts: Box::new([]) };
-        let s = core::mem::replace(&mut self.s, empty);
+        // Sound: `s` is not used again.
+        let s = unsafe { core::mem::ManuallyDrop::take(&mut self.s) };
         SPARE.with(|spare| spare.set(Some(s)));
     }
 }
