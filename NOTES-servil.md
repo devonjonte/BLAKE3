@@ -2764,3 +2764,27 @@ the proof on the code users run, measured on the Mac first.
   GROUPS is their range, 1 to 2^40; the 3-8 group cases are gone.
 - QUALITY said `hash` was proved at 306 lengths: 153, on each of two
   platforms.
+
+### October 14, 2026: a route to the wrappers at every length (a design, untried)
+
+The Lean proofs cover the walk and the Hasher at every length, given their
+hooks' contracts (`subtree_cv`, `children`); what remains is that each
+hook meets them. The SME2 hook's flat walk runs on power-of-two subtrees of
+32 to 1024 chunks (FLAT_MIN_CHUNKS, FLAT_MAX_CHUNKS), with `keep` DEGREE,
+2, or 1: eighteen cases, each a finite machine-code proof with the kernels
+by contract (prove_rust's `sme2_contracts`, the hybrid kernel's once it is
+proved or removed). The NEON hook's subtrees are hash_many calls, already
+proved at every count to its degree. So "every length" for the wrappers
+may need no induction over lengths at all: a finite set of hook cases plus
+the Lean theorem. Open: whether 1 MiB of symbolic input stays tractable
+when every byte reaches the solver only inside a contract's term (a probe:
+the 32-chunk case first).
+A measure in hand answers part of it: the whole-call proofs already run
+the flat walk (hash of 32 and 64 KiB on SME2) and take about 6 GB at
+64 KiB, growing with the input, since each kernel's statement is a term
+over its chunk's symbolic bytes; 1 MiB that way is near 100 GB. The scalable
+form keeps kernels by contract but makes their result an uninterpreted
+function of where their input lies (region, offset, counter, flags): the
+walk's correctness is about which bytes reach which kernel and how the
+results combine, which such terms carry at any size, and the Lean side
+already states the contracts that way (`subtree_cv`, `children`).
