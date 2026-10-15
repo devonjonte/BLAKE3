@@ -119,7 +119,7 @@
 //! binary built for another CPU, or tampering that breaks the digests.
 //! (What the code computes is the tests' and the proofs' to establish.) It
 //! hashes fixed inputs, chosen so that together they run every one of its
-//! assembly kernels on this machine (40 on AArch64, 7 elsewhere), each
+//! assembly kernels on this machine (40 on AArch64, 9 elsewhere), each
 //! input carrying the previous output, and compares each result with the
 //! reference implementation's; on x86 it first checks that the CPU has the
 //! LZCNT and BMI1 instructions a build for newer CPUs assumes, which older
@@ -127,7 +127,7 @@
 //! this build or this CPU computes wrong digests, and stops the program
 //! with a panic naming the code path. The check takes 0.1 to 0.2 ms once
 //! per process on AArch64 (Apple M4 Max, and a Linux VM on it) and about
-//! 25 us on x86-64 (i7-12700K, a performance core; 43 us on an efficiency
+//! 28 us on x86-64 (i7-12700K, a performance core; 47 us on an efficiency
 //! core), in every build, with or without the `std` feature. Other threads that call `initialize`
 //! meanwhile wait for it, and stop with it if it fails. Without `std`, the panic goes to the
 //! program's panic handler, which aborts or halts.
