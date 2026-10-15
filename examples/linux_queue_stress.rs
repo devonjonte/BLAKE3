@@ -4,7 +4,7 @@
 use blake3_servil::{FixedHandler, Hash, MessageHandler, Mode, Queue};
 use std::sync::{Arc, mpsc};
 
-const LENGTHS: &[usize] = &[0, 64, 128, 256, 512, 1024, 2048, 4096];
+const LENGTHS: &[usize] = &[0, 64, 128, 256, 512, 1024, 1500, 2048, 3000, 4096];
 const KEY: &[u8; 32] = b"whats the Elvish word for friend";
 const CONTEXT: &str = "BLAKE3 2019-12-27 16:29:52 test vectors context";
 const IN_FLIGHT: usize = 16;

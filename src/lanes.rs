@@ -1096,6 +1096,8 @@ impl Task {
                 512 => return self.run_equal_members::<512>(platform),
                 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
                 CHUNK_LEN => return self.run_equal_members::<CHUNK_LEN>(platform),
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                len if crate::many::across_from(len, platform).is_some_and(|least| members.len() >= least) => return self.run_members_across(platform),
                 _ => {}
             }
         }
@@ -1109,6 +1111,26 @@ impl Task {
 }
 
 impl Task {
+    /// The members' digests, messages of one length over a chunk, each step
+    /// of their trees across up to sixteen of them (many::hash_group_across,
+    /// as hash_many's batches).
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    fn run_members_across(self, platform: Platform) {
+        let members = &self.member[..self.members];
+        let len = members[0].len;
+        for group in members.chunks(crate::many::ACROSS_GROUP) {
+            // Sound: the queue keeps every member's bytes, `out`, and `left`
+            // in place until its `left` is zero.
+            let messages: arrayvec::ArrayVec<&[u8], { crate::many::ACROSS_GROUP }> = group.iter().map(|m| unsafe { core::slice::from_raw_parts(m.input, m.len) }).collect();
+            let mut digests = [[0u8; crate::OUT_LEN]; crate::many::ACROSS_GROUP];
+            crate::many::hash_group_across(&messages, len, &self.key, self.flags, &mut digests[..group.len()], platform);
+            for (m, digest) in group.iter().zip(&digests) {
+                unsafe { core::ptr::copy_nonoverlapping(digest.as_ptr(), m.out, crate::OUT_LEN) };
+                unsafe { &*m.left }.fetch_sub(1, Ordering::Release);
+            }
+        }
+    }
+
     /// The members' digests, each a message of `N` bytes (whole blocks, at
     /// most a chunk; run_members checked), side by side on the multi-lane
     /// kernel from a table of pointers.
@@ -1299,7 +1321,7 @@ mod test {
         let modes = [(*crate::IV, 0), (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH), (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL)];
         let counts: &[usize] = if cfg!(miri) { &[2, 3] } else { &[2, 3, 4, 7, 8, 15, 16, 17, 63, MEMBERS] };
         let offsets: &[usize] = if cfg!(miri) { &[0, 1] } else { &[0, 1, 7, 63] };
-        for len in [64, 128, 192, 256, 512, 1024] {
+        for len in [64, 128, 192, 256, 512, 1024, 1025, 1500, 2048, 3839] {
             for &count in counts {
                 for mixed in [false, true] {
                     for &offset in offsets {
