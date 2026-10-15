@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `Hasher::update_reader_multithreaded` reads a stream as b3sum does:
+  past the first 64 KiB, 4 MiB pieces read on a second thread while the
+  calling one hashes the last over the pool. b3sum now uses it for stdin
+  and for files of 4 MiB or more it reads, and reads shorter files whole
+  into one buffer kept from file to file (its own pipeline is gone).
 - The scalar one-chunk kernel loads each step's four message words before
   its arithmetic and interleaves the step's four G functions, so in-order
   cores (Cortex-A53, as in the Raspberry Pi 3) no longer wait on each load:

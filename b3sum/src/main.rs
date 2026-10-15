@@ -170,21 +170,50 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
         if args.keyed() {
             bail!("Cannot open `-` in keyed mode");
         }
-        update_from(&mut hasher, io::stdin())?;
+        hasher.update_reader_multithreaded(io::stdin())?;
     } else {
         let file = File::open(path)?;
         #[cfg(unix)]
         if let Some(map) = mapped_if_cached(&file) {
             hasher.update_multithreaded(&map);
         } else {
-            update_from(&mut hasher, file)?;
+            read_into(&mut hasher, file)?;
         }
         #[cfg(not(unix))]
-        update_from(&mut hasher, file)?;
+        read_into(&mut hasher, file)?;
     }
     let mut output_reader = hasher.finalize_xof();
     output_reader.set_position(args.seek());
     Ok(output_reader)
+}
+
+/// Hash `file` by reading it: whole into this thread's buffer when it is
+/// shorter than READ_WHOLE (a tree of small files reads each into one
+/// buffer kept from file to file, allocating nothing), else through
+/// Hasher::update_reader_multithreaded, which reads 4 MiB pieces on a
+/// second thread while this one hashes the last (its two buffers, per
+/// file, cost a 64 KiB-512 KiB file more than its read: a mixed tree ran
+/// 6.6 -> 36.6 ms in the page cache).
+fn read_into(hasher: &mut blake3::Hasher, mut file: File) -> io::Result<()> {
+    let len = file.metadata()?.len();
+    if len >= READ_WHOLE as u64 {
+        hasher.update_reader_multithreaded(file)?;
+        return Ok(());
+    }
+    WHOLE.with_borrow_mut(|buffer| {
+        buffer.clear();
+        file.read_to_end(buffer)?;
+        hasher.update_multithreaded(buffer);
+        Ok(())
+    })
+}
+
+/// Files read whole below this length: update_reader_multithreaded's piece.
+const READ_WHOLE: usize = 4 << 20;
+
+thread_local! {
+    /// The buffer small files are read into, kept from file to file.
+    static WHOLE: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// `file` mapped, when it is at least MAP_LEN long and in the page cache
@@ -219,74 +248,6 @@ fn mapped_if_cached(file: &File) -> Option<memmap2::Mmap> {
 /// read's copy into a cached buffer faults nothing.
 #[cfg(unix)]
 const MAP_LEN: usize = 512 << 10;
-
-/// The read size: each piece is hashed over the pool while the next is read.
-const PIECE: usize = 4 << 20;
-
-thread_local! {
-    /// Two pieces' buffers, kept from input to input: small files allocate nothing.
-    static BUFFERS: std::cell::RefCell<[Vec<u8>; 2]> = std::cell::RefCell::new([vec![0; PIECE], vec![0; PIECE]]);
-}
-
-/// Read from `reader` until `buffer` is full or the input ends; how much was read.
-fn fill(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<usize> {
-    let mut filled = 0;
-    while filled < buffer.len() {
-        match reader.read(&mut buffer[filled..]) {
-            Ok(0) => break,
-            Ok(n) => filled += n,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(filled)
-}
-
-/// Hash all of `reader` (a file, or stdin) into `hasher`. Reading beats
-/// mapping a file that is not in the page cache (a read asks the storage
-/// for a whole piece; a mapping's page faults, for a few pages at a time)
-/// and comes close to it for one that is, when the reading overlaps the
-/// hashing: the first piece is read on this thread, and an input longer
-/// than a piece has the rest read on a second thread into the other
-/// buffer while this one hashes the last piece over the pool
-/// (`bench-hashes b3sum`; NOTES-servil.md, "b3sum, measured").
-fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io::Result<()> {
-    BUFFERS.with_borrow_mut(|[first, second]| {
-        let len = fill(&mut reader, first)?;
-        if len < PIECE {
-            hasher.update_multithreaded(&first[..len]);
-            return Ok(());
-        }
-        std::thread::scope(|scope| {
-            let (free_tx, free_rx) = std::sync::mpsc::sync_channel::<&mut [u8]>(1);
-            let (full_tx, full_rx) = std::sync::mpsc::sync_channel::<(&mut [u8], io::Result<usize>)>(1);
-            let reader = &mut reader;
-            scope.spawn(move || {
-                for buffer in free_rx {
-                    let read = fill(reader, buffer);
-                    // A short piece, or an error, ends the input.
-                    let last = !matches!(read, Ok(n) if n == buffer.len());
-                    if full_tx.send((buffer, read)).is_err() || last {
-                        break;
-                    }
-                }
-            });
-            free_tx.send(&mut second[..]).expect("the reader waits for a buffer");
-            let mut current: &mut [u8] = &mut first[..];
-            loop {
-                hasher.update_multithreaded(current);
-                let (next, read) = full_rx.recv().expect("the reader sends every piece");
-                let len = read?;
-                if len < next.len() {
-                    hasher.update_multithreaded(&next[..len]);
-                    return Ok(());
-                }
-                free_tx.send(current).expect("the reader waits for a buffer");
-                current = next;
-            }
-        })
-    })
-}
 
 fn write_hex_output(mut output: blake3::OutputReader, args: &Args) -> anyhow::Result<()> {
     // Encoding multiples of the 64 bytes is most efficient.

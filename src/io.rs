@@ -39,6 +39,69 @@ pub(crate) fn copy_wide(mut reader: impl io::Read, hasher: &mut crate::Hasher) -
     }
 }
 
+/// [`copy_wide`] over the crate's threads: past the first 64 KiB, pieces
+/// of PIECE bytes, each hashed with update_multithreaded while a second
+/// thread reads the next into the other buffer (b3sum's pipeline). The
+/// first 64 KiB lead the first piece, so every update is a whole subtree
+/// at its offset; every byte read is hashed before an error returns.
+pub(crate) fn copy_wide_multithreaded(reader: impl io::Read + Send, hasher: &mut crate::Hasher) -> io::Result<u64> {
+    // wasm32 has no threads to read on (its multithreaded calls hash on
+    // the calling thread).
+    #[cfg(target_family = "wasm")]
+    return copy_wide(reader, hasher);
+    #[cfg(not(target_family = "wasm"))]
+    pipelined(reader, hasher)
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn pipelined(mut reader: impl io::Read + Send, hasher: &mut crate::Hasher) -> io::Result<u64> {
+    const PIECE: usize = 4 << 20;
+    let mut small = [0; 65536];
+    let (n, read) = fill(&mut reader, &mut small);
+    if n < small.len() || read.is_err() {
+        hasher.update(&small[..n]);
+        return read.map(|()| n as u64);
+    }
+    let mut first = std::vec![0; PIECE];
+    first[..n].copy_from_slice(&small);
+    let (filled, read) = fill(&mut reader, &mut first[n..]);
+    let len = n + filled;
+    if len < PIECE || read.is_err() {
+        hasher.update_multithreaded(&first[..len]);
+        return read.map(|()| len as u64);
+    }
+    let mut second = std::vec![0; PIECE];
+    std::thread::scope(|scope| {
+        let (free_tx, free_rx) = std::sync::mpsc::sync_channel::<&mut [u8]>(1);
+        let (full_tx, full_rx) = std::sync::mpsc::sync_channel::<(&mut [u8], usize, io::Result<()>)>(1);
+        let reader = &mut reader;
+        scope.spawn(move || {
+            for buffer in free_rx {
+                let (n, read) = fill(reader, buffer);
+                // A short piece, or an error, ends the input.
+                let last = n < buffer.len() || read.is_err();
+                if full_tx.send((buffer, n, read)).is_err() || last {
+                    break;
+                }
+            }
+        });
+        free_tx.send(&mut second[..]).expect("the reader waits for a buffer");
+        let mut current: &mut [u8] = &mut first[..];
+        let mut total = 0u64;
+        loop {
+            hasher.update_multithreaded(current);
+            total += current.len() as u64;
+            let (next, n, read) = full_rx.recv().expect("the reader sends every piece");
+            if n < next.len() || read.is_err() {
+                hasher.update_multithreaded(&next[..n]);
+                return read.map(|()| total + n as u64);
+            }
+            free_tx.send(current).expect("the reader waits for a buffer");
+            current = next;
+        }
+    })
+}
+
 /// Read into `buffer` until it is full, the reader ends, or it fails: the
 /// bytes read, and the error if it failed.
 fn fill(reader: &mut impl io::Read, buffer: &mut [u8]) -> (usize, io::Result<()>) {
