@@ -51,6 +51,7 @@ pub mod child;
 pub mod load;
 pub mod other_code;
 pub mod summary;
+pub mod threads;
 
 /// The wall clock, as reports name it.
 #[cfg(target_vendor = "apple")]
