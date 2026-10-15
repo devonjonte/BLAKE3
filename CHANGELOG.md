@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `Verifier::update_multithreaded` checks a piece's groups over this
+  crate's threads when the piece holds 512 KiB of them or more: a 64 MiB
+  encoding verifies at 0.105-0.112 ns/B in 1-4 MiB pieces, from
+  0.274-0.287 with `update` (i7-12700K); pieces under 512 KiB run as
+  `update`.
 - The scalar one-chunk kernel loads each step's four message words before
   its arithmetic and interleaves the step's four G functions, so in-order
   cores (Cortex-A53, as in the Raspberry Pi 3) no longer wait on each load:

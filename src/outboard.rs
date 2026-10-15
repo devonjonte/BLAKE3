@@ -60,7 +60,14 @@ fn outboard(mode: Mode, input: &[u8], pooled: bool) -> (Hash, Vec<u8>) {
     // pooled path takes its own).
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), !pooled);
     let platform = turn.platform();
-    let cvs = if pooled { crate::lanes::group_cvs(input, &key, flags) } else { group_cvs(input, 0, &key, flags, platform) };
+    let cvs = if pooled {
+        let groups = groups_of_input(input);
+        let mut cvs = vec![[0u8; 32]; groups.len()];
+        crate::lanes::group_cvs(&groups, 0, &key, flags, &mut cvs);
+        cvs
+    } else {
+        group_cvs(input, 0, &key, flags, platform)
+    };
     let mut out = Vec::with_capacity(64 * (cvs.len() - 1));
     let (left, right) = node(&cvs, chunks, &key, flags, platform, &mut out);
     (crate::hasher::parent_output(&left, &right, &key, flags, platform).root_hash(), out)
@@ -156,7 +163,19 @@ impl Verifier {
     /// and verified when `update` has returned true and `remaining` is 0
     /// (for the empty message, after one call, with no bytes). Requires at
     /// most `remaining` bytes, and a verifier that has returned true.
-    pub fn update(&mut self, encoded: &[u8], mut verified: impl FnMut(&[u8])) -> bool {
+    pub fn update(&mut self, encoded: &[u8], verified: impl FnMut(&[u8])) -> bool {
+        self.take_piece(encoded, verified, false)
+    }
+
+    /// [`Verifier::update`], hashing a piece's groups over this crate's
+    /// threads when the piece holds 512 KiB of them or more (below, on
+    /// the calling thread, as `update`).
+    #[cfg(feature = "std")]
+    pub fn update_multithreaded(&mut self, encoded: &[u8], verified: impl FnMut(&[u8])) -> bool {
+        self.take_piece(encoded, verified, true)
+    }
+
+    fn take_piece(&mut self, encoded: &[u8], mut verified: impl FnMut(&[u8]), pooled: bool) -> bool {
         assert!(!self.failed, "a verifier that has found a mismatch is spent");
         assert!(encoded.len() as u64 <= self.remaining, "{} bytes past the encoding's end", encoded.len() as u64 - self.remaining);
         self.remaining -= encoded.len() as u64;
@@ -175,7 +194,7 @@ impl Verifier {
                     input = rest;
                     self.take(node, bytes, &mut nodes);
                 }
-                if !self.check(&nodes, &mut verified) {
+                if !self.check(&nodes, &mut verified, pooled) {
                     return false;
                 }
                 continue;
@@ -191,7 +210,7 @@ impl Verifier {
             }
             let mut nodes = Vec::new();
             self.take(node, &gathered, &mut nodes);
-            let ok = self.check(&nodes, &mut verified);
+            let ok = self.check(&nodes, &mut verified, pooled);
             gathered.clear();
             self.gathered = gathered;
             if !ok {
@@ -226,12 +245,19 @@ impl Verifier {
     /// are consecutive groups of the message), then each node in turn, each
     /// group given to `verified` once it and every node before it pass.
     /// False, and the verifier spent, at the first that does not.
-    fn check(&mut self, nodes: &[((u64, u64, Option<CVBytes>), &[u8])], verified: &mut impl FnMut(&[u8])) -> bool {
-        let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
+    fn check(&mut self, nodes: &[((u64, u64, Option<CVBytes>), &[u8])], verified: &mut impl FnMut(&[u8]), pooled: bool) -> bool {
+        let turn = crate::platform::Sme2Turn::take(Platform::detect(), !pooled);
         let platform = turn.platform();
         let groups: Vec<&[u8]> = nodes.iter().filter(|((_, size, expected), _)| *size <= GROUP_CHUNKS && expected.is_some()).map(|(_, b)| *b).collect();
         let mut cvs = vec![[0u8; 32]; groups.len()];
         if let Some(&((g0, _, _), _)) = nodes.iter().find(|((_, size, expected), _)| *size <= GROUP_CHUNKS && expected.is_some()) {
+            #[cfg(feature = "std")]
+            if pooled {
+                crate::lanes::group_cvs(&groups, g0, &self.key, self.flags, &mut cvs);
+            } else {
+                groups_cvs_into(&groups, g0, &self.key, self.flags, platform, &mut cvs);
+            }
+            #[cfg(not(feature = "std"))]
             groups_cvs_into(&groups, g0, &self.key, self.flags, platform, &mut cvs);
         }
         let mut cvs = cvs.iter();
@@ -345,8 +371,12 @@ fn group_cvs(input: &[u8], first_group: u64, key: &CVWords, flags: u8, platform:
 
 /// [`group_cvs`] into `cvs`, one per group.
 pub(crate) fn group_cvs_into(input: &[u8], first_group: u64, key: &CVWords, flags: u8, platform: Platform, cvs: &mut [CVBytes]) {
-    let groups: Vec<&[u8]> = if input.is_empty() { vec![input] } else { input.chunks(GROUP_LEN).collect() };
-    groups_cvs_into(&groups, first_group, key, flags, platform, cvs);
+    groups_cvs_into(&groups_of_input(input), first_group, key, flags, platform, cvs);
+}
+
+/// `input`'s groups, in order (the empty input one empty group).
+fn groups_of_input(input: &[u8]) -> Vec<&[u8]> {
+    if input.is_empty() { vec![input] } else { input.chunks(GROUP_LEN).collect() }
 }
 
 /// The chaining value, as a non-root subtree, of each of `groups`, the
@@ -354,7 +384,7 @@ pub(crate) fn group_cvs_into(input: &[u8], first_group: u64, key: &CVWords, flag
 /// last. Whole groups go in batches through the many-inputs kernels, back
 /// to back, their chunks from wherever each group lies; a last, shorter
 /// group alone.
-fn groups_cvs_into(groups: &[&[u8]], first_group: u64, key: &CVWords, flags: u8, platform: Platform, cvs: &mut [CVBytes]) {
+pub(crate) fn groups_cvs_into(groups: &[&[u8]], first_group: u64, key: &CVWords, flags: u8, platform: Platform, cvs: &mut [CVBytes]) {
     let full = groups.iter().take_while(|g| g.len() == GROUP_LEN).count();
     assert!(full + 1 >= groups.len(), "whole groups but the last");
     let mut done = 0;
@@ -424,6 +454,20 @@ mod test {
         assert_eq!(outboard_multithreaded_with(Mode::Hash, &input), outboard_with(Mode::Hash, &input));
     }
 
+    /// The pool's ranges of groups for a verifier's piece, just past where
+    /// the pool takes them, against the calling thread's: small enough for
+    /// Miri (the CI's smoketest runs it).
+    #[test]
+    fn test_miri_verifier_multithreaded() {
+        let mut input = vec![0u8; 33 * GROUP_LEN + 100];
+        crate::test::paint_test_input(&mut input);
+        let (hash, encoding) = (crate::hash(&input), test_encoding(Mode::Hash, &input));
+        let mut received = Vec::new();
+        let mut verifier = Verifier::new(Mode::Hash, &hash, input.len() as u64);
+        assert!(verifier.update_multithreaded(&encoding, |b| received.extend_from_slice(b)));
+        assert_eq!((verifier.remaining(), received), (0, input));
+    }
+
     /// Every message length around group and tree boundaries, every mode,
     /// pieces of many lengths: the Verifier gives back the message, and
     /// stops at a changed byte of a group or a parent node, or a wrong hash.
@@ -439,7 +483,7 @@ mod test {
                 let hash = crate::hash_with(mode, message);
                 let encoding = test_encoding(mode, message);
                 assert_eq!(encoding.len() as u64, Verifier::new(mode, &hash, len as u64).remaining());
-                let run = |encoding: &[u8], hash: &Hash, piece: usize| -> Option<Vec<u8>> {
+                let run = |encoding: &[u8], hash: &Hash, piece: usize, pooled: bool| -> Option<Vec<u8>> {
                     let mut verifier = Verifier::new(mode, hash, len as u64);
                     let mut received = Vec::new();
                     let mut pieces: Vec<&[u8]> = encoding.chunks(piece).collect();
@@ -447,24 +491,29 @@ mod test {
                         pieces.push(&[]);
                     }
                     for p in pieces {
-                        if !verifier.update(p, |b| received.extend_from_slice(b)) {
+                        let ok = if pooled { verifier.update_multithreaded(p, |b| received.extend_from_slice(b)) } else { verifier.update(p, |b| received.extend_from_slice(b)) };
+                        if !ok {
                             return None;
                         }
                     }
                     assert_eq!(verifier.remaining(), 0);
                     Some(received)
                 };
-                for piece in [1, 63, 64, 1448, GROUP_LEN, GROUP_LEN + 64, 1 << 20] {
-                    assert_eq!(run(&encoding, &hash, piece).as_deref(), Some(message), "len {len} pieces of {piece}");
-                }
-                let mut wrong = *hash.as_bytes();
-                wrong[0] ^= 1;
-                assert_eq!(run(&encoding, &Hash::from_bytes(wrong), 1448), None, "len {len}, wrong hash");
-                for at in [0, encoding.len() / 2, encoding.len().saturating_sub(1)] {
-                    if at < encoding.len() {
-                        let mut bad = encoding.clone();
-                        bad[at] ^= 1;
-                        assert_eq!(run(&bad, &hash, 1448), None, "len {len}, byte {at} changed");
+                for pooled in [false, true] {
+                    for piece in [1, 63, 64, 1448, GROUP_LEN, GROUP_LEN + 64, 1 << 20] {
+                        assert_eq!(run(&encoding, &hash, piece, pooled).as_deref(), Some(message), "len {len} pieces of {piece}, pooled {pooled}");
+                    }
+                    let mut wrong = *hash.as_bytes();
+                    wrong[0] ^= 1;
+                    assert_eq!(run(&encoding, &Hash::from_bytes(wrong), 1 << 20, pooled), None, "len {len}, wrong hash, pooled {pooled}");
+                    for at in [0, encoding.len() / 2, encoding.len().saturating_sub(1)] {
+                        if at < encoding.len() {
+                            let mut bad = encoding.clone();
+                            bad[at] ^= 1;
+                            for piece in [1448, 1 << 20] {
+                                assert_eq!(run(&bad, &hash, piece, pooled), None, "len {len}, byte {at} changed, pieces of {piece}, pooled {pooled}");
+                            }
+                        }
                     }
                 }
             }
