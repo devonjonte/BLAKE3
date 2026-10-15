@@ -3,7 +3,8 @@
 //! the same messages, already in memory, in each; neither copies.
 //!
 //!   stream_probe samples API OUT [LEN...]
-//!       (API collection-each | collection-stream: LEN 0 git objects, 1
+//!       (API oneshot-job | oneshot-stream, with -many for batches of LEN
+//!       64-byte messages: one call a message or batch; collection-each | collection-stream: LEN 0 git objects, 1
 //!       Nix files, hash_each_multithreaded_with against a stream;
 //!       stream-mixed | queue-mixed: lengths from 1 byte to LEN;
 //!       batch-queue | batch-stream: LEN is a batch's 64-byte messages,
@@ -315,6 +316,43 @@ fn collection(api: &str, index: usize) -> Vec<Sample> {
     batches.iter().map(|b| (b.wall_ns, b.calls * bytes as u64, b.started_ns / 1_000_000)).collect()
 }
 
+/// One call per message (LEN bytes) or per batch (LEN 64-byte messages,
+/// the API ending -many), back to back: the pool's one-shot calls
+/// (hash_multithreaded, hash_many_multithreaded) against a stream of one
+/// message or one batch.
+fn oneshot(api: &str, len: usize) -> Vec<Sample> {
+    let many = api.ends_with("-many");
+    let bytes = if many { len * 64 } else { len };
+    let input: Vec<u8> = (0..bytes).map(|i| (i % 251) as u8).collect();
+    let mut digests = vec![[0u8; 32]; if many { len } else { 1 }];
+    let batches = match api {
+        "oneshot-job" => clocks::measure(64, 2_000_000, || {
+            digests[0] = *blake3_servil::hash_multithreaded(&input).as_bytes();
+        }),
+        "oneshot-job-many" => clocks::measure(64, 2_000_000, || blake3_servil::hash_many_multithreaded(&input, 64, &mut digests)),
+        "oneshot-stream" | "oneshot-stream-many" => clocks::measure(64, 2_000_000, || {
+            let mut k = 0;
+            let mut take = |d: &[blake3_servil::Hash]| {
+                for h in d {
+                    digests[k] = *h.as_bytes();
+                    k += 1;
+                }
+            };
+            blake3_servil::stream(blake3_servil::Mode::Hash, |s| {
+                if many {
+                    s.submit_batch(&input, 64, &mut take);
+                } else {
+                    s.submit(&input, &mut take);
+                }
+                s.finish(&mut take);
+            });
+        }),
+        _ => panic!("oneshot-job | oneshot-stream, -many"),
+    };
+    std::hint::black_box(&digests);
+    batches.iter().map(|b| (b.wall_ns, b.calls * bytes as u64, b.started_ns / 1_000_000)).collect()
+}
+
 /// One message at a time after a 1 ms idle gap, its digest awaited: a
 /// server's request, a wait, the next.
 fn lone(api: &str, len: usize) -> Vec<Sample> {
@@ -376,7 +414,7 @@ fn main() {
     let scenarios: &[&str] = match api {
         "new" => &["lone"],
         "rounds" | "queue-read" | "written" | "batch-queue" | "batch-stream" => &["solo", "two"],
-        mixed if mixed.ends_with("-mixed") || mixed.starts_with("collection") => &["solo", "two"],
+        mixed if mixed.ends_with("-mixed") || mixed.starts_with("collection") || mixed.starts_with("oneshot") => &["solo", "two"],
         _ => &["solo", "two", "lone"],
     };
     let (mut rows, mut busy) = (String::new(), String::new());
@@ -385,6 +423,13 @@ fn main() {
             let before = clocks::threads::snapshot();
             let started = clocks::now();
             let samples = match scenario {
+                "solo" if api.starts_with("oneshot") => oneshot(api, len),
+                "two" if api.starts_with("oneshot") => std::thread::scope(|t| {
+                    let other = t.spawn(|| oneshot(api, len));
+                    let mut samples = oneshot(api, len);
+                    samples.extend(other.join().unwrap());
+                    samples
+                }),
                 "solo" if api.starts_with("collection") => collection(api, len),
                 "two" if api.starts_with("collection") => std::thread::scope(|t| {
                     let other = t.spawn(|| collection(api, len));
