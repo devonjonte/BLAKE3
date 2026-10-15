@@ -1047,9 +1047,10 @@ impl Task {
 }
 
 impl Task {
-    /// The members' digests: messages of one block side by side on the
-    /// multi-lane kernels (`hash_many`'s, from a table of pointers); any
-    /// others one at a time.
+    /// The members' digests: messages of one length side by side on the
+    /// multi-lane kernels (`hash_many`'s, from a table of pointers) where
+    /// that length is one block, or on x86 two to sixteen blocks of a power
+    /// of two (128 B to 1 KiB); any others one at a time.
     fn run_members(self, platform: Platform) {
         let members = &self.member[..self.members];
         if let Some(message_len) = self.batch {
@@ -1066,22 +1067,42 @@ impl Task {
         }
         // Sound: the queue keeps every member's bytes, `out`, and `left` in
         // place until its `left` is zero.
-        if members.len() >= 2 && members.iter().all(|m| m.len == crate::BLOCK_LEN) {
-            let table: arrayvec::ArrayVec<&[u8; crate::BLOCK_LEN], MEMBERS> =
-                members.iter().map(|m| unsafe { &*(m.input as *const [u8; crate::BLOCK_LEN]) }).collect();
-            let mut digests = [[0u8; crate::OUT_LEN]; MEMBERS];
-            let flags = self.flags | crate::CHUNK_START | crate::CHUNK_END | crate::ROOT;
-            platform.hash_many::<{ crate::BLOCK_LEN }>(&table, &self.key, 0, crate::IncrementCounter::No, flags, 0, 0, digests[..members.len()].as_flattened_mut());
-            for (m, digest) in members.iter().zip(&digests) {
-                unsafe { core::ptr::copy_nonoverlapping(digest.as_ptr(), m.out, crate::OUT_LEN) };
-                unsafe { &*m.left }.fetch_sub(1, Ordering::Release);
+        if members.len() >= 2 && members.iter().all(|m| m.len == members[0].len) {
+            match members[0].len {
+                crate::BLOCK_LEN => return self.run_equal_members::<{ crate::BLOCK_LEN }>(platform),
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                128 => return self.run_equal_members::<128>(platform),
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                256 => return self.run_equal_members::<256>(platform),
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                512 => return self.run_equal_members::<512>(platform),
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                CHUNK_LEN => return self.run_equal_members::<CHUNK_LEN>(platform),
+                _ => {}
             }
-            return;
         }
         for m in members {
             let bytes = unsafe { core::slice::from_raw_parts(m.input, m.len) };
             let hash = crate::hash_serial_on(bytes, &self.key, self.flags, platform);
             unsafe { core::ptr::copy_nonoverlapping(hash.as_bytes().as_ptr(), m.out, crate::OUT_LEN) };
+            unsafe { &*m.left }.fetch_sub(1, Ordering::Release);
+        }
+    }
+}
+
+impl Task {
+    /// The members' digests, each a message of `N` bytes (whole blocks, at
+    /// most a chunk; run_members checked), side by side on the multi-lane
+    /// kernel from a table of pointers.
+    fn run_equal_members<const N: usize>(self, platform: Platform) {
+        let members = &self.member[..self.members];
+        // Sound: the queue keeps every member's N bytes, `out`, and `left`
+        // in place until its `left` is zero.
+        let table: arrayvec::ArrayVec<&[u8; N], MEMBERS> = members.iter().map(|m| unsafe { &*(m.input as *const [u8; N]) }).collect();
+        let mut digests = [[0u8; crate::OUT_LEN]; MEMBERS];
+        platform.hash_many::<N>(&table, &self.key, 0, crate::IncrementCounter::No, self.flags, crate::CHUNK_START, crate::CHUNK_END | crate::ROOT, digests[..members.len()].as_flattened_mut());
+        for (m, digest) in members.iter().zip(&digests) {
+            unsafe { core::ptr::copy_nonoverlapping(digest.as_ptr(), m.out, crate::OUT_LEN) };
             unsafe { &*m.left }.fetch_sub(1, Ordering::Release);
         }
     }
@@ -1240,6 +1261,74 @@ fn worker_main() {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// Members of one length side by side, against the reference
+    /// implementation: every platform this machine runs, the three modes,
+    /// equal and mixed lengths, unaligned inputs; the slots beside the
+    /// outputs untouched.
+    #[test]
+    fn equal_members_match_the_reference() {
+        #[allow(unused_mut)]
+        let mut platforms: Vec<_> = [Some(Platform::Portable)].into_iter().flatten().collect();
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        platforms.extend([Platform::sse2(), Platform::sse41(), Platform::avx2()].into_iter().flatten());
+        #[cfg(blake3_avx512_ffi)]
+        platforms.extend(Platform::avx512());
+        platforms.push(Platform::detect());
+        let key = [0x5Au8; crate::KEY_LEN];
+        let context = "equal queue members";
+        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let modes = [(*crate::IV, 0), (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH), (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL)];
+        let counts: &[usize] = if cfg!(miri) { &[2, 3] } else { &[2, 3, 4, 7, 8, 15, 16, 17, 63, MEMBERS] };
+        let offsets: &[usize] = if cfg!(miri) { &[0, 1] } else { &[0, 1, 7, 63] };
+        for len in [64, 128, 192, 256, 512, 1024] {
+            for &count in counts {
+                for mixed in [false, true] {
+                    for &offset in offsets {
+                        let inputs: Vec<Vec<u8>> = (0..count)
+                            .map(|m| {
+                                let length = if mixed && m % 2 == 1 { len + 1 } else { len };
+                                (0..offset + length).map(|i| ((m * 1031 + i) % 251) as u8).collect()
+                            })
+                            .collect();
+                        for (mode, (words, flags)) in modes.iter().enumerate() {
+                            let expected: Vec<[u8; crate::OUT_LEN]> = inputs
+                                .iter()
+                                .map(|input| {
+                                    let mut h = match mode {
+                                        0 => reference_impl::Hasher::new(),
+                                        1 => reference_impl::Hasher::new_keyed(&key),
+                                        _ => reference_impl::Hasher::new_derive_key(context),
+                                    };
+                                    h.update(&input[offset..]);
+                                    let mut digest = [0; crate::OUT_LEN];
+                                    h.finalize(&mut digest);
+                                    digest
+                                })
+                                .collect();
+                            for &platform in &platforms {
+                                let done: Vec<AtomicUsize> = (0..count).map(|_| AtomicUsize::new(1)).collect();
+                                let mut out = vec![[0xAA; crate::OUT_LEN]; count + 2];
+                                let mut task = Task::members(words, *flags, None);
+                                task.members = count;
+                                // Every destination from one raw base (Stacked Borrows).
+                                let base = out.as_mut_ptr();
+                                for m in 0..count {
+                                    let out = unsafe { base.add(m + 1) }.cast::<u8>();
+                                    task.member[m] = Member { input: inputs[m][offset..].as_ptr(), len: inputs[m].len() - offset, out, left: &done[m] };
+                                }
+                                task.run(platform);
+                                assert_eq!(&out[1..count + 1], &expected[..], "{platform:?}, {count} x {len}, mixed {mixed}, offset {offset}, mode {mode}");
+                                assert_eq!(out[0], [0xAA; crate::OUT_LEN]);
+                                assert_eq!(out[count + 1], [0xAA; crate::OUT_LEN]);
+                                assert!(done.iter().all(|n| n.load(Ordering::Acquire) == 0));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_next_piece_len() {
