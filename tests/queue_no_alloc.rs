@@ -108,9 +108,12 @@ fn main() {
 #[cfg(not(any(target_family = "wasm", miri)))]
 fn a_warm_queue_allocates_nothing() {
     blake3_servil::initialize_multithreaded();
-    // The pool's threads settling (their first sleeps) allocate nothing:
-    // on Apple's systems a Mutex or Condvar allocates at its first use.
-    let made = allocations_after_warm_up(0, 1, || std::thread::sleep(std::time::Duration::from_millis(20)));
+    // The threads start in the background (each start allocates, for the
+    // standard library's stack-overflow handler), within about 1 ms: the
+    // first 100 ms are their warm-up. Then their settling (their first
+    // sleeps) allocates nothing: on Apple's systems a Mutex or Condvar
+    // allocates at its first use.
+    let made = allocations_after_warm_up(1, 1, || std::thread::sleep(std::time::Duration::from_millis(100)));
     assert_eq!(made, 0, "the pool's threads settling after initialize_multithreaded: allocations");
     {
         for len in [64usize, 1024, 64 << 10, 1 << 20] {

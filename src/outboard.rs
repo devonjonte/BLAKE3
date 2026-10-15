@@ -41,12 +41,13 @@ pub fn outboard_with(mode: Mode, input: &[u8]) -> (Hash, Vec<u8>) {
 /// [`hash_multithreaded`](crate::hash_multithreaded) does.
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil::initialize_multithreaded();
 /// use blake3_servil::Mode;
 /// let input = vec![9u8; 3 << 20];
 /// assert_eq!(blake3_servil::outboard_multithreaded_with(Mode::Hash, &input), blake3_servil::outboard_with(Mode::Hash, &input));
 /// ```
 pub fn outboard_multithreaded_with(mode: Mode, input: &[u8]) -> (Hash, Vec<u8>) {
+    crate::lanes::require();
     outboard(mode, input, true)
 }
 

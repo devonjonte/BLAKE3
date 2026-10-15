@@ -132,7 +132,7 @@ pub mod shape {
 /// blocking the handler:
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil::initialize_multithreaded();
 /// use blake3_servil::{Hash, MessageHandler, Mode, Queue};
 /// use std::sync::mpsc;
 ///
@@ -768,35 +768,21 @@ struct Delivery {
 
 static DELIVERY: Delivery = Delivery { queues: Mutex::new((Vec::new(), false, 0)), wake: Condvar::new() };
 
-/// Start the delivery thread, once per process: from
-/// `initialize_multithreaded`, or else at a queue's first entry in flight.
-/// It sleeps whenever no queue has an entry in flight.
+/// Start the delivery thread: `initialize_multithreaded` does, once per
+/// process, and returns as it starts. It sleeps whenever no queue has an
+/// entry in flight.
 pub(crate) fn start_delivery() {
-    static STARTED: std::sync::Once = std::sync::Once::new();
-    STARTED.call_once(|| {
-        crate::lanes::prepare(&DELIVERY.queues, &DELIVERY.wake);
-        // Return once the thread runs, as the pool's threads do: its start
-        // allocates too (std's stack-overflow handler), which a warm queue
-        // must not meet later.
-        static RUNNING: AtomicBool = AtomicBool::new(false);
-        std::thread::Builder::new()
-            .name("blake3-servil-queue".into())
-            .spawn(|| {
-                RUNNING.store(true, Ordering::SeqCst);
-                DELIVERY.run()
-            })
-            .expect("the queue's delivery thread starts");
-        while !RUNNING.load(Ordering::SeqCst) {
-            std::thread::yield_now();
-        }
-    });
+    crate::lanes::prepare(&DELIVERY.queues, &DELIVERY.wake);
+    std::thread::Builder::new()
+        .name("blake3-servil-queue".into())
+        .spawn(|| DELIVERY.run())
+        .expect("the queue's delivery thread starts");
 }
 
 impl Delivery {
     /// Give the delivery thread `queue`, which has just put an entry in
-    /// flight; start the thread with the first.
+    /// flight.
     fn hold(&self, queue: Arc<dyn Deliver>) {
-        start_delivery();
         let mut queues = crate::lanes::lock_polling(&self.queues);
         queues.0.push(queue);
         if queues.1 {
