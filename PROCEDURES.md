@@ -33,12 +33,14 @@ Speed is this fork's purpose, so no commit that makes it slower may enter git un
 
 Work happens on `candidate/<topic>` branches (`candidate/p-e-classification`, `candidate/workgroup-placement`). Their commits pass the pre-commit check on the machine where they are made, as every code commit does, and may be pushed before native measurement: that is how the Mac's benchmark runner, which builds from GitHub alone, gets them.
 
-A candidate reaches `servil` only when all of these hold, and never without the performance check:
+A candidate reaches `servil` only when all of these hold, and, if it changes compiled code, never without the performance check:
 
 1. It is a fast-forward of `servil`'s current tip, so what was measured is exactly what lands. When `servil` has moved, rebase and check again.
 2. Every test suite passes, judged by each suite's exit status (a failing test binary prints no `test result` line, so a list of result lines can hide it): the fork's default, `no_sme2`, and `pure` builds, the integration tests, the official vectors, b3sum's, and the benchmark's own tests. The fork's GitHub CI passes on the candidate's tip: it builds every target with warnings as errors, which the local suites and the Mac's test job do not (an unused import reached `servil` 1352c21 that way, October 5, 2026). Where the candidate changes the SME2 kernels, the SME2 proofs at every group count pass too: a workflow started by hand (`sme2-every.yml`), kept out of every push for its hours of Arm time.
 3. `pypy3 tools/perf_regress.py compare servil candidate/<topic>` reports no regression on the VM.
 4. The same comparison reports no regression natively on the Mac.
+
+**A candidate that changes no compiled code** (nothing in `src/`, `c/`, `build.rs`, `Cargo.toml`, or `Cargo.lock`: documents, workflows, proof and other tools) needs 1, 2, and CI alone (Zooko, October 14, 2026): its speed comparisons would compare identical code, and the host is rarely idle.
 
 A regression the user accepts, as the section above describes, lands with the user's decision, the regressed cells, and their numbers in the merge's message (for a fast-forward, the promoted commit's message; amend the message only, leaving the measured tree unchanged). The user accepts such trades under this rule (September 25, 2026; revised September 27): every slowed cell stays ahead of every competitor, the gains outweigh the losses, and the user decides; a streaming API's cells may not slow to speed up another API (AGENTS.md, "The streaming APIs first"). A candidate waiting on the Mac waits on its branch; the VM's verdict alone does not promote it.
 

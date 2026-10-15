@@ -908,8 +908,9 @@ implementations with cargo, as it does `crypto_hash/sha256/rust_sha2`). It goes
 in beside the BLAKE3 team's implementations there, which stay untouched: their
 code is widely used, and their timings must keep predicting it (Zooko).
 
-**Not yet submitted** (Zooko, October 12, 2026): the submission waits until the
-fork has optimizations for the machines eBASH runs on (below).
+**Not yet submitted** (Zooko, October 12 and 14, 2026): the submission waits until the
+fork has optimizations for the machines eBASH runs on (below), and until all of its new
+code is formally verified (the progress meter: issue #24).
 
 **The rule for changes made with eBASH in mind** (Zooko, October 12, 2026): eBASH
 should predict what our users see. A change that also speeds the fork up for
