@@ -335,6 +335,43 @@ fn main() {
         println!("check: {} digests equal hash()'s", lens.len());
         return;
     }
+    if let Some(which) = mode.strip_prefix("sporadic-") {
+        // One message at a time after a 1 ms sleep, its digest awaited: a
+        // server's request, a wait, the next (clocks' gaps, idle).
+        let len: usize = args[1].parse().unwrap();
+        let source: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
+        let calls = 400;
+        let ns = match which {
+            "hash" => {
+                let mut input = source.clone();
+                clocks::measure_after_gaps_prepared(calls, clocks::Gap::Idle, 1_000_000, &mut input, |b| b.copy_from_slice(&source), |b| { std::hint::black_box(blake3_servil::hash(b)); }).calls.wall_ns
+            }
+            "ring" => {
+                let ring = std::cell::RefCell::new(Ring::new());
+                let mut unit = ();
+                clocks::measure_after_gaps_prepared(calls, clocks::Gap::Idle, 1_000_000, &mut unit, |_| {}, |_| {
+                    let mut r = ring.borrow_mut();
+                    r.submit(len, |b| b.copy_from_slice(&source), |d| { std::hint::black_box(d); });
+                    r.finish(|d| { std::hint::black_box(d); });
+                }).calls.wall_ns
+            }
+            "queue" => {
+                let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(1);
+                let queue = blake3_servil::Queue::messages(blake3_servil::Mode::Hash, Back(tx));
+                let free = std::cell::RefCell::new(Some(vec![0u8; len]));
+                let mut unit = ();
+                clocks::measure_after_gaps_prepared(calls, clocks::Gap::Idle, 1_000_000, &mut unit, |_| {}, |_| {
+                    let mut buf = free.borrow_mut().take().unwrap();
+                    buf.copy_from_slice(&source);
+                    queue.submit(buf);
+                    *free.borrow_mut() = Some(rx.recv().unwrap());
+                }).calls.wall_ns
+            }
+            _ => panic!("sporadic-hash | sporadic-ring | sporadic-queue LEN"),
+        };
+        println!("{mode} {len} B: {:.1} us a message", ns as f64 / calls as f64 / 1000.0);
+        return;
+    }
     if mode == "samples" {
         // ring_probe samples MODE OUT: every length, one samples file in
         // bench-hashes' format, for `bench-hashes compare`.
