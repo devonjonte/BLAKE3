@@ -177,7 +177,7 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
         if let Some(map) = mapped_if_cached(&file) {
             hasher.update_multithreaded(&map);
         } else {
-            update_from(&mut hasher, file)?;
+            update_from(&mut hasher, uncached(file, path))?;
         }
         #[cfg(not(unix))]
         update_from(&mut hasher, file)?;
@@ -211,6 +211,49 @@ fn mapped_if_cached(file: &File) -> Option<memmap2::Mmap> {
     (rc == 0 && resident & 1 == 1).then_some(map)
 }
 
+/// `file` to read when it is not in the page cache: on Linux, a file of
+/// MAP_LEN or more opened again with O_DIRECT, so the storage writes into
+/// b3sum's buffers with no copy through the page cache, and the file takes
+/// no room there (1 GiB from NVMe: 331 ms against the cached read's 458,
+/// level with a mapping's 329 but at 1.0 CPUs and 67 MiB against its 1.7
+/// and 1 GiB); a file system without direct reads (tmpfs) reads as before.
+#[cfg(unix)]
+fn uncached(file: File, path: &Path) -> Uncached {
+    #[cfg(target_os = "linux")]
+    if let Ok(len) = file.metadata().map(|m| m.len()) {
+        if len >= MAP_LEN as u64 {
+            use std::os::unix::fs::OpenOptionsExt;
+            if let Ok(direct) = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECT).open(path) {
+                return Uncached { file: direct, left: len };
+            }
+        }
+    }
+    let _ = path;
+    Uncached { file, left: u64::MAX }
+}
+
+/// A file read with each read asking no more than the bytes left of its
+/// length (whole 4096-byte blocks, at least one, so a file that grew is
+/// read to its end): a direct read pins every page it asks for, and
+/// asking a whole piece's buffer for a 1 MiB file faulted in 16 MiB
+/// (1 MiB from storage: 7.0 ms against 1.9).
+#[cfg(unix)]
+struct Uncached {
+    file: File,
+    left: u64,
+}
+
+#[cfg(unix)]
+impl Read for Uncached {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let want = usize::try_from(self.left.div_ceil(4096).max(1).saturating_mul(4096)).unwrap_or(usize::MAX);
+        let ask = buffer.len().min(want);
+        let n = self.file.read(&mut buffer[..ask])?;
+        self.left = self.left.saturating_sub(n as u64);
+        Ok(n)
+    }
+}
+
 /// The shortest file mapped when it is in the page cache: where the pool
 /// takes over (the library's 512 KiB). A shorter file is hashed on one
 /// thread, and a mapping's page faults interrupt it once a page, each
@@ -221,11 +264,54 @@ fn mapped_if_cached(file: &File) -> Option<memmap2::Mmap> {
 const MAP_LEN: usize = 512 << 10;
 
 /// The read size: each piece is hashed over the pool while the next is read.
-const PIECE: usize = 4 << 20;
+/// On Linux 16 MiB, where an uncached file's direct reads keep the storage
+/// busy only with pieces that long (1 GiB from NVMe: 4 MiB 362 ms, 8 MiB
+/// 343, 16 MiB 332, a mapping 331).
+const PIECE: usize = if cfg!(target_os = "linux") { 16 << 20 } else { 4 << 20 };
 
 thread_local! {
-    /// Two pieces' buffers, kept from input to input: small files allocate nothing.
-    static BUFFERS: std::cell::RefCell<[Vec<u8>; 2]> = std::cell::RefCell::new([vec![0; PIECE], vec![0; PIECE]]);
+    /// Two pieces' buffers, kept from input to input: small files allocate
+    /// nothing. Page-aligned, as direct reads need.
+    static BUFFERS: std::cell::RefCell<[Aligned; 2]> = std::cell::RefCell::new([Aligned::new(), Aligned::new()]);
+}
+
+/// PIECE bytes at a page boundary (4096; direct reads need their
+/// buffer aligned to the storage's block, 4096 at most on Linux).
+struct Aligned(*mut u8);
+
+impl Aligned {
+    const LAYOUT: std::alloc::Layout = match std::alloc::Layout::from_size_align(PIECE, 4096) {
+        Ok(layout) => layout,
+        Err(_) => panic!("PIECE at a page boundary"),
+    };
+    fn new() -> Aligned {
+        // Sound: a nonzero size.
+        let p = unsafe { std::alloc::alloc(Self::LAYOUT) };
+        assert!(!p.is_null(), "b3sum's read buffers");
+        Aligned(p)
+    }
+}
+
+impl Drop for Aligned {
+    fn drop(&mut self) {
+        // Sound: allocated with LAYOUT in new.
+        unsafe { std::alloc::dealloc(self.0, Self::LAYOUT) };
+    }
+}
+
+impl std::ops::Deref for Aligned {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        // Sound: PIECE bytes, this buffer's own.
+        unsafe { std::slice::from_raw_parts(self.0, PIECE) }
+    }
+}
+
+impl std::ops::DerefMut for Aligned {
+    fn deref_mut(&mut self) -> &mut [u8] {
+        // Sound: PIECE bytes, this buffer's own, borrowed mutably once.
+        unsafe { std::slice::from_raw_parts_mut(self.0, PIECE) }
+    }
 }
 
 /// Read from `reader` until `buffer` is full or the input ends; how much was read.
