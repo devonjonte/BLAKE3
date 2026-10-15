@@ -593,6 +593,72 @@ def prove_xof_every(obj):
     return f"{kinds['head']} paths back to the group loop's head, {kinds['return']} out of it"
 
 
+# The SME2 kernel with an integer lane (c/blake3_sme2_hybrid_aarch64.S,
+# tools/gen_sme2_hybrid.py): 16 SME2 lanes and 2 integer ones a group.
+HYBRID_GROUP = 18
+
+
+def assemble_hybrid():
+    obj = os.path.join(tempfile.mkdtemp(), "sme2_hybrid.o")
+    subprocess.run([CLANG, "-c", "-march=armv9-a+sme2", os.path.join(ROOT_DIR, "c/blake3_sme2_hybrid_aarch64.S"), "-o", obj], check=True)
+    return obj
+
+
+class HybridSetup(Setup):
+    """Setup for the hybrid file: its code from the kernel's entry to the
+    end of .text (the file has no end symbol of its own)."""
+    def __init__(self, obj, regions):
+        sizes = subprocess.run([aarch64.LLVM_OBJDUMP, "-h", obj], capture_output=True, text=True, check=True).stdout
+        end = next(int(l.split()[2], 16) for l in sizes.splitlines() if " .text " in l)
+        syms = aarch64.symbols(obj)
+        real = aarch64.disassemble
+        aarch64.disassemble = lambda o, a, b: real(o, a, end, llvm=True)
+        try:
+            super().__init__(obj, "blake3_sme2x2_hash_chunks_512", "blake3_sme2x2_hash_chunks_512", regions)
+        finally:
+            aarch64.disassemble = real
+
+
+def prove_chunks_x2(obj, groups, check=True):
+    """sme2x2_hash_chunks_512(inputs, key, counter, flags, out, groups): 18
+    chunks a group, chunk i of group g at counter + 18 g + i; flags = flags
+    | start << 8 | end << 16 (bits 24-31 zero, anything above ignored); out
+    receives 18 chaining values a group, in order."""
+    n = HYBRID_GROUP * groups
+    chunks = [byte_symbols(f"in{i}_", 1024) for i in range(n)]
+    key = byte_symbols("key", 32)
+    regions = {f"input{i}": Region(f"input{i}", 1024, False, (lambda b: lambda o: b[o])(chunks[i])) for i in range(n)}
+    regions["key"] = Region("key", 32, False, lambda o: key[o])
+    regions["out"] = Region("out", 32 * n, True, None)
+    table = Region("table", 8 * n, False, None)
+    for i in range(n):
+        for j in range(8):
+            table.bytes[8 * i + j] = (Ptr(f"input{i}", 0), j)
+    regions["table"] = table
+    s = HybridSetup(obj, regions)
+    counter = BitVec("counter", 64)
+    flags, start, end = (BitVec(x, 8) for x in ("flags", "start", "end"))
+    m = s.m
+    m.x[0], m.x[1], m.x[2] = Ptr("table", 0), Ptr("key", 0), counter
+    m.x[3] = Concat(BitVec("junk", 32), BitVecVal(0, 8), end, start, flags)
+    m.x[4], m.x[5] = Ptr("out", 0), BitVecVal(groups, 64)
+    s.run_and_check_abi()
+    if aarch64.concrete(m.x[0]) != 16:
+        raise Unproved(f"returned {m.x[0]}, not 16")
+    if not check:
+        return m.steps
+    zero = BitVecVal(0, 8)
+    cvs = []
+    for i in range(n):
+        cv = spec.words(key)
+        for b in range(16):
+            f = ZeroExt(24, flags | (start if b == 0 else zero) | (end if b == 15 else zero))
+            cv = spec.compress(cv, spec.words(chunks[i][64 * b:64 * b + 64]), counter + i, BitVecVal(64, 32), f)[:8]
+        cvs.append(cv)
+    check_out(m.regions["out"], 0, cvs)
+    return m.steps
+
+
 def cases(only):
     out = []
     for groups in (1, 2):
@@ -604,6 +670,7 @@ def cases(only):
         out.append(("messages", 1, (5, stored)))
     out.append(("messages", 2, (3, 7)))
     out += [("parents", 1, None), ("parents", 2, None), ("xof", 1, None), ("xof", 2, None)]
+    out += [("chunks_x2", 1, None), ("chunks_x2", 2, None)]
     # Hours long: run when named.
     out += [("every", None, None), ("parents_every", None, None), ("xof_every", None, None)]
     out += [(f"messages_every", None, blocks) for blocks in range(2, 17)]
@@ -613,6 +680,7 @@ def cases(only):
 
 
 OBJ = None
+HYBRID_OBJ = [None]
 
 
 def prove_case(case):
@@ -641,6 +709,10 @@ def prove_case(case):
         elif name == "parents_every":
             what = prove_parents_every(OBJ)
             return case, f"proved (the parent kernel at every group count: {what}, {time.time() - t:.0f} s)"
+        elif name == "chunks_x2":
+            if HYBRID_OBJ[0] is None:
+                HYBRID_OBJ[0] = assemble_hybrid()
+            steps, what = prove_chunks_x2(HYBRID_OBJ[0], groups), f"the kernel with an integer lane, {groups} groups of 18"
         elif name == "parents":
             steps, what = prove_parents(OBJ, groups), f"{groups} groups"
         else:

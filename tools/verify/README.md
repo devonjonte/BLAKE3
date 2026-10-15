@@ -6,7 +6,7 @@ specification of BLAKE3 (`c2sp/BLAKE3/`), for every input, key, counter,
 and flags value:
 
     python3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9 (327 cases, 2 min on 16 cores)
-    python3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof (34 cases, 3 min)
+    python3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof (34 cases, 3 min); c/blake3_sme2_hybrid_aarch64.S: chunks_x2 (2 cases, 9 min)
     python3 tools/verify/prove_sme2.py every parents_every xof_every messages_every  # each kernel at every group count (hours)
     python3 tools/verify/lean/emit.py                   # the definition, computed from the Lean specification (needs Lean)
     python3 tools/verify/prove_rust.py                  # the Rust paths, compiled: portable, and the NEON platform's (24 cases)
@@ -27,7 +27,10 @@ the VM on it).
 16; the q kernels' partial chunk at every block count). The SME2 kernels
 at the 512-bit streaming vector length (`cntw` = 16, which they check
 themselves), for one and two groups, the last group storing 1, 15, or
-all 16 values, and the message kernel at every message length of 2 to 16
+all 16 values; the SME2 kernel with an integer lane
+(`c/blake3_sme2_hybrid_aarch64.S`: 16 SME2 lanes and 2 integer ones a
+group) for one and two groups (not yet at every group count, where the
+library calls it with 8 or more), and the message kernel at every message length of 2 to 16
 blocks with the last block of any length. The chunk kernel at every group
 count up to 2^40 groups, its last group storing all 16 values, by
 induction over its group loop (`prove_sme2.py every`, 85 minutes): every
