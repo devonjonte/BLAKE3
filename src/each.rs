@@ -17,7 +17,7 @@ use crate::{CVBytes, CVWords, ChunkState, Hash, Hasher, IncrementCounter, Mode, 
 /// Requires `out.len() == items.len()`.
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil::initialize_multithreaded();
 /// use blake3_servil::Mode;
 /// let items: Vec<Vec<u8>> = (0..100).map(|i| vec![i as u8; 1000 * i]).collect();
 /// let slices: Vec<&[u8]> = items.iter().map(|m| m.as_slice()).collect();
@@ -28,6 +28,7 @@ use crate::{CVBytes, CVWords, ChunkState, Hash, Hasher, IncrementCounter, Mode, 
 /// ```
 #[cfg(feature = "std")]
 pub fn hash_each_multithreaded_with(mode: Mode, items: &[&[u8]], out: &mut [[u8; OUT_LEN]]) {
+    crate::lanes::require();
     assert_eq!(items.len(), out.len(), "one digest per item");
     let (key, flags) = mode.key_and_flags();
     let alone = |item: &[u8]| item.len() >= crate::lanes::MIN_SPLIT_LEN;
@@ -76,6 +77,7 @@ impl Hasher {
     /// Requires each `i < hashers.len()`.
     #[cfg(feature = "std")]
     pub fn update_each_multithreaded(hashers: &mut [Hasher], pieces: &[(usize, &[u8])]) {
+        crate::lanes::require();
         update_turn(hashers, pieces, true);
     }
 
