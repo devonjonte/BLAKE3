@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- On x86-64 with SSE4.1 or AVX2, whole chunks and a partial one after
+  them hash in one pass, the partial chunk in a lane the whole ones leave
+  spare: three whole chunks in four lanes, five to seven in eight (AVX2).
+  On an i7-12700K, hash() of 3839 bytes takes 1.55 us from 2.11 (x0.74),
+  8191 bytes 1.76 from 3.31 (x0.53); after other work 3839 and 7935 bytes
+  x0.90 and x0.85; other lengths level.
 - The startup self-test checks the build and the machine, leaving what
   the code computes to the tests and proofs: on x86-64 and the other
   non-AArch64 targets it runs each kernel once in 7 small cases (from 40),
