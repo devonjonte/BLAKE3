@@ -207,9 +207,14 @@ pub mod platform;
 
 // Platform-specific implementations of the compression function. These
 // BLAKE3-specific cfg flags are set in build.rs.
+// The intrinsics AVX2 kernels: `avx2` itself without the assembly, and
+// everywhere on x86 the pass of whole chunks with a partial one (as in
+// rust_sse41).
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg_attr(not(blake3_avx2_rust), allow(dead_code))]
+mod rust_avx2;
 #[cfg(blake3_avx2_rust)]
-#[path = "rust_avx2.rs"]
-mod avx2;
+use rust_avx2 as avx2;
 #[cfg(blake3_avx2_ffi)]
 #[path = "ffi_avx2.rs"]
 mod avx2;
@@ -234,9 +239,11 @@ mod sse2;
 #[cfg(blake3_sse2_ffi)]
 #[path = "ffi_sse2.rs"]
 mod sse2;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg_attr(not(blake3_sse41_rust), allow(dead_code))]
+mod rust_sse41;
 #[cfg(blake3_sse41_rust)]
-#[path = "rust_sse41.rs"]
-mod sse41;
+use rust_sse41 as sse41;
 #[cfg(blake3_sse41_ffi)]
 #[path = "ffi_sse41.rs"]
 mod sse41;
@@ -753,6 +760,25 @@ fn plan_part(state: &mut PlanState, piece: &[u8], tasks: &mut Vec<lanes::Task>) 
     state.partial = piece.len() - offset;
 }
 
+/// The lanes of the one pass that hashes `whole` whole chunks with a
+/// partial one of `partial` bytes after them, where the pass costs less
+/// than the partial chunk's blocks after the whole ones: three whole
+/// chunks in four lanes (SSE4.1 and AVX2), and in eight (AVX2) six or
+/// seven, or five with a partial chunk of six blocks or more (with fewer,
+/// an i7-12700K's efficiency core ran the eight lanes up to 7% slower; a
+/// pass of eight lanes costs 1.6 times one of four on its performance
+/// core). AVX-512 keeps its own widths (unmeasured).
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[inline]
+fn spare_lane(platform: Platform, whole: usize, partial: usize) -> Option<usize> {
+    match (platform, whole) {
+        (Platform::SSE41 | Platform::AVX2, 3) => Some(4),
+        (Platform::AVX2, 6..=7) => Some(8),
+        (Platform::AVX2, 5) if partial > 5 * BLOCK_LEN => Some(8),
+        _ => None,
+    }
+}
+
 // Use SIMD parallelism to hash up to MAX_SIMD_DEGREE chunks at the same time
 // on a single thread. Write out the chunk chaining values and return the
 // number of chunks hashed. These chunks are never the root and never empty;
@@ -778,6 +804,20 @@ fn compress_chunks_parallel(
     if pair::takes(platform, input.len()) {
         out[..2 * OUT_LEN].copy_from_slice(&pair::parent(input, key, chunk_counter, flags, platform));
         return 2;
+    }
+    // Whole chunks that leave a lane spare, and a partial one: one pass,
+    // the partial chunk in the spare lane.
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    if let (false, Some(lanes)) = (chunks_exact.remainder().is_empty(), spare_lane(platform, chunks_array.len(), chunks_exact.remainder().len())) {
+        let (whole, partial) = (&chunks_array[..], chunks_exact.remainder());
+        // Sound: spare_lane admits each width only on a platform whose CPU
+        // has its instructions.
+        if lanes == 4 {
+            unsafe { rust_sse41::hash_chunks_with_partial(whole, partial, key, chunk_counter, flags, out) };
+        } else {
+            unsafe { rust_avx2::hash_chunks_with_partial(whole, partial, key, chunk_counter, flags, out) };
+        }
+        return whole.len() + 1;
     }
     // Whole chunks and a partial one, on the NEON hybrids: where a q kernel
     // covers the count, the partial chunk runs on the scalar units beside

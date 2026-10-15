@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- On x86-64 with SSE4.1 or AVX2, whole chunks and a partial one after
+  them hash in one pass, the partial chunk in a lane the whole ones leave
+  spare: three whole chunks in four lanes, five to seven in eight (AVX2).
+  On an i7-12700K, hash() of 3839 bytes takes 1.55 us from 2.11 (x0.74),
+  8191 bytes 1.76 from 3.31 (x0.53); after other work 3839 and 7935 bytes
+  x0.90 and x0.85; other lengths level.
 - The scalar one-chunk kernel loads each step's four message words before
   its arithmetic and interleaves the step's four G functions, so in-order
   cores (Cortex-A53, as in the Raspberry Pi 3) no longer wait on each load:
