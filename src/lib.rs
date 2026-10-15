@@ -1527,8 +1527,9 @@ pub fn kernel_report() -> KernelReport {
 /// by the batch's length in bytes: `from_len` is the batch's length at
 /// which each kernel starts. Messages of 1 to 16 whole blocks (64 B to
 /// 1 KiB) are hashed several at a time, and on SME2 so are messages of
-/// whole blocks up to 15 KiB; messages of other lengths run
-/// [`kernel_report`]'s kernel for their length, one message per call.
+/// whole blocks up to 15 KiB. On x86, 2048- and 4096-byte messages batch chunks
+/// and tree levels from four messages where four SIMD lanes are available;
+/// other lengths run [`kernel_report`]'s kernel, one message per call.
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn kernel_report_many(message_len: usize) -> KernelReport {
@@ -1557,6 +1558,14 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
                 from_len: many::sme2_chunked_min(message_len) * message_len,
                 name: "SME2, sixteen messages side by side",
                 why: "From this many messages, groups of sixteen are hashed side by side on the SME2 matrix unit, one message per lane: each chunk across the messages, then each level of the messages' trees; the last group's spare lanes repeat a message.",
+            });
+        }
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        if (message_len == 2 * CHUNK_LEN || message_len == 4 * CHUNK_LEN) && platform.simd_degree() >= 4 {
+            kernels.push(Kernel {
+                from_len: 4 * message_len,
+                name: platform.hash_many_name(),
+                why: "From four messages, each chunk index is batched across independent messages, then every tree level; chunk indices stay their counters and only the final parents carry ROOT.",
             });
         }
         return KernelReport { platform: one.platform, kernels };
