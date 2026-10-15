@@ -38,6 +38,10 @@
 //!
 //! The pool's workers never run user code; the delivery thread does, in
 //! the handler calls.
+// A queue needs threads, which wasm32 lacks: there its delivery thread never
+// starts (initialize_multithreaded leaves it out), and the code that serves it
+// is unused.
+#![cfg_attr(target_family = "wasm", allow(dead_code))]
 
 use crate::lanes::{OwnLine, TASKS, Task};
 use crate::{CVWords, Hash, Mode, OUT_LEN};
