@@ -3,6 +3,9 @@
 //! the same messages, already in memory, in each; neither copies.
 //!
 //!   stream_probe samples API OUT [LEN...]
+//!       (API rounds: each round of messages read into the program's
+//!       buffers, then a stream of them; queue-read: each read into a free
+//!       buffer, then Queue::messages, as bench-hashes' ContinuousMessages)
 //!       API stream | queue | new (lone messages only: a stream a message),
 //!       each length (default 64 B to 1 MiB), one bench-hashes samples v4
 //!       file for `bench-hashes compare`, with three scenarios:
@@ -51,6 +54,47 @@ fn solo(api: &str, len: usize) -> Vec<Sample> {
             });
             b
         }),
+        "rounds" => {
+            // A read of each message into the program's buffers, then a
+            // stream of them: a buffer is refilled only after its scope.
+            let mut buffers = messages.clone();
+            clocks::measure(64, 2_000_000, || {
+                for (b, m) in buffers.iter_mut().zip(&messages) {
+                    b.copy_from_slice(m);
+                }
+                blake3_servil::stream(blake3_servil::Mode::Hash, |s| {
+                    for b in &buffers {
+                        s.submit(b, |d| {
+                            std::hint::black_box(d);
+                        });
+                    }
+                    s.finish(|d| {
+                        std::hint::black_box(d);
+                    });
+                });
+            })
+        }
+        "queue-read" => {
+            // As bench-hashes' ContinuousMessages: each message read into a
+            // free buffer, then submitted.
+            let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(per_call);
+            let queue = blake3_servil::Queue::messages(blake3_servil::Mode::Hash, Back(tx));
+            let mut free = messages.clone();
+            let b = clocks::measure(64, 2_000_000, || {
+                for m in &messages {
+                    let mut buf = match free.pop() {
+                        Some(b) => b,
+                        None => rx.recv().unwrap(),
+                    };
+                    buf.copy_from_slice(m);
+                    queue.submit(buf);
+                }
+            });
+            for _ in free.len()..per_call {
+                rx.recv().unwrap();
+            }
+            b
+        }
         "queue" => {
             let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(per_call);
             let queue = blake3_servil::Queue::messages(blake3_servil::Mode::Hash, Back(tx));
@@ -131,7 +175,11 @@ fn main() {
     assert_eq!(args[0], "samples", "stream_probe samples API OUT [LEN...]");
     let (api, out) = (args[1].as_str(), &args[2]);
     let lens: Vec<usize> = if args.len() > 3 { args[3..].iter().map(|a| a.parse().unwrap()).collect() } else { LENS.to_vec() };
-    let scenarios: &[&str] = if api == "new" { &["lone"] } else { &["solo", "two", "lone"] };
+    let scenarios: &[&str] = match api {
+        "new" => &["lone"],
+        "rounds" | "queue-read" => &["solo", "two"],
+        _ => &["solo", "two", "lone"],
+    };
     let (mut rows, mut busy) = (String::new(), String::new());
     for &scenario in scenarios {
         for &len in &lens {
