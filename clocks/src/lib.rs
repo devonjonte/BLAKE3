@@ -8,11 +8,13 @@
 //!   over-count, when the thread is interrupted, which a median absorbs.
 //! - **The thread's counts per core kind** ([`Counts`]): cycles,
 //!   instructions, and time on performance and efficiency cores, from
-//!   Apple's `thread_selfcounts(THSC_TIME_CPI_PER_PERF_LEVEL)`. Cycles
-//!   over time is the clock the thread ran at, lower where the core waited
-//!   on the SME unit; the split says which kind of core ran it. Other
-//!   platforms give none ([`Counts::read`] returns `None`), and results
-//!   say so.
+//!   Apple's `thread_selfcounts(THSC_TIME_CPI_PER_PERF_LEVEL)`, and on
+//!   Linux x86-64 hybrid CPUs from the `cpu_core` and `cpu_atom` PMUs
+//!   through `perf_event_open` (user-space cycles over running time:
+//!   `linux_counts`). Cycles over time is the clock the thread ran at,
+//!   lower where the core waited on the SME unit; the split says which
+//!   kind of core ran it. Other platforms give none ([`Counts::read`]
+//!   returns `None`), and results say so.
 //!
 //! Thread CPU time (`CLOCK_THREAD_CPUTIME_ID`) is left out: at 1 ms samples
 //! it agrees with the counter and adds an accounting layer to reason about;
@@ -421,7 +423,17 @@ mod imp {
     }
 }
 
-#[cfg(not(target_vendor = "apple"))]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod linux_counts;
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod imp {
+    pub use super::linux_counts::read;
+
+    pub fn set_qos(_class: u32) {}
+}
+
+#[cfg(not(any(target_vendor = "apple", all(target_os = "linux", target_arch = "x86_64"))))]
 mod imp {
     pub fn read() -> Option<super::Counts> {
         None
