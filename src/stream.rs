@@ -76,12 +76,15 @@ enum Kind {
 /// 0.249 -> 0.217 ns/B, 256 B x0.935, i7-12700K); or, in `pieces_out`, a piece's chaining value
 /// (a piece at chunk 0, of two chunks or more, gives its two children
 /// instead) on a line of its own.
+#[repr(transparent)]
 struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 
 /// Hash a stream of messages on this crate's threads, in place: `body`
 /// submits messages that live at least as long as the call
 /// ([`Stream::submit`]), and receives their digests in order from
-/// `submit`, [`collect`](Stream::collect) and [`finish`](Stream::finish).
+/// `submit`, [`collect`](Stream::collect) and [`finish`](Stream::finish),
+/// a slice at a time: the digests of messages finished in a row, or of a
+/// batch's part, together.
 /// `body` calls `finish` last (a scope that ends with digests not handed
 /// back panics). A message of any length; this crate's threads read it
 /// where it is, and `stream` returns only after they are done, also when
@@ -102,9 +105,9 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// let mut digests = Vec::new();
 /// blake3_servil::stream(Mode::Hash, |s| {
 ///     for message in &messages {
-///         s.submit(message, |hash| digests.push(hash));
+///         s.submit(message, |hashes| digests.extend_from_slice(hashes));
 ///     }
-///     s.finish(|hash| digests.push(hash));
+///     s.finish(|hashes| digests.extend_from_slice(hashes));
 /// });
 /// assert_eq!(digests[7], blake3_servil::hash(&messages[7]));
 /// ```
@@ -220,7 +223,7 @@ unsafe impl Send for Stream<'_> {}
 impl<'env> Stream<'env> {
     /// Hash `message` where it is; `digest` receives any digests this call
     /// hands back.
-    pub fn submit(&mut self, message: &'env [u8], mut digest: impl FnMut(Hash)) {
+    pub fn submit(&mut self, message: &'env [u8], mut digest: impl FnMut(&[Hash])) {
         let pieces = message.len().div_ceil(PIECE).max(1);
         for i in 0..pieces {
             let part = &message[i * PIECE..][..(message.len() - i * PIECE).min(PIECE)];
@@ -236,7 +239,7 @@ impl<'env> Stream<'env> {
     /// any digests this call hands back. The stream reuses the bytes once
     /// the message's digest is handed back; a stream keeps 4 MiB of them,
     /// and `submit_with` waits for room as `submit` does.
-    pub fn submit_with(&mut self, len: usize, mut fill: impl FnMut(usize, &mut [u8]), mut digest: impl FnMut(Hash)) {
+    pub fn submit_with(&mut self, len: usize, mut fill: impl FnMut(usize, &mut [u8]), mut digest: impl FnMut(&[Hash])) {
         let pieces = len.div_ceil(PIECE).max(1);
         for i in 0..pieces {
             let part_len = (len - i * PIECE).min(PIECE);
@@ -253,9 +256,9 @@ impl<'env> Stream<'env> {
     /// Hash a batch of messages of `message_len` bytes where it is, laid
     /// out as [`hash_many`](crate::hash_many) takes them (each in whole
     /// blocks, zero after its bytes); `digest` receives any digests this
-    /// call hands back, each message's in turn. The batch goes in parts of
+    /// call hands back, the batch's in its messages' order. The batch goes in parts of
     /// up to 64 KiB, each one entry.
-    pub fn submit_batch(&mut self, batch: &'env [u8], message_len: usize, mut digest: impl FnMut(Hash)) {
+    pub fn submit_batch(&mut self, batch: &'env [u8], message_len: usize, mut digest: impl FnMut(&[Hash])) {
         let slot = crate::many::slot_len(message_len);
         crate::many::assert_slots(batch, message_len, batch.len() / slot);
         for part in batch.chunks((TASK_LEN / slot).max(1) * slot) {
@@ -272,7 +275,7 @@ impl<'env> Stream<'env> {
     /// included: each message in whole blocks, zero after its bytes) into
     /// all of `room`, a part of up to 64 KiB at a time. As
     /// [`submit_with`](Stream::submit_with) and [`submit_batch`](Stream::submit_batch).
-    pub fn submit_batch_with(&mut self, count: usize, message_len: usize, mut fill: impl FnMut(usize, &mut [u8]), mut digest: impl FnMut(Hash)) {
+    pub fn submit_batch_with(&mut self, count: usize, message_len: usize, mut fill: impl FnMut(usize, &mut [u8]), mut digest: impl FnMut(&[Hash])) {
         let slot = crate::many::slot_len(message_len);
         let per_part = (TASK_LEN / slot).max(1);
         for first in (0..count).step_by(per_part) {
@@ -293,7 +296,7 @@ impl<'env> Stream<'env> {
     /// task (of its kind: one of another kind is handed over first); a
     /// piece of a long message is a task of its own, a whole subtree at its
     /// offset.
-    fn add_part(&mut self, input: *const u8, len: usize, kind: Kind, ring_end: usize, digest: &mut impl FnMut(Hash)) {
+    fn add_part(&mut self, input: *const u8, len: usize, kind: Kind, ring_end: usize, digest: &mut impl FnMut(&[Hash])) {
         let entry = self.add_entry(len, kind, ring_end, digest);
         let (batch, out) = match kind {
             Kind::Message => (None, self.s.outs[entry].0.get() as *mut u8),
@@ -339,7 +342,7 @@ impl<'env> Stream<'env> {
     /// The ring offset of `len` free bytes at a 64-byte boundary (whole,
     /// before the ring's end), reserved: waits, handing back digests and
     /// hashing tasks, until entries in flight free them.
-    fn reserve(&mut self, len: usize, digest: &mut impl FnMut(Hash)) -> usize {
+    fn reserve(&mut self, len: usize, digest: &mut impl FnMut(&[Hash])) -> usize {
         let slot = len.div_ceil(64) * 64;
         let mut at = self.head % RING_BYTES;
         // A slot that would cross the end starts the next lap instead.
@@ -357,14 +360,14 @@ impl<'env> Stream<'env> {
 
     /// Hand back every digest finished, in order, without waiting; and hand
     /// the open task to the pool, so what it holds starts hashing.
-    pub fn collect(&mut self, mut digest: impl FnMut(Hash)) {
+    pub fn collect(&mut self, mut digest: impl FnMut(&[Hash])) {
         self.publish();
         self.deliver(&mut digest);
     }
 
     /// Hand back every message's digest, in order: this thread hashes any
     /// task no thread has taken, and waits for the rest.
-    pub fn finish(&mut self, mut digest: impl FnMut(Hash)) {
+    pub fn finish(&mut self, mut digest: impl FnMut(&[Hash])) {
         self.publish();
         while self.delivered < self.next {
             self.help(&mut digest);
@@ -373,7 +376,7 @@ impl<'env> Stream<'env> {
 
     /// Hand back what is done; with nothing done, hash a waiting task or
     /// pause.
-    fn help(&mut self, digest: &mut impl FnMut(Hash)) {
+    fn help(&mut self, digest: &mut impl FnMut(&[Hash])) {
         if self.deliver(digest) == 0 && !crate::lanes::run_one_task() {
             core::hint::spin_loop();
         }
@@ -382,7 +385,7 @@ impl<'env> Stream<'env> {
     /// A new entry of `len` bytes, waiting for room when every entry is in
     /// flight.
     #[inline(always)]
-    fn add_entry(&mut self, len: usize, kind: Kind, ring_end: usize, digest: &mut impl FnMut(Hash)) -> usize {
+    fn add_entry(&mut self, len: usize, kind: Kind, ring_end: usize, digest: &mut impl FnMut(&[Hash])) -> usize {
         if self.next - self.delivered == ENTRIES {
             self.wait_for_room(digest);
         }
@@ -396,7 +399,7 @@ impl<'env> Stream<'env> {
     /// line: a frame of its own, set up only when the stream is full).
     #[cold]
     #[inline(never)]
-    fn wait_for_room(&mut self, digest: &mut impl FnMut(Hash)) {
+    fn wait_for_room(&mut self, digest: &mut impl FnMut(&[Hash])) {
         self.publish();
         while self.next - self.delivered == ENTRIES {
             self.help(digest);
@@ -413,8 +416,11 @@ impl<'env> Stream<'env> {
     }
 
     /// Hand back every finished entry from the oldest on; how many.
-    fn deliver(&mut self, digest: &mut impl FnMut(Hash)) -> usize {
+    fn deliver(&mut self, digest: &mut impl FnMut(&[Hash])) -> usize {
         let mut count = 0;
+        // Whole messages finished in a row: their digests sit side by side
+        // in `outs` (up to its end), handed back as one slice.
+        let mut run = (0, 0);
         while self.delivered < self.next {
             let index = self.delivered % ENTRIES;
             let Entry { len, kind, first, ring_end } = self.s.entries[index];
@@ -424,14 +430,21 @@ impl<'env> Stream<'env> {
             self.delivered += 1;
             self.tail = ring_end;
             count += 1;
-            // Sound: the task wrote its outs before counting `left` down.
-            match kind {
-                Kind::Message => digest(Hash(unsafe { *self.s.outs[index].0.get() })),
-                Kind::Batch { count, at, .. } => {
-                    for j in 0..count {
-                        digest(Hash(unsafe { *(self.s.ring[at + j * OUT_LEN].get() as *const [u8; OUT_LEN]) }));
-                    }
+            if let Kind::Message = kind {
+                if run.1 > 0 && run.0 + run.1 == index {
+                    run.1 += 1;
+                } else {
+                    self.hand_back(run, digest);
+                    run = (index, 1);
                 }
+                continue;
+            }
+            self.hand_back(core::mem::take(&mut run), digest);
+            // Sound: the task wrote its outs before counting `left` down;
+            // Hash is [u8; 32] (repr(transparent)).
+            match kind {
+                Kind::Message => unreachable!(),
+                Kind::Batch { count, at, .. } => digest(unsafe { core::slice::from_raw_parts(self.s.ring[at].get() as *const Hash, count) }),
                 Kind::Piece { counter, last } => {
                     let out = unsafe { *self.s.pieces_out[index].0.0.get() };
                     let (key, flags, platform) = (self.key, self.flags, Platform::detect());
@@ -455,13 +468,23 @@ impl<'env> Stream<'env> {
                         while self.stack.len() > 1 {
                             right = parent(&self.stack.pop().unwrap(), &right).chaining_value();
                         }
-                        digest(parent(&self.stack.pop().unwrap(), &right).root_hash());
+                        digest(&[parent(&self.stack.pop().unwrap(), &right).root_hash()]);
                         self.pieces = 0;
                     }
                 }
             }
         }
+        self.hand_back(run, digest);
         count
+    }
+
+    /// Hand back the digests of `run.1` whole messages from entry `run.0`.
+    fn hand_back(&self, run: (usize, usize), digest: &mut impl FnMut(&[Hash])) {
+        if run.1 > 0 {
+            // Sound: their tasks are done (deliver), Out<32> is [u8; 32] and
+            // so is Hash (both repr(transparent)), side by side in `outs`.
+            digest(unsafe { core::slice::from_raw_parts(self.s.outs[run.0].0.get() as *const Hash, run.1) });
+        }
     }
 }
 
@@ -510,7 +533,7 @@ mod test {
                     // Borrowed, written in place (in reads of up to 1000
                     // bytes), or each in turn.
                     if ways == 0 || (ways == 2 && i % 3 == 0) {
-                        s.submit(message(i), |h| got.push(h));
+                        s.submit(message(i), |h| got.extend_from_slice(h));
                     } else {
                         s.submit_with(
                             lens[i],
@@ -519,14 +542,14 @@ mod test {
                                     part.copy_from_slice(&message(i)[at + j * 1000..][..part.len()]);
                                 }
                             },
-                            |h| got.push(h),
+                            |h| got.extend_from_slice(h),
                         );
                     }
                     if i % 500 == 499 {
-                        s.collect(|h| got.push(h));
+                        s.collect(|h| got.extend_from_slice(h));
                     }
                 }
-                s.finish(|h| got.push(h));
+                s.finish(|h| got.extend_from_slice(h));
             });
             assert_eq!(got.len(), lens.len());
             for i in 0..lens.len() {
@@ -564,16 +587,16 @@ mod test {
             stream(mode, |s| {
                 for (k, (&(len, count), batch)) in cases.iter().zip(&batches).enumerate() {
                     if k % 2 == 0 {
-                        s.submit_batch(batch, len, |h| got.push(h));
+                        s.submit_batch(batch, len, |h| got.extend_from_slice(h));
                     } else {
-                        s.submit_batch_with(count, len, |at, room| room.copy_from_slice(&batch[at..][..room.len()]), |h| got.push(h));
+                        s.submit_batch_with(count, len, |at, room| room.copy_from_slice(&batch[at..][..room.len()]), |h| got.extend_from_slice(h));
                     }
                     let slot = crate::many::slot_len(len);
                     want.extend(batch.chunks(slot).map(|m| crate::hash_with(mode, &m[..len])));
-                    s.submit(&lone, |h| got.push(h));
+                    s.submit(&lone, |h| got.extend_from_slice(h));
                     want.push(crate::hash_with(mode, &lone));
                 }
-                s.finish(|h| got.push(h));
+                s.finish(|h| got.extend_from_slice(h));
             });
             assert_eq!(got.len(), want.len());
             assert!(got == want, "a batch's digests in order");
@@ -590,9 +613,9 @@ mod test {
         stream(Mode::Hash, |s| {
             for round in 0..3 {
                 for len in [0, 65, 70_000] {
-                    s.submit(&input[..len], |h| got.push(h));
+                    s.submit(&input[..len], |h| got.extend_from_slice(h));
                 }
-                s.finish(|h| got.push(h));
+                s.finish(|h| got.extend_from_slice(h));
                 assert_eq!(got.len(), 3 * (round + 1));
             }
         });
@@ -619,12 +642,12 @@ mod test {
         let mut got = std::vec::Vec::new();
         stream(Mode::Hash, |s| {
             for len in lens {
-                s.submit(&input[..len], |h| got.push(h));
-                s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), |h| got.push(h));
+                s.submit(&input[..len], |h| got.extend_from_slice(h));
+                s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), |h| got.extend_from_slice(h));
             }
-            s.submit_batch(&input[..4 * 64], 64, |h| got.push(h));
-            s.submit_batch_with(3, 64, |at, room| room.copy_from_slice(&input[at..][..room.len()]), |h| got.push(h));
-            s.finish(|h| got.push(h));
+            s.submit_batch(&input[..4 * 64], 64, |h| got.extend_from_slice(h));
+            s.submit_batch_with(3, 64, |at, room| room.copy_from_slice(&input[at..][..room.len()]), |h| got.extend_from_slice(h));
+            s.finish(|h| got.extend_from_slice(h));
         });
         let mut want: std::vec::Vec<Hash> = lens.iter().flat_map(|&l| [crate::hash(&input[..l]); 2]).collect();
         want.extend([crate::hash(&input[..64]); 7]);

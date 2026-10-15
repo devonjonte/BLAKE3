@@ -163,6 +163,8 @@ fn batches(api: &str, n: usize) -> Vec<Sample> {
             let mut free: Vec<(Vec<u8>, Vec<[u8; 32]>)> = buffers.into_iter().map(|b| (b, vec![[0u8; 32]; n])).collect();
             // Each digest copied out as it comes back, as the stream's are.
             let total = per_call * n;
+            let mask = total - 1;
+            assert!(total.is_power_of_two());
             let mut kept = vec![[0u8; 32]; total];
             let mut k = 0;
             let b = clocks::measure(64, 2_000_000, || {
@@ -172,7 +174,7 @@ fn batches(api: &str, n: usize) -> Vec<Sample> {
                         None => {
                             let (buffer, digests) = rx.recv().unwrap();
                             for d in &digests {
-                                kept[k % total] = *d;
+                                kept[k & mask] = *d;
                                 k += 1;
                             }
                             (buffer, digests)
@@ -189,24 +191,32 @@ fn batches(api: &str, n: usize) -> Vec<Sample> {
         }
         "batch-stream" => {
             let total = per_call * n;
+            let mask = total - 1;
+            assert!(total.is_power_of_two());
             let mut digests = vec![[0u8; 32]; total];
             blake3_servil::stream(blake3_servil::Mode::Hash, |s| {
                 let mut k = 0;
                 let b = clocks::measure(64, 2_000_000, || {
                     for buffer in &buffers {
                         s.submit_batch(buffer, 64, |d| {
-                            digests[k % total] = *d.as_bytes();
-                            k += 1;
+                            for h in d {
+                                digests[k & mask] = *h.as_bytes();
+                                k += 1;
+                            }
                         });
                     }
                     s.collect(|d| {
-                        digests[k % total] = *d.as_bytes();
-                        k += 1;
+                        for h in d {
+                            digests[k & mask] = *h.as_bytes();
+                            k += 1;
+                        }
                     });
                 });
                 s.finish(|d| {
-                    digests[k % total] = *d.as_bytes();
-                    k += 1;
+                    for h in d {
+                        digests[k & mask] = *h.as_bytes();
+                        k += 1;
+                    }
                 });
                 b
             })
