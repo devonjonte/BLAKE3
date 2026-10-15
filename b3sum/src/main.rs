@@ -175,7 +175,7 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
         let file = File::open(path)?;
         #[cfg(unix)]
         if let Some(map) = mapped(&file) {
-            hasher.update_multithreaded(&map);
+            update(&mut hasher, &map);
         } else {
             update_from(&mut hasher, file)?;
         }
@@ -223,7 +223,23 @@ fn mapped(file: &File) -> Option<memmap2::Mmap> {
 /// slower mapped than prefaulted, probe/willneed-mechanism, job 1156); a
 /// read's copy into a cached buffer faults nothing.
 #[cfg(unix)]
-const MAP_LEN: usize = 512 << 10;
+const MAP_LEN: usize = POOL_LEN;
+
+/// Where the pool takes over: the library's 512 KiB, below which a
+/// multithreaded call hashes on the calling thread.
+const POOL_LEN: usize = 512 << 10;
+
+/// Hash `input` into `hasher`: over the pool from POOL_LEN, starting it
+/// at the first such input (`initialize_multithreaded`), so a run of small
+/// files starts no threads; on this thread below.
+fn update(hasher: &mut blake3::Hasher, input: &[u8]) {
+    if input.len() >= POOL_LEN {
+        blake3::initialize_multithreaded();
+        hasher.update_multithreaded(input);
+    } else {
+        hasher.update(input);
+    }
+}
 
 /// The read size: each piece is hashed over the pool while the next is read.
 const PIECE: usize = 4 << 20;
@@ -259,7 +275,7 @@ fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io:
     BUFFERS.with_borrow_mut(|[first, second]| {
         let len = fill(&mut reader, first)?;
         if len < PIECE {
-            hasher.update_multithreaded(&first[..len]);
+            update(hasher, &first[..len]);
             return Ok(());
         }
         std::thread::scope(|scope| {
@@ -279,11 +295,11 @@ fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io:
             free_tx.send(&mut second[..]).expect("the reader waits for a buffer");
             let mut current: &mut [u8] = &mut first[..];
             loop {
-                hasher.update_multithreaded(current);
+                update(hasher, current);
                 let (next, read) = full_rx.recv().expect("the reader sends every piece");
                 let len = read?;
                 if len < next.len() {
-                    hasher.update_multithreaded(&next[..len]);
+                    update(hasher, &next[..len]);
                     return Ok(());
                 }
                 free_tx.send(current).expect("the reader waits for a buffer");

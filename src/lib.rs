@@ -67,8 +67,7 @@
 //! every hash function, since its code and data must come back into the
 //! CPU's caches and a resting core runs slower at first: hashing 64 KiB
 //! after a pause takes about three times as long as nonstop on an Apple M4
-//! Max. Calling [`initialize_multithreaded`] in place of [`initialize`]
-//! keeps the threads' one-time start off the first multithreaded call.
+//! Max.
 //!
 //! **Apple M4 and later** have one matrix unit that this crate uses for
 //! inputs of 16 KiB and more; when several threads of a program hash such
@@ -103,9 +102,7 @@
 //! - **Once per process**: the startup self-test's buffers, about 45 KiB
 //!   of the calling thread's stack while it runs (it allocates nothing),
 //!   and the threads: a worker per CPU beyond the first, the queue's
-//!   delivery thread, each with the standard library's stack. The
-//!   self-test runs in [`initialize`]; the threads come at the first call
-//!   that needs them, or at start-up, when the program calls
+//!   delivery thread, each with the standard library's stack, started by
 //!   [`initialize_multithreaded`].
 //!
 //! # Startup self-test
@@ -113,7 +110,9 @@
 //! **Every program calls [`initialize`] (or [`initialize_multithreaded`])
 //! once, before any other call of this crate**: a call before it panics, in
 //! every build, saying so. The check costs nothing: it is part of the
-//! platform load every call makes.
+//! platform load every call makes. **A program that makes multithreaded
+//! calls or uses a [`Queue`] calls [`initialize_multithreaded`]**: a
+//! multithreaded call or a `Queue` before it panics (one load per call).
 //!
 //! In `initialize`, the crate checks the build and the machine running it
 //! before the process first hashes: a miscompilation, a faulty CPU, a
@@ -1019,7 +1018,7 @@ pub fn hash(input: &[u8]) -> Hash {
 /// [`Hash`](struct@Hash) as [`hash`], never slower.
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil::initialize_multithreaded();
 /// let hash = blake3_servil::hash_multithreaded(&[0u8; 1 << 20]);
 /// assert_eq!(hash, blake3_servil::hash(&[0u8; 1 << 20]));
 /// ```
@@ -1036,10 +1035,11 @@ pub fn hash(input: &[u8]) -> Hash {
 /// share the cores in turn, each getting a fair part; a call that finds the
 /// cores all busy hashes on its own thread, at [`hash`]'s speed.
 ///
-/// The first call that uses other cores starts this crate's threads, under
-/// 1 ms; [`initialize_multithreaded`] moves that to start-up.
+/// The program calls [`initialize_multithreaded`] first; a call before it
+/// panics.
 #[cfg(feature = "std")]
 pub fn hash_multithreaded(input: &[u8]) -> Hash {
+    lanes::require();
     lanes::hash(input)
 }
 
@@ -1059,10 +1059,14 @@ pub fn initialize() {
 }
 
 /// [`initialize`], and start the threads that the multithreaded calls and
-/// [`Queue`] use, so that their first call does not wait for them: under
-/// 1 ms, once per process (and their memory, see [Memory](crate#memory)).
-/// Later calls return at once. The threads wait asleep whenever no call has
-/// work for them.
+/// [`Queue`] use: every program that makes such calls calls this once,
+/// before them, in place of `initialize`. It starts the first worker and
+/// the queue's delivery thread and returns; the first worker starts the
+/// others, a worker per CPU beyond the first (each 20-30 us on Linux
+/// x86-64), and calls run on the workers started so far. Later calls
+/// return at once. The threads wait asleep
+/// whenever no call has work for them (their memory: see
+/// [Memory](crate#memory)).
 ///
 /// ```
 /// blake3_servil::initialize_multithreaded();
@@ -1071,11 +1075,14 @@ pub fn initialize() {
 /// ```
 #[cfg(feature = "std")]
 pub fn initialize_multithreaded() {
-    initialize();
-    lanes::initialize();
-    // A queue needs threads, which wasm32 lacks (its first submission panics).
-    #[cfg(not(target_family = "wasm"))]
-    queue::start_delivery();
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        initialize();
+        lanes::initialize();
+        // A queue needs threads, which wasm32 lacks (its first submission panics).
+        #[cfg(not(target_family = "wasm"))]
+        queue::start_delivery();
+    });
 }
 
 /// Which of BLAKE3's three functions a call computes: the plain hash
@@ -1121,7 +1128,7 @@ pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
 /// [`hash_multithreaded`] in any [`Mode`], at its speed.
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil::initialize_multithreaded();
 /// use blake3_servil::Mode;
 /// let key = [7u8; 32];
 /// let input = vec![1u8; 1 << 20];
@@ -1129,6 +1136,7 @@ pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
 /// ```
 #[cfg(feature = "std")]
 pub fn hash_multithreaded_with(mode: Mode, input: &[u8]) -> Hash {
+    lanes::require();
     let (key, flags) = mode.key_and_flags();
     lanes::hash_with_key(input, &key, flags)
 }
@@ -1381,7 +1389,7 @@ fn hash_many_serial_from(platform: Platform, input: &[u8], message_len: usize, k
 /// hashes, never slower.
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil::initialize_multithreaded();
 /// let leaves = vec![7u8; 4096 * 256];
 /// let mut hashes = vec![[0u8; 32]; 4096];
 /// blake3_servil::hash_many_multithreaded(&leaves, 256, &mut hashes);
@@ -1394,6 +1402,7 @@ fn hash_many_serial_from(platform: Platform, input: &[u8], message_len: usize, k
 /// shares the cores with other callers as [`hash_multithreaded`] does.
 #[cfg(feature = "std")]
 pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
+    lanes::require();
     lanes::hash_many(input, message_len, IV, 0, out);
 }
 
@@ -1416,7 +1425,7 @@ pub fn hash_many_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[
 /// [`hash_many_multithreaded`] in any [`Mode`], at its speed.
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil::initialize_multithreaded();
 /// use blake3_servil::Mode;
 /// let key = [7u8; 32];
 /// let nodes = vec![1u8; 20000 * 64];
@@ -1426,6 +1435,7 @@ pub fn hash_many_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[
 /// ```
 #[cfg(feature = "std")]
 pub fn hash_many_multithreaded_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
+    lanes::require();
     let (key, flags) = mode.key_and_flags();
     lanes::hash_many(input, message_len, &key, flags, out);
 }
@@ -2069,7 +2079,7 @@ impl Hasher {
     /// hashes each piece while your thread reads the next.
     ///
     /// ```
-    /// # blake3_servil::initialize();
+    /// # blake3_servil::initialize_multithreaded();
     /// let input = vec![7u8; 3 << 20];
     /// let mut hasher = blake3_servil::Hasher::new();
     /// for piece in input.chunks(64 * 1024) {
@@ -2079,6 +2089,7 @@ impl Hasher {
     /// ```
     #[cfg(feature = "std")]
     pub fn update_multithreaded(&mut self, input: &[u8]) -> &mut Self {
+        lanes::require();
         self.gather(input, true)
     }
 

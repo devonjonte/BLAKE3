@@ -682,11 +682,62 @@ struct Slot {
     readers: AtomicUsize,
 }
 
-/// Start the pool: see [`crate::initialize`]. Every later call returns
-/// the same pool at once.
+/// Create the pool and start its threads in the background, once per
+/// process ([`crate::initialize_multithreaded`] is its public face): this
+/// thread starts the SME2 thread and worker 1, and worker 1 the other
+/// workers. Calls run on the workers started so far.
 pub(crate) fn initialize() {
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let sme2 = cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect()));
+    let pool = Pool {
+        slots: std::array::from_fn(|_| Slot { job: AtomicPtr::new(std::ptr::null_mut()), readers: AtomicUsize::new(0) }),
+        callers: AtomicUsize::new(0),
+        cpus,
+        sme2,
+        sleepers: AtomicUsize::new(0),
+        notified: AtomicUsize::new(0),
+        owed: AtomicUsize::new(0),
+        sleep_lock: Mutex::new(()),
+        posted: Condvar::new(),
+        waiters: AtomicUsize::new(0),
+        finished: Mutex::new(()),
+        finished_signal: Condvar::new(),
+    };
+    prepare(&pool.sleep_lock, &pool.posted);
+    prepare(&pool.finished, &pool.finished_signal);
+    prepare(&TASKS.sme2_asleep, &TASKS.sme2_wake);
+    drop(TASKS.list.lock());
+    assert!(POOL.set(pool).is_ok(), "initialize_multithreaded creates the pool once");
+    if sme2 {
+        std::thread::Builder::new().name("blake3-sme2".into()).spawn(sme2_main).expect("spawning the SME2 thread");
+    }
+    if cpus == 1 {
+        return;
+    }
+    std::thread::Builder::new()
+        .name("blake3-worker-1".into())
+        .spawn(move || {
+            for worker in 2..cpus {
+                std::thread::Builder::new()
+                    .name(format!("blake3-worker-{worker}"))
+                    .spawn(worker_main)
+                    .expect("spawning a BLAKE3 worker");
+            }
+            worker_main()
+        })
+        .expect("spawning a BLAKE3 worker");
+}
+
+/// The contract's check at every multithreaded call and queue: a call
+/// before [`crate::initialize_multithreaded`] panics, in every build. It
+/// costs one load and a branch the CPU predicts.
+#[inline]
+pub(crate) fn require() {
     pool();
 }
+
+/// The pool, once [`initialize`] has created it.
+static POOL: OnceLock<Pool> = OnceLock::new();
 
 /// Make `mutex` and `condvar` ready now: on Apple's systems the standard
 /// library allocates each on its first use, which the pool's threads would
@@ -697,62 +748,30 @@ pub(crate) fn prepare<T>(mutex: &Mutex<T>, condvar: &Condvar) {
     condvar.notify_one();
 }
 
-/// The pool, created on first use. Creation spawns the workers, then
-/// returns; [`crate::initialize`] is this function's public face. Workers
-/// calling `pool()` wait until the creator returns.
+/// The pool. The caller must have called
+/// [`crate::initialize_multithreaded`] before; a call before it panics. The
+/// check is the load of the pool, which every call makes anyway.
+#[inline]
 fn pool() -> &'static Pool {
-    static POOL: OnceLock<Pool> = OnceLock::new();
-    POOL.get_or_init(|| {
-        let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-        let pool = Pool {
-            slots: std::array::from_fn(|_| Slot { job: AtomicPtr::new(std::ptr::null_mut()), readers: AtomicUsize::new(0) }),
-            callers: AtomicUsize::new(0),
-            cpus,
-            sme2: cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect())),
-            sleepers: AtomicUsize::new(0),
-            notified: AtomicUsize::new(0),
-            owed: AtomicUsize::new(0),
-            sleep_lock: Mutex::new(()),
-            posted: Condvar::new(),
-            waiters: AtomicUsize::new(0),
-            finished: Mutex::new(()),
-            finished_signal: Condvar::new(),
-        };
-        prepare(&pool.sleep_lock, &pool.posted);
-        prepare(&pool.finished, &pool.finished_signal);
-        prepare(&TASKS.sme2_asleep, &TASKS.sme2_wake);
-        drop(TASKS.list.lock());
-        // Every thread counts itself as it starts, before it reaches
-        // pool() (which waits for this creator): the creator returns once
-        // all have, so the pool's start ends inside initialize_multithreaded,
-        // its allocations too (std's thread start allocates 16 bytes for its
-        // stack-overflow handler, which a warm queue's test counted after
-        // initialize_multithreaded returned).
-        static STARTED: AtomicUsize = AtomicUsize::new(0);
-        let threads = usize::from(pool.sme2) + cpus - 1;
-        if pool.sme2 {
-            std::thread::Builder::new()
-                .name("blake3-sme2".into())
-                .spawn(|| {
-                    STARTED.fetch_add(1, Ordering::SeqCst);
-                    sme2_main()
-                })
-                .expect("spawning the SME2 thread");
-        }
-        for worker in 1..cpus {
-            std::thread::Builder::new()
-                .name(format!("blake3-worker-{worker}"))
-                .spawn(move || {
-                    STARTED.fetch_add(1, Ordering::SeqCst);
-                    worker_main()
-                })
-                .expect("spawning a BLAKE3 worker");
-        }
-        while STARTED.load(Ordering::SeqCst) < threads {
-            std::thread::yield_now();
-        }
-        pool
-    })
+    match POOL.get() {
+        Some(pool) => pool,
+        None => no_pool(),
+    }
+}
+
+/// A multithreaded call before `initialize_multithreaded`: the caller broke
+/// the contract. The crate's own unit tests, many small programs in one,
+/// initialize here instead.
+#[cold]
+#[inline(never)]
+fn no_pool() -> &'static Pool {
+    #[cfg(test)]
+    {
+        crate::initialize_multithreaded();
+        POOL.get().expect("initialize_multithreaded created the pool")
+    }
+    #[cfg(not(test))]
+    panic!("blake3-servil: call blake3_servil::initialize_multithreaded() once, before any multithreaded call or Queue: it starts the threads they use")
 }
 
 impl Pool {

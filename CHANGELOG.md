@@ -26,6 +26,14 @@
   build, saying so. Each call then loads the detected platform instead of
   checking the self-test and detecting the CPU again, so the check costs
   nothing.
+- **Breaking: a program that makes multithreaded calls or uses a `Queue`
+  calls `initialize_multithreaded()` first**, in place of `initialize()`;
+  such a call before it panics (one load per call). It starts the first
+  worker and the queue's delivery thread and returns; the first worker
+  starts the others, and calls run on the workers started so far. The
+  first multithreaded call no longer starts the threads, nor waits for 19
+  of them one after another: b3sum hashes a 1 MiB file in the page cache
+  in 1.06 ms, from 1.41 (official 1.22; i7-12700K, Linux).
 - On x86-64 with AVX2 or AVX-512, a message of 1089 to 2047 bytes (a whole
   chunk and a partial one, as a 1500-byte packet) hashes the two chunks'
   first blocks side by side, on the kernels' existing two-input path: the
