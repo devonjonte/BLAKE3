@@ -20,6 +20,8 @@ Use one clear mechanism wherever it serves. When approaches perform similarly, c
 
 **These principles govern this file too** These guides, and every document of the team's, are a design like any other: each rule, reminder, and decision earns its place, and too many crowd out the ones that matter. When one fails, first look for what to remove, or to move to where its subject lives (the code, the subject's own document); add only what nothing else can do.
 
+**Follow a rule for its purpose** (Zooko, October 15, 2026). Every rule here exists to deliver something: a check catches a kind of bug, a gate catches a kind of slowdown. Before following one, ask what it can deliver this time. When it can deliver nothing (the check cannot see this change; the gate would measure code the change leaves as it was), skip it, and say in the record which rule you skipped and why, in a sentence a reader can check. A rule whose letter keeps asking for pointless work has a defect: fix the rule where it lives.
+
 **Revisit complexity as you learn** Complexity is a large cost that never stops being paid, so its benefit is never settled: whenever new information shows a piece of complexity doing less than it was built for, weigh removing it, since its cost may now exceed its benefit. Above all, when you find yourself building a second solution to a problem that an earlier solution already addresses, stop: you are very likely making a mistake. Go back and either make the first solution good enough, or remove it entirely; say which, and why, before building anything.
 
 **An unexplained cause is an orange flag.** When you contemplate adding a mechanism to solve a problem whose exact cause you have yet to establish, pause. Trace the cause, then decide whether to improve or remove the existing mechanism. A diagnostic experiment earns its place by distinguishing possible causes.
@@ -164,4 +166,4 @@ Read `/workspace/blake3-servil/bench-hashes/NEXT-STEPS.md` first: it says what t
 
 # Speed: no slower commit enters unnoticed
 
-Speed is this fork's purpose. Every commit that touches code passes the performance-regression check before it enters git, and the main line takes only changes that passed it on every target machine; `PROCEDURES.md` gives the procedure and what each verdict obliges.
+Speed is this fork's purpose. Every commit that can change the machine code the gate's machines run (AArch64, on macOS and Linux) passes the performance-regression check before it enters git, and the main line takes only changes that passed it on every target machine; `PROCEDURES.md` gives the procedure and what each verdict obliges.

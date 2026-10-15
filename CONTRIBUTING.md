@@ -45,8 +45,10 @@ cargo test --release --manifest-path test_vectors/Cargo.toml
 
 CI (`.github/workflows/ci.yml`) runs the suites in debug and release on
 Linux x86-64 and arm64, macOS, Windows, wasm32, and big-endian and 32-bit
-targets under qemu, for `servil`, `candidate/*` branches, and pull
-requests.
+targets under qemu, for every pull request from a fork, and by hand for a
+candidate that changes code for those targets. `sh tools/check-builds.sh`
+runs, in minutes, the builds the suites above leave out: without std,
+warnings as errors, and compile checks for x86-64, i686, and wasm32.
 
 The NEON hybrid assembly is generated and committed. Edit
 `tools/gen_neon_hybrid.py`, then run

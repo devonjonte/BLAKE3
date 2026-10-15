@@ -320,10 +320,9 @@ pypy3 tools/verify/prove_timing.py   # ends "2316 of 2316 cases proved"
 pypy3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
 
-GitHub's CI runs the shorter ones on every push; the longest (the SME2
-inductions, the Rust paths, whole calls) run on the fork's VM before each
-promotion, reported beside CI's checks as the commit's status "long
-proofs" (`tools/verify/long-proofs.sh`).
+All of them run on the fork's VM before each promotion that changes the
+code or the proof tools (`tools/verify/long-proofs.sh`), reported on
+GitHub as the commit's status "long proofs".
 
 Each case is proved when Z3 finds no input on which the code and the
 definition differ. Each case prints its verdict; one that fails prints
