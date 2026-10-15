@@ -1572,9 +1572,10 @@ pub fn kernel_report() -> KernelReport {
 /// by the batch's length in bytes: `from_len` is the batch's length at
 /// which each kernel starts. Messages of 1 to 16 whole blocks (64 B to
 /// 1 KiB) are hashed several at a time, and on SME2 so are messages of
-/// whole blocks up to 15 KiB. On x86, 2048- and 4096-byte messages batch chunks
-/// and tree levels from four messages where four SIMD lanes are available;
-/// other lengths run [`kernel_report`]'s kernel, one message per call.
+/// whole blocks up to 15 KiB. On x86 with AVX2 or AVX-512, messages of 2
+/// to 15 chunks hash across the messages at every step of their trees,
+/// from four or eight messages; other lengths run [`kernel_report`]'s
+/// kernel, one message per call.
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn kernel_report_many(message_len: usize) -> KernelReport {
@@ -1606,11 +1607,11 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
             });
         }
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        if (message_len == 2 * CHUNK_LEN || message_len == 4 * CHUNK_LEN) && platform.simd_degree() >= 4 {
+        if let Some(least) = many::across_from(message_len, platform) {
             kernels.push(Kernel {
-                from_len: 4 * message_len,
+                from_len: least * message_len,
                 name: platform.hash_many_name(),
-                why: "From four messages, each chunk index is batched across independent messages, then every tree level; chunk indices stay their counters and only the final parents carry ROOT.",
+                why: "From this many messages, every step of their trees runs across the messages, up to sixteen at a time: each whole chunk, the partial chunk's blocks but its last (that one per message), and each parent node; only the top parents carry ROOT.",
             });
         }
         return KernelReport { platform: one.platform, kernels };
