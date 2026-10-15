@@ -25,9 +25,7 @@ impl blake3_servil::MessageHandler for Back {
 /// One mode's batches at messages of `len` bytes (1 MiB: 64 a batch).
 fn measure(mode: &str, len: usize) -> (Vec<clocks::Batch>, usize) {
     let per_call = if len >= 1 << 20 { 64 } else { PER_CALL };
-    let messages: Vec<Vec<u8>> = (0..per_call)
-        .map(|m| (0..len).map(|i| ((i + m) % 251) as u8).collect())
-        .collect();
+    let messages: Vec<Vec<u8>> = (0..per_call).map(|m| (0..len).map(|i| ((i + m) % 251) as u8).collect()).collect();
     let batches = match mode {
         "stream" => blake3_servil::stream(blake3_servil::Mode::Hash, |s| {
             let b = clocks::measure(64, 2_000_000, || {
@@ -73,40 +71,19 @@ fn main() {
     assert_eq!(args[0], "samples", "stream_probe samples MODE OUT");
     let (which, out) = (args[1].as_str(), &args[2]);
     let (mut rows, mut busy) = (String::new(), String::new());
-    let lens: Vec<usize> = if args.len() > 3 {
-        args[3..].iter().map(|a| a.parse().unwrap()).collect()
-    } else {
-        LENS.to_vec()
-    };
+    let lens: Vec<usize> = if args.len() > 3 { args[3..].iter().map(|a| a.parse().unwrap()).collect() } else { LENS.to_vec() };
     for len in lens {
         let before = clocks::threads::snapshot();
         let started = clocks::now();
         let (batches, per_call) = measure(which, len);
         let wall = clocks::since_ns(started);
         if let (Some(b), Some(a)) = (before, clocks::threads::snapshot()) {
-            let total: u64 = clocks::threads::since(&b, &a)
-                .iter()
-                .map(|x| x.cpu_ns)
-                .sum();
-            busy += &format!(
-                "# cpus busy at {len} B: {}.{:02}\n",
-                total / wall,
-                total % wall * 100 / wall
-            );
+            let total: u64 = clocks::threads::since(&b, &a).iter().map(|x| x.cpu_ns).sum();
+            busy += &format!("# cpus busy at {len} B: {}.{:02}\n", total / wall, total % wall * 100 / wall);
         }
-        let samples: Vec<String> = batches
-            .iter()
-            .map(|b| format!("{}/{}", b.wall_ns, b.calls * (per_call * len) as u64))
-            .collect();
-        let starts: Vec<String> = batches
-            .iter()
-            .map(|b| (b.started_ns / 1_000_000).to_string())
-            .collect();
-        rows += &format!(
-            "stream\tsolo\tOwnedMessages\t{len} B\tB\t{}\t{}\n",
-            samples.join(","),
-            starts.join(",")
-        );
+        let samples: Vec<String> = batches.iter().map(|b| format!("{}/{}", b.wall_ns, b.calls * (per_call * len) as u64)).collect();
+        let starts: Vec<String> = batches.iter().map(|b| (b.started_ns / 1_000_000).to_string()).collect();
+        rows += &format!("stream\tsolo\tOwnedMessages\t{len} B\tB\t{}\t{}\n", samples.join(","), starts.join(","));
     }
     let load = clocks::load::describe(&clocks::load::windows());
     std::fs::write(out, format!("# bench-hashes samples v4\n# probe: stream_probe {which}\n# load: {load}\n# power: not reported by this probe\n{busy}contender\tscenario\tuse_case\tpoint\tunit\tns/units\tstart ms\n{rows}")).unwrap();

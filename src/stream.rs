@@ -97,12 +97,8 @@ pub fn stream<'env, T>(mode: Mode, body: impl for<'s> FnOnce(&'s mut Stream<'env
         key,
         flags,
         entries: std::vec![Entry { len: 0, piece: None, first: 0 }; ENTRIES].into_boxed_slice(),
-        outs: (0..ENTRIES)
-            .map(|_| Out(UnsafeCell::new([0; OUT_LEN])))
-            .collect(),
-        pieces_out: (0..ENTRIES)
-            .map(|_| OwnLine(Out(UnsafeCell::new([0; 64]))))
-            .collect(),
+        outs: (0..ENTRIES).map(|_| Out(UnsafeCell::new([0; OUT_LEN]))).collect(),
+        pieces_out: (0..ENTRIES).map(|_| OwnLine(Out(UnsafeCell::new([0; 64])))).collect(),
         lefts: (0..ENTRIES).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
         open_first: 0,
         next: 0,
@@ -115,10 +111,7 @@ pub fn stream<'env, T>(mode: Mode, body: impl for<'s> FnOnce(&'s mut Stream<'env
     // Every entry may be a task in flight at once.
     TASKS.make_room(ENTRIES);
     let result = body(&mut stream);
-    assert_eq!(
-        stream.delivered, stream.next,
-        "a stream's body calls finish last"
-    );
+    assert_eq!(stream.delivered, stream.next, "a stream's body calls finish last");
     result
 }
 
@@ -162,9 +155,7 @@ impl<'env> Stream<'env> {
         if message.len() <= PIECE {
             let entry = self.add_entry(message.len(), None, &mut digest);
             let (key, flags) = (self.key, self.flags);
-            let open = self
-                .open
-                .get_or_insert_with(|| Task::members(&key, flags, None));
+            let open = self.open.get_or_insert_with(|| Task::members(&key, flags, None));
             // The task's first member's `left` counts all of its members
             // (set as the task is handed over).
             if open.members == 0 {
@@ -172,12 +163,7 @@ impl<'env> Stream<'env> {
             }
             let first = self.open_first;
             self.entries[entry].first = first;
-            let member = Member {
-                input: message.as_ptr(),
-                len: message.len(),
-                out: self.outs[entry].0.get() as *mut u8,
-                left: &*self.lefts[first],
-            };
+            let member = Member { input: message.as_ptr(), len: message.len(), out: self.outs[entry].0.get() as *mut u8, left: &*self.lefts[first] };
             open.member[open.members] = member;
             open.members += 1;
             open.len += member.len;
@@ -230,21 +216,12 @@ impl<'env> Stream<'env> {
     /// A new entry of `len` bytes, waiting for room when every entry is in
     /// flight.
     #[inline(always)]
-    fn add_entry(
-        &mut self,
-        len: usize,
-        piece: Option<(u64, bool)>,
-        digest: &mut impl FnMut(Hash),
-    ) -> usize {
+    fn add_entry(&mut self, len: usize, piece: Option<(u64, bool)>, digest: &mut impl FnMut(Hash)) -> usize {
         if self.next - self.delivered == ENTRIES {
             self.wait_for_room(digest);
         }
         let index = self.next % ENTRIES;
-        self.entries[index] = Entry {
-            len,
-            piece,
-            first: index,
-        };
+        self.entries[index] = Entry { len, piece, first: index };
         self.next += 1;
         index
     }
@@ -286,15 +263,9 @@ impl<'env> Stream<'env> {
                 Some((counter, last)) => {
                     let out = unsafe { *self.pieces_out[index].0.0.get() };
                     let (key, flags, platform) = (self.key, self.flags, Platform::detect());
-                    let parent = |left: &CVBytes, right: &CVBytes| {
-                        crate::hasher::parent_output(left, right, &key, flags, platform)
-                    };
+                    let parent = |left: &CVBytes, right: &CVBytes| crate::hasher::parent_output(left, right, &key, flags, platform);
                     let cv: CVBytes = if counter == 0 && len > CHUNK_LEN {
-                        parent(
-                            out[..OUT_LEN].try_into().unwrap(),
-                            out[OUT_LEN..].try_into().unwrap(),
-                        )
-                        .chaining_value()
+                        parent(out[..OUT_LEN].try_into().unwrap(), out[OUT_LEN..].try_into().unwrap()).chaining_value()
                     } else {
                         out[..OUT_LEN].try_into().unwrap()
                     };
@@ -353,34 +324,10 @@ mod test {
         let mut input = std::vec![0u8; (1 << 20) + 200];
         crate::test::paint_test_input(&mut input);
         let key = [5u8; 32];
-        let lens: std::vec::Vec<usize> = (0..12000)
-            .map(|i| {
-                [
-                    0,
-                    1,
-                    63,
-                    64,
-                    64,
-                    64,
-                    100,
-                    1024,
-                    1024,
-                    1500,
-                    4096,
-                    PIECE,
-                    PIECE + 1,
-                    200_000,
-                    (1 << 20) + 7,
-                    64,
-                ][i % 16]
-            })
-            .collect();
+        let lens: std::vec::Vec<usize> =
+            (0..12000).map(|i| [0, 1, 63, 64, 64, 64, 100, 1024, 1024, 1500, 4096, PIECE, PIECE + 1, 200_000, (1 << 20) + 7, 64][i % 16]).collect();
         let message = |i: usize| &input[i % 97..][..lens[i]];
-        for mode in [
-            Mode::Hash,
-            Mode::Keyed(&key),
-            Mode::DeriveKey("stream test"),
-        ] {
+        for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("stream test")] {
             let mut got = std::vec::Vec::new();
             stream(mode, |s| {
                 for i in 0..lens.len() {
@@ -393,12 +340,7 @@ mod test {
             });
             assert_eq!(got.len(), lens.len());
             for i in 0..lens.len() {
-                assert_eq!(
-                    got[i],
-                    crate::hash_with(mode, message(i)),
-                    "message {i}, {} bytes",
-                    lens[i]
-                );
+                assert_eq!(got[i], crate::hash_with(mode, message(i)), "message {i}, {} bytes", lens[i]);
             }
         }
     }
