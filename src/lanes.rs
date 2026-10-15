@@ -1100,7 +1100,17 @@ impl Task {
         // in place until its `left` is zero.
         let table: arrayvec::ArrayVec<&[u8; N], MEMBERS> = members.iter().map(|m| unsafe { &*(m.input as *const [u8; N]) }).collect();
         let mut digests = [[0u8; crate::OUT_LEN]; MEMBERS];
-        platform.hash_many::<N>(&table, &self.key, 0, crate::IncrementCounter::No, self.flags, crate::CHUNK_START, crate::CHUNK_END | crate::ROOT, digests[..members.len()].as_flattened_mut());
+        // One block carries every flag at once, and passes them as the
+        // 64-byte batches do (flags_start and flags_end 0): with every
+        // caller of hash_many::<64> passing those zeros, LLVM specializes it
+        // (AArch64: x5 and x6 left out, `out` in a register; a queue passing
+        // its flags here instead cost the VM's lent batches of 16).
+        let (flags, start, end) = if N == crate::BLOCK_LEN {
+            (self.flags | crate::CHUNK_START | crate::CHUNK_END | crate::ROOT, 0, 0)
+        } else {
+            (self.flags, crate::CHUNK_START, crate::CHUNK_END | crate::ROOT)
+        };
+        platform.hash_many::<N>(&table, &self.key, 0, crate::IncrementCounter::No, flags, start, end, digests[..members.len()].as_flattened_mut());
         for (m, digest) in members.iter().zip(&digests) {
             unsafe { core::ptr::copy_nonoverlapping(digest.as_ptr(), m.out, crate::OUT_LEN) };
             unsafe { &*m.left }.fetch_sub(1, Ordering::Release);
