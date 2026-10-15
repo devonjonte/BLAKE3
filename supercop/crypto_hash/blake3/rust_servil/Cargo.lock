@@ -11,7 +11,7 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 [[package]]
 name = "blake3-servil"
 version = "0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5"
-source = "git+https://github.com/johnservil/BLAKE3?rev=7158bb9e478d31c7fc4ac6bbb1c3ba81f68ef6c9#7158bb9e478d31c7fc4ac6bbb1c3ba81f68ef6c9"
+source = "git+https://github.com/johnservil/BLAKE3?rev=2b7567f3b9f7dec61f550f879316b5cf6b372060#2b7567f3b9f7dec61f550f879316b5cf6b372060"
 dependencies = [
  "arrayvec",
  "cc",
