@@ -70,3 +70,15 @@ On Linux for example, Cargo will put the compiled binary in
 If you want to install directly from this directory, you can run `cargo
 install --path .`. Or you can just build with `cargo build --release`,
 which puts the binary at `./target/release/b3sum`.
+
+On Linux, a statically linked `b3sum` starts sooner, skipping the dynamic
+loader: about 100-160 us less per process on an i7-12700K (a 4 KiB file
+in 0.67-0.73 ms, from 0.77-0.89), which counts where `b3sum` runs once
+per file. Build it so with your machine's target:
+
+```
+RUSTFLAGS="-C target-feature=+crt-static" cargo install --path . --target x86_64-unknown-linux-gnu
+```
+
+The `--target` keeps the flag off the build's procedural macros, which
+cannot link statically.
