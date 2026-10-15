@@ -882,3 +882,31 @@ pub unsafe fn hash_chunks_with_partial(
         }
     }
 }
+
+#[cfg(test)]
+mod partial_test {
+    /// The pass of whole chunks and a partial one against the portable
+    /// chunk values, called directly (so Miri, which detects no AVX2,
+    /// checks its reads and writes when built with SSE4.1 enabled).
+    #[test]
+    fn test_miri_chunks_with_partial() {
+        if !is_x86_feature_detected!("sse4.1") && !cfg!(target_feature = "sse4.1") {
+            return;
+        }
+        let mut input = [0u8; 4 * crate::CHUNK_LEN];
+        crate::test::paint_test_input(&mut input);
+        let cases: &[(usize, usize)] = if cfg!(miri) { &[(3, 1), (3, 1023)] } else { &[(1, 1), (2, 64), (3, 65), (3, 700), (3, 1023)] };
+        for &(whole, partial) in cases {
+            let chunks: std::vec::Vec<&[u8; crate::CHUNK_LEN]> = input.chunks_exact(crate::CHUNK_LEN).take(whole).map(|c| c.try_into().unwrap()).collect();
+            let rest = &input[whole * crate::CHUNK_LEN..][..partial];
+            let mut out = [0u8; 4 * crate::OUT_LEN];
+            // Sound: SSE4.1 is detected or enabled for this build.
+            unsafe { super::hash_chunks_with_partial(&chunks, rest, crate::IV, 5, 0, &mut out) };
+            for (i, chunk) in input[..whole * crate::CHUNK_LEN + partial].chunks(crate::CHUNK_LEN).enumerate() {
+                let mut state = crate::ChunkState::new(crate::IV, 5 + i as u64, 0, crate::platform::Platform::Portable);
+                state.update(chunk);
+                assert_eq!(&out[i * crate::OUT_LEN..][..crate::OUT_LEN], &state.output().chaining_value(), "{whole} whole, {partial} partial, chunk {i}");
+            }
+        }
+    }
+}
