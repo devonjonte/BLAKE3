@@ -224,24 +224,8 @@ fn hash_two_chunks(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[inline(never)]
 fn hash_long_or_single(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
-    if outputs.len() >= 4 && platform.simd_degree() >= 4 {
-        match len {
-            n if n == 2 * CHUNK_LEN => return hash_whole_chunks::<2>(input, key, flags, outputs, platform),
-            n if n == 4 * CHUNK_LEN => {
-                // A four-chunk message already fills a four-lane call alone;
-                // batch whole fours of messages and hash the rest singly, so
-                // no chunk index falls to one-lane kernels (6 messages: 12% slower
-                // when batched in full, probe x86_batch_probe 4096x6).
-                let batched = outputs.len() - outputs.len() % 4;
-                let (head, tail) = outputs.split_at_mut(batched);
-                hash_whole_chunks::<4>(&input[..batched * len], key, flags, head, platform);
-                for (i, output) in tail.iter_mut().enumerate() {
-                    *output = *crate::hash_serial_on(&input[(batched + i) * len..][..len], key, flags, platform).as_bytes();
-                }
-                return;
-            }
-            _ => {}
-        }
+    if across_from(len, platform).is_some_and(|least| outputs.len() >= least) {
+        return hash_across(input, len, key, flags, outputs, platform);
     }
     let slot = slot_len(len);
     for (i, output) in outputs.iter_mut().enumerate() {
@@ -249,41 +233,97 @@ fn hash_long_or_single(input: &[u8], len: usize, key: &CVWords, flags: u8, outpu
     }
 }
 
-/// Batch each chunk index and each balanced tree level across independent
-/// messages. Chunk indices remain their counters; ROOT belongs to the last
-/// parent level alone. Compile-time chunk counts bound the caller's stack.
+/// The chunks a message has below which [`hash_across`] takes it: from 16,
+/// a message's own chunks fill the widest lanes alone (as each.rs's
+/// ALONE_CHUNKS).
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const ACROSS_CHUNKS: usize = 16;
+
+/// The fewest messages of `len` bytes that [`hash_across`] takes on
+/// `platform` (AVX2 and AVX-512, messages of 2 to ACROSS_CHUNKS - 1
+/// chunks): as many as the lanes, or 4 where each message's chunks leave
+/// the lanes short and its own tree is a long chain (a partial chunk after
+/// its whole ones, or two chunks). i7-12700K, six messages: 1500-6000 B
+/// x0.58-0.84 across; 4 KiB x1.13, 8 KiB x1.55, 12-15 KiB x1.15-1.23
+/// (their own lanes and parents ahead).
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+pub(crate) fn across_from(len: usize, platform: Platform) -> Option<usize> {
+    let chunks = len.div_ceil(CHUNK_LEN);
+    if !(2..ACROSS_CHUNKS).contains(&chunks) || !crate::pair::takes_platform(platform) {
+        return None;
+    }
+    let chain = chunks < platform.simd_degree() && (len % CHUNK_LEN != 0 || chunks == 2);
+    Some(if chain { 4 } else { platform.simd_degree() })
+}
+
+/// Messages of one length, over a chunk and under ACROSS_CHUNKS chunks,
+/// hashed across up to sixteen messages at every step of their tree (all
+/// share one shape): each whole chunk index on the platform's hash_many;
+/// the partial chunk's blocks but its last likewise, its last block for
+/// each message alone (its chaining value so far is that message's own);
+/// then each parent node, from the leaves up, across the messages, ROOT on
+/// the top one. Every value on the stack: the batch allocates nothing.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[inline(never)]
-fn hash_whole_chunks<const CHUNKS: usize>(input: &[u8], key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
-    assert!(CHUNKS == 2 || CHUNKS == 4);
+fn hash_across(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
     const GROUP: usize = 16;
-    let len = CHUNKS * CHUNK_LEN;
-    for (messages, digests) in input.chunks(len * GROUP).zip(outputs.chunks_mut(GROUP)) {
+    let slot = slot_len(len);
+    let (full, chunks) = (len / CHUNK_LEN, len.div_ceil(CHUNK_LEN));
+    assert!(full >= 1 && chunks >= 2 && chunks < ACROSS_CHUNKS, "messages of 2 chunks to under ACROSS_CHUNKS");
+    for (group, digests) in outputs.chunks_mut(GROUP).enumerate() {
         let count = digests.len();
-        let mut cvs = [[[0u8; OUT_LEN]; GROUP]; CHUNKS];
-        for (chunk, out) in cvs.iter_mut().enumerate() {
-            let lanes: arrayvec::ArrayVec<&[u8; CHUNK_LEN], GROUP> = messages.chunks_exact(len)
-                .map(|m| m[chunk * CHUNK_LEN..(chunk + 1) * CHUNK_LEN].try_into().unwrap()).collect();
-            platform.hash_many(&lanes, key, chunk as u64, IncrementCounter::No, flags, CHUNK_START, CHUNK_END, out[..count].as_flattened_mut());
+        let message = |m: usize| &input[(group * GROUP + m) * slot..][..len];
+        // cvs[chunk][message]
+        let mut cvs = [[[0u8; OUT_LEN]; GROUP]; ACROSS_CHUNKS];
+        for k in 0..full {
+            let refs: arrayvec::ArrayVec<&[u8; CHUNK_LEN], GROUP> = (0..count).map(|m| message(m)[k * CHUNK_LEN..][..CHUNK_LEN].try_into().unwrap()).collect();
+            platform.hash_many(&refs, key, k as u64, IncrementCounter::No, flags, CHUNK_START, CHUNK_END, cvs[k][..count].as_flattened_mut());
         }
-        let mut width = CHUNKS;
-        let mut pairs = [[0u8; BLOCK_LEN]; GROUP];
-        while width > 1 {
-            for parent in 0..width / 2 {
-                for (i, pair) in pairs[..count].iter_mut().enumerate() {
-                    pair[..OUT_LEN].copy_from_slice(&cvs[2 * parent][i]);
-                    pair[OUT_LEN..].copy_from_slice(&cvs[2 * parent + 1][i]);
-                }
-                let lanes: arrayvec::ArrayVec<&[u8; BLOCK_LEN], GROUP> = pairs[..count].iter().collect();
-                if width == 2 {
-                    platform.hash_many(&lanes, key, 0, IncrementCounter::No, flags | crate::PARENT | ROOT, 0, 0, digests.as_flattened_mut());
-                } else {
-                    platform.hash_many(&lanes, key, 0, IncrementCounter::No, flags | crate::PARENT, 0, 0, cvs[parent][..count].as_flattened_mut());
-                }
+        if full < chunks {
+            let partial = len - full * CHUNK_LEN;
+            let before_last = (partial - 1) / BLOCK_LEN;
+            let mut so_far = [[0u8; OUT_LEN]; GROUP];
+            if before_last > 0 {
+                // Sound: each pointer reaches before_last whole blocks of its message.
+                let ptrs: arrayvec::ArrayVec<*const u8, GROUP> = (0..count).map(|m| message(m)[full * CHUNK_LEN..].as_ptr()).collect();
+                unsafe { crate::pair::hash_many_blocks(platform, &ptrs, before_last, key, full as u64, false, flags, CHUNK_START, 0, so_far[..count].as_flattened_mut()) };
             }
-            width /= 2;
+            for m in 0..count {
+                let mut cv = if before_last > 0 { crate::platform::words_from_le_bytes_32(&so_far[m]) } else { *key };
+                let last = &message(m)[full * CHUNK_LEN + before_last * BLOCK_LEN..];
+                let mut block = [0u8; BLOCK_LEN];
+                block[..last.len()].copy_from_slice(last);
+                let start = if before_last == 0 { CHUNK_START } else { 0 };
+                platform.compress_in_place(&mut cv, &block, last.len() as u8, full as u64, flags | start | CHUNK_END);
+                cvs[full][m] = crate::hasher::le_bytes(&cv);
+            }
         }
+        subtree_across(&mut cvs, 0, chunks, count, key, flags, platform, true);
+        digests.copy_from_slice(&cvs[0][..count]);
     }
+}
+
+/// The chaining values (at the top, the root hashes) of the subtree of
+/// chunks `first..first + n` of every message, into `cvs[first]`, from the
+/// chunk values in `cvs` (per chunk, then message), each parent across the
+/// messages.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[allow(clippy::too_many_arguments)]
+fn subtree_across(cvs: &mut [[[u8; OUT_LEN]; 16]; ACROSS_CHUNKS], first: usize, n: usize, count: usize, key: &CVWords, flags: u8, platform: Platform, top: bool) {
+    if n == 1 {
+        return;
+    }
+    let split = crate::tree::left_len(n * CHUNK_LEN) / CHUNK_LEN;
+    subtree_across(cvs, first, split, count, key, flags, platform, false);
+    subtree_across(cvs, first + split, n - split, count, key, flags, platform, false);
+    let mut blocks = [[0u8; BLOCK_LEN]; 16];
+    for m in 0..count {
+        blocks[m][..OUT_LEN].copy_from_slice(&cvs[first][m]);
+        blocks[m][OUT_LEN..].copy_from_slice(&cvs[first + split][m]);
+    }
+    let lanes: arrayvec::ArrayVec<&[u8; BLOCK_LEN], 16> = blocks[..count].iter().collect();
+    let parent_flags = flags | crate::PARENT | if top { ROOT } else { 0 };
+    platform.hash_many(&lanes, key, 0, IncrementCounter::No, parent_flags, 0, 0, cvs[first][..count].as_flattened_mut());
 }
 
 /// Whether a batch of `count` messages of `len` bytes runs SME2 kernels
@@ -521,6 +561,33 @@ fn platform_is_sme2(platform: Platform) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// Batches of messages over a chunk (hash_chunks_across on x86), every
+    /// count from the cutoff to two groups and a tail, lengths around each
+    /// chunk boundary to fifteen chunks, three modes, against hash_with.
+    #[test]
+    fn test_chunks_across_messages() {
+        let key = [9u8; 32];
+        let lens = [CHUNK_LEN + 1, CHUNK_LEN + 64, 1500, 2 * CHUNK_LEN - 1, 2 * CHUNK_LEN + 1, 3 * CHUNK_LEN, 3000, 5 * CHUNK_LEN + 700, 8 * CHUNK_LEN - 1, 8 * CHUNK_LEN, 9 * CHUNK_LEN + 3, 15 * CHUNK_LEN + 1023];
+        for mode in [crate::Mode::Hash, crate::Mode::Keyed(&key), crate::Mode::DeriveKey("chunks across")] {
+            for len in lens {
+                for count in [1, 2, 3, 4, 5, 15, 16, 17, 33] {
+                    let slot = slot_len(len);
+                    let mut input = vec![0u8; slot * count];
+                    for m in 0..count {
+                        for (j, b) in input[m * slot..][..len].iter_mut().enumerate() {
+                            *b = ((m * 131 + j) % 251) as u8;
+                        }
+                    }
+                    let mut out = vec![[0xAAu8; OUT_LEN]; count];
+                    crate::hash_many_with(mode, &input, len, &mut out);
+                    for m in 0..count {
+                        assert_eq!(out[m], *crate::hash_with(mode, &input[m * slot..][..len]).as_bytes(), "{count} x {len} B, message {m}");
+                    }
+                }
+            }
+        }
+    }
     use std::vec::Vec;
 
     /// `count` deterministic messages of `len` bytes, each in its slot
@@ -686,6 +753,43 @@ mod test {
         }
     }
 
+    /// hash_across with partial chunks (1025, 3073, 7169 bytes: one whole
+    /// chunk and a byte, three and a byte, seven and a byte), on the
+    /// portable platform (so Miri runs it), against the published vectors
+    /// (test_vectors/test_vectors.json, byte i = i % 251), each message in
+    /// its zero-padded slot.
+    #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
+    #[test]
+    fn portable_across_partial_chunks_matches_published_vectors() {
+        let key = b"whats the Elvish word for friend";
+        let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
+        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let modes = [(*crate::IV, 0), (crate::platform::words_from_le_bytes_32(key), crate::KEYED_HASH),
+            (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL)];
+        let cases = [
+            (1025, ["d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444", "357dc55de0c7e382c900fd6e320acc04146be01db6a8ce7210b7189bd664ea69", "effaa245f065fbf82ac186839a249707c3bddf6d3fdda22d1b95a3c970379bcb"]),
+            (3073, ["7124b49501012f81cc7f11ca069ec9226cecb8a2c850cfe644e327d22d3e1cd3", "68dede9bef00ba89e43f31a6825f4cf433389fedae75c04ee9f0cf16a427c95a", "72613c9ec9ff7e40f8f5c173784c532ad852e827dba2bf85b2ab4b76f7079081"]),
+            (7169, ["a003fc7a51754a9b3c7fae0367ab3d782dccf28855a03d435f8cfe74605e7817", "ed9b1a922c046fdb3d423ae34e143b05ca1bf28b710432857bf738bcedbfa511", "554b0a5efea9ef183f2f9b931b7497995d9eb26f5c5c6dad2b97d62fc5ac31d9"]),
+        ];
+        for (len, anchors) in cases {
+            let slot = slot_len(len);
+            for count in if cfg!(miri) { &[2usize][..] } else { &[4usize, 17][..] } {
+                let mut input = vec![0u8; slot * count];
+                for m in 0..*count {
+                    for (i, b) in input[m * slot..][..len].iter_mut().enumerate() {
+                        *b = (i % 251) as u8;
+                    }
+                }
+                for ((words, flags), anchor) in modes.iter().zip(anchors) {
+                    let expected: [u8; OUT_LEN] = hex::decode(anchor).unwrap().try_into().unwrap();
+                    let mut out = vec![[0u8; OUT_LEN]; *count];
+                    hash_across(&input, len, words, *flags, &mut out, Platform::Portable);
+                    assert!(out.iter().all(|digest| *digest == expected), "{count} x {len} B");
+                }
+            }
+        }
+    }
+
     /// Published anchors exercise the two-chunk helper independently of
     /// SIMD availability, including under Miri on the portable platform.
     #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
@@ -708,7 +812,7 @@ mod test {
             for ((words, flags), anchor) in modes.iter().zip(anchors) {
                 let expected: [u8; OUT_LEN] = hex::decode(anchor).unwrap().try_into().unwrap();
                 let mut out = vec![[0u8; OUT_LEN]; count];
-                hash_whole_chunks::<2>(&input, words, *flags, &mut out, Platform::Portable);
+                hash_across(&input, 2 * CHUNK_LEN, words, *flags, &mut out, Platform::Portable);
                 assert!(out.iter().all(|digest| *digest == expected));
             }
         }
@@ -734,7 +838,7 @@ mod test {
             for ((words, flags), anchor) in modes.iter().zip(anchors) {
                 let expected: [u8; OUT_LEN] = hex::decode(anchor).unwrap().try_into().unwrap();
                 let mut out = vec![[0u8; OUT_LEN]; count];
-                hash_whole_chunks::<4>(&input, words, *flags, &mut out, Platform::Portable);
+                hash_across(&input, 4 * CHUNK_LEN, words, *flags, &mut out, Platform::Portable);
                 assert!(out.iter().all(|digest| *digest == expected));
             }
         }
