@@ -173,6 +173,7 @@ impl Verifier {
     /// the calling thread, as `update`).
     #[cfg(feature = "std")]
     pub fn update_multithreaded(&mut self, encoded: &[u8], verified: impl FnMut(&[u8])) -> bool {
+        crate::lanes::require();
         self.take_piece(encoded, verified, true)
     }
 

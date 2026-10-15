@@ -4,8 +4,8 @@
 
 - The startup self-test checks the build and the machine, leaving what
   the code computes to the tests and proofs: on x86-64 and the other
-  non-AArch64 targets it runs each kernel once in 7 small cases (from 40),
-  25 us in a fresh process on an i7-12700K's performance core, from 109.
+  non-AArch64 targets it runs each kernel once in 9 small cases (from 40),
+  28 us in a fresh process on an i7-12700K's performance core, from 109.
   On x86 it first stops a binary built for CPUs with LZCNT or BMI1 on a
   CPU without them, which runs those instructions as others and would
   compute wrong digests (seen under QEMU's Ivy Bridge). AArch64's 40 cases

@@ -13,10 +13,9 @@
 //! of it is running every assembly kernel, 390 KB of unrolled code, whose
 //! first fetch dominates the fresh-process cost (Zooko chose this budget
 //! over a smaller one that leaves kernels out, September 26, 2026).
-//! Elsewhere seven cases reach every x86 kernel: about 25 µs in a fresh
-//! process on an i7-12700K's performance core, 13 µs warm (43 and 24 on
-//! an efficiency core), from 109 and 90 (210 and 182) with the AArch64
-//! list.
+//! Elsewhere nine cases reach every x86 kernel: about 28 µs in a fresh
+//! process on an i7-12700K's performance core, 16 µs warm (47 on an
+//! efficiency core), from 109 and 90 (210) with the AArch64 list.
 //!
 //! As Niels Ferguson suggested, the cases chain: each writes the first 32
 //! bytes of its output over the start of the next case's input (and keys
@@ -128,7 +127,8 @@ pub(crate) const CASES: &[(Case, &str)] = &[
 /// assembly has one-block, extended-output, and many-input kernels
 /// (compress_in_place, compress_xof, hash_many, and on AVX-512 xof_many),
 /// which these reach on every x86 platform (tools/self_test_coverage.py,
-/// AVX2: all 3 of its entries), with pair.rs's two-input path, the tree,
+/// AVX2: all 3 of its entries), with pair.rs's two-input path, the passes of
+/// whole chunks and a partial one (rust_sse41 and rust_avx2), the tree,
 /// the Hasher, a batch and its tail, and the three modes. The logic around
 /// the kernels is the tests' and the proofs' to establish; this checks the
 /// build and the machine running it.
@@ -137,6 +137,8 @@ pub(crate) const CASES: &[(Case, &str)] = &[
     (Hash { offset: 1, len: 65 }, "a block and a byte, unaligned: the one-block kernel"),
     (Keyed { len: KIB + 476 }, "keyed, a chunk and a partial one: the two-input path (AVX2, AVX-512)"),
     (Hash { offset: 3, len: 16 * KIB + 65 }, "sixteen chunks and a block, unaligned: the widest chunk kernel, its parents, the tree"),
+    (Hash { offset: 0, len: 3 * KIB + 100 }, "three chunks and a partial one: the four-lane pass with a partial chunk"),
+    (Hash { offset: 5, len: 7 * KIB + 1000 }, "seven chunks and a partial one, unaligned: the eight-lane pass with a partial chunk"),
     (Many { offset: 1, len: 64, count: 17 }, "seventeen 64-byte messages: the batch kernel, full groups and a tail"),
     (Derive { len: 64 }, "key derivation over a block holding all of the previous output"),
     (Incremental { len: 2 * KIB + 1, piece: 700 }, "a Hasher fed in uneven pieces"),
@@ -262,14 +264,16 @@ const EXPECTED: [u64; 40] = [
 ];
 
 #[cfg(not(target_arch = "aarch64"))]
-const EXPECTED: [u64; 7] = [
+const EXPECTED: [u64; 9] = [
     0x64e806087be9bc85,
     0x9da981564c48565d,
     0x62f3a113bda8855d,
-    0x5d9614a093427254,
-    0xa490fa2cd0d99099,
-    0x9c21ca988aea1930,
-    0x6a799e32b257a426,
+    0x9e7e7b35e7d65f9e,
+    0xb44bb45d40165469,
+    0xffa2cd2cf9099037,
+    0x65a54931ceb20894,
+    0xf8ac65a0532e4c76,
+    0x80069f7c5b5d1e8b,
 ];
 
 /// A case's outputs from this build, into `out`, through the entry points'
