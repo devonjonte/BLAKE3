@@ -9,6 +9,7 @@ on:
     # not on tags; not for commits that change documents alone
     paths-ignore:
       - "**.md"
+  pull_request:
   # By hand, for a push whose event GitHub dropped.
   workflow_dispatch:
 
