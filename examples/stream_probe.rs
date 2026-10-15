@@ -3,7 +3,8 @@
 //! the same messages, already in memory, in each; neither copies.
 //!
 //!   stream_probe samples API OUT [LEN...]
-//!       (API written: each message read straight into the stream's bytes
+//!       (API batch-queue | batch-stream: LEN is a batch's 64-byte messages,
+//!       Queue::fixed against a stream of each batch's messages; written: each message read straight into the stream's bytes
 //!       (submit_with); rounds: each round of messages read into the program's
 //!       buffers, then a stream of them; queue-read: each read into a free
 //!       buffer, then Queue::messages, as bench-hashes' ContinuousMessages)
@@ -139,6 +140,82 @@ fn solo(api: &str, len: usize) -> Vec<Sample> {
     batches.iter().map(|b| (b.wall_ns, b.calls * (per_call * len) as u64, b.started_ns / 1_000_000)).collect()
 }
 
+struct BatchBack(mpsc::SyncSender<(Vec<u8>, Vec<[u8; 32]>)>);
+impl blake3_servil::FixedHandler for BatchBack {
+    type Buffer = Vec<u8>;
+    type Digests = Vec<[u8; 32]>;
+    fn hashed(&mut self, buffer: Vec<u8>, digests: Vec<[u8; 32]>) {
+        self.0.send((buffer, digests)).unwrap();
+    }
+}
+
+/// Batches of `n` 64-byte messages, already in memory, 4 MiB of them a
+/// sample: Queue::fixed (each batch's buffer and digest space cycled back),
+/// or a stream's submit_batch, its digests into the batch's digest space.
+fn batches(api: &str, n: usize) -> Vec<Sample> {
+    let len = n * 64;
+    let per_call = (4 << 20) / len;
+    let buffers: Vec<Vec<u8>> = (0..per_call).map(|b| (0..len).map(|i| ((i + b) % 251) as u8).collect()).collect();
+    let batches = match api {
+        "batch-queue" => {
+            let (tx, rx) = mpsc::sync_channel(per_call);
+            let queue = blake3_servil::Queue::fixed(64, blake3_servil::Mode::Hash, BatchBack(tx));
+            let mut free: Vec<(Vec<u8>, Vec<[u8; 32]>)> = buffers.into_iter().map(|b| (b, vec![[0u8; 32]; n])).collect();
+            // Each digest copied out as it comes back, as the stream's are.
+            let total = per_call * n;
+            let mut kept = vec![[0u8; 32]; total];
+            let mut k = 0;
+            let b = clocks::measure(64, 2_000_000, || {
+                for _ in 0..per_call {
+                    let (buffer, digests) = match free.pop() {
+                        Some(p) => p,
+                        None => {
+                            let (buffer, digests) = rx.recv().unwrap();
+                            for d in &digests {
+                                kept[k % total] = *d;
+                                k += 1;
+                            }
+                            (buffer, digests)
+                        }
+                    };
+                    queue.submit(buffer, digests);
+                }
+            });
+            std::hint::black_box(&kept);
+            for _ in free.len()..per_call {
+                rx.recv().unwrap();
+            }
+            b
+        }
+        "batch-stream" => {
+            let total = per_call * n;
+            let mut digests = vec![[0u8; 32]; total];
+            blake3_servil::stream(blake3_servil::Mode::Hash, |s| {
+                let mut k = 0;
+                let b = clocks::measure(64, 2_000_000, || {
+                    for buffer in &buffers {
+                        s.submit_batch(buffer, 64, |d| {
+                            digests[k % total] = *d.as_bytes();
+                            k += 1;
+                        });
+                    }
+                    s.collect(|d| {
+                        digests[k % total] = *d.as_bytes();
+                        k += 1;
+                    });
+                });
+                s.finish(|d| {
+                    digests[k % total] = *d.as_bytes();
+                    k += 1;
+                });
+                b
+            })
+        }
+        _ => panic!("batches: batch-queue | batch-stream"),
+    };
+    batches.iter().map(|b| (b.wall_ns, b.calls * (per_call * len) as u64, b.started_ns / 1_000_000)).collect()
+}
+
 /// One message at a time after a 1 ms idle gap, its digest awaited: a
 /// server's request, a wait, the next.
 fn lone(api: &str, len: usize) -> Vec<Sample> {
@@ -199,7 +276,7 @@ fn main() {
     let lens: Vec<usize> = if args.len() > 3 { args[3..].iter().map(|a| a.parse().unwrap()).collect() } else { LENS.to_vec() };
     let scenarios: &[&str] = match api {
         "new" => &["lone"],
-        "rounds" | "queue-read" | "written" => &["solo", "two"],
+        "rounds" | "queue-read" | "written" | "batch-queue" | "batch-stream" => &["solo", "two"],
         _ => &["solo", "two", "lone"],
     };
     let (mut rows, mut busy) = (String::new(), String::new());
@@ -208,6 +285,13 @@ fn main() {
             let before = clocks::threads::snapshot();
             let started = clocks::now();
             let samples = match scenario {
+                "solo" if api.starts_with("batch") => batches(api, len),
+                "two" if api.starts_with("batch") => std::thread::scope(|t| {
+                    let other = t.spawn(|| batches(api, len));
+                    let mut samples = batches(api, len);
+                    samples.extend(other.join().unwrap());
+                    samples
+                }),
                 "solo" => solo(api, len),
                 "two" => std::thread::scope(|t| {
                     let other = t.spawn(|| solo(api, len));

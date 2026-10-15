@@ -49,15 +49,26 @@ const ENTRIES: usize = 1024;
 #[derive(Clone, Copy)]
 struct Entry {
     len: usize,
-    /// For a piece of a long message: its first chunk's index, and whether
-    /// it is the message's last piece. `None` for a whole message.
-    piece: Option<(u64, bool)>,
+    kind: Kind,
     /// The index of its task's first entry, whose `left` counts the task.
     first: usize,
     /// The stream's ring bytes reserved up to and including this entry
     /// (its own, for a message written in place): free once it is handed
     /// back.
     ring_end: usize,
+}
+
+/// What an entry is.
+#[derive(Clone, Copy)]
+enum Kind {
+    /// A whole message: its digest in the entry's `outs`.
+    Message,
+    /// A piece of a long message: its first chunk's index, and whether it
+    /// is the message's last piece.
+    Piece { counter: u64, last: bool },
+    /// `count` messages of `message_len` bytes laid out as hash_many takes
+    /// them: their digests in the ring, from `at`.
+    Batch { message_len: usize, count: usize, at: usize },
 }
 
 /// What a task's threads write for an entry: a message's digest, two to a
@@ -148,7 +159,7 @@ impl Storage {
         // Every entry may be a task in flight at once.
         TASKS.make_room(ENTRIES);
         Storage {
-            entries: std::vec![Entry { len: 0, piece: None, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
+            entries: std::vec![Entry { len: 0, kind: Kind::Message, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
             ring: {
                 // Zeroed, untouched pages: only the bytes written in place
                 // are faulted in.
@@ -168,6 +179,11 @@ impl Drop for Storage {
     fn drop(&mut self) {
         TASKS.give_room(self.lefts.len());
     }
+}
+
+/// Part `i` of a message in `pieces` parts: the message whole, or a piece.
+fn part_kind(i: usize, pieces: usize) -> Kind {
+    if pieces == 1 { Kind::Message } else { Kind::Piece { counter: (i * PIECE / CHUNK_LEN) as u64, last: i + 1 == pieces } }
 }
 
 /// The messages of one [`stream`] call, borrowed for its scope.
@@ -209,7 +225,7 @@ impl<'env> Stream<'env> {
         for i in 0..pieces {
             let part = &message[i * PIECE..][..(message.len() - i * PIECE).min(PIECE)];
             let at = self.head;
-            self.add_part(part.as_ptr(), part.len(), i, pieces, at, &mut digest);
+            self.add_part(part.as_ptr(), part.len(), part_kind(i, pieces), at, &mut digest);
         }
     }
 
@@ -230,34 +246,78 @@ impl<'env> Stream<'env> {
             let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring[at].get(), part_len) };
             fill(i * PIECE, room);
             let end = self.head;
-            self.add_part(room.as_ptr(), part_len, i, pieces, end, &mut digest);
+            self.add_part(room.as_ptr(), part_len, part_kind(i, pieces), end, &mut digest);
         }
     }
 
-    /// Part `i` of `pieces` of a message, `len` bytes at `input`, its ring
-    /// bytes reserved up to `ring_end`: a whole message joins the open task;
-    /// a piece of a longer one is a task of its own, a whole subtree at its
+    /// Hash a batch of messages of `message_len` bytes where it is, laid
+    /// out as [`hash_many`](crate::hash_many) takes them (each in whole
+    /// blocks, zero after its bytes); `digest` receives any digests this
+    /// call hands back, each message's in turn. The batch goes in parts of
+    /// up to 64 KiB, each one entry.
+    pub fn submit_batch(&mut self, batch: &'env [u8], message_len: usize, mut digest: impl FnMut(Hash)) {
+        let slot = crate::many::slot_len(message_len);
+        crate::many::assert_slots(batch, message_len, batch.len() / slot);
+        for part in batch.chunks((TASK_LEN / slot).max(1) * slot) {
+            let count = part.len() / slot;
+            let at = self.reserve(count * OUT_LEN, &mut digest);
+            let end = self.head;
+            self.add_part(part.as_ptr(), part.len(), Kind::Batch { message_len, count, at }, end, &mut digest);
+        }
+    }
+
+    /// Hash a batch of `count` messages of `message_len` bytes that `fill`
+    /// writes in place, laid out as [`hash_many`](crate::hash_many) takes
+    /// them: `fill(at, room)` writes the batch's bytes from `at` (padding
+    /// included: each message in whole blocks, zero after its bytes) into
+    /// all of `room`, a part of up to 64 KiB at a time. As
+    /// [`submit_with`](Stream::submit_with) and [`submit_batch`](Stream::submit_batch).
+    pub fn submit_batch_with(&mut self, count: usize, message_len: usize, mut fill: impl FnMut(usize, &mut [u8]), mut digest: impl FnMut(Hash)) {
+        let slot = crate::many::slot_len(message_len);
+        let per_part = (TASK_LEN / slot).max(1);
+        for first in (0..count).step_by(per_part) {
+            let part_count = (count - first).min(per_part);
+            let bytes_at = self.reserve(part_count * slot, &mut digest);
+            // Sound: as in submit_with.
+            let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring[bytes_at].get(), part_count * slot) };
+            fill(first * slot, room);
+            crate::many::assert_slots(room, message_len, part_count);
+            let at = self.reserve(part_count * OUT_LEN, &mut digest);
+            let end = self.head;
+            self.add_part(room.as_ptr(), room.len(), Kind::Batch { message_len, count: part_count, at }, end, &mut digest);
+        }
+    }
+
+    /// An entry of `kind`, `len` bytes at `input`, its ring bytes reserved
+    /// up to `ring_end`: a whole message, or a batch's part, joins the open
+    /// task (of its kind: one of another kind is handed over first); a
+    /// piece of a long message is a task of its own, a whole subtree at its
     /// offset.
-    fn add_part(&mut self, input: *const u8, len: usize, i: usize, pieces: usize, ring_end: usize, digest: &mut impl FnMut(Hash)) {
-        let counter = (i * PIECE / CHUNK_LEN) as u64;
-        let piece = (pieces > 1).then_some((counter, i + 1 == pieces));
-        let entry = self.add_entry(len, piece, ring_end, digest);
-        if piece.is_some() {
-            self.s.lefts[entry].store(1, Ordering::Relaxed);
-            // Sound: the bytes stay in place until the entry is handed back.
-            let bytes = unsafe { core::slice::from_raw_parts(input, len) };
-            let task = Task {
-                key: self.key,
-                flags: self.flags,
-                out: self.s.pieces_out[entry].0.0.get() as *mut u8,
-                left: &*self.s.lefts[entry],
-                ..Task::of(bytes, counter)
-            };
-            TASKS.push(core::iter::once(task));
-            return;
+    fn add_part(&mut self, input: *const u8, len: usize, kind: Kind, ring_end: usize, digest: &mut impl FnMut(Hash)) {
+        let entry = self.add_entry(len, kind, ring_end, digest);
+        let (batch, out) = match kind {
+            Kind::Message => (None, self.s.outs[entry].0.get() as *mut u8),
+            Kind::Batch { message_len, at, .. } => (Some(message_len), self.s.ring[at].get()),
+            Kind::Piece { counter, .. } => {
+                self.s.lefts[entry].store(1, Ordering::Relaxed);
+                // Sound: the bytes stay in place until the entry is handed back.
+                let bytes = unsafe { core::slice::from_raw_parts(input, len) };
+                let task = Task {
+                    key: self.key,
+                    flags: self.flags,
+                    out: self.s.pieces_out[entry].0.0.get() as *mut u8,
+                    left: &*self.s.lefts[entry],
+                    ..Task::of(bytes, counter)
+                };
+                TASKS.push(core::iter::once(task));
+                return;
+            }
+        };
+        if self.open.as_ref().is_some_and(|open| open.batch != batch) {
+            self.publish();
         }
         let (key, flags) = (self.key, self.flags);
-        let open = self.open.get_or_insert_with(|| Task::members(&key, flags, None));
+        let open = self.open.get_or_insert_with(|| Task::members(&key, flags, batch));
         // The task's first member's `left` counts all of its members (set
         // as the task is handed over).
         if open.members == 0 {
@@ -265,10 +325,13 @@ impl<'env> Stream<'env> {
         }
         let first = self.open_first;
         self.s.entries[entry].first = first;
-        open.member[open.members] = Member { input, len, out: self.s.outs[entry].0.get() as *mut u8, left: &*self.s.lefts[first] };
+        open.member[open.members] = Member { input, len, out, left: &*self.s.lefts[first] };
         open.members += 1;
         open.len += len;
-        if open.members == MEMBERS || open.len >= TASK_LEN / 4 {
+        // Messages longer than a block hash one at a time: a task of them
+        // stops at a quarter of a task's bytes, to spread over more threads
+        // (the queue's rule); batches fill a task's bytes.
+        if open.members == MEMBERS || open.len >= if batch.is_some() { TASK_LEN } else { TASK_LEN / 4 } {
             self.publish();
         }
     }
@@ -319,12 +382,12 @@ impl<'env> Stream<'env> {
     /// A new entry of `len` bytes, waiting for room when every entry is in
     /// flight.
     #[inline(always)]
-    fn add_entry(&mut self, len: usize, piece: Option<(u64, bool)>, ring_end: usize, digest: &mut impl FnMut(Hash)) -> usize {
+    fn add_entry(&mut self, len: usize, kind: Kind, ring_end: usize, digest: &mut impl FnMut(Hash)) -> usize {
         if self.next - self.delivered == ENTRIES {
             self.wait_for_room(digest);
         }
         let index = self.next % ENTRIES;
-        self.s.entries[index] = Entry { len, piece, first: index, ring_end };
+        self.s.entries[index] = Entry { len, kind, first: index, ring_end };
         self.next += 1;
         index
     }
@@ -354,7 +417,7 @@ impl<'env> Stream<'env> {
         let mut count = 0;
         while self.delivered < self.next {
             let index = self.delivered % ENTRIES;
-            let Entry { len, piece, first, ring_end } = self.s.entries[index];
+            let Entry { len, kind, first, ring_end } = self.s.entries[index];
             if self.s.lefts[first].load(Ordering::Acquire) != 0 {
                 break;
             }
@@ -362,9 +425,14 @@ impl<'env> Stream<'env> {
             self.tail = ring_end;
             count += 1;
             // Sound: the task wrote its outs before counting `left` down.
-            match piece {
-                None => digest(Hash(unsafe { *self.s.outs[index].0.get() })),
-                Some((counter, last)) => {
+            match kind {
+                Kind::Message => digest(Hash(unsafe { *self.s.outs[index].0.get() })),
+                Kind::Batch { count, at, .. } => {
+                    for j in 0..count {
+                        digest(Hash(unsafe { *(self.s.ring[at + j * OUT_LEN].get() as *const [u8; OUT_LEN]) }));
+                    }
+                }
+                Kind::Piece { counter, last } => {
                     let out = unsafe { *self.s.pieces_out[index].0.0.get() };
                     let (key, flags, platform) = (self.key, self.flags, Platform::detect());
                     let parent = |left: &CVBytes, right: &CVBytes| crate::hasher::parent_output(left, right, &key, flags, platform);
@@ -467,6 +535,51 @@ mod test {
         }
     }
 
+    /// Batches of every message length kind (empty, short, one block, not
+    /// whole blocks, a chunk, longer than a task's bytes), counts from 0
+    /// to more than a part holds, borrowed and written in place, between
+    /// single messages (the open task changes kind), in each mode, against
+    /// hash_with of each message, in order.
+    #[test]
+    fn test_stream_batches_against_hash_with() {
+        let key = [7u8; 32];
+        let cases: std::vec::Vec<(usize, usize)> = [0, 1, 64, 100, 1024, 1500, 70_000]
+            .iter()
+            .flat_map(|&len| [0, 1, 3, 16, 1100].into_iter().filter(move |&count| len < 10_000 || count < 20).map(move |count| (len, count)))
+            .collect();
+        let batch_of = |len: usize, count: usize| -> std::vec::Vec<u8> {
+            let slot = crate::many::slot_len(len);
+            let mut batch = std::vec![0u8; slot * count];
+            for (i, s) in batch.chunks_mut(slot).enumerate() {
+                crate::test::paint_test_input(&mut s[..len]);
+                s[..len.min(8)].iter_mut().for_each(|b| *b ^= i as u8);
+            }
+            batch
+        };
+        let batches: std::vec::Vec<std::vec::Vec<u8>> = cases.iter().map(|&(len, count)| batch_of(len, count)).collect();
+        let lone = [5u8; 300];
+        for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("stream batches")] {
+            let mut got = std::vec::Vec::new();
+            let mut want = std::vec::Vec::new();
+            stream(mode, |s| {
+                for (k, (&(len, count), batch)) in cases.iter().zip(&batches).enumerate() {
+                    if k % 2 == 0 {
+                        s.submit_batch(batch, len, |h| got.push(h));
+                    } else {
+                        s.submit_batch_with(count, len, |at, room| room.copy_from_slice(&batch[at..][..room.len()]), |h| got.push(h));
+                    }
+                    let slot = crate::many::slot_len(len);
+                    want.extend(batch.chunks(slot).map(|m| crate::hash_with(mode, &m[..len])));
+                    s.submit(&lone, |h| got.push(h));
+                    want.push(crate::hash_with(mode, &lone));
+                }
+                s.finish(|h| got.push(h));
+            });
+            assert_eq!(got.len(), want.len());
+            assert!(got == want, "a batch's digests in order");
+        }
+    }
+
     /// A stream takes more messages after finishing; a body that ends
     /// without finishing panics (after the threads are done with its
     /// messages), and so does one that panics itself.
@@ -509,9 +622,12 @@ mod test {
                 s.submit(&input[..len], |h| got.push(h));
                 s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), |h| got.push(h));
             }
+            s.submit_batch(&input[..4 * 64], 64, |h| got.push(h));
+            s.submit_batch_with(3, 64, |at, room| room.copy_from_slice(&input[at..][..room.len()]), |h| got.push(h));
             s.finish(|h| got.push(h));
         });
-        let want: std::vec::Vec<Hash> = lens.iter().flat_map(|&l| [crate::hash(&input[..l]); 2]).collect();
+        let mut want: std::vec::Vec<Hash> = lens.iter().flat_map(|&l| [crate::hash(&input[..l]); 2]).collect();
+        want.extend([crate::hash(&input[..64]); 7]);
         assert_eq!(got, want);
     }
 }
