@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `Verifier::update_multithreaded` checks a piece's groups over this
+  crate's threads when the piece holds 512 KiB of them or more: a 64 MiB
+  encoding verifies at 0.105-0.112 ns/B in 1-4 MiB pieces, from
+  0.274-0.287 with `update` (i7-12700K); pieces under 512 KiB run as
+  `update`.
 - On x86-64 with SSE4.1 or AVX2, whole chunks and a partial one after
   them hash in one pass, the partial chunk in a lane the whole ones leave
   spare: three whole chunks in four lanes, five to seven in eight (AVX2).
