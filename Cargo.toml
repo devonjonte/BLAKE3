@@ -126,6 +126,18 @@ required-features = ["std"]
 name = "scaling"
 required-features = ["std"]
 
+[[example]]
+name = "queue_probe"
+required-features = ["std"]
+
+[[example]]
+name = "start_stress"
+required-features = ["std"]
+
+[[test]]
+name = "initialize_multithreaded_contract"
+required-features = ["std"]
+
 [dependencies]
 arrayvec = { version = "0.7.4", default-features = false }
 constant_time_eq = { version = "0.4.2", default-features = false }
