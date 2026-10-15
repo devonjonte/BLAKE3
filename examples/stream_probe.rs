@@ -3,7 +3,8 @@
 //! the same messages, already in memory, in each; neither copies.
 //!
 //!   stream_probe samples API OUT [LEN...]
-//!       (API rounds: each round of messages read into the program's
+//!       (API written: each message read straight into the stream's bytes
+//!       (submit_with); rounds: each round of messages read into the program's
 //!       buffers, then a stream of them; queue-read: each read into a free
 //!       buffer, then Queue::messages, as bench-hashes' ContinuousMessages)
 //!       API stream | queue | new (lone messages only: a stream a message),
@@ -44,6 +45,27 @@ fn solo(api: &str, len: usize) -> Vec<Sample> {
                     s.submit(m, |d| {
                         std::hint::black_box(d);
                     });
+                }
+                s.collect(|d| {
+                    std::hint::black_box(d);
+                });
+            });
+            s.finish(|d| {
+                std::hint::black_box(d);
+            });
+            b
+        }),
+        "written" => blake3_servil::stream(blake3_servil::Mode::Hash, |s| {
+            // Each message read straight into the stream's bytes.
+            let b = clocks::measure(64, 2_000_000, || {
+                for m in &messages {
+                    s.submit_with(
+                        m.len(),
+                        |at, room| room.copy_from_slice(&m[at..][..room.len()]),
+                        |d| {
+                            std::hint::black_box(d);
+                        },
+                    );
                 }
                 s.collect(|d| {
                     std::hint::black_box(d);
@@ -177,7 +199,7 @@ fn main() {
     let lens: Vec<usize> = if args.len() > 3 { args[3..].iter().map(|a| a.parse().unwrap()).collect() } else { LENS.to_vec() };
     let scenarios: &[&str] = match api {
         "new" => &["lone"],
-        "rounds" | "queue-read" => &["solo", "two"],
+        "rounds" | "queue-read" | "written" => &["solo", "two"],
         _ => &["solo", "two", "lone"],
     };
     let (mut rows, mut busy) = (String::new(), String::new());

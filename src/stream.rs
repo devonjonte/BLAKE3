@@ -32,6 +32,9 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 /// this long (a task's subtree).
 pub(crate) const PIECE: usize = TASK_LEN;
 
+/// The bytes a stream keeps for messages written in place.
+const RING_BYTES: usize = 4 << 20;
+
 /// The most entries (messages and pieces) in flight in one stream (1024:
 /// 4 KiB to 16 KiB messages 8-9% faster than at 8192, i7-12700K; 256 lost
 /// 26-130% at 64 and 256 B).
@@ -51,6 +54,10 @@ struct Entry {
     piece: Option<(u64, bool)>,
     /// The index of its task's first entry, whose `left` counts the task.
     first: usize,
+    /// The stream's ring bytes reserved up to and including this entry
+    /// (its own, for a message written in place): free once it is handed
+    /// back.
+    ring_end: usize,
 }
 
 /// What a task's threads write for an entry: a message's digest, two to a
@@ -94,7 +101,20 @@ pub fn stream<'env, T>(mode: Mode, body: impl for<'s> FnOnce(&'s mut Stream<'env
     crate::lanes::require();
     let (key, flags) = mode.key_and_flags();
     let s = SPARE.with(|spare| spare.take()).unwrap_or_else(Storage::new);
-    let mut stream = Stream { key, flags, s, open_first: 0, next: 0, delivered: 0, open: None, stack: Vec::with_capacity(64), pieces: 0, env: PhantomData };
+    let mut stream = Stream {
+        key,
+        flags,
+        s,
+        open_first: 0,
+        next: 0,
+        delivered: 0,
+        head: 0,
+        tail: 0,
+        open: None,
+        stack: Vec::with_capacity(64),
+        pieces: 0,
+        env: PhantomData,
+    };
     let result = body(&mut stream);
     assert_eq!(stream.delivered, stream.next, "a stream's body calls finish last");
     result
@@ -106,6 +126,9 @@ pub fn stream<'env, T>(mode: Mode, body: impl for<'s> FnOnce(&'s mut Stream<'env
 /// time, 4-5 us with the spare; one stream kept open, 2.6-4 us. i7-12700K).
 struct Storage {
     entries: Box<[Entry]>,
+    /// The bytes of messages written in place ([`Stream::submit_with`]),
+    /// each at a 64-byte boundary, in the order of their entries.
+    ring: Box<[UnsafeCell<u8>]>,
     outs: Box<[Out<OUT_LEN>]>,
     pieces_out: Box<[OwnLine<Out<64>>]>,
     /// For a task's first entry, the count of the task's entries still
@@ -125,7 +148,14 @@ impl Storage {
         // Every entry may be a task in flight at once.
         TASKS.make_room(ENTRIES);
         Storage {
-            entries: std::vec![Entry { len: 0, piece: None, first: 0 }; ENTRIES].into_boxed_slice(),
+            entries: std::vec![Entry { len: 0, piece: None, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
+            ring: {
+                // Zeroed, untouched pages: only the bytes written in place
+                // are faulted in.
+                let bytes = std::vec![0u8; RING_BYTES].into_boxed_slice();
+                // Sound: UnsafeCell<u8> is u8's layout (repr(transparent)).
+                unsafe { Box::from_raw(Box::into_raw(bytes) as *mut [UnsafeCell<u8>]) }
+            },
             outs: (0..ENTRIES).map(|_| Out(UnsafeCell::new([0; OUT_LEN]))).collect(),
             pieces_out: (0..ENTRIES).map(|_| OwnLine(Out(UnsafeCell::new([0; 64])))).collect(),
             lefts: (0..ENTRIES).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
@@ -151,6 +181,10 @@ pub struct Stream<'env> {
     /// Entries submitted, and entries handed back (each counts on).
     next: usize,
     delivered: usize,
+    /// Ring bytes reserved, and freed (each counts on; the ring holds
+    /// head - tail).
+    head: usize,
+    tail: usize,
     /// Short messages gathered, not yet handed to the pool.
     open: Option<Task>,
     /// A long message being handed back: its pieces' chaining values so
@@ -171,41 +205,91 @@ impl<'env> Stream<'env> {
     /// Hash `message` where it is; `digest` receives any digests this call
     /// hands back.
     pub fn submit(&mut self, message: &'env [u8], mut digest: impl FnMut(Hash)) {
-        if message.len() <= PIECE {
-            let entry = self.add_entry(message.len(), None, &mut digest);
-            let (key, flags) = (self.key, self.flags);
-            let open = self.open.get_or_insert_with(|| Task::members(&key, flags, None));
-            // The task's first member's `left` counts all of its members
-            // (set as the task is handed over).
-            if open.members == 0 {
-                self.open_first = entry;
-            }
-            let first = self.open_first;
-            self.s.entries[entry].first = first;
-            let member = Member { input: message.as_ptr(), len: message.len(), out: self.s.outs[entry].0.get() as *mut u8, left: &*self.s.lefts[first] };
-            open.member[open.members] = member;
-            open.members += 1;
-            open.len += member.len;
-            if open.members == MEMBERS || open.len >= TASK_LEN / 4 {
-                self.publish();
-            }
-            return;
+        let pieces = message.len().div_ceil(PIECE).max(1);
+        for i in 0..pieces {
+            let part = &message[i * PIECE..][..(message.len() - i * PIECE).min(PIECE)];
+            let at = self.head;
+            self.add_part(part.as_ptr(), part.len(), i, pieces, at, &mut digest);
         }
-        let pieces = message.len().div_ceil(PIECE);
-        for (i, piece) in message.chunks(PIECE).enumerate() {
-            let counter = (i * PIECE / CHUNK_LEN) as u64;
-            let entry = self.add_entry(piece.len(), Some((counter, i + 1 == pieces)), &mut digest);
-            // A piece is a task of its own: a whole subtree at `counter`.
+    }
+
+    /// Hash a message of `len` bytes that `fill` writes in place, into the
+    /// stream's own bytes, in pieces of up to 64 KiB: `fill(at, room)`
+    /// writes the message's bytes from `at` into all of `room` (a read
+    /// from a file or socket straight into the stream). `digest` receives
+    /// any digests this call hands back. The stream reuses the bytes once
+    /// the message's digest is handed back; a stream keeps 4 MiB of them,
+    /// and `submit_with` waits for room as `submit` does.
+    pub fn submit_with(&mut self, len: usize, mut fill: impl FnMut(usize, &mut [u8]), mut digest: impl FnMut(Hash)) {
+        let pieces = len.div_ceil(PIECE).max(1);
+        for i in 0..pieces {
+            let part_len = (len - i * PIECE).min(PIECE);
+            let at = self.reserve(part_len, &mut digest);
+            // Sound: [at, at + part_len) is reserved and free (no entry in
+            // flight holds it), and `&mut self` keeps every other writer out.
+            let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring[at].get(), part_len) };
+            fill(i * PIECE, room);
+            let end = self.head;
+            self.add_part(room.as_ptr(), part_len, i, pieces, end, &mut digest);
+        }
+    }
+
+    /// Part `i` of `pieces` of a message, `len` bytes at `input`, its ring
+    /// bytes reserved up to `ring_end`: a whole message joins the open task;
+    /// a piece of a longer one is a task of its own, a whole subtree at its
+    /// offset.
+    fn add_part(&mut self, input: *const u8, len: usize, i: usize, pieces: usize, ring_end: usize, digest: &mut impl FnMut(Hash)) {
+        let counter = (i * PIECE / CHUNK_LEN) as u64;
+        let piece = (pieces > 1).then_some((counter, i + 1 == pieces));
+        let entry = self.add_entry(len, piece, ring_end, digest);
+        if piece.is_some() {
             self.s.lefts[entry].store(1, Ordering::Relaxed);
+            // Sound: the bytes stay in place until the entry is handed back.
+            let bytes = unsafe { core::slice::from_raw_parts(input, len) };
             let task = Task {
                 key: self.key,
                 flags: self.flags,
                 out: self.s.pieces_out[entry].0.0.get() as *mut u8,
                 left: &*self.s.lefts[entry],
-                ..Task::of(piece, counter)
+                ..Task::of(bytes, counter)
             };
             TASKS.push(core::iter::once(task));
+            return;
         }
+        let (key, flags) = (self.key, self.flags);
+        let open = self.open.get_or_insert_with(|| Task::members(&key, flags, None));
+        // The task's first member's `left` counts all of its members (set
+        // as the task is handed over).
+        if open.members == 0 {
+            self.open_first = entry;
+        }
+        let first = self.open_first;
+        self.s.entries[entry].first = first;
+        open.member[open.members] = Member { input, len, out: self.s.outs[entry].0.get() as *mut u8, left: &*self.s.lefts[first] };
+        open.members += 1;
+        open.len += len;
+        if open.members == MEMBERS || open.len >= TASK_LEN / 4 {
+            self.publish();
+        }
+    }
+
+    /// The ring offset of `len` free bytes at a 64-byte boundary (whole,
+    /// before the ring's end), reserved: waits, handing back digests and
+    /// hashing tasks, until entries in flight free them.
+    fn reserve(&mut self, len: usize, digest: &mut impl FnMut(Hash)) -> usize {
+        let slot = len.div_ceil(64) * 64;
+        let mut at = self.head % RING_BYTES;
+        // A slot that would cross the end starts the next lap instead.
+        let skip = if at + slot > RING_BYTES { RING_BYTES - at } else { 0 };
+        while RING_BYTES - (self.head - self.tail) < skip + slot {
+            self.publish();
+            self.help(digest);
+        }
+        if skip > 0 {
+            at = 0;
+        }
+        self.head += skip + slot;
+        at
     }
 
     /// Hand back every digest finished, in order, without waiting; and hand
@@ -235,12 +319,12 @@ impl<'env> Stream<'env> {
     /// A new entry of `len` bytes, waiting for room when every entry is in
     /// flight.
     #[inline(always)]
-    fn add_entry(&mut self, len: usize, piece: Option<(u64, bool)>, digest: &mut impl FnMut(Hash)) -> usize {
+    fn add_entry(&mut self, len: usize, piece: Option<(u64, bool)>, ring_end: usize, digest: &mut impl FnMut(Hash)) -> usize {
         if self.next - self.delivered == ENTRIES {
             self.wait_for_room(digest);
         }
         let index = self.next % ENTRIES;
-        self.s.entries[index] = Entry { len, piece, first: index };
+        self.s.entries[index] = Entry { len, piece, first: index, ring_end };
         self.next += 1;
         index
     }
@@ -270,11 +354,12 @@ impl<'env> Stream<'env> {
         let mut count = 0;
         while self.delivered < self.next {
             let index = self.delivered % ENTRIES;
-            let Entry { len, piece, first } = self.s.entries[index];
+            let Entry { len, piece, first, ring_end } = self.s.entries[index];
             if self.s.lefts[first].load(Ordering::Acquire) != 0 {
                 break;
             }
             self.delivered += 1;
+            self.tail = ring_end;
             count += 1;
             // Sound: the task wrote its outs before counting `left` down.
             match piece {
@@ -327,7 +412,7 @@ impl Drop for Stream<'_> {
                 }
             }
         }
-        let empty = Storage { entries: Box::new([]), outs: Box::new([]), pieces_out: Box::new([]), lefts: Box::new([]) };
+        let empty = Storage { entries: Box::new([]), ring: Box::new([]), outs: Box::new([]), pieces_out: Box::new([]), lefts: Box::new([]) };
         let s = core::mem::replace(&mut self.s, empty);
         SPARE.with(|spare| spare.set(Some(s)));
     }
@@ -339,8 +424,9 @@ mod test {
 
     /// Messages of every kind the stream handles (empty, short, one length
     /// many times over, a whole piece, a piece and a byte, several pieces
-    /// and a partial one), in each mode, against hash_with, in order; far
-    /// more entries than a stream holds at once, so it fills and waits.
+    /// and a partial one), borrowed and written in place, in each mode,
+    /// against hash_with, in order; far more entries and bytes than a
+    /// stream holds at once, so it fills, wraps its ring, and waits.
     #[test]
     fn test_stream_against_hash_with() {
         let mut input = std::vec![0u8; (1 << 20) + 200];
@@ -349,11 +435,25 @@ mod test {
         let lens: std::vec::Vec<usize> =
             (0..12000).map(|i| [0, 1, 63, 64, 64, 64, 100, 1024, 1024, 1500, 4096, PIECE, PIECE + 1, 200_000, (1 << 20) + 7, 64][i % 16]).collect();
         let message = |i: usize| &input[i % 97..][..lens[i]];
-        for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("stream test")] {
+        for (mode, ways) in [(Mode::Hash, 0), (Mode::Keyed(&key), 1), (Mode::DeriveKey("stream test"), 2)] {
             let mut got = std::vec::Vec::new();
             stream(mode, |s| {
                 for i in 0..lens.len() {
-                    s.submit(message(i), |h| got.push(h));
+                    // Borrowed, written in place (in reads of up to 1000
+                    // bytes), or each in turn.
+                    if ways == 0 || (ways == 2 && i % 3 == 0) {
+                        s.submit(message(i), |h| got.push(h));
+                    } else {
+                        s.submit_with(
+                            lens[i],
+                            |at, room| {
+                                for (j, part) in room.chunks_mut(1000).enumerate() {
+                                    part.copy_from_slice(&message(i)[at + j * 1000..][..part.len()]);
+                                }
+                            },
+                            |h| got.push(h),
+                        );
+                    }
                     if i % 500 == 499 {
                         s.collect(|h| got.push(h));
                     }
@@ -407,10 +507,11 @@ mod test {
         stream(Mode::Hash, |s| {
             for len in lens {
                 s.submit(&input[..len], |h| got.push(h));
+                s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), |h| got.push(h));
             }
             s.finish(|h| got.push(h));
         });
-        let want: std::vec::Vec<Hash> = lens.iter().map(|&l| crate::hash(&input[..l])).collect();
+        let want: std::vec::Vec<Hash> = lens.iter().flat_map(|&l| [crate::hash(&input[..l]); 2]).collect();
         assert_eq!(got, want);
     }
 }
