@@ -134,6 +134,10 @@ required-features = ["std"]
 name = "start_stress"
 required-features = ["std"]
 
+[[example]]
+name = "verifier_probe"
+required-features = ["std"]
+
 [[test]]
 name = "initialize_multithreaded_contract"
 required-features = ["std"]

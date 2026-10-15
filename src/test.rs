@@ -1429,6 +1429,7 @@ fn test_hasher_gathers() {
 /// chunk then sits at a later counter), in each of the three modes,
 /// against the reference implementation.
 #[test]
+#[cfg(feature = "std")]
 fn test_chunks_with_partial_against_reference() {
     let mut input = vec![0u8; 40 * CHUNK_LEN];
     paint_test_input(&mut input);
