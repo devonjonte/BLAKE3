@@ -23,12 +23,18 @@ use crate::{CVWords, BLOCK_LEN, CHUNK_END, CHUNK_LEN, CHUNK_START, OUT_LEN};
 /// assembly is in this build).
 #[inline]
 pub(crate) fn takes(platform: Platform, len: usize) -> bool {
-    let shape = (CHUNK_LEN + BLOCK_LEN + 1..2 * CHUNK_LEN).contains(&len);
+    takes_platform(platform) && (CHUNK_LEN + BLOCK_LEN + 1..2 * CHUNK_LEN).contains(&len)
+}
+
+/// Whether [`hash_many_blocks`] runs on `platform`: AVX2 or AVX-512, whose
+/// assembly is in this build.
+#[inline]
+pub(crate) fn takes_platform(platform: Platform) -> bool {
     match platform {
         #[cfg(blake3_avx2_ffi)]
-        Platform::AVX2 => shape,
+        Platform::AVX2 => true,
         #[cfg(blake3_avx512_ffi)]
-        Platform::AVX512 => shape,
+        Platform::AVX512 => true,
         _ => false,
     }
 }
@@ -46,11 +52,11 @@ pub(crate) fn parent(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8,
     unsafe {
         // The first `paired` blocks of both chunks, side by side.
         let mut halfway = [0u8; 2 * OUT_LEN];
-        hash_many(platform, &[whole.as_ptr(), partial.as_ptr()], paired, key, chunk_counter, true, flags, CHUNK_START, 0, &mut halfway);
+        hash_many_blocks(platform, &[whole.as_ptr(), partial.as_ptr()], paired, key, chunk_counter, true, flags, CHUNK_START, 0, &mut halfway);
         // The whole chunk's other blocks, from its chaining value so far.
         let cv = words_from_le_bytes_32(halfway[..OUT_LEN].try_into().unwrap());
         let rest = whole[paired * BLOCK_LEN..].as_ptr();
-        hash_many(platform, &[rest], CHUNK_LEN / BLOCK_LEN - paired, &cv, chunk_counter, false, flags, 0, CHUNK_END, &mut out[..OUT_LEN]);
+        hash_many_blocks(platform, &[rest], CHUNK_LEN / BLOCK_LEN - paired, &cv, chunk_counter, false, flags, 0, CHUNK_END, &mut out[..OUT_LEN]);
         // The partial chunk's last block, zero-padded.
         let mut cv = words_from_le_bytes_32(halfway[OUT_LEN..].try_into().unwrap());
         let last = &partial[paired * BLOCK_LEN..];
@@ -62,15 +68,30 @@ pub(crate) fn parent(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8,
     out
 }
 
-/// The platform's assembly `hash_many`, with the block count at run time.
-/// Unsafe: each of `inputs` reaches `blocks` blocks, and the CPU has the
-/// platform.
+/// The platform's assembly `hash_many`, with the block count at run time
+/// (AVX2 and AVX-512; elsewhere each input in turn). Unsafe: each of `inputs` reaches `blocks`
+/// blocks, and the CPU has the platform.
 #[allow(clippy::too_many_arguments)]
-unsafe fn hash_many(
+pub(crate) unsafe fn hash_many_blocks(
     platform: Platform, inputs: &[*const u8], blocks: usize, key: &CVWords, counter: u64, increment: bool,
     flags: u8, flags_start: u8, flags_end: u8, out: &mut [u8],
 ) {
     assert!(out.len() >= inputs.len() * OUT_LEN && (1..=CHUNK_LEN / BLOCK_LEN).contains(&blocks));
+    if !takes_platform(platform) {
+        // Elsewhere one input after another on the platform's compression
+        // (for the tests of hash_many's batches on every platform).
+        for (i, &p) in inputs.iter().enumerate() {
+            let mut cv = *key;
+            for b in 0..blocks {
+                // Sound: `p` reaches `blocks` blocks.
+                let block: &[u8; BLOCK_LEN] = unsafe { &*(p.add(b * BLOCK_LEN) as *const [u8; BLOCK_LEN]) };
+                let f = flags | if b == 0 { flags_start } else { 0 } | if b + 1 == blocks { flags_end } else { 0 };
+                platform.compress_in_place(&mut cv, block, BLOCK_LEN as u8, counter + if increment { i as u64 } else { 0 }, f);
+            }
+            out[i * OUT_LEN..][..OUT_LEN].copy_from_slice(&crate::hasher::le_bytes(&cv));
+        }
+        return;
+    }
     let (n, input, key, out) = (inputs.len(), inputs.as_ptr(), key.as_ptr(), out.as_mut_ptr());
     match platform {
         #[cfg(blake3_avx2_ffi)]
@@ -81,7 +102,7 @@ unsafe fn hash_many(
         Platform::AVX512 => unsafe {
             crate::avx512::ffi::blake3_hash_many_avx512(input, n, blocks, key, counter, increment, flags, flags_start, flags_end, out)
         },
-        _ => unreachable!("pair::takes admits AVX2 and AVX-512 alone"),
+        _ => unreachable!("takes_platform admitted AVX2 or AVX-512"),
     }
 }
 
