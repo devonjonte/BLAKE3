@@ -1422,3 +1422,32 @@ fn test_hasher_gathers() {
     }
     assert_eq!(pieced.finalize_non_root(), whole.finalize_non_root());
 }
+
+/// Whole chunks and a partial one in one pass (rust_avx2's
+/// hash_chunks_with_partial, on AVX2 or AVX-512): every length with a
+/// partial chunk up to eight chunks, and some past them (the partial
+/// chunk then sits at a later counter), in each of the three modes,
+/// against the reference implementation.
+#[test]
+fn test_chunks_with_partial_against_reference() {
+    let mut input = vec![0u8; 40 * CHUNK_LEN];
+    paint_test_input(&mut input);
+    let key = [7u8; crate::KEY_LEN];
+    let mut lens: Vec<usize> = (CHUNK_LEN + 1..8 * CHUNK_LEN).filter(|l| l % CHUNK_LEN != 0).collect();
+    lens.extend([9 * CHUNK_LEN + 1, 12 * CHUNK_LEN + 700, 16 * CHUNK_LEN + 64, 23 * CHUNK_LEN + 1023, 39 * CHUNK_LEN + 5]);
+    if cfg!(miri) {
+        lens = vec![CHUNK_LEN + 1, 2 * CHUNK_LEN + 65, 7 * CHUNK_LEN + 1023];
+    }
+    for len in lens {
+        let m = &input[..len];
+        let expect = |mut r: reference_impl::Hasher| {
+            r.update(m);
+            let mut out = [0u8; OUT_LEN];
+            r.finalize(&mut out);
+            out
+        };
+        assert_eq!(crate::hash(m).as_bytes(), &expect(reference_impl::Hasher::new()), "hash, len {len}");
+        assert_eq!(crate::keyed_hash(&key, m).as_bytes(), &expect(reference_impl::Hasher::new_keyed(&key)), "keyed_hash, len {len}");
+        assert_eq!(crate::derive_key("partial test", m), expect(reference_impl::Hasher::new_derive_key("partial test")), "derive_key, len {len}");
+    }
+}

@@ -799,3 +799,86 @@ mod test {
         crate::test::test_hash_many_fn(hash_many, hash_many);
     }
 }
+
+/// rust_avx2's `hash_chunks_with_partial` in four lanes: 1 to 3 whole
+/// chunks and a partial one after them, in one pass of sixteen blocks.
+/// Requires a CPU with SSE4.1.
+#[target_feature(enable = "sse4.1")]
+pub unsafe fn hash_chunks_with_partial(
+    whole: &[&[u8; crate::CHUNK_LEN]],
+    partial: &[u8],
+    key: &CVWords,
+    counter: u64,
+    flags: u8,
+    out: &mut [u8],
+) {
+    let n = whole.len();
+    assert!((1..DEGREE).contains(&n) && (1..crate::CHUNK_LEN).contains(&partial.len()) && out.len() >= (n + 1) * OUT_LEN);
+    let mut padded = [0u8; crate::CHUNK_LEN];
+    padded[..partial.len()].copy_from_slice(partial);
+    let mut inputs = [padded.as_ptr(); DEGREE];
+    for (lane, chunk) in whole.iter().enumerate() {
+        inputs[lane] = chunk.as_ptr();
+    }
+    let last = partial.len().div_ceil(BLOCK_LEN) - 1;
+    let last_len = (partial.len() - last * BLOCK_LEN) as u32;
+    let lane_n = |value: u32, others: u32| {
+        let mut lanes = [others; DEGREE];
+        lanes[n] = value;
+        lanes
+    };
+    unsafe {
+        let mut h_vecs = [set1(key[0]), set1(key[1]), set1(key[2]), set1(key[3]), set1(key[4]), set1(key[5]), set1(key[6]), set1(key[7])];
+        let (counter_low_vec, counter_high_vec) = load_counters(counter, IncrementCounter::Yes);
+        let mut partial_cv = [set1(0); 8];
+        for block in 0..crate::CHUNK_LEN / BLOCK_LEN {
+            let mut block_flags = flags as u32;
+            if block == 0 {
+                block_flags |= crate::CHUNK_START as u32;
+            }
+            if block + 1 == crate::CHUNK_LEN / BLOCK_LEN {
+                block_flags |= crate::CHUNK_END as u32;
+            }
+            let (block_len_vec, block_flags_vec) = if block == last {
+                let l = lane_n(last_len, BLOCK_LEN as u32);
+                let f = lane_n(block_flags | crate::CHUNK_END as u32, block_flags);
+                (set4(l[0], l[1], l[2], l[3]), set4(f[0], f[1], f[2], f[3]))
+            } else {
+                (set1(BLOCK_LEN as u32), set1(block_flags))
+            };
+            let msg_vecs = transpose_msg_vecs(&inputs, block * BLOCK_LEN);
+            let mut v = [
+                h_vecs[0], h_vecs[1], h_vecs[2], h_vecs[3], h_vecs[4], h_vecs[5], h_vecs[6], h_vecs[7],
+                set1(IV[0]), set1(IV[1]), set1(IV[2]), set1(IV[3]),
+                counter_low_vec, counter_high_vec, block_len_vec, block_flags_vec,
+            ];
+            round(&mut v, &msg_vecs, 0);
+            round(&mut v, &msg_vecs, 1);
+            round(&mut v, &msg_vecs, 2);
+            round(&mut v, &msg_vecs, 3);
+            round(&mut v, &msg_vecs, 4);
+            round(&mut v, &msg_vecs, 5);
+            round(&mut v, &msg_vecs, 6);
+            for i in 0..8 {
+                h_vecs[i] = xor(v[i], v[i + 8]);
+            }
+            if block == last {
+                partial_cv = h_vecs;
+            }
+        }
+        // Word i of every lane, then each lane's eight words.
+        let mut words = [[0u32; DEGREE]; 8];
+        for (i, vec) in h_vecs.iter().enumerate() {
+            storeu(*vec, words[i].as_mut_ptr() as *mut u8);
+        }
+        for lane in 0..n {
+            for i in 0..8 {
+                out[(lane * 8 + i) * 4..][..4].copy_from_slice(&words[i][lane].to_le_bytes());
+            }
+        }
+        for (i, vec) in partial_cv.iter().enumerate() {
+            storeu(*vec, words[i].as_mut_ptr() as *mut u8);
+            out[(n * 8 + i) * 4..][..4].copy_from_slice(&words[i][n].to_le_bytes());
+        }
+    }
+}
