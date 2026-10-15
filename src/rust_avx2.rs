@@ -493,3 +493,94 @@ mod test {
         crate::test::test_hash_many_fn(hash_many, hash_many);
     }
 }
+
+/// The chaining values of `whole.len()` whole chunks and one partial chunk
+/// after them (1 to CHUNK_LEN - 1 bytes), at `counter` and the counters
+/// after it, all eight lanes in one pass of sixteen blocks: the partial
+/// chunk takes a lane beside the whole ones, its last block flagged
+/// CHUNK_END at its own step, and its value is kept from that step. So
+/// the longest chain of dependent blocks is a whole chunk's sixteen, where
+/// hashing the partial chunk after the whole ones added its blocks to it.
+/// Writes `(whole.len() + 1) * OUT_LEN` bytes of `out`. Requires 1 to 7
+/// whole chunks and a CPU with AVX2.
+#[target_feature(enable = "avx2")]
+pub unsafe fn hash_chunks_with_partial(
+    whole: &[&[u8; crate::CHUNK_LEN]],
+    partial: &[u8],
+    key: &CVWords,
+    counter: u64,
+    flags: u8,
+    out: &mut [u8],
+) {
+    let n = whole.len();
+    assert!((1..DEGREE).contains(&n) && (1..crate::CHUNK_LEN).contains(&partial.len()) && out.len() >= (n + 1) * OUT_LEN);
+    // The partial chunk zero-padded to a whole one, so its lane reads
+    // within bounds after its last block (those steps' values are unused);
+    // the lanes past it read it too.
+    let mut padded = [0u8; crate::CHUNK_LEN];
+    padded[..partial.len()].copy_from_slice(partial);
+    let mut inputs = [padded.as_ptr(); DEGREE];
+    for (lane, chunk) in whole.iter().enumerate() {
+        inputs[lane] = chunk.as_ptr();
+    }
+    let last = partial.len().div_ceil(BLOCK_LEN) - 1;
+    let last_len = (partial.len() - last * BLOCK_LEN) as u32;
+    // Lane `n`'s value in a vector of eight lanes, `others` in the rest.
+    let lane_n = |value: u32, others: u32| {
+        let mut lanes = [others; DEGREE];
+        lanes[n] = value;
+        lanes
+    };
+    unsafe {
+        let mut h_vecs = [set1(key[0]), set1(key[1]), set1(key[2]), set1(key[3]), set1(key[4]), set1(key[5]), set1(key[6]), set1(key[7])];
+        let (counter_low_vec, counter_high_vec) = load_counters(counter, IncrementCounter::Yes);
+        let mut partial_cv = [set1(0); 8];
+        for block in 0..crate::CHUNK_LEN / BLOCK_LEN {
+            let mut block_flags = flags as u32;
+            if block == 0 {
+                block_flags |= crate::CHUNK_START as u32;
+            }
+            if block + 1 == crate::CHUNK_LEN / BLOCK_LEN {
+                block_flags |= crate::CHUNK_END as u32;
+            }
+            let (block_len_vec, block_flags_vec) = if block == last {
+                let l = lane_n(last_len, BLOCK_LEN as u32);
+                let f = lane_n(block_flags | crate::CHUNK_END as u32, block_flags);
+                (set8(l[0], l[1], l[2], l[3], l[4], l[5], l[6], l[7]), set8(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]))
+            } else {
+                (set1(BLOCK_LEN as u32), set1(block_flags))
+            };
+            let msg_vecs = transpose_msg_vecs(&inputs, block * BLOCK_LEN);
+            let mut v = [
+                h_vecs[0], h_vecs[1], h_vecs[2], h_vecs[3], h_vecs[4], h_vecs[5], h_vecs[6], h_vecs[7],
+                set1(IV[0]), set1(IV[1]), set1(IV[2]), set1(IV[3]),
+                counter_low_vec, counter_high_vec, block_len_vec, block_flags_vec,
+            ];
+            round(&mut v, &msg_vecs, 0);
+            round(&mut v, &msg_vecs, 1);
+            round(&mut v, &msg_vecs, 2);
+            round(&mut v, &msg_vecs, 3);
+            round(&mut v, &msg_vecs, 4);
+            round(&mut v, &msg_vecs, 5);
+            round(&mut v, &msg_vecs, 6);
+            for i in 0..8 {
+                h_vecs[i] = xor(v[i], v[i + 8]);
+            }
+            if block == last {
+                partial_cv = h_vecs;
+            }
+        }
+        transpose_vecs(&mut h_vecs);
+        let mut values = [0u8; DEGREE * OUT_LEN];
+        for (i, vec) in h_vecs.iter().enumerate() {
+            storeu(*vec, values.as_mut_ptr().add(i * 4 * DEGREE));
+        }
+        out[..n * OUT_LEN].copy_from_slice(&values[..n * OUT_LEN]);
+        // Lane n of the snapshot: word i of the partial chunk's value.
+        let mut words = [0u32; DEGREE];
+        for (i, vec) in partial_cv.iter().enumerate() {
+            storeu(*vec, words.as_mut_ptr() as *mut u8);
+            out[(n * 8 + i) * 4..][..4].copy_from_slice(&words[n].to_le_bytes());
+        }
+    }
+}
