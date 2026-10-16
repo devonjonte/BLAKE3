@@ -3,7 +3,9 @@
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
 files: src/chunk_core.rs src/each.rs src/ffi_avx2.rs src/ffi_avx512.rs src/ffi_neon.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/ffi_sse2.rs src/ffi_sse41.rs src/guts.rs src/hasher_core.rs src/hazmat.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/neon_xof.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/queue.rs src/rust_avx2.rs src/rust_sse2.rs src/rust_sse41.rs src/self_test.rs src/stack_core.rs src/traits.rs src/tree.rs src/tree_core.rs src/wasm32_simd.rs 
+src/each.rs	replace * with + in hash_held	1	UNCLASSIFIED
 src/each.rs	replace * with / in hash_held	2	another machine: the per-group calls of a CPU without SME2 (check-builds' one-CPU no_sme2 tests reach them)
+src/each.rs	replace + with - in hash_held	1	UNCLASSIFIED
 src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace < with <= in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
 src/each.rs	replace < with == in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
@@ -11,7 +13,6 @@ src/each.rs	replace < with > in hash_each_multithreaded_with	1	speed: moves a th
 src/each.rs	replace >= with < in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace hash_held with ()	1	compiled out: the copy of hash_held without std (check-builds' no_std tests reach it)
 src/each.rs	replace | with ^ in hash_held	1	equivalent: | and ^ agree on flag bits that never overlap
-src/ffi_neon_hybrid.rs	replace != with == in partial_covers	1	speed: moves a threshold between equally correct paths (the partial kernel computes every count from 1 to 15, 10 too; 10 runs faster without it)
 src/ffi_neon_hybrid.rs	replace % with + in prefetch_message_code	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace % with / in prefetch_message_code	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace && with || in prefetch_message_code	1	speed: whether and what to prefetch after a pause (no effect on results)
@@ -23,28 +24,24 @@ src/ffi_neon_hybrid.rs	replace + with * in prefetch_tree_code	1	speed: whether a
 src/ffi_neon_hybrid.rs	replace + with - in prefetch_parent_code	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace + with - in prefetch_tree_code	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace / with % in prefetch_parent_code	2	speed: whether and what to prefetch after a pause (no effect on results)
-src/ffi_neon_hybrid.rs	replace > with < in partial_pays	2	speed: moves a threshold between equally correct paths (the partial kernel computes every count from 1 to 15, 10 too; 10 runs faster without it)
 src/ffi_neon_hybrid.rs	replace > with < in prefetch_message_code	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace > with < in prefetch_tree_code	2	speed: whether and what to prefetch after a pause (no effect on results)
-src/ffi_neon_hybrid.rs	replace > with == in partial_pays	2	speed: moves a threshold between equally correct paths (the partial kernel computes every count from 1 to 15, 10 too; 10 runs faster without it)
 src/ffi_neon_hybrid.rs	replace > with == in prefetch_message_code	2	speed: whether and what to prefetch after a pause (no effect on results)
-src/ffi_neon_hybrid.rs	replace > with == in prefetch_parent_code	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace > with == in prefetch_tree_code	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace > with >= in partial_pays	2	speed: moves a threshold between equally correct paths (the partial kernel computes every count from 1 to 15, 10 too; 10 runs faster without it)
 src/ffi_neon_hybrid.rs	replace > with >= in prefetch_message_code	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace > with >= in prefetch_parent_code	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace > with >= in prefetch_tree_code	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace chunk_code -> (usize, usize) with (0, 1)	1	speed: whether and what to prefetch after a pause (no effect on results)
+src/ffi_neon_hybrid.rs	replace entries -> std::vec::Vec<(std::string::String, *const())> with vec![]	1	UNCLASSIFIED
 src/ffi_neon_hybrid.rs	replace parent_code -> (usize, usize) with (0, 1)	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/ffi_neon_hybrid.rs	replace partial_covers -> bool with false	1	speed: moves a threshold between equally correct paths (the partial kernel computes every count from 1 to 15, 10 too; 10 runs faster without it)
-src/ffi_neon_hybrid.rs	replace partial_pays -> bool with false	1	speed: moves a threshold between equally correct paths (the partial kernel computes every count from 1 to 15, 10 too; 10 runs faster without it)
 src/ffi_neon_hybrid.rs	replace prefetch_message_code with ()	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace prefetch_pair_code with ()	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace prefetch_parent_code with ()	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace prefetch_tree_code with ()	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace sha3_detected -> bool with true	1	detection, on a machine with SHA-3: a wrong no runs the NEON kernels (equally correct), a wrong yes is this machine's answer
 src/ffi_neon_hybrid.rs	replace | with ^ in compress_in_place	1	equivalent: | and ^ agree on flag bits that never overlap
-src/ffi_neon_hybrid.rs	replace || with && in partial_pays	1	speed: moves a threshold between equally correct paths (the partial kernel computes every count from 1 to 15, 10 too; 10 runs faster without it)
+src/ffi_sme2.rs	replace entries -> std::vec::Vec<(&'static str, *const())> with vec![]	1	UNCLASSIFIED
 src/ffi_sme2.rs	replace prefetch_code with ()	1	UNCLASSIFIED
 src/io.rs	replace * with +	1	UNCLASSIFIED
 src/io.rs	replace += with *= in copy_wide	1	UNCLASSIFIED
@@ -100,7 +97,6 @@ src/lanes.rs	replace - with / in sme2_prefix	1	UNCLASSIFIED
 src/lanes.rs	replace -= with += in hash_each	1	UNCLASSIFIED
 src/lanes.rs	replace -= with /= in hash_each	1	UNCLASSIFIED
 src/lanes.rs	replace / with % in sme2_prefix	2	UNCLASSIFIED
-src/lanes.rs	replace / with * in sme2_prefix	1	UNCLASSIFIED
 src/lanes.rs	replace < with <= in Pool::take_piece	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with <= in Pool::wait_done	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with <= in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
@@ -109,11 +105,10 @@ src/lanes.rs	replace < with <= in hash_each	1	UNCLASSIFIED
 src/lanes.rs	replace < with <= in proofs::cut_step_keeps_whole_subtrees	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace < with == in Pool::take_piece	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with == in Pool::wait_done	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace < with == in Pool::wake_for	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
+src/lanes.rs	replace < with == in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with == in group_cvs	1	UNCLASSIFIED
 src/lanes.rs	replace < with == in hash_each	1	UNCLASSIFIED
 src/lanes.rs	replace < with == in proofs::cut_step_keeps_whole_subtrees	1	a Kani harness's own code (cargo kani checks it)
-src/lanes.rs	replace < with > in Pool::take_piece	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with > in Pool::wait_done	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with > in Pool::wake_for	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with > in cut_with_prefix	1	UNCLASSIFIED
@@ -132,18 +127,22 @@ src/lanes.rs	replace == with != in sme2_main	1	OPEN: the pool's scheduling under
 src/lanes.rs	replace > with < in Pool::unregister	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace > with < in Pool::wake_for	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace > with < in cut_with_prefix	1	UNCLASSIFIED
+src/lanes.rs	replace > with < in hash_many_over_pool	1	UNCLASSIFIED
+src/lanes.rs	replace > with < in hash_over_pool	1	UNCLASSIFIED
 src/lanes.rs	replace > with < in proofs::next_piece_len_bounds	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace > with < in sme2_main	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace > with < in splits	1	UNCLASSIFIED
 src/lanes.rs	replace > with < in takes_tasks	1	UNCLASSIFIED
 src/lanes.rs	replace > with == in Pool::wake_for	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
+src/lanes.rs	replace > with == in hash_many_over_pool	1	UNCLASSIFIED
+src/lanes.rs	replace > with == in hash_over_pool	1	UNCLASSIFIED
 src/lanes.rs	replace > with == in proofs::next_piece_len_bounds	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace > with == in sme2_main	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace > with == in splits	1	UNCLASSIFIED
 src/lanes.rs	replace > with == in takes_tasks	1	UNCLASSIFIED
 src/lanes.rs	replace > with >= in Pool::piece_done	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace > with >= in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace > with >= in cut_with_prefix	1	UNCLASSIFIED
+src/lanes.rs	replace > with >= in hash_many_over_pool	1	UNCLASSIFIED
+src/lanes.rs	replace > with >= in hash_over_pool	1	UNCLASSIFIED
 src/lanes.rs	replace > with >= in proofs::next_piece_len_bounds	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace > with >= in sme2_main	3	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace > with >= in splits	1	UNCLASSIFIED
@@ -163,6 +162,7 @@ src/lanes.rs	replace Pool::wake_for with ()	1	OPEN: the pool's scheduling under 
 src/lanes.rs	replace Tasks::give_room with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace match guard task.members > 0 with false in sme2_main	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace match guard task.members > 0 with true in sme2_main	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
+src/lanes.rs	replace poll_pause with ()	1	UNCLASSIFIED
 src/lanes.rs	replace prefix_for -> usize with 0	1	UNCLASSIFIED
 src/lanes.rs	replace prefix_for -> usize with 1	1	UNCLASSIFIED
 src/lanes.rs	replace prepare with ()	1	UNCLASSIFIED
@@ -170,20 +170,18 @@ src/lanes.rs	replace proofs::cut_step_keeps_whole_subtrees with ()	1	a Kani harn
 src/lanes.rs	replace proofs::next_piece_len_bounds with ()	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace sme2_prefix -> usize with 0	1	UNCLASSIFIED
 src/lanes.rs	replace sme2_prefix -> usize with 1	1	UNCLASSIFIED
-src/lanes.rs	replace splits -> bool with false	1	UNCLASSIFIED
 src/lanes.rs	replace splits -> bool with true	1	UNCLASSIFIED
 src/lanes.rs	replace takes_tasks -> bool with false	1	UNCLASSIFIED
 src/lanes.rs	replace takes_tasks -> bool with true	1	UNCLASSIFIED
 src/lanes.rs	replace worker_main with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace | with & in Task::run_equal_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	replace | with ^ in Task::run_equal_members	4	equivalent: | and ^ agree on flag bits that never overlap
+src/lanes.rs	replace || with && in group_cvs	1	UNCLASSIFIED
 src/lanes.rs	replace || with && in hash_each	1	UNCLASSIFIED
 src/lanes.rs	replace || with && in takes_tasks	1	UNCLASSIFIED
 src/lib.rs	delete ! in <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv	1	speed: chooses between equally correct paths
 src/lib.rs	delete ! in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
 src/lib.rs	delete ! in batch_after_pause	2	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	delete ! in kernel_report_many_multithreaded	1	OPEN: the kernel report's lengths; no test checks them against the dispatch
-src/lib.rs	delete ! in kernel_report_multithreaded	1	OPEN: the kernel report's lengths; no test checks them against the dispatch
 src/lib.rs	delete ! in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	delete ! in prefetch_update_kernels	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	delete match arm (Platform::AVX2, 6..= 7) in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
@@ -272,7 +270,6 @@ src/lib.rs	replace | with ^ in compress_parents_parallel	1	equivalent: | and ^ a
 src/lib.rs	replace | with ^ in hash_all_at_once	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in hash_one_chunk_root	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace || with && in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
-src/lib.rs	replace || with && in compress_chunks_parallel	1	speed: chooses between equally correct paths
 src/many.rs	delete ! in across_from	2	UNCLASSIFIED
 src/many.rs	delete match arm 3 in hash_four_at_a_time	1	UNCLASSIFIED
 src/many.rs	replace != with == in across_from	1	UNCLASSIFIED
@@ -417,6 +414,7 @@ src/platform.rs	replace != with == in sme2_reported	2	detection, on a machine wi
 src/platform.rs	replace != with == in ticks_in_100_us	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/platform.rs	replace & with ^ in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace & with | in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
+src/platform.rs	replace && with || in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace * with + in Platform::compress_blocks	1	another build: the loop for builds without the AArch64 integer kernel (the pure build's tests reach it)
 src/platform.rs	replace * with + in Platform::xof_many	1	speed: moves a threshold between equally correct paths
 src/platform.rs	replace * with / in Platform::compress_blocks	1	another build: the loop for builds without the AArch64 integer kernel (the pure build's tests reach it)
@@ -495,7 +493,6 @@ src/queue.rs	replace - with + in Inner<H, I, S>::submit	1	UNCLASSIFIED
 src/queue.rs	replace - with + in State<I>::add_block	2	UNCLASSIFIED
 src/queue.rs	replace - with / in Inner<H, I, S>::submit	1	UNCLASSIFIED
 src/queue.rs	replace -= with += in Delivery::give_room	1	UNCLASSIFIED
-src/queue.rs	replace -= with /= in Delivery::give_room	1	UNCLASSIFIED
 src/queue.rs	replace / with % in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
 src/queue.rs	replace / with % in State<I>::close_open	1	UNCLASSIFIED
 src/queue.rs	replace / with * in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
@@ -528,8 +525,6 @@ src/queue.rs	replace |= with &= in Delivery::run	1	UNCLASSIFIED
 src/queue.rs	replace || with && in State<I>::close_open	2	UNCLASSIFIED
 src/self_test.rs	delete match arm FAILED in ensure_slow	1	UNCLASSIFIED
 src/self_test.rs	replace != with == in ensure	1	UNCLASSIFIED
-src/self_test.rs	replace % with + in chunk_values	1	UNCLASSIFIED
-src/self_test.rs	replace % with / in chunk_values	1	UNCLASSIFIED
 src/self_test.rs	replace & with ^ in compiled_features_present	2	UNCLASSIFIED
 src/self_test.rs	replace & with | in compiled_features_present	2	UNCLASSIFIED
 src/self_test.rs	replace && with || in compiled_features_present	2	UNCLASSIFIED
@@ -539,13 +534,11 @@ src/self_test.rs	replace * with /	6	UNCLASSIFIED
 src/self_test.rs	replace + with *	8	UNCLASSIFIED
 src/self_test.rs	replace + with -	7	UNCLASSIFIED
 src/self_test.rs	replace << with >> in compiled_features_present	2	UNCLASSIFIED
-src/self_test.rs	replace == with != in chunk_values	1	UNCLASSIFIED
 src/self_test.rs	replace == with != in compiled_features_present	2	UNCLASSIFIED
 src/self_test.rs	replace compiled_features_present with ()	1	UNCLASSIFIED
 src/self_test.rs	replace ensure with ()	1	UNCLASSIFIED
 src/self_test.rs	replace ensure_slow with ()	1	UNCLASSIFIED
 src/self_test.rs	replace ensure_slow::<impl Drop for Failed>::drop with ()	1	UNCLASSIFIED
-src/self_test.rs	replace run with ()	1	UNCLASSIFIED
 src/self_test.rs	replace | with ^ in chunk_values	2	equivalent: | and ^ agree on flag bits that never overlap
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::children -> Option<[Cv; 2]> with None	1	UNCLASSIFIED
 src/wasm32_simd.rs	delete ! in load_counters	1	UNCLASSIFIED
