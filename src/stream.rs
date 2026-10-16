@@ -33,7 +33,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 pub(crate) const PIECE: usize = TASK_LEN;
 
 /// The bytes a stream keeps for messages written in place.
-const RING_BYTES: usize = 4 << 20;
+const RING_BYTES: usize = 1 << 20;
 
 /// The most entries (messages and pieces) in flight in one stream (1024:
 /// 4 KiB to 16 KiB messages 8-9% faster than at 8192, i7-12700K; 256 lost
