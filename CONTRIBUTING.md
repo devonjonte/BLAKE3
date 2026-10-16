@@ -28,7 +28,7 @@ including the ideas tried and rejected.
 ## Build and test
 
 The supported C compilers are those of supported operating systems: GCC
-10 or later (Debian 11's, the oldest; CI builds and tests with it), Clang,
+12 or later (Debian 12's, the oldest; CI builds and tests with it), Clang,
 and MSVC as current releases ship them. Older ones are unsupported.
 
 On AArch64 Linux and macOS the build includes the SME2 kernel when the C
