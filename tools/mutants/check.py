@@ -70,9 +70,7 @@ def survivors(files):
         # Its own build directory, named outright (a cargo config's
         # target-dir would otherwise give the shards one, and each would
         # test the others' builds).
-        # Temporary files on /tmp too: a full root filesystem failed the
-        # tests that write them, and counted their mutants caught.
-        env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"), TMPDIR="/tmp")
+        env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"))
         shard = args + ["--shard", f"{k}/{SHARDS}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
         runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=cap_memory)))
     names = collections.Counter()
