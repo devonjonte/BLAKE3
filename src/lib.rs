@@ -1663,13 +1663,17 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
                 name: "integer and NEON code, up to nine messages at a time",
                 why: "Two or more messages are hashed together, up to eight on the NEON vector units and one on the integer units at once; on SME2 this handles the messages left over below a group of sixteen.",
             });
-        } else {
-            // hash_four_at_a_time pads three messages to a group of four.
-            kernels.push(Kernel {
-                from_len: 3 * message_len,
-                name: "NEON vectors, four messages at a time",
-                why: "From three messages, groups of four are hashed on the NEON vector units, three left over padded to four with a repeat and one or two left over one call each.",
-            });
+        } else if message_len % BLOCK_LEN == 0 {
+            // Whole blocks, on the C NEON kernel: 64-byte messages from two
+            // (hash_run hands it any count), longer ones from three
+            // (hash_four_at_a_time pads three to four). A partial last
+            // block runs one call each.
+            let (least, why) = if message_len == BLOCK_LEN {
+                (2, "From two messages, the NEON vector units hash them four at a time.")
+            } else {
+                (3, "From three messages, groups of four are hashed on the NEON vector units, three left over padded to four with a repeat and one or two left over one call each.")
+            };
+            kernels.push(Kernel { from_len: least * message_len, name: "NEON vectors, four messages at a time", why });
         }
         #[cfg(blake3_sme2)]
         const _: () = assert!(many::ONE_BLOCK_PAD_MIN == 11 && many::ONE_BLOCK_PAD_AFTER_GROUPS == 5, "the words below name these counts");
