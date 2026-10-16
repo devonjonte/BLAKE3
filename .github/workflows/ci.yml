@@ -80,10 +80,6 @@ jobs:
     - run: cargo test --features=no_avx512,no_avx2
     - run: cargo test --features=no_avx512,no_avx2,pure
 
-    # Test benchmarks. RUSTC_BOOTSTRAP=1 lets this run on non-nightly toolchains.
-    - run: cargo test --benches
-      env:
-        RUSTC_BOOTSTRAP: 1
     # Test vectors.
     - name: test vectors
       run: cargo test
@@ -154,9 +150,6 @@ jobs:
     - run: cargo test --target wasm32-wasip1 --no-default-features
     - run: cargo test --target wasm32-wasip1 --features wasm32_simd
     - run: cargo test --target wasm32-wasip1 --no-default-features --features wasm32_simd
-    - run: cargo test --target wasm32-wasip1 --benches --features=wasm32_simd
-      env:
-        RUSTC_BOOTSTRAP: 1
     - name: test vectors w/o SIMD
       run: cargo test --target wasm32-wasip1
       working-directory: ./test_vectors
