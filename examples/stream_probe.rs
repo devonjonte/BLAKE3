@@ -347,7 +347,17 @@ fn oneshot(api: &str, len: usize) -> Vec<Sample> {
                 s.finish(&mut take);
             });
         }),
-        _ => panic!("oneshot-job | oneshot-stream, -many"),
+        // One message from a reader (an in-memory one: each read a copy).
+        "oneshot-reader-stream" => clocks::measure(64, 2_000_000, || {
+            blake3_servil::stream(blake3_servil::Mode::Hash, |s| {
+                s.submit_reader(&input[..], |d| digests[0] = *d[0].as_bytes()).unwrap();
+                s.finish(|d| digests[0] = *d[0].as_bytes());
+            });
+        }),
+        "oneshot-reader-hasher" => clocks::measure(64, 2_000_000, || {
+            digests[0] = *blake3_servil::Hasher::new().update_reader(&input[..]).unwrap().finalize().as_bytes();
+        }),
+        _ => panic!("oneshot-job | oneshot-stream | oneshot-reader-stream | oneshot-reader-hasher, -many"),
     };
     std::hint::black_box(&digests);
     batches.iter().map(|b| (b.wall_ns, b.calls * bytes as u64, b.started_ns / 1_000_000)).collect()

@@ -69,6 +69,10 @@ enum Kind {
     /// `count` messages of `message_len` bytes laid out as hash_many takes
     /// them: their digests in the ring, from `at`.
     Batch { message_len: usize, count: usize, at: usize },
+    /// The end of a long message whose reader failed after some pieces
+    /// ([`Stream::submit_reader`]): no digest; its pieces' chaining values
+    /// are dropped.
+    Abandoned,
 }
 
 /// What a task's threads write for an entry: a message's digest, two to a
@@ -262,6 +266,78 @@ impl<'env> Stream<'env> {
         }
     }
 
+    /// Hash the message `reader` yields, to its end, read straight into the
+    /// stream's own bytes in pieces of up to 64 KiB (a file or socket read
+    /// into the stream, overlapping the hashing of earlier pieces): the
+    /// message's length on success. `digest` receives any digests this
+    /// call hands back. On a read error (other than an interruption, which
+    /// reads again) the message gets no digest and the error returns; the
+    /// stream goes on with the next message. The length need not be known:
+    /// the stream reads one piece ahead to tell the last.
+    pub fn submit_reader(&mut self, mut reader: impl std::io::Read, mut digest: impl FnMut(&[Hash])) -> std::io::Result<u64> {
+        let start = self.head;
+        let (mut at, mut end, mut n, mut read) = self.read_piece(&mut reader, &mut digest);
+        let mut i = 0;
+        loop {
+            let ahead = (n == PIECE && read.is_ok()).then(|| self.read_piece(&mut reader, &mut digest));
+            let failed = read.is_err() || ahead.as_ref().is_some_and(|a| a.3.is_err());
+            if failed {
+                let error = match (read, ahead) {
+                    (Err(e), _) => e,
+                    (_, Some((_, _, _, Err(e)))) => e,
+                    _ => unreachable!("a read failed"),
+                };
+                // The bytes not yet handed to the pool go; the pieces that
+                // were end in an entry that drops their chaining values.
+                self.head = if i == 0 { start } else { end - PIECE.div_ceil(64) * 64 };
+                if i > 0 {
+                    let head = self.head;
+                    self.add_entry(0, Kind::Abandoned, head, &mut digest);
+                }
+                return Err(error);
+            }
+            let last = match &ahead {
+                None => true,
+                // Exactly a piece, then the end: give the read-ahead room back.
+                Some((_, _, 0, _)) => {
+                    self.head = end;
+                    true
+                }
+                Some(_) => false,
+            };
+            let kind = if i == 0 && last { Kind::Message } else { Kind::Piece { counter: (i * PIECE / CHUNK_LEN) as u64, last } };
+            // [at, at + n): this piece's reserved room, written.
+            let input = self.s.ring_at(at);
+            self.add_part(input, n, kind, end, &mut digest);
+            if last {
+                return Ok((i * PIECE + n) as u64);
+            }
+            (at, end, n, read) = ahead.unwrap();
+            i += 1;
+        }
+    }
+
+    /// A piece's room (PIECE bytes, reserved), read into from `reader` until
+    /// it is full, the reader ends, or a read fails: its offset, the ring's
+    /// head after its reservation, the bytes read, and the read's result.
+    fn read_piece(&mut self, reader: &mut impl std::io::Read, digest: &mut impl FnMut(&[Hash])) -> (usize, usize, usize, std::io::Result<()>) {
+        let at = self.reserve(PIECE, digest);
+        let end = self.head;
+        // Sound: [at, at + PIECE) is reserved and free, and `&mut self`
+        // keeps every other writer out.
+        let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring_at(at), PIECE) };
+        let mut n = 0;
+        while n < PIECE {
+            match reader.read(&mut room[n..]) {
+                Ok(0) => break,
+                Ok(k) => n += k,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return (at, end, n, Err(e)),
+            }
+        }
+        (at, end, n, Ok(()))
+    }
+
     /// Hash a batch of messages of `message_len` bytes where it is, laid
     /// out as [`hash_many`](crate::hash_many) takes them (each in whole
     /// blocks, zero after its bytes); `digest` receives any digests this
@@ -309,6 +385,7 @@ impl<'env> Stream<'env> {
         let entry = self.add_entry(len, kind, ring_end, digest);
         let (batch, out) = match kind {
             Kind::Message => (None, self.s.outs[entry].0.get() as *mut u8),
+            Kind::Abandoned => unreachable!("an abandoned message adds no part"),
             Kind::Batch { message_len, at, .. } => (Some(message_len), self.s.ring_at(at)),
             Kind::Piece { counter, .. } => {
                 self.s.lefts[entry].store(1, Ordering::Relaxed);
@@ -453,6 +530,10 @@ impl<'env> Stream<'env> {
             // Hash is [u8; 32] (repr(transparent)).
             match kind {
                 Kind::Message => unreachable!(),
+                Kind::Abandoned => {
+                    self.stack.clear();
+                    self.pieces = 0;
+                }
                 Kind::Batch { count, at, .. } => digest(unsafe { core::slice::from_raw_parts(self.s.ring_at(at) as *const Hash, count) }),
                 Kind::Piece { counter, last } => {
                     let out = unsafe { *self.s.pieces_out[index].0.0.get() };
@@ -642,6 +723,67 @@ mod test {
         }
     }
 
+    /// A reader that yields `data` in reads of varying sizes (1 byte to
+    /// 9000), interrupted now and then, failing after `fail_at` bytes.
+    struct Uneven<'a> {
+        data: &'a [u8],
+        at: usize,
+        calls: usize,
+        fail_at: Option<usize>,
+    }
+
+    impl std::io::Read for Uneven<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.calls += 1;
+            if self.calls % 7 == 0 {
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            if self.fail_at.is_some_and(|f| self.at >= f) {
+                return Err(std::io::Error::other("the reader fails"));
+            }
+            let limit = self.fail_at.unwrap_or(self.data.len()).min(self.data.len());
+            let n = buf.len().min([1, 9000, 333, 65536, 4096][self.calls % 5]).min(limit - self.at);
+            buf[..n].copy_from_slice(&self.data[self.at..][..n]);
+            self.at += n;
+            Ok(n)
+        }
+    }
+
+    /// Readers of every length the pieces make special (empty, under,
+    /// at, and over a piece, many pieces), in each mode, between borrowed
+    /// messages, against hash_with, in order; and readers failing in the
+    /// first piece, at a piece's end, and later: no digest for them, an
+    /// error back, and the next message's digest still right.
+    #[test]
+    fn test_stream_readers() {
+        let mut input = std::vec![0u8; 5 * PIECE + 77];
+        crate::test::paint_test_input(&mut input);
+        let key = [9u8; 32];
+        let lens = [0, 1, 1000, PIECE - 1, PIECE, PIECE + 1, 2 * PIECE, 3 * PIECE + 5, 5 * PIECE + 77];
+        for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("stream readers")] {
+            let (mut got, mut want) = (std::vec::Vec::new(), std::vec::Vec::new());
+            stream(mode, |s| {
+                for _ in 0..3 {
+                    for &len in &lens {
+                        let n = s.submit_reader(Uneven { data: &input[..len], at: 0, calls: 0, fail_at: None }, |h| got.extend_from_slice(h)).unwrap();
+                        assert_eq!(n, len as u64);
+                        want.push(crate::hash_with(mode, &input[..len]));
+                        s.submit(&input[..100], |h| got.extend_from_slice(h));
+                        want.push(crate::hash_with(mode, &input[..100]));
+                    }
+                }
+                for fail_at in [0, 500, PIECE, PIECE + 3, 2 * PIECE, 3 * PIECE + 1] {
+                    let r = s.submit_reader(Uneven { data: &input, at: 0, calls: 0, fail_at: Some(fail_at) }, |h| got.extend_from_slice(h));
+                    assert!(r.is_err(), "a failing reader's error comes back (failing at {fail_at})");
+                    s.submit(&input[..3 * PIECE + 5], |h| got.extend_from_slice(h));
+                    want.push(crate::hash_with(mode, &input[..3 * PIECE + 5]));
+                }
+                s.finish(|h| got.extend_from_slice(h));
+            });
+            assert!(got == want, "readers' digests in order, none for the failed ones");
+        }
+    }
+
     /// A few messages through a stream, small enough for Miri: the handover
     /// of entries to the pool's threads and back, checked for data races.
     #[test]
@@ -654,11 +796,14 @@ mod test {
                 s.submit(&input[..len], |h| got.extend_from_slice(h));
                 s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), |h| got.extend_from_slice(h));
             }
+            assert_eq!(s.submit_reader(&input[..2 * PIECE + 1], |h| got.extend_from_slice(h)).unwrap(), 2 * PIECE as u64 + 1);
+            assert!(s.submit_reader(Uneven { data: &input, at: 0, calls: 0, fail_at: Some(PIECE + 1) }, |h| got.extend_from_slice(h)).is_err());
             s.submit_batch(&input[..4 * 64], 64, |h| got.extend_from_slice(h));
             s.submit_batch_with(3, 64, |at, room| room.copy_from_slice(&input[at..][..room.len()]), |h| got.extend_from_slice(h));
             s.finish(|h| got.extend_from_slice(h));
         });
         let mut want: std::vec::Vec<Hash> = lens.iter().flat_map(|&l| [crate::hash(&input[..l]); 2]).collect();
+        want.push(crate::hash(&input[..2 * PIECE + 1]));
         want.extend([crate::hash(&input[..64]); 7]);
         assert_eq!(got, want);
     }
