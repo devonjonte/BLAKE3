@@ -99,11 +99,10 @@ use std::sync::{Condvar, Mutex, OnceLock};
 pub(crate) const MIN_SPLIT_LEN: usize = 512 * 1024;
 
 /// The shortest batch [`hash_many`] splits over the pool when the last
-/// such batch call ended within SPIN_BEFORE_SLEEP (a program hashing one
-/// batch after another, whose calls keep the workers awake): from here to
-/// MIN_SPLIT_LEN, a batch splits only then, and stays on the calling
-/// thread after a pause. (A rule on the workers' state alone never split:
-/// calls on the calling thread leave them asleep.) A batch's messages split anywhere
+/// such batch call ended within BATCH_WINDOW (a program hashing one batch
+/// after another): from here to MIN_SPLIT_LEN, a batch splits only then,
+/// and stays on the calling thread after a pause. (A rule on the workers'
+/// state alone never split: they sleep as soon as they find no work.) A batch's messages split anywhere
 /// between them, with no tree to join, so awake workers pay from a
 /// smaller size than a message; waking sleeping ones does not. i7-12700K,
 /// 64-byte messages: one call after another, split from here against
@@ -270,16 +269,21 @@ pub(crate) fn hash_many(input: &[u8], message_len: usize, key: &crate::CVWords, 
     hash_many_middle(input, message_len, key, flags, outputs)
 }
 
+/// How soon after the last batch call from MIN_SPLIT_BATCH the next splits
+/// below MIN_SPLIT_LEN: back-to-back calls come within it, calls after a
+/// pause (bench-hashes' gaps are 1 ms) do not.
+const BATCH_WINDOW: std::time::Duration = std::time::Duration::from_micros(200);
+
 /// When the last batch call from MIN_SPLIT_BATCH ended, in ns since the
 /// pool's start.
 static LAST_BATCH_NS: AtomicU64 = AtomicU64::new(0);
 
 /// A batch from MIN_SPLIT_BATCH: over the pool from MIN_SPLIT_LEN, or when
-/// the last such call ended within SPIN_BEFORE_SLEEP; else on this thread.
+/// the last such call ended within BATCH_WINDOW; else on this thread.
 #[inline(never)]
 fn hash_many_middle(input: &[u8], message_len: usize, key: &crate::CVWords, flags: u8, outputs: &mut [[u8; crate::OUT_LEN]]) {
     let started = pool().started.elapsed().as_nanos() as u64;
-    let recent = started.saturating_sub(LAST_BATCH_NS.load(Ordering::Relaxed)) < SPIN_BEFORE_SLEEP.as_nanos() as u64;
+    let recent = started.saturating_sub(LAST_BATCH_NS.load(Ordering::Relaxed)) < BATCH_WINDOW.as_nanos() as u64;
     if input.len() >= MIN_SPLIT_LEN || recent {
         hash_many_over_pool(input, message_len, key, flags, outputs);
     } else {
