@@ -998,40 +998,15 @@ impl Pool {
     }
 }
 
-/// The spin window: how long a worker that finds nothing keeps looking
-/// while a stream is open, in microseconds (BLAKE3_SPIN_US, for the
-/// experiment; default 5).
-fn spin_window() -> std::time::Duration {
-    static US: OnceLock<u64> = OnceLock::new();
-    std::time::Duration::from_micros(*US.get_or_init(|| std::env::var("BLAKE3_SPIN_US").ok().and_then(|v| v.parse().ok()).unwrap_or(5)))
-}
+/// How long a worker that finds nothing keeps looking while a stream is
+/// open (more is coming) before it parks: 5 us. i7-12700K, against the
+/// stream on the earlier pool: none cost small messages 9-12% (a park and
+/// a wake at every gap); 20 us cost 22% more CPU time a run for no speed;
+/// a cap on how many workers spin did not help.
+const SPIN: std::time::Duration = std::time::Duration::from_micros(5);
 
-/// Workers spinning now, and the most that may (BLAKE3_SPINNERS, for the
-/// experiment; default every worker): the others park at once, and the
-/// chained wakes bring them back when work grows.
-static SPINNING: OwnLine<AtomicUsize> = OwnLine(AtomicUsize::new(0));
-
-fn max_spinners() -> usize {
-    static N: OnceLock<usize> = OnceLock::new();
-    *N.get_or_init(|| std::env::var("BLAKE3_SPINNERS").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX))
-}
-
-/// Look for work for up to the spin window: whether some appeared.
+/// Look for work for up to SPIN: whether some appeared.
 fn spin_for_work(pool: &Pool) -> bool {
-    let window = spin_window();
-    if window.is_zero() {
-        return false;
-    }
-    if SPINNING.fetch_add(1, Ordering::Relaxed) >= max_spinners() {
-        SPINNING.fetch_sub(1, Ordering::Relaxed);
-        return false;
-    }
-    let found = spin_while(pool, window);
-    SPINNING.fetch_sub(1, Ordering::Relaxed);
-    found
-}
-
-fn spin_while(pool: &Pool, window: std::time::Duration) -> bool {
     let started = std::time::Instant::now();
     loop {
         for _ in 0..16 {
@@ -1040,7 +1015,7 @@ fn spin_while(pool: &Pool, window: std::time::Duration) -> bool {
             }
             core::hint::spin_loop();
         }
-        if started.elapsed() >= window || !sources::open() {
+        if started.elapsed() >= SPIN || !sources::open() {
             return false;
         }
     }

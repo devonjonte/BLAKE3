@@ -11,9 +11,11 @@
 //!   subtree at its offset and a task of its own; the program's thread
 //!   merges the pieces' chaining values in order as it hands back the
 //!   digest.
-//! - Tasks go to the pool's task list a task at a time (one lock per task,
-//!   no locked instruction per message). The open task is handed over when
-//!   it fills, or when the program collects or finishes.
+//! - The stream is its own source of tasks for the pool's workers
+//!   (`lanes::sources`): it writes each task into its source's ring and
+//!   publishes it with one store, and workers take tasks in order by
+//!   compare-and-swap, with no lock and no shared queue. The open task is
+//!   handed over when it fills, or when the program collects or finishes.
 //! - Each submission names where its digests go, in the program's memory;
 //!   the threads write them there (a long message's, merged on the
 //!   program's thread, too). The stream hands that memory back to the
@@ -36,23 +38,12 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 /// this long (a task's subtree).
 pub(crate) const PIECE: usize = TASK_LEN;
 
-/// The bytes a stream keeps for messages and batches written in place.
-/// The ring's size: BLAKE3_RING_KIB (for the experiment; default 4096),
-/// read once, then a plain load.
-static RING_BYTES_SET: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-#[inline(always)]
-fn ring_bytes() -> usize {
-    let n = RING_BYTES_SET.load(Ordering::Relaxed);
-    if n != 0 { n } else { ring_bytes_init() }
-}
-
-#[cold]
-fn ring_bytes_init() -> usize {
-    let n = std::env::var("BLAKE3_RING_KIB").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4096) << 10;
-    RING_BYTES_SET.store(n, Ordering::Relaxed);
-    n
-}
+/// The bytes a stream keeps for messages and batches written in place:
+/// 2 MiB. With the digests in the program's places, 4 MiB made two
+/// programs streaming 4 MiB batches 18% slower (the ring, the places, and
+/// the programs' own buffers past the L3, i7-12700K); 2 MiB is level there
+/// and 2-4 points less fast than 4 MiB on some other cells.
+const RING_BYTES: usize = 2 << 20;
 
 /// The most entries (messages and pieces) in flight in one stream (1024:
 /// 4 KiB to 16 KiB messages 8-9% faster than at 8192, i7-12700K; 256 lost
@@ -124,6 +115,13 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// `body` share goes in a [`Cell`](core::cell::Cell) or
 /// [`RefCell`](core::cell::RefCell).
 ///
+/// Each message's place comes back alone, about 1-2 ns a message: for
+/// many short messages of one length, [`Stream::submit_batch`] hands back
+/// one place per batch and hashes them side by side (64-byte messages one
+/// at a time ran 4-8% slower than in the stream's earlier design, which
+/// handed back runs of digests from its own memory; batches of them,
+/// 5-13% faster; i7-12700K).
+///
 /// ```
 /// # blake3_servil::initialize_multithreaded();
 /// use blake3_servil::{Hash, Mode};
@@ -174,7 +172,7 @@ pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: im
 /// time, 4-5 us with the spare; one stream kept open, 2.6-4 us. i7-12700K).
 struct Storage {
     entries: Box<[Entry]>,
-    /// ring_bytes() for messages and batches written in place
+    /// RING_BYTES for messages and batches written in place
     /// ([`Stream::submit_with`]), each at a 64-byte boundary, in the order
     /// of their entries: an allocation of its own, reached by pointer
     /// alone (the program writes some bytes while threads read others).
@@ -216,7 +214,7 @@ impl Storage {
             source: crate::lanes::sources::Source::new(ENTRIES),
             entries: std::vec![Entry { len: 0, kind: Kind::Abandoned, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
             // Zeroed, untouched pages: only the bytes used are faulted in.
-            ring: Box::into_raw(std::vec![0u8; ring_bytes()].into_boxed_slice()) as *mut u8,
+            ring: Box::into_raw(std::vec![0u8; RING_BYTES].into_boxed_slice()) as *mut u8,
             pieces_out: (0..ENTRIES).map(|_| OwnLine(Out(UnsafeCell::new([0; 64])))).collect(),
             lefts: (0..ENTRIES).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
         }
@@ -224,7 +222,7 @@ impl Storage {
 
     /// The ring's byte at `at`.
     fn ring_at(&self, at: usize) -> *mut u8 {
-        debug_assert!(at <= ring_bytes());
+        debug_assert!(at <= RING_BYTES);
         // Sound: `at` is in the ring.
         unsafe { self.ring.add(at) }
     }
@@ -496,10 +494,10 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// hashing tasks, until entries in flight free them.
     fn reserve(&mut self, len: usize) -> usize {
         let slot = len.div_ceil(64) * 64;
-        let mut at = self.head % ring_bytes();
+        let mut at = self.head % RING_BYTES;
         // A slot that would cross the end starts the next lap instead.
-        let skip = if at + slot > ring_bytes() { ring_bytes() - at } else { 0 };
-        while ring_bytes() - (self.head - self.tail) < skip + slot {
+        let skip = if at + slot > RING_BYTES { RING_BYTES - at } else { 0 };
+        while RING_BYTES - (self.head - self.tail) < skip + slot {
             self.publish();
             self.help();
         }
