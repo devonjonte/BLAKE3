@@ -132,6 +132,8 @@ The part above (Philosophy, Strategy, Style) reads the same in the `AGENTS.md` o
 
 **Generated text is computed from what the page shows.** A sentence about the page's own contents is built from the same data as the page, so it names only what is on the page, whatever options produced it.
 
+**Our APIs freeze at 1.0** (Zooko, October 16, 2026). The crate's version stays below 1.0 while we still change its APIs freely, every caller with them (Contracts change everywhere at once). Version 1.0 marks the day its efficiency, correctness, and generality over platforms and use cases reach what we want, and its public APIs freeze. From then on, their callers are users we cannot change, so a parameter that costs little and will likely be needed may come ahead of its use, to spare them a breaking change (`Stream::submit_reader`'s size hint, a scheduling hint and never part of the hash, is the first).
+
 **Comparisons, as the servil projects run them** (Zooko, October 16, 2026). A run's mean is `clocks::summary::mean`. A comparison's cells are judged by `clocks::summary::discoveries` (a paired t-test per cell, the false discovery rate controlled over all cells at 5%, a 3% margin), each pair of runs with a fresh link layout; for samples files, `bench-hashes compare OLD... -- NEW...` and `bench-hashes regress`. The regression check's calibration (October 2, 2026) is in the fork's NOTES. Before changing how comparisons are judged, read bench-hashes' `COMPARISONS.md`: each choice's evidence, what it gives up, the alternatives already set aside, and why the rule kept changing.
 
 ## Strategy: the streaming APIs first (Zooko, September 27, 2026)
