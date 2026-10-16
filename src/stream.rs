@@ -435,7 +435,9 @@ impl<'env> Stream<'env> {
         let skip = if at + slot > RING_BYTES { RING_BYTES - at } else { 0 };
         while RING_BYTES - (self.head - self.tail) < skip + slot {
             self.publish();
-            self.help(digest);
+            if self.deliver(digest) == 0 {
+                crate::lanes::poll_pause(&mut std::time::Instant::now());
+            }
         }
         if skip > 0 {
             at = 0;
