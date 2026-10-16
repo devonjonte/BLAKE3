@@ -1424,17 +1424,18 @@ fn test_hasher_gathers() {
 }
 
 /// Whole chunks and a partial one in one pass (rust_avx2's
-/// hash_chunks_with_partial, on AVX2 or AVX-512): every length with a
-/// partial chunk up to eight chunks, and some past them (the partial
-/// chunk then sits at a later counter), in each of the three modes,
-/// against the reference implementation.
+/// hash_chunks_with_partial, on AVX2 or AVX-512): 1 to 7 whole chunks
+/// (each a different count of lanes beside the partial chunk's) with a
+/// partial chunk of each block count (block_cases), and some past them
+/// (the partial chunk then sits at a later counter), in each of the three
+/// modes, against the reference implementation.
 #[test]
 #[cfg(feature = "std")]
 fn test_chunks_with_partial_against_reference() {
     let mut input = vec![0u8; 40 * CHUNK_LEN];
     paint_test_input(&mut input);
     let key = [7u8; crate::KEY_LEN];
-    let mut lens: Vec<usize> = (CHUNK_LEN + 1..8 * CHUNK_LEN).filter(|l| l % CHUNK_LEN != 0).collect();
+    let mut lens: Vec<usize> = (1..8).flat_map(|whole| block_cases(CHUNK_LEN - 1).map(move |partial| whole * CHUNK_LEN + partial)).collect();
     lens.extend([9 * CHUNK_LEN + 1, 12 * CHUNK_LEN + 700, 16 * CHUNK_LEN + 64, 23 * CHUNK_LEN + 1023, 39 * CHUNK_LEN + 5]);
     if cfg!(miri) {
         lens = vec![CHUNK_LEN + 1, 2 * CHUNK_LEN + 65, 7 * CHUNK_LEN + 1023];
