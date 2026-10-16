@@ -36,7 +36,8 @@ your own machine; here are its
 It supports 64-bit Arm (Linux and macOS), x86-64 (Linux, macOS, and Windows with MSVC), and
 WebAssembly, with the latest stable Rust; for other targets (32-bit x86 or Arm, big-endian
 CPUs, Windows with MinGW) and older compilers, [official BLAKE3](https://github.com/BLAKE3-team/BLAKE3)
-serves them. `CONTRIBUTING.md` says how to work on the fork. Everything below is upstream's
+serves them, and C programs too until the fork offers C a library of its
+own. `CONTRIBUTING.md` says how to work on the fork. Everything below is upstream's
 README, apart from the speed chart.
 
 # The BLAKE3 algorithm
@@ -213,7 +214,10 @@ assert_ne!(email_key, api_key);
 
 ### The C implementation
 
-See [`c/README.md`](c/README.md).
+This fork has no C library yet: C programs use official BLAKE3's (see its
+[`c/README.md`](https://github.com/BLAKE3-team/BLAKE3/blob/master/c/README.md)).
+The fork's `c/` holds the assembly kernels and the C NEON kernel its Rust
+crate builds.
 
 ### Other implementations
 

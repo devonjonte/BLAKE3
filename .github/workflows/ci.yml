@@ -2,7 +2,7 @@ name: tests
 
 on:
   # Started by hand for a promotion candidate that touches code for other
-  # targets (x86, Windows, wasm32, big-endian), and for every fork's pull
+  # targets (x86, Windows, wasm32), and for every fork's pull
   # request; the AArch64 builds and proofs run on the VM and the Mac
   # (PROCEDURES.md: tools/check-builds.sh, tools/verify/long-proofs.sh).
   pull_request:
@@ -91,33 +91,6 @@ jobs:
     - name: test vectors pure
       run: cargo test --features=pure
       working-directory: ./test_vectors
-    # Test C code.
-    - name: cargo test C bindings assembly
-      run: cargo test
-      working-directory: ./c/blake3_c_rust_bindings
-    - name: cargo test C bindings intrinsics
-      run: cargo test --features=prefer_intrinsics
-      working-directory: ./c/blake3_c_rust_bindings
-    - name: cargo test C bindings no AVX-512
-      run: cargo test
-      working-directory: ./c/blake3_c_rust_bindings
-      env:
-        CFLAGS: -DBLAKE3_NO_AVX512
-    - name: cargo test C bindings no AVX2
-      run: cargo test
-      working-directory: ./c/blake3_c_rust_bindings
-      env:
-        CFLAGS: -DBLAKE3_NO_AVX512 -DBLAKE3_NO_AVX2
-    - name: cargo test C bindings no SSE41
-      run: cargo test
-      working-directory: ./c/blake3_c_rust_bindings
-      env:
-        CFLAGS: -DBLAKE3_NO_AVX512 -DBLAKE3_NO_AVX2 -DBLAKE3_NO_SSE41
-    - name: cargo test C bindings no SSE2
-      run: cargo test
-      working-directory: ./c/blake3_c_rust_bindings
-      env:
-        CFLAGS: -DBLAKE3_NO_AVX512 -DBLAKE3_NO_AVX2 -DBLAKE3_NO_SSE41 -DBLAKE3_NO_SSE2
     # Reference impl doc test.
     - name: reference impl doc test
       run: cargo test
@@ -191,125 +164,6 @@ jobs:
       run: cargo test --target wasm32-wasip1 --features wasm32_simd
       working-directory: ./test_vectors
 
-  cmake_c_tests:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: CMake C tests SIMD=${{ matrix.simd }} TBB=${{ matrix.use_tbb }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        use_tbb: ["OFF", "ON"]
-        simd: ["x86-intrinsics", "amd64-asm"]
-    steps:
-    - uses: actions/checkout@v4
-    - run: |
-        sudo apt-get update
-        sudo apt-get install ninja-build libtbb-dev libtbb12
-    # Test the intrinsics-based and assembly-based implementations.
-    - run: |
-        cmake --fresh -S c -B c/build -G Ninja -DBLAKE3_TESTING=ON -DBLAKE3_TESTING_CI=ON "-DBLAKE3_SIMD_TYPE=${{ matrix.simd }}"
-        cmake --build c/build --target test
-        cat c/build/Testing/Temporary/LastTest.log
-    - run: |
-        cmake --fresh -S c -B c/build -G Ninja -DBLAKE3_TESTING=ON -DBLAKE3_TESTING_CI=ON "-DBLAKE3_SIMD_TYPE=${{ matrix.simd }}" -DBLAKE3_NO_SSE2=1
-        cmake --build c/build --target test
-        cat c/build/Testing/Temporary/LastTest.log
-    - run: |
-        cmake --fresh -S c -B c/build -G Ninja -DBLAKE3_TESTING=ON -DBLAKE3_TESTING_CI=ON "-DBLAKE3_SIMD_TYPE=${{ matrix.simd }}" -DBLAKE3_NO_SSE2=1 -DBLAKE3_NO_SSE41=1
-        cmake --build c/build --target test
-        cat c/build/Testing/Temporary/LastTest.log
-    - run: |
-        cmake --fresh -S c -B c/build -G Ninja -DBLAKE3_TESTING=ON -DBLAKE3_TESTING_CI=ON "-DBLAKE3_SIMD_TYPE=${{ matrix.simd }}" "-DBLAKE3_NO_SSE2=1" "-DBLAKE3_NO_SSE41=1" "-DBLAKE3_NO_AVX2=1"
-        cmake --build c/build --target test
-        cat c/build/Testing/Temporary/LastTest.log
-    - run: |
-        cmake --fresh -S c -B c/build -G Ninja -DBLAKE3_TESTING=ON -DBLAKE3_TESTING_CI=ON "-DBLAKE3_SIMD_TYPE=${{ matrix.simd }}" "-DBLAKE3_NO_SSE2=1" "-DBLAKE3_NO_SSE41=1" "-DBLAKE3_NO_AVX2=1" "-DBLAKE3_NO_AVX512=1"
-        cmake --build c/build --target test
-        cat c/build/Testing/Temporary/LastTest.log
-    # Test with TBB disabled/enabled.
-    - run: |
-        cmake --fresh -S c -B c/build -G Ninja -DBLAKE3_TESTING=ON -DBLAKE3_TESTING_CI=ON "-DBLAKE3_USE_TBB=${{ matrix.use_tbb }}"
-        cmake --build c/build --target test
-        cat c/build/Testing/Temporary/LastTest.log
-    # Build the example with TBB disabled/enabled.
-    - run: |
-        cmake --fresh -S c -B c/build -G Ninja -DBLAKE3_TESTING=ON -DBLAKE3_TESTING_CI=ON -DBLAKE3_EXAMPLES=ON "-DBLAKE3_USE_TBB=${{ matrix.use_tbb }}"
-        cmake --build c/build --target blake3-example
-
-  # Currently only on x86.
-  pkg_config_c_tests:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: pkg-config C tests TBB=${{ matrix.use_tbb }} BUILD_SHARED_LIBS=${{ matrix.shared_libs }} STDLIB=${{ matrix.stdlib }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        use_tbb: ["OFF", "ON"]
-        shared_libs: ["OFF", "ON"]
-        stdlib: ["libc++", "libstdc++"]
-    steps:
-    - uses: actions/checkout@v4
-    - name: update packages
-      run: |
-        sudo apt-get update
-        sudo apt-get install ninja-build libtbb-dev libtbb12
-        ${{ matrix.stdlib != 'libc++' || 'sudo apt-get install libc++-dev libc++abi-dev' }}
-    - name: configure cmake
-      run: |
-        export CXXFLAGS=${{ matrix.stdlib == 'libc++' && '-stdlib=libc++' || '' }}
-        export CC=${{ matrix.stdlib == 'libc++' && 'clang' || 'gcc' }}
-        export CXX=${{ matrix.stdlib == 'libc++' && 'clang++' || 'g++' }}
-        cmake --fresh -S c -B c/build -G Ninja -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/target "-DBLAKE3_USE_TBB=${{ matrix.use_tbb }}" "-DBUILD_SHARED_LIBS=${{ matrix.shared_libs }}" -DCMAKE_VERBOSE_MAKEFILE=1
-    - run: cmake --build c/build --target install
-    - run: mkdir -p ${{ github.workspace }}/target/bin
-    - run: echo "PKG_CONFIG_PATH=${{ github.workspace }}/target/lib/pkgconfig" >> $GITHUB_ENV
-    - run: gcc -O3 -o ${{ github.workspace }}/target/bin/blake3-example c/example.c $(pkg-config --cflags --libs libblake3)
-    - if: matrix.use_tbb == 'ON'
-      run: gcc -O3 -o ${{ github.workspace }}/target/bin/blake3-example-tbb c/example_tbb.c $(pkg-config --cflags --libs libblake3)
-
-  # Note that this jobs builds AArch64 binaries from an x86_64 host.
-  build_apple_silicon:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: build for Apple Silicon
-    runs-on: macOS-latest
-    strategy:
-      fail-fast: false
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: aarch64-apple-darwin
-    - name: build blake3
-      run: cargo build --target aarch64-apple-darwin
-    - name: build b3sum
-      run: cargo build --target aarch64-apple-darwin
-      working-directory: ./b3sum
-
-  build_tinycc:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: build with the Tiny C Compiler
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: install TCC
-      run: sudo apt-get install -y tcc
-    - name: compile
-      run: >
-        tcc -shared -O3 -o libblake3.so \
-          -DBLAKE3_NO_SSE2 -DBLAKE3_NO_SSE41 -DBLAKE3_NO_AVX2 -DBLAKE3_NO_AVX512 \
-          blake3.c blake3_dispatch.c blake3_portable.c
-      working-directory: ./c
-
-  # The oldest GCC supported (CONTRIBUTING.md): Debian 12's, the oldest in a
-  # supported distribution (Debian 11's support ended in August 2026). Older compilers are unsupported (GCC 5.4's
-  # assembler rejects the AVX-512 code GCC 5.4 itself emits at -O3; GCC 5
-  # was superseded in 2016). Upstream's reason for an old-GCC job:
-  # https://github.com/BLAKE3-team/BLAKE3/issues/271. The runner may lack
-  # AVX-512; the build is the check that holds on every runner.
   aarch64_without_sme2:
     # A pull request from a branch of this repository: its push runs CI already.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
@@ -332,6 +186,12 @@ jobs:
       env:
         CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
 
+  # The oldest GCC supported (CONTRIBUTING.md): Debian 12's, the oldest in a
+  # supported distribution (Debian 11's support ended in August 2026). Older compilers are unsupported (GCC 5.4's
+  # assembler rejects the AVX-512 code GCC 5.4 itself emits at -O3; GCC 5
+  # was superseded in 2016). Upstream's reason for an old-GCC job:
+  # https://github.com/BLAKE3-team/BLAKE3/issues/271. The runner may lack
+  # AVX-512; the build is the check that holds on every runner.
   gcc_floor:
     # A pull request from a branch of this repository: its push runs CI already.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
@@ -348,81 +208,6 @@ jobs:
           curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
           cd /work
           ~/.cargo/bin/cargo test
-
-  # CMake build test (Library only).
-  cmake_current_build:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: CMake ${{ matrix.os }} CC=${{ matrix.toolchain.cc }} CXX=${{ matrix.toolchain.cxx }} TBB=${{ matrix.use_tbb }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        cmakeVersion: [latest]
-        ninjaVersion: [latest]
-        os: [ubuntu-latest, macOS-latest, windows-latest]
-        toolchain: [
-          { cc: cl, cxx: cl },
-          { cc: clang, cxx: clang++ },
-          { cc: clang-cl, cxx: clang-cl },
-          { cc: gcc, cxx: g++ },
-        ]
-        use_tbb: [OFF, ON]
-        exclude:
-          - os: macOS-latest
-            toolchain: { cc: cl, cxx: cl }
-          - os: macOS-latest
-            toolchain: { cc: clang-cl, cxx: clang-cl }
-          - os: ubuntu-latest
-            toolchain: { cc: cl, cxx: cl }
-          - os: ubuntu-latest
-            toolchain: { cc: clang-cl, cxx: clang-cl }
-          - os: windows-latest
-            toolchain: { cc: clang, cxx: clang++ }
-            use_tbb: ON
-          - os: windows-latest
-            toolchain: { cc: gcc, cxx: g++ }
-            use_tbb: ON
-    steps:
-      - uses: actions/checkout@v4
-      - uses: lukka/get-cmake@5f6e04f5267c8133f1273bf2103583fc72c46b17
-        with:
-          cmakeVersion: ${{ matrix.cmakeVersion }}
-          ninjaVersion: ${{ matrix.ninjaVersion }}
-      - if: matrix.os == 'macOS-latest'
-        name: Install dependencies on macOS
-        run: |
-          brew update
-          brew install tbb
-      - if: matrix.os == 'ubuntu-latest'
-        name: Install dependencies on Linux
-        run: |
-          sudo apt-get update
-          sudo apt-get install libtbb-dev libtbb12
-      - name: CMake generation, build, install
-        run: |
-          ${{ matrix.os != 'windows-latest' || '$vs_install_path = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath; & "$vs_install_path/Common7/Tools/Launch-VsDevShell.ps1" -Arch amd64 -SkipAutomaticLocation' }}
-          cmake -S c -B c/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/target -DCMAKE_C_COMPILER=${{ matrix.toolchain.cc }} -DCMAKE_CXX_COMPILER=${{ matrix.toolchain.cxx }} -DBLAKE3_USE_TBB=${{ matrix.use_tbb }} -DBLAKE3_FETCH_TBB=${{ matrix.os == 'windows-latest' && 'YES' || 'NO' }} -DBLAKE3_EXAMPLES=ON
-          cmake --build c/build --target install
-
-  cmake_3-9_build:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: CMake 3.9.6 ubuntu-latest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: lukka/get-cmake@5f6e04f5267c8133f1273bf2103583fc72c46b17
-        with:
-          cmakeVersion: 3.9.6
-      - name: Create build directory
-        run: mkdir c/build
-      - name: CMake generation
-        run: cmake .. -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/target
-        working-directory: c/build
-      - name: CMake build / install
-        run: make install
-        working-directory: c/build
 
   miri_smoketest:
     # A pull request from a branch of this repository: its push runs CI already.
@@ -443,29 +228,3 @@ jobs:
       env:
         MIRIFLAGS: "-Zmiri-num-cpus=4 -Zmiri-ignore-leaks"
 
-  tbb_rust_bindings_tests:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: TBB test bindings ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ["ubuntu-latest", "macOS-latest"]
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - name: install TBB
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install libtbb-dev libtbb12
-    - name: install TBB
-      if: matrix.os == 'macOS-latest'
-      run: |
-        brew install tbb
-        echo "CXXFLAGS=-I$(brew --prefix)/include $CPPFLAGS" >> $GITHUB_ENV
-        echo "RUSTFLAGS=-L$(brew --prefix)/lib $RUSTFLAGS" >> $GITHUB_ENV
-    - name: cargo test C bindings with TBB
-      run: cargo test --features=tbb
-      working-directory: ./c/blake3_c_rust_bindings
