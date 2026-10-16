@@ -17,6 +17,7 @@ new mutant's reason UNCLASSIFIED and the others' kept.
 """
 
 import collections
+import json
 import os
 import platform
 import re
@@ -78,6 +79,7 @@ def survivors(files):
         shard = args + ["--shard", f"{k}/{SHARDS}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
         runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=cap_memory)))
     names = collections.Counter()
+    functions = collections.defaultdict(list)  # (file, function) -> [(outcome, name)]
     for tree, run in runs:
         # 0: every mutant caught; 2: some missed; 3: some timed out. Any
         # other status (a failing unmutated baseline) is no result.
@@ -86,14 +88,40 @@ def survivors(files):
             m = NAME.match(line)
             assert m, f"a missed mutant cargo-mutants names unexpectedly: {line}"
             names[f"{m.group(1)}\t{m.group(2)}"] += 1
+        for outcome in json.load(open(os.path.join(tree, "mutants-result", "mutants.out", "outcomes.json")))["outcomes"]:
+            mutant = outcome["scenario"]
+            if not isinstance(mutant, dict):
+                continue  # the unmutated baseline
+            mutant = mutant["Mutant"]
+            function = (mutant.get("function") or {}).get("function_name", "")
+            m = NAME.match(mutant["name"])
+            functions[(mutant["file"], function)].append((outcome["summary"], f"{m.group(1)}\t{m.group(2)}"))
         subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
         shutil.rmtree(tree, ignore_errors=True)
-    return names
+    return names, functions
+
+
+def figure(functions, known):
+    """How much of the library mutation testing covers, by function: every
+    mutant caught, every survivor explained, or one still open."""
+    caught = explained = 0
+    open_ = []
+    for (file, function), outcomes in sorted(functions.items()):
+        reasons = [known.get(name, (0, "UNCLASSIFIED"))[1] for summary, name in outcomes if summary == "MissedMutant"]
+        if not reasons:
+            caught += 1
+        elif all(not r.startswith(("OPEN", "UNCLASSIFIED")) for r in reasons):
+            explained += 1
+        else:
+            open_.append(f"{file} {function}")
+    print(f"functions: {len(functions)}: {caught} every mutant caught, {explained} every survivor explained, {len(open_)} open; "
+          "the proved cores (src/*_core.rs) and the assembly kernels are the proofs'")
+    return open_
 
 
 def main():
     files, known = read_known()
-    found = survivors(files)
+    found, functions = survivors(files)
     if "--write" in sys.argv:
         header = [l.rstrip("\n") for l in open(KNOWN) if l.startswith("#") or l.startswith("files:")]
         rows = [f"{k}\t{n}\t{known.get(k, (0, 'UNCLASSIFIED'))[1]}" for k, n in sorted(found.items())]
@@ -109,6 +137,7 @@ def main():
         print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
     for k, c in sorted(stale.items()):
         print(f"NOW CAUGHT ({c - found.get(k, 0)}): {k}")
+    figure(functions, known)
     ok = not new and not stale and not unexplained
     print(f"mutants: {sum(found.values())} survive, each known and explained" if ok else "mutants: the list and this run differ, or a listed mutant has no reason")
     sys.exit(0 if ok else 1)
