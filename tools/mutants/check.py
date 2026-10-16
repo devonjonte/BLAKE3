@@ -61,13 +61,16 @@ def survivors(files):
     args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize,traits-preview", "--timeout", "30"]
     for f in files:
         args += ["--file", f]
-    env = {k: v for k, v in os.environ.items() if k != "CARGO_TARGET_DIR"}
     runs = []
     for k in range(SHARDS):
         tree = tempfile.mkdtemp(prefix="mutants-", dir="/tmp")
         subprocess.run(["git", "-C", ROOT, "worktree", "add", "-q", "--detach", tree, "HEAD"], check=True)
         # The library's and the integration tests; the doc tests stay out
         # (each compiles a program of its own: minutes per mutant).
+        # Its own build directory, named outright (a cargo config's
+        # target-dir would otherwise give the shards one, and each would
+        # test the others' builds).
+        env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"))
         shard = args + ["--shard", f"{k}/{SHARDS}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
         runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=cap_memory)))
     names = collections.Counter()
