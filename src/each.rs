@@ -376,6 +376,33 @@ mod test {
     /// Many hashers fed in turns of interleaved pieces of many lengths:
     /// update_each, its multithreaded twin, and finalize_each give every
     /// message the hash one Hasher per message gives.
+    /// One turn in which several hashers hold a group each beyond their
+    /// first (nonzero counters), under two keys whose flags agree: the
+    /// groups of one key hash together, each lands in its own hasher.
+    #[test]
+    fn test_update_each_holds_groups_together() {
+        let mut input = vec![0u8; 3 * crate::STAGE_LEN];
+        crate::test::paint_test_input(&mut input);
+        let keys = [[1u8; 32], [2u8; 32]];
+        let mut hashers: Vec<Hasher> = (0..6).map(|i| Hasher::new_keyed(&keys[i % 2])).collect();
+        // Each hasher a group in, its message at a different offset into the
+        // input; then one turn of two pieces each, which stage its second
+        // group from its start and fill it (held), and 7 bytes more.
+        let start = |i: usize| i * 1000;
+        let group = crate::STAGE_LEN;
+        for (i, h) in hashers.iter_mut().enumerate() {
+            h.update(&input[start(i)..start(i) + group]);
+        }
+        let turn: Vec<(usize, &[u8])> = (0..6)
+            .flat_map(|i| [(i, &input[start(i) + group..start(i) + group + 100]), (i, &input[start(i) + group + 100..start(i) + 2 * group + 7])])
+            .collect();
+        Hasher::update_each(&mut hashers, &turn);
+        for (i, h) in hashers.iter().enumerate() {
+            let message = &input[start(i)..start(i) + 2 * crate::STAGE_LEN + 7];
+            assert_eq!(h.finalize(), crate::keyed_hash(&keys[i % 2], message), "hasher {i}");
+        }
+    }
+
     #[test]
     fn test_update_each() {
         let mut input = vec![0u8; 1 << 20];
