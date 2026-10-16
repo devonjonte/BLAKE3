@@ -125,12 +125,13 @@ SIMD (`pure`).
 **Every process checks itself before its first hash.** The tests prove
 the code on our machines; a user's machine may have a compiler that
 miscompiles, a linker that mislinks, or a CPU with a faulty vector or
-matrix unit. So the first call in a process (or `initialize()`) hashes 40
+matrix unit. So the first call in a process (or `initialize()`) hashes 41
 fixed inputs and compares each result with the reference implementation's
 answer, checked into the source (`src/self_test.rs`) and verified there
 by a unit test. The inputs are chosen so that together they run every one
-of the AArch64 assembly kernels, all 32 entry points, counted with gdb
-breakpoints (`tools/self_test_coverage.py`), along with the batch,
+of the AArch64 assembly kernels, every entry point, which a unit test
+checks on every run (`test_self_test_runs_every_kernel`, from the code's
+own kernel tables), along with the batch,
 keyed, key-derivation, incremental, and extended-output paths. As Niels
 Ferguson suggested, each case's output feeds the next case's input, so
 a fault anywhere changes every result after it, and the inputs use
@@ -507,7 +508,7 @@ names the commit that introduced the code and the one that fixed it, in
 | Lean proofs of the tree and the Hasher | an error in how chunks combine, at any length or update sequence, in the source code | `check.sh` fails on any unproved step (a planted `sorry`) and on any axiom beyond Lean's three | the compiler (the whole-call proofs cover it) |
 | Instruction models against the CPU and Arm's specification | a wrong model of an instruction the proofs rely on | the CPU check found the carry-flag error; Isla rejects planted model errors | loads, branches, and calls by contract, which the executor's run of the official vectors checks |
 | Test vectors and the reference implementation | any wrong digest at the lengths and shapes tested, on any platform | found bugs 1 and 2 below | untested lengths and shapes |
-| Startup self-test | a miscompiled, mislinked, or faulty-hardware kernel on the user's machine | its inputs run all 32 kernel entry points (`tools/self_test_coverage.py`), and each case's output feeds the next, so one wrong result changes every later one | faults that appear only after startup |
+| Startup self-test | a miscompiled, mislinked, or faulty-hardware kernel on the user's machine | its inputs run every kernel entry point (a unit test checks it each run), and each case's output feeds the next, so one wrong result changes every later one | faults that appear only after startup |
 | Sanitizers, Miri, guard pages | out-of-bounds access, use after free, data races, undefined behaviour in the paths tested | Miri found bug 7; controls with planted faults are caught | paths not exercised |
 
 ## Formal verification: what we tried and considered

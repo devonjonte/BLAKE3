@@ -119,7 +119,7 @@
 //! binary built for another CPU, or tampering that breaks the digests.
 //! (What the code computes is the tests' and the proofs' to establish.) It
 //! hashes fixed inputs, chosen so that together they run every one of its
-//! assembly kernels on this machine (40 on AArch64, 9 elsewhere), each
+//! assembly kernels on this machine (41 on AArch64, 9 elsewhere), each
 //! input carrying the previous output, and compares each result with the
 //! reference implementation's; on x86 it first checks that the CPU has the
 //! LZCNT and BMI1 instructions a build for newer CPUs assumes, which older
@@ -295,14 +295,32 @@ std::thread_local! {
     pub(crate) static RAN: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
 }
 
-/// Note that a kernel of `kind` ran: in the tests' record, and nothing in
-/// any other build (some of which have no kernel to note).
+/// Note that `kind` happened: in the tests' record, and nothing in any
+/// other build (some of which have no kernel to note).
 #[inline(always)]
 #[allow(dead_code)]
 pub(crate) fn ran(kind: Ran) {
     #[cfg(all(test, feature = "std"))]
     RAN.with(|r| r.set(r.get() | kind as u32));
     let _ = kind;
+}
+
+#[cfg(all(test, feature = "std"))]
+std::thread_local! {
+    /// The assembly entry points this thread's calls ran since the test
+    /// last cleared it, by address.
+    pub(crate) static RAN_ENTRIES: core::cell::RefCell<std::collections::BTreeSet<usize>> = const { core::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// Note that the assembly entry point at `entry`, a kernel of `kind`, ran
+/// (in the tests' record; nothing in any other build).
+#[inline(always)]
+#[allow(dead_code)]
+pub(crate) fn ran_kernel(kind: Ran, entry: *const ()) {
+    ran(kind);
+    #[cfg(all(test, feature = "std"))]
+    RAN_ENTRIES.with(|r| r.borrow_mut().insert(entry as usize));
+    let _ = entry;
 }
 
 use arrayvec::{ArrayString, ArrayVec};

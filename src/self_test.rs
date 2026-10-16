@@ -74,8 +74,8 @@ const KIB: usize = 1024;
 /// Apple M4 and later; other machines take their own paths through the
 /// same entry points). Every assembly entry of the AArch64 kernels runs:
 /// the hybrids' k1-k10, q1-q9, p2-p9, and c1, and SME2's chunk, message,
-/// parent, and integer-lane kernels (tools/self_test_coverage.py counts
-/// them with gdb breakpoints). The hybrids' k kernels hash whole chunks at
+/// parent, counter-per-group, and integer-lane kernels
+/// (test_self_test_runs_every_kernel checks it). The hybrids' k kernels hash whole chunks at
 /// rising counters, so only whole inputs reach them; batches of one-chunk
 /// messages, all at counter 0, take the parent plans (p).
 #[cfg(target_arch = "aarch64")]
@@ -105,6 +105,7 @@ pub(crate) const CASES: &[(Case, &str)] = &[
     (Hash { offset: 7, len: 19 * KIB + 5 }, "an SME2 group, a remainder on NEON, unaligned: k3"),
     (Hash { offset: 0, len: 32 * KIB }, "two SME2 groups: the SME2 parent kernel"),
     (ChunkValues { chunks: 18 }, "keyed chaining values: the SME2 kernel with integer lanes"),
+    (ChunkValues { chunks: 16 }, "keyed chaining values from a group's counter: the SME2 chunk kernel at a counter per group"),
     (Many { offset: 1, len: 64, count: 2 }, "a pair of 64-byte messages: the parent plans"),
     (Many { offset: 0, len: 64, count: 11 }, "eleven 64-byte messages: a padded SME2 group"),
     (Many { offset: 3, len: 64, count: 21 }, "an SME2 group and five more in a padded group"),
@@ -126,8 +127,8 @@ pub(crate) const CASES: &[(Case, &str)] = &[
 /// and each of the Rust paths around them once, on a small input: x86's
 /// assembly has one-block, extended-output, and many-input kernels
 /// (compress_in_place, compress_xof, hash_many, and on AVX-512 xof_many),
-/// which these reach on every x86 platform (tools/self_test_coverage.py,
-/// AVX2: all 3 of its entries), with pair.rs's two-input path, the passes of
+/// which these reach on every x86 platform (AVX2: all 3 of its entries,
+/// counted with gdb in October 2026), with pair.rs's two-input path, the passes of
 /// whole chunks and a partial one (rust_sse41 and rust_avx2), the tree,
 /// the Hasher, a batch and its tail, and the three modes. The logic around
 /// the kernels is the tests' and the proofs' to establish; this checks the
@@ -220,7 +221,7 @@ pub(crate) fn chain(
 /// `self_test_matches_the_reference` checks them, and prints this table
 /// when it differs).
 #[cfg(target_arch = "aarch64")]
-const EXPECTED: [u64; 40] = [
+const EXPECTED: [u64; 41] = [
     0x90e4e563714f7c48,
     0x80003c83df0cf1a6,
     0xf4ffcff9e99d31ba,
@@ -246,21 +247,22 @@ const EXPECTED: [u64; 40] = [
     0x85b92449ae3bb6d6,
     0xd306834db3ef623a,
     0xfcab2c0c730749f0,
-    0x9e8638ebeff4b28a,
-    0x3fb12d675ce0ef8d,
-    0x65a0d42d9d58e25b,
-    0x6456a5098c002235,
-    0x9af343b2ecd71d2b,
-    0x0e5cb7bf68527612,
-    0x0243bf5c211ea02c,
-    0x2da3874c1806f4dc,
-    0xbc178d10e6d9c2bd,
-    0x366a22ceb651ca6a,
-    0x53f113d67d7ac3e5,
-    0x9b802b34b48bb23a,
-    0x0eaabf3bcc0790e7,
-    0x7bf131603d28d0e7,
-    0xa7e6fd013dbeb762,
+    0x246556497630201e,
+    0x51b132deb2511234,
+    0x85420e247d8bc47e,
+    0x10d6d2a5021726dc,
+    0x7ad4a2d7705b197d,
+    0x81a0e1efb1d51dd8,
+    0xd385111ef206d404,
+    0xd0fa70aa7fd5b597,
+    0x234076d25fcb6b66,
+    0x74d0fc3ad8aa7be6,
+    0x1ef58bb8b4e89a3f,
+    0xd51f6efa30e761d2,
+    0x9a919948756311db,
+    0x7eeec51084f8916c,
+    0x17e6a5f121cc313c,
+    0xa786ab75f48678d7,
 ];
 
 #[cfg(not(target_arch = "aarch64"))]
@@ -350,6 +352,7 @@ fn chunk_values(platform: Platform, input: &[u8], key: &[u8; 32], out: &mut [u8]
         let turn = crate::platform::Sme2Turn::take(platform, true);
         if matches!(turn.platform(), Platform::SME2) {
             let flags = crate::KEYED_HASH as u32 | (crate::CHUNK_START as u32) << 8 | (crate::CHUNK_END as u32) << 16;
+            crate::ran_kernel(crate::Ran::Sme2x2, crate::sme2::ffi::blake3_sme2x2_hash_chunks_512 as *const ());
             // Sound: SME2 was detected, and the table holds 18 chunk pointers per group.
             let lanes = unsafe {
                 crate::sme2::ffi::blake3_sme2x2_hash_chunks_512(
@@ -362,6 +365,17 @@ fn chunk_values(platform: Platform, input: &[u8], key: &[u8; 32], out: &mut [u8]
                 )
             };
             assert_eq!(lanes, 16, "SME2 streaming vector length changed under us");
+            return out.len();
+        }
+    }
+    // A group of sixteen: on SME2 the kernel with a counter per group (as
+    // Hasher::update_each hashes held groups).
+    #[cfg(all(blake3_sme2, feature = "std"))]
+    if chunks.len() == crate::sme2::GROUP {
+        let turn = crate::platform::Sme2Turn::take(platform, true);
+        if matches!(turn.platform(), Platform::SME2) {
+            // Sound: SME2 was detected.
+            unsafe { crate::sme2::hash_groups_at(&chunks, &[1], &key, crate::KEYED_HASH, crate::CHUNK_START, crate::CHUNK_END, out) };
             return out.len();
         }
     }
@@ -476,6 +490,35 @@ fn ensure_slow() {
 #[cfg(all(test, feature = "std"))]
 mod test {
     use super::*;
+
+    /// The self-test runs every assembly entry point this machine has:
+    /// the hybrids' with SHA-3 (else the NEON kernel), and SME2's with
+    /// SME2. It runs again when another test held the SME2 turn.
+    #[test]
+    #[cfg(blake3_neon_hybrid)]
+    fn test_self_test_runs_every_kernel() {
+        use crate::{Ran, RAN, RAN_ENTRIES};
+        let mut want: std::vec::Vec<(std::string::String, *const ())> = std::vec::Vec::new();
+        if crate::neon_hybrid::sha3_detected() {
+            want.extend(crate::neon_hybrid::entries());
+        } else {
+            want.push(("the NEON kernel".into(), crate::neon::ffi::blake3_hash_many_neon as *const ()));
+        }
+        #[cfg(blake3_sme2)]
+        if crate::platform::sme2_detected() {
+            want.extend(crate::sme2::entries().into_iter().map(|(n, e)| (n.into(), e)));
+        }
+        let ran = loop {
+            RAN.with(|r| r.set(0));
+            RAN_ENTRIES.with(|r| r.borrow_mut().clear());
+            run();
+            if RAN.with(|r| r.get()) & Ran::TurnTaken as u32 == 0 {
+                break RAN_ENTRIES.with(|r| r.borrow().clone());
+            }
+        };
+        let missing: std::vec::Vec<&str> = want.iter().filter(|(_, e)| !ran.contains(&(*e as usize))).map(|(n, _)| n.as_str()).collect();
+        assert!(missing.is_empty(), "the self-test leaves out {missing:?}");
+    }
 
     /// `outputs` as `chain` takes it: the bytes written into its buffer.
     fn into(
