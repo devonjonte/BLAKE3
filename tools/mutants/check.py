@@ -98,14 +98,18 @@ def main():
         open(KNOWN, "w").write("\n".join(header + rows) + "\n")
         print(f"{KNOWN}: {sum(found.values())} survivors, {sum(1 for k in found if k not in known)} names new")
         return
+    unexplained = sorted(k for k, (_, reason) in known.items() if reason == "UNCLASSIFIED")
+    for k in unexplained:
+        print(f"NO REASON: {k}")
     new = {k: n for k, n in found.items() if n > known.get(k, (0, ""))[0]}
     stale = {k: c for k, (c, _) in known.items() if found.get(k, 0) < c}
     for k, n in sorted(new.items()):
         print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
     for k, c in sorted(stale.items()):
         print(f"NOW CAUGHT ({c - found.get(k, 0)}): {k}")
-    print(f"mutants: {sum(found.values())} survive, all known" if not new and not stale else "mutants: the list and this run differ")
-    sys.exit(1 if new or stale else 0)
+    ok = not new and not stale and not unexplained
+    print(f"mutants: {sum(found.values())} survive, each known and explained" if ok else "mutants: the list and this run differ, or a listed mutant has no reason")
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":
