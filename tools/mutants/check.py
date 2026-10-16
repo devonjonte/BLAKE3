@@ -3,8 +3,8 @@
     pypy3 tools/mutants/check.py [--write]
 
 cargo-mutants plants likely bugs in the files tools/mutants/known-<arch>.txt
-names (its `files:` line), one at a time, and runs the library's tests on
-each. Every mutant that survives them must be in the list, with its
+names (its `files:` line), one at a time, and runs the library's and the
+integration tests on each. Every mutant that survives them must be in the list, with its
 reason; every listed mutant must still survive. So the check fails on a
 new survivor (a missing test, or a new equivalent mutant to list with its
 reason) and on a listed one now caught (the list is stale). A mutant is
@@ -53,7 +53,9 @@ def survivors(files):
     for f in files:
         args += ["--file", f]
     env = {k: v for k, v in os.environ.items() if k != "CARGO_TARGET_DIR"}
-    subprocess.run(args + ["--", "--lib"], cwd=tree, env=env)
+    # The library's and the integration tests; the doc tests stay out (each
+    # compiles a program of its own: minutes per mutant).
+    subprocess.run(args + ["--", "--lib", "--tests"], cwd=tree, env=env)
     missed = open(os.path.join(out, "mutants.out", "missed.txt")).read().splitlines()
     subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
     shutil.rmtree(tree, ignore_errors=True)
