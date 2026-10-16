@@ -4,16 +4,16 @@
 
 cargo-mutants plants likely bugs in the files tools/mutants/known-<arch>.txt
 names (its `files:` line), one at a time, and runs the library's and the
-integration tests on each. Every mutant that survives them must be in the list, with its
-reason; every listed mutant must still survive. So the check fails on a
-new survivor (a missing test, or a new equivalent mutant to list with its
-reason) and on a listed one now caught (the list is stale). A mutant is
-named by its file, function, and change, without its line: the same
+integration tests on each. Every mutant that survives them must be in the
+list with its reason, and every listed mutant must still survive. So the
+check fails on a new survivor (a missing test, or a new equivalent mutant
+to list with its reason), on a listed one now caught (the list is
+stale), and on a listed one whose reason is still UNCLASSIFIED. A mutant
+is named by its file, function, and change, without its line: the same
 change at several places in one function counts once per place. It runs
 in git worktrees of HEAD of its own (SHARDS at once), so the checkout is
-never mutated.
-With --write, the list is rewritten from this run, each new mutant's
-reason UNCLASSIFIED and the others' kept.
+never mutated. With --write, the list is rewritten from this run, each
+new mutant's reason UNCLASSIFIED and the others' kept.
 """
 
 import collections
