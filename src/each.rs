@@ -376,9 +376,10 @@ mod test {
     /// Many hashers fed in turns of interleaved pieces of many lengths:
     /// update_each, its multithreaded twin, and finalize_each give every
     /// message the hash one Hasher per message gives.
-    /// One turn in which several hashers hold a group each beyond their
-    /// first (nonzero counters), under two keys whose flags agree: the
-    /// groups of one key hash together, each lands in its own hasher.
+    /// Turns in which several hashers hold a group each, under two keys
+    /// whose flags agree, beyond their first group and at it (nonzero
+    /// counters, and zero): the groups of one key hash together, each
+    /// lands in its own hasher.
     #[test]
     fn test_update_each_holds_groups_together() {
         let mut input = vec![0u8; 3 * crate::STAGE_LEN];
@@ -400,6 +401,17 @@ mod test {
         for (i, h) in hashers.iter().enumerate() {
             let message = &input[start(i)..start(i) + 2 * crate::STAGE_LEN + 7];
             assert_eq!(h.finalize(), crate::keyed_hash(&keys[i % 2], message), "hasher {i}");
+        }
+        // And each hasher's first group (chunk counter zero, which hands
+        // its core the group's two halves), six at once: a first piece
+        // longer than a chunk, so it is staged from offset zero.
+        let mut fresh: Vec<Hasher> = (0..6).map(|i| Hasher::new_keyed(&keys[i % 2])).collect();
+        let turn: Vec<(usize, &[u8])> = (0..6)
+            .flat_map(|i| [(i, &input[start(i)..start(i) + 1100]), (i, &input[start(i) + 1100..start(i) + group + 7])])
+            .collect();
+        Hasher::update_each(&mut fresh, &turn);
+        for (i, h) in fresh.iter().enumerate() {
+            assert_eq!(h.finalize(), crate::keyed_hash(&keys[i % 2], &input[start(i)..start(i) + group + 7]), "fresh hasher {i}");
         }
     }
 

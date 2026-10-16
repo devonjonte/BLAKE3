@@ -493,6 +493,13 @@ fn ensure_slow() {
 mod test {
     use super::*;
 
+    /// `initialize` runs the self-test, which passes.
+    #[test]
+    fn test_initialize_runs_the_self_test() {
+        crate::initialize();
+        assert_eq!(STATE.load(core::sync::atomic::Ordering::SeqCst), PASSED);
+    }
+
     /// The self-test runs every assembly entry point this machine has:
     /// the hybrids' with SHA-3 (else the NEON kernel), and SME2's with
     /// SME2. It runs again when another test held the SME2 turn.
@@ -502,12 +509,14 @@ mod test {
         use crate::{Ran, RAN, RAN_ENTRIES};
         let mut want: std::vec::Vec<(std::string::String, *const ())> = std::vec::Vec::new();
         if crate::neon_hybrid::sha3_detected() {
+            assert!(!crate::neon_hybrid::entries().is_empty(), "the hybrids' entries");
             want.extend(crate::neon_hybrid::entries());
         } else {
             want.push(("the NEON kernel".into(), crate::neon::ffi::blake3_hash_many_neon as *const ()));
         }
         #[cfg(blake3_sme2)]
         if crate::platform::sme2_detected() {
+            assert!(!crate::sme2::entries().is_empty(), "SME2's entries");
             want.extend(crate::sme2::entries().into_iter().map(|(n, e)| (n.into(), e)));
         }
         let ran = loop {
