@@ -182,7 +182,7 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
             // 56 ms run for 1 GiB), while entries that merely exist cost
             // nothing measured but their memory, 2 MiB per GiB touched
             // (NOTES-servil.md, "Mappings and page tables").
-            std::mem::forget(map);
+            hold(args, path, map);
         } else {
             update_from(&mut hasher, file)?;
         }
@@ -192,6 +192,35 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
     let mut output_reader = hasher.finalize_xof();
     output_reader.set_position(args.seek());
     Ok(output_reader)
+}
+
+/// EXPERIMENT (#56's review): which mappings to leave to exit, by this
+/// binary's name: b3sum-last, only the last file's (John's option 1);
+/// b3sum-cap, up to HOLD_BYTES in all, each file unmapped once past it
+/// (option 2); any other name, every one (#56).
+#[cfg(unix)]
+fn hold(args: &Args, path: &Path, map: memmap2::Mmap) {
+    const HOLD_BYTES: u64 = 1 << 30;
+    static HELD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let name = std::env::args().next().unwrap_or_default();
+    let name = name.rsplit('/').next().unwrap_or_default();
+    let keep = match name {
+        "b3sum-last" => args.file_args.last().map(|p| p.as_path()) == Some(path),
+        "b3sum-cap" => {
+            let len = map.len() as u64;
+            let before = HELD.fetch_add(len, std::sync::atomic::Ordering::Relaxed);
+            if before + len > HOLD_BYTES {
+                HELD.fetch_sub(len, std::sync::atomic::Ordering::Relaxed);
+                false
+            } else {
+                true
+            }
+        }
+        _ => true,
+    };
+    if keep {
+        std::mem::forget(map);
+    }
 }
 
 /// `file` mapped, when it is at least MAP_LEN long and, outside Linux, in the page cache
