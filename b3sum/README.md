@@ -2,7 +2,8 @@
 
 A command line utility for calculating
 [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) hashes, similar to
-Coreutils tools like `b2sum` or `md5sum`.
+Coreutils tools like `b2sum` or `md5sum`: the servil fork's, on its
+crate (the repository's [README](../README.md) says what the fork is).
 
 ```
 Usage: b3sum [OPTIONS] [FILE]...
@@ -27,7 +28,7 @@ Options:
 ```
 
 See also [this document about how the `--check` flag
-works](https://github.com/BLAKE3-team/BLAKE3/blob/master/b3sum/what_does_check_do.md).
+works](what_does_check_do.md).
 
 # Example
 
@@ -51,17 +52,17 @@ time b3sum /tmp/bigfile
 
 # Installation
 
-Prebuilt binaries are available for Linux, Windows, and macOS (requiring
-the [unidentified developer
-workaround](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac))
-on the [releases page](https://github.com/BLAKE3-team/BLAKE3/releases).
-If you've [installed Rust and
-Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html),
-you can also build `b3sum` yourself with:
+With [Rust and
+Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html)
+installed, build this `b3sum` with:
 
 ```
-cargo install b3sum
+cargo install --git https://github.com/johnservil/BLAKE3 b3sum
 ```
+
+(`cargo install b3sum`, and the prebuilt binaries on [official BLAKE3's
+releases page](https://github.com/BLAKE3-team/BLAKE3/releases), give
+official BLAKE3's `b3sum`.)
 
 On Linux for example, Cargo will put the compiled binary in
 `~/.cargo/bin`. You might want to add that directory to your `$PATH`, or
@@ -72,7 +73,7 @@ install --path .`. Or you can just build with `cargo build --release`,
 which puts the binary at `./target/release/b3sum`.
 
 On Linux, a statically linked `b3sum` starts sooner, skipping the dynamic
-loader: about 100-160 us less per process on an i7-12700K (a 4 KiB file
+loader: about 100-160 µs less per process on an i7-12700K (a 4 KiB file
 in 0.67-0.73 ms, from 0.77-0.89), which counts where `b3sum` runs once
 per file. Build it so with your machine's target:
 
