@@ -302,7 +302,9 @@ fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, f
     if callers >= pool.cpus {
         return crate::hash_many_serial(input, message_len, key, flags, outputs);
     }
-    let pieces = cut_messages(outputs.len(), slot, pool.cpus);
+    // Below MIN_SPLIT_LEN, a thread per 32 KiB: fewer cores woken.
+    let threads = if input.len() < MIN_SPLIT_LEN { (input.len() / (32 << 10)).clamp(2, pool.cpus) } else { pool.cpus };
+    let pieces = cut_messages(outputs.len(), slot, threads);
     let work = Work::Messages { input, message_len, key: *key, flags, pieces: &pieces, outputs: outputs.as_mut_ptr() };
     pool.run_job(work, pieces.len(), 0, pool_platform());
 }
