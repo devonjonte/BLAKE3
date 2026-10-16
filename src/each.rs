@@ -324,9 +324,14 @@ mod test {
             hash_each_multithreaded_with(mode, &items, &mut a);
             hash_each_with(mode, &items, &mut b);
             assert_eq!(a, b);
-            // Below the split, on the calling thread.
-            hash_each_multithreaded_with(mode, &items[..20], &mut a[..20]);
-            assert_eq!(a[..20], b[..20]);
+            // Below the split, on the calling thread: the items of 16 KiB
+            // or less, which sum to less than the split's length.
+            let small: Vec<usize> = (0..items.len()).filter(|&k| items[k].len() <= 16 * 1024).take(30).collect();
+            assert!(small.iter().map(|&k| items[k].len()).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN);
+            let small_items: Vec<&[u8]> = small.iter().map(|&k| items[k]).collect();
+            let mut c = vec![[0u8; OUT_LEN]; small.len()];
+            hash_each_multithreaded_with(mode, &small_items, &mut c);
+            assert!(small.iter().zip(&c).all(|(&k, d)| *d == b[k]));
         }
     }
 
