@@ -91,12 +91,16 @@ tests; the tests check the calls into them, and every other platform.)
   such), or code that does nothing (removed).
 
 **What mutation testing finds**, first on `src/many.rs` (the batch
-dispatch), on the VM: of 259 mutants, 115 fail a test and 40 do not
-compile; each of the other 104 is explained: a speed threshold moved
-between equally correct paths (most of them), `|` made `^` on flag bits
-that never overlap, a Kani harness's own code (checked by `cargo kani`),
-or a branch only another machine takes (CPUs without the SHA-3
-extension, and x86, whose tests run in CI). None is a missing case.
+dispatch), on the VM: of 340 mutants, 115 fail a test and 40 do not
+compile; each of the other 185 is listed, with its reason, in
+`tools/mutants/known-aarch64.txt`: a speed threshold moved between
+equally correct paths (51), x86 code compiled out here (50, which CI's
+x86 tests reach), a Kani harness's own code (14), `|` made `^` on flag
+bits that never overlap (8), or a path only another machine takes (7: a
+CPU without the SHA-3 extension or without SME2). None is a missing case.
+`tools/mutants/check.py` reruns them and fails on any survivor not
+listed, and on any listed one now caught; the long proofs run it before
+each promotion.
 
 **What the suites cover now**, on the VM's AArch64 with SME2: 86% of the
 library's branch sides (859 of 994). Most of the rest are the branches

@@ -6,7 +6,8 @@
 # hybrid kernel; every SME2 kernel at every group count (the chunk and
 # parent kernels' inductions are what the SME2 contracts in the Rust and
 # whole-call proofs rest on); the Rust paths and whole calls, with the
-# instruction models they run checked against the CPU; and the mutants.
+# instruction models they run checked against the CPU; the proofs' mutants;
+# and the tests' (tools/mutants/check.py).
 # About nine hours, in a worktree of the commit; nothing should measure
 # meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and the status
 # names their BLAKE3 hash.
@@ -44,6 +45,11 @@ run prove_hybrid pypy3 tools/verify/prove_hybrid.py
 run prove_sme2 pypy3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof every parents_every xof_every messages_every
 run cross_check pypy3 tools/verify/cross_check.py
 run mutants pypy3 tools/verify/mutants.py
+# The library's tests against plausible bugs, every survivor known
+# (tools/mutants/check.py; cargo-mutants under /root/tools when absent).
+export PATH=/root/tools/bin:$PATH
+command -v cargo-mutants >/dev/null || CARGO_INSTALL_ROOT=/root/tools cargo install -q cargo-mutants --locked
+run test_mutants pypy3 tools/mutants/check.py
 hash=$(pypy3 -c 'import sys; sys.path.insert(0, "tools/verify"); import results
 print(results.blake3(data="\n".join(results.blake3(sorted(sys.argv[1:]))).encode())[0][:16])' "$logs"/*.txt)
 status "$state" "$verdict: Lean, hybrid, SME2, cross_check, mutants; logs' BLAKE3 $hash (VM)"
