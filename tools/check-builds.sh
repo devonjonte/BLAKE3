@@ -3,6 +3,7 @@
 # on this machine (part of a promotion's gate, PROCEDURES.md): the library
 # without std, tested; the library on one CPU without SME2, tested;
 # warnings as errors for the default, pure, and no_sme2 builds and b3sum;
+# the C API, tested from Rust and from C;
 # and compile-only checks for x86-64 (default features: its C and assembly
 # with the clang here) and wasm32. Each failure stops the script.
 #
@@ -22,6 +23,8 @@ for features in "" "--features pure" "--features no_sme2"; do
 	RUSTFLAGS="-D warnings" step cargo check -q --release --tests --examples $features
 done
 RUSTFLAGS="-D warnings" step cargo check -q --release --manifest-path b3sum/Cargo.toml
+# The C API (capi/): its Rust tests, and b3.h compiled as C11 and run.
+RUSTFLAGS="-D warnings" step cargo test -q --release --manifest-path capi/Cargo.toml
 RUSTFLAGS="-D warnings" step cargo check -q --tests --examples --target x86_64-unknown-linux-gnu
 RUSTFLAGS="-D warnings" step cargo check -q --tests --target wasm32-wasip1
 RUSTFLAGS="-D warnings" step cargo check -q --tests --target wasm32-wasip1 --no-default-features

@@ -57,7 +57,10 @@ Rust, and its x86-64 kernels, and adds code of its own:
   each back to a handler (`Queue`, `src/queue.rs`);
 - outboards and their verification (`outboard_with`, `Verifier`,
   `src/outboard.rs`);
-- the startup self-test (`src/self_test.rs`).
+- the startup self-test (`src/self_test.rs`);
+- the C API (`capi/b3.h` over the crate, `capi/src/lib.rs`), tested
+  through every call against the official test vectors, and from a C
+  program compiled as C11 with every warning an error (`capi/tests/`).
 
 Everything below aims at this new code. Much of it is `unsafe`: assembly,
 pointer tables, uninitialised scratch buffers, and threads that share

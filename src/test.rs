@@ -1535,3 +1535,20 @@ fn test_kernel_reports_match_the_dispatch() {
         });
     }
 }
+
+/// A context hashed once (Mode::DeriveKeyMaterial) derives what the
+/// context string derives (Mode::DeriveKey), one-shot and in a batch.
+#[test]
+fn test_derive_key_material_mode() {
+    let context = "BLAKE3 2026-10-16 derive key material test";
+    let context_key = crate::hazmat::hash_derive_key_context(context);
+    let (by_string, by_key) = (crate::Mode::DeriveKey(context), crate::Mode::DeriveKeyMaterial(&context_key));
+    let mut input = [0u8; 3000];
+    paint_test_input(&mut input);
+    assert_eq!(crate::hash_with(by_key, &input), crate::hash_with(by_string, &input));
+    assert_eq!(crate::hash_with(by_key, &input), crate::derive_key(context, &input));
+    let (mut a, mut b) = ([[0u8; 32]; 4], [[0u8; 32]; 4]);
+    crate::hash_many_with(by_key, &input[..4 * 128], 128, &mut a);
+    crate::hash_many_with(by_string, &input[..4 * 128], 128, &mut b);
+    assert_eq!(a, b);
+}

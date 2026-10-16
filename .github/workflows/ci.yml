@@ -87,6 +87,10 @@ jobs:
     - name: test vectors pure
       run: cargo test --features=pure
       working-directory: ./test_vectors
+    # The C API (capi/: b3.h over the crate).
+    - name: C API
+      run: cargo test --release
+      working-directory: ./capi
     # Reference impl doc test.
     - name: reference impl doc test
       run: cargo test
@@ -178,6 +182,9 @@ jobs:
     - run: cargo test --lib --tests --features=mmap,serde,zeroize
       env:
         CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
+    - name: C API
+      run: cargo test --release
+      working-directory: ./capi
 
   # The oldest GCC supported (CONTRIBUTING.md): Debian 12's, the oldest in a
   # supported distribution (Debian 11's support ended in August 2026). Older compilers are unsupported (GCC 5.4's

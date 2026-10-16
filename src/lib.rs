@@ -1149,7 +1149,9 @@ pub fn initialize_multithreaded() {
 /// Which of BLAKE3's three functions a call computes: the plain hash
 /// ([`hash`]), the keyed hash ([`keyed_hash`]), or key derivation
 /// ([`derive_key`]). Every call that takes a mode runs each one at the same
-/// speed.
+/// speed, but for `DeriveKey`, which first hashes its context string (once
+/// per call; [`DeriveKeyMaterial`](Mode::DeriveKeyMaterial) takes it hashed
+/// once for many calls).
 #[derive(Clone, Copy)]
 pub enum Mode<'a> {
     /// The default hash function, as [`hash`].
@@ -1159,6 +1161,9 @@ pub enum Mode<'a> {
     /// The key derivation function with this context string, as
     /// [`derive_key`]; the input is the key material.
     DeriveKey(&'a str),
+    /// The key derivation function with its context string already hashed
+    /// ([`hazmat::hash_derive_key_context`]); the input is the key material.
+    DeriveKeyMaterial(&'a hazmat::ContextKey),
 }
 
 impl Mode<'_> {
@@ -1168,6 +1173,7 @@ impl Mode<'_> {
             Mode::Hash => (*IV, 0),
             Mode::Keyed(key) => (platform::words_from_le_bytes_32(key), KEYED_HASH),
             Mode::DeriveKey(context) => (platform::words_from_le_bytes_32(&hazmat::hash_derive_key_context(context)), DERIVE_KEY_MATERIAL),
+            Mode::DeriveKeyMaterial(context_key) => (platform::words_from_le_bytes_32(context_key), DERIVE_KEY_MATERIAL),
         }
     }
 }

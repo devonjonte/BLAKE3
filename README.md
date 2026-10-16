@@ -25,7 +25,7 @@ reads the next (`Queue`), and verified streaming in iroh-blobs' format (`outboar
 It supports 64-bit Arm (Linux and macOS), x86-64 (Linux, macOS, and Windows with MSVC), and
 WebAssembly, with the latest stable Rust. [Official
 BLAKE3](https://github.com/BLAKE3-team/BLAKE3) serves other targets (32-bit x86 or Arm,
-big-endian CPUs, Windows with MinGW), older compilers, and C programs.
+big-endian CPUs, Windows with MinGW) and older compilers.
 
 [bench-hashes](https://github.com/johnservil/bench-hashes) measures it against other hashes
 on your own machine; here are its [full results on an Apple M4
@@ -55,6 +55,21 @@ assert_eq!(hasher.finalize(), hash);
 The [crate documentation](https://johnservil.github.io/BLAKE3/blake3_servil/) opens with a
 table of which call fits your data. `keyed_hash` (a MAC) and `derive_key` (a KDF) work as in
 official BLAKE3, below.
+
+From C, build the library in `capi/` (`cargo build --release` there gives `libb3.a` and
+`libb3.so` or `libb3.dylib`), include [`capi/b3.h`](capi/b3.h), and link with `-lb3`:
+
+```c
+#include "b3.h"
+
+b3_mode plain = b3_plain();
+b3_digest digest = b3_hash(&plain, "foobarbaz", 9);
+```
+
+A mode (`b3_plain`, `b3_keyed`, `b3_derive_key`) says which of BLAKE3's three functions a
+call computes; batches of messages (`b3_hash_many`), other cores (`_multithreaded`), and a
+hasher for a message in pieces (`b3_hasher`, in your memory) complete it. `b3.h` documents
+each call.
 
 The command-line `b3sum` prints the BLAKE3 hashes of files or of standard input:
 

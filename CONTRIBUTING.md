@@ -23,6 +23,9 @@ The README lists what the fork adds for callers; the code is laid out so:
   `queue.rs`, `outboard.rs` (outboards and the `Verifier`),
   `self_test.rs` (the startup self-test), and the proved cores
   (`tree_core.rs`, `hasher_core.rs`, `stack_core.rs`, `chunk_core.rs`).
+- `capi/`: the C API, `b3.h`, a thin layer over the crate
+  (`capi/src/lib.rs`), tested from Rust against the official test vectors
+  and from C (`capi/tests/`).
 - `tools/verify/`: the proofs (QUALITY.md, "Proofs"); `tools/mutants/`:
   mutation testing and the list of mutants known to survive.
 
@@ -48,6 +51,7 @@ cargo test --release --lib --tests --features no_sme2
 cargo test --release --lib --tests --features pure
 cargo test --release --doc
 cargo test --release --manifest-path test_vectors/Cargo.toml
+cargo test --release --manifest-path capi/Cargo.toml   # the C API
 sh tools/check-builds.sh            # the builds the suites leave out
 pypy3 tools/mutants/check.py        # about an hour: every surviving mutant known
 ```
