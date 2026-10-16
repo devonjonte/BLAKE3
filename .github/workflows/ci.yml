@@ -389,19 +389,22 @@ jobs:
           blake3.c blake3_dispatch.c blake3_portable.c
       working-directory: ./c
 
-  # See https://github.com/BLAKE3-team/BLAKE3/issues/271 for why we test this.
-  # Note that this isn't guaranteed to execute on an AVX-512-supporting server,
-  # but hopefully at least some of the time it will.
-  gcc54:
+  # The oldest GCC supported (CONTRIBUTING.md): Debian 11's, the oldest in a
+  # supported distribution. Older compilers are unsupported (GCC 5.4's
+  # assembler rejects the AVX-512 code GCC 5.4 itself emits at -O3; GCC 5
+  # was superseded in 2016). Upstream's reason for an old-GCC job:
+  # https://github.com/BLAKE3-team/BLAKE3/issues/271. The runner may lack
+  # AVX-512; the build is the check that holds on every runner.
+  gcc_floor:
     # A pull request from a branch of this repository: its push runs CI already.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: "compile and test with GCC 5.4"
+    name: "compile and test with GCC 10, the oldest supported"
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - uses: addnab/docker-run-action@v3
       with:
-        image: gcc:5.4
+        image: gcc:10
         options: -v ${{ github.workspace }}:/work
         run: |
           cat /proc/cpuinfo
