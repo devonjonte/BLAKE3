@@ -1499,6 +1499,7 @@ fn test_hash_comparisons_and_formats() {
 fn test_debug_leaves_out_the_bytes() {
     let mut state = crate::guts::ChunkState::new(5);
     state.update(&[0xab; 70]);
+    assert_eq!(state.len(), 70);
     let shown = std::format!("{state:?}");
     assert!(shown.contains("count: 70") && shown.contains("chunk_counter: 5"), "{shown}");
     assert!(!shown.contains("171") && !shown.contains("cv"), "{shown}");
