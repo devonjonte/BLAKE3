@@ -129,6 +129,7 @@ pub fn stream<'env, T>(mode: Mode, body: impl for<'s> FnOnce(&'s mut Stream<'env
         head: 0,
         tail: 0,
         open: None,
+        yielded: std::time::Instant::now(),
         stack: arrayvec::ArrayVec::new(),
         pieces: 0,
         env: PhantomData,
@@ -219,6 +220,8 @@ pub struct Stream<'env> {
     tail: usize,
     /// Short messages gathered, not yet handed to the pool.
     open: Option<Task>,
+    /// When a wait last yielded the CPU (lanes::poll_pause).
+    yielded: std::time::Instant,
     /// A long message being handed back: its pieces' chaining values so
     /// far (merged as the Hasher's stack merges), and how many.
     stack: arrayvec::ArrayVec<CVBytes, { crate::MAX_DEPTH + 1 }>,
@@ -464,7 +467,7 @@ impl<'env> Stream<'env> {
     /// pause.
     fn help(&mut self, digest: &mut impl FnMut(&[Hash])) {
         if self.deliver(digest) == 0 && !crate::lanes::run_one_task() {
-            core::hint::spin_loop();
+            crate::lanes::poll_pause(&mut self.yielded);
         }
     }
 
