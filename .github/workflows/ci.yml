@@ -404,6 +404,10 @@ jobs:
     # or a Graviton 2), whose detection then picks the plain NEON kernels.
     name: "AArch64 without SME2, and without SHA-3 (QEMU Cortex-A72)"
     runs-on: ubuntu-24.04-arm
+    # Clang assembles the SME2 kernel, which this build carries as users'
+    # do (GCC 13 here cannot); detection then leaves it out.
+    env:
+      CC: clang
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
