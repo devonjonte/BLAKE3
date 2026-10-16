@@ -17,6 +17,33 @@ mount).
 Treat the benchmark (`bench-hashes/`, its own repository) as a customer:
 tune to the hardware, never to its harness.
 
+## The pool, special-purpose: a lock-free source per stream, a parking token per worker (October 16, 2026)
+
+Zooko's lesson, from this work: it is often better not to reuse a
+general-purpose abstraction or tool and to build a special-purpose one;
+especially so for preemptive multithreading's paradigms and conventional
+wisdom.
+
+The case (i7-12700K, 19 workers). The pool was conventional: one
+`Mutex<VecDeque<Task>>`, and one `Mutex` with one `Condvar` for idle
+workers. A task's hand-over cost the producer, the bottleneck thread, 434
+ns (the lock 19 workers poll, list work, a wake check reading counters the
+workers write); and every worker slept and woke through one mutex and
+condvar, which the kernel serialized on one futex bucket's spinlock: 6-15%
+of all samples in `native_queued_spin_lock_slowpath` (`futex_q_lock`,
+`futex_wake`), resolved against vmlinux.
+
+The special-purpose pool (experiment/devon-pool-cursor): each stream's own
+ring is its queue (`published`, one Release store by the stream; `claimed`,
+CAS by workers; both only count up); each worker parks on its own thread
+token (park/unpark, a parked bit mask); the producer wakes at most one
+worker per publish, woken workers chain; workers spin 5 us while a stream
+is open. Against the same stream on the conventional pool, every stream
+cell level or faster (messages -5% to -49%, batches -3% to -15%); one-shot
+cells level; context switches per run 28.5k -> 10k. Spin 0 cost small
+messages 9-12% against the earlier stream; 20 us cost 22% more CPU time per
+run for no speed. Evidence: bench-hashes-validation/pool-cursor.
+
 ## Layout
 
 | Piece | Where | Role |
