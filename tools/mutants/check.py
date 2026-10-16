@@ -49,7 +49,7 @@ def survivors(files):
     # The public features on, so the code behind them is tested too (the
     # build variants, pure, no_sme2, and the like, are their own builds).
     args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize,traits-preview",
-            "--timeout", "300", "--output", out]
+            "--timeout", "30", "--output", out]
     for f in files:
         args += ["--file", f]
     env = {k: v for k, v in os.environ.items() if k != "CARGO_TARGET_DIR"}
