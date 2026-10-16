@@ -90,6 +90,14 @@ tests; the tests check the calls into them, and every other platform.)
   change between equally correct paths (a speed threshold, listed as
   such), or code that does nothing (removed).
 
+**What mutation testing finds**, first on `src/many.rs` (the batch
+dispatch), on the VM: of 259 mutants, 115 fail a test and 40 do not
+compile; each of the other 104 is explained: a speed threshold moved
+between equally correct paths (most of them), `|` made `^` on flag bits
+that never overlap, a Kani harness's own code (checked by `cargo kani`),
+or a branch only another machine takes (CPUs without the SHA-3
+extension, and x86, whose tests run in CI). None is a missing case.
+
 **What the suites cover now**, on the VM's AArch64 with SME2: 86% of the
 library's branch sides (859 of 994). Most of the rest are the branches
 of other machines (a CPU without the SHA-3 extension or without SME2,
