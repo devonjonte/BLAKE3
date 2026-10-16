@@ -395,6 +395,24 @@ jobs:
   # was superseded in 2016). Upstream's reason for an old-GCC job:
   # https://github.com/BLAKE3-team/BLAKE3/issues/271. The runner may lack
   # AVX-512; the build is the check that holds on every runner.
+  aarch64_without_sme2:
+    # A pull request from a branch of this repository: its push runs CI already.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # The AArch64 paths our machines (an M4 Max and a VM on it) never run:
+    # a CPU without SME2 (this runner, a Neoverse N2), and one without the
+    # SHA-3 extension either (QEMU as a Cortex-A72, as in a Raspberry Pi 4
+    # or a Graviton 2), whose detection then picks the plain NEON kernels.
+    name: "AArch64 without SME2, and without SHA-3 (QEMU Cortex-A72)"
+    runs-on: ubuntu-24.04-arm
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - run: cargo test --lib --tests --features=mmap,serde,zeroize
+    - run: sudo apt-get update && sudo apt-get install -y qemu-user
+    - run: cargo test --lib --tests --features=mmap,serde,zeroize
+      env:
+        CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
+
   gcc_floor:
     # A pull request from a branch of this repository: its push runs CI already.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
