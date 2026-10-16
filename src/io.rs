@@ -7,7 +7,7 @@ use std::io;
 #[cfg(feature = "mmap")]
 const MINIMUM_MMAP_SIZE: u64 = 16 * 1024; // 16 KiB
 
-pub(crate) fn copy_wide(mut reader: impl io::Read, hasher: &mut crate::Hasher) -> io::Result<u64> {
+pub(crate) fn copy_wide(mut reader: impl io::Read, hasher: &mut crate::Hasher) -> io::Result<()> {
     // A reader that fills 64 KiB has more: the rest goes through a 1 MiB
     // buffer, filled before each update. On SME2, 1 MiB pieces hash at the
     // one-shot rate, where 64 KiB pieces each meet the SME unit's slow
@@ -21,19 +21,18 @@ pub(crate) fn copy_wide(mut reader: impl io::Read, hasher: &mut crate::Hasher) -
     let (n, read) = fill(&mut reader, &mut small);
     if n < small.len() || read.is_err() {
         hasher.update(&small[..n]);
-        return read.map(|()| n as u64);
+        return read;
     }
     let mut buffer = std::vec![0; 1 << 20];
     buffer[..n].copy_from_slice(&small);
-    let (mut start, mut total) = (n, 0u64);
+    let mut start = n;
     loop {
         let (filled, read) = fill(&mut reader, &mut buffer[start..]);
         let n = start + filled;
         hasher.update(&buffer[..n]);
-        total += n as u64;
         read?;
         if n < buffer.len() {
-            return Ok(total);
+            return Ok(());
         }
         start = 0;
     }

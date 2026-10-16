@@ -3,9 +3,9 @@
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
 files: src/chunk_core.rs src/each.rs src/ffi_avx2.rs src/ffi_avx512.rs src/ffi_neon.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/ffi_sse2.rs src/ffi_sse41.rs src/guts.rs src/hasher_core.rs src/hazmat.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/neon_xof.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/queue.rs src/rust_avx2.rs src/rust_sse2.rs src/rust_sse41.rs src/self_test.rs src/stack_core.rs src/traits.rs src/tree.rs src/tree_core.rs src/wasm32_simd.rs 
-src/each.rs	replace * with + in hash_held	1	UNCLASSIFIED
+src/each.rs	replace * with + in hash_held	1	another machine: the path without SME2 (check-builds' one-CPU no_sme2 tests and CI's AArch64 job run it)
 src/each.rs	replace * with / in hash_held	2	another machine: the per-group calls of a CPU without SME2 (check-builds' one-CPU no_sme2 tests reach them)
-src/each.rs	replace + with - in hash_held	1	UNCLASSIFIED
+src/each.rs	replace + with - in hash_held	1	another machine: the path without SME2 (check-builds' one-CPU no_sme2 tests and CI's AArch64 job run it)
 src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace < with <= in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
 src/each.rs	replace < with == in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
@@ -42,14 +42,14 @@ src/ffi_neon_hybrid.rs	replace prefetch_tree_code with ()	1	speed: whether and w
 src/ffi_neon_hybrid.rs	replace sha3_detected -> bool with true	1	detection, on a machine with SHA-3: a wrong no runs the NEON kernels (equally correct), a wrong yes is this machine's answer
 src/ffi_neon_hybrid.rs	replace | with ^ in compress_in_place	1	equivalent: | and ^ agree on flag bits that never overlap
 src/ffi_sme2.rs	replace entries -> std::vec::Vec<(&'static str, *const())> with vec![]	1	UNCLASSIFIED
-src/ffi_sme2.rs	replace prefetch_code with ()	1	UNCLASSIFIED
-src/io.rs	replace * with +	1	UNCLASSIFIED
+src/ffi_sme2.rs	replace prefetch_code with ()	1	speed: whether and what to prefetch after a pause (no effect on results)
+src/io.rs	replace * with +	1	speed: moves a threshold between equally correct paths (MINIMUM_MMAP_SIZE: whether to map or read)
 src/io.rs	replace += with *= in copy_wide	1	UNCLASSIFIED
-src/io.rs	replace - with + in maybe_mmap_file	1	UNCLASSIFIED
-src/io.rs	replace - with / in maybe_mmap_file	1	UNCLASSIFIED
-src/io.rs	replace < with <= in fill	1	UNCLASSIFIED
+src/io.rs	replace - with + in maybe_mmap_file	1	a guard against lengths past isize::MAX, which no file reaches
+src/io.rs	replace - with / in maybe_mmap_file	1	a guard against lengths past isize::MAX, which no file reaches
+src/io.rs	replace < with <= in fill	1	equivalent: one more read into an empty buffer, which returns 0 and ends the loop
 src/lanes.rs	delete ! in Pool::take_piece	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	delete ! in initialize	1	UNCLASSIFIED
+src/lanes.rs	delete ! in initialize	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	delete match arm 128 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	delete match arm 256 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	delete match arm 512 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
@@ -62,98 +62,98 @@ src/lanes.rs	replace & with | in proofs::cut_step_keeps_whole_subtrees	1	a Kani 
 src/lanes.rs	replace && with || in Pool::next_piece	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace && with || in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace && with || in Tasks::push	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace && with || in hash_each	1	UNCLASSIFIED
-src/lanes.rs	replace && with || in initialize	1	UNCLASSIFIED
+src/lanes.rs	replace && with || in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace && with || in initialize	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace && with || in proofs::cut_step_keeps_whole_subtrees	3	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace && with || in proofs::next_piece_len_bounds	1	a Kani harness's own code (cargo kani checks it)
-src/lanes.rs	replace * with + in cut_messages	1	UNCLASSIFIED
-src/lanes.rs	replace * with + in group_cvs	1	UNCLASSIFIED
-src/lanes.rs	replace * with + in merge_to_children	1	UNCLASSIFIED
-src/lanes.rs	replace * with + in sme2_prefix	2	UNCLASSIFIED
-src/lanes.rs	replace * with / in cut_messages	1	UNCLASSIFIED
-src/lanes.rs	replace * with / in cut_with_prefix	1	UNCLASSIFIED
-src/lanes.rs	replace * with / in group_cvs	1	UNCLASSIFIED
-src/lanes.rs	replace * with / in sme2_prefix	1	UNCLASSIFIED
+src/lanes.rs	replace * with + in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace * with + in group_cvs	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace * with + in merge_to_children	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace * with + in sme2_prefix	2	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace * with / in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace * with / in cut_with_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace * with / in group_cvs	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace * with / in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace + with * in Pool::take_piece	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace + with * in Tasks::push	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace + with * in group_cvs	1	UNCLASSIFIED
-src/lanes.rs	replace + with * in hash_each	1	UNCLASSIFIED
-src/lanes.rs	replace + with * in hash_many_over_pool	1	UNCLASSIFIED
-src/lanes.rs	replace + with * in hash_over_pool	1	UNCLASSIFIED
-src/lanes.rs	replace + with * in sme2_prefix	1	UNCLASSIFIED
-src/lanes.rs	replace + with * in subtree_children	1	UNCLASSIFIED
+src/lanes.rs	replace + with * in group_cvs	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace + with * in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace + with * in hash_many_over_pool	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace + with * in hash_over_pool	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace + with * in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace + with * in subtree_children	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace + with - in Pool::take_piece	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace += with *= in hash_each	1	UNCLASSIFIED
+src/lanes.rs	replace += with *= in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace - with + in Pool::register	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace - with + in Pool::wake_for	7	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace - with + in cut_messages	1	UNCLASSIFIED
-src/lanes.rs	replace - with + in cut_with_prefix	3	UNCLASSIFIED
+src/lanes.rs	replace - with + in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace - with + in cut_with_prefix	3	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in proofs::cut_step_keeps_whole_subtrees	2	a Kani harness's own code (cargo kani checks it)
-src/lanes.rs	replace - with + in sme2_prefix	1	UNCLASSIFIED
+src/lanes.rs	replace - with + in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with / in Pool::register	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace - with / in Pool::wake_for	5	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace - with / in proofs::cut_step_keeps_whole_subtrees	2	a Kani harness's own code (cargo kani checks it)
-src/lanes.rs	replace - with / in sme2_prefix	1	UNCLASSIFIED
-src/lanes.rs	replace -= with += in hash_each	1	UNCLASSIFIED
-src/lanes.rs	replace -= with /= in hash_each	1	UNCLASSIFIED
-src/lanes.rs	replace / with % in sme2_prefix	2	UNCLASSIFIED
+src/lanes.rs	replace - with / in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace -= with += in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace -= with /= in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace / with % in sme2_prefix	2	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace < with <= in Pool::take_piece	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with <= in Pool::wait_done	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with <= in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace < with <= in group_cvs	1	UNCLASSIFIED
-src/lanes.rs	replace < with <= in hash_each	1	UNCLASSIFIED
+src/lanes.rs	replace < with <= in group_cvs	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace < with <= in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace < with <= in proofs::cut_step_keeps_whole_subtrees	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace < with == in Pool::take_piece	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with == in Pool::wait_done	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with == in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace < with == in group_cvs	1	UNCLASSIFIED
-src/lanes.rs	replace < with == in hash_each	1	UNCLASSIFIED
+src/lanes.rs	replace < with == in group_cvs	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace < with == in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace < with == in proofs::cut_step_keeps_whole_subtrees	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace < with > in Pool::wait_done	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace < with > in Pool::wake_for	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace < with > in cut_with_prefix	1	UNCLASSIFIED
-src/lanes.rs	replace < with > in group_cvs	1	UNCLASSIFIED
-src/lanes.rs	replace < with > in hash_each	1	UNCLASSIFIED
+src/lanes.rs	replace < with > in cut_with_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace < with > in group_cvs	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace < with > in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace < with > in proofs::cut_step_keeps_whole_subtrees	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace <= with > in proofs::cut_step_keeps_whole_subtrees	2	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace <= with > in proofs::next_piece_len_bounds	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace == with != in Pool::next_piece	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace == with != in Task::run_equal_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	replace == with != in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
-src/lanes.rs	replace == with != in hash_each	1	UNCLASSIFIED
-src/lanes.rs	replace == with != in initialize	1	UNCLASSIFIED
+src/lanes.rs	replace == with != in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace == with != in initialize	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace == with != in proofs::cut_step_keeps_whole_subtrees	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace == with != in sme2_main	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace > with < in Pool::unregister	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace > with < in Pool::wake_for	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace > with < in cut_with_prefix	1	UNCLASSIFIED
-src/lanes.rs	replace > with < in hash_many_over_pool	1	UNCLASSIFIED
-src/lanes.rs	replace > with < in hash_over_pool	1	UNCLASSIFIED
+src/lanes.rs	replace > with < in cut_with_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace > with < in hash_many_over_pool	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace > with < in hash_over_pool	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace > with < in proofs::next_piece_len_bounds	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace > with < in sme2_main	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace > with < in takes_tasks	1	UNCLASSIFIED
+src/lanes.rs	replace > with < in takes_tasks	1	one CPU or many: this machine has many (check-builds' one-CPU tests run the other side)
 src/lanes.rs	replace > with == in Pool::wake_for	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace > with == in hash_many_over_pool	1	UNCLASSIFIED
-src/lanes.rs	replace > with == in hash_over_pool	1	UNCLASSIFIED
+src/lanes.rs	replace > with == in hash_many_over_pool	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace > with == in hash_over_pool	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace > with == in proofs::next_piece_len_bounds	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace > with == in sme2_main	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace > with == in takes_tasks	1	UNCLASSIFIED
+src/lanes.rs	replace > with == in takes_tasks	1	one CPU or many: this machine has many (check-builds' one-CPU tests run the other side)
 src/lanes.rs	replace > with >= in Pool::piece_done	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace > with >= in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace > with >= in cut_with_prefix	1	UNCLASSIFIED
-src/lanes.rs	replace > with >= in hash_many_over_pool	1	UNCLASSIFIED
-src/lanes.rs	replace > with >= in hash_over_pool	1	UNCLASSIFIED
+src/lanes.rs	replace > with >= in cut_with_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace > with >= in hash_many_over_pool	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace > with >= in hash_over_pool	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace > with >= in proofs::next_piece_len_bounds	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace > with >= in sme2_main	3	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace > with >= in splits	1	UNCLASSIFIED
-src/lanes.rs	replace > with >= in takes_tasks	1	UNCLASSIFIED
+src/lanes.rs	replace > with >= in splits	1	one CPU or many: this machine has many (check-builds' one-CPU tests run the other side)
+src/lanes.rs	replace > with >= in takes_tasks	1	one CPU or many: this machine has many (check-builds' one-CPU tests run the other side)
 src/lanes.rs	replace >= with < in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
-src/lanes.rs	replace >= with < in group_cvs	1	UNCLASSIFIED
-src/lanes.rs	replace >= with < in hash_each	1	UNCLASSIFIED
-src/lanes.rs	replace >= with < in poll_pause	1	UNCLASSIFIED
+src/lanes.rs	replace >= with < in group_cvs	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace >= with < in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace >= with < in poll_pause	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace >= with < in proofs::cut_step_keeps_whole_subtrees	1	a Kani harness's own code (cargo kani checks it)
-src/lanes.rs	replace >= with < in sme2_prefix	1	UNCLASSIFIED
-src/lanes.rs	replace >= with < in subtree_children	1	UNCLASSIFIED
+src/lanes.rs	replace >= with < in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace >= with < in subtree_children	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace Pool::register -> Option<usize> with None	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace Pool::register -> Option<usize> with Some(0)	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace Pool::register -> Option<usize> with Some(1)	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
@@ -162,23 +162,23 @@ src/lanes.rs	replace Pool::wake_for with ()	1	OPEN: the pool's scheduling under 
 src/lanes.rs	replace Tasks::give_room with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace match guard task.members > 0 with false in sme2_main	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace match guard task.members > 0 with true in sme2_main	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
-src/lanes.rs	replace poll_pause with ()	1	UNCLASSIFIED
-src/lanes.rs	replace prefix_for -> usize with 0	1	UNCLASSIFIED
-src/lanes.rs	replace prefix_for -> usize with 1	1	UNCLASSIFIED
-src/lanes.rs	replace prepare with ()	1	UNCLASSIFIED
+src/lanes.rs	replace poll_pause with ()	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace prefix_for -> usize with 0	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace prefix_for -> usize with 1	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace prepare with ()	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
 src/lanes.rs	replace proofs::cut_step_keeps_whole_subtrees with ()	1	a Kani harness's own code (cargo kani checks it)
 src/lanes.rs	replace proofs::next_piece_len_bounds with ()	1	a Kani harness's own code (cargo kani checks it)
-src/lanes.rs	replace sme2_prefix -> usize with 0	1	UNCLASSIFIED
-src/lanes.rs	replace sme2_prefix -> usize with 1	1	UNCLASSIFIED
-src/lanes.rs	replace splits -> bool with true	1	UNCLASSIFIED
-src/lanes.rs	replace takes_tasks -> bool with false	1	UNCLASSIFIED
-src/lanes.rs	replace takes_tasks -> bool with true	1	UNCLASSIFIED
+src/lanes.rs	replace sme2_prefix -> usize with 0	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace sme2_prefix -> usize with 1	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace splits -> bool with true	1	one CPU or many: this machine has many (check-builds' one-CPU tests run the other side)
+src/lanes.rs	replace takes_tasks -> bool with false	1	one CPU or many: this machine has many (check-builds' one-CPU tests run the other side)
+src/lanes.rs	replace takes_tasks -> bool with true	1	one CPU or many: this machine has many (check-builds' one-CPU tests run the other side)
 src/lanes.rs	replace worker_main with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench NEXT-STEPS 11)
 src/lanes.rs	replace | with & in Task::run_equal_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	replace | with ^ in Task::run_equal_members	4	equivalent: | and ^ agree on flag bits that never overlap
-src/lanes.rs	replace || with && in group_cvs	1	UNCLASSIFIED
-src/lanes.rs	replace || with && in hash_each	1	UNCLASSIFIED
-src/lanes.rs	replace || with && in takes_tasks	1	UNCLASSIFIED
+src/lanes.rs	replace || with && in group_cvs	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace || with && in hash_each	1	OPEN, deferred: the pool's job scheduler, which the one scheduler replaces (NEXT-STEPS 0)
+src/lanes.rs	replace || with && in takes_tasks	1	one CPU or many: this machine has many (check-builds' one-CPU tests run the other side)
 src/lib.rs	delete ! in <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv	1	speed: chooses between equally correct paths
 src/lib.rs	delete ! in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
 src/lib.rs	delete ! in batch_after_pause	2	speed: whether and what to prefetch after a pause (no effect on results)
@@ -270,107 +270,107 @@ src/lib.rs	replace | with ^ in compress_parents_parallel	1	equivalent: | and ^ a
 src/lib.rs	replace | with ^ in hash_all_at_once	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in hash_one_chunk_root	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace || with && in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
-src/many.rs	delete ! in across_from	2	UNCLASSIFIED
-src/many.rs	delete match arm 3 in hash_four_at_a_time	1	UNCLASSIFIED
-src/many.rs	replace != with == in across_from	1	UNCLASSIFIED
-src/many.rs	replace != with == in hash_four_at_a_time	1	UNCLASSIFIED
-src/many.rs	replace % with + in across_from	1	UNCLASSIFIED
+src/many.rs	delete ! in across_from	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	delete match arm 3 in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace != with == in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace != with == in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace % with + in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace % with + in hash_chunked	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace % with + in hash_four_at_a_time	1	UNCLASSIFIED
-src/many.rs	replace % with / in across_from	1	UNCLASSIFIED
+src/many.rs	replace % with + in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace % with / in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace % with / in hash_chunked	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace % with / in hash_four_at_a_time	1	UNCLASSIFIED
-src/many.rs	replace && with || in across_from	1	UNCLASSIFIED
-src/many.rs	replace && with || in hash_four_at_a_time	1	UNCLASSIFIED
-src/many.rs	replace && with || in hash_run_short	1	UNCLASSIFIED
+src/many.rs	replace % with / in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace && with || in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace && with || in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace && with || in hash_run_short	1	speed: moves a threshold between equally correct paths
 src/many.rs	replace && with || in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace && with || in sme2_sized	5	UNCLASSIFIED
-src/many.rs	replace * with + in hash_across	2	UNCLASSIFIED
-src/many.rs	replace * with + in hash_group_across	5	UNCLASSIFIED
-src/many.rs	replace * with + in hash_long_or_single	1	UNCLASSIFIED
+src/many.rs	replace && with || in sme2_sized	5	speed: moves a threshold between equally correct paths
+src/many.rs	replace * with + in hash_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with + in hash_group_across	5	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with + in hash_long_or_single	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace * with + in hash_many_on	1	speed: moves a threshold between equally correct paths
 src/many.rs	replace * with + in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace * with + in subtree_across	1	UNCLASSIFIED
-src/many.rs	replace * with / in hash_across	2	UNCLASSIFIED
-src/many.rs	replace * with / in hash_four_at_a_time	1	UNCLASSIFIED
-src/many.rs	replace * with / in hash_group_across	5	UNCLASSIFIED
-src/many.rs	replace * with / in hash_long_or_single	1	UNCLASSIFIED
+src/many.rs	replace * with + in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with / in hash_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with / in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace * with / in hash_group_across	5	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with / in hash_long_or_single	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace * with / in hash_many_on	1	speed: moves a threshold between equally correct paths
 src/many.rs	replace * with / in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace * with / in subtree_across	1	UNCLASSIFIED
-src/many.rs	replace + with * in hash_across	1	UNCLASSIFIED
-src/many.rs	replace + with * in hash_blocks	1	UNCLASSIFIED
-src/many.rs	replace + with * in hash_group_across	1	UNCLASSIFIED
+src/many.rs	replace * with / in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace + with * in hash_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace + with * in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace + with * in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace + with * in proofs::fill_table_writes_every_lane	1	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace + with * in subtree_across	2	UNCLASSIFIED
-src/many.rs	replace + with - in hash_across	1	UNCLASSIFIED
-src/many.rs	replace + with - in hash_blocks	1	UNCLASSIFIED
-src/many.rs	replace + with - in hash_group_across	1	UNCLASSIFIED
+src/many.rs	replace + with * in subtree_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace + with - in hash_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace + with - in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace + with - in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace + with - in proofs::fill_table_writes_every_lane	1	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace + with - in subtree_across	2	UNCLASSIFIED
-src/many.rs	replace - with + in hash_blocks	1	UNCLASSIFIED
+src/many.rs	replace + with - in subtree_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace - with + in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
 src/many.rs	replace - with + in hash_chunked	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace - with + in hash_four_at_a_time	1	UNCLASSIFIED
-src/many.rs	replace - with + in hash_group_across	2	UNCLASSIFIED
+src/many.rs	replace - with + in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace - with + in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace - with + in proofs::fill_table_writes_every_lane	1	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace - with + in subtree_across	1	UNCLASSIFIED
-src/many.rs	replace - with / in hash_blocks	1	UNCLASSIFIED
+src/many.rs	replace - with + in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace - with / in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
 src/many.rs	replace - with / in hash_chunked	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace - with / in hash_group_across	2	UNCLASSIFIED
+src/many.rs	replace - with / in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace - with / in proofs::fill_table_writes_every_lane	1	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace - with / in subtree_across	1	UNCLASSIFIED
-src/many.rs	replace / with % in hash_group_across	2	UNCLASSIFIED
-src/many.rs	replace / with % in subtree_across	1	UNCLASSIFIED
-src/many.rs	replace / with * in hash_group_across	2	UNCLASSIFIED
-src/many.rs	replace / with * in subtree_across	1	UNCLASSIFIED
-src/many.rs	replace < with <= in across_from	1	UNCLASSIFIED
-src/many.rs	replace < with <= in hash_group_across	1	UNCLASSIFIED
+src/many.rs	replace - with / in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace / with % in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace / with % in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace / with * in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace / with * in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with <= in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with <= in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace < with <= in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace < with == in across_from	1	UNCLASSIFIED
-src/many.rs	replace < with == in hash_group_across	1	UNCLASSIFIED
+src/many.rs	replace < with == in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with == in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace < with == in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace < with > in across_from	1	UNCLASSIFIED
-src/many.rs	replace < with > in hash_group_across	1	UNCLASSIFIED
+src/many.rs	replace < with > in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with > in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace < with > in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
 src/many.rs	replace <= with > in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
 src/many.rs	replace <= with > in proofs::slot_len_is_whole_blocks	1	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace <= with > in sme2_sized	2	UNCLASSIFIED
-src/many.rs	replace == with != in across_from	1	UNCLASSIFIED
-src/many.rs	replace == with != in hash_blocks	1	UNCLASSIFIED
-src/many.rs	replace == with != in hash_group_across	1	UNCLASSIFIED
-src/many.rs	replace == with != in subtree_across	1	UNCLASSIFIED
+src/many.rs	replace <= with > in sme2_sized	2	speed: moves a threshold between equally correct paths
+src/many.rs	replace == with != in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace == with != in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace == with != in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace == with != in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace > with < in hash_chunked	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace > with < in hash_group_across	2	UNCLASSIFIED
-src/many.rs	replace > with < in sme2_sized	2	UNCLASSIFIED
-src/many.rs	replace > with == in hash_blocks	1	UNCLASSIFIED
+src/many.rs	replace > with < in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace > with < in sme2_sized	2	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with == in hash_blocks	1	speed: moves a threshold between equally correct paths; and an SME2 call with no lanes, which does nothing
 src/many.rs	replace > with == in hash_chunked	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace > with == in hash_group_across	2	UNCLASSIFIED
-src/many.rs	replace > with == in hash_run	1	UNCLASSIFIED
-src/many.rs	replace > with == in sme2_sized	2	UNCLASSIFIED
-src/many.rs	replace > with >= in hash_blocks	2	UNCLASSIFIED
+src/many.rs	replace > with == in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace > with == in hash_run	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with == in sme2_sized	2	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with >= in hash_blocks	2	speed: moves a threshold between equally correct paths; and an SME2 call with no lanes, which does nothing
 src/many.rs	replace > with >= in hash_chunked	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace > with >= in hash_group_across	2	UNCLASSIFIED
-src/many.rs	replace > with >= in hash_run	1	UNCLASSIFIED
-src/many.rs	replace > with >= in sme2_sized	2	UNCLASSIFIED
-src/many.rs	replace >= with < in hash_long_or_single	1	UNCLASSIFIED
+src/many.rs	replace > with >= in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace > with >= in hash_run	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with >= in sme2_sized	2	speed: moves a threshold between equally correct paths
+src/many.rs	replace >= with < in hash_long_or_single	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace >= with < in hash_many_on	2	speed: moves a threshold between equally correct paths
-src/many.rs	replace >= with < in hash_run_short	1	UNCLASSIFIED
-src/many.rs	replace >= with < in sme2_sized	6	UNCLASSIFIED
-src/many.rs	replace across_from -> Option<usize> with None	1	UNCLASSIFIED
-src/many.rs	replace across_from -> Option<usize> with Some(0)	1	UNCLASSIFIED
-src/many.rs	replace across_from -> Option<usize> with Some(1)	1	UNCLASSIFIED
-src/many.rs	replace hash_across with ()	1	UNCLASSIFIED
-src/many.rs	replace hash_group_across with ()	1	UNCLASSIFIED
-src/many.rs	replace hash_long_or_single with ()	1	UNCLASSIFIED
-src/many.rs	replace neon_plans -> bool with true	1	UNCLASSIFIED
-src/many.rs	replace platform_is_sme2 -> bool with true	1	UNCLASSIFIED
+src/many.rs	replace >= with < in hash_run_short	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace >= with < in sme2_sized	6	speed: moves a threshold between equally correct paths
+src/many.rs	replace across_from -> Option<usize> with None	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace across_from -> Option<usize> with Some(0)	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace across_from -> Option<usize> with Some(1)	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace hash_across with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace hash_group_across with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace hash_long_or_single with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace neon_plans -> bool with true	1	another machine: forces the NEON plans on a CPU without SHA-3, which would stop
+src/many.rs	replace platform_is_sme2 -> bool with true	1	another machine: forces SME2 on a CPU without it, which would stop (check-builds' one-CPU no_sme2 tests and CI's AArch64 job run it)
 src/many.rs	replace proofs::fill_table_writes_every_lane with ()	1	a Kani harness's own code (cargo kani checks it)
 src/many.rs	replace proofs::slot_len_is_whole_blocks with ()	1	a Kani harness's own code (cargo kani checks it)
-src/many.rs	replace sme2_sized -> bool with false	1	UNCLASSIFIED
-src/many.rs	replace sme2_sized -> bool with true	1	UNCLASSIFIED
-src/many.rs	replace subtree_across with ()	1	UNCLASSIFIED
-src/many.rs	replace | with & in hash_group_across	2	UNCLASSIFIED
-src/many.rs	replace | with & in subtree_across	2	UNCLASSIFIED
+src/many.rs	replace sme2_sized -> bool with false	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace sme2_sized -> bool with true	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace subtree_across with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace | with & in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace | with & in subtree_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace | with ^ in hash_blocks	1	equivalent: | and ^ agree on flag bits that never overlap
 src/many.rs	replace | with ^ in hash_four_at_a_time	1	equivalent: | and ^ agree on flag bits that never overlap
 src/many.rs	replace | with ^ in hash_group_across	2	equivalent: | and ^ agree on flag bits that never overlap
@@ -379,31 +379,31 @@ src/many.rs	replace | with ^ in hash_run_padded	1	equivalent: | and ^ agree on f
 src/many.rs	replace | with ^ in hash_two_chunks	1	equivalent: | and ^ agree on flag bits that never overlap
 src/many.rs	replace | with ^ in neon_plans_last_len	1	equivalent: | and ^ agree on flag bits that never overlap
 src/many.rs	replace | with ^ in subtree_across	2	equivalent: | and ^ agree on flag bits that never overlap
-src/many.rs	replace || with && in across_from	2	UNCLASSIFIED
-src/many.rs	replace || with && in sme2_sized	4	UNCLASSIFIED
+src/many.rs	replace || with && in across_from	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace || with && in sme2_sized	4	speed: moves a threshold between equally correct paths
 src/outboard.rs	delete ! in Verifier::check	1	speed: whether the check takes the SME2 turn
 src/outboard.rs	delete ! in outboard	1	speed: whether the outboard takes the SME2 turn
 src/outboard.rs	replace && with || in Verifier::check	1	equivalent: only the root lacks an expected value, and in the encoding's pre-order a batch's first node with one starts where its first group does
 src/outboard.rs	replace | with ^ in groups_cvs_into	1	equivalent: | and ^ agree on flag bits that never overlap
-src/pair.rs	delete match arm Platform::AVX2 in takes_platform	1	UNCLASSIFIED
-src/pair.rs	delete match arm Platform::AVX512 in takes_platform	1	UNCLASSIFIED
-src/pair.rs	replace * with + in parent	3	UNCLASSIFIED
-src/pair.rs	replace * with + in takes	1	UNCLASSIFIED
-src/pair.rs	replace * with / in parent	3	UNCLASSIFIED
-src/pair.rs	replace * with / in takes	1	UNCLASSIFIED
-src/pair.rs	replace + with * in parent	1	UNCLASSIFIED
-src/pair.rs	replace + with * in takes	2	UNCLASSIFIED
-src/pair.rs	replace + with - in parent	1	UNCLASSIFIED
-src/pair.rs	replace + with - in takes	2	UNCLASSIFIED
-src/pair.rs	replace - with + in parent	2	UNCLASSIFIED
-src/pair.rs	replace - with / in parent	2	UNCLASSIFIED
-src/pair.rs	replace / with % in parent	1	UNCLASSIFIED
-src/pair.rs	replace / with * in parent	1	UNCLASSIFIED
-src/pair.rs	replace parent -> [u8; BLOCK_LEN] with [0; BLOCK_LEN]	1	UNCLASSIFIED
-src/pair.rs	replace parent -> [u8; BLOCK_LEN] with [1; BLOCK_LEN]	1	UNCLASSIFIED
-src/pair.rs	replace takes -> bool with false	1	UNCLASSIFIED
-src/pair.rs	replace takes_platform -> bool with false	1	UNCLASSIFIED
-src/pair.rs	replace | with & in parent	1	UNCLASSIFIED
+src/pair.rs	delete match arm Platform::AVX2 in takes_platform	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	delete match arm Platform::AVX512 in takes_platform	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace * with + in parent	3	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace * with + in takes	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace * with / in parent	3	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace * with / in takes	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace + with * in parent	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace + with * in takes	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace + with - in parent	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace + with - in takes	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace - with + in parent	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace - with / in parent	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace / with % in parent	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace / with * in parent	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace parent -> [u8; BLOCK_LEN] with [0; BLOCK_LEN]	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace parent -> [u8; BLOCK_LEN] with [1; BLOCK_LEN]	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace takes -> bool with false	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace takes_platform -> bool with false	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace | with & in parent	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
 src/pair.rs	replace | with ^ in parent	1	equivalent: | and ^ agree on flag bits that never overlap
 src/platform.rs	delete ! in Platform::xof_many	1	speed: chooses between equally correct paths
 src/platform.rs	delete ! in sme2_detect_uncached	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
@@ -470,110 +470,110 @@ src/platform.rs	replace ticks_in_100_us -> u64 with 1	1	speed: whether and what 
 src/platform.rs	replace | with & in Platform::compress_blocks	1	another build: the loop for builds without the AArch64 integer kernel (the pure build's tests reach it)
 src/platform.rs	replace | with ^ in Platform::compress_blocks	1	equivalent: | and ^ agree on flag bits that never overlap
 src/portable.rs	replace | with ^ in hash1	1	equivalent: | and ^ agree on flag bits that never overlap
-src/queue.rs	delete ! in <impl Deliver for Inner<H, (H::Buffer, H::Digests), shape::Fixed>>::deliver	1	UNCLASSIFIED
-src/queue.rs	delete ! in Delivery::run	1	UNCLASSIFIED
-src/queue.rs	delete ! in Inner<H, I, S>::deliver_with	2	UNCLASSIFIED
-src/queue.rs	delete ! in Inner<H, I, S>::submit	1	UNCLASSIFIED
-src/queue.rs	replace && with || in <impl Deliver for Inner<H, (H::Buffer, H::Digests), shape::Fixed>>::deliver	1	UNCLASSIFIED
-src/queue.rs	replace && with || in Inner<H, I, S>::submit	1	UNCLASSIFIED
-src/queue.rs	replace && with || in Queue<H, shape::Fixed>::submit	3	UNCLASSIFIED
-src/queue.rs	replace && with || in Queue<H, shape::Messages>::submit	3	UNCLASSIFIED
-src/queue.rs	replace && with || in Queue<H, shape::Pieces>::submit	1	UNCLASSIFIED
-src/queue.rs	replace && with || in State<I>::close_open	3	UNCLASSIFIED
-src/queue.rs	replace * with + in Inner<H, I, S>::submit	1	UNCLASSIFIED
-src/queue.rs	replace * with + in State<I>::add_block	2	UNCLASSIFIED
-src/queue.rs	replace * with + in State<I>::close_open	1	UNCLASSIFIED
-src/queue.rs	replace * with / in State<I>::add_block	2	UNCLASSIFIED
-src/queue.rs	replace * with / in State<I>::close_open	1	UNCLASSIFIED
-src/queue.rs	replace + with * in Inner<H, I, S>::deliver_with	1	UNCLASSIFIED
-src/queue.rs	replace += with *= in Inner<H, I, S>::deliver_with	1	UNCLASSIFIED
-src/queue.rs	replace += with *= in Inner<H, I, S>::submit_member	1	UNCLASSIFIED
-src/queue.rs	replace - with + in Delivery::make_room	1	UNCLASSIFIED
-src/queue.rs	replace - with + in Inner<H, I, S>::submit	1	UNCLASSIFIED
-src/queue.rs	replace - with + in State<I>::add_block	2	UNCLASSIFIED
-src/queue.rs	replace - with / in Inner<H, I, S>::submit	1	UNCLASSIFIED
-src/queue.rs	replace -= with += in Delivery::give_room	1	UNCLASSIFIED
-src/queue.rs	replace / with % in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
-src/queue.rs	replace / with % in State<I>::close_open	1	UNCLASSIFIED
-src/queue.rs	replace / with * in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
-src/queue.rs	replace / with * in State<I>::close_open	1	UNCLASSIFIED
-src/queue.rs	replace < with <= in Inner<H, I, S>::deliver_with	1	UNCLASSIFIED
-src/queue.rs	replace < with <= in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
-src/queue.rs	replace < with <= in Queue<H, shape::Messages>::submit	1	UNCLASSIFIED
-src/queue.rs	replace < with == in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
-src/queue.rs	replace < with == in Queue<H, shape::Messages>::submit	1	UNCLASSIFIED
-src/queue.rs	replace < with > in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
-src/queue.rs	replace < with > in Queue<H, shape::Messages>::submit	1	UNCLASSIFIED
-src/queue.rs	replace <impl Drop for State<I>>::drop with ()	1	UNCLASSIFIED
-src/queue.rs	replace == with != in Inner<H, I, S>::deliver_with	2	UNCLASSIFIED
-src/queue.rs	replace == with != in State<I>::close_open	1	UNCLASSIFIED
-src/queue.rs	replace > with < in Inner<H, I, S>::deliver_with	2	UNCLASSIFIED
-src/queue.rs	replace > with < in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
-src/queue.rs	replace > with < in State<I>::close_open	1	UNCLASSIFIED
-src/queue.rs	replace > with == in Inner<H, I, S>::deliver_with	2	UNCLASSIFIED
-src/queue.rs	replace > with == in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
-src/queue.rs	replace > with == in State<I>::close_open	1	UNCLASSIFIED
-src/queue.rs	replace > with >= in Inner<H, I, S>::deliver_with	2	UNCLASSIFIED
-src/queue.rs	replace > with >= in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
-src/queue.rs	replace > with >= in State<I>::close_open	1	UNCLASSIFIED
-src/queue.rs	replace >= with < in Queue<H, shape::Fixed>::submit	1	UNCLASSIFIED
-src/queue.rs	replace >= with < in Queue<H, shape::Messages>::submit	1	UNCLASSIFIED
-src/queue.rs	replace >= with < in Queue<H, shape::Pieces>::submit	1	UNCLASSIFIED
-src/queue.rs	replace >= with < in State<I>::close_open	2	UNCLASSIFIED
-src/queue.rs	replace Delivery::give_room with ()	1	UNCLASSIFIED
-src/queue.rs	replace |= with &= in Delivery::run	1	UNCLASSIFIED
-src/queue.rs	replace || with && in State<I>::close_open	2	UNCLASSIFIED
-src/self_test.rs	delete match arm FAILED in ensure_slow	1	UNCLASSIFIED
+src/queue.rs	delete ! in <impl Deliver for Inner<H, (H::Buffer, H::Digests), shape::Fixed>>::deliver	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	delete ! in Delivery::run	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	delete ! in Inner<H, I, S>::deliver_with	2	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	delete ! in Inner<H, I, S>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace && with || in <impl Deliver for Inner<H, (H::Buffer, H::Digests), shape::Fixed>>::deliver	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace && with || in Inner<H, I, S>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace && with || in Queue<H, shape::Fixed>::submit	3	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace && with || in Queue<H, shape::Messages>::submit	3	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace && with || in Queue<H, shape::Pieces>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace && with || in State<I>::close_open	3	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace * with + in Inner<H, I, S>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace * with + in State<I>::add_block	2	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace * with + in State<I>::close_open	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace * with / in State<I>::add_block	2	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace * with / in State<I>::close_open	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace + with * in Inner<H, I, S>::deliver_with	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace += with *= in Inner<H, I, S>::deliver_with	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace += with *= in Inner<H, I, S>::submit_member	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace - with + in Delivery::make_room	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace - with + in Inner<H, I, S>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace - with + in State<I>::add_block	2	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace - with / in Inner<H, I, S>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace -= with += in Delivery::give_room	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace / with % in Queue<H, shape::Fixed>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace / with % in State<I>::close_open	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace / with * in Queue<H, shape::Fixed>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace / with * in State<I>::close_open	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace < with <= in Inner<H, I, S>::deliver_with	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace < with <= in Queue<H, shape::Fixed>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace < with <= in Queue<H, shape::Messages>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace < with == in Queue<H, shape::Fixed>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace < with == in Queue<H, shape::Messages>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace < with > in Queue<H, shape::Fixed>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace < with > in Queue<H, shape::Messages>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace <impl Drop for State<I>>::drop with ()	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace == with != in Inner<H, I, S>::deliver_with	2	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace == with != in State<I>::close_open	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace > with < in Inner<H, I, S>::deliver_with	2	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace > with < in Queue<H, shape::Fixed>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace > with < in State<I>::close_open	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace > with == in Inner<H, I, S>::deliver_with	2	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace > with == in Queue<H, shape::Fixed>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace > with == in State<I>::close_open	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace > with >= in Inner<H, I, S>::deliver_with	2	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace > with >= in Queue<H, shape::Fixed>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace > with >= in State<I>::close_open	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace >= with < in Queue<H, shape::Fixed>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace >= with < in Queue<H, shape::Messages>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace >= with < in Queue<H, shape::Pieces>::submit	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace >= with < in State<I>::close_open	2	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace Delivery::give_room with ()	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace |= with &= in Delivery::run	1	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/queue.rs	replace || with && in State<I>::close_open	2	OPEN, deferred: the queue, which the stream may replace (NEXT-STEPS 0)
+src/self_test.rs	delete match arm FAILED in ensure_slow	1	OPEN: the self-test's failure path (a CPU or build that computes wrong digests); no test makes the self-test fail
 src/self_test.rs	replace != with == in ensure	1	UNCLASSIFIED
-src/self_test.rs	replace & with ^ in compiled_features_present	2	UNCLASSIFIED
-src/self_test.rs	replace & with | in compiled_features_present	2	UNCLASSIFIED
-src/self_test.rs	replace && with || in compiled_features_present	2	UNCLASSIFIED
-src/self_test.rs	replace * with +	6	UNCLASSIFIED
-src/self_test.rs	replace * with + in chain	1	UNCLASSIFIED
-src/self_test.rs	replace * with /	6	UNCLASSIFIED
-src/self_test.rs	replace + with *	8	UNCLASSIFIED
-src/self_test.rs	replace + with -	7	UNCLASSIFIED
-src/self_test.rs	replace << with >> in compiled_features_present	2	UNCLASSIFIED
-src/self_test.rs	replace == with != in compiled_features_present	2	UNCLASSIFIED
-src/self_test.rs	replace compiled_features_present with ()	1	UNCLASSIFIED
+src/self_test.rs	replace & with ^ in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace & with | in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace && with || in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace * with +	6	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
+src/self_test.rs	replace * with + in chain	1	equivalent: the case has one message, so its length scales only message 0's offset, 0
+src/self_test.rs	replace * with /	6	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
+src/self_test.rs	replace + with *	8	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
+src/self_test.rs	replace + with -	7	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
+src/self_test.rs	replace << with >> in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace == with != in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace compiled_features_present with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace ensure with ()	1	UNCLASSIFIED
-src/self_test.rs	replace ensure_slow with ()	1	UNCLASSIFIED
-src/self_test.rs	replace ensure_slow::<impl Drop for Failed>::drop with ()	1	UNCLASSIFIED
+src/self_test.rs	replace ensure_slow with ()	1	OPEN: the self-test's failure path (a CPU or build that computes wrong digests); no test makes the self-test fail
+src/self_test.rs	replace ensure_slow::<impl Drop for Failed>::drop with ()	1	OPEN: the self-test's failure path (a CPU or build that computes wrong digests); no test makes the self-test fail
 src/self_test.rs	replace | with ^ in chunk_values	2	equivalent: | and ^ agree on flag bits that never overlap
-src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::children -> Option<[Cv; 2]> with None	1	UNCLASSIFIED
-src/wasm32_simd.rs	delete ! in load_counters	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace & with ^ in load_counters	8	UNCLASSIFIED
-src/wasm32_simd.rs	replace & with | in load_counters	8	UNCLASSIFIED
-src/wasm32_simd.rs	replace * with + in compress_pre	8	UNCLASSIFIED
-src/wasm32_simd.rs	replace * with / in compress_pre	8	UNCLASSIFIED
-src/wasm32_simd.rs	replace + with * in load_counters	8	UNCLASSIFIED
-src/wasm32_simd.rs	replace + with - in load_counters	8	UNCLASSIFIED
-src/wasm32_simd.rs	replace - with + in rot12	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace - with + in rot7	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace - with / in rot12	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace - with / in rot7	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace add -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace blend_epi16 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace compress_in_place with ()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace compress_pre -> [v128; 4] with [Default::default(); 4]	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace compress_xof -> [u8; 64] with [0; 64]	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace compress_xof -> [u8; 64] with [1; 64]	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace diagonalize with ()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace g1 with ()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace g2 with ()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace load_counters -> (v128, v128) with (Default::default(), Default::default())	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace rot12 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace rot16 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace rot7 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace rot8 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace round with ()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace set1 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace set4 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace shuffle_epi32 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace transpose_vecs with ()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace undiagonalize with ()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace unpackhi_epi32 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace unpackhi_epi64 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace unpacklo_epi32 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace unpacklo_epi64 -> v128 with Default::default()	1	UNCLASSIFIED
-src/wasm32_simd.rs	replace xor -> v128 with Default::default()	1	UNCLASSIFIED
+src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::children -> Option<[Cv; 2]> with None	1	speed: chooses between equally correct paths (the walk computes the children itself)
+src/wasm32_simd.rs	delete ! in load_counters	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace & with ^ in load_counters	8	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace & with | in load_counters	8	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace * with + in compress_pre	8	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace * with / in compress_pre	8	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace + with * in load_counters	8	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace + with - in load_counters	8	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace - with + in rot12	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace - with + in rot7	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace - with / in rot12	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace - with / in rot7	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace add -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace blend_epi16 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace compress_in_place with ()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace compress_pre -> [v128; 4] with [Default::default(); 4]	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace compress_xof -> [u8; 64] with [0; 64]	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace compress_xof -> [u8; 64] with [1; 64]	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace diagonalize with ()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace g1 with ()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace g2 with ()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace load_counters -> (v128, v128) with (Default::default(), Default::default())	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace rot12 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace rot16 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace rot7 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace rot8 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace round with ()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace set1 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace set4 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace shuffle_epi32 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace transpose_vecs with ()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace undiagonalize with ()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace unpackhi_epi32 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace unpackhi_epi64 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace unpacklo_epi32 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace unpacklo_epi64 -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
+src/wasm32_simd.rs	replace xor -> v128 with Default::default()	1	another architecture's: wasm32, compiled out here (CI's wasm tests run it)
