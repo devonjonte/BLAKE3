@@ -171,10 +171,15 @@ ciborium = "0.2.2"
 [build-dependencies]
 cc = "1.1.12"
 
-# Tests built optimized, their checks kept (debug assertions, overflow
-# checks): the reference comparisons over every length run in seconds,
-# where an unoptimized build takes minutes.
+# Tests built as users' release build is (opt-level 3, 16 codegen units,
+# no incremental compilation, no debug info), with its checks on: debug
+# assertions and overflow checks, which name a broken assumption where
+# users' build would pass it silently. `cargo test --release` runs users'
+# build exactly.
 [profile.test]
-opt-level = 2
+opt-level = 3
+codegen-units = 16
+incremental = false
+debug = false
 debug-assertions = true
 overflow-checks = true
