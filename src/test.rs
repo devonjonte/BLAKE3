@@ -1503,25 +1503,42 @@ fn test_kernel_reports_match_the_dispatch() {
             return kinds;
         }
     };
-    // Kernel i of `report` runs at units from_len / unit up to the next's.
-    let check = |report: crate::KernelReport, unit: usize, at: &dyn Fn(usize) -> u32| {
+    // Kernel i of `report` runs at units from_len / unit up to the next's,
+    // and every kind a call runs is one the report names at or below it
+    // (the last kernel's checked at twice its start, too).
+    // `also`: the kinds a call may run beside the report's (for a batch,
+    // what hash() of one message runs).
+    let check = |report: crate::KernelReport, unit: usize, also: u32, at: &dyn Fn(usize) -> u32| {
+        // Any call above one chunk compresses its root on the integer
+        // kernel, so every kernel brings the integer kind with it.
+        let named = |n: usize| report.kernels.iter().filter(|k| k.from_len <= n * unit).fold(also, |m, k| m | kind(k.name) | Ran::Scalar as u32);
+        let ran = |n: usize| {
+            let kinds = at(n);
+            assert!(kinds & !named(n) == 0, "at {n} x {unit}, kinds {kinds:#b} beyond the report's {:#b}: {report:?}", named(n));
+            kinds
+        };
         for (i, k) in report.kernels.iter().enumerate() {
             let first = (k.from_len / unit).max(1);
-            let got = at(first); assert!(got & kind(k.name) != 0, "{} at {first} x {unit}: ran {got:#b}", k.name);
-            if let Some(next) = report.kernels.get(i + 1) {
-                let below = next.from_len / unit - 1;
-                let kinds = at(below);
-                assert!(kinds & kind(k.name) != 0, "{} at {below} x {unit}: {report:?}", k.name);
-                if kind(next.name) != kind(k.name) {
-                    assert!(kinds & kind(next.name) == 0, "{} below its start, {below} x {unit}: {report:?}", next.name);
+            assert!(ran(first) & kind(k.name) != 0, "{} at {first} x {unit}: {report:?}", k.name);
+            match report.kernels.get(i + 1) {
+                Some(next) => {
+                    let below = next.from_len / unit - 1;
+                    let kinds = ran(below);
+                    assert!(kinds & kind(k.name) != 0, "{} at {below} x {unit}: {report:?}", k.name);
+                    if kind(next.name) != kind(k.name) {
+                        assert!(kinds & kind(next.name) == 0, "{} below its start, {below} x {unit}: {report:?}", next.name);
+                    }
                 }
+                None => assert!(ran(2 * first) & kind(k.name) != 0, "{} at {} x {unit}: {report:?}", k.name, 2 * first),
             }
         }
     };
     let mut input = vec![0u8; 2 << 20];
     paint_test_input(&mut input);
-    check(crate::kernel_report(), 1, &|len| ran(&|| { crate::hash(&input[..len]); }));
-    check(crate::kernel_report_multithreaded(), 1, &|len| ran(&|| { crate::hash_multithreaded(&input[..len]); }));
+    // What hash() of `len` bytes may run, by its report.
+    let one = |len: usize| crate::kernel_report().kernels.iter().filter(|k| k.from_len <= len).fold(Ran::Scalar as u32, |m, k| m | kind(k.name));
+    check(crate::kernel_report(), 1, 0, &|len| ran(&|| { crate::hash(&input[..len]); }));
+    check(crate::kernel_report_multithreaded(), 1, 0, &|len| ran(&|| { crate::hash_multithreaded(&input[..len]); }));
     for message_len in [64, 1000, 1024, 2000, 3000, 15 * 1024, 300_000] {
         let slot = crate::many::slot_len(message_len);
         let batch = |n: usize| -> std::vec::Vec<u8> {
@@ -1531,12 +1548,12 @@ fn test_kernel_reports_match_the_dispatch() {
             }
             b
         };
-        check(crate::kernel_report_many(message_len), message_len, &|n| {
+        check(crate::kernel_report_many(message_len), message_len, one(message_len), &|n| {
             let b = batch(n);
             let out = std::vec![[0u8; 32]; n];
             ran(&|| crate::hash_many(&b, message_len, &mut out.clone()))
         });
-        check(crate::kernel_report_many_multithreaded(message_len), message_len, &|n| {
+        check(crate::kernel_report_many_multithreaded(message_len), message_len, one(message_len), &|n| {
             let b = batch(n);
             let out = std::vec![[0u8; 32]; n];
             ran(&|| crate::hash_many_multithreaded(&b, message_len, &mut out.clone()))
