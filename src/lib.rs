@@ -1683,7 +1683,7 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
 pub fn kernel_report_many_multithreaded(message_len: usize) -> KernelReport {
     let mut report = kernel_report_many(message_len);
     report.kernels.push(Kernel {
-        from_len: lanes::MIN_SPLIT_LEN.max(2 * message_len),
+        from_len: lanes::MIN_SPLIT_BATCH.max(2 * message_len),
         name: "split over threads",
         why: "From here the batch is cut into ranges of messages that the calling thread and this crate's worker threads (one per CPU beyond the first) hash at once, each with integer and NEON code.",
     });

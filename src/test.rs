@@ -1112,7 +1112,7 @@ fn test_kernel_reports() {
         assert_eq!(&many_multi.kernels[..many.kernels.len()], &many.kernels[..]);
         assert_eq!(many_multi.kernels.len(), many.kernels.len() + 1);
         assert!(many_multi.kernels.last().unwrap().from_len > many.kernels.last().unwrap().from_len);
-        assert!(many_multi.kernels.last().unwrap().from_len >= crate::lanes::MIN_SPLIT_LEN);
+        assert!(many_multi.kernels.last().unwrap().from_len >= crate::lanes::MIN_SPLIT_BATCH);
     }
 }
 
