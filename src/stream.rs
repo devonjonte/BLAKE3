@@ -37,7 +37,10 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 pub(crate) const PIECE: usize = TASK_LEN;
 
 /// The bytes a stream keeps for messages and batches written in place.
-const RING_BYTES: usize = 4 << 20;
+fn ring_bytes() -> usize {
+    static BYTES: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *BYTES.get_or_init(|| std::env::var("BLAKE3_RING_KIB").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4096) << 10)
+}
 
 /// The most entries (messages and pieces) in flight in one stream (1024:
 /// 4 KiB to 16 KiB messages 8-9% faster than at 8192, i7-12700K; 256 lost
@@ -159,7 +162,7 @@ pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: im
 /// time, 4-5 us with the spare; one stream kept open, 2.6-4 us. i7-12700K).
 struct Storage {
     entries: Box<[Entry]>,
-    /// RING_BYTES for messages and batches written in place
+    /// ring_bytes() for messages and batches written in place
     /// ([`Stream::submit_with`]), each at a 64-byte boundary, in the order
     /// of their entries: an allocation of its own, reached by pointer
     /// alone (the program writes some bytes while threads read others).
@@ -201,7 +204,7 @@ impl Storage {
             source: crate::lanes::sources::Source::new(ENTRIES),
             entries: std::vec![Entry { len: 0, kind: Kind::Abandoned, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
             // Zeroed, untouched pages: only the bytes used are faulted in.
-            ring: Box::into_raw(std::vec![0u8; RING_BYTES].into_boxed_slice()) as *mut u8,
+            ring: Box::into_raw(std::vec![0u8; ring_bytes()].into_boxed_slice()) as *mut u8,
             pieces_out: (0..ENTRIES).map(|_| OwnLine(Out(UnsafeCell::new([0; 64])))).collect(),
             lefts: (0..ENTRIES).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
         }
@@ -209,7 +212,7 @@ impl Storage {
 
     /// The ring's byte at `at`.
     fn ring_at(&self, at: usize) -> *mut u8 {
-        debug_assert!(at <= RING_BYTES);
+        debug_assert!(at <= ring_bytes());
         // Sound: `at` is in the ring.
         unsafe { self.ring.add(at) }
     }
@@ -481,10 +484,10 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// hashing tasks, until entries in flight free them.
     fn reserve(&mut self, len: usize) -> usize {
         let slot = len.div_ceil(64) * 64;
-        let mut at = self.head % RING_BYTES;
+        let mut at = self.head % ring_bytes();
         // A slot that would cross the end starts the next lap instead.
-        let skip = if at + slot > RING_BYTES { RING_BYTES - at } else { 0 };
-        while RING_BYTES - (self.head - self.tail) < skip + slot {
+        let skip = if at + slot > ring_bytes() { ring_bytes() - at } else { 0 };
+        while ring_bytes() - (self.head - self.tail) < skip + slot {
             self.publish();
             self.help();
         }
