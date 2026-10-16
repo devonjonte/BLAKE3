@@ -125,7 +125,7 @@ SIMD (`pure`).
 **Every process checks itself before its first hash.** The tests prove
 the code on our machines; a user's machine may have a compiler that
 miscompiles, a linker that mislinks, or a CPU with a faulty vector or
-matrix unit. So the first call in a process (or `initialize()`) hashes 41
+matrix unit. So the first call in a process (or `initialize()`) hashes 42
 fixed inputs and compares each result with the reference implementation's
 answer, checked into the source (`src/self_test.rs`) and verified there
 by a unit test. The inputs are chosen so that together they run every one

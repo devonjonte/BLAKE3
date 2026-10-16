@@ -178,7 +178,10 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
     // No CPU to spare (every one has a caller, or the process has one
     // CPU): hash as hash() does, as the batch path does.
     if callers >= pool.cpus {
-        crate::ran(crate::Ran::PoolBusy);
+        // Other callers took the pool (with one CPU, it has no threads).
+        if pool.cpus > 1 {
+            crate::ran(crate::Ran::PoolBusy);
+        }
         return crate::hash_serial(input, key, flags);
     }
     let threads = pool.cpus;
@@ -262,7 +265,10 @@ fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, f
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let _caller = Caller(&pool.callers);
     if callers >= pool.cpus {
-        crate::ran(crate::Ran::PoolBusy);
+        // Other callers took the pool (with one CPU, it has no threads).
+        if pool.cpus > 1 {
+            crate::ran(crate::Ran::PoolBusy);
+        }
         return crate::hash_many_serial(input, message_len, key, flags, outputs);
     }
     let pieces = cut_messages(outputs.len(), slot, pool.cpus);

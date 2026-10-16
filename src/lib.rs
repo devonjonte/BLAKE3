@@ -119,7 +119,7 @@
 //! binary built for another CPU, or tampering that breaks the digests.
 //! (What the code computes is the tests' and the proofs' to establish.) It
 //! hashes fixed inputs, chosen so that together they run every one of its
-//! assembly kernels on this machine (41 on AArch64, 9 elsewhere), each
+//! assembly kernels on this machine (42 on AArch64, 9 elsewhere), each
 //! input carrying the previous output, and compares each result with the
 //! reference implementation's; on x86 it first checks that the CPU has the
 //! LZCNT and BMI1 instructions a build for newer CPUs assumes, which older
