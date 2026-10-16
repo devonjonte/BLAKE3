@@ -36,8 +36,8 @@ def read_known():
         if line.startswith("files:"):
             files = line.split()[1:]
         elif line and not line.startswith("#"):
-            key, count, reason = line.split("\t")
-            known[key] = (int(count), reason)
+            file, mutant, count, reason = line.split("\t")
+            known[f"{file}\t{mutant}"] = (int(count), reason)
     return files, known
 
 
