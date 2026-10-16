@@ -1723,8 +1723,9 @@ pub fn kernel_report_many_multithreaded(message_len: usize) -> KernelReport {
     }
     report.kernels.push(Kernel {
         // The split counts the batch's slots (each message's whole blocks,
-        // zero past its end), from two messages.
-        from_len: lanes::MIN_SPLIT_LEN.div_ceil(many::slot_len(message_len)).max(2) * message_len,
+        // zero past its end), from two messages, from MIN_SPLIT_BATCH bytes
+        // of them when the last such call ended within BATCH_WINDOW.
+        from_len: lanes::MIN_SPLIT_BATCH.div_ceil(many::slot_len(message_len)).max(2) * message_len,
         name: "split over threads",
         why: "From here the batch is cut into ranges of messages that the calling thread and this crate's worker threads (one per CPU beyond the first) hash at once, each with integer and NEON code.",
     });
