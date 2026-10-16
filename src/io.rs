@@ -118,8 +118,8 @@ pub(crate) fn maybe_mmap_file(file: &mut File) -> io::Result<Option<memmap2::Mma
     // It's UB to produce a slice longer than `isize::MAX`. `memmap2` checks that internally, so
     // it's kind of redundant to check it here, but we need to guard the `usize` cast in any case.
     if offset_len <= isize::MAX as u64 - seek_offset {
-        // We have a seekable file that's long enough to be worth mapping, but not too long to map
-        // (e.g. on a 32-bit system). Try to map it. If this succeeds, we'll assume the caller
+        // We have a seekable file that's long enough to be worth mapping, and short enough to
+        // map. Try to map it. If this succeeds, we'll assume the caller
         // isn't going to do any ordinary reads, so we don't need to `rewind`.
         let mut mmap_options = memmap2::MmapOptions::new();
         mmap_options.len((offset_len + seek_offset) as usize); // checked above
