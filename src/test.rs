@@ -767,6 +767,15 @@ fn test_zeroize() {
     hash.zeroize();
     assert_eq!(hash.0, [0u8; 32]);
 
+    // A Hasher: its core, and the bytes it has staged.
+    let mut hasher = crate::Hasher::new_keyed(&[42; 32]);
+    hasher.update(&[42; 3000]);
+    assert!(hasher.staged > 0);
+    hasher.zeroize();
+    assert_eq!(hasher.staged, 0);
+    assert!(hasher.stage.iter().all(|b| unsafe { b.assume_init() } == 0));
+    assert_eq!(hasher.core.key, [0; 8]);
+
     let mut hasher = crate::HasherCore {
         chunk_state: crate::hasher::ChunkState {
             cv: [42; 8],
@@ -1473,16 +1482,36 @@ fn test_hash_comparisons_and_formats() {
     }
 }
 
-/// A chunk state's Debug form names its count, counter, flags, and
-/// platform, and leaves out its bytes and chaining value (they may be
-/// secret).
+/// The Debug forms of a chunk state and a Hasher name their counts,
+/// flags, and platform, and leave out their bytes and chaining values
+/// (they may be secret).
 #[test]
 #[cfg(feature = "std")]
 #[allow(deprecated)]
-fn test_chunk_state_debug_leaves_out_its_bytes() {
+fn test_debug_leaves_out_the_bytes() {
     let mut state = crate::guts::ChunkState::new(5);
     state.update(&[0xab; 70]);
     let shown = std::format!("{state:?}");
     assert!(shown.contains("count: 70") && shown.contains("chunk_counter: 5"), "{shown}");
     assert!(!shown.contains("171") && !shown.contains("cv"), "{shown}");
+    let mut hasher = crate::Hasher::new_keyed(&[0xab; 32]);
+    hasher.update(&[0xab; 70]);
+    let shown = std::format!("{hasher:?}");
+    assert!(shown.starts_with("Hasher {") && shown.contains("flags: 16") && shown.contains("platform"), "{shown}");
+    assert!(!shown.contains("171"), "{shown}");
+}
+
+/// A Hasher as an io::Write: write takes the whole input, and the digest
+/// is update's.
+#[test]
+#[cfg(feature = "std")]
+fn test_hasher_io_write() {
+    use std::io::Write;
+    let mut input = [0u8; 3000];
+    paint_test_input(&mut input);
+    let mut hasher = crate::Hasher::new();
+    assert_eq!(hasher.write(&input[..1000]).unwrap(), 1000);
+    hasher.write_all(&input[1000..]).unwrap();
+    hasher.flush().unwrap();
+    assert_eq!(hasher.finalize(), crate::hash(&input));
 }
