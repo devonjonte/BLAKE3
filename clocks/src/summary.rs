@@ -303,4 +303,29 @@ mod tests {
         assert_eq!(interval_permille(&[1010, 1020, 1030, 1040, 1050, 1060, 1070, 1080]), Some((1020, 1070)));
         assert_eq!(interval_permille(&[1000; 4]), None);
     }
+
+    /// Student's t at its tables' points: t = 2.776 with 4 degrees of
+    /// freedom is p = 0.05 two-sided; 2.228 with 10, 0.05; 3.169 with 10,
+    /// 0.01; t = 0, p = 1.
+    #[test]
+    fn t_p_values_match_the_tables() {
+        for (t, df, p) in [(2.776, 4.0, 0.05), (2.228, 10.0, 0.05), (3.169, 10.0, 0.01), (0.0, 4.0, 1.0)] {
+            assert!((t_two_sided(t, df) - p).abs() < 2e-4, "t {t} df {df}: {}", t_two_sided(t, df));
+        }
+    }
+
+    /// Three cells of five pairs: one 10% slower in every pair, one whose
+    /// pairs scatter 3% each way, one 1% faster in every pair (its
+    /// p-value passes, but it lies within a 3% margin). The slower cell is
+    /// still found among 1000 unchanged ones; at q = 0 nothing is.
+    #[test]
+    fn discoveries_judge_every_cell_at_once() {
+        let pairs = |ratios: &[u128]| ratios.iter().map(|&r| (1000u128 << 63, r << 63)).collect::<Vec<_>>();
+        let cells = vec![pairs(&[1100, 1102, 1098, 1101, 1099]), pairs(&[1030, 970, 1025, 975, 1000]), pairs(&[990, 991, 989, 990, 990])];
+        assert_eq!(discoveries(&cells, 50, 30), [Verdict::Slower, Verdict::Level, Verdict::Level]);
+        let mut many = vec![pairs(&[1030, 970, 1025, 975, 1000]); 1000];
+        many.push(pairs(&[1100, 1102, 1098, 1101, 1099]));
+        assert_eq!(discoveries(&many, 50, 30).iter().filter(|&&v| v != Verdict::Level).count(), 1);
+        assert!(discoveries(&many, 0, 30).iter().all(|&v| v == Verdict::Level));
+    }
 }
