@@ -176,6 +176,13 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
         #[cfg(unix)]
         if let Some(map) = mapped(&file) {
             update(&mut hasher, &map);
+            // Never unmapped: process exit reclaims it (crash-only). An
+            // unmap tears down the file's page-table entries, about 65 ns a
+            // page with cross-core TLB flushes (i7-12700K: 23-25 ms of a
+            // 56 ms run for 1 GiB), while entries that merely exist cost
+            // nothing measured but their memory, 2 MiB per GiB touched
+            // (NOTES-servil.md, "Mappings and page tables").
+            std::mem::forget(map);
         } else {
             update_from(&mut hasher, file)?;
         }
