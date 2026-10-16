@@ -155,7 +155,7 @@ pub(crate) fn lock_polling<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGu
 const LOCK_POLLS: usize = 256;
 
 /// How long a caller polls for its last pieces before sleeping.
-pub(crate) const SPIN_BEFORE_SLEEP: std::time::Duration = std::time::Duration::from_micros(200);
+pub(crate) const SPIN_BEFORE_SLEEP: std::time::Duration = std::time::Duration::from_micros(0);
 
 /// The length of the next piece when `remaining` bytes are uncut and
 /// `threads` threads may share them: about a thread's share of what is
