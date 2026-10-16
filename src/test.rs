@@ -1472,3 +1472,17 @@ fn test_hash_comparisons_and_formats() {
         assert_eq!(std::format!("{a:?}"), std::format!("Hash({:?})", hex.as_str()));
     }
 }
+
+/// A chunk state's Debug form names its count, counter, flags, and
+/// platform, and leaves out its bytes and chaining value (they may be
+/// secret).
+#[test]
+#[cfg(feature = "std")]
+#[allow(deprecated)]
+fn test_chunk_state_debug_leaves_out_its_bytes() {
+    let mut state = crate::guts::ChunkState::new(5);
+    state.update(&[0xab; 70]);
+    let shown = std::format!("{state:?}");
+    assert!(shown.contains("count: 70") && shown.contains("chunk_counter: 5"), "{shown}");
+    assert!(!shown.contains("171") && !shown.contains("cv"), "{shown}");
+}

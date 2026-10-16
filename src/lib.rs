@@ -2305,10 +2305,10 @@ impl HasherCore {
     // chunks (or bytes) so far.
     #[cfg(feature = "std")]
     fn merge_cv_stack(&mut self, chunk_counter: u64) {
-        // Account for non-zero cases of Hasher::set_input_offset, where there are no prior
-        // subtrees in the stack. Note that initial_chunk_counter is always 0 for callers who don't
-        // use the hazmat module.
-        let post_merge_stack_len = hasher::ones(chunk_counter - self.initial_chunk_counter);
+        // Its callers (the queue's hashers, and a Hasher's held group) start
+        // at offset zero; hazmat's offsets take the proved core's path.
+        debug_assert_eq!(self.initial_chunk_counter, 0, "a hasher at offset zero");
+        let post_merge_stack_len = hasher::ones(chunk_counter);
         let kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, false);
         self.cv_stack.merge(&kernels, post_merge_stack_len);
     }
