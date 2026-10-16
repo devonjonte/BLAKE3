@@ -536,7 +536,9 @@ fn hash_four_at_a_time<const N: usize>(lanes: &[&[u8; N]], key: &CVWords, flags:
         return;
     }
     let fours = lanes.len() / 4 * 4;
-    platform.hash_many::<N>(&lanes[..fours], key, 0, IncrementCounter::No, flags, start, end, outputs[..fours].as_flattened_mut());
+    if fours > 0 {
+        platform.hash_many::<N>(&lanes[..fours], key, 0, IncrementCounter::No, flags, start, end, outputs[..fours].as_flattened_mut());
+    }
     match lanes.len() - fours {
         3 => {
             let spare = [lanes[fours], lanes[fours + 1], lanes[fours + 2], lanes[fours + 2]];
