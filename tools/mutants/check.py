@@ -46,7 +46,10 @@ def survivors(files):
     tree = tempfile.mkdtemp(prefix="mutants-", dir="/tmp")
     subprocess.run(["git", "-C", ROOT, "worktree", "add", "-q", "--detach", tree, "HEAD"], check=True)
     out = os.path.join(tree, "mutants-result")
-    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--timeout", "300", "--output", out]
+    # The public features on, so the code behind them is tested too (the
+    # build variants, pure, no_sme2, and the like, are their own builds).
+    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize,traits-preview",
+            "--timeout", "300", "--output", out]
     for f in files:
         args += ["--file", f]
     env = {k: v for k, v in os.environ.items() if k != "CARGO_TARGET_DIR"}
