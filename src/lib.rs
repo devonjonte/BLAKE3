@@ -268,6 +268,43 @@ pub use queue::{FixedHandler, MessageHandler, PieceHandler, Queue, shape};
 mod pair;
 mod self_test;
 
+/// A kind of kernel a call ran, for the test that checks the kernel
+/// reports against the dispatch (test_kernel_reports_match_the_dispatch).
+/// Each build notes the kinds it has.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub(crate) enum Ran {
+    Scalar = 1,
+    Hybrid = 2,
+    Neon = 4,
+    Sme2 = 8,
+    Sme2x2 = 16,
+    Pool = 32,
+    /// The call wanted SME2 and another thread held the turn.
+    TurnTaken = 64,
+    /// The call followed a pause and took the pair kernel
+    /// (batch_after_pause), which the reports leave out.
+    AfterPause = 128,
+    /// The pool's CPUs each had a caller, so the call stayed on its thread.
+    PoolBusy = 256,
+}
+
+#[cfg(all(test, feature = "std"))]
+std::thread_local! {
+    /// The kinds this thread's calls ran since the test last cleared it.
+    pub(crate) static RAN: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
+}
+
+/// Note that a kernel of `kind` ran: in the tests' record, and nothing in
+/// any other build (some of which have no kernel to note).
+#[inline(always)]
+#[allow(dead_code)]
+pub(crate) fn ran(kind: Ran) {
+    #[cfg(all(test, feature = "std"))]
+    RAN.with(|r| r.set(r.get() | kind as u32));
+    let _ = kind;
+}
+
 use arrayvec::{ArrayString, ArrayVec};
 use core::cmp;
 use core::fmt;
@@ -1269,6 +1306,7 @@ fn batch_after_pause(input: &[u8], message_len: usize, key: &CVWords, flags: u8,
     for (slot, message) in table.iter_mut().zip(input.chunks_exact(BLOCK_LEN)) {
         *slot = message.try_into().unwrap();
     }
+    ran(Ran::AfterPause);
     // Sound: the SHA-3 extension is here (above).
     unsafe { neon_hybrid::hash_pairs(&table[..count], key, flags, CHUNK_START, CHUNK_END | ROOT, message_len, out.as_flattened_mut()) };
     true
@@ -1551,10 +1589,12 @@ pub fn kernel_report() -> KernelReport {
 /// whole blocks up to 15 KiB. On x86 with AVX2 or AVX-512, messages of 2
 /// to 15 chunks hash across the messages at every step of their trees,
 /// from four or eight messages; other lengths run [`kernel_report`]'s
-/// kernel, one message per call.
+/// kernel, one message per call. Requires `message_len` of 1 or more (the
+/// report counts a batch in its messages' bytes).
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn kernel_report_many(message_len: usize) -> KernelReport {
+    assert!(message_len > 0, "messages of one byte or more");
     let platform = Platform::detect();
     let blocks = if (1..=CHUNK_LEN).contains(&message_len) { many::slot_len(message_len) / BLOCK_LEN } else { 0 };
     let mut kernels = Vec::with_capacity(3);
@@ -1653,13 +1693,19 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
 
 /// What [`hash_many_multithreaded`] runs by batch length:
 /// [`kernel_report_many`] plus, from the length at which a call may leave
-/// the calling thread, the split across threads.
+/// the calling thread, the split across threads (with one CPU, none).
+/// Requires [`initialize_multithreaded`], as the call does.
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn kernel_report_many_multithreaded(message_len: usize) -> KernelReport {
     let mut report = kernel_report_many(message_len);
+    if !lanes::splits() {
+        return report;
+    }
     report.kernels.push(Kernel {
-        from_len: lanes::MIN_SPLIT_LEN.max(2 * message_len),
+        // The split counts the batch's slots (each message's whole blocks,
+        // zero past its end), from two messages.
+        from_len: lanes::MIN_SPLIT_LEN.div_ceil(many::slot_len(message_len)).max(2) * message_len,
         name: "split over threads",
         why: "From here the batch is cut into ranges of messages that the calling thread and this crate's worker threads (one per CPU beyond the first) hash at once, each with integer and NEON code.",
     });
@@ -1668,11 +1714,16 @@ pub fn kernel_report_many_multithreaded(message_len: usize) -> KernelReport {
 
 /// What [`hash_multithreaded`] runs at each input length: [`kernel_report`]
 /// below the length at which a call may leave the calling thread, and from
-/// there the split across threads (its pieces run the kernels below it).
+/// there the split across threads (its pieces run the kernels below it;
+/// with one CPU, no split). Requires [`initialize_multithreaded`], as the
+/// call does.
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn kernel_report_multithreaded() -> KernelReport {
     let mut report = kernel_report();
+    if !lanes::splits() {
+        return report;
+    }
     report.kernels.retain(|kernel| kernel.from_len < lanes::MIN_SPLIT_LEN);
     report.kernels.push(Kernel {
         from_len: lanes::MIN_SPLIT_LEN,

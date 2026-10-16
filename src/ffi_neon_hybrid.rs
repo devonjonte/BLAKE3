@@ -571,6 +571,7 @@ pub unsafe fn compress_blocks(
     let cv_ptr = cv.as_mut_ptr();
     unsafe {
         let last = blocks.add((count - 1) * BLOCK_LEN);
+        crate::ran(crate::Ran::Scalar);
         asm::blake3_hybrid_c1(blocks, count as u64, cv_ptr, counter, packed, cv_ptr as *mut u8, last);
     }
 }
@@ -602,6 +603,7 @@ pub fn compress_in_place(
     // Safe: the block is 64 readable bytes and the count is 1.
     unsafe {
         let block = block.as_ptr();
+        crate::ran(crate::Ran::Scalar);
         asm::blake3_hybrid_c1(block, 1, cv_ptr, counter, packed, cv_ptr as *mut u8, block);
     }
 }
@@ -637,6 +639,7 @@ pub unsafe fn hash_chunk(
         | (flags_end as u64) << 16
         | (last_len as u64) << 24;
     unsafe {
+        crate::ran(crate::Ran::Scalar);
         asm::blake3_hybrid_c1(
             input,
             blocks as u64,
@@ -706,6 +709,7 @@ pub unsafe fn hash_chunks_with_partial(
     flags_end: u8,
     out: &mut [u8],
 ) {
+    crate::ran(crate::Ran::Hybrid);
     assert!(partial_covers(chunks.len()), "1 to 15 whole chunks but 10");
     assert!(!partial.is_empty() && partial.len() < CHUNK_LEN, "a partial chunk holds 1 to 1023 bytes");
     assert!(out.len() >= (chunks.len() + 1) * OUT_LEN);
@@ -821,6 +825,7 @@ unsafe fn run_plan(
     packed_flags: u64,
     out: &mut [u8],
 ) {
+    crate::ran(crate::Ran::Hybrid);
     let mut done = 0;
     for &size in plan {
         let kernel = kernels[size].expect("plan names an existing kernel");

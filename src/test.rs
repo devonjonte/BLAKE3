@@ -1063,36 +1063,23 @@ fn test_miri_smoketest() {
     reader.fill(&mut [0]);
 }
 
-/// The kernel reports are well formed: ascending from 0, and the
-/// multithreaded report is the single-threaded one below the split, then
-/// the split entry, which starts where hash_multithreaded may leave the
-/// calling thread.
+/// The kernel reports' contract: kernels in ascending `from_len`, the
+/// first at 0, each named and explained (where each kernel runs is
+/// test_kernel_reports_match_the_dispatch's).
 #[test]
 #[cfg(feature = "std")]
 fn test_kernel_reports() {
-    let single = crate::kernel_report();
-    assert!(!single.platform.is_empty());
-    assert_eq!(single.kernels[0].from_len, 0);
-    assert!(single.kernels.windows(2).all(|pair| pair[0].from_len < pair[1].from_len));
-    let multi = crate::kernel_report_multithreaded();
-    assert_eq!(multi.platform, single.platform);
-    let below: Vec<_> = single.kernels.iter().filter(|kernel| kernel.from_len < crate::lanes::MIN_SPLIT_LEN).copied().collect();
-    assert_eq!(&multi.kernels[..multi.kernels.len() - 1], &below[..]);
-    assert_eq!(multi.kernels.last().unwrap().from_len, crate::lanes::MIN_SPLIT_LEN);
-    for kernel in &multi.kernels {
-        assert!(!kernel.name.is_empty() && !kernel.why.is_empty());
-    }
-    // The batch reports, for every message length a batch can take: the
-    // same shape, the split last, where a batch may leave the calling thread.
-    for message_len in [0, 1, 63, 64, 65, 128, 256, 1000, 1024, 1025, 40_000] {
-        let many = crate::kernel_report_many(message_len);
-        let many_multi = crate::kernel_report_many_multithreaded(message_len);
-        assert_eq!(many.kernels[0].from_len, 0, "{message_len}-byte messages");
-        assert!(many.kernels.windows(2).all(|pair| pair[0].from_len < pair[1].from_len), "{message_len}-byte messages");
-        assert_eq!(&many_multi.kernels[..many.kernels.len()], &many.kernels[..]);
-        assert_eq!(many_multi.kernels.len(), many.kernels.len() + 1);
-        assert!(many_multi.kernels.last().unwrap().from_len > many.kernels.last().unwrap().from_len);
-        assert!(many_multi.kernels.last().unwrap().from_len >= crate::lanes::MIN_SPLIT_LEN);
+    let check = |report: crate::KernelReport| {
+        assert!(!report.platform.is_empty());
+        assert_eq!(report.kernels[0].from_len, 0, "{report:?}");
+        assert!(report.kernels.windows(2).all(|pair| pair[0].from_len < pair[1].from_len), "{report:?}");
+        assert!(report.kernels.iter().all(|k| !k.name.is_empty() && !k.why.is_empty()), "{report:?}");
+    };
+    check(crate::kernel_report());
+    check(crate::kernel_report_multithreaded());
+    for message_len in [1, 63, 64, 65, 128, 256, 1000, 1024, 1025, 40_000] {
+        check(crate::kernel_report_many(message_len));
+        check(crate::kernel_report_many_multithreaded(message_len));
     }
 }
 
@@ -1478,4 +1465,81 @@ fn test_hasher_io_write() {
     hasher.write_all(&input[1000..]).unwrap();
     hasher.flush().unwrap();
     assert_eq!(hasher.finalize(), crate::hash(&input));
+}
+
+/// Each kernel report against the dispatch: at each kernel's first length
+/// and the length below the next kernel's, the calls run the kernel the
+/// report names, and below the next one, not that one. For `hash`,
+/// `hash_multithreaded`, and the batch reports at each kind of message
+/// length the batch dispatch distinguishes (a block, blocks to a chunk,
+/// two chunks, more).
+#[test]
+#[cfg(all(feature = "std", blake3_neon_hybrid))]
+fn test_kernel_reports_match_the_dispatch() {
+    use crate::{Ran, RAN};
+    let kind = |name: &str| -> u32 {
+        (match name {
+            "integer code, one call" | "integer code, one message per call" => Ran::Scalar,
+            "integer and NEON code side by side"
+            | "integer and NEON code, messages side by side"
+            | "integer and NEON code, up to nine messages at a time" => Ran::Hybrid,
+            "NEON vectors, four chunks at a time" | "NEON vectors, four messages at a time" => Ran::Neon,
+            "SME2, sixteen chunks at a time" | "SME2, sixteen messages side by side" | "SME2, sixteen messages at a time" => Ran::Sme2,
+            "SME2 with integer code beside it" => Ran::Sme2x2,
+            "split over threads" | "split over threads, SME2 on one for large inputs" => Ran::Pool,
+            other => panic!("a kernel this test knows: {other}"),
+        }) as u32
+    };
+    // The kinds one call ran on this thread; again when another test's
+    // call held the SME2 turn (this call then ran NEON in its place), or
+    // when the call followed a pause and took the pair kernel (the reports
+    // describe calls back to back), or when other tests' calls filled the
+    // pool. The call again comes right after.
+    let ran = |call: &dyn Fn()| loop {
+        RAN.with(|r| r.set(0));
+        call();
+        let kinds = RAN.with(|r| r.get());
+        if kinds & (Ran::TurnTaken as u32 | Ran::AfterPause as u32 | Ran::PoolBusy as u32) == 0 {
+            return kinds;
+        }
+    };
+    // Kernel i of `report` runs at units from_len / unit up to the next's.
+    let check = |report: crate::KernelReport, unit: usize, at: &dyn Fn(usize) -> u32| {
+        for (i, k) in report.kernels.iter().enumerate() {
+            let first = (k.from_len / unit).max(1);
+            let got = at(first); assert!(got & kind(k.name) != 0, "{} at {first} x {unit}: ran {got:#b}", k.name);
+            if let Some(next) = report.kernels.get(i + 1) {
+                let below = next.from_len / unit - 1;
+                let kinds = at(below);
+                assert!(kinds & kind(k.name) != 0, "{} at {below} x {unit}: {report:?}", k.name);
+                if kind(next.name) != kind(k.name) {
+                    assert!(kinds & kind(next.name) == 0, "{} below its start, {below} x {unit}: {report:?}", next.name);
+                }
+            }
+        }
+    };
+    let mut input = vec![0u8; 2 << 20];
+    paint_test_input(&mut input);
+    check(crate::kernel_report(), 1, &|len| ran(&|| { crate::hash(&input[..len]); }));
+    check(crate::kernel_report_multithreaded(), 1, &|len| ran(&|| { crate::hash_multithreaded(&input[..len]); }));
+    for message_len in [64, 1000, 1024, 2000, 3000, 15 * 1024, 300_000] {
+        let slot = crate::many::slot_len(message_len);
+        let batch = |n: usize| -> std::vec::Vec<u8> {
+            let mut b = std::vec![0u8; n * slot];
+            for m in 0..n {
+                b[m * slot..][..message_len].copy_from_slice(&input[m % 7..][..message_len]);
+            }
+            b
+        };
+        check(crate::kernel_report_many(message_len), message_len, &|n| {
+            let b = batch(n);
+            let out = std::vec![[0u8; 32]; n];
+            ran(&|| crate::hash_many(&b, message_len, &mut out.clone()))
+        });
+        check(crate::kernel_report_many_multithreaded(message_len), message_len, &|n| {
+            let b = batch(n);
+            let out = std::vec![[0u8; 32]; n];
+            ran(&|| crate::hash_many_multithreaded(&b, message_len, &mut out.clone()))
+        });
+    }
 }

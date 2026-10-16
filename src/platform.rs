@@ -115,6 +115,8 @@ impl Sme2Turn {
             let held = !SME2_BUSY.0.load(Ordering::Relaxed);
             if held {
                 SME2_BUSY.0.store(true, Ordering::Relaxed);
+            } else {
+                crate::ran(crate::Ran::TurnTaken);
             }
             return Sme2Turn { platform: if held { Platform::SME2 } else { Platform::NEON }, held };
         }

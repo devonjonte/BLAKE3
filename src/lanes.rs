@@ -178,6 +178,7 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
     // No CPU to spare (every one has a caller, or the process has one
     // CPU): hash as hash() does, as the batch path does.
     if callers >= pool.cpus {
+        crate::ran(crate::Ran::PoolBusy);
         return crate::hash_serial(input, key, flags);
     }
     let threads = pool.cpus;
@@ -261,6 +262,7 @@ fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, f
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let _caller = Caller(&pool.callers);
     if callers >= pool.cpus {
+        crate::ran(crate::Ran::PoolBusy);
         return crate::hash_many_serial(input, message_len, key, flags, outputs);
     }
     let pieces = cut_messages(outputs.len(), slot, pool.cpus);
@@ -735,6 +737,12 @@ pub(crate) fn require() {
     pool();
 }
 
+/// Whether a call may leave the calling thread: the process has more
+/// than one CPU. Requires the pool (`require`).
+pub(crate) fn splits() -> bool {
+    pool().cpus > 1
+}
+
 /// The pool, once [`initialize`] has created it.
 static POOL: OnceLock<Pool> = OnceLock::new();
 
@@ -780,6 +788,7 @@ impl Pool {
     /// back (the SME2 thread's prefix; the workers' cursor starts after
     /// it), then takes pieces as the workers do.
     fn run_job(&self, work: Work, pieces: usize, own: usize, own_platform: Platform) {
+        crate::ran(crate::Ran::Pool);
         let job = Job {
             work,
             pieces,
