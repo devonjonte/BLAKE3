@@ -10,7 +10,8 @@ new survivor (a missing test, or a new equivalent mutant to list with its
 reason) and on a listed one now caught (the list is stale). A mutant is
 named by its file, function, and change, without its line: the same
 change at several places in one function counts once per place. It runs
-in a git worktree of HEAD of its own, so the checkout is never mutated.
+in git worktrees of HEAD of its own (SHARDS at once), so the checkout is
+never mutated.
 With --write, the list is rewritten from this run, each new mutant's
 reason UNCLASSIFIED and the others' kept.
 """
@@ -41,29 +42,36 @@ def read_known():
     return files, known
 
 
+SHARDS = 3  # runs at once, each in its own worktree and build
+
+
 def survivors(files):
     """The mutants that survive the library's tests, by name, counted."""
-    tree = tempfile.mkdtemp(prefix="mutants-", dir="/tmp")
-    subprocess.run(["git", "-C", ROOT, "worktree", "add", "-q", "--detach", tree, "HEAD"], check=True)
-    out = os.path.join(tree, "mutants-result")
     # The public features on, so the code behind them is tested too (the
     # build variants, pure, no_sme2, and the like, are their own builds).
-    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize,traits-preview",
-            "--timeout", "30", "--output", out]
+    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize,traits-preview", "--timeout", "30"]
     for f in files:
         args += ["--file", f]
     env = {k: v for k, v in os.environ.items() if k != "CARGO_TARGET_DIR"}
-    # The library's and the integration tests; the doc tests stay out (each
-    # compiles a program of its own: minutes per mutant).
-    subprocess.run(args + ["--", "--lib", "--tests"], cwd=tree, env=env)
-    missed = open(os.path.join(out, "mutants.out", "missed.txt")).read().splitlines()
-    subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
-    shutil.rmtree(tree, ignore_errors=True)
+    runs = []
+    for k in range(SHARDS):
+        tree = tempfile.mkdtemp(prefix="mutants-", dir="/tmp")
+        subprocess.run(["git", "-C", ROOT, "worktree", "add", "-q", "--detach", tree, "HEAD"], check=True)
+        # The library's and the integration tests; the doc tests stay out
+        # (each compiles a program of its own: minutes per mutant).
+        shard = args + ["--shard", f"{k}/{SHARDS}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
+        runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env)))
     names = collections.Counter()
-    for line in missed:
-        m = NAME.match(line)
-        assert m, f"a missed mutant cargo-mutants names unexpectedly: {line}"
-        names[f"{m.group(1)}\t{m.group(2)}"] += 1
+    for tree, run in runs:
+        # 0: every mutant caught; 2: some missed; 3: some timed out. Any
+        # other status (a failing unmutated baseline) is no result.
+        assert run.wait() in (0, 2, 3), f"cargo mutants failed ({run.returncode}) in {tree}"
+        for line in open(os.path.join(tree, "mutants-result", "mutants.out", "missed.txt")).read().splitlines():
+            m = NAME.match(line)
+            assert m, f"a missed mutant cargo-mutants names unexpectedly: {line}"
+            names[f"{m.group(1)}\t{m.group(2)}"] += 1
+        subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
+        shutil.rmtree(tree, ignore_errors=True)
     return names
 
 
