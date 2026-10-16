@@ -108,18 +108,9 @@ no_sme2 = []
 # Document the mmap method and the Serialize/Deserialize/Zeroize impls on docs.rs.
 features = ["mmap", "serde", "zeroize"]
 
-# The integration tests exercise the pool and the queue, which need std.
+# The integration tests exercise the pool and streams, which need std.
 [[test]]
 name = "api_plan"
-required-features = ["std"]
-
-[[test]]
-name = "one_cpu"
-required-features = ["std"]
-
-[[test]]
-name = "queue_no_alloc"
-harness = false
 required-features = ["std"]
 
 [[test]]
@@ -133,10 +124,6 @@ required-features = ["std"]
 
 [[example]]
 name = "scaling"
-required-features = ["std"]
-
-[[example]]
-name = "queue_probe"
 required-features = ["std"]
 
 [[example]]

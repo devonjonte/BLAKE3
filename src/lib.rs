@@ -266,10 +266,6 @@ mod tree;
 mod lanes;
 mod many;
 #[cfg(feature = "std")]
-mod queue;
-#[cfg(feature = "std")]
-pub use queue::{FixedHandler, MessageHandler, PieceHandler, Queue, shape};
-#[cfg(feature = "std")]
 mod stream;
 #[cfg(feature = "std")]
 pub use stream::{stream, Stream};
@@ -723,51 +719,6 @@ impl IncrementCounter {
     }
 }
 
-
-/// Where a stream stands for [`plan_subtrees`]: its chunk counter and the
-/// bytes in its partial chunk (0 to CHUNK_LEN), as a [`Hasher`]'s chunk
-/// state holds them.
-#[cfg(feature = "std")]
-#[derive(Clone, Copy, Default)]
-pub(crate) struct PlanState {
-    counter: u64,
-    partial: usize,
-}
-
-/// The whole subtrees that [`Hasher::update`] would hash from `state` on
-/// `piece` in parts of at most [`lanes::TASK_LEN`] (any split of the input
-/// gives the same digest; the parts spread a long input over threads),
-/// appended to `tasks` in order (each computed as [`lanes::Task`] says),
-/// and `state` moved past the piece: what [`Hasher::update_with_results`]
-/// takes back. The bytes around them (a partial chunk's fill, a part's last
-/// chunk) stay for the replay. The stream starts at chunk zero.
-#[cfg(feature = "std")]
-pub(crate) fn plan_subtrees(state: &mut PlanState, piece: &[u8], tasks: &mut Vec<lanes::Task>) {
-    for part in piece.chunks(lanes::TASK_LEN) {
-        plan_part(state, part, tasks);
-    }
-}
-
-#[cfg(feature = "std")]
-fn plan_part(state: &mut PlanState, piece: &[u8], tasks: &mut Vec<lanes::Task>) {
-    let mut offset = 0;
-    if state.partial > 0 {
-        offset = cmp::min(CHUNK_LEN - state.partial, piece.len());
-        if offset == piece.len() {
-            state.partial += offset;
-            return;
-        }
-        state.counter += 1;
-    }
-    while piece.len() - offset > CHUNK_LEN {
-        let len = hasher::subtree_len(state.counter, piece.len() - offset);
-        tasks.push(lanes::Task::of(&piece[offset..offset + len], state.counter));
-        state.counter += (len / CHUNK_LEN) as u64;
-        offset += len;
-    }
-    state.partial = piece.len() - offset;
-}
-
 /// The lanes of the one pass that hashes `whole` whole chunks with a
 /// partial one of `partial` bytes after them, where the pass costs less
 /// than the partial chunk's blocks after the whole ones: three whole
@@ -1103,10 +1054,9 @@ pub fn initialize() {
 }
 
 /// [`initialize`], and start the threads that the multithreaded calls and
-/// [`Queue`] use: every program that makes such calls calls this once,
+/// [`stream`] use: every program that makes such calls calls this once,
 /// before them, in place of `initialize`. It starts the first worker and
-/// the queue's delivery thread and returns; the first worker starts the
-/// others, a worker per CPU beyond the first (each 20-30 us on Linux
+/// returns; the first worker starts the others, a worker per CPU beyond the first (each 20-30 us on Linux
 /// x86-64), and calls run on the workers started so far. Later calls
 /// return at once. The threads wait asleep
 /// whenever no call has work for them (their memory: see
@@ -1123,9 +1073,6 @@ pub fn initialize_multithreaded() {
     STARTED.call_once(|| {
         initialize();
         lanes::initialize();
-        // A queue needs threads, which wasm32 lacks (its first submission panics).
-        #[cfg(not(target_family = "wasm"))]
-        queue::start_delivery();
     });
 }
 
@@ -2373,8 +2320,8 @@ impl HasherCore {
 
 
     /// [`update`](Hasher::update) with every whole subtree's result taken
-    /// from `results`, in the order [`plan_subtrees`] gave them (in the same
-    /// parts), as [`lanes::Task`] computes them.
+    /// from `results`, in order, each a whole subtree's 64-byte block as
+    /// [`lanes::Task`] computes it.
     #[cfg(feature = "std")]
     pub(crate) fn update_with_results<'a>(&mut self, input: &[u8], results: &mut impl Iterator<Item = &'a [u8; BLOCK_LEN]>) {
         for part in input.chunks(lanes::TASK_LEN) {

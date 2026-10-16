@@ -197,15 +197,6 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
     merge_root(&pieces, &mut cvs, key, flags)
 }
 
-/// Whether the pool has a thread that takes queue tasks: a worker, or the
-/// SME2 thread. With one CPU to the process (`available_parallelism`, which
-/// counts its affinity and quota) and no SME2 it has none, and a queue
-/// hashes everything on its delivery thread.
-pub(crate) fn takes_tasks() -> bool {
-    let pool = pool();
-    pool.cpus > 1 || pool.sme2
-}
-
 /// The two child chaining values of the subtree `input` at chunk
 /// `counter`, over the machine's threads: what
 /// `compress_subtree_to_parent_node` returns for a whole subtree.
@@ -770,7 +761,7 @@ fn no_pool() -> &'static Pool {
         POOL.get().expect("initialize_multithreaded created the pool")
     }
     #[cfg(not(test))]
-    panic!("blake3-servil: call blake3_servil::initialize_multithreaded() once, before any multithreaded call or Queue: it starts the threads they use")
+    panic!("blake3-servil: call blake3_servil::initialize_multithreaded() once, before any multithreaded call or stream: it starts the threads they use")
 }
 
 impl Pool {
@@ -978,16 +969,16 @@ impl Pool {
     }
 }
 
-/// The longest part of a queue's input planned as tasks
-/// ([`crate::plan_subtrees`]): a task is a whole subtree within one part.
+/// The longest piece of a stream's message, and the most bytes of short
+/// messages one task gathers: a piece is a whole subtree.
 pub(crate) const TASK_LEN: usize = 64 * CHUNK_LEN;
 
-/// One piece of a queue's work (crate::queue), hashed by whichever thread
+/// One piece of a stream's work (crate::stream), hashed by whichever thread
 /// pops it from [`TASKS`]: a whole subtree at chunk `counter` of a message,
-/// as [`crate::plan_subtrees`] cuts it, its result a 64-byte block at `out`;
-/// or, with `batch` the messages' length, a range of a batch's messages in
-/// their slots, their digests at `out`. Then it counts down `left`; the
-/// queue keeps the bytes, `out`, and `left` in place until `left` is zero.
+/// its result a 64-byte block at `out`; or, with `batch` the messages'
+/// length, a range of a batch's messages in their slots, their digests at
+/// `out`. Then it counts down `left`; the stream keeps the bytes, `out`,
+/// and `left` in place until `left` is zero.
 pub(crate) struct Task {
     pub(crate) input: *const u8,
     pub(crate) len: usize,
