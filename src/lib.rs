@@ -1,5 +1,7 @@
-//! The official Rust implementation of the [BLAKE3] cryptographic hash
-//! function.
+//! The [BLAKE3] cryptographic hash function, in the servil fork: the same
+//! digests as official BLAKE3, faster on 64-bit Arm (above all Apple
+//! M4-class chips) and on x86-64, with a call for each way programs hash
+//! (the table below).
 //!
 //! # Examples
 //!
@@ -118,19 +120,20 @@
 //! before the process first hashes: a miscompilation, a faulty CPU, a
 //! binary built for another CPU, or tampering that breaks the digests.
 //! (What the code computes is the tests' and the proofs' to establish.) It
-//! hashes fixed inputs, chosen so that together they run every one of its
-//! assembly kernels on this machine (42 on AArch64, 9 elsewhere), each
-//! input carrying the previous output, and compares each result with the
-//! reference implementation's; on x86 it first checks that the CPU has the
+//! hashes fixed inputs (42 on AArch64, 9 elsewhere), chosen so that
+//! together they run every one of its assembly kernels on this machine (a
+//! unit test checks it on every run), each input carrying the previous
+//! output, and compares each result with the reference implementation's; on x86 it first checks that the CPU has the
 //! LZCNT and BMI1 instructions a build for newer CPUs assumes, which older
 //! ones run as other instructions instead of stopping. A difference means
 //! this build or this CPU computes wrong digests, and stops the program
 //! with a panic naming the code path. The check takes 0.1 to 0.2 ms once
 //! per process on AArch64 (Apple M4 Max, and a Linux VM on it) and about
-//! 28 us on x86-64 (i7-12700K, a performance core; 47 us on an efficiency
-//! core), in every build, with or without the `std` feature. Other threads that call `initialize`
-//! meanwhile wait for it, and stop with it if it fails. Without `std`, the panic goes to the
-//! program's panic handler, which aborts or halts.
+//! 28 µs on x86-64 (i7-12700K, a performance core; 47 µs on an efficiency
+//! core), in every build, with or without the `std` feature. Other threads
+//! that call `initialize` meanwhile wait for it, and stop with it if it
+//! fails. Without `std`, the panic goes to the program's panic handler,
+//! which aborts or halts.
 //!
 //! # Cargo Features
 //!
@@ -139,35 +142,28 @@
 //! method for [`Hasher`], and also the [`Read`] and [`Seek`] implementations
 //! for [`OutputReader`].
 //!
-//! The `mmap` feature (disabled by default, but enabled for [docs.rs]) adds the
+//! The `mmap` feature (off by default, on for [docs.rs]) adds the
 //! [`update_mmap`](Hasher::update_mmap) helper method for memory-mapped IO.
 //!
-//! The `zeroize` feature (disabled by default, but enabled for [docs.rs])
+//! The `zeroize` feature (off by default, on for [docs.rs])
 //! implements
 //! [`Zeroize`](https://docs.rs/zeroize/latest/zeroize/trait.Zeroize.html) for
 //! this crate's types.
 //!
-//! The `serde` feature (disabled by default, but enabled for [docs.rs]) implements
+//! The `serde` feature (off by default, on for [docs.rs]) implements
 //! [`serde::Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html) and
 //! [`serde::Deserialize`](https://docs.rs/serde/latest/serde/trait.Deserialize.html)
 //! for [`Hash`](struct@Hash).
 //!
-//! The NEON implementation is enabled by default for AArch64 but requires the
-//! `neon` feature for other ARM targets. Not all ARMv7 CPUs support NEON, and
-//! enabling this feature will produce a binary that's not portable to CPUs
-//! without NEON support.
+//! The `wasm32_simd` feature turns on the WebAssembly SIMD implementation
+//! for `wasm32` targets, and assumes the runtime has WebAssembly SIMD.
 //!
-//! The `wasm32_simd` feature enables the WASM SIMD implementation for all `wasm32-`
-//! targets. Similar to the `neon` feature, if `wasm32_simd` is enabled, WASM SIMD
-//! support is assumed. This may become the default in the future.
-//!
-//! The `traits-preview` feature enables implementations of traits from the
-//! RustCrypto [`digest`] crate, and re-exports that crate as `traits::digest`.
-//! However, the traits aren't stable, and they're expected to change in
-//! incompatible ways before that crate reaches 1.0. For that reason, this crate
-//! makes no SemVer guarantees for this feature, and callers who use it should
-//! expect breaking changes between patch versions. (The "-preview" feature name
-//! follows the conventions of the RustCrypto [`signature`] crate.)
+//! The `traits-preview` feature implements the traits of the RustCrypto
+//! [`digest`] crate, through which generic Rust code takes a hash function,
+//! and re-exports that crate as `traits::digest`. Those traits are still
+//! changing before that crate's 1.0, so this feature may change with any
+//! version of this crate. (The "-preview" name follows the RustCrypto
+//! [`signature`] crate's convention.)
 //!
 //! [BLAKE3]: https://blake3.io
 //! [docs.rs]: https://docs.rs/
