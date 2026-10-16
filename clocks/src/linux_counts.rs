@@ -14,21 +14,21 @@ use std::sync::OnceLock;
 
 /// perf_event_attr, version 0 (64 bytes): the fields used, zero after.
 #[repr(C)]
-struct Attr {
-    kind: u32,
-    size: u32,
-    config: u64,
-    sample_period: u64,
-    sample_type: u64,
-    read_format: u64,
-    flags: u64,
-    reserved: [u64; 2],
+pub(crate) struct Attr {
+    pub(crate) kind: u32,
+    pub(crate) size: u32,
+    pub(crate) config: u64,
+    pub(crate) sample_period: u64,
+    pub(crate) sample_type: u64,
+    pub(crate) read_format: u64,
+    pub(crate) flags: u64,
+    pub(crate) reserved: [u64; 2],
 }
 
 unsafe extern "C" {
     fn syscall(number: c_long, ...) -> c_long;
     #[link_name = "read"]
-    fn read_fd(fd: c_int, buffer: *mut c_void, size: usize) -> isize;
+    pub(crate) fn read_fd(fd: c_int, buffer: *mut c_void, size: usize) -> isize;
 }
 
 const SYS_PERF_EVENT_OPEN: c_long = 298;
@@ -53,10 +53,16 @@ fn attr(pmu: u32, event: u64, leader: bool) -> Attr {
 /// A counter of `event` on `pmu` for the calling thread, in `group` (or a
 /// new group's leader, with -1).
 fn open(pmu: u32, event: u64, group: c_int) -> Option<OwnedFd> {
-    let a = attr(pmu, event, group == -1);
+    // pid 0 and cpu -1: the calling thread, on any CPU.
+    perf_open(&attr(pmu, event, group == -1), 0, -1, group)
+}
+
+/// perf_event_open(`a`, `pid`, `cpu`, `group`), close-on-exec: the counter's
+/// descriptor, or `None` where the kernel refuses.
+pub(crate) fn perf_open(a: &Attr, pid: c_int, cpu: c_int, group: c_int) -> Option<OwnedFd> {
     // Sound: the x86-64 Linux system call, `a` an initialized attr of the
-    // size it states; pid 0 and cpu -1 count the calling thread anywhere.
-    let fd = unsafe { syscall(SYS_PERF_EVENT_OPEN, &a as *const Attr, 0 as c_long, -1 as c_long, c_long::from(group), PERF_FLAG_FD_CLOEXEC) };
+    // size it states.
+    let fd = unsafe { syscall(SYS_PERF_EVENT_OPEN, a as *const Attr, c_long::from(pid), c_long::from(cpu), c_long::from(group), PERF_FLAG_FD_CLOEXEC) };
     // Sound: a fresh descriptor, ours alone.
     (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(c_int::try_from(fd).unwrap()) })
 }
