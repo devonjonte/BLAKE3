@@ -1,6 +1,7 @@
 //! The C API from C (tests/check.c): built with this machine's C compiler
 //! (`cc`, C11, every warning an error) against the shared library, run,
-//! and its digests checked against the Rust crate's.
+//! and its digests checked against the Rust crate's; and b3.h from C++
+//! (tests/check.cpp, C++11).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -26,6 +27,21 @@ fn from_c() {
         .status()
         .expect("a C compiler, cc");
     assert!(status.success(), "tests/check.c compiles and links");
+    // And from C++ (C++11).
+    let cpp = lib_dir.join("b3-check-cpp");
+    let status = Command::new("c++")
+        .args(["-std=c++11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-I"])
+        .arg(&here)
+        .arg(here.join("tests/check.cpp"))
+        .arg("-L")
+        .arg(&lib_dir)
+        .arg(format!("-Wl,-rpath,{}", lib_dir.display()))
+        .args(["-lb3", "-o"])
+        .arg(&cpp)
+        .status()
+        .expect("a C++ compiler, c++");
+    assert!(status.success(), "tests/check.cpp compiles and links");
+    assert!(Command::new(&cpp).status().unwrap().success(), "tests/check.cpp runs");
     let out = Command::new(&program).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let out = String::from_utf8(out.stdout).unwrap();

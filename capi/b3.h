@@ -8,7 +8,7 @@
  * the library's threads at their first use; they last for the process.
  *
  * Link with -lb3 (libb3.a or libb3.so / libb3.dylib, built by `cargo build
- * --release` in capi/). C11.
+ * --release` in capi/). C11, or C++11.
  */
 #ifndef B3_H
 #define B3_H
@@ -62,8 +62,9 @@ b3_digest b3_hash_multithreaded(const b3_mode *mode, const void *input, size_t l
  * i * B3_STRIDE(message_len) of `input`, and the bytes between a message's
  * end and the next stride are zero. Messages whose length is a multiple of
  * 64 sit back to back: a Merkle tree's layer of leaves, or of 64-byte
- * pairs of child digests. Many short messages hash fastest this way, about
- * five times faster than one b3_hash call each. */
+ * pairs of child digests. Short messages hash fastest this way: 1024
+ * messages of 64 bytes take about a fifth of the time of 1024 b3_hash
+ * calls (an Apple M4 Max). */
 void b3_hash_many(const b3_mode *mode, const void *input, size_t message_len, size_t count, b3_digest *out);
 
 /* b3_hash_many, using other CPU cores where that is faster. */
@@ -75,8 +76,13 @@ void b3_hash_many_multithreaded(const b3_mode *mode, const void *input, size_t m
  * there is nothing to free. b3_hasher_init starts a message, and starts
  * one over. */
 #define B3_HASHER_SIZE 18432
+#ifdef __cplusplus
+#define B3_ALIGN64 alignas(64)
+#else
+#define B3_ALIGN64 _Alignas(64)
+#endif
 typedef struct {
-  _Alignas(64) uint8_t opaque[B3_HASHER_SIZE];
+  B3_ALIGN64 uint8_t opaque[B3_HASHER_SIZE];
 } b3_hasher;
 
 void b3_hasher_init(b3_hasher *hasher, const b3_mode *mode);
