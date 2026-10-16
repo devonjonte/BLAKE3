@@ -32,8 +32,7 @@ jobs:
         # flags below would build the same code each time.
         target: [
           { "os": "ubuntu-latest",    "toolchain": "x86_64-unknown-linux-gnu",  "name": "Linux GNU" },
-          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-msvc",    "name": "Windows MSVC" },
-          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-gnu",     "name": "Windows GNU" }
+          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-msvc",    "name": "Windows MSVC" }
         ]
         channel: ["stable", "nightly"]
 
@@ -59,39 +58,27 @@ jobs:
     # no_std tests.
     - run: cargo test --no-default-features
     - name: Make sure enabling LTO via CFLAGS doesn't break the build.
-      run: cargo build --tests --features prefer_intrinsics
+      run: cargo build --tests
       if: matrix.target.toolchain != 'x86_64-pc-windows-msvc'
       env:
         CFLAGS: -flto
 
-    # Each level of SIMD support, with assembly, Rust and C intrinsics, and
-    # pure Rust intrinsics, in the test profile (optimized, its assertions
+    # Each level of SIMD support, with assembly and with pure Rust
+    # intrinsics, in the test profile (optimized, its assertions
     # and overflow checks on: Cargo.toml); the release profile once, at full
     # support, for the optimizer's own behavior.
     #
     # Full SIMD support.
     - run: cargo test --features=
-    - run: cargo test --features=prefer_intrinsics
     - run: cargo test --features=pure
     - run: cargo test --features= --release
-    - run: cargo test --features=prefer_intrinsics --release
     - run: cargo test --features=pure --release
     # No AVX-512.
     - run: cargo test --features=no_avx512
-    - run: cargo test --features=no_avx512,prefer_intrinsics
     - run: cargo test --features=no_avx512,pure
     # No AVX2.
     - run: cargo test --features=no_avx512,no_avx2
-    - run: cargo test --features=no_avx512,no_avx2,prefer_intrinsics
     - run: cargo test --features=no_avx512,no_avx2,pure
-    # No SSE4.1
-    - run: cargo test --features=no_avx512,no_avx2,no_sse41
-    - run: cargo test --features=no_avx512,no_avx2,no_sse41,prefer_intrinsics
-    - run: cargo test --features=no_avx512,no_avx2,no_sse41,pure
-    # No SSE2
-    - run: cargo test --features=no_avx512,no_avx2,no_sse41,no_sse2
-    - run: cargo test --features=no_avx512,no_avx2,no_sse41,no_sse2,prefer_intrinsics
-    - run: cargo test --features=no_avx512,no_avx2,no_sse41,no_sse2,pure
 
     # Test benchmarks. RUSTC_BOOTSTRAP=1 lets this run on non-nightly toolchains.
     - run: cargo test --benches
@@ -100,9 +87,6 @@ jobs:
     # Test vectors.
     - name: test vectors
       run: cargo test
-      working-directory: ./test_vectors
-    - name: test vectors intrinsics
-      run: cargo test --features=prefer_intrinsics
       working-directory: ./test_vectors
     - name: test vectors pure
       run: cargo test --features=pure
@@ -139,25 +123,6 @@ jobs:
       run: cargo test
       working-directory: ./reference_impl
 
-  msrv_build:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: MSRV build ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ["ubuntu-latest", "macOS-latest", "windows-latest"]
-    steps:
-    - uses: actions/checkout@v4
-    # The current MSRV. This crate doesn't have an official MSRV policy,
-    # but in practice we'll probably do what libc does:
-    # https://github.com/rust-lang/libs-team/issues/72.
-    # This test target is here so that we notice if we accidentally bump
-    # the MSRV, but it's not a promise that we won't bump it.
-    - uses: dtolnay/rust-toolchain@1.85.1
-    - run: cargo build --features=mmap,traits-preview,serde,zeroize
-
   b3sum_tests:
     # A pull request from a branch of this repository: its push runs CI already.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
@@ -171,8 +136,7 @@ jobs:
         # flags below would build the same code each time.
         target: [
           { "os": "ubuntu-latest",    "toolchain": "x86_64-unknown-linux-gnu",  "name": "Linux GNU" },
-          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-msvc",    "name": "Windows MSVC" },
-          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-gnu",     "name": "Windows GNU" }
+          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-msvc",    "name": "Windows MSVC" }
         ]
         channel: ["stable", "nightly"]
 
@@ -189,50 +153,11 @@ jobs:
       run: cargo test --no-default-features
       working-directory: ./b3sum
     - name: Make sure enabling LTO via CFLAGS doesn't break the build.
-      run: cargo build --features prefer_intrinsics
+      run: cargo build
       if: matrix.target.toolchain != 'x86_64-pc-windows-msvc'
       env:
         CFLAGS: -flto
       working-directory: ./b3sum
-
-  cross_tests:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: cross ${{ matrix.arch }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - i586-unknown-linux-musl
-          - i686-unknown-linux-musl
-          - armv7-unknown-linux-gnueabihf
-          - aarch64-unknown-linux-gnu
-          # Big-endian targets. See https://twitter.com/burntsushi5/status/1695483429997945092.
-          - powerpc64-unknown-linux-gnu
-          - s390x-unknown-linux-gnu
-
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - run: cargo install cross
-    # Test the portable implementation on everything.
-    - run: cross test --target ${{ matrix.arch }}
-    # Test building for ancient i386 processors without guaranteed SSE2 support.
-    - run: cross rustc --target ${{ matrix.arch }} -- -C target-cpu=i386
-      if: startsWith(matrix.arch, 'i586-')
-    # Test the NEON implementation on ARM targets.
-    - run: cross test --target ${{ matrix.arch }} --features=neon
-      if: startsWith(matrix.arch, 'armv7-') || startsWith(matrix.arch, 'aarch64-')
-    # NEON is enabled by default on aarch64, disabling it through the no_neon feature.
-    - run: cross test --target ${{ matrix.arch }} --features=no_neon
-      if: startsWith(matrix.arch, 'aarch64-')
-    # Test vectors. Note that this uses a hacky script due to path dependency limitations.
-    - run: ./test_vectors/cross_test.sh --target ${{ matrix.arch }}
-    # C code. Same issue with the hacky script.
-    - run: ./c/blake3_c_rust_bindings/cross_test.sh --target ${{ matrix.arch }}
-    - run: ./c/blake3_c_rust_bindings/cross_test.sh --target ${{ matrix.arch }} --features=neon
-      if: startsWith(matrix.arch, 'armv7-') || startsWith(matrix.arch, 'aarch64-')
 
   wasm_tests:
     # A pull request from a branch of this repository: its push runs CI already.
@@ -432,7 +357,7 @@ jobs:
           cat /proc/cpuinfo
           curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
           cd /work
-          ~/.cargo/bin/cargo test --features prefer_intrinsics
+          ~/.cargo/bin/cargo test
 
   # CMake build test (Library only).
   cmake_current_build:

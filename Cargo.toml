@@ -13,12 +13,6 @@ edition = "2024"
 [features]
 default = ["std"]
 
-# The NEON implementation does not participate in dynamic feature detection,
-# which is currently x86-only. If "neon" is on, NEON support is assumed. Note
-# that AArch64 always supports NEON, but support on ARMv7 varies. The NEON
-# implementation uses C intrinsics and requires a C compiler.
-neon = []
-
 # The Wasm SIMD implementation does not participate in dynamic feature detection,
 # which is currently x86-only. If "wasm_simd" is on, Wasm SIMD support is assumed.
 # Note that not all Wasm implementations support the Wasm SIMD specification.
@@ -54,32 +48,15 @@ traits-preview = ["dep:digest"]
 # The following features are mainly intended for testing and benchmarking, and
 # they might change or disappear at any time without a major version bump.
 
-# It wasn't originally intended to expose "digest" as its own feature, but the
-# traits-preview feature above predated the "dep:" syntax in Cargo. Version
-# 1.5.2 of this crate started using "dep:" syntax, but that broke some callers
-# in the wild (https://solana.stackexchange.com/q/17787/29050). This feature
-# unbreaks those callers. When Cargo gains the ability to deprecate features,
-# this feature will be deprecated. Note that the relevant trait implementations
-# are still gated by "traits-preview".
-digest = ["dep:digest"]
-
 # By default on x86_64, this crate uses Samuel Neves' hand-written assembly
 # implementations for SSE4.1, AVX2, and AVX512. (These provide both the best
-# runtime performance, and the fastest build times.) And by default on 32-bit
-# x86, this crate uses Rust intrinsics implementations for SSE4.1 and AVX2, and
-# a C intrinsics implementation for AVX-512. In both cases, if a C compiler is
-# not detected, or if AVX-512 support is missing from the detected compiler,
+# runtime performance, and the fastest build times.) If a C compiler is not
+# detected, or if AVX-512 support is missing from the detected compiler,
 # build.rs automatically falls back to a pure Rust build. This feature forces
 # that fallback, for testing purposes. (Note that in CI testing, we set the
 # BLAKE3_CI environment variable, which instructs build.rs to error out rather
 # than doing an automatic fallback.)
 pure = []
-
-# As described above, on x86_64 this crate use assembly implementations by
-# default. Enabling the "prefer_intrinsics" feature makes this crate use
-# intrinsics implementations on both 32-bit and 64-bit x86, again for testing
-# purposes.
-prefer_intrinsics = []
 
 # Disable individual instruction sets. CI testing uses these flags to simulate
 # different levels of hardware SIMD support. Note that code for the
@@ -92,8 +69,6 @@ prefer_intrinsics = []
 # level turns out to be the right approach, then we can design a stable
 # feature. Until then, we reserve the right to break these features in a patch
 # release.
-no_sse2 = []
-no_sse41 = []
 no_avx2 = []
 no_avx512 = []
 no_neon = []

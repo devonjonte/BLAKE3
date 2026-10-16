@@ -47,12 +47,18 @@ cargo test --release --test '*'     # the planned API and the queue
 cargo test --release --manifest-path test_vectors/Cargo.toml
 ```
 
-CI (`.github/workflows/ci.yml`) runs the suites in debug and release on
-Linux x86-64 and arm64, macOS, Windows, wasm32, and big-endian and 32-bit
-targets under qemu, for every pull request from a fork, and by hand for a
+CI (`.github/workflows/ci.yml`) runs the suites on Linux x86-64 and arm64
+(without SME2, and without SHA-3 under QEMU), macOS, Windows with MSVC,
+and wasm32, for every pull request from a fork, and by hand for a
 candidate that changes code for those targets. `sh tools/check-builds.sh`
-runs, in minutes, the builds the suites above leave out: without std,
-warnings as errors, and compile checks for x86-64, i686, and wasm32.
+runs, in minutes, the builds the suites above leave out: without std, on
+one CPU without SME2, warnings as errors, and compile checks for x86-64
+and wasm32.
+
+The supported targets are 64-bit Arm (Linux, macOS), x86-64 (Linux,
+macOS, Windows with MSVC), and wasm32, with the latest stable Rust (and
+any nightly feature the fork chooses to use). Official BLAKE3 serves the
+rest.
 
 The NEON hybrid assembly is generated and committed. Edit
 `tools/gen_neon_hybrid.py`, then run

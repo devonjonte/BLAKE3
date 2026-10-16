@@ -210,7 +210,7 @@ pub mod platform;
 // The intrinsics AVX2 kernels: `avx2` itself without the assembly, and
 // everywhere on x86 the pass of whole chunks with a partial one (as in
 // rust_sse41).
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[cfg_attr(not(blake3_avx2_rust), allow(dead_code))]
 mod rust_avx2;
 #[cfg(blake3_avx2_rust)]
@@ -233,13 +233,7 @@ mod portable;
 #[cfg(blake3_sme2)]
 #[path = "ffi_sme2.rs"]
 mod sme2;
-#[cfg(blake3_sse2_rust)]
-#[path = "rust_sse2.rs"]
-mod sse2;
-#[cfg(blake3_sse2_ffi)]
-#[path = "ffi_sse2.rs"]
-mod sse2;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[cfg_attr(not(blake3_sse41_rust), allow(dead_code))]
 mod rust_sse41;
 #[cfg(blake3_sse41_rust)]
@@ -803,7 +797,7 @@ fn plan_part(state: &mut PlanState, piece: &[u8], tasks: &mut Vec<lanes::Task>) 
 /// an i7-12700K's efficiency core ran the eight lanes up to 7% slower; a
 /// pass of eight lanes costs 1.6 times one of four on its performance
 /// core). AVX-512 keeps its own widths (unmeasured).
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[inline]
 fn spare_lane(platform: Platform, whole: usize, partial: usize) -> Option<usize> {
     match (platform, whole) {
@@ -842,7 +836,7 @@ fn compress_chunks_parallel(
     }
     // Whole chunks that leave a lane spare, and a partial one: one pass,
     // the partial chunk in the spare lane.
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     if let (false, Some(lanes)) = (chunks_exact.remainder().is_empty(), spare_lane(platform, chunks_array.len(), chunks_exact.remainder().len())) {
         let (whole, partial) = (&chunks_array[..], chunks_exact.remainder());
         // Sound: spare_lane admits each width only on a platform whose CPU
@@ -1640,7 +1634,7 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
                 why: "From this many messages, groups of sixteen are hashed side by side on the SME2 matrix unit, one message per lane: each chunk across the messages, then each level of the messages' trees; the last group's spare lanes repeat a message.",
             });
         }
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         if let Some(least) = many::across_from(message_len, platform) {
             kernels.push(Kernel {
                 from_len: least * message_len,

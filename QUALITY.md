@@ -163,9 +163,9 @@ unrolled kernel code.
   ThreadSanitizer over the pool, unsafe-path, and batch tests and the
   planned API's (the queue among them; std itself uninstrumented): all
   clean.
-- **CI on other targets** (GitHub Actions, every branch): the suites in
-  debug and release on Linux x86-64 and arm64, macOS, Windows, wasm32
-  (wasmtime), and big-endian and 32-bit targets under qemu.
+- **CI on other targets** (GitHub Actions): the suites on Linux x86-64
+  and arm64 (without SME2, and without SHA-3 under QEMU), macOS, Windows
+  with MSVC, and wasm32 (wasmtime).
 - **Miri**, which interprets Rust and stops at undefined behaviour, over
   small versions of the unsafe paths in the `pure` build (Miri cannot run
   assembly or SIMD intrinsics): `test::unsafe_paths` (batches, the pool

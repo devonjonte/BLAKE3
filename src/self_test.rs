@@ -420,16 +420,11 @@ fn run() {
 /// on a CPU without it (SIGILL), which already stops the program. The
 /// check reads the CPU (CPUID) only in a build that assumes them.
 fn compiled_features_present() {
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     {
-        #[cfg(target_arch = "x86")]
-        use core::arch::x86::__cpuid_count;
         #[cfg(target_arch = "x86_64")]
         use core::arch::x86_64::__cpuid_count;
-        // Sound: every CPU this code runs on has CPUID. Unsafe to call
-        // before Rust 1.87 (the MSRV is older), safe after.
-        #[allow(unused_unsafe)]
-        let cpuid = |leaf, sub| unsafe { __cpuid_count(leaf, sub) };
+        let cpuid = |leaf, sub| __cpuid_count(leaf, sub);
         let lacks = |feature: &str| -> ! {
             panic!("blake3-servil: this binary was compiled for CPUs with {feature}, which this CPU lacks, and here it would compute wrong digests; build it for this CPU")
         };

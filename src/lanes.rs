@@ -1103,13 +1103,13 @@ impl Task {
         if members.len() >= 2 && members.iter().all(|m| m.len == members[0].len) {
             match members[0].len {
                 crate::BLOCK_LEN => return self.run_equal_members::<{ crate::BLOCK_LEN }>(platform),
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                #[cfg(target_arch = "x86_64")]
                 128 => return self.run_equal_members::<128>(platform),
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                #[cfg(target_arch = "x86_64")]
                 256 => return self.run_equal_members::<256>(platform),
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                #[cfg(target_arch = "x86_64")]
                 512 => return self.run_equal_members::<512>(platform),
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                #[cfg(target_arch = "x86_64")]
                 CHUNK_LEN => return self.run_equal_members::<CHUNK_LEN>(platform),
                 _ => {}
             }
@@ -1313,8 +1313,8 @@ mod test {
     fn equal_members_match_the_reference() {
         #[allow(unused_mut)]
         let mut platforms: Vec<_> = [Some(Platform::Portable)].into_iter().flatten().collect();
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        platforms.extend([Platform::sse2(), Platform::sse41(), Platform::avx2()].into_iter().flatten());
+        #[cfg(target_arch = "x86_64")]
+        platforms.extend([Platform::sse41(), Platform::avx2()].into_iter().flatten());
         #[cfg(blake3_avx512_ffi)]
         platforms.extend(Platform::avx512());
         platforms.push(Platform::detect());

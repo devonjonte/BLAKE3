@@ -33,8 +33,11 @@ of which call fits your data.
 [bench-hashes](https://github.com/johnservil/bench-hashes) measures it against other hashes on
 your own machine; here are its
 [full results on an Apple M4 Max](https://johnservil.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.map.html).
-`CONTRIBUTING.md` says how to work on the fork. Everything below is upstream's README, apart
-from the speed chart.
+It supports 64-bit Arm (Linux and macOS), x86-64 (Linux, macOS, and Windows with MSVC), and
+WebAssembly, with the latest stable Rust; for other targets (32-bit x86 or Arm, big-endian
+CPUs, Windows with MinGW) and older compilers, [official BLAKE3](https://github.com/BLAKE3-team/BLAKE3)
+serves them. `CONTRIBUTING.md` says how to work on the fork. Everything below is upstream's
+README, apart from the speed chart.
 
 # The BLAKE3 algorithm
 
