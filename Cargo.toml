@@ -183,3 +183,9 @@ incremental = false
 debug = false
 debug-assertions = true
 overflow-checks = true
+
+# Mutation testing (tools/mutants/check.py): the test profile, built
+# incrementally, since cargo-mutants rebuilds the crate once per mutant.
+[profile.mutants]
+inherits = "test"
+incremental = true
