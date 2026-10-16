@@ -58,7 +58,11 @@ def survivors(files):
     """The mutants that survive the library's tests, by name, counted."""
     # The public features on, so the code behind them is tested too (the
     # build variants, pure, no_sme2, and the like, are their own builds).
-    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize,traits-preview", "--timeout", "30"]
+    # Proved code is left to its proofs: the Kani harnesses (`proofs::`,
+    # which `cargo kani` checks) here, and the four proved cores, which
+    # cargo-mutants never reaches (they come in by `include!`).
+    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize,traits-preview", "--timeout", "30",
+            "--exclude-re", "proofs::"]
     for f in files:
         args += ["--file", f]
     runs = []
