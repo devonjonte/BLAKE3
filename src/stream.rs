@@ -37,9 +37,21 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 pub(crate) const PIECE: usize = TASK_LEN;
 
 /// The bytes a stream keeps for messages and batches written in place.
+/// The ring's size: BLAKE3_RING_KIB (for the experiment; default 4096),
+/// read once, then a plain load.
+static RING_BYTES_SET: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[inline(always)]
 fn ring_bytes() -> usize {
-    static BYTES: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *BYTES.get_or_init(|| std::env::var("BLAKE3_RING_KIB").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4096) << 10)
+    let n = RING_BYTES_SET.load(Ordering::Relaxed);
+    if n != 0 { n } else { ring_bytes_init() }
+}
+
+#[cold]
+fn ring_bytes_init() -> usize {
+    let n = std::env::var("BLAKE3_RING_KIB").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4096) << 10;
+    RING_BYTES_SET.store(n, Ordering::Relaxed);
+    n
 }
 
 /// The most entries (messages and pieces) in flight in one stream (1024:
