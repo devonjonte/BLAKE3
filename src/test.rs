@@ -593,6 +593,14 @@ fn test_xof_seek() {
         );
         assert!(reader.seek(std::io::SeekFrom::End(0)).is_err());
         assert!(reader.seek(std::io::SeekFrom::Current(-1000)).is_err());
+        // Back to the start exactly, and one byte before it; past the end
+        // of u64 stops at its end.
+        let at = reader.position() as i64;
+        assert_eq!(reader.seek(std::io::SeekFrom::Current(-at)).unwrap(), 0);
+        assert!(reader.seek(std::io::SeekFrom::Current(-1)).is_err());
+        reader.seek(std::io::SeekFrom::Start(u64::MAX - 1)).unwrap();
+        assert_eq!(reader.seek(std::io::SeekFrom::Current(2)).unwrap(), u64::MAX);
+        assert_eq!(std::format!("{reader:?}"), "OutputReader { position: 18446744073709551615 }");
     }
 }
 
