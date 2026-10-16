@@ -30,24 +30,21 @@ use crate::{CVBytes, CVWords, ChunkState, Hash, Hasher, IncrementCounter, Mode, 
 pub fn hash_each_multithreaded_with(mode: Mode, items: &[&[u8]], out: &mut [[u8; OUT_LEN]]) {
     crate::lanes::require();
     assert_eq!(items.len(), out.len(), "one digest per item");
-    if items.iter().map(|i| i.len()).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN {
-        return hash_each_with(mode, items, out);
+    let (key, flags) = mode.key_and_flags();
+    let alone = |item: &[u8]| item.len() >= crate::lanes::MIN_SPLIT_LEN;
+    // The collection with each item that hashes alone set aside (an empty
+    // stand-in, its digest written after).
+    let small: Vec<&[u8]> = items.iter().map(|&i| if alone(i) { &[][..] } else { i }).collect();
+    if small.iter().map(|i| i.len()).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN {
+        hash_each_on(&key, flags, &small, out, Platform::detect(), |item| crate::hash_with(mode, item));
+    } else {
+        crate::lanes::hash_each(&key, flags, &small, out);
     }
-    // A stream of the items (git objects level, Nix files x0.86 against the
-    // pool job it replaced, i7-12700K).
-    let mut done = 0;
-    let mut take = |digests: &[Hash]| {
-        for (o, d) in out[done..].iter_mut().zip(digests) {
-            *o = *d.as_bytes();
+    for (item, out) in items.iter().zip(out.iter_mut()) {
+        if alone(item) {
+            *out = *crate::lanes::hash_with_key(item, &key, flags).as_bytes();
         }
-        done += digests.len();
-    };
-    crate::stream(mode, |s| {
-        for &item in items {
-            s.submit(item, &mut take);
-        }
-        s.finish(&mut take);
-    });
+    }
 }
 
 /// Many messages arriving at once, such as a server's uploads, each with
