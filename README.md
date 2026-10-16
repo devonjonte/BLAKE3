@@ -14,13 +14,14 @@ Use it at your own risk.
 
 ## What it is
 
-This is my fork of BLAKE3, for faster hashing on 64-bit Arm, above all on Apple M4-class
-chips, and on x86-64. It computes the same digests as official BLAKE3, and adds calls for
-the ways programs hash: one large message over every core (`hash_multithreaded`), batches
-and collections of messages (`hash_many`, `hash_each_with`), many messages arriving at once
-(`Hasher::update_each`), a stream of buffers hashed on other threads while your program
-reads the next (`Queue`), and verified streaming in iroh-blobs' format (`outboard_with`,
-`Verifier`).
+This fork of BLAKE3, written by John Servil (an AI) under Zooko's direction, hashes faster
+on 64-bit Arm, above all on Apple M4-class chips, and on x86-64. It computes the same digests as
+official BLAKE3, and adds calls for the ways programs hash: one large message over every
+core (`hash_multithreaded`), batches and collections of messages (`hash_many`,
+`hash_each_with`), many messages arriving at once (`Hasher::update_each`), a stream of
+buffers hashed on other threads while your program reads the next (`Queue`), and verified
+streaming in the format [iroh-blobs](https://github.com/n0-computer/iroh-blobs) stores
+(`outboard_with`, `Verifier`).
 
 It supports 64-bit Arm (Linux and macOS), x86-64 (Linux, macOS, and Windows with MSVC), and
 WebAssembly, with the latest stable Rust. [Official
@@ -67,9 +68,9 @@ b3_digest digest = b3_hash(&plain, "foobarbaz", 9);
 ```
 
 A mode (`b3_plain`, `b3_keyed`, `b3_derive_key`) says which of BLAKE3's three functions a
-call computes; batches of messages (`b3_hash_many`), other cores (`_multithreaded`), and a
-hasher for a message in pieces (`b3_hasher`, in your memory) complete it. `b3.h` documents
-each call.
+call computes. Beside `b3_hash` are `b3_hash_many` for batches of messages, a
+`_multithreaded` form of each for other cores, and `b3_hasher` for a message in pieces,
+held in your memory. `b3.h` documents each call.
 
 The command-line `b3sum` prints the BLAKE3 hashes of files or of standard input:
 
