@@ -1063,43 +1063,6 @@ fn test_miri_smoketest() {
     reader.fill(&mut [0]);
 }
 
-// I had to move these tests out of the deprecated guts module, because leaving them there causes
-// an un-silenceable warning: https://github.com/rust-lang/rust/issues/47238
-#[cfg(test)]
-#[allow(deprecated)]
-mod guts_tests {
-    use crate::guts::*;
-
-    #[test]
-    fn test_chunk() {
-        assert_eq!(
-            crate::hash(b"foo"),
-            ChunkState::new(0).update(b"foo").finalize(true)
-        );
-    }
-
-    #[test]
-    fn test_parents() {
-        let mut hasher = crate::Hasher::new();
-        let mut buf = [0; crate::CHUNK_LEN];
-
-        buf[0] = 'a' as u8;
-        hasher.update(&buf);
-        let chunk0_cv = ChunkState::new(0).update(&buf).finalize(false);
-
-        buf[0] = 'b' as u8;
-        hasher.update(&buf);
-        let chunk1_cv = ChunkState::new(1).update(&buf).finalize(false);
-
-        hasher.update(b"c");
-        let chunk2_cv = ChunkState::new(2).update(b"c").finalize(false);
-
-        let parent = parent_cv(&chunk0_cv, &chunk1_cv, false);
-        let root = parent_cv(&parent, &chunk2_cv, true);
-        assert_eq!(hasher.finalize(), root);
-    }
-}
-
 /// The kernel reports are well formed: ascending from 0, and the
 /// multithreaded report is the single-threaded one below the split, then
 /// the split entry, which starts where hash_multithreaded may leave the
@@ -1490,19 +1453,11 @@ fn test_hash_comparisons_and_formats() {
     }
 }
 
-/// The Debug forms of a chunk state and a Hasher name their counts,
-/// flags, and platform, and leave out their bytes and chaining values
-/// (they may be secret).
+/// A Hasher's Debug form names its flags and platform, and leaves out
+/// its bytes and chaining values (they may be secret).
 #[test]
 #[cfg(feature = "std")]
-#[allow(deprecated)]
 fn test_debug_leaves_out_the_bytes() {
-    let mut state = crate::guts::ChunkState::new(5);
-    state.update(&[0xab; 70]);
-    assert_eq!(state.len(), 70);
-    let shown = std::format!("{state:?}");
-    assert!(shown.contains("count: 70") && shown.contains("chunk_counter: 5"), "{shown}");
-    assert!(!shown.contains("171") && !shown.contains("cv"), "{shown}");
     let mut hasher = crate::Hasher::new_keyed(&[0xab; 32]);
     hasher.update(&[0xab; 70]);
     let shown = std::format!("{hasher:?}");

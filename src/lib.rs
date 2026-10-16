@@ -199,10 +199,6 @@ pub use outboard::{outboard_multithreaded_with, outboard_with, verify_range_with
 #[doc(hidden)]
 pub use outboard::test_encoding;
 
-#[doc(hidden)]
-#[deprecated(since = "1.8.0", note = "use the hazmat module instead")]
-pub mod guts;
-
 pub mod hazmat;
 
 /// Undocumented and unstable, for benchmarks only.
@@ -654,18 +650,6 @@ impl ChunkState {
         self
     }
 
-}
-
-// Don't derive(Debug), because the state may be secret.
-impl fmt::Debug for ChunkState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("ChunkState")
-            .field("count", &self.count())
-            .field("chunk_counter", &self.chunk_counter)
-            .field("flags", &self.flags)
-            .field("platform", &self.platform)
-            .finish()
-    }
 }
 
 #[cfg(feature = "zeroize")]
