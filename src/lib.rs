@@ -1646,10 +1646,11 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
                 why: "Two or more messages are hashed together, up to eight on the NEON vector units and one on the integer units at once; on SME2 this handles the messages left over below a group of sixteen.",
             });
         } else {
+            // hash_four_at_a_time pads three messages to a group of four.
             kernels.push(Kernel {
-                from_len: 4 * message_len,
+                from_len: 3 * message_len,
                 name: "NEON vectors, four messages at a time",
-                why: "From four messages, groups of four are hashed on the NEON vector units and any left over one call each; on SME2 this handles the messages left over below a group of sixteen.",
+                why: "From three messages, groups of four are hashed on the NEON vector units, three left over padded to four with a repeat and one or two left over one call each.",
             });
         }
         #[cfg(blake3_sme2)]
