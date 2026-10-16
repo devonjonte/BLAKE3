@@ -122,6 +122,7 @@ def figure(functions, known):
 def main():
     files, known = read_known()
     found, functions = survivors(files)
+    figure(functions, {k: known.get(k, (n, "UNCLASSIFIED")) for k, n in found.items()})
     if "--write" in sys.argv:
         header = [l.rstrip("\n") for l in open(KNOWN) if l.startswith("#") or l.startswith("files:")]
         rows = [f"{k}\t{n}\t{known.get(k, (0, 'UNCLASSIFIED'))[1]}" for k, n in sorted(found.items())]
@@ -137,7 +138,6 @@ def main():
         print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
     for k, c in sorted(stale.items()):
         print(f"NOW CAUGHT ({c - found.get(k, 0)}): {k}")
-    figure(functions, known)
     ok = not new and not stale and not unexplained
     print(f"mutants: {sum(found.values())} survive, each known and explained" if ok else "mutants: the list and this run differ, or a listed mutant has no reason")
     sys.exit(0 if ok else 1)
