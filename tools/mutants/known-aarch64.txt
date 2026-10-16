@@ -1,0 +1,136 @@
+# The mutants known to survive the library's tests on AArch64 (the VM, with
+# SME2 and the SHA-3 extension), each with its reason; tools/mutants/check.py
+# fails on any other survivor and on any listed one now caught.
+# A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
+files: src/many.rs
+src/many.rs	delete ! in across_from	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	delete match arm 3 in hash_four_at_a_time	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace != with == in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace != with == in hash_four_at_a_time	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace % with + in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace % with + in hash_blocks	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace % with + in hash_chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace % with + in hash_four_at_a_time	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace % with + in hash_run	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace % with / in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace % with / in hash_chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace % with / in hash_four_at_a_time	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace % with / in hash_run	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace && with || in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace && with || in hash_blocks	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace && with || in hash_four_at_a_time	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace && with || in hash_run	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace && with || in hash_run_short	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace && with || in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace && with || in sme2_sized	5	speed: moves a threshold between equally correct paths
+src/many.rs	replace * with + in chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace * with + in hash_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with + in hash_group_across	5	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with + in hash_long_or_single	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with + in hash_many_on	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace * with + in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace * with + in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with / in chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace * with / in hash_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with / in hash_four_at_a_time	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace * with / in hash_group_across	5	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with / in hash_long_or_single	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace * with / in hash_many_on	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace * with / in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace * with / in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace + with * in hash_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace + with * in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension, and x86)
+src/many.rs	replace + with * in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace + with * in proofs::fill_table_writes_every_lane	1	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace + with * in subtree_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace + with - in hash_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace + with - in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension, and x86)
+src/many.rs	replace + with - in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace + with - in proofs::fill_table_writes_every_lane	1	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace + with - in subtree_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace - with + in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension, and x86)
+src/many.rs	replace - with + in hash_chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace - with + in hash_four_at_a_time	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace - with + in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace - with + in proofs::fill_table_writes_every_lane	1	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace - with + in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace - with / in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension, and x86)
+src/many.rs	replace - with / in hash_chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace - with / in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace - with / in proofs::fill_table_writes_every_lane	1	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace - with / in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace / with % in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace / with % in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace / with * in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace / with * in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with <= in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with <= in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with <= in hash_many_on	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace < with <= in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace < with == in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with == in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with == in hash_many_on	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace < with == in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace < with > in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with > in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace < with > in hash_many_on	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace < with > in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace <= with > in proofs::fill_table_writes_every_lane	2	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace <= with > in proofs::slot_len_is_whole_blocks	1	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace <= with > in sme2_sized	2	speed: moves a threshold between equally correct paths
+src/many.rs	replace == with != in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace == with != in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension, and x86)
+src/many.rs	replace == with != in hash_group_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace == with != in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace > with < in hash_blocks	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with < in hash_chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with < in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace > with < in hash_run	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with < in sme2_sized	2	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with == in hash_blocks	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with == in hash_chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with == in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace > with == in hash_run	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with == in sme2_sized	2	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with >= in hash_blocks	2	speed: moves a threshold between equally correct paths; and an SME2 call with no lanes, which does nothing
+src/many.rs	replace > with >= in hash_chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with >= in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace > with >= in hash_many_on	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with >= in hash_run	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace > with >= in sme2_sized	2	speed: moves a threshold between equally correct paths
+src/many.rs	replace >= with < in hash_blocks	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace >= with < in hash_chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace >= with < in hash_long_or_single	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace >= with < in hash_many_on	4	speed: moves a threshold between equally correct paths
+src/many.rs	replace >= with < in hash_run	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace >= with < in hash_run_short	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace >= with < in sme2_sized	6	speed: moves a threshold between equally correct paths
+src/many.rs	replace across_from -> Option<usize> with None	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace across_from -> Option<usize> with Some(0)	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace across_from -> Option<usize> with Some(1)	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace chunked -> bool with false	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace hash_across with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace hash_group_across with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace hash_long_or_single with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace neon_plans -> bool with false	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace neon_plans -> bool with true	1	another machine: forces the NEON plans, which a CPU without the SHA-3 extension would refuse
+src/many.rs	replace platform_is_sme2 -> bool with false	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace platform_is_sme2 -> bool with true	1	another machine: forces SME2 on the NEON platform, which a CPU without SME2 would refuse
+src/many.rs	replace proofs::fill_table_writes_every_lane with ()	1	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace proofs::slot_len_is_whole_blocks with ()	1	a Kani harness's own code (cargo kani checks it)
+src/many.rs	replace sme2_sized -> bool with false	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace sme2_sized -> bool with true	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace subtree_across with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace | with & in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace | with & in subtree_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace | with ^ in hash_blocks	1	equivalent: | and ^ agree on flag bits that never overlap
+src/many.rs	replace | with ^ in hash_four_at_a_time	1	equivalent: | and ^ agree on flag bits that never overlap
+src/many.rs	replace | with ^ in hash_group_across	2	equivalent: | and ^ agree on flag bits that never overlap
+src/many.rs	replace | with ^ in hash_run	3	equivalent: | and ^ agree on flag bits that never overlap
+src/many.rs	replace | with ^ in hash_run_padded	1	equivalent: | and ^ agree on flag bits that never overlap
+src/many.rs	replace | with ^ in hash_two_chunks	1	equivalent: | and ^ agree on flag bits that never overlap
+src/many.rs	replace | with ^ in neon_plans_last_len	1	equivalent: | and ^ agree on flag bits that never overlap
+src/many.rs	replace | with ^ in subtree_across	2	equivalent: | and ^ agree on flag bits that never overlap
+src/many.rs	replace || with && in across_from	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/many.rs	replace || with && in hash_many_on	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace || with && in sme2_sized	4	speed: moves a threshold between equally correct paths
