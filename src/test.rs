@@ -1453,3 +1453,22 @@ fn test_chunks_with_partial_against_reference() {
         assert_eq!(crate::derive_key("partial test", m), expect(reference_impl::Hasher::new_derive_key("partial test")), "derive_key, len {len}");
     }
 }
+
+/// Hash's comparisons (constant time) and formats: equal and unequal
+/// against a Hash, a 32-byte array, and a slice, and a slice of another
+/// length; Display as the hex digest, Debug as Hash("hex").
+#[test]
+fn test_hash_comparisons_and_formats() {
+    let a = crate::hash(b"a");
+    let b = crate::hash(b"b");
+    assert!(a == a && a != b);
+    assert!(a == *a.as_bytes() && a != *b.as_bytes());
+    assert!(a == a.as_bytes()[..] && a != b.as_bytes()[..] && a != a.as_bytes()[..31]);
+    let hex = a.to_hex();
+    assert_eq!(hex.as_str(), "17762fddd969a453925d65717ac3eea21320b66b54342fde15128d6caf21215f");
+    #[cfg(feature = "std")]
+    {
+        assert_eq!(std::format!("{a}"), hex.as_str());
+        assert_eq!(std::format!("{a:?}"), std::format!("Hash({:?})", hex.as_str()));
+    }
+}

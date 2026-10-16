@@ -473,13 +473,6 @@ fn ensure_slow() {
     }
 }
 
-/// The self-test's own time, for probes: run it again (it has passed).
-#[cfg(not(miri))]
-pub(crate) fn run_again() {
-    ensure();
-    run();
-}
-
 #[cfg(all(test, feature = "std"))]
 mod test {
     use super::*;

@@ -272,14 +272,6 @@ pub use queue::{FixedHandler, MessageHandler, PieceHandler, Queue, shape};
 mod pair;
 mod self_test;
 
-/// The startup self-test's own time, for probes: it runs again (it has
-/// already passed once in this process). Hidden, unstable.
-#[cfg(not(miri))]
-#[doc(hidden)]
-pub fn __self_test_run_again() {
-    self_test::run_again();
-}
-
 use arrayvec::{ArrayString, ArrayVec};
 use core::cmp;
 use core::fmt;
