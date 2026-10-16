@@ -6,11 +6,17 @@ a commit, measured side by side.
     pypy3 tools/perf_regress.py check --against REV    # against a commit
     pypy3 tools/perf_regress.py compare OLD NEW        # two commits
     pypy3 tools/perf_regress.py compare OLD NEW --full # every cell of a default run
+    pypy3 tools/perf_regress.py compare OLD NEW --bench OLD_BENCH NEW_BENCH
+                                   # an API change: each side's own cells
     pypy3 tools/perf_regress.py build                  # bench-hashes against the working tree
 
 It builds bench-hashes twice, once against the fork at the old commit and
 once against the new one (for `check`, a commit object made from the
-working tree), the same benchmark source in both; relinks each side
+working tree), the same benchmark source in both; or, with `--bench`, each
+side's own bench-hashes commit (an API change, whose cells call the new
+API: the old design through the old cells against the new design through
+the new ones; the instrument, the clocks crate and `regress`, stays the
+working tree's on both sides). It relinks each side
 LAYOUTS times, each with its own random function order (a binary's
 layout alone moves cells by several percent: bench-hashes
 audit/variance-on-unchanged-code.md), and runs
@@ -99,7 +105,25 @@ def target_root():
     return Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "bench-hashes/target"))
 
 
-def side_bench(side, commit):
+def bench_source(side, rev):
+    """The bench-hashes checkout a side copies: this checkout's, as it is;
+    or, for `rev`, a worktree of this checkout's bench-hashes repository at
+    that commit, under CACHE/side (moved only when `rev` does)."""
+    bench = ROOT / "bench-hashes"
+    if rev is None:
+        return bench
+    rev = git("rev-parse", f"{rev}^{{commit}}", cwd=bench)
+    tree = CACHE / side / "bench-src"
+    if not tree.exists():
+        git("worktree", "prune", cwd=bench)
+        tree.parent.mkdir(parents=True, exist_ok=True)
+        git("worktree", "add", "--detach", str(tree), rev, cwd=bench)
+    elif git("rev-parse", "HEAD", cwd=tree) != rev:
+        git("checkout", "--quiet", "--force", "--detach", rev, cwd=tree)
+    return tree
+
+
+def side_bench(side, commit, bench_rev=None):
     """The bench-hashes executable built against the fork at `commit`, in
     the side `side` ("old", "new", or the runner's "bench"): a fork worktree under CACHE/side with a copy of bench-hashes
     inside, and a target directory of its own. Each step changes only what
@@ -118,9 +142,10 @@ def side_bench(side, commit):
         git("worktree", "add", "--detach", str(checkout), commit)
     elif git("rev-parse", "HEAD", cwd=checkout) != commit:
         git("checkout", "--quiet", "--force", "--detach", commit, cwd=checkout)
-    # The benchmark as it is now, so only the fork differs between sides;
-    # everything but the lock, which the side derives.
-    bench, copy = ROOT / "bench-hashes", checkout / "bench-hashes"
+    # The benchmark as it is now, so only the fork differs between sides
+    # (or the side's own, with `bench_rev`); everything but the lock, which
+    # the side derives.
+    bench, copy = bench_source(side, bench_rev), checkout / "bench-hashes"
     skip = {"target", "benchmark-results", "tmp", ".git"}
     wanted = set()
     for path in sorted(bench.rglob("*")):
@@ -238,14 +263,36 @@ def require_sme2_kernel(exe):
                            "point CC at a compiler that assembles SME2 (CC=clang-19 in the VM)")
 
 
-def compare(old_rev, new, full=False):
+def provenance(name, fork, bench_rev):
+    """One side's sources, for the report: the fork commit, and the
+    bench-hashes commit (its own, or the checkout's HEAD and whether the
+    checkout differs from it)."""
+    bench = ROOT / "bench-hashes"
+    if bench_rev is not None:
+        source = git("rev-parse", "--short=12", f"{bench_rev}^{{commit}}", cwd=bench)
+    else:
+        dirty = git("status", "--porcelain", "--untracked-files=no", cwd=bench) != ""
+        source = git("rev-parse", "--short=12", "HEAD", cwd=bench) + (" plus uncommitted changes" if dirty else "")
+    return f"perf_regress: {name}: fork {git('rev-parse', '--short=12', fork)}, bench-hashes {source}"
+
+
+def compare(old_rev, new, full=False, bench=(None, None)):
     """Compare the fork at `old_rev` with `new` (a commit, or None for the
     working tree): bench-hashes regress over each side's layouts (with
-    `full`, every cell of a default run). Returns its exit code."""
-    old = layouts("old", *side_bench("old", old_rev))
-    new_exes = layouts("new", *side_bench("new", working_tree_commit() if new is None else new))
+    `full`, every cell of a default run; with `bench`, each side's own
+    bench-hashes commit). Returns its exit code. It first prints what it
+    compares, so that a report carries what reproduces it."""
+    new_rev = working_tree_commit() if new is None else new
+    old = layouts("old", *side_bench("old", old_rev, bench[0]))
+    new_exes = layouts("new", *side_bench("new", new_rev, bench[1]))
     name = "the working tree" if new is None else new
     print(f"perf_regress: {name} against {old_rev}", file=sys.stderr, flush=True)
+    print(provenance("old", old_rev, bench[0]), file=sys.stderr, flush=True)
+    print(provenance("new", new_rev, bench[1]), file=sys.stderr, flush=True)
+    linker = "ld -order_file" if sys.platform == "darwin" else f"{os.path.realpath(lld_dir() / 'ld.lld')} --symbol-ordering-file"
+    print(f"perf_regress: {LAYOUTS} layouts a side, function order seeds 0-{LAYOUTS - 1} (random.Random(seed).shuffle of the sorted text symbols), {linker}; "
+          f"instrument: clocks and regress from {git('rev-parse', '--short=12', 'HEAD')}{' plus uncommitted changes' if git('status', '--porcelain', '--untracked-files=no') else ''}",
+          file=sys.stderr, flush=True)
     return subprocess.run([new_exes[0], "regress", *(["--full"] if full else []), *old, "--", *new_exes], env=ENV).returncode
 
 
@@ -260,6 +307,8 @@ def main():
     p.add_argument("old")
     p.add_argument("new")
     p.add_argument("--full", action="store_true", help="every cell of a default run, not the check's points")
+    p.add_argument("--bench", nargs=2, metavar=("OLD_BENCH", "NEW_BENCH"),
+                   help="each side's own bench-hashes commit (an API change, its cells changed with it)")
     p = sub.add_parser("build", help="build bench-hashes against the working tree, or a commit, as it is; "
                                      "print the executable's path")
     p.add_argument("--commit", help="a fork commit (default: the working tree)")
@@ -278,7 +327,9 @@ def main():
         if args.command == "build":
             print(side_bench(args.side, args.commit or working_tree_commit())[0])
             return 0
-        return compare(args.against, None) if args.command == "check" else compare(args.old, args.new, args.full)
+        if args.command == "check":
+            return compare(args.against, None)
+        return compare(args.old, args.new, args.full, tuple(args.bench) if args.bench else (None, None))
 
 
 if __name__ == "__main__":
