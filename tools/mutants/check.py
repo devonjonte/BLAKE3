@@ -43,6 +43,15 @@ def read_known():
 
 
 SHARDS = 3  # runs at once, each in its own worktree and build
+# Each process's address space, builds' and tests' alike: a mutant that
+# allocates without end fails its test here, and leaves the machine's
+# memory to the rest (one of 57 GB took the long proofs' memory).
+MEMORY = 8 << 30
+
+
+def cap_memory():
+    import resource
+    resource.setrlimit(resource.RLIMIT_AS, (MEMORY, MEMORY))
 
 
 def survivors(files):
@@ -60,7 +69,7 @@ def survivors(files):
         # The library's and the integration tests; the doc tests stay out
         # (each compiles a program of its own: minutes per mutant).
         shard = args + ["--shard", f"{k}/{SHARDS}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
-        runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env)))
+        runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=cap_memory)))
     names = collections.Counter()
     for tree, run in runs:
         # 0: every mutant caught; 2: some missed; 3: some timed out. Any
