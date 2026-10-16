@@ -18,8 +18,9 @@ pub fn crypto_hash(out: &mut [u8; 32], m: &[u8]) {
 (`initialize()`, once per process, is the crate's contract; SUPERCOP's first call makes it, before anything is timed.)
 
 SUPERCOP builds Rust implementations with cargo, as it does `crypto_hash/sha256/rust_sha2`.
-The crate picks its kernels at run time for each length and CPU; on x86-64 that is
-upstream's code, with its runtime choice of SSE4.1, AVX2 or AVX-512.
+The crate picks its kernels at run time for each length and CPU; on x86-64, upstream's
+assembly for SSE4.1, AVX2 or AVX-512, with the fork's own passes of whole chunks and a
+partial one.
 
 SUPERCOP 20261004 in a Linux VM on an Apple M4 Max, cycles per call (checksums pass, and
 SUPERCOP selects rust_servil):
