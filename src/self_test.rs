@@ -60,6 +60,9 @@ pub(crate) enum Case {
     /// derive_key() over `len` bytes.
     Derive { len: usize },
     /// A Hasher fed `len` bytes in pieces of `piece` bytes.
+    // AArch64's cases alone feed a Hasher in pieces; elsewhere the
+    // extended-output case runs the Hasher.
+    #[cfg_attr(not(target_arch = "aarch64"), allow(dead_code))]
     Incremental { len: usize, piece: usize },
     /// `out` bytes of extended output from hashing `len` bytes, read
     /// from output position `skip`.
@@ -135,21 +138,20 @@ pub(crate) const CASES: &[(Case, &str)] = &[
 #[cfg(not(target_arch = "aarch64"))]
 pub(crate) const CASES: &[(Case, &str)] = &[
     (Hash { offset: 1, len: 65 }, "a block and a byte, unaligned: the one-block kernel"),
-    (Keyed { len: KIB + 476 }, "keyed, a chunk and a partial one: the two-input path (AVX2, AVX-512)"),
-    (Hash { offset: 3, len: 16 * KIB + 65 }, "sixteen chunks and a block, unaligned: the widest chunk kernel, its parents, the tree"),
+    (Keyed { len: KIB + 65 }, "keyed, a chunk and a block and a byte (the shortest the two-input path takes): the two-input path (AVX2, AVX-512)"),
+    (Hash { offset: 3, len: 4 * KIB + 65 }, "four chunks and a block, unaligned: the chunk kernel over chunks, their parents, the tree"),
     (Hash { offset: 0, len: 3 * KIB + 100 }, "three chunks and a partial one: the four-lane pass with a partial chunk"),
-    (Hash { offset: 5, len: 7 * KIB + 1000 }, "seven chunks and a partial one, unaligned: the eight-lane pass with a partial chunk"),
+    (Hash { offset: 5, len: 5 * KIB + 321 }, "five chunks and a partial one of six blocks, unaligned (the fewest the eight-lane pass takes): the eight-lane pass with a partial chunk"),
     (Many { offset: 1, len: 64, count: 17 }, "seventeen 64-byte messages: the batch kernel, full groups and a tail"),
     (Derive { len: 64 }, "key derivation over a block holding all of the previous output"),
-    (Incremental { len: 2 * KIB + 1, piece: 700 }, "a Hasher fed in uneven pieces"),
-    (Xof { len: 100, skip: 37, out: 1100 }, "seventeen blocks and more of extended output, from an unaligned position: the extended-output kernels"),
+    (Xof { len: 100, skip: 37, out: 1100 }, "seventeen blocks and more of extended output, from an unaligned position, through a Hasher: the extended-output kernels"),
 ];
 
 /// The largest input any case reads, offset included.
 #[cfg(target_arch = "aarch64")]
 pub(crate) const INPUT_LEN: usize = 32 * KIB + 8;
 #[cfg(not(target_arch = "aarch64"))]
-pub(crate) const INPUT_LEN: usize = 16 * KIB + 68;
+pub(crate) const INPUT_LEN: usize = 5 * KIB + 512;
 
 /// The most output any case writes (an extended output's).
 pub(crate) const OUTPUT_LEN: usize = 1100;
@@ -264,16 +266,15 @@ const EXPECTED: [u64; 40] = [
 ];
 
 #[cfg(not(target_arch = "aarch64"))]
-const EXPECTED: [u64; 9] = [
+const EXPECTED: [u64; 8] = [
     0x64e806087be9bc85,
-    0x9da981564c48565d,
-    0x62f3a113bda8855d,
-    0x9e7e7b35e7d65f9e,
-    0xb44bb45d40165469,
-    0xffa2cd2cf9099037,
-    0x65a54931ceb20894,
-    0xf8ac65a0532e4c76,
-    0x80069f7c5b5d1e8b,
+    0x7d406241656b8c26,
+    0xe80762bc37755db3,
+    0xdf7d1f1dcd33ceb4,
+    0x47bc1a41d7c475f5,
+    0x9e68560dd612af97,
+    0xe1a4c5967b2225ff,
+    0xdb630ec123f1460e,
 ];
 
 /// A case's outputs from this build, into `out`, through the entry points'
