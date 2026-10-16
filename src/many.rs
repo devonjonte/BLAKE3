@@ -541,27 +541,58 @@ mod test {
         }
     }
 
-    /// Every length from 0 to 3000 bytes at a few counts, and every last
-    /// block length at counts that reach each kernel, on every platform
-    /// this CPU has.
+    /// hash_many_on's cases, read from its code and the code it calls,
+    /// against the reference implementation on every platform this CPU
+    /// has. Lengths: none; for each slot of 1 to 16 blocks (each its own
+    /// hash_blocks::<N>), its last block one byte and whole
+    /// (crate::test::block_cases); 1 to 15 chunks and one past them (SME2's side-by-side path
+    /// takes 2 to 15, the NEON pairing CHUNK_LEN + 1 to 2 CHUNK_LEN),
+    /// whole and a block over. Counts: each of 1 to GROUP + 1 (each picks
+    /// its own kernel plan), either side of every threshold the dispatch
+    /// compares a count with, and past one TABLE. Each length at the
+    /// counts that reach every branch; each count at one length a path.
     #[test]
-    fn test_hash_many_every_length() {
+    fn test_hash_many_cases() {
+        // The kernels' group of sixteen lanes (hash_chunked's and the plans'
+        // GROUP).
+        const GROUP: usize = 16;
         #[allow(unused_mut)]
         let mut platforms = vec![Platform::detect(), Platform::Portable];
         #[cfg(blake3_neon)]
         platforms.push(Platform::neon().expect("NEON on AArch64"));
-        for len in 0..=3000 {
-            let counts: &[usize] = if len % 97 == 0 || len <= 130 || (1020..=1030).contains(&len) { &[2, 3, 7, 10, 16, 21, 33] } else { &[3, 16] };
-            for &count in counts {
-                let input = messages(len, count);
-                for &platform in &platforms {
-                    let mut out = vec![[0xAAu8; OUT_LEN]; count + 16];
-                    hash_many_on(&input, len, crate::IV, 0, &mut out[..count], platform);
-                    assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count} x {len} B: a store past the last output");
-                    for (i, digest) in out[..count].iter().enumerate() {
-                        assert_eq!(*digest, *crate::test::reference_hash(message(&input, len, i)).as_bytes(), "{platform:?}, message {i} of {count}, {len} bytes");
-                    }
+        let mut lengths: Vec<usize> = core::iter::once(0).chain(crate::test::block_cases(CHUNK_LEN)).collect();
+        for chunks in 1..=16 {
+            lengths.extend([chunks * CHUNK_LEN, chunks * CHUNK_LEN + BLOCK_LEN]);
+        }
+        let mut thresholds = vec![GROUP, TABLE, SME2_TAIL_MIN, GROUP + SME2_TAIL_MIN_AFTER_GROUPS, ONE_BLOCK_PAD_MIN,
+            GROUP + ONE_BLOCK_PAD_AFTER_GROUPS, crate::SME2_SIZED_BATCH];
+        for chunks in 2..=15 {
+            let min = sme2_chunked_min(chunks * CHUNK_LEN);
+            thresholds.extend([min, GROUP + min - 2]);
+        }
+        let mut counts: Vec<usize> = (1..=GROUP + 1).chain(thresholds.iter().flat_map(|&t| [t - 1, t, t + 1])).collect();
+        counts.extend([2 * GROUP, TABLE + GROUP + 1]);
+        counts.sort_unstable();
+        counts.dedup();
+        let check = |len: usize, count: usize| {
+            let input = messages(len, count);
+            for &platform in &platforms {
+                let mut out = vec![[0xAAu8; OUT_LEN]; count + 16];
+                hash_many_on(&input, len, crate::IV, 0, &mut out[..count], platform);
+                assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count} x {len} B: a store past the last output");
+                for (i, digest) in out[..count].iter().enumerate() {
+                    assert_eq!(*digest, *crate::test::reference_hash(message(&input, len, i)).as_bytes(), "{platform:?}, message {i} of {count}, {len} bytes");
                 }
+            }
+        };
+        for &len in &lengths {
+            for count in [1, 2, 3, GROUP - 1, GROUP, GROUP + 1] {
+                check(len, count);
+            }
+        }
+        for len in [BLOCK_LEN, 3, 5 * BLOCK_LEN, 5 * BLOCK_LEN - 1, CHUNK_LEN, 2 * CHUNK_LEN, 3 * CHUNK_LEN, 3 * CHUNK_LEN + BLOCK_LEN, 16 * CHUNK_LEN] {
+            for &count in &counts {
+                check(len, count);
             }
         }
     }

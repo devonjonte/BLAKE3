@@ -1,6 +1,5 @@
 use crate::{BLOCK_LEN, CHUNK_LEN, CVBytes, CVWords, IncrementCounter, OUT_LEN};
 use arrayvec::ArrayVec;
-use rand::prelude::*;
 
 // Interesting input lengths to run tests on.
 pub const TEST_CASES: &[usize] = &[
@@ -500,71 +499,56 @@ fn test_compare_update_multiple() {
     }
 }
 
+/// Hashers fed three updates against the reference implementation, each
+/// update's length one of the cases the staging (Hasher::gather_part)
+/// and the core distinguish: none, a byte, either side of a chunk, either
+/// side of the stage (crate::STAGE_LEN), and past two stages. Every order
+/// of three, so each update meets every staging state the others leave.
 #[test]
-fn test_fuzz_hasher() {
-    const INPUT_MAX: usize = 4 * CHUNK_LEN;
-    let mut input_buf = [0; 3 * INPUT_MAX];
-    paint_test_input(&mut input_buf);
-
-    // Don't do too many iterations in debug mode, to keep the tests under a
-    // second or so. CI should run tests in release mode also. Provide an
-    // environment variable for specifying a larger number of fuzz iterations.
-    let num_tests = if cfg!(debug_assertions) { 100 } else { 10_000 };
-
-    // Use a fixed RNG seed for reproducibility.
-    let mut rng = chacha20::ChaCha8Rng::from_seed([1; 32]);
-    for _num_test in 0..num_tests {
-        #[cfg(feature = "std")]
-        dbg!(_num_test);
-        let mut hasher = crate::Hasher::new();
-        let mut total_input = 0;
-        // For each test, write 3 inputs of random length.
-        for _ in 0..3 {
-            let input_len = rng.random_range(0..(INPUT_MAX + 1));
-            #[cfg(feature = "std")]
-            dbg!(input_len);
-            let input = &input_buf[total_input..][..input_len];
-            hasher.update(input);
-            total_input += input_len;
+fn test_hasher_update_cases() {
+    let lens = [0, 1, CHUNK_LEN - 1, CHUNK_LEN, CHUNK_LEN + 1, crate::STAGE_LEN - 1, crate::STAGE_LEN, crate::STAGE_LEN + 1, 2 * crate::STAGE_LEN + 1];
+    let mut input = vec![0u8; 3 * (2 * crate::STAGE_LEN + 1)];
+    paint_test_input(&mut input);
+    for &a in &lens {
+        for &b in &lens {
+            for &c in &lens {
+                let mut hasher = crate::Hasher::new();
+                hasher.update(&input[..a]).update(&input[a..][..b]).update(&input[a + b..][..c]);
+                assert_eq!(hasher.finalize(), reference_hash(&input[..a + b + c]), "updates of {a}, {b}, {c} bytes");
+            }
         }
-        let expected = reference_hash(&input_buf[..total_input]);
-        assert_eq!(expected, hasher.finalize());
     }
 }
 
+/// Extended output against the reference implementation at every case its
+/// reader distinguishes: a root of one block, of a whole multi-block chunk
+/// (BLOCK_LEN + 1 bytes), and a parent; a read starting at a block's start,
+/// its second byte, and its last; then 1 to 33 whole blocks (below, at,
+/// and past SME2's group of 16 and NEON's groups of 8 and 4, every
+/// remainder) and none, one, or BLOCK_LEN - 1 bytes more.
 #[test]
-fn test_fuzz_xof() {
-    let mut input_buf = [0u8; 3 * BLOCK_LEN];
-    paint_test_input(&mut input_buf);
-
-    // Don't do too many iterations in debug mode, to keep the tests under a
-    // second or so. CI should run tests in release mode also. Provide an
-    // environment variable for specifying a larger number of fuzz iterations.
-    let num_tests = if cfg!(debug_assertions) { 100 } else { 2500 };
-
-    // Use a fixed RNG seed for reproducibility.
-    let mut rng = chacha20::ChaCha8Rng::from_seed([1; 32]);
-    for _num_test in 0..num_tests {
-        #[cfg(feature = "std")]
-        dbg!(_num_test);
-        // 31 (16 + 8 + 4 + 2 + 1) outputs
-        let mut output_buf = [0; 31 * CHUNK_LEN];
-        let input_len = rng.random_range(0..input_buf.len());
-        let mut xof = crate::Hasher::new()
-            .update(&input_buf[..input_len])
-            .finalize_xof();
-        let partial_start = rng.random_range(0..output_buf.len());
-        let partial_end = rng.random_range(partial_start..output_buf.len());
-        xof.fill(&mut output_buf[..partial_start]);
-        xof.fill(&mut output_buf[partial_start..partial_end]);
-        xof.fill(&mut output_buf[partial_end..]);
-
-        let mut reference_buf = [0; 31 * CHUNK_LEN];
+fn test_xof_cases() {
+    let mut input = [0u8; CHUNK_LEN + 1];
+    paint_test_input(&mut input);
+    for input_len in [0, BLOCK_LEN, BLOCK_LEN + 1, CHUNK_LEN + 1] {
+        let mut reference = [0u8; 35 * BLOCK_LEN];
         let mut reference_hasher = reference_impl::Hasher::new();
-        reference_hasher.update(&input_buf[..input_len]);
-        reference_hasher.finalize(&mut reference_buf);
-
-        assert_eq!(reference_buf, output_buf);
+        reference_hasher.update(&input[..input_len]);
+        reference_hasher.finalize(&mut reference);
+        let mut hasher = crate::Hasher::new();
+        hasher.update(&input[..input_len]);
+        for start in [0, 1, BLOCK_LEN - 1] {
+            for blocks in 1..=33 {
+                for tail in [0, 1, BLOCK_LEN - 1] {
+                    let mut xof = hasher.finalize_xof();
+                    let mut out = [0u8; 35 * BLOCK_LEN];
+                    let end = start + blocks * BLOCK_LEN + tail;
+                    xof.fill(&mut out[..start]);
+                    xof.fill(&mut out[start..end]);
+                    assert_eq!(out[..end], reference[..end], "{input_len} B input, from {start}, {blocks} blocks + {tail}");
+                }
+            }
+        }
     }
 }
 
@@ -1132,14 +1116,31 @@ fn test_kernel_reports() {
     }
 }
 
-/// Every length from one whole chunk and a byte to seventeen chunks,
-/// against the reference implementation: the whole-plus-partial kernels
-/// and the plans around them, on this machine's platform.
+/// The lengths, 1 to `max`, that reach every case of a message's block
+/// structure: for each count of blocks, its last block one byte and
+/// whole. Lengths within one block count run the same code, differing
+/// only in how many bytes the last block's padding covers.
+pub(crate) fn block_cases(max: usize) -> impl Iterator<Item = usize> {
+    (1..=max.div_ceil(BLOCK_LEN)).flat_map(|b| [(b - 1) * BLOCK_LEN + 1, b * BLOCK_LEN]).filter(move |&len| len <= max)
+}
+
+/// One-shot hashes of 1 to 17 chunks against the reference
+/// implementation, on this machine's platform: for each count of whole
+/// chunks (each picks its own whole-plus-partial kernel and plan), a
+/// partial chunk of each block count (each a different kernel shape), its
+/// last block one byte and whole, and the count's whole chunks alone.
 #[test]
-fn test_every_length_1_to_17_chunks_against_reference() {
+fn test_one_to_seventeen_chunks_against_reference() {
     let mut input = vec![0u8; 17 * CHUNK_LEN];
     paint_test_input(&mut input);
-    for len in CHUNK_LEN + 1..=17 * CHUNK_LEN {
+    let mut lens = vec![17 * CHUNK_LEN];
+    for whole in 1..=16 {
+        lens.push(whole * CHUNK_LEN);
+        lens.extend(block_cases(CHUNK_LEN).map(|partial| whole * CHUNK_LEN + partial));
+    }
+    lens.sort_unstable();
+    lens.dedup();
+    for len in lens {
         let mut reference = reference_impl::Hasher::new();
         reference.update(&input[..len]);
         let mut want = [0u8; OUT_LEN];

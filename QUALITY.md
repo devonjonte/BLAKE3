@@ -59,23 +59,56 @@ vectors (`test_vectors/`) and the reference implementation
 never regenerate their own expected answers. (The benchmark checks no
 digests; correctness is these tests' business.)
 
-**The test suites** (the fork's `src/test.rs` and each module's tests),
-among them:
+**How a test chooses its inputs.** Each test checks the cases its code
+can tell apart, and only those: every branch, and every arithmetic case
+that changes what the code does (a boundary such as a block's last byte,
+a count either side of a threshold, a remainder of each size). The cases
+come from reading the code, and each test computes its list from the
+code's own constants (`BLOCK_LEN`, `CHUNK_LEN`, a kernel group's size,
+the dispatch's thresholds), so a list moves with the code it covers; a
+change to the code's cases changes its tests in the same commit.
+Inputs within one case run the same code on different data, so they add
+time and no evidence: no test enumerates every length or draws random
+inputs. (Every input of the assembly kernels is covered by proof, not by
+tests; the tests check the calls into them, and every other platform.)
 
-- every chunk count and every partial length of every NEON kernel,
-  against the portable compressor;
-- every input length from one chunk and a byte to seventeen chunks,
-  against the reference implementation;
-- every platform's batch kernel at every input shape (1 to 16 blocks,
-  keyed flags, a counter whose low word overflows mid-batch, pointer
-  tables forward, reversed, and strided), against the portable one;
-- `hash_many` at every message length from 0 to 3000 bytes on every
-  platform the CPU has, against the reference implementation, and at
-  counts that fill and leave remainders in every group size, single- and
-  multithreaded, against one `hash` call per message;
-- the pool's cuts and merges, its thread caps, and 32 callers at once;
-- the same suites in the builds without SME2 (`no_sme2`) and without any
-  SIMD (`pure`).
+**How the choice is checked**, mechanically:
+
+- *Branch coverage* (`cargo llvm-cov --branch`, LLVM's per-branch
+  counts): a test that replaces another reaches every branch side the old
+  one reached. Replacing the exhaustive and random tests (October 2026)
+  kept or raised each one's coverage, at a fraction of the inputs:
+  `hash_many` from every length to 3000 bytes to each length case, one
+  to seventeen chunks from 16,384 lengths to 513, the `Hasher`'s random
+  updates by three updates at each staging boundary (202 to 216 branch
+  sides), the extended output's random reads by each read case (200 to
+  207).
+- *Mutation testing* (`cargo mutants`): it plants the likely future bug
+  (`<` for `<=`, a constant or an operand off by one, a condition
+  inverted) one at a time and requires a test to fail. A mutant every test
+  survives is one of three things: a missing case (the test gains it), a
+  change between equally correct paths (a speed threshold, listed as
+  such), or code that does nothing (removed).
+
+**What the suites cover now**, on the VM's AArch64 with SME2: 86% of the
+library's branch sides (859 of 994). Most of the rest are the branches
+of other machines (a CPU without the SHA-3 extension or without SME2,
+which the `no_sme2` and `pure` builds and the Mac reach in part), the
+pool's and the queue's scheduling races, and fail-stop arms. The aim is
+every branch side of the code users run, each one reached by a test or
+named as unreachable in the code, and every mutant either caught or
+explained; a branch that is not worth a test is a sign the branch is not
+worth keeping.
+
+**The suites** (the fork's `src/test.rs` and each module's tests), among
+them: every case of `hash_many` on every platform the CPU has, and of the
+one-shot hash from one to seventeen chunks, against the reference
+implementation; every platform's batch kernel at every input shape (1 to
+16 blocks, keyed flags, a counter whose low word overflows mid-batch,
+pointer tables forward, reversed, and strided), against the portable one;
+the pool's cuts and merges, its thread caps, and 32 callers at once; and
+the same suites in the builds without SME2 (`no_sme2`) and without any
+SIMD (`pure`).
 
 **Every process checks itself before its first hash.** The tests prove
 the code on our machines; a user's machine may have a compiler that

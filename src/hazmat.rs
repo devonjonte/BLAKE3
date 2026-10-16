@@ -341,7 +341,7 @@ fn test_max_subtree_len() {
 ///
 /// # Example
 ///
-/// Hash a input of random length as two subtrees:
+/// Hash an input as two subtrees:
 ///
 /// ```
 /// # blake3_servil::initialize();
@@ -349,11 +349,9 @@ fn test_max_subtree_len() {
 /// use blake3_servil::hazmat::{left_subtree_len, merge_subtrees_root, HasherExt, Mode};
 /// use blake3_servil::{Hasher, CHUNK_LEN};
 ///
-/// // Generate a random-length input. Note that to be split into two subtrees, the input length
-/// // must be greater than CHUNK_LEN.
-/// let input_len = rand::random_range(CHUNK_LEN + 1..1_000_000);
-/// let mut input = vec![0; input_len];
-/// rand::fill(&mut input[..]);
+/// // To be split into two subtrees, the input must be longer than CHUNK_LEN.
+/// let input_len = 5 * CHUNK_LEN + 100;
+/// let input: Vec<u8> = (0..input_len).map(|i| (i % 251) as u8).collect();
 ///
 /// // Compute the left and right subtree hashes and then the root hash. left_subtree_len() tells
 /// // us exactly where to split the input. Any other split would either panic (if we're lucky) or

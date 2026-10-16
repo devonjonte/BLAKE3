@@ -154,11 +154,10 @@ cpufeatures = "0.3.0"
 libc = { version = "0.2", default-features = false }
 
 [dev-dependencies]
+rand = "0.10.0"
 hmac = "0.13.0"
 hex = "0.4.2"
 page_size = "0.6.0"
-rand = "0.10.0"
-chacha20 = "0.10.0"
 reference_impl = { path = "./reference_impl" }
 clocks = { path = "./clocks" }
 tempfile = "3.8.0"
@@ -167,3 +166,11 @@ ciborium = "0.2.2"
 
 [build-dependencies]
 cc = "1.1.12"
+
+# Tests built optimized, their checks kept (debug assertions, overflow
+# checks): the reference comparisons over every length run in seconds,
+# where an unoptimized build takes minutes.
+[profile.test]
+opt-level = 2
+debug-assertions = true
+overflow-checks = true

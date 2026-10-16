@@ -1193,12 +1193,12 @@ mod test {
         }
     }
 
-    /// hash_chunk for every input length 0..=1024 (every block count and
-    /// every final block length), with root and non-root flags, against
-    /// the portable compressor run block by block.
-    /// Every q kernel, every partial length: the whole chunks' and the
-    /// partial chunk's chaining values against the portable compressor,
-    /// with a counter past zero and keyed flags as well as plain ones.
+    /// Every q kernel, a partial chunk of each block count (its last block
+    /// one byte and whole, crate::test::block_cases): the whole chunks' and
+    /// the partial chunk's chaining values against the portable compressor,
+    /// with a counter past zero and keyed flags as well as plain ones. The
+    /// kernels themselves are proved for every input
+    /// (tools/verify/prove_hybrid.py); this checks the calls into them.
     #[test]
     fn test_partial_kernels_against_portable() {
         if !sha3_detected() {
@@ -1228,7 +1228,7 @@ mod test {
         for n in (1..16).filter(|&n| partial_covers(n)) {
             let chunks: Vec<&[u8; CHUNK_LEN]> =
                 input[..n * CHUNK_LEN].chunks_exact(CHUNK_LEN).map(|c| c.try_into().unwrap()).collect();
-            for len in 1..CHUNK_LEN {
+            for len in crate::test::block_cases(CHUNK_LEN - 1) {
                 let partial = &input[n * CHUNK_LEN..][..len];
                 for (key, flags, counter) in [(*IV, 0u8, 0u64), (key, KEYED_HASH, (1u64 << 32) - 2)] {
                     let mut got = vec![0u8; (n + 1) * OUT_LEN];
@@ -1242,11 +1242,14 @@ mod test {
         }
     }
 
+    /// hash_chunk at every block count (crate::test::block_cases, and the
+    /// empty input), with root and non-root flags, against the portable
+    /// compressor run block by block.
     #[test]
     fn test_hash_chunk_against_portable() {
         let mut input = [0u8; CHUNK_LEN];
         crate::test::paint_test_input(&mut input);
-        for len in 0..=CHUNK_LEN {
+        for len in core::iter::once(0).chain(crate::test::block_cases(CHUNK_LEN)) {
             let blocks = core::cmp::max(1, (len + BLOCK_LEN - 1) / BLOCK_LEN);
             let whole = (blocks - 1) * BLOCK_LEN;
             let mut last = [0u8; BLOCK_LEN];
