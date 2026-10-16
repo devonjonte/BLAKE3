@@ -257,7 +257,8 @@ every length:
   `tools/gen_sme2_hybrid.py`), which the SME2 walk runs on subtrees of
   256 KiB and more: tested against the portable code and checked by the
   startup self-test, unproved;
-- x86 and other targets, where the fork runs upstream's code;
+- x86-64 and wasm32, whose code (the fork's own x86-64 kernels among it)
+  the tests cover;
 - one statement in Lean: the compression proofs reach their verdicts in
   Z3, outside Lean.
 
@@ -591,8 +592,8 @@ however often the hash is timed.
    powers of two (and their neighbours) to 64 KiB; `keyed_hash`,
    `derive_key`, and a `Hasher` fed in two updates, at those lengths to
    4 KiB. Other lengths, and other ways of feeding a Hasher, are still
-   to come. On x86
-   the fork runs upstream's code, which these proofs do not cover.
+   to come. These proofs cover AArch64; on x86-64 the tests cover the
+   fork's code.
 2. **Each instruction takes the same time whatever values it computes
    on.** That is a promise of the CPU. Arm CPUs make it, for a listed set
    of instructions, while data-independent timing (DIT) is enabled. The
