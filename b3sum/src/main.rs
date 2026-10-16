@@ -1,6 +1,5 @@
 use anyhow::{bail, ensure};
 use clap::Parser;
-use std::cmp;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -96,6 +95,8 @@ struct Args {
     inner: Inner,
     file_args: Vec<PathBuf>,
     base_hasher: blake3::Hasher,
+    /// The key read from stdin, in keyed mode.
+    key: Option<[u8; blake3::KEY_LEN]>,
 }
 
 impl Args {
@@ -111,10 +112,11 @@ impl Args {
         if inner.raw && file_args.len() > 1 {
             bail!("Only one filename can be provided when using --raw");
         }
-        let base_hasher = if inner.keyed {
-            // In keyed mode, since stdin is used for the key, we can't handle
-            // `-` arguments. Input::open handles that case below.
-            blake3::Hasher::new_keyed(&read_key_from_stdin()?)
+        // In keyed mode, since stdin is used for the key, we can't handle
+        // `-` arguments. hash_path handles that case below.
+        let key = if inner.keyed { Some(read_key_from_stdin()?) } else { None };
+        let base_hasher = if let Some(key) = &key {
+            blake3::Hasher::new_keyed(key)
         } else if let Some(ref context) = inner.derive_key {
             blake3::Hasher::new_derive_key(context)
         } else {
@@ -124,7 +126,17 @@ impl Args {
             inner,
             file_args,
             base_hasher,
+            key,
         })
+    }
+
+    /// The mode every input is hashed in.
+    fn mode(&self) -> blake3::Mode<'_> {
+        match (&self.key, &self.inner.derive_key) {
+            (Some(key), _) => blake3::Mode::Keyed(key),
+            (None, Some(context)) => blake3::Mode::DeriveKey(context),
+            (None, None) => blake3::Mode::Hash,
+        }
     }
 
     fn num_threads(&self) -> Option<usize> {
@@ -309,23 +321,22 @@ fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io:
     })
 }
 
-fn write_hex_output(mut output: blake3::OutputReader, args: &Args) -> anyhow::Result<()> {
+/// The output's first `args.len()` bytes in hex. `output` is an
+/// OutputReader, or a 32-byte digest's bytes where that is all the output.
+fn write_hex_output(output: impl Read, args: &Args) -> anyhow::Result<()> {
     // Encoding multiples of the 64 bytes is most efficient.
-    // TODO: This computes each output block twice when the --seek argument isn't a multiple of 64.
-    // We'll refactor all of this soon anyway, once SIMD optimizations are available for the XOF.
-    let mut len = args.len();
+    let mut output = output.take(args.len());
     let mut block = [0; blake3::BLOCK_LEN];
-    while len > 0 {
-        output.fill(&mut block);
-        let hex_str = hex::encode(&block[..]);
-        let take_bytes = cmp::min(len, block.len() as u64);
-        print!("{}", &hex_str[..2 * take_bytes as usize]);
-        len -= take_bytes;
+    loop {
+        let n = fill(&mut output, &mut block)?;
+        if n == 0 {
+            return Ok(());
+        }
+        print!("{}", hex::encode(&block[..n]));
     }
-    Ok(())
 }
 
-fn write_raw_output(output: blake3::OutputReader, args: &Args) -> anyhow::Result<()> {
+fn write_raw_output(output: impl Read, args: &Args) -> anyhow::Result<()> {
     let mut output = output.take(args.len());
     let stdout = std::io::stdout();
     let mut handler = stdout.lock();
@@ -533,7 +544,106 @@ fn parse_check_line(mut line: &str) -> anyhow::Result<ParsedCheckLine> {
 /// meets directories), and the exit status counts them. Several inputs
 /// hash on several threads at once: a tree of small files costs mostly
 /// opening and reading each, which one thread does one at a time.
+/// An input's bytes for the stream: a mapping or a read file, never freed
+/// (process exit reclaims them), so that the stream may borrow it.
+fn input_bytes(path: &Path, read_small: bool) -> anyhow::Result<&'static [u8]> {
+    let file = File::open(path)?;
+    let len = usize::try_from(file.metadata()?.len())?;
+    if len == 0 {
+        return Ok(&[]);
+    }
+    if read_small && len < MAP_LEN {
+        let mut bytes = Vec::with_capacity(len);
+        let mut file = file;
+        file.read_to_end(&mut bytes)?;
+        return Ok(Vec::leak(bytes));
+    }
+    // Sound: as `mapped`.
+    let map = unsafe { memmap2::Mmap::map(&file) }?;
+    Ok(Box::leak(Box::new(map)))
+}
+
+/// EXPERIMENT: every input hashed through one stream on this thread, its
+/// bytes mapped (or read) by B3_OPENERS opener threads (1 by default), the
+/// digests printed in the inputs' order. B3_SMALL=read reads files under
+/// MAP_LEN instead of mapping them.
+fn hash_inputs_hybrid(args: &Args) -> u64 {
+    let paths = &args.file_args;
+    let (openers, read_small) = variant().unwrap();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let (tx, rx) = std::sync::mpsc::channel::<(usize, anyhow::Result<&'static [u8]>)>();
+    blake3::initialize_multithreaded();
+    let mut failed = 0u64;
+    std::thread::scope(|scope| {
+        for _ in 0..openers.min(paths.len()) {
+            let (tx, next) = (tx.clone(), &next);
+            scope.spawn(move || loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(path) = paths.get(i) else { return };
+                if tx.send((i, input_bytes(path, read_small))).is_err() {
+                    return;
+                }
+            });
+        }
+        drop(tx);
+        // Submitted in arrival order; `order` maps each digest back to its
+        // input, `waiting` holds lines until the earlier ones print.
+        let order = std::cell::RefCell::new(std::collections::VecDeque::new());
+        let waiting = std::cell::RefCell::new(std::collections::BTreeMap::new());
+        let printed = std::cell::Cell::new(0usize);
+        let failed_count = std::cell::Cell::new(0u64);
+        let flush = || {
+            let mut waiting = waiting.borrow_mut();
+            while let Some(line) = waiting.remove(&printed.get()) {
+                let i = printed.get();
+                let result: anyhow::Result<blake3::Hash> = line;
+                if let Err(e) = result.and_then(|hash| print_output(&hash.as_bytes()[..], &paths[i], args)) {
+                    failed_count.set(failed_count.get() + 1);
+                    eprintln!("{}: {}: {}", NAME, paths[i].to_string_lossy(), e);
+                }
+                printed.set(i + 1);
+            }
+        };
+        let mut take = |hashes: &[blake3::Hash]| {
+            for hash in hashes {
+                let i = order.borrow_mut().pop_front().expect("an input for every digest");
+                waiting.borrow_mut().insert(i, Ok(*hash));
+            }
+            flush();
+        };
+        blake3::stream(args.mode(), |s| {
+            for (i, bytes) in rx {
+                match bytes {
+                    Ok(bytes) => {
+                        order.borrow_mut().push_back(i);
+                        s.submit(bytes, &mut take);
+                    }
+                    Err(e) => {
+                        waiting.borrow_mut().insert(i, Err(e));
+                    }
+                }
+            }
+            s.finish(&mut take);
+        });
+        flush();
+        failed = failed_count.get();
+    });
+    failed
+}
+
+/// EXPERIMENT: the variant from this binary's name: b3sum-hN (N openers,
+/// small files mapped) or b3sum-hNr (read); None for any other name.
+fn variant() -> Option<(usize, bool)> {
+    let name = std::env::args().next()?;
+    let tail = name.rsplit('/').next()?.strip_prefix("b3sum-h")?;
+    let (n, read) = match tail.strip_suffix('r') { Some(n) => (n, true), None => (tail, false) };
+    Some((n.parse().ok()?, read))
+}
+
 fn hash_inputs(args: &Args) -> u64 {
+    if variant().is_some() && args.file_args.len() > 1 && args.len() == blake3::OUT_LEN as u64 && args.seek() == 0 && !args.file_args.iter().any(|p| p == Path::new("-")) {
+        return hash_inputs_hybrid(args);
+    }
     let paths = &args.file_args;
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(paths.len());
     let next = std::sync::atomic::AtomicUsize::new(0);
@@ -581,7 +691,7 @@ fn hash_some(args: &Args, next: &std::sync::atomic::AtomicUsize, mut done: impl 
     }
 }
 
-fn print_output(output: blake3::OutputReader, path: &Path, args: &Args) -> anyhow::Result<()> {
+fn print_output(output: impl Read, path: &Path, args: &Args) -> anyhow::Result<()> {
     if args.raw() {
         write_raw_output(output, args)?;
         return Ok(());
