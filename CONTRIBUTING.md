@@ -32,7 +32,7 @@ including the ideas tried and rejected.
 
 The supported C compilers are those of supported operating systems: GCC
 12 or later (Debian 12's, the oldest; CI builds and tests with it), Clang,
-and MSVC as current releases ship them. Older ones are unsupported.
+and MSVC as current releases ship them; official BLAKE3 serves older ones.
 
 On AArch64 Linux and macOS the build includes the SME2 kernel when the C
 compiler assembles SME2: Clang 17 or later (Xcode 15 or later), or GCC 14
@@ -53,9 +53,10 @@ pypy3 tools/mutants/check.py        # about an hour: every surviving mutant know
 
 A change that makes a mutant survive, or lets a listed one be caught,
 fails `tools/mutants/check.py`: add a test for the new survivor, or list
-it in `tools/mutants/known-aarch64.txt` with the reason no test can catch
-it (`--write` rewrites the list; each new row's reason starts
-`UNCLASSIFIED`).
+it in `tools/mutants/known-aarch64.txt` with the reason it survives (an
+equivalent change, a choice between equally correct paths, another
+machine's code; `--write` rewrites the list, each new row's reason
+`UNCLASSIFIED` until you write one).
 
 CI (`.github/workflows/ci.yml`) runs the suites on Linux x86-64 and arm64
 (without SME2, and without SHA-3 under QEMU), macOS, Windows with MSVC,

@@ -160,7 +160,7 @@ A fact that concerns several audiences goes in each audience's document, phrased
 
 # Targets
 
-**Support only what we stand behind** (Zooko, October 16, 2026). Every supported platform, operating system, compiler, version, and feature costs builds, tests, proofs, and documentation on every change, so each one earns its place or goes (Simplicity). Support nothing we cannot test fully, and nothing so old that it is itself insecure, buggy, or out of its own support; claim support only for what our checks run.
+**Support only what we stand behind** (Zooko, October 16, 2026). Every supported platform, operating system, compiler, version, and feature costs builds, tests, proofs, and documentation on every change, so each one earns its place or goes (Simplicity). Support what we test fully and what is itself current, secure, and maintained, and claim support for exactly what our checks run.
 
 **The native Mac comes first; virtual machines follow** (the user's decision, September 27, 2026). Performance-sensitive programs run on native hosts far more often than in VMs, and the Mac shows what our code does (each thread's cycles per core kind, the host's own scheduler), where a VM's layers hide it. Diagnose and design on the Mac first; then measure the VM, and keep it level or better. How VMs differ (idle vCPUs that spin steal host time from those that hash; a guest's vCPUs may outnumber its fast host cores) is in `NOTES-servil.md` and the host lab's `host-lab-reports/`.
 

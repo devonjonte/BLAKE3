@@ -90,23 +90,30 @@ tests; the tests check the calls into them, and every other platform.)
   change between equally correct paths (a speed threshold, listed as
   such), or code that does nothing (removed).
 
-**What mutation testing finds**, first on `src/many.rs` (the batch
-dispatch), on the VM: of 340 mutants, 115 fail a test and 40 do not
-compile; each of the other 185 is listed, with its reason, in
-`tools/mutants/known-aarch64.txt`: a speed threshold moved between
-equally correct paths (51), x86 code compiled out here (50, which CI's
-x86 tests reach), a Kani harness's own code (14), `|` made `^` on flag
-bits that never overlap (8), or a path only another machine takes (7: a
-CPU without the SHA-3 extension or without SME2). None is a missing case.
-`tools/mutants/check.py` reruns them and fails on any survivor not
-listed, and on any listed one now caught; the long proofs run it before
+**What mutation testing finds**, over the whole library on the VM
+(October 16; the four proved cores, which the proofs cover, are left
+out): of 2488 mutants, 1560 fail a test or hang, and 147 do not compile.
+Each of the other 781 is listed with its reason in
+`tools/mutants/known-aarch64.txt`: code for another machine (x86,
+wasm32, a CPU without SME2 or the SHA-3 extension, one CPU), a choice
+between equally correct paths (what to prefetch, a speed threshold, how
+work is cut among threads), an equivalent change (`|` made `^` on flag
+bits that never overlap), or a Kani harness's own code. Two groups stay
+open: the thread pool's scheduling under interleavings that the tests
+leave to chance (Loom would force them), and the queue and the pool's
+job scheduler, which the stream now in design replaces. The run found
+missing cases (in `Hash`, the `Hasher`, `OutputReader`, `update_each`,
+the self-test) and dead code, each fixed. `tools/mutants/check.py`
+reruns every mutant and fails on a survivor not listed, a listed one now
+caught, or a listed one without a reason; the long proofs run it before
 each promotion.
 
-**What the suites cover now**, on the VM's AArch64 with SME2: 86% of the
-library's branch sides (859 of 994). Most of the rest are the branches
-of other machines (a CPU without the SHA-3 extension or without SME2,
-which the `no_sme2` and `pure` builds and the Mac reach in part), the
-pool's and the queue's scheduling races, and fail-stop arms. The aim is
+**What the suites cover now**, on the VM: 88% of the library's branch
+sides (906 of 1026), over the default, one-CPU, and no-std runs. Most of
+the rest are the branches of other machines (the std build on a CPU
+without the SHA-3 extension or without SME2, which CI's AArch64 job now
+runs), the pool's and the queue's scheduling races, and fail-stop arms.
+The aim is
 every branch side of the code users run, each one reached by a test or
 named as unreachable in the code, and every mutant either caught or
 explained; a branch that is not worth a test is a sign the branch is not

@@ -3,14 +3,14 @@
 ## Warning
 
 This code is new. An AI wrote it rapidly under Zooko's direction (his guidance is in
-`AGENTS.md`). No person has reviewed it line by line, and nobody has audited it. It is
-checked with tests against the reference implementation and fixed digests, sanitizers,
-Miri, formal proofs, mutation testing, and a self-test that every process runs before its
-first hash; [`QUALITY.md`](QUALITY.md) lists every check, the bugs they found, and how to
-repeat them. Its speed is measured on an Apple M4 Max (and a Linux VM on it) and on an
-Intel i7-12700K; its tests also run on 64-bit Arm without SME2 and without the SHA-3
-extension, on x86-64 Linux and Windows, and on WebAssembly. It has no users yet: you would
-be the first. Use it at your own risk.
+`AGENTS.md`), and it awaits its first line-by-line review by a person and its first audit.
+It is checked with tests against the reference implementation and fixed digests,
+sanitizers, Miri, formal proofs, mutation testing, and a self-test that every process runs
+before its first hash; [`QUALITY.md`](QUALITY.md) lists every check, the bugs they found,
+and how to repeat them. Its speed is measured on an Apple M4 Max (and a Linux VM on it) and
+on an Intel i7-12700K; its tests also run on other 64-bit Arm CPUs (down to a Raspberry Pi
+4's kind), on x86-64 Linux and Windows, and on WebAssembly. You would be its first user.
+Use it at your own risk.
 
 ## What it is
 
@@ -25,8 +25,7 @@ reads the next (`Queue`), and verified streaming in iroh-blobs' format (`outboar
 It supports 64-bit Arm (Linux and macOS), x86-64 (Linux, macOS, and Windows with MSVC), and
 WebAssembly, with the latest stable Rust. [Official
 BLAKE3](https://github.com/BLAKE3-team/BLAKE3) serves other targets (32-bit x86 or Arm,
-big-endian CPUs, Windows with MinGW), older compilers, and C programs; this fork has no C
-library yet.
+big-endian CPUs, Windows with MinGW), older compilers, and C programs.
 
 [bench-hashes](https://github.com/johnservil/bench-hashes) measures it against other hashes
 on your own machine; here are its [full results on an Apple M4
