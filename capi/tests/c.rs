@@ -3,17 +3,27 @@
 //! and its digests checked against the Rust crate's; and b3.h from C++
 //! (tests/check.cpp, C++11).
 
+#![cfg(unix)]
+
 use std::path::PathBuf;
 use std::process::Command;
 
 #[test]
-#[cfg(unix)]
 fn from_c() {
-    // The test binary is target/<profile>/deps/c-<hash>; the libraries are
-    // in target/<profile>.
+    // The test binary is target/<profile>/deps/c-<hash>; the libraries go
+    // in target/<profile>, built here (`cargo test` builds only the Rust
+    // library the tests link), by the same cargo, profile, and target
+    // directory.
     let exe = std::env::current_exe().unwrap();
     let lib_dir = exe.parent().unwrap().parent().unwrap().to_path_buf();
     let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut build = Command::new(env!("CARGO"));
+    build.args(["build", "--lib", "--manifest-path"]).arg(here.join("Cargo.toml"));
+    build.arg("--target-dir").arg(lib_dir.parent().unwrap());
+    if lib_dir.file_name().unwrap() == "release" {
+        build.arg("--release");
+    }
+    assert!(build.status().unwrap().success(), "the C libraries build");
     let program = lib_dir.join("b3-check");
     let status = Command::new("cc")
         .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-I"])
