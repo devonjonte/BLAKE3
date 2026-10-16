@@ -2,14 +2,36 @@
 
 ## Unreleased
 
+- **A C API**, `capi/b3.h`: a mode as a value (`b3_plain`, `b3_keyed`,
+  `b3_derive_key`, the context hashed once), digests as values, the
+  one-shot and batch calls on one thread or many, and a hasher in the
+  caller's memory. It builds as `libb3`, and compiles as C11 and C++11.
+- **Breaking: the supported targets are 64-bit Arm (Linux, macOS),
+  x86-64 (Linux, macOS, Windows with MSVC), and WebAssembly, with the
+  latest stable Rust.** 32-bit x86 and Arm, big-endian CPUs, Windows with
+  MinGW, the SSE2 kernel (x86 CPUs without SSE4.1), and older compilers
+  go to official BLAKE3; with them go the `neon`, `prefer_intrinsics`,
+  `no_sse2`, `no_sse41`, and `digest` features, and upstream's C library.
+  GCC 12 is the oldest C compiler supported.
+- **Breaking: the deprecated `guts` module goes** (`hazmat` serves it).
+- `Mode::DeriveKeyMaterial` takes a derived key's context already hashed
+  (`hazmat::hash_derive_key_context`), for many calls with one context.
+- Each kernel report (`kernel_report` and its forms) is checked against
+  the dispatch by a test, which found four wrong: the batch split counts
+  the messages' slots (512 messages of 1000 bytes, not 524); with one CPU
+  nothing splits; without the SHA-3 extension NEON runs batches of 64-byte
+  messages from two and other whole blocks from three.
+- The startup self-test checks, in a test on every run, that it reaches
+  every assembly kernel this machine has; it gained two cases on AArch64
+  (42), for the SME2 kernel at a counter per group and, on CPUs without
+  SME2, the three-chunk hybrid kernel.
 - The startup self-test checks the build and the machine, leaving what
   the code computes to the tests and proofs: on x86-64 and the other
   non-AArch64 targets it runs each kernel once in 9 small cases (from 40),
   28 us in a fresh process on an i7-12700K's performance core, from 109.
   On x86 it first stops a binary built for CPUs with LZCNT or BMI1 on a
   CPU without them, which runs those instructions as others and would
-  compute wrong digests (seen under QEMU's Ivy Bridge). AArch64's 40 cases
-  are unchanged.
+  compute wrong digests (seen under QEMU's Ivy Bridge).
 - On x86-64 with SSE4.1 or AVX2, whole chunks and a partial one after
   them hash in one pass, the partial chunk in a lane the whole ones leave
   spare: three whole chunks in four lanes, five to seven in eight (AVX2).
