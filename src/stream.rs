@@ -43,7 +43,7 @@ pub(crate) const PIECE: usize = TASK_LEN;
 /// programs streaming 4 MiB batches 18% slower (the ring, the places, and
 /// the programs' own buffers past the L3, i7-12700K); 2 MiB is level there
 /// and 2-4 points less fast than 4 MiB on some other cells.
-const RING_BYTES: usize = 2 << 20;
+const RING_BYTES: usize = 256 * 1024;
 
 /// The most entries (messages and pieces) in flight in one stream (1024:
 /// 4 KiB to 16 KiB messages 8-9% faster than at 8192, i7-12700K; 256 lost
