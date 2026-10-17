@@ -3,7 +3,6 @@
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
 files: src/chunk_core.rs src/each.rs src/ffi_avx2.rs src/ffi_avx512.rs src/ffi_neon.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/ffi_sse2.rs src/ffi_sse41.rs src/guts.rs src/hasher_core.rs src/hazmat.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/neon_xof.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/queue.rs src/rust_avx2.rs src/rust_sse2.rs src/rust_sse41.rs src/self_test.rs src/stack_core.rs src/traits.rs src/tree.rs src/tree_core.rs src/wasm32_simd.rs 
-src/each.rs	replace * with + in hash_held	1	another machine: the path without SME2 (check-builds' one-CPU no_sme2 tests and CI's AArch64 job run it)
 src/each.rs	replace * with / in hash_held	2	another machine: the per-group calls of a CPU without SME2 (check-builds' one-CPU no_sme2 tests reach them)
 src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace < with <= in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
@@ -414,8 +413,6 @@ src/platform.rs	replace Platform::hash_many_name -> &'static str with ""	1	a nam
 src/platform.rs	replace Platform::hash_many_name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
 src/platform.rs	replace Platform::name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
 src/platform.rs	replace Platform::sme2 -> Option<Self> with None	1	speed: chooses between equally correct paths (no SME2: the NEON platform)
-src/platform.rs	replace Platform::sse2 -> Option<Self> with None	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
-src/platform.rs	replace Platform::sse2 -> Option<Self> with Some(Default::default())	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
 src/platform.rs	replace Platform::sse41 -> Option<Self> with None	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
 src/platform.rs	replace Platform::sse41 -> Option<Self> with Some(Default::default())	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
 src/platform.rs	replace Platform::wasm32_simd -> Option<Self> with None	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
@@ -433,8 +430,6 @@ src/platform.rs	replace sme2_detected -> bool with false	1	detection, on a machi
 src/platform.rs	replace sme2_detected -> bool with true	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace sme2_reported -> bool with false	2	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace sme2_reported -> bool with true	2	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
-src/platform.rs	replace sse2_detected -> bool with false	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
-src/platform.rs	replace sse2_detected -> bool with true	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
 src/platform.rs	replace sse41_detected -> bool with false	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
 src/platform.rs	replace sse41_detected -> bool with true	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
 src/platform.rs	replace ticks_in_100_us -> u64 with 0	1	speed: whether and what to prefetch after a pause (no effect on results)
