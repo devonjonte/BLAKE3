@@ -579,6 +579,9 @@ struct Pool {
     threads: Box<[OnceLock<std::thread::Thread>]>,
     /// Wakes still owed: each woken worker pays them before it works.
     owed: AtomicUsize,
+    /// The worker that parked last, plus one (0: none yet): woken first,
+    /// since its core went idle last and sleeps least deeply.
+    last_parked: AtomicUsize,
 }
 
 /// Create the pool and start its threads in the background, once per
@@ -595,6 +598,7 @@ pub(crate) fn initialize() {
         parked: (0..cpus.div_ceil(64)).map(|_| OwnLine(AtomicU64::new(0))).collect(),
         threads: (0..cpus).map(|_| OnceLock::new()).collect(),
         owed: AtomicUsize::new(0),
+        last_parked: AtomicUsize::new(0),
     };
     assert!(POOL.set(pool).is_ok(), "initialize_multithreaded creates the pool once");
     if sme2 {
@@ -709,6 +713,14 @@ impl Pool {
 
     /// Wake one parked worker, if any: whether one was.
     pub(crate) fn wake_one(&self) -> bool {
+        // The last to park first, if it still is.
+        if let Some(worker) = self.last_parked.load(Ordering::Relaxed).checked_sub(1) {
+            let (word, bit) = (&self.parked[worker / 64], 1u64 << (worker % 64));
+            if word.fetch_and(!bit, Ordering::SeqCst) & bit != 0 {
+                self.threads[worker].get().expect("a parked worker has set its thread").unpark();
+                return true;
+            }
+        }
         for (w, word) in self.parked.iter().enumerate() {
             let mut bits = word.load(Ordering::SeqCst);
             while bits != 0 {
@@ -752,6 +764,7 @@ impl Pool {
                 word.fetch_and(!bit, Ordering::SeqCst);
                 continue;
             }
+            self.last_parked.store(me + 1, Ordering::Relaxed);
             while word.load(Ordering::SeqCst) & bit != 0 {
                 std::thread::park();
             }
