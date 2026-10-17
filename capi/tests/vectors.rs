@@ -3,7 +3,7 @@
 //! repeated, and a hasher fed in uneven pieces, its digest and its extended
 //! output at an offset.
 
-use b3::*;
+use b3_servil::*;
 use core::ffi::c_void;
 
 fn hex(bytes: &[u8]) -> String {
