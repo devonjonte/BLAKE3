@@ -1033,7 +1033,10 @@ pub(crate) mod sources {
     pub(crate) fn run_one() -> bool {
         find(|source| {
             let Some(item) = source.take() else { return false };
-            if source.waiting() >= 2 && pool().any_parked() {
+            // A job's pieces chain a wake while one more waits (its caller
+            // and the woken take the rest); a stream's while two do (the
+            // stream wakes one at each publish beyond).
+            if source.waiting() >= if source.ring.is_empty() { 1 } else { 2 } && pool().any_parked() {
                 pool().wake_one();
             }
             match item {
