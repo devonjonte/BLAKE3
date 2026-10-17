@@ -160,6 +160,21 @@ fn main() {
     println!("workers a call:       {}", pct(jobs.iter().map(|j| j.2.len() as u64).collect()));
     println!("pieces by workers:    {}", pct(jobs.iter().map(|j| j.3 as u64).collect()));
     println!("pieces by the caller: {}", pct(jobs.iter().map(|j| j.4 as u64).collect()));
+    // Which thread took each call's first worker piece (probe thread numbers).
+    let mut first: std::collections::BTreeMap<u32, usize> = Default::default();
+    {
+        let mut seen: std::collections::BTreeMap<u32, (u32, u32)> = Default::default();
+        for &(job, kind, thread, ns) in &events {
+            if kind == WORKER_PIECE {
+                let e = seen.entry(job).or_insert((u32::MAX, 0));
+                if ns < e.0 { *e = (ns, thread); }
+            }
+        }
+        for (_, (_, thread)) in seen { *first.entry(thread).or_default() += 1; }
+    }
+    let mut top: Vec<_> = first.into_iter().collect();
+    top.sort_by(|a, b| b.1.cmp(&a.1));
+    println!("first worker, by thread (calls): {:?}", &top[..top.len().min(5)]);
     let none = jobs.iter().filter(|j| j.2.is_empty()).count();
     println!("calls no worker joined: {none} of {}", jobs.len());
 }
