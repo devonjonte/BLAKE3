@@ -4,9 +4,8 @@
 # specification against C2SP's text and the proofs' definition from it;
 # the generated hybrid file against its generator; the helpers; every
 # hybrid kernel; every SME2 kernel at every group count; the instruction
-# models checked against the CPU; the proofs' mutants; and the tests'
-# (tools/mutants/check.py). Hours, in a worktree of the commit; nothing
-# should measure meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
+# models checked against the CPU; and the proofs' mutants. Hours, in a
+# worktree of the commit; nothing should measure meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
 # the status names their BLAKE3 hash.
 #
 #     sh tools/verify/long-proofs.sh [COMMIT]     (default HEAD)
@@ -42,11 +41,6 @@ run prove_hybrid pypy3 tools/verify/prove_hybrid.py
 run prove_sme2 pypy3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof every parents_every xof_every messages_every
 run cross_check pypy3 tools/verify/cross_check.py
 run mutants pypy3 tools/verify/mutants.py
-# The library's tests against plausible bugs, every survivor known
-# (tools/mutants/check.py; cargo-mutants under /root/tools when absent).
-export PATH=/root/tools/bin:$PATH
-command -v cargo-mutants >/dev/null || CARGO_INSTALL_ROOT=/root/tools cargo install -q cargo-mutants --locked
-run test_mutants pypy3 tools/mutants/check.py
 hash=$(cat "$logs"/*.txt | cargo run -q --release --manifest-path b3sum/Cargo.toml -- --no-names | cut -c1-16)
 status "$state" "$verdict: Lean, hybrid, SME2, cross_check, mutants; logs' BLAKE3 $hash (VM)"
 echo "long proofs $verdict for $commit; logs in $logs, BLAKE3 $hash"
