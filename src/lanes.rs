@@ -745,6 +745,9 @@ impl Pool {
             // Park: the bit first, then one more look (a publisher stores,
             // then reads `parked`; this sets the bit, then looks: one of the
             // two sees the other), then the token.
+            // SeqCst, as the publisher's fence: a store-buffering pair, which
+            // AcqRel would not order (tools/loom-scheduler finds the lost
+            // wake-up without it).
             word.fetch_or(bit, Ordering::SeqCst);
             if sources::visible(false) {
                 // Ours to clear unless a waker cleared it first (then its
@@ -944,6 +947,8 @@ pub(crate) mod sources {
         /// Count `n` of the caller's job's pieces finished (their outputs
         /// written before); the last one wakes a caller parked for it.
         pub(crate) fn finished(&self, n: usize) {
+            // SeqCst with the waiter's `sleeping`: a store-buffering pair
+            // (AcqRel would lose the wake: tools/loom-scheduler).
             let now = self.finished.fetch_add(n, Ordering::SeqCst) + n;
             if now == self.published.load(Ordering::SeqCst) && self.sleeping.load(Ordering::SeqCst) {
                 if let Some(owner) = &*self.owner.lock().unwrap() {
@@ -964,6 +969,8 @@ pub(crate) mod sources {
                 }
                 poll_pause(&mut yielded);
             }
+            // SeqCst with the finisher's count: a store-buffering pair (AcqRel
+            // would lose the wake: tools/loom-scheduler).
             self.sleeping.store(true, Ordering::SeqCst);
             while self.finished.load(Ordering::SeqCst) < target {
                 std::thread::park();
