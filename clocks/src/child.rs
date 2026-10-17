@@ -341,6 +341,23 @@ mod tests {
         assert_eq!(running_cpu_ns(), 0, "none running after the reaping");
     }
 
+    /// The check above can fail: a sibling spinning beside the child, a
+    /// process that run did not start, reads as other programs' load in
+    /// the windows while the child runs.
+    #[test]
+    #[cfg(unix)]
+    fn a_sibling_beside_the_child_reads_as_load() {
+        let _one = one();
+        let before = crate::load::windows().len();
+        let mut sibling = std::process::Command::new("perl").args(["-e", "my $t = time; 1 while time - $t < 4"]).spawn().expect("perl");
+        let child = run(std::process::Command::new("sleep").arg("3"));
+        sibling.kill().ok();
+        sibling.wait().expect("the sibling");
+        let windows = crate::load::windows();
+        let during: Vec<_> = windows[before..].iter().filter(|w| w.end_ns > child.started_ns && w.start_ns < child.started_ns + child.wall_ns).collect();
+        assert!(during.iter().any(|w| w.other_milli_cpus >= 700), "a spinning sibling is other load: {during:?}");
+    }
+
     /// A reaped child's CPU time counts as this process's own, so the
     /// load it puts on the machine is never read as other programs'.
     #[test]
