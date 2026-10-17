@@ -48,6 +48,27 @@ pub struct Run {
     pub counts: Option<Counts>,
 }
 
+impl Run {
+    /// Runs one after another as one: started with the first, their wall
+    /// and CPU times, reads, faults and counts summed, their peak memory the
+    /// largest, successful when every one was. Requires a run. (Callers sum
+    /// runs here, never by hand, so a count added to Run reaches them.)
+    pub fn sum(runs: &[Run]) -> Run {
+        let first = runs.first().expect("a sum of runs needs a run");
+        let sum = |f: fn(&Run) -> Option<u64>| runs.iter().map(f).sum::<Option<u64>>();
+        Run {
+            started_ns: first.started_ns,
+            wall_ns: runs.iter().map(|r| r.wall_ns).sum(),
+            success: runs.iter().all(|r| r.success),
+            cpu_ns: sum(|r| r.cpu_ns),
+            max_rss_bytes: runs.iter().map(|r| r.max_rss_bytes).max().flatten(),
+            storage_read_bytes: sum(|r| r.storage_read_bytes),
+            major_faults: sum(|r| r.major_faults),
+            counts: runs.iter().map(|r| r.counts).reduce(|a, b| a.zip(b).map(|(a, b)| a.plus(b))).flatten(),
+        }
+    }
+}
+
 /// Run `command` (its arguments and standard streams set by the caller)
 /// to its exit and measure it. Panics when it cannot be started: the
 /// caller named a program that is absent.
@@ -356,6 +377,17 @@ mod tests {
 
     /// A reaped child's CPU time counts as this process's own, so the
     /// load it puts on the machine is never read as other programs'.
+    /// A sum of runs: times and counts added, peak memory the largest, a
+    /// missing count missing from the sum, failed if any one failed.
+    #[test]
+    fn runs_sum() {
+        let run = |wall_ns, rss, cpu: Option<u64>, success| Run { started_ns: wall_ns, wall_ns, success, cpu_ns: cpu, max_rss_bytes: Some(rss), storage_read_bytes: Some(1), major_faults: None, counts: None };
+        let sum = Run::sum(&[run(10, 5, Some(3), true), run(20, 7, Some(4), true)]);
+        assert_eq!((sum.started_ns, sum.wall_ns, sum.cpu_ns, sum.max_rss_bytes, sum.storage_read_bytes, sum.major_faults, sum.success), (10, 30, Some(7), Some(7), Some(2), None, true));
+        assert_eq!(Run::sum(&[run(1, 1, None, true), run(1, 1, Some(1), false)]).cpu_ns, None);
+        assert!(!Run::sum(&[run(1, 1, None, true), run(1, 1, None, false)]).success);
+    }
+
     #[test]
     fn a_reaped_childs_cpu_time_is_this_processs() {
         let _one = one();
