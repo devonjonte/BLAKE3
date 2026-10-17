@@ -18,6 +18,14 @@
 //! assumption alone, that a pair is as likely to come out either way when
 //! nothing changed.
 //!
+//! **Before changing these rules**, read bench-hashes' `COMPARISONS.md`:
+//! each choice's evidence, what it gives up, the alternatives already set
+//! aside, and why the rules kept changing. In particular, [`verdict`] suits
+//! a check of a few cells (the regression check's): over a comparison's
+//! 700 cells it flags a dozen cells of unchanged code, and judging many
+//! cells at once needs their false discovery rate controlled (bench-hashes
+//! #11 with this fork's #44, adopted October 16, 2026).
+//!
 //! **Values** are nanoseconds per unit in fixed point, 64 integer and 64
 //! fractional bits (Q64.64, as bench-hashes' `Fixed`); ratios in permille;
 //! integers throughout, rounded once where a person reads them.
