@@ -42,6 +42,9 @@ pub struct Run {
     pub success: bool,
     /// User and system CPU time, all its threads.
     pub cpu_ns: Option<u64>,
+    /// The CPU package's energy from just before its start to its exit
+    /// ([`crate::energy`]: every program's, so its own on a quiet machine).
+    pub energy_nj: Option<u64>,
     pub max_rss_bytes: Option<u64>,
     pub storage_read_bytes: Option<u64>,
     pub major_faults: Option<u64>,
@@ -53,10 +56,12 @@ pub struct Run {
 /// caller named a program that is absent.
 pub fn run(command: &mut std::process::Command) -> Run {
     crate::load::tick();
+    let energy0 = crate::energy::package_nj();
     let started_ns = crate::load::now_ns();
     let started = crate::now();
     let child = command.spawn().unwrap_or_else(|e| panic!("cannot start {command:?}: {e}"));
-    imp::finish(child, started, started_ns)
+    let run = imp::finish(child, started, started_ns);
+    Run { energy_nj: energy0.zip(crate::energy::package_nj()).map(|(before, after)| after - before), ..run }
 }
 
 /// The child [`run`] is running (its pid; 0 for none): one at a time.
@@ -203,6 +208,7 @@ mod imp {
             wall_ns,
             success: status == 0,
             cpu_ns: Some(rusage::cpu_ns(&words)),
+            energy_nj: None,
             max_rss_bytes: Some(rusage::max_rss_bytes(&words)),
             storage_read_bytes: Some(rusage::inblock(&words) * 512),
             major_faults: Some(rusage::major_faults(&words)),
@@ -271,6 +277,7 @@ mod imp {
             wall_ns,
             success: status == 0,
             cpu_ns: Some(rusage::cpu_ns(&rusage_words)),
+            energy_nj: None,
             max_rss_bytes: Some(rusage::max_rss_bytes(&rusage_words)),
             storage_read_bytes: usage.map(|w| w[DISKIO_BYTESREAD]),
             major_faults: Some(rusage::major_faults(&rusage_words)),
@@ -286,7 +293,7 @@ mod imp {
     pub fn finish(mut child: std::process::Child, started: std::time::Instant, started_ns: u64) -> Run {
         let status = child.wait().expect("wait on the child");
         let wall_ns = crate::since_ns(started);
-        Run { started_ns, wall_ns, success: status.success(), cpu_ns: None, max_rss_bytes: None, storage_read_bytes: None, major_faults: None, counts: None }
+        Run { started_ns, wall_ns, success: status.success(), cpu_ns: None, energy_nj: None, max_rss_bytes: None, storage_read_bytes: None, major_faults: None, counts: None }
     }
 }
 
