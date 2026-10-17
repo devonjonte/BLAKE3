@@ -401,6 +401,42 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(1500));
     }
 
+    /// A child's threads that exit while it runs still count as its own:
+    /// the child (this test binary again, running the helper below) burns
+    /// about 1.2 CPU-seconds in four threads that then exit, and sleeps on
+    /// past the next window; no window while it runs reads that CPU as
+    /// other programs'. On Linux /proc/PID/stat counts a process's exited
+    /// threads; on macOS proc_pid_rusage's task times are to count them.
+    #[test]
+    #[cfg(unix)]
+    fn a_childs_exited_threads_count_as_its_own() {
+        let _one = one();
+        let before = crate::load::windows().len();
+        let child = run(std::process::Command::new(std::env::current_exe().expect("the test binary"))
+            .args(["--exact", "child::tests::exiting_threads_helper", "--test-threads=1", "--quiet"])
+            .env("CLOCKS_EXITING_THREADS_HELPER", "1")
+            .stdout(std::process::Stdio::null()));
+        assert!(child.success, "{child:?}");
+        let windows = crate::load::windows();
+        let during: Vec<_> = windows[before..].iter().filter(|w| w.end_ns > child.started_ns && w.start_ns < child.started_ns + child.wall_ns).collect();
+        assert!(!during.is_empty(), "{windows:?}");
+        assert!(during.iter().all(|w| w.other_milli_cpus < 500), "a child's exited threads are this process's: {during:?}");
+    }
+
+    /// The helper for the test above: does nothing unless that test set
+    /// CLOCKS_EXITING_THREADS_HELPER.
+    #[test]
+    fn exiting_threads_helper() {
+        if std::env::var_os("CLOCKS_EXITING_THREADS_HELPER").is_none() {
+            return;
+        }
+        let threads: Vec<_> = (0..4).map(|_| std::thread::spawn(|| crate::busy_work(300_000_000))).collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+    }
+
     /// A reaped child's CPU time counts as this process's own, so the
     /// load it puts on the machine is never read as other programs'.
     #[test]
