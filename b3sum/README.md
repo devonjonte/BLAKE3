@@ -66,6 +66,22 @@ installed, build this `b3sum` with:
 cargo install --git https://github.com/johnservil/BLAKE3 b3sum
 ```
 
+**On Linux, build it statically linked** (we recommend it, and bench-hashes
+measures this build): it starts without the dynamic loader, so each run
+costs about as little as starting a process at all. On an i7-12700K, a
+64-byte file takes 0.49 ms a run against 0.74 ms dynamically linked, a
+third less where `b3sum` runs once per file (`for f in *; do b3sum "$f";
+done`). Give your machine's target (`aarch64-unknown-linux-gnu` on 64-bit
+Arm):
+
+```
+RUSTFLAGS="-C target-feature=+crt-static" cargo install --git https://github.com/johnservil/BLAKE3 b3sum --target x86_64-unknown-linux-gnu
+```
+
+The `--target` keeps the flag off the build's procedural macros, which
+cannot link statically. (macOS links its C library dynamically always;
+its shared-library cache keeps start-up short there.)
+
 (`cargo install b3sum`, and the prebuilt binaries on [official BLAKE3's
 releases page](https://github.com/BLAKE3-team/BLAKE3/releases), give
 official BLAKE3's `b3sum`.)
@@ -75,17 +91,6 @@ On Linux for example, Cargo will put the compiled binary in
 `rustup` might have done it for you when you installed Cargo.
 
 If you want to install directly from this directory, you can run `cargo
-install --path .`. Or you can just build with `cargo build --release`,
-which puts the binary at `./target/release/b3sum`.
-
-On Linux, a statically linked `b3sum` starts sooner, skipping the dynamic
-loader: about 100-160 µs less per process on an i7-12700K (a 4 KiB file
-in 0.67-0.73 ms, from 0.77-0.89), which counts where `b3sum` runs once
-per file. Build it so with your machine's target:
-
-```
-RUSTFLAGS="-C target-feature=+crt-static" cargo install --path . --target x86_64-unknown-linux-gnu
-```
-
-The `--target` keeps the flag off the build's procedural macros, which
-cannot link statically.
+install --path .` (with the flag and `--target` above, on Linux). Or you
+can just build with `cargo build --release`, which puts the binary at
+`./target/release/b3sum`.
