@@ -10,8 +10,9 @@
 //! which needs `perf_event_paranoid` at 0 or below (or CAP_PERFMON). It is
 //! the package's, every program's: a measurement's share is valid on a
 //! quiet machine, which [`crate::load`] checks. The counter's unit is
-//! 2^-32 J; this module requires that scale and reports nanojoules,
-//! exactly (integer arithmetic). Elsewhere, or without the permission,
+//! the scale sysfs gives (2^-32 J on Intel, 2^-16 J on AMD), read as an
+//! exact decimal, so nanojoules come out exactly (integer arithmetic; the
+//! scale parsing from #48). Elsewhere, or without the permission,
 //! [`package_nj`] is `None`, and results say so.
 //!
 //! **Resolution.** RAPL updates about once a millisecond, so a sample of a
@@ -32,9 +33,27 @@ pub fn package_nj() -> Option<u64> {
 
 #[cfg(target_os = "linux")]
 mod imp {
-    /// The `energy-pkg` event's counter, open on one CPU of the package.
+    /// The `energy-pkg` event's counter, open on one CPU of the package,
+    /// and its unit as an exact decimal: count times `mantissa` times
+    /// 10^`exponent` joules.
     pub struct Counter {
         fd: i32,
+        mantissa: u128,
+        exponent: i32,
+    }
+
+    /// "2.3283064365386962890625e-10" as (23283064365386962890625, -32):
+    /// the scale perf gives, exactly. Requires decimal digits, one point at
+    /// most, and an optional exponent.
+    pub fn parse_scale(text: &str) -> Option<(u128, i32)> {
+        let text = text.trim();
+        let (digits, exponent) = match text.split_once(['e', 'E']) {
+            Some((d, e)) => (d, e.parse::<i32>().ok()?),
+            None => (text, 0),
+        };
+        let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+        let mantissa = format!("{whole}{fraction}").parse::<u128>().ok()?;
+        Some((mantissa, exponent - fraction.len() as i32))
     }
 
     unsafe extern "C" {
@@ -49,9 +68,6 @@ mod imp {
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     const SYS_PERF_EVENT_OPEN: i64 = -1;
 
-    /// The event's unit, 2^-32 J (Intel's and AMD's RAPL energy unit).
-    const SCALE: &str = "2.3283064365386962890625e-10";
-
     fn sysfs(name: &str) -> Option<String> {
         std::fs::read_to_string(format!("/sys/bus/event_source/devices/power/{name}")).ok().map(|s| s.trim().to_owned())
     }
@@ -63,9 +79,7 @@ mod imp {
             }
             let pmu: u64 = sysfs("type")?.parse().ok()?;
             let config = u64::from_str_radix(sysfs("events/energy-pkg")?.strip_prefix("event=0x")?, 16).ok()?;
-            if sysfs("events/energy-pkg.scale")? != SCALE {
-                return None;
-            }
+            let (mantissa, exponent) = parse_scale(&sysfs("events/energy-pkg.scale")?)?;
             let cpu: i64 = sysfs("cpumask")?.split([',', '-']).next()?.parse().ok()?;
             // struct perf_event_attr, as 64-bit words: type and size, then
             // config; everything else zero (counting, enabled at open).
@@ -75,7 +89,7 @@ mod imp {
             // Sound: `attr` is a perf_event_attr of the size it states; pid
             // -1 with a CPU counts that CPU's package, every process.
             let fd = unsafe { syscall(SYS_PERF_EVENT_OPEN, attr.as_ptr(), -1i64, cpu, -1i64, 0u64) };
-            (fd >= 0).then_some(Counter { fd: fd as i32 })
+            (fd >= 0).then_some(Counter { fd: fd as i32, mantissa, exponent })
         }
 
         pub fn read_nj(&self) -> u64 {
@@ -83,8 +97,11 @@ mod imp {
             // Sound: `count` is writable for 8 bytes.
             let got = unsafe { read(self.fd, count.as_mut_ptr(), 8) };
             assert_eq!(got, 8, "reading the package energy counter: {}", std::io::Error::last_os_error());
-            // 2^-32 J a unit: exactly nanojoules, rounded down.
-            u64::try_from((u128::from(u64::from_ne_bytes(count)) * 1_000_000_000) >> 32).expect("energy fits in u64")
+            // count x mantissa x 10^(exponent + 9) nanojoules, rounded down.
+            let scaled = u128::from(u64::from_ne_bytes(count)) * self.mantissa;
+            let exponent = self.exponent + 9;
+            let nj = if exponent >= 0 { scaled * 10u128.pow(exponent as u32) } else { scaled / 10u128.pow(exponent.unsigned_abs()) };
+            u64::try_from(nj).expect("energy fits in u64")
         }
     }
 }
@@ -107,6 +124,16 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Intel's and AMD's scales, exactly (#48's cases).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn scales_parse_exactly() {
+        assert_eq!(imp::parse_scale("2.3283064365386962890625e-10\n"), Some((23283064365386962890625, -32)));
+        assert_eq!(imp::parse_scale("1.52587890625e-5"), Some((152587890625, -16)));
+        assert_eq!(imp::parse_scale("1"), Some((1, 0)));
+        assert_eq!(imp::parse_scale("joules"), None);
+    }
 
     /// Where the package energy can be read, it counts up, and a second of
     /// busy work costs the package between 0.1 and 500 J (a desktop's
