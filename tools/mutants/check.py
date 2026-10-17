@@ -1,6 +1,6 @@
 """Mutation testing against a list of the mutants known to survive.
 
-    pypy3 tools/mutants/check.py [--write]
+    pypy3 tools/mutants/check.py [--since REV] [--write]
 
 cargo-mutants plants likely bugs in the files tools/mutants/known-<arch>.txt
 names (its `files:` line), one at a time, and runs the library's and the
@@ -14,6 +14,15 @@ change at several places in one function counts once per place. It runs
 in git worktrees of HEAD of its own (SHARDS at once), so the checkout is
 never mutated. With --write, the list is rewritten from this run, each
 new mutant's reason UNCLASSIFIED and the others' kept.
+
+With --since REV, a change's check: only the mutants in the lines the
+change makes (git diff REV...HEAD, cargo-mutants --in-diff), and it fails
+on a new survivor among them; a listed one now caught waits for a whole
+run. Either way it fails while the list names a missing test ("OPEN: a
+missing test"): that is work to do, not a survivor to keep. A change that removes or alters test code (a line of src/test.rs or
+tests/, or one with an assertion or a test's name) can weaken the tests of
+code it leaves alone, which only a whole run sees: then the whole run
+happens instead, by itself.
 """
 
 import collections
@@ -92,11 +101,14 @@ def run(files, extra=(), shards=SHARDS, label="run"):
         # other status (a failing unmutated baseline) is no result.
         assert process.wait() in (0, 2, 3), f"cargo mutants failed ({process.returncode}) in {tree}"
         out = os.path.join(tree, "mutants-result", "mutants.out")
-        for line in open(os.path.join(out, "missed.txt")).read().splitlines():
+        # No missed.txt when there was nothing to test (a diff of no mutants).
+        missed = os.path.join(out, "missed.txt")
+        for line in (open(missed).read().splitlines() if os.path.exists(missed) else []):
             m = NAME.match(line)
             assert m, f"a missed mutant cargo-mutants names unexpectedly: {line}"
             names[f"{m.group(1)}\t{m.group(2)}"] += 1
-        for outcome in json.load(open(os.path.join(out, "outcomes.json")))["outcomes"]:
+        outcomes = os.path.join(out, "outcomes.json")
+        for outcome in (json.load(open(outcomes))["outcomes"] if os.path.exists(outcomes) else []):
             mutant = outcome["scenario"]
             if not isinstance(mutant, dict):
                 continue  # the unmutated baseline
@@ -110,11 +122,12 @@ def run(files, extra=(), shards=SHARDS, label="run"):
     return names, functions
 
 
-def confirm(found, known):
+def confirm(found, known, differ=None):
     """`found` with every name whose count differs from the list's run
     again, alone: a test that fails by chance (under load, say) neither
     hides a survivor nor fails the check."""
-    differ = sorted(k for k in set(found) | set(known) if found.get(k, 0) != known.get(k, (0, ""))[0])
+    if differ is None:
+        differ = sorted(k for k in set(found) | set(known) if found.get(k, 0) != known.get(k, (0, ""))[0])
     if not differ:
         return found
     patterns = [": " + re.escape(k.split("\t", 1)[1]) + "$" for k in differ]
@@ -124,6 +137,20 @@ def confirm(found, known):
         confirmed[k] = again.get(k, 0)
     print(f"confirmed alone: {len(differ)} names whose count differed from the list")
     return +confirmed
+
+
+def weakens_tests(diff):
+    """Whether a diff removes or alters test code: a line it takes away (a
+    changed line is one taken away and one added) in src/test.rs or
+    tests/, or one holding an assertion or a test."""
+    file = ""
+    for line in diff.splitlines():
+        if line.startswith("--- "):
+            file = line[6:] if line.startswith("--- a/") else ""
+        elif line.startswith("-") and not line.startswith("---"):
+            if file == "src/test.rs" or file.startswith("tests/") or re.search(r"assert|#\[test\]|fn test_", line):
+                return True
+    return False
 
 
 def figure(functions, known):
@@ -146,6 +173,38 @@ def figure(functions, known):
 
 def main():
     files, known = read_known()
+    # A test known to be missing is work to do now, not a survivor to keep:
+    # the check fails while one is listed, whichever run this is.
+    missing = sorted(k for k, (_, reason) in known.items() if reason.startswith("OPEN: a missing test"))
+    for k in missing:
+        print(f"MISSING TEST: {k}")
+    if missing:
+        sys.exit("mutants: the list names missing tests; write them first")
+    since = sys.argv[sys.argv.index("--since") + 1] if "--since" in sys.argv else None
+    if since is not None:
+        diff = subprocess.run(["git", "-C", ROOT, "diff", f"{since}...HEAD", "--", *files], capture_output=True, text=True, check=True).stdout
+        if weakens_tests(diff):
+            print(f"mutants: the change since {since} removes or alters test code; the whole run")
+            since = None
+    if since is not None:
+        if not diff:
+            print(f"mutants: the change since {since} touches no mutated file")
+            return
+        path = os.path.join(tempfile.mkdtemp(prefix="mutants-diff-", dir="/tmp"), "change.diff")
+        with open(path, "w") as f:
+            f.write(diff)
+        # One shard: a change's mutants are few, and each shard builds anew.
+        found, functions = run(files, ["--in-diff", path], shards=1)
+        # Only the names with more survivors than the list: the run holds
+        # the change's lines alone, so a listed name's other places are
+        # missing from it (a whole run sees those, and stale entries).
+        found = confirm(found, known, sorted(k for k in found if found[k] > known.get(k, (0, ""))[0]))
+        new = {k: n for k, n in found.items() if n > known.get(k, (0, ""))[0]}
+        for k, n in sorted(new.items()):
+            print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
+        print(f"mutants: the change since {since}: {sum(1 for f in functions.values() for _ in f)} mutants, "
+              + ("no new survivor" if not new else f"{len(new)} names with a new survivor"))
+        sys.exit(1 if new else 0)
     found, functions = run(files)
     found = confirm(found, known)
     figure(functions, {k: known.get(k, (n, "UNCLASSIFIED")) for k, n in found.items()})

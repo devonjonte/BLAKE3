@@ -129,7 +129,10 @@ kernels are the proofs'.
 `tools/mutants/check.py` reruns every mutant, reruns alone any whose
 outcome differs from the list (so a test that fails by chance, under
 load, decides nothing), and fails on a survivor not listed, a listed one
-now caught, or a listed one without a reason (44 minutes on the VM).
+now caught, a listed one without a reason, or a test the list names as
+missing (44 minutes on the VM, overnight). For a change, `--since servil`
+tests only the mutants in the lines it changes, in seconds, and runs the
+whole set itself when the change removes or alters test code.
 
 **What the suites cover**, on the VM (October 16, before the stream): 88% of the library's branch
 sides (906 of 1026), over the default, one-CPU, and no-std runs. Most of

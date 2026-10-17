@@ -106,8 +106,8 @@ benchmark against your working tree, see bench-hashes' `CONTRIBUTING.md`.
 
 `servil` is the main line. Work happens on `candidate/<topic>`
 branches; a candidate joins `servil` as a fast-forward once every check
-above passes, mutation testing passes for a change to the Rust
-(`tools/mutants/check.py`), and the regression check finds no slowdown
+above passes, mutation testing passes on a change to the Rust
+(`tools/mutants/check.py --since servil`), and the regression check finds no slowdown
 on AArch64 Linux in a VM and natively on an Apple M4 Max. The proofs
 (QUALITY.md says how to run them) run after a change to an AArch64
 kernel or the proof tools lands; a failure is fixed first. Pull requests are welcome
