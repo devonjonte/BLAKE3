@@ -452,9 +452,12 @@ mod test {
     /// Miri (the CI's smoketest runs it).
     #[test]
     fn test_miri_outboard_multithreaded() {
-        let mut input = vec![0u8; 33 * GROUP_LEN + 100];
+        let mut input = vec![0u8; (crate::lanes::MIN_SPLIT_LEN / GROUP_LEN + 1) * GROUP_LEN + 100];
         crate::test::paint_test_input(&mut input);
-        assert_eq!(outboard_multithreaded_with(Mode::Hash, &input), outboard_with(Mode::Hash, &input));
+        crate::RAN.with(|r| r.set(0));
+        let pooled = outboard_multithreaded_with(Mode::Hash, &input);
+        crate::lanes::assert_past_the_split("the groups");
+        assert_eq!(pooled, outboard_with(Mode::Hash, &input));
     }
 
     /// The pool's ranges of groups for a verifier's piece, just past where
@@ -462,12 +465,14 @@ mod test {
     /// Miri (the CI's smoketest runs it).
     #[test]
     fn test_miri_verifier_multithreaded() {
-        let mut input = vec![0u8; 33 * GROUP_LEN + 100];
+        let mut input = vec![0u8; (crate::lanes::MIN_SPLIT_LEN / GROUP_LEN + 1) * GROUP_LEN + 100];
         crate::test::paint_test_input(&mut input);
         let (hash, encoding) = (crate::hash(&input), test_encoding(Mode::Hash, &input));
         let mut received = Vec::new();
         let mut verifier = Verifier::new(Mode::Hash, &hash, input.len() as u64);
+        crate::RAN.with(|r| r.set(0));
         assert!(verifier.update_multithreaded(&encoding, |b| received.extend_from_slice(b)));
+        crate::lanes::assert_past_the_split("the verifier's groups");
         assert_eq!((verifier.remaining(), received), (0, input));
     }
 

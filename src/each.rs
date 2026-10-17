@@ -300,11 +300,13 @@ mod test {
     /// Miri (the CI's smoketest runs it).
     #[test]
     fn test_miri_hash_each_multithreaded() {
-        let mut input = vec![0u8; 520 * 1024];
+        let mut input = vec![0u8; crate::lanes::MIN_SPLIT_LEN + 8 * 1024];
         crate::test::paint_test_input(&mut input);
-        let items: Vec<&[u8]> = input.chunks(13 * 1024 + 7).collect();
+        let items: Vec<&[u8]> = input.chunks(crate::lanes::MIN_SPLIT_LEN / 40 + 7).collect();
         let (mut a, mut b) = (vec![[0u8; OUT_LEN]; items.len()], vec![[0u8; OUT_LEN]; items.len()]);
+        crate::RAN.with(|r| r.set(0));
         hash_each_multithreaded_with(Mode::Hash, &items, &mut a);
+        crate::lanes::assert_past_the_split("the items");
         hash_each_with(Mode::Hash, &items, &mut b);
         assert_eq!(a, b);
     }
