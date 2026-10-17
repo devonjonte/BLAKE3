@@ -119,10 +119,15 @@ open: the thread pool's scheduling under interleavings that the tests
 leave to chance (Loom would force them), and the queue and the pool's
 job scheduler, which the stream now in design replaces. The run found
 missing cases (in `Hash`, the `Hasher`, `OutputReader`, `update_each`,
-the self-test) and dead code, each fixed. `tools/mutants/check.py`
-reruns every mutant and fails on a survivor not listed, a listed one now
-caught, or a listed one without a reason; the long proofs run it before
-each promotion.
+the self-test) and dead code, each fixed. By function, of the library's
+384 functions with mutants, 223 have every mutant caught, 123 every
+survivor explained, and 38 an open survivor (in the two groups above);
+the four proved cores and the assembly kernels are the proofs'.
+`tools/mutants/check.py` reruns every mutant, reruns alone any whose
+outcome differs from the list (so a test that fails by chance, under
+load, decides nothing), and fails on a survivor not listed, a listed one
+now caught, or a listed one without a reason; the long proofs run it
+before each promotion.
 
 **What the suites cover now**, on the VM: 88% of the library's branch
 sides (906 of 1026), over the default, one-CPU, and no-std runs. Most of
