@@ -18,7 +18,11 @@ at most 7200):
 (bench-hashes before its git dependency on the fork took `--thorough` for
 a full run; later ones run in full by default and take `--quick`.)
     {"type": "perf_regress", "old_commit": "...", "new_commit": "...",
-     "bench_commit": "..."}
+     "bench_commit": "...", "full": true, "benches": ["OLD", "NEW"]}
+
+(perf_regress's "full" judges every cell of a default run; "benches" gives
+each side its own bench-hashes commit, for an API change, its cells with
+it; both optional.)
     {"type": "example", "example": "scaling" | "host_lab", "fork_commit": "...",
      "features": ["no_sme2"]}
     {"type": "test", "fork_commit": "..."}
@@ -176,8 +180,14 @@ def benchmark(job, run, work, out):
 def perf_regress(job, run, work, out):
     old, new = hex_commit(job, "old_commit"), hex_commit(job, "new_commit")
     fork = run.checkouts(new, hex_commit(job, "bench_commit"))
+    cmd = [sys.executable, "tools/perf_regress.py", "compare", old, new]
+    if job.get("full"):
+        cmd.append("--full")
+    if "benches" in job:
+        assert isinstance(job["benches"], list) and len(job["benches"]) == 2, "benches: two bench-hashes commits"
+        cmd += ["--bench", *(hex_commit({"bench": b}, "bench") for b in job["benches"])]
     try:
-        run.run([sys.executable, "tools/perf_regress.py", "compare", old, new], cwd=fork)
+        run.run(cmd, cwd=fork)
         return "no regression"
     except subprocess.CalledProcessError as e:
         if e.returncode in (1, 2):
