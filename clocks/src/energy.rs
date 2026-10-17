@@ -1,0 +1,125 @@
+//! The energy the CPU package has used, for what a measurement costs the
+//! machine beside what its caller waits for: CPU time counts the cycles a
+//! program's threads ran, spinning included; package energy also counts
+//! what they cost in power, and what they cost everything else on the
+//! package (a clock the whole package shares, lowered by cores waking and
+//! sleeping, shows here and nowhere in CPU time).
+//!
+//! **What it counts.** Linux: the `power` PMU's `energy-pkg` event (Intel
+//! and AMD RAPL), read through `perf_event_open` for the whole package,
+//! which needs `perf_event_paranoid` at 0 or below (or CAP_PERFMON). It is
+//! the package's, every program's: a measurement's share is valid on a
+//! quiet machine, which [`crate::load`] checks. The counter's unit is
+//! 2^-32 J; this module requires that scale and reports nanojoules,
+//! exactly (integer arithmetic). Elsewhere, or without the permission,
+//! [`package_nj`] is `None`, and results say so.
+//!
+//! **Resolution.** RAPL updates about once a millisecond, so a sample of a
+//! millisecond reads within about one update's energy; a cell's energy
+//! per unit sums its samples' (as its CPU time does), which averages that
+//! out.
+
+use std::sync::OnceLock;
+
+/// The package's energy since the counter opened, in nanojoules (it only
+/// counts up while the process lives): `None` where the platform gives no
+/// package energy or this process may not read it. A difference of two
+/// readings is the energy between them.
+pub fn package_nj() -> Option<u64> {
+    static COUNTER: OnceLock<Option<imp::Counter>> = OnceLock::new();
+    COUNTER.get_or_init(imp::Counter::open).as_ref().map(imp::Counter::read_nj)
+}
+
+#[cfg(target_os = "linux")]
+mod imp {
+    /// The `energy-pkg` event's counter, open on one CPU of the package.
+    pub struct Counter {
+        fd: i32,
+    }
+
+    unsafe extern "C" {
+        fn syscall(number: i64, ...) -> i64;
+        fn read(fd: i32, buffer: *mut u8, count: usize) -> isize;
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    const SYS_PERF_EVENT_OPEN: i64 = 298;
+    #[cfg(target_arch = "aarch64")]
+    const SYS_PERF_EVENT_OPEN: i64 = 241;
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    const SYS_PERF_EVENT_OPEN: i64 = -1;
+
+    /// The event's unit, 2^-32 J (Intel's and AMD's RAPL energy unit).
+    const SCALE: &str = "2.3283064365386962890625e-10";
+
+    fn sysfs(name: &str) -> Option<String> {
+        std::fs::read_to_string(format!("/sys/bus/event_source/devices/power/{name}")).ok().map(|s| s.trim().to_owned())
+    }
+
+    impl Counter {
+        pub fn open() -> Option<Counter> {
+            if SYS_PERF_EVENT_OPEN < 0 {
+                return None;
+            }
+            let pmu: u64 = sysfs("type")?.parse().ok()?;
+            let config = u64::from_str_radix(sysfs("events/energy-pkg")?.strip_prefix("event=0x")?, 16).ok()?;
+            if sysfs("events/energy-pkg.scale")? != SCALE {
+                return None;
+            }
+            let cpu: i64 = sysfs("cpumask")?.split([',', '-']).next()?.parse().ok()?;
+            // struct perf_event_attr, as 64-bit words: type and size, then
+            // config; everything else zero (counting, enabled at open).
+            let mut attr = [0u64; 16];
+            attr[0] = pmu | ((attr.len() as u64 * 8) << 32);
+            attr[1] = config;
+            // Sound: `attr` is a perf_event_attr of the size it states; pid
+            // -1 with a CPU counts that CPU's package, every process.
+            let fd = unsafe { syscall(SYS_PERF_EVENT_OPEN, attr.as_ptr(), -1i64, cpu, -1i64, 0u64) };
+            (fd >= 0).then_some(Counter { fd: fd as i32 })
+        }
+
+        pub fn read_nj(&self) -> u64 {
+            let mut count = [0u8; 8];
+            // Sound: `count` is writable for 8 bytes.
+            let got = unsafe { read(self.fd, count.as_mut_ptr(), 8) };
+            assert_eq!(got, 8, "reading the package energy counter: {}", std::io::Error::last_os_error());
+            // 2^-32 J a unit: exactly nanojoules, rounded down.
+            u64::try_from((u128::from(u64::from_ne_bytes(count)) * 1_000_000_000) >> 32).expect("energy fits in u64")
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+mod imp {
+    pub struct Counter;
+
+    impl Counter {
+        pub fn open() -> Option<Counter> {
+            None
+        }
+
+        pub fn read_nj(&self) -> u64 {
+            unreachable!("no counter opens here")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Where the package energy can be read, it counts up, and a second of
+    /// busy work costs the package between 0.1 and 500 J (a desktop's
+    /// package draws a few watts idle and a few hundred at most).
+    #[test]
+    fn package_energy_counts_up_by_a_plausible_amount() {
+        let Some(before) = package_nj() else {
+            eprintln!("no package energy here; nothing to check");
+            return;
+        };
+        crate::busy_work(1_000_000_000);
+        let millijoules = (package_nj().unwrap() - before) / 1_000_000;
+        eprintln!("package energy over a busy second: {millijoules} mJ");
+        assert!((100..=500_000).contains(&millijoules), "{millijoules} mJ over a busy second");
+    }
+}
