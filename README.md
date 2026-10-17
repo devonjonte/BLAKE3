@@ -8,7 +8,7 @@ digests as official BLAKE3.
 - **Proved correct:** every assembly kernel on 64-bit Arm but one is proved, as the CPU runs
   it, to compute the BLAKE3 standard's compression for every possible input. A solver checks
   the machine code against a specification of the standard written in Lean.
-- **Its tests are tested:** mutation testing plants 2,600 likely bugs in the Rust code, one at
+- **Its tests are tested:** mutation testing plants 2,500 likely bugs in the Rust code, one at
   a time. Two in three fail a test; each of the rest is listed with the reason it survives
   (most change only speed, or run only on another kind of machine).
 - **Every digest is checked** against the official test vectors and an independent

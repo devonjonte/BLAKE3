@@ -17,7 +17,7 @@ the bugs those steps found and what formal verification we have tried.
   (`c/blake3_sme2_hybrid_aarch64.S`), is proved at one and two groups of
   chunks and tested beyond.
 - **The tests are tested.** Mutation testing plants each likely bug in
-  the library's Rust, one at a time, about 2,600 in all, and requires a
+  the library's Rust, one at a time, about 2,500 in all, and requires a
   test to fail. Each one that survives is listed with its reason (most
   change only speed, or run only on another kind of machine), and a
   change that lets a new one survive is held until a test catches it.
@@ -111,31 +111,33 @@ tests; the tests check the calls into them, and every other platform.)
   such), or code that does nothing (removed).
 
 **What mutation testing finds**, over the whole library on the VM
-(October 17): of 2614 mutants, 1772 fail a test or hang, and 169 do not
-compile. Each of the other 673 is listed with its reason in
-`tools/mutants/known-aarch64.txt`: code for another machine (x86, a CPU
-without SME2 or the SHA-3 extension, one CPU), a choice between equally
-correct paths (what to prefetch, a speed threshold, how work is cut
-among threads), or an equivalent change (`|` made `^` on flag bits that
-never overlap). Two groups stay open: the thread pool's scheduling under
-interleavings that the tests leave to chance (Loom would force them),
-and the queue and the pool's job scheduler, which the stream replaces.
-Earlier runs found missing cases (in `Hash`, the `Hasher`,
-`OutputReader`, `update_each`, the self-test) and dead code, each fixed.
-By function, of the library's 398 functions with mutants, 253 have every
-mutant caught, 109 every survivor explained, and 36 an open survivor (in
-the two groups above); the assembly kernels are the proofs'.
+(October 17, with the stream): of 2518 mutants, 1680 fail a test or
+hang, and 166 do not compile. Each of the other 672 is listed with its
+reason in `tools/mutants/known-aarch64.txt`: code for another machine
+(x86, a CPU without SME2 or the SHA-3 extension, one CPU), a choice
+between equally correct paths (what to prefetch, a speed threshold, how
+work is cut among threads, how long an idle worker spins), or an
+equivalent change (`|` made `^` on flag bits that never overlap). Two
+groups stay open: the thread pool's and the stream's scheduling under
+interleavings the tests leave to chance (Loom would force them), and
+eight missing tests (`Hasher::reset` after the stack holds values;
+`update_each`'s held group at more chunk counts), next to write. Earlier
+runs found missing cases (in `Hash`, the `Hasher`, `OutputReader`,
+`update_each`, the self-test) and dead code, each fixed. By function, of
+the library's 385 functions with mutants, 239 have every mutant caught,
+111 every survivor explained, and 35 an open survivor; the assembly
+kernels are the proofs'.
+
 `tools/mutants/check.py` reruns every mutant, reruns alone any whose
 outcome differs from the list (so a test that fails by chance, under
 load, decides nothing), and fails on a survivor not listed, a listed one
-now caught, or a listed one without a reason; it runs before each
-promotion that changes the library's Rust (44 minutes on the VM).
+now caught, or a listed one without a reason (44 minutes on the VM).
 
-**What the suites cover now**, on the VM: 88% of the library's branch
+**What the suites cover**, on the VM (October 16, before the stream): 88% of the library's branch
 sides (906 of 1026), over the default, one-CPU, and no-std runs. Most of
 the rest are the branches of other machines (the std build on a CPU
 without the SHA-3 extension or without SME2, which CI's AArch64 job now
-runs), the pool's and the queue's scheduling races, and fail-stop arms.
+runs), the pool's scheduling races, and fail-stop arms.
 The aim is
 every branch side of the code users run, each one reached by a test or
 named as unreachable in the code, and every mutant either caught or
