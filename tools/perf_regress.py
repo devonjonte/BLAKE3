@@ -17,7 +17,8 @@ side's own bench-hashes commit (an API change, whose cells call the new
 API: the old design through the old cells against the new design through
 the new ones; the instrument, the clocks crate and `regress`, stays the
 working tree's on both sides). It relinks each side
-LAYOUTS times, each with its own random function order (a binary's
+LAYOUTS times, each with its own random function order, the two sides'
+seeds apart so that identical code still meets a new layout in every run (a binary's
 layout alone moves cells by several percent: bench-hashes
 audit/variance-on-unchanged-code.md), and runs
 `bench-hashes regress OLD... -- NEW...`, pair i on the i-th layout of
@@ -209,15 +210,19 @@ def lld_dir():
     return link.parent
 
 
-def layouts(side, exe, copy, env):
-    """`exe` relinked LAYOUTS times, each with its functions in their own
-    random order (seed i for layout i): a linker order file, which Mach-O's
-    ld and lld on Linux both take. Each relink rebuilds the bench-hashes
+def layouts(side, exe, copy, env, seeds):
+    """`exe` relinked once per seed, each with its functions in their own
+    random order (random.Random(seed)): a linker order file, which Mach-O's
+    ld and lld on Linux both take. The two sides take different seeds
+    (old 0 to LAYOUTS - 1, new LAYOUTS on), so that identical code on both
+    sides still meets a different layout in each run, as a real change does:
+    with one seed list, a check of a commit against itself ran the same
+    binary twice in every pair and never met layout noise. Each relink rebuilds the bench-hashes
     crate alone; its dependencies stay built."""
     nm = subprocess.run(["nm", exe], env=ENV, check=True, stdout=subprocess.PIPE, text=True).stdout
     symbols = sorted({fields[2] for fields in (line.split() for line in nm.splitlines()) if len(fields) == 3 and fields[1] in "tT"})
     exes = []
-    for seed in range(LAYOUTS):
+    for seed in seeds:
         order = CACHE / side / f"order-{seed}.txt"
         shuffled = list(symbols)
         random.Random(seed).shuffle(shuffled)
@@ -283,14 +288,14 @@ def compare(old_rev, new, full=False, bench=(None, None)):
     bench-hashes commit). Returns its exit code. It first prints what it
     compares, so that a report carries what reproduces it."""
     new_rev = working_tree_commit() if new is None else new
-    old = layouts("old", *side_bench("old", old_rev, bench[0]))
-    new_exes = layouts("new", *side_bench("new", new_rev, bench[1]))
+    old = layouts("old", *side_bench("old", old_rev, bench[0]), range(LAYOUTS))
+    new_exes = layouts("new", *side_bench("new", new_rev, bench[1]), range(LAYOUTS, 2 * LAYOUTS))
     name = "the working tree" if new is None else new
     print(f"perf_regress: {name} against {old_rev}", file=sys.stderr, flush=True)
     print(provenance("old", old_rev, bench[0]), file=sys.stderr, flush=True)
     print(provenance("new", new_rev, bench[1]), file=sys.stderr, flush=True)
     linker = "ld -order_file" if sys.platform == "darwin" else f"{os.path.realpath(lld_dir() / 'ld.lld')} --symbol-ordering-file"
-    print(f"perf_regress: {LAYOUTS} layouts a side, function order seeds 0-{LAYOUTS - 1} (random.Random(seed).shuffle of the sorted text symbols), {linker}; "
+    print(f"perf_regress: {LAYOUTS} layouts a side, function order seeds 0-{LAYOUTS - 1} old and {LAYOUTS}-{2 * LAYOUTS - 1} new (random.Random(seed).shuffle of the sorted text symbols), {linker}; "
           f"instrument: clocks and regress from {git('rev-parse', '--short=12', 'HEAD')}{' plus uncommitted changes' if git('status', '--porcelain', '--untracked-files=no') else ''}",
           file=sys.stderr, flush=True)
     return subprocess.run([new_exes[0], "regress", *(["--full"] if full else []), *old, "--", *new_exes], env=ENV).returncode
