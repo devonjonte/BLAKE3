@@ -11,6 +11,8 @@ a commit, measured side by side.
     pypy3 tools/perf_regress.py compare OLD NEW --full --layouts 18 --rounds 4 --keep DIR
                                    # 18 pairs of runs with 4 samples of every
                                    # cell; every run's samples file kept in DIR
+    pypy3 tools/perf_regress.py compare OLD NEW --contenders sha256,sha256-ring --points "continuous 64 KiB"
+                                   # the cells a run with these measures
     pypy3 tools/perf_regress.py build                  # bench-hashes against the working tree
 
 It builds bench-hashes twice, once against the fork at the old commit and
@@ -284,12 +286,12 @@ def provenance(name, fork, bench_rev):
     return f"perf_regress: {name}: fork {git('rev-parse', '--short=12', fork)}, bench-hashes {source}"
 
 
-def compare(old_rev, new, full=False, bench=(None, None), pairs=LAYOUTS, rounds=None, keep=None):
+def compare(old_rev, new, bench=(None, None), pairs=LAYOUTS, regress=()):
     """Compare the fork at `old_rev` with `new` (a commit, or None for the
-    working tree): bench-hashes regress over each side's layouts (with
-    `full`, every cell of a default run; with `bench`, each side's own
-    bench-hashes commit; `pairs` pairs, `rounds` samples of every cell a
-    run, each run's samples file kept in `keep`). Returns its exit code. It first prints what it
+    working tree): bench-hashes regress over each side's layouts, `pairs`
+    of them, with `regress`'s other options as given (which cells, rounds,
+    where to keep the samples: regress_options); with `bench`, each side's
+    own bench-hashes commit. Returns its exit code. It first prints what it
     compares, so that a report carries what reproduces it."""
     new_rev = working_tree_commit() if new is None else new
     old = layouts("old", *side_bench("old", old_rev, bench[0]), range(pairs))
@@ -302,9 +304,17 @@ def compare(old_rev, new, full=False, bench=(None, None), pairs=LAYOUTS, rounds=
     print(f"perf_regress: {pairs} layouts a side, function order seeds 0-{pairs - 1} old and {pairs}-{2 * pairs - 1} new (random.Random(seed).shuffle of the sorted text symbols), {linker}; "
           f"instrument: clocks and regress from {git('rev-parse', '--short=12', 'HEAD')}{' plus uncommitted changes' if git('status', '--porcelain', '--untracked-files=no') else ''}",
           file=sys.stderr, flush=True)
-    options = [*(["--full"] if full else []), "--pairs", str(pairs), *(["--rounds", str(rounds)] if rounds else []),
-               *(["--keep", str(Path(keep).resolve())] if keep else [])]
-    return subprocess.run([new_exes[0], "regress", *options, *old, "--", *new_exes], env=ENV).returncode
+    return subprocess.run([new_exes[0], "regress", "--pairs", str(pairs), *regress, *old, "--", *new_exes], env=ENV).returncode
+
+
+def regress_options(args):
+    """compare's options that are regress's, as regress takes them: the
+    meaning of each is regress's (bench-hashes regress's usage)."""
+    return [*(["--full"] if args.full else []),
+            *(["--contenders", args.contenders] if args.contenders else []),
+            *(["--points", args.points] if args.points else []),
+            *(["--rounds", str(args.rounds)] if args.rounds else []),
+            *(["--keep", str(Path(args.keep).resolve())] if args.keep else [])]
 
 
 def main():
@@ -318,6 +328,8 @@ def main():
     p.add_argument("old")
     p.add_argument("new")
     p.add_argument("--full", action="store_true", help="every cell of a default run, not the check's points")
+    p.add_argument("--contenders", help="the cells a run with these contenders measures (regress --contenders)")
+    p.add_argument("--points", help="with --contenders, these points alone (regress --points)")
     p.add_argument("--bench", nargs=2, metavar=("OLD_BENCH", "NEW_BENCH"),
                    help="each side's own bench-hashes commit (an API change, its cells changed with it)")
     p.add_argument("--layouts", type=int, default=LAYOUTS, help=f"pairs of runs, each side relinked for each (default {LAYOUTS})")
@@ -343,7 +355,7 @@ def main():
             return 0
         if args.command == "check":
             return compare(args.against, None)
-        return compare(args.old, args.new, args.full, tuple(args.bench) if args.bench else (None, None), args.layouts, args.rounds, args.keep)
+        return compare(args.old, args.new, tuple(args.bench) if args.bench else (None, None), args.layouts, regress_options(args))
 
 
 if __name__ == "__main__":
