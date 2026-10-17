@@ -23,158 +23,23 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// before (`hash_path`; MAP_LEN).
 const SMALL: u64 = crate::MAP_LEN as u64;
 
-/// Reads in flight a thread (pilot: B3_IN_FLIGHT).
-fn in_flight() -> usize {
-    std::env::var("B3_IN_FLIGHT").ok().and_then(|v| v.parse().ok()).unwrap_or(4)
-}
+/// Reads in flight a thread: 80 with 20 threads. From storage, 1000 files
+/// of 16 KiB took as long at 2, 4, 8 and 16 a thread, and longer at 1
+/// (bench-hashes-validation/b3sum-uring).
+const IN_FLIGHT: usize = 4;
 
-/// Whether the ring serves this run: several files, the default output.
+/// Whether the ring serves this run: several files, none of them stdin,
+/// on several threads (the kernel runs some of io_uring's work on worker
+/// threads of this process, which --num-threads 1 rules out).
 pub(crate) fn applies(args: &Args) -> bool {
-    args.file_args.len() > 1
-        && !args.check()
-        && !args.raw()
-        && args.len() == blake3::OUT_LEN as u64
-        && args.seek() == 0
-        && crate::threads().get() > 1
-        && args.file_args.iter().all(|p| p != Path::new("-"))
+    args.file_args.len() > 1 && crate::threads().get() > 1 && args.file_args.iter().all(|p| p != Path::new("-"))
 }
 
 /// Hash every file of the run, printing in order: the files that failed.
 pub(crate) fn hash_inputs(args: &Args) -> u64 {
-    let print = |hash: blake3::Hash, path: &Path, args: &Args| crate::print_hash(&hash, path, args);
-    // Pilot: B3_STREAM_IO=K, K threads reading and a stream each, the pool hashing.
-    if let Some(io) = std::env::var("B3_STREAM_IO").ok().and_then(|v| v.parse::<usize>().ok()) {
-        let threads = io.min(args.file_args.len());
-        grow_descriptor_table(threads * in_flight() + 64);
-        blake3::initialize_multithreaded(Some(crate::threads()));
-        return crate::hash_inputs_with(args, threads, hash_some_streamed, print);
-    }
     let threads = crate::threads().get().min(args.file_args.len());
-    grow_descriptor_table(threads * in_flight() + 64);
-    crate::hash_inputs_with(args, threads, hash_some, print)
-}
-
-/// The mode the run hashes in.
-fn mode(args: &Args) -> blake3::Mode<'_> {
-    match (&args.key, args.derive_key()) {
-        (Some(key), _) => blake3::Mode::Keyed(key),
-        (None, Some(context)) => blake3::Mode::DeriveKey(context),
-        (None, None) => blake3::Mode::Hash,
-    }
-}
-
-/// Digest places a streaming thread cycles through: more than a stream
-/// holds in flight (1024 messages), so a place comes back before its turn.
-const PLACES: usize = 2048;
-
-/// As hash_some, each completed file a message to this thread's stream,
-/// which the pool hashes while this thread goes on reading.
-fn hash_some_streamed(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow::Result<blake3::Hash>) -> bool) {
-    let paths = &args.file_args;
-    let depth = in_flight();
-    let done = std::cell::RefCell::new(done);
-    let listening = std::cell::Cell::new(true);
-    // Submitted files in order (index, buffer), and buffers to reuse.
-    let pending = std::cell::RefCell::new(std::collections::VecDeque::<(usize, Vec<u8>)>::new());
-    let spare = std::cell::RefCell::new(Vec::<Vec<u8>>::new());
-    let places: *mut blake3::Hash = Box::into_raw(vec![blake3::Hash::from_bytes([0; 32]); PLACES].into_boxed_slice()) as *mut blake3::Hash;
-    let handed = |back: &mut [blake3::Hash]| {
-        for hash in back.iter() {
-            let (i, buffer) = pending.borrow_mut().pop_front().expect("a file for each place");
-            if !(done.borrow_mut())(i, Ok(*hash)) {
-                listening.set(false);
-            }
-            spare.borrow_mut().push(buffer);
-        }
-    };
-    blake3::stream(mode(args), handed, |s| {
-        let mut ring = IoUring::new(depth as u32 * 2).expect("io_uring");
-        let mut flights: Vec<Option<(Flight, Vec<u8>)>> = (0..depth).map(|_| None).collect();
-        let mut free: Vec<usize> = (0..depth).rev().collect();
-        let mut more = true;
-        let mut submitted = 0usize;
-        loop {
-            while more && !free.is_empty() && listening.get() {
-                let i = next.fetch_add(1, Ordering::Relaxed);
-                if i >= paths.len() {
-                    more = false;
-                    break;
-                }
-                let small = std::fs::File::open(&paths[i]).and_then(|file| Ok((file.metadata()?, file)));
-                let (opened, file) = match small {
-                    Ok((opened, file)) if opened.is_file() && opened.len() < SMALL => (opened, file),
-                    _ => {
-                        let digest = before(args, &paths[i]);
-                        if !(done.borrow_mut())(i, digest) {
-                            listening.set(false);
-                        }
-                        continue;
-                    }
-                };
-                let slot = free.pop().unwrap();
-                let size = opened.len() as usize;
-                let mut buffer = spare.borrow_mut().pop().unwrap_or_default();
-                if buffer.len() < size {
-                    buffer.resize(size, 0);
-                }
-                let read = opcode::Read::new(types::Fd(file.as_raw_fd()), buffer.as_mut_ptr(), size as u32).offset(0).build().user_data(slot as u64);
-                flights[slot] = Some((Flight { index: i, file, opened }, buffer));
-                // Sound: the buffer's bytes (on the heap, unmoved when the Vec
-                // moves) and the file stay until this read completes.
-                unsafe { ring.submission().push(&read).expect("room in the ring") };
-                ring.submit().expect("io_uring_enter");
-                submitted += take(args, s, &mut ring, &mut flights, &mut free, &pending, &done, &listening, places, submitted);
-            }
-            if free.len() == depth {
-                break;
-            }
-            ring.submit_and_wait(1).expect("io_uring_enter");
-            submitted += take(args, s, &mut ring, &mut flights, &mut free, &pending, &done, &listening, places, submitted);
-        }
-        s.finish();
-    });
-}
-
-/// The completed reads of hash_some_streamed: each file checked and
-/// submitted to the stream, or hashed as before; how many were submitted.
-#[allow(clippy::too_many_arguments)]
-fn take<'env, D: FnMut(&'env mut [blake3::Hash])>(
-    args: &Args,
-    s: &mut blake3::Stream<'env, D>,
-    ring: &mut IoUring,
-    flights: &mut [Option<(Flight, Vec<u8>)>],
-    free: &mut Vec<usize>,
-    pending: &std::cell::RefCell<std::collections::VecDeque<(usize, Vec<u8>)>>,
-    done: &std::cell::RefCell<&mut dyn FnMut(usize, anyhow::Result<blake3::Hash>) -> bool>,
-    listening: &std::cell::Cell<bool>,
-    places: *mut blake3::Hash,
-    submitted: usize,
-) -> usize {
-    let completed: Vec<(u64, i32)> = ring.completion().map(|c| (c.user_data(), c.result())).collect();
-    let mut n = 0;
-    for (slot, read) in completed {
-        let slot = slot as usize;
-        let (f, buffer) = flights[slot].take().expect("a flight for each read");
-        free.push(slot);
-        let size = f.opened.len();
-        let same = f.file.metadata().is_ok_and(|now| now.len() == size && now.modified().ok() == f.opened.modified().ok());
-        if read as i64 != size as i64 || !same {
-            let digest = before(args, &args.file_args[f.index]);
-            if !(done.borrow_mut())(f.index, digest) {
-                listening.set(false);
-            }
-            continue;
-        }
-        let (bytes, len) = (buffer.as_ptr(), size as usize);
-        pending.borrow_mut().push_back((f.index, buffer));
-        // Sound: the bytes stay allocated, unmoved, in `pending` until the
-        // stream hands their place back; the place is free again by then
-        // (PLACES exceeds what a stream holds in flight).
-        let (message, place) = unsafe { (core::slice::from_raw_parts(bytes, len), &mut *places.add((submitted + n) % PLACES)) };
-        s.submit(message, place);
-        n += 1;
-    }
-    n
+    grow_descriptor_table(threads * IN_FLIGHT + 64);
+    crate::hash_inputs_with(args, threads, hash_some, crate::print_output)
 }
 
 /// Room for `descriptors` open descriptors, made while this process has
@@ -207,12 +72,12 @@ struct Flight {
 
 /// Hash the files whose turn `next` gives, IN_FLIGHT reads at a time,
 /// giving each digest to `done` as its read completes.
-fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow::Result<blake3::Hash>) -> bool) {
+fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow::Result<blake3::OutputReader>) -> bool) {
     let paths = &args.file_args;
-    let mut ring = IoUring::new(in_flight() as u32 * 2).expect("io_uring");
-    let mut buffers: Vec<Vec<u8>> = (0..in_flight()).map(|_| Vec::new()).collect();
-    let mut flights: Vec<Option<Flight>> = (0..in_flight()).map(|_| None).collect();
-    let mut free: Vec<usize> = (0..in_flight()).rev().collect();
+    let mut ring = IoUring::new(IN_FLIGHT as u32 * 2).expect("io_uring");
+    let mut buffers: Vec<Vec<u8>> = (0..IN_FLIGHT).map(|_| Vec::new()).collect();
+    let mut flights: Vec<Option<Flight>> = (0..IN_FLIGHT).map(|_| None).collect();
+    let mut free: Vec<usize> = (0..IN_FLIGHT).rev().collect();
     let mut more = true;
     loop {
         while more && !free.is_empty() {
@@ -226,7 +91,7 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
                 Ok((opened, file)) if opened.is_file() && opened.len() < SMALL => (opened, file),
                 // Not for the ring (or an error, which hash_path reports).
                 _ => {
-                    if !done(i, before(args, &paths[i])) {
+                    if !done(i, crate::hash_path(args, &paths[i])) {
                         return;
                     }
                     continue;
@@ -251,7 +116,7 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
                 return;
             }
         }
-        if free.len() == in_flight() {
+        if free.len() == IN_FLIGHT {
             return;
         }
         ring.submit_and_wait(1).expect("io_uring_enter");
@@ -263,7 +128,7 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
 
 /// Hash the files whose reads have completed, giving each digest to `done`:
 /// false once nobody listens.
-fn finish(args: &Args, ring: &mut IoUring, flights: &mut [Option<Flight>], free: &mut Vec<usize>, buffers: &[Vec<u8>], done: &mut dyn FnMut(usize, anyhow::Result<blake3::Hash>) -> bool) -> bool {
+fn finish(args: &Args, ring: &mut IoUring, flights: &mut [Option<Flight>], free: &mut Vec<usize>, buffers: &[Vec<u8>], done: &mut dyn FnMut(usize, anyhow::Result<blake3::OutputReader>) -> bool) -> bool {
     {
         let completed: Vec<(u64, i32)> = ring.completion().map(|c| (c.user_data(), c.result())).collect();
         for (slot, read) in completed {
@@ -275,10 +140,12 @@ fn finish(args: &Args, ring: &mut IoUring, flights: &mut [Option<Flight>], free:
             let digest = if read as i64 == size as i64 && same {
                 let mut hasher = args.base_hasher.clone();
                 hasher.update(&buffers[slot][..size as usize]);
-                Ok(hasher.finalize())
+                let mut output = hasher.finalize_xof();
+                output.set_position(args.seek());
+                Ok(output)
             } else {
                 // Anything unexpected: as before, which reports it.
-                before(args, &args.file_args[f.index])
+                crate::hash_path(args, &args.file_args[f.index])
             };
             if !done(f.index, digest) {
                 return false;
@@ -286,12 +153,4 @@ fn finish(args: &Args, ring: &mut IoUring, flights: &mut [Option<Flight>], free:
         }
     }
     true
-}
-
-/// A file hashed as before (hash_path): its 32-byte digest.
-fn before(args: &Args, path: &Path) -> anyhow::Result<blake3::Hash> {
-    let mut output = crate::hash_path(args, path)?;
-    let mut digest = [0; blake3::OUT_LEN];
-    output.fill(&mut digest);
-    Ok(blake3::Hash::from_bytes(digest))
 }

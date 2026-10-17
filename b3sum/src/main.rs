@@ -105,9 +105,6 @@ struct Args {
     inner: Inner,
     file_args: Vec<PathBuf>,
     base_hasher: blake3::Hasher,
-    /// The key, in keyed mode (read from stdin once).
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    key: Option<[u8; blake3::KEY_LEN]>,
 }
 
 impl Args {
@@ -123,11 +120,10 @@ impl Args {
         if inner.raw && file_args.len() > 1 {
             bail!("Only one filename can be provided when using --raw");
         }
-        let key = if inner.keyed { Some(read_key_from_stdin()?) } else { None };
-        let base_hasher = if let Some(key) = &key {
+        let base_hasher = if inner.keyed {
             // In keyed mode, since stdin is used for the key, we can't handle
             // `-` arguments. Input::open handles that case below.
-            blake3::Hasher::new_keyed(key)
+            blake3::Hasher::new_keyed(&read_key_from_stdin()?)
         } else if let Some(ref context) = inner.derive_key {
             blake3::Hasher::new_derive_key(context)
         } else {
@@ -137,7 +133,6 @@ impl Args {
             inner,
             file_args,
             base_hasher,
-            key,
         })
     }
 
@@ -169,11 +164,6 @@ impl Args {
         self.inner.seek
     }
 
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    fn derive_key(&self) -> Option<&str> {
-        self.inner.derive_key.as_deref()
-    }
-
     fn keyed(&self) -> bool {
         self.inner.keyed
     }
@@ -202,17 +192,7 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
             // Beside other files, a file in the page cache takes the pool only
             // from SHARED_POOL_LEN (see there); one read from storage, from
             // POOL_LEN.
-            let cached = resident(&map);
-            let pool_from = if args.file_args.len() > 1 && cached { SHARED_POOL_LEN } else { POOL_LEN };
-            // Pilot: B3_ADVISE=willneed|populate for a file not in the page cache.
-            if !cached {
-                match std::env::var("B3_ADVISE").as_deref() {
-                    // Sound: advice on this process's own mapping.
-                    Ok("willneed") => unsafe { libc::madvise(map.as_ptr() as *mut libc::c_void, map.len(), libc::MADV_WILLNEED); },
-                    Ok("populate") => unsafe { libc::madvise(map.as_ptr() as *mut libc::c_void, map.len(), 22 /* MADV_POPULATE_READ */); },
-                    _ => {}
-                }
-            }
+            let pool_from = if args.file_args.len() > 1 && resident(&map) { SHARED_POOL_LEN } else { POOL_LEN };
             update(&mut hasher, &map, pool_from);
             hashed_len = map.len() as u64;
             hold(map);
@@ -721,25 +701,6 @@ fn hash_some(args: &Args, next: &std::sync::atomic::AtomicUsize, done: &mut dyn 
             return;
         }
     }
-}
-
-/// A 32-byte digest printed as print_output prints one (no --raw).
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn print_hash(hash: &blake3::Hash, path: &Path, args: &Args) -> anyhow::Result<()> {
-    if args.no_names() {
-        println!("{}", hash.to_hex());
-        return Ok(());
-    }
-    let FilepathString { filepath_string, is_escaped } = filepath_to_string(path);
-    if is_escaped {
-        print!("\\");
-    }
-    if args.tag() {
-        println!("BLAKE3 ({}) = {}", filepath_string, hash.to_hex());
-    } else {
-        println!("{}  {}", hash.to_hex(), filepath_string);
-    }
-    Ok(())
 }
 
 fn print_output(output: blake3::OutputReader, path: &Path, args: &Args) -> anyhow::Result<()> {
