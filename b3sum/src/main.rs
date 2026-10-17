@@ -247,6 +247,7 @@ const POOL_LEN: usize = 512 << 10;
 /// files ran on the pool), while a 1 MiB file pays the pool's wake (about
 /// 100 us) to save less. A file read from storage keeps POOL_LEN: there the
 /// pool's page faults keep more reads in flight.
+#[cfg(unix)]
 const SHARED_POOL_LEN: usize = 8 << 20;
 
 /// Hash `input` into `hasher`: over the pool from `pool_from` (at least
