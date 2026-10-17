@@ -74,6 +74,8 @@ pub enum Broken {
     Nothing,
     NoRecheck,
     NoFences,
+    /// The stream reuses a ring slot once its task is claimed, not finished.
+    RoomByClaims,
 }
 
 impl Pool {
@@ -237,6 +239,177 @@ pub fn job(workers: usize, pieces: usize, broken: Broken) {
         pool.stop.store(true, SeqCst);
         sc(&pool);
         while pool.wake_one() {}
+        for h in handles {
+            h.join().unwrap();
+        }
+    });
+}
+
+/// A stream's source (lanes.rs `Source` with a ring): the producer writes a
+/// task into slot `published % len` and publishes it with a Release store;
+/// a worker claims a number by CAS below `published` and reads its slot.
+/// A slot is written again only after its task and every task before it
+/// finished: the stream reuses a slot once its entry is delivered, and it
+/// delivers in order, each entry once its task's `left` reaches zero. Room
+/// counted by claims would not do (a worker claims by CAS and reads the
+/// slot after, so the producer could overwrite it first: Loom finds the
+/// race, `Broken::RoomByClaims`), nor would a count of finished tasks (a
+/// later task can finish while an earlier one's worker has yet to read
+/// its slot). Loom checks the slots' accesses for races.
+pub struct Stream {
+    pub pool: Pool,
+    pub ring: Vec<loom::cell::UnsafeCell<usize>>,
+    pub claimed_s: AtomicUsize,
+    pub published_s: AtomicUsize,
+    /// Tasks run (a task is its number; `ran[n]` counts task n's runs).
+    pub done: AtomicUsize,
+    pub open: AtomicBool,
+}
+
+// Sound in the model as in lanes.rs: a slot's write and its read are
+// ordered by the Release store of `published` and the claimant's Acquire
+// load, and a slot is rewritten only after `claimed` passed it.
+unsafe impl Sync for Stream {}
+unsafe impl Send for Stream {}
+
+impl Stream {
+    fn waiting(&self) -> usize {
+        self.published_s.load(Acquire).saturating_sub(self.claimed_s.load(Acquire))
+    }
+
+    /// Source::publish: write the slot, Release-store `published`, fence;
+    /// wake a parked worker when two or more wait.
+    pub fn publish(&self, task: usize) {
+        let p = self.published_s.load(Relaxed);
+        self.ring[p % self.ring.len()].with_mut(|slot| unsafe { *slot = task });
+        self.published_s.store(p + 1, Release);
+        fence(SeqCst);
+        if self.pool.parked.load(Relaxed) != 0 && p + 1 - self.claimed_s.load(Relaxed) >= 2 {
+            self.pool.wake_one();
+        }
+    }
+
+    /// Source::take: a task's number, if one is published and unclaimed.
+    pub fn take(&self) -> Option<usize> {
+        let mut c = self.claimed_s.load(Acquire);
+        loop {
+            let p = self.published_s.load(Acquire);
+            if c >= p {
+                return None;
+            }
+            match self.claimed_s.compare_exchange_weak(c, c + 1, AcqRel, Acquire) {
+                Ok(_) => return Some(self.ring[c % self.ring.len()].with(|slot| unsafe { *slot })),
+                Err(now) => c = now,
+            }
+        }
+    }
+
+    fn run(&self, task: usize) {
+        // Release: the slot's read before it, for the in-order delivery.
+        self.pool.ran[task].fetch_add(1, Release);
+        self.done.fetch_add(1, Release);
+    }
+
+    /// The stream's delivery: how many tasks from the first have finished,
+    /// in order (each entry delivered once its task's `left` is zero).
+    fn delivered(&self) -> usize {
+        let published = self.published_s.load(Relaxed);
+        (0..published).take_while(|&t| self.pool.ran[t].load(Acquire) > 0).count()
+    }
+
+    /// Pool::serve over the stream's source: run tasks; while the stream is
+    /// open, look again a couple of times (the spin) before parking.
+    pub fn serve(&self, me: usize) {
+        let pool = &self.pool;
+        pool.threads.lock().unwrap()[me] = Some(thread::current());
+        let bit = 1u64 << me;
+        loop {
+            if let Some(task) = self.take() {
+                if self.waiting() >= 2 && pool.parked.load(Relaxed) != 0 {
+                    pool.wake_one();
+                }
+                self.run(task);
+                continue;
+            }
+            if pool.stop.load(SeqCst) {
+                return;
+            }
+            if self.open.load(Relaxed) {
+                // The spin, bounded: two more looks.
+                let mut found = false;
+                for _ in 0..2 {
+                    thread::yield_now();
+                    if self.waiting() > 0 {
+                        found = true;
+                        break;
+                    }
+                }
+                if found {
+                    continue;
+                }
+            }
+            pool.parked.fetch_or(bit, SeqCst);
+            sc(pool);
+            if pool.broken != Broken::NoRecheck && (self.waiting() > 0 || pool.stop.load(SeqCst)) {
+                pool.parked.fetch_and(!bit, SeqCst);
+                continue;
+            }
+            while pool.parked.load(SeqCst) & bit != 0 {
+                thread::park();
+            }
+        }
+    }
+}
+
+/// A stream of `tasks` tasks through a ring of `ring` slots beside
+/// `workers` workers, every interleaving: the producer publishes each task
+/// once room is free (taking tasks itself while it waits, as the stream
+/// does), then waits for all to run; each runs once, every slot's write and
+/// read are ordered, and every thread ends.
+pub fn stream(workers: usize, tasks: usize, ring: usize, broken: Broken) {
+    loom::model(move || {
+        let s = Arc::new(Stream {
+            pool: Pool { broken, ..Pool::new(workers, tasks) },
+            ring: (0..ring).map(|_| loom::cell::UnsafeCell::new(usize::MAX)).collect(),
+            claimed_s: AtomicUsize::new(0),
+            published_s: AtomicUsize::new(0),
+            done: AtomicUsize::new(0),
+            open: AtomicBool::new(true),
+        });
+        let handles: Vec<_> = (0..workers).map(|w| {
+            let s = s.clone();
+            thread::spawn(move || s.serve(w))
+        }).collect();
+        for task in 0..tasks {
+            // Room for the task: the ring holds every task not yet finished
+            // (the stream's entries, delivered once their tasks finish).
+            let in_flight = |s: &Stream| if broken == Broken::RoomByClaims {
+                s.published_s.load(Relaxed) - s.claimed_s.load(Acquire)
+            } else {
+                s.published_s.load(Relaxed) - s.delivered()
+            };
+            while in_flight(&s) >= ring {
+                match s.take() {
+                    Some(t) => s.run(t),
+                    None => thread::yield_now(),
+                }
+            }
+            s.publish(task);
+        }
+        // finish: the producer takes tasks while any wait, else polls.
+        while s.done.load(Acquire) < tasks {
+            match s.take() {
+                Some(t) => s.run(t),
+                None => thread::yield_now(),
+            }
+        }
+        s.open.store(false, Relaxed);
+        for (i, ran) in s.pool.ran.iter().enumerate() {
+            assert_eq!(ran.load(Relaxed), 1, "task {i} ran once");
+        }
+        s.pool.stop.store(true, SeqCst);
+        sc(&s.pool);
+        while s.pool.wake_one() {}
         for h in handles {
             h.join().unwrap();
         }

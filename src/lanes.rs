@@ -813,7 +813,10 @@ fn spin_for_work() -> bool {
 /// below `published`. Both only count up, across everything a source ever
 /// carries, so a stale claim is impossible. A stream's source carries its
 /// tasks in a ring (a slot written again only after its task was taken,
-/// copied out); a calling thread's carries its one-shot jobs' pieces,
+/// copied out, which the stream knows from delivery: it delivers entries in
+/// order, each once its task has finished, and reuses a slot only past a
+/// delivered entry; a claim alone would not do, since a worker claims, then
+/// reads: tools/loom-scheduler); a calling thread's carries its one-shot jobs' pieces,
 /// numbered on from job to job (job k owns [base, base + pieces)). Sources
 /// are never freed (recycled), so a worker may read one after its owner is
 /// done with it.
@@ -899,8 +902,9 @@ pub(crate) mod sources {
         pub(crate) fn publish(&self, task: Task) {
             let p = self.published.load(Ordering::Relaxed);
             debug_assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
-            // Sound: slot p % len is free (its last task was taken), and
-            // only this stream writes it.
+            // Sound: slot p % len is free (its last task finished, and every
+            // one before it: the stream reuses it only past a delivered
+            // entry), and only this stream writes it.
             unsafe { (*self.ring[p % self.ring.len()].get()).write(task) };
             self.published.store(p + 1, Ordering::Release);
             core::sync::atomic::fence(Ordering::SeqCst);
