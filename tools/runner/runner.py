@@ -78,7 +78,7 @@ PATCH = 'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'
 # blake3, blake3-mt, blake3-servil: bench-hashes' keys before September 25, 2026.
 CONTENDERS = {"blake3-official", "blake3-official-mt", "blake3", "blake3-servil-st", "blake3-servil", "blake3-servil-mt", "blake3-mt",
               "sha256", "sha256-ring", "sha256-cc", "sha1dc", "sha3-256", "blake3-commonware"}
-EXAMPLES = {"scaling", "host_lab", "energy_probe", "job_trace"}
+EXAMPLES = {"scaling", "host_lab", "energy_probe", "job_trace", "sme_units"}
 FEATURES = {"no_sme2", "pure", "job-trace"}
 DEFAULT_LIMIT = 1800
 MAX_LIMIT = 7200
