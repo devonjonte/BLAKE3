@@ -7,12 +7,27 @@
 //!
 //! `message N`: hash_multithreaded on N bytes; `batch N`: hash_many_multithreaded
 //! on N messages of 64 B. Prints the distribution over calls (p10, p50, p90).
+//! A fourth argument `after-stream` streams 64 messages of 16 KiB before each
+//! call (the stream cells' pattern before a lent cell's).
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let kind = args.first().map_or("message", String::as_str).to_owned();
     let n: usize = args.get(1).map_or(1 << 20, |a| a.parse().expect("a size"));
     let calls: usize = args.get(2).map_or(2000, |a| a.parse().expect("a count"));
+    let after_stream = args.get(3).is_some_and(|a| a == "after-stream");
+    let messages: Vec<Vec<u8>> = (0..64u32).map(|i| i.to_le_bytes().repeat(4096)).collect();
+    let mut places = vec![blake3_servil::Hash::from_bytes([0; 32]); messages.len()];
+    let mut stream_once = || {
+        if after_stream {
+            blake3_servil::stream(blake3_servil::Mode::Hash, |_: &mut [blake3_servil::Hash]| {}, |s| {
+                for (m, place) in messages.iter().zip(places.iter_mut()) {
+                    s.submit(m, place);
+                }
+                s.finish();
+            });
+        }
+    };
     blake3_servil::initialize_multithreaded();
     let input = vec![0x5au8; if kind == "batch" { n * 64 } else { n }];
     let mut out = vec![[0u8; 32]; if kind == "batch" { n } else { 0 }];
@@ -25,10 +40,12 @@ fn main() {
         }
     };
     for _ in 0..200 {
+        stream_once();
         call();
     }
     blake3_servil::job_trace::take();
     for _ in 0..calls {
+        stream_once();
         call();
     }
     let events = blake3_servil::job_trace::take();
