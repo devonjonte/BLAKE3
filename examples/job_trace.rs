@@ -30,7 +30,12 @@ fn main() {
         }
     };
     blake3_servil::initialize_multithreaded();
-    let copy = args.get(4).is_some_and(|a| a == "copy");
+    let copy = args.get(4).is_some_and(|a| a == "copy" || a == "cell");
+    // `cell`: also each digest copied into a ring of 1024 slots afterwards,
+    // as bench-hashes' use_digest does (the lent cell's whole sample).
+    let cell = args.get(4).is_some_and(|a| a == "cell");
+    let mut slots = vec![[0u8; 32]; 1024];
+    let mut next = 0usize;
     let source = vec![0x5au8; if kind == "batch" { n * 64 } else { n }];
     let mut out = vec![[0u8; 32]; if kind == "batch" { n } else { 0 }];
     // The lent cell's pattern with `copy`: each call's input read into a
@@ -47,7 +52,14 @@ fn main() {
         }
         let input = &kept;
         if kind == "batch" {
-            blake3_servil::hash_many_multithreaded(&input, 64, &mut out);
+            blake3_servil::hash_many_multithreaded(input, 64, &mut out);
+            if cell {
+                for digest in &out {
+                    slots[next % 1024] = *std::hint::black_box(digest);
+                    next += 1;
+                }
+                std::hint::black_box(&slots);
+            }
             std::hint::black_box(&out);
         } else {
             std::hint::black_box(blake3_servil::hash_multithreaded(&input));
@@ -69,12 +81,38 @@ fn main() {
         call();
     }
     blake3_servil::job_trace::take();
-    let began = std::time::Instant::now();
-    for _ in 0..calls {
-        stream_once();
-        call();
+    // `every10`: a stream of 64 x 16 KiB before each block of 10 calls, the
+    // calls alone timed: the bench's pattern (a sample of about 10 calls,
+    // other cells' streams between samples).
+    let every10 = args.get(3).is_some_and(|a| a == "every10");
+    let mut timed_ns = 0u128;
+    if every10 {
+        let mut stream_ten = || {
+            blake3_servil::stream(blake3_servil::Mode::Hash, |_: &mut [blake3_servil::Hash]| {}, |s| {
+                for (m, place) in messages.iter().zip(places.iter_mut()) {
+                    s.submit(m, place);
+                }
+                s.finish();
+            });
+        };
+        let _ = &mut stream_ten;
+        for _ in 0..calls / 10 {
+            stream_ten();
+            let began = std::time::Instant::now();
+            for _ in 0..10 {
+                call();
+            }
+            timed_ns += began.elapsed().as_nanos();
+        }
+    } else {
+        let began = std::time::Instant::now();
+        for _ in 0..calls {
+            stream_once();
+            call();
+        }
+        timed_ns = began.elapsed().as_nanos();
     }
-    let per_call_ns = began.elapsed().as_nanos() / calls as u128;
+    let per_call_ns = timed_ns / calls as u128;
     let events = blake3_servil::job_trace::take();
     use blake3_servil::job_trace::{CALLER_PIECE, END, WORKER_PIECE};
     // Per job: its end, its first worker piece, its threads, its pieces by kind.
