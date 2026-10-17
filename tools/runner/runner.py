@@ -18,13 +18,17 @@ at most 7200):
 (bench-hashes before its git dependency on the fork took `--thorough` for
 a full run; later ones run in full by default and take `--quick`.)
     {"type": "perf_regress", "old_commit": "...", "new_commit": "...",
-     "bench_commit": "...", "full": true, "benches": ["OLD", "NEW"]}
+     "bench_commit": "...", "full": true, "benches": ["OLD", "NEW"],
+     "contenders": [...], "points": [...]}
 
 (perf_regress's "full" judges every cell of a default run; "benches" gives
 each side its own bench-hashes commit, for an API change, its cells with
 it; both optional. Every run's samples file lands in the job's samples/.)
-    {"type": "example", "example": "scaling" | "host_lab", "fork_commit": "...",
-     "features": ["no_sme2"]}
+
+(Any job may add "powermetrics": true: the chip's CPU, GPU, and ANE power
+every 500 ms beside it, in its results' powermetrics.txt.)
+    {"type": "example", "example": "scaling" | "host_lab" | "energy_probe" | "job_trace",
+     "fork_commit": "...", "features": ["no_sme2"], "args": ["message", "1048576"]}
     {"type": "test", "fork_commit": "..."}
 
 (A test job runs the fork's suites natively: the library tests in the
@@ -47,6 +51,7 @@ this runner's perf_regress.py, the fork as it is) benchmark jobs.
 """
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -73,8 +78,8 @@ PATCH = 'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'
 # blake3, blake3-mt, blake3-servil: bench-hashes' keys before September 25, 2026.
 CONTENDERS = {"blake3-official", "blake3-official-mt", "blake3", "blake3-servil-st", "blake3-servil", "blake3-servil-mt", "blake3-mt",
               "sha256", "sha256-ring", "sha256-cc", "sha1dc", "sha3-256", "blake3-commonware"}
-EXAMPLES = {"scaling", "host_lab"}
-FEATURES = {"no_sme2", "pure"}
+EXAMPLES = {"scaling", "host_lab", "energy_probe", "job_trace", "sme_units"}
+FEATURES = {"no_sme2", "pure", "job-trace"}
 DEFAULT_LIMIT = 1800
 MAX_LIMIT = 7200
 
@@ -185,6 +190,15 @@ def perf_regress(job, run, work, out):
     cmd = [sys.executable, "tools/perf_regress.py", "compare", old, new, "--keep", str(out / "samples")]
     if job.get("full"):
         cmd.append("--full")
+    # The cells a run with these contenders (and points) measures, every one
+    # judged: perf_regress compare --contenders, --points.
+    if "contenders" in job:
+        assert job["contenders"] and set(job["contenders"]) <= CONTENDERS, f"contenders must come from {sorted(CONTENDERS)}"
+        cmd += ["--contenders", ",".join(job["contenders"])]
+    if "points" in job:
+        assert job["points"] and all(isinstance(p, str) and p.replace(" ", "").isalnum() for p in job["points"]), \
+            "points are labels such as \"64 B\" or \"1024\""
+        cmd += ["--points", ",".join(job["points"])]
     if "benches" in job:
         assert isinstance(job["benches"], list) and len(job["benches"]) == 2, "benches: two bench-hashes commits"
         cmd += ["--bench", *(hex_commit({"bench": b}, "bench") for b in job["benches"])]
@@ -206,8 +220,13 @@ def example(job, run, work, out):
     if features:
         cmd += ["--features", ",".join(features)]
     run.run(cmd, cwd=fork)
+    # An example's arguments: a few short words or numbers, nothing a shell
+    # would read.
+    args = job.get("args", [])
+    assert isinstance(args, list) and len(args) <= 8 and all(isinstance(a, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", a) for a in args), \
+        "args: at most 8 words of letters, digits, _ . -"
     # host_lab writes its report to the working directory.
-    run.run([str(fork / "target" / "release" / "examples" / job["example"])], cwd=out)
+    run.run([str(fork / "target" / "release" / "examples" / job["example"]), *args], cwd=out)
     return "ok"
 
 
@@ -240,6 +259,14 @@ def power():
     return ", ".join([source] + ([charge] if charge else []) + modes)
 
 
+# The chip's power beside a job ("powermetrics": true), from the one command
+# line /etc/sudoers.d/benchrunner-powermetrics lets this user run as root:
+# CPU, GPU, and ANE power every 500 ms, stopping by itself after MAX_LIMIT,
+# so a runner that dies leaves no sampler running.
+POWERMETRICS = ["sudo", "-n", "/usr/bin/powermetrics", "--samplers", "cpu_power", "-i", "500", "-n", "14400"]
+assert 14400 * 0.5 >= MAX_LIMIT
+
+
 def process(path, results):
     out = results / f"{path.stem}.{time.strftime('%Y%m%d-%H%M%S')}"
     out.mkdir()
@@ -252,8 +279,18 @@ def process(path, results):
             assert job.get("type") in HANDLERS, f"type must be one of {sorted(HANDLERS)}"
             limit = job.get("time_limit_seconds", DEFAULT_LIMIT)
             assert isinstance(limit, int) and 0 < limit <= MAX_LIMIT, f"time_limit_seconds must be 1-{MAX_LIMIT}"
-            with tempfile.TemporaryDirectory(dir=HOME / "tmp") as work:
-                verdict["status"] = HANDLERS[job["type"]](job, Job(log, limit), Path(work), out)
+            assert isinstance(job.get("powermetrics", False), bool), "powermetrics: true or false"
+            meter = subprocess.Popen(POWERMETRICS, stdout=open(out / "powermetrics.txt", "w"), stderr=log) \
+                if job.get("powermetrics") else None
+            try:
+                with tempfile.TemporaryDirectory(dir=HOME / "tmp") as work:
+                    verdict["status"] = HANDLERS[job["type"]](job, Job(log, limit), Path(work), out)
+            finally:
+                if meter is not None:
+                    # sudo passes the signal on to powermetrics, which ends its
+                    # last sample and exits.
+                    meter.send_signal(signal.SIGINT)
+                    meter.wait(timeout=10)
         except Exception as e:
             verdict["status"] = "error"
             verdict["error"] = f"{type(e).__name__}: {e}"

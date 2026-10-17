@@ -295,11 +295,18 @@ mod imp {
 mod tests {
     use super::*;
 
-    /// run's contract: one child at a time (the tests run on many threads).
-    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
+    /// run's contract, one child at a time, and the windows the tests read:
+    /// the tests that use the process's load windows take turns.
     fn one() -> std::sync::MutexGuard<'static, ()> {
-        ONE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::load::exclusive()
+    }
+
+    /// Other programs' load over about the second before now, in
+    /// milli-CPUs: the tests judge a child's windows against it, so that a
+    /// busy machine (a gate's proof workers beside the tests) still tests
+    /// the attribution, rather than failing or passing for its own load.
+    fn background_milli_cpus() -> u64 {
+        crate::load::other_milli_cpus_over(1_000_000_000)
     }
 
     /// A shell that spins briefly: it succeeds, its wall time covers its
@@ -325,16 +332,18 @@ mod tests {
     #[test]
     fn a_running_childs_windows_stay_a_second_long() {
         let _one = one();
+        let background = background_milli_cpus();
         let before = crate::load::windows().len();
-        // One process spinning about 3 s (a grandchild's CPU time would
-        // reach this process only when the child reaps it).
-        let child = run(std::process::Command::new("perl").args(["-e", "my $t = time; 1 while time - $t < 3"]));
+        // One process spinning 3 s (a grandchild's CPU time would reach
+        // this process only when the child reaps it; Time::HiRes, since
+        // whole seconds would stop it anywhere from 2 s on).
+        let child = run(std::process::Command::new("perl").args(["-e", "use Time::HiRes qw(time); my $t = time; 1 while time - $t < 3"]));
         assert!(child.wall_ns > 2_200_000_000, "the child ran long enough to span windows: {child:?}");
         let windows = crate::load::windows();
         let during: Vec<_> = windows[before..].iter().filter(|w| w.end_ns > child.started_ns && w.start_ns < child.started_ns + child.wall_ns).collect();
         assert!(during.len() >= 2, "windows closed while it ran: {windows:?}");
         assert!(during.iter().all(|w| w.end_ns - w.start_ns < 2 * crate::load::WINDOW_NS), "{during:?}");
-        assert!(during.iter().all(|w| w.other_milli_cpus < 500), "the child's own CPU is this process's: {during:?}");
+        assert!(during.iter().all(|w| w.other_milli_cpus < background + 500), "the child's own CPU is this process's (other load before it: {background}): {during:?}");
         assert_eq!(running_cpu_ns(), 0, "none running after the reaping");
     }
 
@@ -344,6 +353,7 @@ mod tests {
     #[test]
     fn a_sibling_beside_the_child_reads_as_load() {
         let _one = one();
+        let background = background_milli_cpus();
         let before = crate::load::windows().len();
         let mut sibling = std::process::Command::new("perl").args(["-e", "my $t = time; 1 while time - $t < 4"]).spawn().expect("perl");
         let child = run(std::process::Command::new("sleep").arg("3"));
@@ -351,7 +361,44 @@ mod tests {
         sibling.wait().expect("the sibling");
         let windows = crate::load::windows();
         let during: Vec<_> = windows[before..].iter().filter(|w| w.end_ns > child.started_ns && w.start_ns < child.started_ns + child.wall_ns).collect();
-        assert!(during.iter().any(|w| w.other_milli_cpus >= 700), "a spinning sibling is other load: {during:?}");
+        assert!(during.iter().any(|w| w.other_milli_cpus >= background + 700), "a spinning sibling is other load (other load before it: {background}): {during:?}");
+    }
+
+    /// A child's threads that exit while it runs still count as its own:
+    /// the child (this test binary again, running the helper below) burns
+    /// about 1.2 CPU-seconds in four threads that then exit, and sleeps on
+    /// past the next window; no window while it runs reads that CPU as
+    /// other programs'. On Linux /proc/PID/stat counts a process's exited
+    /// threads; on macOS proc_pid_rusage's task times are to count them.
+    #[test]
+    #[cfg(unix)]
+    fn a_childs_exited_threads_count_as_its_own() {
+        let _one = one();
+        let background = background_milli_cpus();
+        let before = crate::load::windows().len();
+        let child = run(std::process::Command::new(std::env::current_exe().expect("the test binary"))
+            .args(["--exact", "child::tests::exiting_threads_helper", "--test-threads=1", "--quiet"])
+            .env("CLOCKS_EXITING_THREADS_HELPER", "1")
+            .stdout(std::process::Stdio::null()));
+        assert!(child.success, "{child:?}");
+        let windows = crate::load::windows();
+        let during: Vec<_> = windows[before..].iter().filter(|w| w.end_ns > child.started_ns && w.start_ns < child.started_ns + child.wall_ns).collect();
+        assert!(!during.is_empty(), "{windows:?}");
+        assert!(during.iter().all(|w| w.other_milli_cpus < background + 500), "a child's exited threads are this process's (other load before it: {background}): {during:?}");
+    }
+
+    /// The helper for the test above: does nothing unless that test set
+    /// CLOCKS_EXITING_THREADS_HELPER.
+    #[test]
+    fn exiting_threads_helper() {
+        if std::env::var_os("CLOCKS_EXITING_THREADS_HELPER").is_none() {
+            return;
+        }
+        let threads: Vec<_> = (0..4).map(|_| std::thread::spawn(|| crate::busy_work(300_000_000))).collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1500));
     }
 
     /// A reaped child's CPU time counts as this process's own, so the

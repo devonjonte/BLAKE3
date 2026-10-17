@@ -18,7 +18,7 @@
 - **A C API**, `capi/b3.h`: a mode as a value (`b3_plain`, `b3_keyed`,
   `b3_derive_key`, the context hashed once), digests as values, the
   one-shot and batch calls on one thread or many, and a hasher in the
-  caller's memory. It builds as `libb3`, and compiles as C11 and C++11.
+  caller's memory. It builds as `libb3_servil`, and compiles as C11 and C++11.
 - **Breaking: the supported targets are 64-bit Arm (Linux, macOS),
   x86-64 (Linux, macOS, Windows with MSVC), and WebAssembly, with the
   latest stable Rust.** 32-bit x86 and Arm, big-endian CPUs, Windows with

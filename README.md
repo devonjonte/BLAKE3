@@ -57,8 +57,8 @@ The [crate documentation](https://johnservil.github.io/BLAKE3/blake3_servil/) op
 table of which call fits your data. `keyed_hash` (a MAC) and `derive_key` (a KDF) work as in
 official BLAKE3, below.
 
-From C, build the library in `capi/` (`cargo build --release` there gives `libb3.a` and
-`libb3.so` or `libb3.dylib`), include [`capi/b3.h`](capi/b3.h), and link with `-lb3`:
+From C, build the library in `capi/` (`cargo build --release` there gives `libb3_servil.a` and
+`libb3_servil.so` or `libb3_servil.dylib`), include [`capi/b3.h`](capi/b3.h), and link with `-lb3_servil`:
 
 ```c
 #include "b3.h"

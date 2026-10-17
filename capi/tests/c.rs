@@ -33,7 +33,7 @@ fn from_c() {
         .arg("-L")
         .arg(&lib_dir)
         .arg(format!("-Wl,-rpath,{}", lib_dir.display()))
-        .args(["-lb3", "-o"])
+        .args(["-lb3_servil", "-o"])
         .arg(&program)
         .status()
         .expect("a C compiler, cc");
@@ -47,7 +47,7 @@ fn from_c() {
         .arg("-L")
         .arg(&lib_dir)
         .arg(format!("-Wl,-rpath,{}", lib_dir.display()))
-        .args(["-lb3", "-o"])
+        .args(["-lb3_servil", "-o"])
         .arg(&cpp)
         .status()
         .expect("a C++ compiler, c++");

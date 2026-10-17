@@ -7,7 +7,7 @@ license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
 publish = false
 
 [lib]
-name = "b3"
+name = "b3_servil"
 # The static and shared C libraries, and the Rust library its tests call.
 crate-type = ["staticlib", "cdylib", "rlib"]
 

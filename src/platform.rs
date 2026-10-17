@@ -680,12 +680,72 @@ impl Platform {
     }
 }
 
-// Note that AVX-512 is divided into multiple featuresets, and we use two of
-// them, F and VL.
+/// The x86-64 features the platforms check, as bits: [`SSE41`], [`AVX2`],
+/// [`AVX512`] (F and VL, the two AVX-512 featuresets the kernels use), and
+/// [`READ`] once the bits are read. Every check reads them from CPUID once
+/// per process: CPUID costs about 640 ns (i7-12700K), and cpufeatures read
+/// three leaves per feature checked, six on an AVX2 machine's first
+/// detection where two serve. A feature the build assumes needs none.
+#[cfg(target_arch = "x86_64")]
+mod x86_bits {
+    pub const SSE41: u8 = 2;
+    pub const AVX2: u8 = 4;
+    pub const AVX512: u8 = 8;
+    pub const READ: u8 = 128;
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn x86_features() -> u8 {
+    use core::sync::atomic::{AtomicU8, Ordering};
+    static FEATURES: AtomicU8 = AtomicU8::new(0);
+    let features = FEATURES.load(Ordering::Relaxed);
+    if features != 0 {
+        return features;
+    }
+    let features = read_x86_features();
+    FEATURES.store(features, Ordering::Relaxed);
+    features
+}
+
+/// [`x86_features`] from CPUID: leaf 1, and, where the CPU has AVX and the
+/// OS saves its registers (XSAVE, OSXSAVE, AVX, then XCR0), leaf 7. Every
+/// CPU with AVX has leaf 7.
+#[cfg(target_arch = "x86_64")]
+#[cold]
+fn read_x86_features() -> u8 {
+    use core::arch::x86_64 as arch;
+    use x86_bits::*;
+    // Sound: every x86-64 CPU has CPUID. (Safe since Rust 1.94; unsafe
+    // before.)
+    #[allow(unused_unsafe)]
+    let leaf1 = unsafe { arch::__cpuid(1) };
+    let mut features = READ;
+    if leaf1.ecx & (1 << 19) != 0 {
+        features |= SSE41;
+    }
+    let avx = (1 << 26) | (1 << 27) | (1 << 28);
+    if leaf1.ecx & avx == avx {
+        // Sound: OSXSAVE (bit 27) says the OS enabled XGETBV.
+        let xcr0 = unsafe { arch::_xgetbv(0) };
+        // Sound: as leaf 1; leaf 7 exists where AVX does.
+        #[allow(unused_unsafe)]
+        let leaf7 = unsafe { arch::__cpuid_count(7, 0) };
+        let (ymm, zmm) = (0b110, 0b1110_0110);
+        if xcr0 & ymm == ymm && leaf7.ebx & (1 << 5) != 0 {
+            features |= AVX2;
+        }
+        let f_vl = (1 << 16) | (1 << 31);
+        if xcr0 & zmm == zmm && leaf7.ebx & f_vl == f_vl {
+            features |= AVX512;
+        }
+    }
+    features
+}
+
 #[cfg(blake3_avx512_ffi)]
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-#[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
 pub fn avx512_detected() -> bool {
     if cfg!(miri) {
         return false;
@@ -696,13 +756,18 @@ pub fn avx512_detected() -> bool {
         return false;
     }
 
-    cpufeatures::new!(has_avx512, "avx512f", "avx512vl");
-    has_avx512::get()
+    // A build for CPUs that have it (`-C target-cpu=...` or
+    // `-C target-feature=...`) needs no check: run elsewhere, it stops
+    // at its first such instruction (SIGILL), in the startup self-test.
+    if cfg!(all(target_feature = "avx512f", target_feature = "avx512vl")) {
+        return true;
+    }
+
+    x86_features() & x86_bits::AVX512 != 0
 }
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-#[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
 pub fn avx2_detected() -> bool {
     if cfg!(miri) {
         return false;
@@ -713,21 +778,32 @@ pub fn avx2_detected() -> bool {
         return false;
     }
 
-    cpufeatures::new!(has_avx2, "avx2");
-    has_avx2::get()
+    // A build for CPUs that have it (`-C target-cpu=...` or
+    // `-C target-feature=...`) needs no check: run elsewhere, it stops
+    // at its first such instruction (SIGILL), in the startup self-test.
+    if cfg!(target_feature = "avx2") {
+        return true;
+    }
+
+    x86_features() & x86_bits::AVX2 != 0
 }
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-#[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
 pub fn sse41_detected() -> bool {
     if cfg!(miri) {
         return false;
     }
 
 
-    cpufeatures::new!(has_sse41, "sse4.1");
-    has_sse41::get()
+    // A build for CPUs that have it (`-C target-cpu=...` or
+    // `-C target-feature=...`) needs no check: run elsewhere, it stops
+    // at its first such instruction (SIGILL), in the startup self-test.
+    if cfg!(target_feature = "sse4.1") {
+        return true;
+    }
+
+    x86_features() & x86_bits::SSE41 != 0
 }
 
 /// The core's virtual counter (CNTVCT_EL0, which user code reads
@@ -952,5 +1028,23 @@ mod sme2_turn_test {
                 assert!(matches!(first.platform(), Platform::SME2));
             }
         }
+    }
+}
+
+#[cfg(all(test, target_arch = "x86_64", not(miri)))]
+mod x86_features_test {
+    /// The CPUID read finds what the standard library's detection, an
+    /// independent reading, finds.
+    #[test]
+    fn test_x86_features_match_std() {
+        use super::x86_bits::*;
+        let features = super::read_x86_features();
+        assert_eq!(features & READ, READ);
+        assert_eq!(features & SSE41 != 0, std::is_x86_feature_detected!("sse4.1"));
+        assert_eq!(features & AVX2 != 0, std::is_x86_feature_detected!("avx2"));
+        assert_eq!(
+            features & AVX512 != 0,
+            std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl")
+        );
     }
 }

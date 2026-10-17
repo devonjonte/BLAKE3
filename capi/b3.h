@@ -7,7 +7,7 @@
  * nothing extra. Calls that use other CPU cores (`_multithreaded`) start
  * the library's threads at their first use; they last for the process.
  *
- * Link with -lb3 (libb3.a or libb3.so / libb3.dylib, built by `cargo build
+ * Link with -lb3_servil (libb3_servil.a or libb3_servil.so / libb3_servil.dylib, built by `cargo build
  * --release` in capi/). C11, or C++11.
  */
 #ifndef B3_H
