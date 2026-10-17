@@ -205,7 +205,7 @@ pub fn windows() -> Vec<Window> {
 /// from two readings of its own (the windows' rule, apart from their
 /// state): the tests' measure of the load beside them. 0 where the
 /// platform gives no CPU times.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn other_milli_cpus_over(ns: u64) -> u64 {
     let Some(before) = Reading::take() else { return 0 };
     std::thread::sleep(std::time::Duration::from_nanos(ns));
@@ -216,7 +216,7 @@ pub(crate) fn other_milli_cpus_over(ns: u64) -> u64 {
 /// The tests that use this process's windows (they tick, read, or run a
 /// child, whose watcher ticks) take turns: the tests run on many threads,
 /// and one's windows are another's.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn exclusive() -> std::sync::MutexGuard<'static, ()> {
     static TURN: Mutex<()> = Mutex::new(());
     TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
