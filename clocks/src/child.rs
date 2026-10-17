@@ -60,9 +60,11 @@ pub fn run(command: &mut std::process::Command) -> Run {
 }
 
 /// The child [`run`] is running (its pid; 0 for none): one at a time.
+#[cfg(unix)]
 static RUNNING: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
 /// The CPU time of the child [`run`] is running, so far (0 for none).
+#[cfg(unix)]
 pub(crate) fn running_cpu_ns() -> u64 {
     match RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
         0 => 0,
@@ -281,10 +283,6 @@ mod imp {
 mod imp {
     use super::Run;
 
-    pub fn cpu_so_far_ns(_: i32) -> u64 {
-        0
-    }
-
     pub fn finish(mut child: std::process::Child, started: std::time::Instant, started_ns: u64) -> Run {
         let status = child.wait().expect("wait on the child");
         let wall_ns = crate::since_ns(started);
@@ -292,7 +290,8 @@ mod imp {
     }
 }
 
-#[cfg(test)]
+/// The tests start processes (Unix only).
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
@@ -306,7 +305,6 @@ mod tests {
     /// A shell that spins briefly: it succeeds, its wall time covers its
     /// CPU time, and a failing one reports failure.
     #[test]
-    #[cfg(unix)]
     fn a_child_is_timed_and_counted() {
         let _one = one();
         let ok = run(std::process::Command::new("sh").args(["-c", "i=0; while [ $i -lt 20000 ]; do i=$((i+1)); done"]));
@@ -325,7 +323,6 @@ mod tests {
     /// its CPU time this process's own in each (none reads as other
     /// programs' load), the watcher's work done by its exit.
     #[test]
-    #[cfg(unix)]
     fn a_running_childs_windows_stay_a_second_long() {
         let _one = one();
         let before = crate::load::windows().len();
@@ -345,7 +342,6 @@ mod tests {
     /// process that run did not start, reads as other programs' load in
     /// the windows while the child runs.
     #[test]
-    #[cfg(unix)]
     fn a_sibling_beside_the_child_reads_as_load() {
         let _one = one();
         let before = crate::load::windows().len();
@@ -361,7 +357,6 @@ mod tests {
     /// A reaped child's CPU time counts as this process's own, so the
     /// load it puts on the machine is never read as other programs'.
     #[test]
-    #[cfg(unix)]
     fn a_reaped_childs_cpu_time_is_this_processs() {
         let _one = one();
         let before = crate::process_cpu_ns();
