@@ -313,12 +313,15 @@ const POOL_LEN: usize = 512 << 10;
 #[cfg(unix)]
 const SHARED_POOL_LEN: usize = 8 << 20;
 
-/// The most threads b3sum hashes on (--num-threads, else one per CPU),
-/// set once in main before any input is hashed.
+/// The most threads b3sum hashes on: --num-threads (main sets it), else
+/// one per CPU, asked for only when it matters (several files, or a file
+/// the pool takes): on Linux, std::thread::available_parallelism reads
+/// the process's cgroup files, eight system calls, which a run on one
+/// small file never needs.
 static THREADS: std::sync::OnceLock<std::num::NonZeroUsize> = std::sync::OnceLock::new();
 
 fn threads() -> std::num::NonZeroUsize {
-    *THREADS.get().expect("main sets the threads first")
+    *THREADS.get_or_init(|| std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN))
 }
 
 /// The threads hashing files at once, with --num-threads (hash_inputs sets
@@ -380,6 +383,10 @@ fn fill(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<usize> {
 fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io::Result<u64> {
     BUFFERS.with_borrow_mut(|[first, second]| {
         let mut len = fill(&mut reader, first)?;
+        if len < PIECE {
+            update(hasher, &first[..len], POOL_LEN);
+            return Ok(len as u64);
+        }
         if threads().get() == 1 {
             // Each piece read, then hashed, on this thread.
             let mut total = 0;
@@ -391,10 +398,6 @@ fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io:
                 }
                 len = fill(&mut reader, first)?;
             }
-        }
-        if len < PIECE {
-            update(hasher, &first[..len], POOL_LEN);
-            return Ok(len as u64);
         }
         std::thread::scope(|scope| {
             let (free_tx, free_rx) = std::sync::mpsc::sync_channel::<&mut [u8]>(1);
@@ -655,7 +658,7 @@ fn parse_check_line(mut line: &str) -> anyhow::Result<ParsedCheckLine> {
 /// opening and reading each, which one thread does one at a time.
 fn hash_inputs(args: &Args) -> u64 {
     let paths = &args.file_args;
-    let threads = threads().get().min(paths.len());
+    let threads = if paths.len() == 1 { 1 } else { threads().get().min(paths.len()) };
     // With --num-threads, the bound: the pool takes what the file threads
     // leave. By default the pool keeps one thread a CPU beside the file
     // threads, which keeps every core busy to the run's end: the bound
@@ -849,8 +852,9 @@ fn main() -> anyhow::Result<()> {
     explain_sigbus();
     blake3::initialize();
     let args = Args::parse()?;
-    let threads = args.num_threads().unwrap_or_else(|| std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN));
-    THREADS.set(threads).expect("main sets the threads once");
+    if let Some(threads) = args.num_threads() {
+        THREADS.set(threads).expect("main sets the threads first");
+    }
     let mut files_failed = 0u64;
     // Note that file_args automatically includes `-` if nothing is given.
     if args.check() {
