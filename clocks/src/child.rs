@@ -295,11 +295,10 @@ mod imp {
 mod tests {
     use super::*;
 
-    /// run's contract: one child at a time (the tests run on many threads).
-    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
+    /// run's contract, one child at a time, and the windows the tests read:
+    /// the tests that use the process's load windows take turns.
     fn one() -> std::sync::MutexGuard<'static, ()> {
-        ONE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::load::exclusive()
     }
 
     /// Other programs' load over about the second before now, in
