@@ -18,7 +18,8 @@ at most 7200):
 (bench-hashes before its git dependency on the fork took `--thorough` for
 a full run; later ones run in full by default and take `--quick`.)
     {"type": "perf_regress", "old_commit": "...", "new_commit": "...",
-     "bench_commit": "...", "full": true, "benches": ["OLD", "NEW"]}
+     "bench_commit": "...", "full": true, "benches": ["OLD", "NEW"],
+     "contenders": [...], "points": [...]}
 
 (perf_regress's "full" judges every cell of a default run; "benches" gives
 each side its own bench-hashes commit, for an API change, its cells with
@@ -189,6 +190,15 @@ def perf_regress(job, run, work, out):
     cmd = [sys.executable, "tools/perf_regress.py", "compare", old, new, "--keep", str(out / "samples")]
     if job.get("full"):
         cmd.append("--full")
+    # The cells a run with these contenders (and points) measures, every one
+    # judged: perf_regress compare --contenders, --points.
+    if "contenders" in job:
+        assert job["contenders"] and set(job["contenders"]) <= CONTENDERS, f"contenders must come from {sorted(CONTENDERS)}"
+        cmd += ["--contenders", ",".join(job["contenders"])]
+    if "points" in job:
+        assert job["points"] and all(isinstance(p, str) and p.replace(" ", "").isalnum() for p in job["points"]), \
+            "points are labels such as \"64 B\" or \"1024\""
+        cmd += ["--points", ",".join(job["points"])]
     if "benches" in job:
         assert isinstance(job["benches"], list) and len(job["benches"]) == 2, "benches: two bench-hashes commits"
         cmd += ["--bench", *(hex_commit({"bench": b}, "bench") for b in job["benches"])]
