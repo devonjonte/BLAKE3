@@ -201,6 +201,18 @@ pub fn windows() -> Vec<Window> {
     state.windows.clone()
 }
 
+/// Other programs' load over the next `ns` of wall time, in milli-CPUs,
+/// from two readings of its own (the windows' rule, apart from their
+/// state): the tests' measure of the load beside them. 0 where the
+/// platform gives no CPU times.
+#[cfg(test)]
+pub(crate) fn other_milli_cpus_over(ns: u64) -> u64 {
+    let Some(before) = Reading::take() else { return 0 };
+    std::thread::sleep(std::time::Duration::from_nanos(ns));
+    let after = Reading::take().expect("CPU times read a moment ago");
+    between(before, after).other_milli_cpus
+}
+
 /// Milli-CPUs as "1.23".
 pub fn cpus(milli: u64) -> String {
     let hundredths = (milli + 5) / 10;
