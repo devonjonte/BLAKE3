@@ -289,7 +289,9 @@ def main():
     failed = 0
     # A fresh process per case: the normal forms' caches keep their terms
     # alive (canon.py), so a worker that kept them would only grow.
-    with multiprocessing.Pool(min(4, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
+    # Every CPU: a case holds about 1 GB (October 17), so the VM's sixteen
+    # fit its memory many times over; four took 90 minutes for 3.1 CPU-hours.
+    with multiprocessing.Pool(multiprocessing.cpu_count(), maxtasksperchild=1) as pool:
         for (name, _, _), verdict in pool.imap(prove_case, todo):
             print(f"{name}: {verdict}", flush=True)
             failed += verdict.startswith("NOT")

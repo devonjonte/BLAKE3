@@ -5,7 +5,7 @@ These tools prove every assembly kernel on AArch64 (the SME2 hybrid,
 the compression function of the Lean specification of BLAKE3
 (`c2sp/BLAKE3/`), for every input, key, counter, and flags value:
 
-    pypy3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9 (327 cases, 2 min on 16 cores)
+    pypy3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9 (327 cases, 3.1 CPU-hours: about 12 minutes on 16 CPUs)
     pypy3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof, and the chunk and parent kernels at every group count (36 cases, hours); c/blake3_sme2_hybrid_aarch64.S: chunks_x2 (2 cases, 9 min)
     pypy3 tools/verify/prove_sme2.py xof_every messages_every  # the other kernels at every group count (hours)
     pypy3 tools/verify/lean/emit.py                   # the definition, from the Lean specification (needs Lean)
