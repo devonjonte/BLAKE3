@@ -735,12 +735,21 @@ impl Pool {
     /// finds nothing.
     fn serve(&self, me: usize) -> ! {
         let (word, bit) = (&self.parked[me / 64], 1u64 << (me % 64));
+        // This worker's spin: SPIN after a spin that found work, halved
+        // after each that found none (a stream whose work comes in long
+        // gaps stops paying for spins; one whose work comes often keeps
+        // them).
+        let mut spin = SPIN;
         loop {
             if sources::run_one() {
                 continue;
             }
-            if sources::open() && spin_for_work() {
-                continue;
+            if sources::open() {
+                if spin_for_work(spin) {
+                    spin = SPIN;
+                    continue;
+                }
+                spin /= 2;
             }
             // Park: the bit first, then one more look (a publisher stores,
             // then reads `parked`; this sets the bit, then looks: one of the
@@ -773,8 +782,9 @@ impl Pool {
 /// a cap on how many workers spin did not help.
 const SPIN: std::time::Duration = std::time::Duration::from_micros(5);
 
-/// Look for work for up to SPIN: whether some appeared.
-fn spin_for_work() -> bool {
+/// Look for work for up to `spin` (at least one round of looks): whether
+/// some appeared.
+fn spin_for_work(spin: std::time::Duration) -> bool {
     let started = std::time::Instant::now();
     loop {
         for _ in 0..16 {
@@ -783,7 +793,7 @@ fn spin_for_work() -> bool {
             }
             core::hint::spin_loop();
         }
-        if started.elapsed() >= SPIN || !sources::open() {
+        if started.elapsed() >= spin || !sources::open() {
             return false;
         }
     }
