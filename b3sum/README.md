@@ -16,7 +16,7 @@ Options:
       --derive-key <CONTEXT>  Use the key derivation mode, with the given context string
   -l, --length <LEN>          The number of output bytes, before hex encoding [default: 32]
       --seek <SEEK>           The starting output byte offset, before hex encoding [default: 0]
-      --num-threads <NUM>     Ignored, with a warning: b3sum chooses its threads itself
+      --num-threads <NUM>     The most threads hashing at once [default: as fast as b3sum can]
       --no-mmap               No effect: b3sum chooses between reading and mapping each file
       --no-names              Omit filenames in the output
       --raw                   Write raw output bytes to stdout, rather than hex
@@ -26,6 +26,17 @@ Options:
   -h, --help                  Print help (see more with '--help')
   -V, --version               Print version
 ```
+
+`--num-threads N` hashes on at most N threads in all: several files at
+once, or one file over several threads. By default b3sum hashes as many
+files as there are CPUs at once, and a large one over every CPU besides:
+more threads than CPUs, which keeps every core busy to the end (the bound
+costs a tree with a few large files up to a third more time). `--num-threads 1` runs b3sum on
+one thread, reading and hashing each file in turn: for one b3sum per
+core, or to leave the other cores to other work. With more, a large file
+read from storage, or stdin, has one more thread reading ahead, which
+hashes nothing. To run b3sum on chosen CPUs, start it under
+`taskset -c LIST b3sum ...` (Linux).
 
 See also [this document about how the `--check` flag
 works](what_does_check_do.md).
