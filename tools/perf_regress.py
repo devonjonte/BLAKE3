@@ -8,6 +8,9 @@ a commit, measured side by side.
     pypy3 tools/perf_regress.py compare OLD NEW --full # every cell of a default run
     pypy3 tools/perf_regress.py compare OLD NEW --bench OLD_BENCH NEW_BENCH
                                    # an API change: each side's own cells
+    pypy3 tools/perf_regress.py compare OLD NEW --full --layouts 18 --rounds 4 --keep DIR
+                                   # 18 pairs of runs with 4 samples of every
+                                   # cell; every run's samples file kept in DIR
     pypy3 tools/perf_regress.py build                  # bench-hashes against the working tree
 
 It builds bench-hashes twice, once against the fork at the old commit and
@@ -16,9 +19,11 @@ working tree), the same benchmark source in both; or, with `--bench`, each
 side's own bench-hashes commit (an API change, whose cells call the new
 API: the old design through the old cells against the new design through
 the new ones; the instrument, the clocks crate and `regress`, stays the
-working tree's on both sides). It relinks each side
-LAYOUTS times, each with its own random function order (a binary's
-layout alone moves cells by several percent: bench-hashes
+working tree's on both sides). It relinks each side once per pair
+(`--layouts`, 8 by default), each with its own random function order,
+the two sides' seeds apart, so that identical code on both sides still
+meets as many layouts as a real change does (a binary's layout alone
+moves cells by several percent: bench-hashes
 audit/variance-on-unchanged-code.md), and runs
 `bench-hashes regress OLD... -- NEW...`, pair i on the i-th layout of
 each side, whose exit it returns: 0, no cell slower;
@@ -209,15 +214,15 @@ def lld_dir():
     return link.parent
 
 
-def layouts(side, exe, copy, env):
-    """`exe` relinked LAYOUTS times, each with its functions in their own
-    random order (seed i for layout i): a linker order file, which Mach-O's
+def layouts(side, exe, copy, env, seeds):
+    """`exe` relinked once per seed, each with its functions in their own
+    random order (random.Random(seed)): a linker order file, which Mach-O's
     ld and lld on Linux both take. Each relink rebuilds the bench-hashes
     crate alone; its dependencies stay built."""
     nm = subprocess.run(["nm", exe], env=ENV, check=True, stdout=subprocess.PIPE, text=True).stdout
     symbols = sorted({fields[2] for fields in (line.split() for line in nm.splitlines()) if len(fields) == 3 and fields[1] in "tT"})
     exes = []
-    for seed in range(LAYOUTS):
+    for seed in seeds:
         order = CACHE / side / f"order-{seed}.txt"
         shuffled = list(symbols)
         random.Random(seed).shuffle(shuffled)
@@ -276,24 +281,27 @@ def provenance(name, fork, bench_rev):
     return f"perf_regress: {name}: fork {git('rev-parse', '--short=12', fork)}, bench-hashes {source}"
 
 
-def compare(old_rev, new, full=False, bench=(None, None)):
+def compare(old_rev, new, full=False, bench=(None, None), pairs=LAYOUTS, rounds=None, keep=None):
     """Compare the fork at `old_rev` with `new` (a commit, or None for the
     working tree): bench-hashes regress over each side's layouts (with
     `full`, every cell of a default run; with `bench`, each side's own
-    bench-hashes commit). Returns its exit code. It first prints what it
+    bench-hashes commit; `pairs` pairs, `rounds` samples of every cell a
+    run, each run's samples file kept in `keep`). Returns its exit code. It first prints what it
     compares, so that a report carries what reproduces it."""
     new_rev = working_tree_commit() if new is None else new
-    old = layouts("old", *side_bench("old", old_rev, bench[0]))
-    new_exes = layouts("new", *side_bench("new", new_rev, bench[1]))
+    old = layouts("old", *side_bench("old", old_rev, bench[0]), range(pairs))
+    new_exes = layouts("new", *side_bench("new", new_rev, bench[1]), range(pairs, 2 * pairs))
     name = "the working tree" if new is None else new
     print(f"perf_regress: {name} against {old_rev}", file=sys.stderr, flush=True)
     print(provenance("old", old_rev, bench[0]), file=sys.stderr, flush=True)
     print(provenance("new", new_rev, bench[1]), file=sys.stderr, flush=True)
     linker = "ld -order_file" if sys.platform == "darwin" else f"{os.path.realpath(lld_dir() / 'ld.lld')} --symbol-ordering-file"
-    print(f"perf_regress: {LAYOUTS} layouts a side, function order seeds 0-{LAYOUTS - 1} (random.Random(seed).shuffle of the sorted text symbols), {linker}; "
+    print(f"perf_regress: {pairs} layouts a side, function order seeds 0-{pairs - 1} old and {pairs}-{2 * pairs - 1} new (random.Random(seed).shuffle of the sorted text symbols), {linker}; "
           f"instrument: clocks and regress from {git('rev-parse', '--short=12', 'HEAD')}{' plus uncommitted changes' if git('status', '--porcelain', '--untracked-files=no') else ''}",
           file=sys.stderr, flush=True)
-    return subprocess.run([new_exes[0], "regress", *(["--full"] if full else []), *old, "--", *new_exes], env=ENV).returncode
+    options = [*(["--full"] if full else []), "--pairs", str(pairs), *(["--rounds", str(rounds)] if rounds else []),
+               *(["--keep", str(Path(keep).resolve())] if keep else [])]
+    return subprocess.run([new_exes[0], "regress", *options, *old, "--", *new_exes], env=ENV).returncode
 
 
 def main():
@@ -309,6 +317,9 @@ def main():
     p.add_argument("--full", action="store_true", help="every cell of a default run, not the check's points")
     p.add_argument("--bench", nargs=2, metavar=("OLD_BENCH", "NEW_BENCH"),
                    help="each side's own bench-hashes commit (an API change, its cells changed with it)")
+    p.add_argument("--layouts", type=int, default=LAYOUTS, help=f"pairs of runs, each side relinked for each (default {LAYOUTS})")
+    p.add_argument("--rounds", type=int, help="samples of every cell a run (default: a run's own)")
+    p.add_argument("--keep", help="a directory to keep every run's samples file in")
     p = sub.add_parser("build", help="build bench-hashes against the working tree, or a commit, as it is; "
                                      "print the executable's path")
     p.add_argument("--commit", help="a fork commit (default: the working tree)")
@@ -329,7 +340,7 @@ def main():
             return 0
         if args.command == "check":
             return compare(args.against, None)
-        return compare(args.old, args.new, args.full, tuple(args.bench) if args.bench else (None, None))
+        return compare(args.old, args.new, args.full, tuple(args.bench) if args.bench else (None, None), args.layouts, args.rounds, args.keep)
 
 
 if __name__ == "__main__":
