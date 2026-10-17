@@ -74,7 +74,10 @@ struct Flight {
 /// giving each digest to `done` as its read completes.
 fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow::Result<blake3::OutputReader>) -> bool) {
     let paths = &args.file_args;
-    let mut ring = IoUring::new(IN_FLIGHT as u32 * 2).expect("io_uring");
+    // Made at the thread's first small file: a run of large files makes
+    // none (making one maps memory, which waits on the page faults other
+    // threads take in their mappings).
+    let mut ring: Option<IoUring> = None;
     let mut buffers: Vec<Vec<u8>> = (0..IN_FLIGHT).map(|_| Vec::new()).collect();
     let mut flights: Vec<Option<Flight>> = (0..IN_FLIGHT).map(|_| None).collect();
     let mut free: Vec<usize> = (0..IN_FLIGHT).rev().collect();
@@ -107,20 +110,22 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
             flights[slot] = Some(Flight { index: i, file, opened });
             // Sound: the buffer and the file stay, unmoved, until this read
             // completes (the slot is not reused before).
+            let ring = ring.get_or_insert_with(|| IoUring::new(IN_FLIGHT as u32 * 2).expect("io_uring"));
             unsafe { ring.submission().push(&read).expect("room in the ring") };
             // Submitted at once: a read of cached data completes here, and its
             // file is hashed now, while its bytes are in this core's cache;
             // only reads that wait for storage stay in flight.
             ring.submit().expect("io_uring_enter");
-            if !finish(args, &mut ring, &mut flights, &mut free, &buffers, done) {
+            if !finish(args, ring, &mut flights, &mut free, &buffers, done) {
                 return;
             }
         }
         if free.len() == IN_FLIGHT {
             return;
         }
+        let ring = ring.as_mut().expect("a ring holds the reads in flight");
         ring.submit_and_wait(1).expect("io_uring_enter");
-        if !finish(args, &mut ring, &mut flights, &mut free, &buffers, done) {
+        if !finish(args, ring, &mut flights, &mut free, &buffers, done) {
             return;
         }
     }
