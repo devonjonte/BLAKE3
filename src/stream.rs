@@ -122,6 +122,17 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// handed back runs of digests from its own memory; batches of them,
 /// 5-13% faster; i7-12700K).
 ///
+/// **Streams, then other calls.** While a stream is open, this crate's
+/// threads keep looking for its next message for a few microseconds before
+/// they sleep, which makes streams of messages 3-5% faster. A program that
+/// streams and then soon makes a one-shot multithreaded call pays for it:
+/// on an i7-12700K under Linux, [`crate::hash_many_multithreaded`] on 16384
+/// messages right after streams of 16-64 KiB messages ran about 5% slower.
+/// A program that keeps streaming does not pay it; one that alternates can
+/// stream its other work
+/// too ([`Stream::submit_batch`] for a batch, a stream per round with
+/// [`finish`](Stream::finish) between rounds that depend on each other).
+///
 /// ```
 /// # blake3_servil::initialize_multithreaded();
 /// use blake3_servil::{Hash, Mode};
