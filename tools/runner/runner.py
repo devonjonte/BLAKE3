@@ -23,6 +23,9 @@ a full run; later ones run in full by default and take `--quick`.)
 (perf_regress's "full" judges every cell of a default run; "benches" gives
 each side its own bench-hashes commit, for an API change, its cells with
 it; both optional. Every run's samples file lands in the job's samples/.)
+
+(Any job may add "powermetrics": true: the chip's CPU, GPU, and ANE power
+every 500 ms beside it, in its results' powermetrics.txt.)
     {"type": "example", "example": "scaling" | "host_lab" | "energy_probe" | "job_trace",
      "fork_commit": "...", "features": ["no_sme2"], "args": ["message", "1048576"]}
     {"type": "test", "fork_commit": "..."}
@@ -246,6 +249,14 @@ def power():
     return ", ".join([source] + ([charge] if charge else []) + modes)
 
 
+# The chip's power beside a job ("powermetrics": true), from the one command
+# line /etc/sudoers.d/benchrunner-powermetrics lets this user run as root:
+# CPU, GPU, and ANE power every 500 ms, stopping by itself after MAX_LIMIT,
+# so a runner that dies leaves no sampler running.
+POWERMETRICS = ["sudo", "-n", "/usr/bin/powermetrics", "--samplers", "cpu_power", "-i", "500", "-n", "14400"]
+assert 14400 * 0.5 >= MAX_LIMIT
+
+
 def process(path, results):
     out = results / f"{path.stem}.{time.strftime('%Y%m%d-%H%M%S')}"
     out.mkdir()
@@ -258,8 +269,18 @@ def process(path, results):
             assert job.get("type") in HANDLERS, f"type must be one of {sorted(HANDLERS)}"
             limit = job.get("time_limit_seconds", DEFAULT_LIMIT)
             assert isinstance(limit, int) and 0 < limit <= MAX_LIMIT, f"time_limit_seconds must be 1-{MAX_LIMIT}"
-            with tempfile.TemporaryDirectory(dir=HOME / "tmp") as work:
-                verdict["status"] = HANDLERS[job["type"]](job, Job(log, limit), Path(work), out)
+            assert isinstance(job.get("powermetrics", False), bool), "powermetrics: true or false"
+            meter = subprocess.Popen(POWERMETRICS, stdout=open(out / "powermetrics.txt", "w"), stderr=log) \
+                if job.get("powermetrics") else None
+            try:
+                with tempfile.TemporaryDirectory(dir=HOME / "tmp") as work:
+                    verdict["status"] = HANDLERS[job["type"]](job, Job(log, limit), Path(work), out)
+            finally:
+                if meter is not None:
+                    # sudo passes the signal on to powermetrics, which ends its
+                    # last sample and exits.
+                    meter.send_signal(signal.SIGINT)
+                    meter.wait(timeout=10)
         except Exception as e:
             verdict["status"] = "error"
             verdict["error"] = f"{type(e).__name__}: {e}"
