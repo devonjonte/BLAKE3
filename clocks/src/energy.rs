@@ -37,7 +37,9 @@ mod imp {
     /// and its unit as an exact decimal: count times `mantissa` times
     /// 10^`exponent` joules.
     pub struct Counter {
-        fd: i32,
+        /// The counter's descriptor, read through std (no foreign `read`
+        /// of our own, so none to disagree with another module's).
+        file: std::fs::File,
         mantissa: u128,
         exponent: i32,
     }
@@ -58,7 +60,6 @@ mod imp {
 
     unsafe extern "C" {
         fn syscall(number: i64, ...) -> i64;
-        fn read(fd: i32, buffer: *mut u8, count: usize) -> isize;
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -89,14 +90,13 @@ mod imp {
             // Sound: `attr` is a perf_event_attr of the size it states; pid
             // -1 with a CPU counts that CPU's package, every process.
             let fd = unsafe { syscall(SYS_PERF_EVENT_OPEN, attr.as_ptr(), -1i64, cpu, -1i64, 0u64) };
-            (fd >= 0).then_some(Counter { fd: fd as i32, mantissa, exponent })
+            // Sound: a descriptor perf_event_open just returned, ours alone.
+            (fd >= 0).then(|| Counter { file: unsafe { std::os::fd::FromRawFd::from_raw_fd(fd as i32) }, mantissa, exponent })
         }
 
         pub fn read_nj(&self) -> u64 {
             let mut count = [0u8; 8];
-            // Sound: `count` is writable for 8 bytes.
-            let got = unsafe { read(self.fd, count.as_mut_ptr(), 8) };
-            assert_eq!(got, 8, "reading the package energy counter: {}", std::io::Error::last_os_error());
+            std::io::Read::read_exact(&mut &self.file, &mut count).expect("reading the package energy counter");
             // count x mantissa x 10^(exponent + 9) nanojoules, rounded down.
             let scaled = u128::from(u64::from_ne_bytes(count)) * self.mantissa;
             let exponent = self.exponent + 9;
