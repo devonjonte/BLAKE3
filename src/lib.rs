@@ -1015,7 +1015,7 @@ pub fn hash(input: &[u8]) -> Hash {
     // their input a second time, PLANT% more work at every length.
     #[cfg(feature = "std")]
     {
-        const PLANT: u64 = 0;
+        const PLANT: u64 = 3;
         std::thread_local! {
             static CALLS: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
         }
