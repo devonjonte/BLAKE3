@@ -102,6 +102,7 @@ The benchmark calls the current fork API; a commit that predates it fails to bui
   - `vm/home/bin/gh-cred.sh` speaks the git credential protocol and reads the johnservil classic token from `/workspace/blake3-servil/ghtokenclassic.txt` (never print that file). Both repos have `credential.helper = !sh /workspace/blake3-servil/vm/home/bin/gh-cred.sh` (the mount drops executable bits, hence `!sh`).
   - `vm/setup.sh` installs `clang-19` from apt.llvm.org, and `pypy3` and `librsvg2-bin` from Debian, when they are absent; creates `/tmp/target`; configures git and cargo for every shell of the boot (below); re-points both repos' credential helpers; and installs the guest's pre-commit hook in `/tmp/git-hooks`. Run `sh /workspace/blake3-servil/vm/setup.sh` first after a VM restart.
 - Guest disk (`/tmp`, `/usr`, apt packages) vanishes with the VM. Only `/workspace` persists.
+- So everything that cannot be rebuilt lives under `/workspace`: worktrees (in `tmp/wt-*`, which git ignores), uncommitted work, logs, and results. Builds and caches stay on `/tmp`. Commit work in progress at each step (a restart on October 17 wiped an uncommitted worktree in `/tmp`).
 
 ## Building and running
 
