@@ -12,7 +12,7 @@ mod unit_tests;
 const NAME: &str = "b3sum";
 
 #[cfg(target_os = "linux")]
-mod uring;
+mod readahead;
 
 const DERIVE_KEY_ARG: &str = "derive_key";
 const KEYED_ARG: &str = "keyed";
@@ -641,8 +641,8 @@ fn parse_check_line(mut line: &str) -> anyhow::Result<ParsedCheckLine> {
 /// opening and reading each, which one thread does one at a time.
 fn hash_inputs(args: &Args) -> u64 {
     #[cfg(target_os = "linux")]
-    if uring::applies(args) {
-        return uring::hash_inputs(args);
+    if readahead::applies(args) {
+        return readahead::hash_inputs(args);
     }
     hash_inputs_with(args, threads().get().min(args.file_args.len()), hash_some, print_output)
 }

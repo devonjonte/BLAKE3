@@ -70,7 +70,7 @@ fn test_hash_many() {
 }
 
 /// Many files of many sizes, more than b3sum keeps in flight (on Linux,
-/// through io_uring: 4 reads a thread), each digest the library's and in
+/// read ahead 4 a thread), each digest the library's and in
 /// the order given: empty files, small ones, and ones beside the 512 KiB
 /// boundary where mapping takes over.
 #[test]
