@@ -16,6 +16,7 @@ fn main() {
     let n: usize = args.get(1).map_or(1 << 20, |a| a.parse().expect("a size"));
     let calls: usize = args.get(2).map_or(2000, |a| a.parse().expect("a count"));
     let after_stream = args.get(3).is_some_and(|a| a == "after-stream");
+    let stream_first = args.get(3).is_some_and(|a| a == "stream-first");
     let messages: Vec<Vec<u8>> = (0..64u32).map(|i| i.to_le_bytes().repeat(4096)).collect();
     let mut places = vec![blake3_servil::Hash::from_bytes([0; 32]); messages.len()];
     let mut stream_once = || {
@@ -29,9 +30,22 @@ fn main() {
         }
     };
     blake3_servil::initialize_multithreaded();
-    let input = vec![0x5au8; if kind == "batch" { n * 64 } else { n }];
+    let copy = args.get(4).is_some_and(|a| a == "copy");
+    let source = vec![0x5au8; if kind == "batch" { n * 64 } else { n }];
     let mut out = vec![[0u8; 32]; if kind == "batch" { n } else { 0 }];
+    // The lent cell's pattern with `copy`: each call's input read into a
+    // kept buffer first (allocated at the first call, after any first stream).
+    let mut kept: Vec<u8> = Vec::new();
     let mut call = || {
+        if kept.is_empty() {
+            kept = vec![0u8; source.len()];
+        }
+        if copy {
+            kept.copy_from_slice(std::hint::black_box(&source));
+        } else if kept[0] == 0 {
+            kept.copy_from_slice(&source);
+        }
+        let input = &kept;
         if kind == "batch" {
             blake3_servil::hash_many_multithreaded(&input, 64, &mut out);
             std::hint::black_box(&out);
@@ -39,15 +53,28 @@ fn main() {
             std::hint::black_box(blake3_servil::hash_multithreaded(&input));
         }
     };
+    if stream_first {
+        // One stream, once, then only calls (does a stream leave lasting
+        // state?).
+        let mut first_places = vec![blake3_servil::Hash::from_bytes([0; 32]); messages.len()];
+        blake3_servil::stream(blake3_servil::Mode::Hash, |_: &mut [blake3_servil::Hash]| {}, |s| {
+            for (m, place) in messages.iter().zip(first_places.iter_mut()) {
+                s.submit(m, place);
+            }
+            s.finish();
+        });
+    }
     for _ in 0..200 {
         stream_once();
         call();
     }
     blake3_servil::job_trace::take();
+    let began = std::time::Instant::now();
     for _ in 0..calls {
         stream_once();
         call();
     }
+    let per_call_ns = began.elapsed().as_nanos() / calls as u128;
     let events = blake3_servil::job_trace::take();
     use blake3_servil::job_trace::{CALLER_PIECE, END, WORKER_PIECE};
     // Per job: its end, its first worker piece, its threads, its pieces by kind.
@@ -71,7 +98,7 @@ fn main() {
         let at = |q: usize| v[(v.len() - 1) * q / 100];
         format!("p10 {} p50 {} p90 {}", at(10), at(50), at(90))
     };
-    println!("{kind} {n}: {} calls traced", jobs.len());
+    println!("{kind} {n}: {} calls traced, {per_call_ns} ns a loop iteration in all", jobs.len());
     println!("call ns:              {}", pct(jobs.iter().map(|j| u64::from(j.0)).collect()));
     println!("first worker ns:      {}", pct(jobs.iter().map(|j| if j.1 == u32::MAX { u64::from(j.0) } else { u64::from(j.1) }).collect()));
     println!("workers a call:       {}", pct(jobs.iter().map(|j| j.2.len() as u64).collect()));
