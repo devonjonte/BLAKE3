@@ -779,7 +779,7 @@ impl Pool {
                 std::thread::park();
             }
             // Woken: pay the wakes owed before working.
-            while self.owed.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok() {
+            while self.owed.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok() {
                 if !self.wake_one() {
                     self.owed.store(0, Ordering::SeqCst);
                     break;
