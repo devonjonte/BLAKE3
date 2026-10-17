@@ -17,7 +17,10 @@ fn main() {
     let calls: usize = args.get(2).map_or(2000, |a| a.parse().expect("a count"));
     let after_stream = args.get(3).is_some_and(|a| a == "after-stream");
     let stream_first = args.get(3).is_some_and(|a| a == "stream-first");
-    let messages: Vec<Vec<u8>> = (0..64u32).map(|i| i.to_le_bytes().repeat(4096)).collect();
+    // The streams' messages: 64 of 16 KiB, or with BIG_STREAM=1 256 of
+    // 64 KiB (16 MiB, about a bench sample of continuous 64 KiB messages).
+    let big = std::env::var_os("BIG_STREAM").is_some();
+    let messages: Vec<Vec<u8>> = (0..if big { 256u32 } else { 64 }).map(|i| i.to_le_bytes().repeat(if big { 16384 } else { 4096 })).collect();
     let mut places = vec![blake3_servil::Hash::from_bytes([0; 32]); messages.len()];
     let mut stream_once = || {
         if after_stream {
@@ -87,13 +90,28 @@ fn main() {
     let every10 = args.get(3).is_some_and(|a| a == "every10");
     let mut timed_ns = 0u128;
     if every10 {
-        let mut stream_ten = || {
+        // DUO=1: the block's stream on two other threads at once, as the
+        // bench's shared samples run (its duo-copy threads).
+        let duo = std::env::var_os("DUO").is_some();
+        let messages = &messages;
+        let one_stream = move || {
+            let mut places = vec![blake3_servil::Hash::from_bytes([0; 32]); messages.len()];
             blake3_servil::stream(blake3_servil::Mode::Hash, |_: &mut [blake3_servil::Hash]| {}, |s| {
                 for (m, place) in messages.iter().zip(places.iter_mut()) {
                     s.submit(m, place);
                 }
                 s.finish();
             });
+        };
+        let mut stream_ten = || {
+            if duo {
+                std::thread::scope(|scope| {
+                    scope.spawn(one_stream);
+                    scope.spawn(one_stream);
+                });
+            } else {
+                one_stream();
+            }
         };
         let _ = &mut stream_ten;
         for _ in 0..calls / 10 {
