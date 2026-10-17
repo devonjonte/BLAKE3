@@ -748,12 +748,14 @@ fn main() -> anyhow::Result<()> {
     #[cfg(windows)]
     {
         unsafe extern "system" {
+            fn GetCurrentProcess() -> *mut core::ffi::c_void;
             fn TerminateProcess(process: *mut core::ffi::c_void, status: u32) -> i32;
         }
-        // Sound: -1 is the current process's pseudo-handle, and ending the
-        // current process does not return. (ExitProcess, std's way out, runs
-        // every DLL's detach and the C runtime's handlers first.)
-        unsafe { TerminateProcess(-1isize as *mut core::ffi::c_void, status as u32) };
+        // Sound: GetCurrentProcess returns this process's pseudo-handle (a
+        // constant, no system call), and ending the current process does not
+        // return. (ExitProcess, std's way out, runs every DLL's detach and
+        // the C runtime's handlers first.)
+        unsafe { TerminateProcess(GetCurrentProcess(), status as u32) };
         unreachable!("TerminateProcess on the current process returns only on failure")
     }
 }
