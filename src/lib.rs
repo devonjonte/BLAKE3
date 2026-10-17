@@ -250,6 +250,8 @@ mod io;
 mod tree;
 #[cfg(feature = "std")]
 mod lanes;
+#[cfg(feature = "job-trace")]
+pub use lanes::job_trace;
 mod many;
 #[cfg(feature = "std")]
 mod queue;

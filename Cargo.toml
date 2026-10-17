@@ -13,6 +13,10 @@ edition = "2024"
 [features]
 default = ["std"]
 
+# probe/devon-job-trace-servil: record when each one-shot job's pieces start and on
+# which thread (lanes::job_trace), for examples/job_trace.rs. Probe only.
+job-trace = ["std"]
+
 # The Wasm SIMD implementation does not participate in dynamic feature detection,
 # which is currently x86-only. If "wasm_simd" is on, Wasm SIMD support is assumed.
 # Note that not all Wasm implementations support the Wasm SIMD specification.
@@ -159,3 +163,7 @@ overflow-checks = true
 [profile.mutants]
 inherits = "test"
 incremental = true
+
+[[example]]
+name = "job_trace"
+required-features = ["job-trace"]
