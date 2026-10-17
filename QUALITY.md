@@ -103,27 +103,25 @@ tests; the tests check the calls into them, and every other platform.)
   such), or code that does nothing (removed).
 
 **What mutation testing finds**, over the whole library on the VM
-(October 16; the four proved cores, which the proofs cover, are left
-out): of 2488 mutants, 1560 fail a test or hang, and 147 do not compile.
-Each of the other 781 is listed with its reason in
-`tools/mutants/known-aarch64.txt`: code for another machine (x86,
-wasm32, a CPU without SME2 or the SHA-3 extension, one CPU), a choice
-between equally correct paths (what to prefetch, a speed threshold, how
-work is cut among threads), an equivalent change (`|` made `^` on flag
-bits that never overlap), or a Kani harness's own code. Two groups stay
-open: the thread pool's scheduling under interleavings that the tests
-leave to chance (Loom would force them), and the queue and the pool's
-job scheduler, which the stream now in design replaces. The run found
-missing cases (in `Hash`, the `Hasher`, `OutputReader`, `update_each`,
-the self-test) and dead code, each fixed. By function, of the library's
-384 functions with mutants, 223 have every mutant caught, 123 every
-survivor explained, and 38 an open survivor (in the two groups above);
-the four proved cores and the assembly kernels are the proofs'.
+(October 17): of 2614 mutants, 1772 fail a test or hang, and 169 do not
+compile. Each of the other 673 is listed with its reason in
+`tools/mutants/known-aarch64.txt`: code for another machine (x86, a CPU
+without SME2 or the SHA-3 extension, one CPU), a choice between equally
+correct paths (what to prefetch, a speed threshold, how work is cut
+among threads), or an equivalent change (`|` made `^` on flag bits that
+never overlap). Two groups stay open: the thread pool's scheduling under
+interleavings that the tests leave to chance (Loom would force them),
+and the queue and the pool's job scheduler, which the stream replaces.
+Earlier runs found missing cases (in `Hash`, the `Hasher`,
+`OutputReader`, `update_each`, the self-test) and dead code, each fixed.
+By function, of the library's 398 functions with mutants, 253 have every
+mutant caught, 109 every survivor explained, and 36 an open survivor (in
+the two groups above); the assembly kernels are the proofs'.
 `tools/mutants/check.py` reruns every mutant, reruns alone any whose
 outcome differs from the list (so a test that fails by chance, under
 load, decides nothing), and fails on a survivor not listed, a listed one
-now caught, or a listed one without a reason; the long proofs run it
-before each promotion.
+now caught, or a listed one without a reason; it runs before each
+promotion that changes the library's Rust (44 minutes on the VM).
 
 **What the suites cover now**, on the VM: 88% of the library's branch
 sides (906 of 1026), over the default, one-CPU, and no-std runs. Most of
