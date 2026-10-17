@@ -46,3 +46,17 @@ fork's suites, natively) needs no quiet machine.
 Every job type runs on the Mac. A thorough `--all` benchmark run under the
 runner matches the same run from the user's Terminal (704 cells, median
 ratio 1.001).
+
+## The chip's power (`"powermetrics": true`)
+
+A job may record the chip's power beside it. The runner's user runs one
+fixed command line as root, which only prints and stops by itself after
+two hours. Allow it once, with `sudo visudo -f
+/etc/sudoers.d/benchrunner-powermetrics`, holding exactly:
+
+    benchrunner ALL=(root) NOPASSWD: /usr/bin/powermetrics --samplers cpu_power -i 500 -n 14400
+
+Check it with `sudo -u benchrunner sudo -n /usr/bin/powermetrics --samplers
+cpu_power -i 500 -n 14400` (Ctrl-C after a sample). Any other arguments
+stay refused, so the runner cannot use `powermetrics -o` to write files as
+root.
