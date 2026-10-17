@@ -814,11 +814,9 @@ mod test {
         }
     }
 
-    /// A stream takes more messages after finishing; a body that ends
-    /// without finishing panics (after the threads are done with its
-    /// messages), and so does one that panics itself.
+    /// A stream takes more messages after finishing.
     #[test]
-    fn test_stream_finish_and_panics() {
+    fn test_stream_finish() {
         let input = std::vec![9u8; 300_000];
         let mut got = places(9);
         let handed = core::cell::Cell::new(0);
@@ -832,6 +830,14 @@ mod test {
             }
         });
         assert_eq!(got[5], crate::hash(&input[..70_000]));
+    }
+
+    /// A body that ends without finishing panics (after the threads are
+    /// done with its messages), and so does one that panics itself.
+    #[test]
+    #[cfg_attr(not(panic = "unwind"), ignore = "catches panics, which this target aborts on")]
+    fn test_stream_panics() {
+        let input = std::vec![9u8; 300_000];
         for unwinding in [false, true] {
             let result = std::panic::catch_unwind(|| {
                 let mut got = places(4);
