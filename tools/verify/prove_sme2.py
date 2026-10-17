@@ -717,13 +717,22 @@ def prove_case(case):
     return case, f"proved ({what}, {steps} instructions, {time.time() - t:.1f} s)"
 
 
+WORKERS = 5
+
+
 def main():
     import multiprocessing
-    todo = cases(set(sys.argv[1:]))
+    # The longest cases first, so none is left to run alone at the end: the
+    # chunk kernel's induction (4.3 hours, October 16), then the message
+    # kernel's, longest message first (3.6 hours at 14 blocks, 16 minutes at 5).
+    todo = sorted(cases(set(sys.argv[1:])),
+                  key=lambda c: (0,) if c[0] == "every" else (1, -c[2]) if c[0] == "messages_every" else (2,))
     failed = 0
     # A fresh process per case: the normal forms' caches keep their terms
-    # alive (canon.py), so a worker that kept them would only grow.
-    with multiprocessing.Pool(min(4, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
+    # alive (canon.py), so a worker that kept them would only grow. WORKERS
+    # at once: the largest case holds about 14 GB (messages_every at 16
+    # blocks, October 16), so five fit the VM's 98 GB.
+    with multiprocessing.Pool(min(WORKERS, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
         for (name, _, _), verdict in pool.imap_unordered(prove_case, todo):
             print(f"{name}: {verdict}", flush=True)
             failed += verdict.startswith("NOT")
