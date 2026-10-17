@@ -780,7 +780,7 @@ impl Pool {
 const SPIN: std::time::Duration = std::time::Duration::from_micros(5);
 
 /// The most workers spinning at once (the rest park at once).
-const SPIN_CAP: usize = 1;
+const SPIN_CAP: usize = 2;
 
 /// Workers spinning now (and those about to see SPIN_CAP).
 static SPINNING: AtomicUsize = AtomicUsize::new(0);
