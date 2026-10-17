@@ -23,8 +23,8 @@ a full run; later ones run in full by default and take `--quick`.)
 (perf_regress's "full" judges every cell of a default run; "benches" gives
 each side its own bench-hashes commit, for an API change, its cells with
 it; both optional. Every run's samples file lands in the job's samples/.)
-    {"type": "example", "example": "scaling" | "host_lab", "fork_commit": "...",
-     "features": ["no_sme2"]}
+    {"type": "example", "example": "scaling" | "host_lab" | "energy_probe" | "job_trace",
+     "fork_commit": "...", "features": ["no_sme2"], "args": ["message", "1048576"]}
     {"type": "test", "fork_commit": "..."}
 
 (A test job runs the fork's suites natively: the library tests in the
@@ -47,6 +47,7 @@ this runner's perf_regress.py, the fork as it is) benchmark jobs.
 """
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -73,8 +74,8 @@ PATCH = 'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'
 # blake3, blake3-mt, blake3-servil: bench-hashes' keys before September 25, 2026.
 CONTENDERS = {"blake3-official", "blake3-official-mt", "blake3", "blake3-servil-st", "blake3-servil", "blake3-servil-mt", "blake3-mt",
               "sha256", "sha256-ring", "sha256-cc", "sha1dc", "sha3-256", "blake3-commonware"}
-EXAMPLES = {"scaling", "host_lab"}
-FEATURES = {"no_sme2", "pure"}
+EXAMPLES = {"scaling", "host_lab", "energy_probe", "job_trace"}
+FEATURES = {"no_sme2", "pure", "job-trace"}
 DEFAULT_LIMIT = 1800
 MAX_LIMIT = 7200
 
@@ -206,8 +207,13 @@ def example(job, run, work, out):
     if features:
         cmd += ["--features", ",".join(features)]
     run.run(cmd, cwd=fork)
+    # An example's arguments: a few short words or numbers, nothing a shell
+    # would read.
+    args = job.get("args", [])
+    assert isinstance(args, list) and len(args) <= 8 and all(isinstance(a, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", a) for a in args), \
+        "args: at most 8 words of letters, digits, _ . -"
     # host_lab writes its report to the working directory.
-    run.run([str(fork / "target" / "release" / "examples" / job["example"])], cwd=out)
+    run.run([str(fork / "target" / "release" / "examples" / job["example"]), *args], cwd=out)
     return "ok"
 
 
