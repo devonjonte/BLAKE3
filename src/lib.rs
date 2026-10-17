@@ -1010,6 +1010,20 @@ fn hash_all_at_once(
 /// The first hash in a process first runs a self-test (see the crate's
 /// documentation), under 0.2 ms; [`initialize`] moves it to start-up.
 pub fn hash(input: &[u8]) -> Hash {
+    // PLANT (probe/devon-plant-*, calibration only, after John's
+    // probe/plant-proportional): PLANT of every 100 calls on a thread hash
+    // their input a second time, PLANT% more work at every length.
+    #[cfg(feature = "std")]
+    {
+        const PLANT: u64 = 0;
+        std::thread_local! {
+            static CALLS: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+        }
+        let n = CALLS.with(|c| c.replace(c.get() + 1));
+        if n % 100 < PLANT {
+            core::hint::black_box(hash_serial(core::hint::black_box(input), IV, 0));
+        }
+    }
     hash_serial(input, IV, 0)
 }
 
