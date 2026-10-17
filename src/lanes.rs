@@ -89,7 +89,10 @@ use std::sync::{Mutex, OnceLock};
 /// 2026; native first): after the gap 512 KiB 0.35 -> 0.19-0.24 ns/B and
 /// 8192 64-byte messages 22.5 -> 13.3 ns/msg (jobs 538-541), the VM's
 /// 512 KiB 20-30% slower than on the caller's thread.
-pub(crate) const MIN_SPLIT_LEN: usize = 512 * 1024;
+// Under Miri, which interprets every instruction about a million times
+// slower, 16 KiB, so its tests reach the same pool code on inputs 32 times
+// smaller (512 KiB: about 40 minutes a test in CI).
+pub(crate) const MIN_SPLIT_LEN: usize = if cfg!(miri) { 16 * 1024 } else { 512 * 1024 };
 
 /// The shortest piece: eight chunks, a hybrid kernel's worth.
 const MIN_PIECE_LEN: usize = 8 * CHUNK_LEN;
@@ -265,8 +268,13 @@ pub(crate) fn hash_each(key: &crate::CVWords, flags: u8, items: &[&[u8]], out: &
 /// thread.
 pub(crate) fn group_cvs(groups: &[&[u8]], first_group: u64, key: &crate::CVWords, flags: u8, cvs: &mut [ChainingValue]) {
     assert_eq!(groups.len(), cvs.len(), "a chaining value for each group");
-    let pooled = if groups.len() * crate::outboard::GROUP_LEN < MIN_SPLIT_LEN { None } else { spare_pool() };
-    let Some((pool, _caller)) = pooled else { return crate::outboard::groups_cvs_into(groups, first_group, key, flags, Platform::detect(), cvs) };
+    if groups.len() * crate::outboard::GROUP_LEN < MIN_SPLIT_LEN {
+        return crate::outboard::groups_cvs_into(groups, first_group, key, flags, Platform::detect(), cvs);
+    }
+    let Some((pool, _caller)) = spare_pool() else {
+        pool_busy();
+        return crate::outboard::groups_cvs_into(groups, first_group, key, flags, Platform::detect(), cvs);
+    };
     let pieces = cut_messages(groups.len(), crate::outboard::GROUP_LEN, pool.cpus);
     let work = Work::Groups { groups, first_group, pieces: &pieces, key: *key, flags, cvs: cvs.as_mut_ptr() };
     pool.run_job(work, pieces.len(), 0, pool_platform());
@@ -1283,6 +1291,15 @@ fn wake_sme2() {
             thread.unpark();
         }
     }
+}
+
+/// For tests that must reach the pool: the call this thread made since
+/// `RAN` was cleared went past the split (to the pool, or found every CPU
+/// with a caller), or the process has one CPU and no pool.
+#[cfg(test)]
+pub(crate) fn assert_past_the_split(what: &str) {
+    let kinds = crate::RAN.with(|r| r.get());
+    assert!(pool().cpus == 1 || kinds & (crate::Ran::Pool as u32 | crate::Ran::PoolBusy as u32) != 0, "{what} went past the split");
 }
 
 /// Run `task` on this thread, as a worker would.
