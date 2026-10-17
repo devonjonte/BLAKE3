@@ -24,7 +24,7 @@ impl MessageHandler for Back {
 }
 
 fn main() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     let seed: usize = std::env::args().nth(1).map_or(0, |s| s.parse().unwrap());
     let data: Vec<u8> = (0..(2 << 20) + 4096).map(|i| ((i * 31 + seed) % 251) as u8).collect();
     // The queue first: messages of 64 B to 1 KiB (gathered members), and longer.

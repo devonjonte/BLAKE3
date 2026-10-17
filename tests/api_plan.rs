@@ -60,7 +60,7 @@ const LARGE: [usize; 5] = [(512 << 10) - 1, 512 << 10, 1 << 20, (1 << 20) + 1, (
 
 #[test]
 fn one_message_every_form_matches_the_vectors() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     for (len, expected) in vectors() {
         let data = input(len);
         assert_eq!(blake3_servil::hash(&data), Hash::from(expected[0]), "hash, {len} bytes");
@@ -82,7 +82,7 @@ fn one_message_every_form_matches_the_vectors() {
 /// against the reference implementation.
 #[test]
 fn a_message_in_pieces_matches_the_reference() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     let hashers = |m: usize| match m {
         0 => blake3_servil::Hasher::new(),
         1 => blake3_servil::Hasher::new_keyed(KEY),
@@ -119,7 +119,7 @@ fn a_message_in_pieces_matches_the_reference() {
 
 #[test]
 fn one_message_large_inputs_match_the_reference() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     for len in LARGE {
         let data = input(len);
         assert_eq!(blake3_servil::hash_multithreaded(&data), Hash::from(reference(0, &data)), "hash_multithreaded, {len} bytes");
@@ -149,7 +149,7 @@ fn padded_batch(count: usize, len: usize) -> (Vec<u8>, Vec<Vec<u8>>) {
 
 #[test]
 fn batches_every_form_match_the_reference() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     for (count, len) in [(1, 64), (2, 64), (4, 64), (12, 64), (16, 64), (17, 64), (1000, 64), (12288, 64), (13000, 64), (5, 0), (7, 1), (9, 63), (33, 100), (20, 1024), (3, 1025), (40, 4000), (2, 70000), (20, 60000)] {
         let (buffer, messages) = padded_batch(count, len);
         let expected: Vec<Vec<[u8; 32]>> = (0..3).map(|m| messages.iter().map(|message| reference(m, message)).collect()).collect();
@@ -172,7 +172,7 @@ fn batches_every_form_match_the_reference() {
 #[test]
 #[should_panic]
 fn a_batch_whose_buffer_is_not_whole_slots_is_refused() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     let mut out = [[0u8; 32]; 2];
     blake3_servil::hash_many(&[0u8; 100], 64, &mut out);
 }
@@ -218,7 +218,7 @@ impl FixedHandler for Fixed {
 #[test]
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn queue_of_messages_returns_every_buffer_in_order_with_its_digest() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     let mut lengths: Vec<usize> = vectors().iter().map(|(len, _)| *len).collect();
     lengths.extend(LARGE);
     for (m, mode) in modes().into_iter().enumerate() {
@@ -245,7 +245,7 @@ fn queue_of_messages_returns_every_buffer_in_order_with_its_digest() {
 #[test]
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn queue_of_pieces_returns_each_piece_and_one_digest() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     for total in [0usize, 1, 1024, 1025, 100_000, 1 << 20, (3 << 20) + 12345] {
         let data = input(total);
         for piece_len in [1usize, 63, 64, 1000, 4096, 65536, 1 << 20] {
@@ -282,7 +282,7 @@ fn queue_of_pieces_returns_each_piece_and_one_digest() {
 #[test]
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn queue_of_fixed_length_messages_fills_the_callers_digest_space() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     for (len, per_buffer) in [(64usize, 1usize), (64, 4), (64, 16), (64, 1000), (64, 16384), (256, 50), (1024, 9), (100, 7)] {
         for (m, mode) in modes().into_iter().enumerate() {
             {
@@ -315,7 +315,7 @@ fn queue_of_fixed_length_messages_fills_the_callers_digest_space() {
 #[test]
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn bursts_of_large_batches_after_pauses_complete() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     let (buffer, messages) = padded_batch(4096, 64);
     let expected: Vec<[u8; 32]> = messages.iter().map(|message| reference(0, message)).collect();
     let (tx, rx) = mpsc::channel();
@@ -341,7 +341,7 @@ fn bursts_of_large_batches_after_pauses_complete() {
 #[test]
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn a_handler_may_resubmit_its_buffer() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     struct Cycle {
         queue: std::sync::Arc<std::sync::OnceLock<Queue<Cycle>>>,
         left: usize,
@@ -379,7 +379,7 @@ fn a_handler_may_resubmit_its_buffer() {
 #[test]
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn dropping_a_queue_cancels_nothing() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     let (tx, rx) = mpsc::channel();
     let queue = Queue::messages(Mode::Hash, Messages(tx));
     for i in 0..200 {
@@ -398,7 +398,7 @@ fn dropping_a_queue_cancels_nothing() {
 #[test]
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn queues_on_several_threads_keep_their_own_order() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     std::thread::scope(|scope| {
         for t in 0..6usize {
             scope.spawn(move || {
@@ -424,7 +424,7 @@ fn queues_on_several_threads_keep_their_own_order() {
 #[test]
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn one_queue_shared_by_several_submitting_threads() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     let (tx, rx) = mpsc::channel();
     let queue = Queue::messages(Mode::Hash, Messages(tx));
     const THREADS: usize = 4;
@@ -462,7 +462,7 @@ fn one_queue_shared_by_several_submitting_threads() {
 #[test]
 #[cfg_attr(target_family = "wasm", ignore = "a queue needs threads, which this target lacks")]
 fn a_panicking_handler_aborts_the_process() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     if std::env::var_os("API_PLAN_PANIC_CHILD").is_some() {
         struct Panics;
         impl MessageHandler for Panics {

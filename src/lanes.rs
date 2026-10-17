@@ -27,8 +27,8 @@
 //! in the pool's slot table, then takes pieces through the cursor until
 //! none remain. It unregisters the job and waits for its active threads
 //! to finish. Workers,
-//! started once per process ([`crate::initialize_multithreaded`]), one per CPU beyond
-//! the first, serve the registered jobs round-robin, one piece at a time
+//! started once per process ([`crate::initialize_multithreaded`]), one fewer
+//! than the threads it asks for (by default, one per CPU beyond the first), serve the registered jobs round-robin, one piece at a time
 //! through the same cursor. Two callers
 //! hashing at once therefore each get about half the workers' time, and
 //! a slow thread takes fewer pieces than a fast one; there is nothing to
@@ -180,14 +180,14 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
     let _caller = Caller(&pool.callers);
     // No CPU to spare (every one has a caller, or the process has one
     // CPU): hash as hash() does, as the batch path does.
-    if callers >= pool.cpus {
+    if callers >= pool.threads {
         // Other callers took the pool (with one CPU, it has no threads).
-        if pool.cpus > 1 {
+        if pool.threads > 1 {
             crate::ran(crate::Ran::PoolBusy);
         }
         return crate::hash_serial(input, key, flags);
     }
-    let threads = pool.cpus;
+    let threads = pool.threads;
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
     let (pieces, own) = cut_with_prefix(input.len(), threads, prefix_for(&turn, input.len(), threads));
     let mut cvs = vec![ChainingValue::default(); pieces.len()];
@@ -210,7 +210,7 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
 /// hashes everything on its delivery thread.
 pub(crate) fn takes_tasks() -> bool {
     let pool = pool();
-    pool.cpus > 1 || pool.sme2
+    pool.threads > 1 || pool.sme2
 }
 
 /// The two child chaining values of the subtree `input` at chunk
@@ -230,8 +230,8 @@ pub(crate) fn subtree_children(
     let pool = pool();
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let _caller = Caller(&pool.callers);
-    let threads = pool.cpus;
-    if callers >= pool.cpus {
+    let threads = pool.threads;
+    if callers >= pool.threads {
         return crate::compress_subtree_to_parent_node(input, 0, key, counter, flags, pool_platform());
     }
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
@@ -267,14 +267,14 @@ fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, f
     let pool = pool();
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let _caller = Caller(&pool.callers);
-    if callers >= pool.cpus {
+    if callers >= pool.threads {
         // Other callers took the pool (with one CPU, it has no threads).
-        if pool.cpus > 1 {
+        if pool.threads > 1 {
             crate::ran(crate::Ran::PoolBusy);
         }
         return crate::hash_many_serial(input, message_len, key, flags, outputs);
     }
-    let pieces = cut_messages(outputs.len(), slot, pool.cpus);
+    let pieces = cut_messages(outputs.len(), slot, pool.threads);
     let work = Work::Messages { input, message_len, key: *key, flags, pieces: &pieces, outputs: outputs.as_mut_ptr() };
     pool.run_job(work, pieces.len(), 0, pool_platform());
 }
@@ -288,14 +288,14 @@ pub(crate) fn hash_each(key: &crate::CVWords, flags: u8, items: &[&[u8]], out: &
     let _caller = Caller(&pool.callers);
     assert!(items.iter().all(|i| i.len() < MIN_SPLIT_LEN), "items under MIN_SPLIT_LEN");
     let mut remaining: usize = items.iter().map(|i| i.len()).sum();
-    if callers >= pool.cpus {
+    if callers >= pool.threads {
         let platform = Platform::detect();
         return crate::each::hash_each_on(key, flags, items, out, platform, |item| crate::hash_serial_on(item, key, flags, platform));
     }
     let mut pieces = Vec::with_capacity(64);
     let mut start = 0;
     while start < items.len() {
-        let want = next_piece_len(remaining, pool.cpus);
+        let want = next_piece_len(remaining, pool.threads);
         let (mut end, mut bytes) = (start, 0);
         while end < items.len() && (bytes < want || end == start) {
             bytes += items[end].len();
@@ -321,14 +321,14 @@ pub(crate) fn group_cvs(groups: &[&[u8]], first_group: u64, key: &crate::CVWords
     if groups.len() * crate::outboard::GROUP_LEN < MIN_SPLIT_LEN {
         return crate::outboard::groups_cvs_into(groups, first_group, key, flags, Platform::detect(), cvs);
     }
-    if callers >= pool.cpus {
+    if callers >= pool.threads {
         // Other callers took the pool (with one CPU, it has no threads).
-        if pool.cpus > 1 {
+        if pool.threads > 1 {
             crate::ran(crate::Ran::PoolBusy);
         }
         return crate::outboard::groups_cvs_into(groups, first_group, key, flags, Platform::detect(), cvs);
     }
-    let pieces = cut_messages(groups.len(), crate::outboard::GROUP_LEN, pool.cpus);
+    let pieces = cut_messages(groups.len(), crate::outboard::GROUP_LEN, pool.threads);
     let work = Work::Groups { groups, first_group, pieces: &pieces, key: *key, flags, cvs: cvs.as_mut_ptr() };
     pool.run_job(work, pieces.len(), 0, pool_platform());
 }
@@ -651,7 +651,7 @@ fn merge_to_children(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::C
 }
 
 /*
- * The pool: cpus - 1 worker threads serving the registered jobs.
+ * The pool: threads - 1 worker threads (the calling thread hashes too) serving the registered jobs.
  *
  * The slots hold raw pointers to jobs on callers' stacks. A worker counts
  * itself as a reader of a slot before it loads the pointer and until it has
@@ -672,7 +672,8 @@ struct Pool {
     slots: [Slot; MAX_JOBS],
     /// Callers inside hash_over_pool.
     callers: AtomicUsize,
-    cpus: usize,
+    /// The threads a call hashes on: its caller and the workers.
+    threads: usize,
     /// Whether the SME2 thread runs (this CPU has SME2).
     sme2: bool,
     /// Workers asleep on `posted`.
@@ -703,13 +704,13 @@ struct Slot {
 /// process ([`crate::initialize_multithreaded`] is its public face): this
 /// thread starts the SME2 thread and worker 1, and worker 1 the other
 /// workers. Calls run on the workers started so far.
-pub(crate) fn initialize() {
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let sme2 = cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect()));
+pub(crate) fn initialize(threads: usize) {
+    // With one thread, none beside the caller: no SME2 thread either.
+    let sme2 = threads > 1 && cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect()));
     let pool = Pool {
         slots: std::array::from_fn(|_| Slot { job: AtomicPtr::new(std::ptr::null_mut()), readers: AtomicUsize::new(0) }),
         callers: AtomicUsize::new(0),
-        cpus,
+        threads,
         sme2,
         sleepers: AtomicUsize::new(0),
         notified: AtomicUsize::new(0),
@@ -728,13 +729,13 @@ pub(crate) fn initialize() {
     if sme2 {
         std::thread::Builder::new().name("blake3-sme2".into()).spawn(sme2_main).expect("spawning the SME2 thread");
     }
-    if cpus == 1 {
+    if threads == 1 {
         return;
     }
     std::thread::Builder::new()
         .name("blake3-worker-1".into())
         .spawn(move || {
-            for worker in 2..cpus {
+            for worker in 2..threads {
                 std::thread::Builder::new()
                     .name(format!("blake3-worker-{worker}"))
                     .spawn(worker_main)
@@ -756,7 +757,7 @@ pub(crate) fn require() {
 /// Whether a call may leave the calling thread: the process has more
 /// than one CPU. Requires the pool (`require`).
 pub(crate) fn splits() -> bool {
-    pool().cpus > 1
+    pool().threads > 1
 }
 
 /// The pool, once [`initialize`] has created it.
@@ -790,11 +791,11 @@ fn pool() -> &'static Pool {
 fn no_pool() -> &'static Pool {
     #[cfg(test)]
     {
-        crate::initialize_multithreaded();
+        crate::initialize_multithreaded(None);
         POOL.get().expect("initialize_multithreaded created the pool")
     }
     #[cfg(not(test))]
-    panic!("blake3-servil: call blake3_servil::initialize_multithreaded() once, before any multithreaded call or Queue: it starts the threads they use")
+    panic!("blake3-servil: call blake3_servil::initialize_multithreaded(None) once, before any multithreaded call or Queue: it starts the threads they use")
 }
 
 impl Pool {
@@ -862,11 +863,11 @@ impl Pool {
         // the counts are exact under sleep_lock, where every sleeper
         // counted is waiting (see next_piece).
         let unnotified = self.sleepers.load(Ordering::SeqCst).saturating_sub(self.notified.load(Ordering::SeqCst));
-        if unnotified > 0 && self.cpus - 1 - unnotified.min(self.cpus - 1) < wanted {
+        if unnotified > 0 && self.threads - 1 - unnotified.min(self.threads - 1) < wanted {
             let _guard = self.sleep_lock.lock().unwrap();
             let sleepers = self.sleepers.load(Ordering::SeqCst);
             let unnotified = sleepers - self.notified.load(Ordering::SeqCst);
-            let awake = self.cpus - 1 - unnotified;
+            let awake = self.threads - 1 - unnotified;
             if unnotified > 0 && awake < wanted {
                 let wake = (wanted - awake).min(unnotified);
                 self.notified.fetch_add(wake, Ordering::SeqCst);
@@ -1305,7 +1306,7 @@ impl Tasks {
 #[cfg(test)]
 pub(crate) fn assert_past_the_split(what: &str) {
     let kinds = crate::RAN.with(|r| r.get());
-    assert!(pool().cpus == 1 || kinds & (crate::Ran::Pool as u32 | crate::Ran::PoolBusy as u32) != 0, "{what} went past the split");
+    assert!(pool().threads == 1 || kinds & (crate::Ran::Pool as u32 | crate::Ran::PoolBusy as u32) != 0, "{what} went past the split");
 }
 
 fn worker_main() {

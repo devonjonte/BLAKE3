@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking: `initialize_multithreaded` takes the number of threads**
+  the multithreaded calls hash on, `Option<NonZeroUsize>`: `None` for one
+  a CPU, as before; `Some(1)` hashes on the calling thread alone, with no
+  workers. Call it as `initialize_multithreaded(None)` to keep the old
+  behavior.
 - **A C API**, `capi/b3.h`: a mode as a value (`b3_plain`, `b3_keyed`,
   `b3_derive_key`, the context hashed once), digests as values, the
   one-shot and batch calls on one thread or many, and a hasher in the

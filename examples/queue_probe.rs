@@ -21,7 +21,7 @@ impl MessageHandler for Back {
 }
 
 fn main() {
-    blake3_servil::initialize_multithreaded();
+    blake3_servil::initialize_multithreaded(None);
     let mode = std::env::args().nth(1).expect("batch | channel | queue");
     let input: Vec<u8> = (0..64).map(|i| i as u8).collect();
     let batches = match mode.as_str() {
