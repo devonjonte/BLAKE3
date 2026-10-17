@@ -48,7 +48,6 @@ src/hasher.rs	replace <impl Feed<ChunkState<P>> for Kernels<'_, P, H>>::subtree_
 src/hasher.rs	replace > with < in feed	1	speed: chooses between equally correct paths (the subtree through the flat walk, or through its children)
 src/hasher.rs	replace > with >= in ChunkState<P>::absorb	1	speed: chooses between equally correct paths (a first whole block through the empty buffer, or straight from the input)
 src/hasher.rs	replace CvStack::array -> Option<&[Cv; DEPTH]> with Some(Box::leak(Box::new([Default::default(); DEPTH])))	1	test-only code (cfg(test)): the test's own accessor
-src/hasher.rs	replace CvStack::clear with ()	1	OPEN: a missing test: Hasher::reset after the stack holds values
 src/hasher.rs	replace | with ^ in ChunkState<P>::absorb	1	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
 src/hasher.rs	replace | with ^ in ChunkState<P>::output	2	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
 src/hasher.rs	replace | with ^ in Output<P>::root_bytes	1	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
@@ -221,23 +220,20 @@ src/lib.rs	replace * with / in compress_chunks_parallel	1	x86 only: compiled out
 src/lib.rs	replace * with / in kernel_report_many	4	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86
 src/lib.rs	replace * with / in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace + with * in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace + with * in HasherCore::update_part_with_results	1	OPEN: a missing test: update_each's held group at more chunk counts (the core's partial-chunk and two-value branches)
 src/lib.rs	replace + with * in compress_chunks_parallel	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace + with * in hash_serial_from	1	speed: moves a threshold between equally correct paths
 src/lib.rs	replace + with * in kernel_report	2	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86
 src/lib.rs	replace + with * in kernel_report_many	2	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86
 src/lib.rs	replace + with - in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace + with - in HasherCore::update_part_with_results	1	OPEN: a missing test: update_each's held group at more chunk counts (the core's partial-chunk and two-value branches)
 src/lib.rs	replace + with - in compress_chunks_parallel	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace + with - in hash_serial_from	1	speed: moves a threshold between equally correct paths
 src/lib.rs	replace + with - in kernel_report	2	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86
 src/lib.rs	replace + with - in kernel_report_many	2	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86
 src/lib.rs	replace += with *= in prefetch_update_kernels	2	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace - with + in HasherCore::update_part_with_results	1	OPEN: a missing test: update_each's held group at more chunk counts (the core's partial-chunk and two-value branches)
-src/lib.rs	replace - with / in HasherCore::update_part_with_results	1	OPEN: a missing test: update_each's held group at more chunk counts (the core's partial-chunk and two-value branches)
 src/lib.rs	replace -= with /= in prefetch_update_kernels	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace / with % in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace / with % in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
+src/lib.rs	replace / with * in HasherCore::update_part_with_results	1	equivalent for its one caller: a held group is exactly 16 KiB (16 chunks), so its second half's counter, 8 or 32, has one one-bit either way, which is all the merge reads
 src/lib.rs	replace / with * in HasherCore::update_part_with_results	1	equivalent: a power of two times or over 2 has the same one bit, so the stack merges alike
 src/lib.rs	replace / with * in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace / with * in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
@@ -249,7 +245,6 @@ src/lib.rs	replace == with != in compress_chunks_parallel	1	x86 only: compiled o
 src/lib.rs	replace == with != in kernel_report	1	the report's prose: which sentence explains a kernel (no test pins the words)
 src/lib.rs	replace == with != in kernel_report_many	2	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86
 src/lib.rs	replace == with != in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace > with < in HasherCore::update_part_with_results	1	OPEN: a missing test: update_each's held group at more chunk counts (the core's partial-chunk and two-value branches)
 src/lib.rs	replace > with < in code_may_be_cold	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with < in kernel_report	1	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86
 src/lib.rs	replace > with < in kernel_report_many	1	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86
@@ -260,7 +255,7 @@ src/lib.rs	replace > with == in kernel_report	1	another machine or build: the re
 src/lib.rs	replace > with == in kernel_report_many	1	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86
 src/lib.rs	replace > with == in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with == in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/lib.rs	replace > with >= in HasherCore::update_part_with_results	2	OPEN: a missing test: update_each's held group at more chunk counts (the core's partial-chunk and two-value branches)
+src/lib.rs	replace > with >= in HasherCore::update_part_with_results	2	equivalent for its one caller: a held group is exactly 16 KiB (16 chunks), so no length it compares equals one chunk
 src/lib.rs	replace > with >= in code_may_be_cold	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with >= in kernel_report	1	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86
 src/lib.rs	replace > with >= in kernel_report_many	1	another machine or build: the report's branches for CPUs without SHA-3 (CI's QEMU job runs the report test there), for builds without the hybrids, and for x86

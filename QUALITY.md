@@ -111,21 +111,19 @@ tests; the tests check the calls into them, and every other platform.)
   such), or code that does nothing (removed).
 
 **What mutation testing finds**, over the whole library on the VM
-(October 17, with the stream): of 2518 mutants, 1680 fail a test or
-hang, and 166 do not compile. Each of the other 672 is listed with its
+(October 17, with the stream): of 2511 mutants, 1678 fail a test or
+hang, and 166 do not compile. Each of the other 667 is listed with its
 reason in `tools/mutants/known-aarch64.txt`: code for another machine
 (x86, a CPU without SME2 or the SHA-3 extension, one CPU), a choice
 between equally correct paths (what to prefetch, a speed threshold, how
 work is cut among threads, how long an idle worker spins), or an
 equivalent change (`|` made `^` on flag bits that never overlap). Two
 groups stay open: the thread pool's and the stream's scheduling under
-interleavings the tests leave to chance (Loom would force them), and
-eight missing tests (`Hasher::reset` after the stack holds values;
-`update_each`'s held group at more chunk counts), next to write. Earlier
+interleavings the tests leave to chance (Loom would force them). Earlier
 runs found missing cases (in `Hash`, the `Hasher`, `OutputReader`,
 `update_each`, the self-test) and dead code, each fixed. By function, of
-the library's 385 functions with mutants, 239 have every mutant caught,
-111 every survivor explained, and 35 an open survivor; the assembly
+the library's 385 functions with mutants, 240 have every mutant caught,
+112 every survivor explained, and 33 an open survivor; the assembly
 kernels are the proofs'.
 
 `tools/mutants/check.py` reruns every mutant, reruns alone any whose

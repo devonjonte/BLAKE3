@@ -2368,17 +2368,9 @@ impl HasherCore {
 
     #[cfg(feature = "std")]
     fn update_part_with_results<'a>(&mut self, mut input: &[u8], results: &mut impl Iterator<Item = &'a [u8; BLOCK_LEN]>) {
-        if self.chunk_state.count() > 0 {
-            let take = cmp::min(CHUNK_LEN - self.chunk_state.count(), input.len());
-            self.chunk_state.update(&input[..take]);
-            input = &input[take..];
-            if input.is_empty() {
-                return;
-            }
-            let chunk_cv = self.chunk_state.output().chaining_value();
-            self.push_cv(&chunk_cv, self.chunk_state.chunk_counter);
-            self.chunk_state = ChunkState::new(&self.key, self.chunk_state.chunk_counter + 1, self.chunk_state.flags, self.chunk_state.platform);
-        }
+        // Its one caller hands it a whole held group, from a group boundary,
+        // where the core's chunk is empty (Hasher::take_held).
+        debug_assert_eq!(self.chunk_state.count(), 0, "a held group starts where the core's chunk is empty");
         while input.len() > CHUNK_LEN {
             let len = hasher::subtree_len(self.chunk_state.chunk_counter, input.len());
             let chunks = (len / CHUNK_LEN) as u64;

@@ -645,6 +645,15 @@ fn test_reset() {
     kdf.update(&[42; CHUNK_LEN + 3]);
     let expected = crate::derive_key(context, &[42; CHUNK_LEN + 3]);
     assert_eq!(kdf.finalize(), expected);
+
+    // A reset after the stack holds values (past the stage, which keeps
+    // short updates from the core): the stack empty again.
+    let long = std::vec![42u8; 5 * crate::STAGE_LEN + 7];
+    let mut hasher = crate::Hasher::new();
+    hasher.update(&long);
+    hasher.reset();
+    hasher.update(&long[..CHUNK_LEN + 3]);
+    assert_eq!(hasher.finalize(), crate::hash(&[42; CHUNK_LEN + 3]));
 }
 
 #[test]

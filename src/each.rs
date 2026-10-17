@@ -417,6 +417,36 @@ mod test {
         }
     }
 
+    /// A group held together after whole groups (the core keeps its last
+    /// full chunk, so the held group's core starts by finishing it), at
+    /// group counts 1 to 4, and more groups after it; and a fresh hasher's
+    /// first group held (its two halves' values) with groups after it, so
+    /// the second half's counter shows in the merges that follow.
+    #[test]
+    fn test_update_each_held_group_after_and_before_groups() {
+        let group = crate::STAGE_LEN;
+        let mut input = vec![0u8; 12 * group];
+        crate::test::paint_test_input(&mut input);
+        for before in 0..5 {
+            let mut hashers: Vec<Hasher> = (0..4).map(|_| Hasher::new()).collect();
+            for h in &mut hashers {
+                h.update(&input[..before * group]);
+            }
+            // Pieces under a group's length gather in the stage (the first
+            // over a chunk, which a fresh hasher would otherwise send to its
+            // core); together they fill one group from a group boundary,
+            // which is held.
+            let at = before * group;
+            let turn: Vec<(usize, &[u8])> = (0..4).flat_map(|i| [(i, &input[at..at + 1100]), (i, &input[at + 1100..at + group])]).collect();
+            Hasher::update_each(&mut hashers, &turn);
+            for (i, h) in hashers.iter_mut().enumerate() {
+                let end = at + group + (i + 1) * 3 * group / 2 + 7;
+                h.update(&input[at + group..end]);
+                assert_eq!(h.finalize(), crate::hash(&input[..end]), "{before} groups before, hasher {i}");
+            }
+        }
+    }
+
     #[test]
     fn test_update_each() {
         let mut input = vec![0u8; 1 << 20];
