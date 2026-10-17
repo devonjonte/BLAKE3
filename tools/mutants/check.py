@@ -44,6 +44,10 @@ def read_known():
 
 
 SHARDS = 3  # runs at once, each in its own worktree and build
+# The seconds a mutant's tests may take: the unmutated tests take 1.5 s on
+# the VM and a caught mutant's at most 2.5 s (October 16), so a mutant
+# still running at 10 s hangs.
+TIMEOUT = 10
 # Each process's address space, builds' and tests' alike: a mutant that
 # allocates without end fails its test here, and leaves the machine's
 # memory to the rest (one of 57 GB took the long proofs' memory).
@@ -61,11 +65,10 @@ def run(files, extra=(), shards=SHARDS):
     tmp/mutants-last/ for a look afterwards."""
     # The public features on, so the code behind them is tested too (the
     # build variants, pure, no_sme2, and the like, are their own builds).
-    # Proved code is left to its proofs: the Kani harnesses (`proofs::`,
-    # which `cargo kani` checks) here, and the four proved cores, which
-    # cargo-mutants never reaches (they come in by `include!`).
-    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize,traits-preview", "--timeout", "30",
-            "--exclude-re", "proofs::", *extra]
+    # A mutant whose tests outlast TIMEOUT is a hang, which the check counts
+    # as caught.
+    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize,traits-preview", "--timeout", str(TIMEOUT),
+            *extra]
     for f in files:
         args += ["--file", f]
     runs = []
