@@ -7,31 +7,37 @@ the bugs those steps found and what formal verification we have tried.
 
 **In brief.** On Apple Silicon and other 64-bit Arm CPUs:
 
-- **The assembly kernels are proved right.** Every assembly kernel but
+- **The assembly kernels are proved correct.** Every assembly kernel but
   one (NEON, integer, and SME2) is proved to compute the BLAKE3
   standard's compression function for every input, key, counter, and
-  flags value, as the CPU runs it; each reads and writes only its own
-  buffers and takes a path that depends only on lengths. The one, the
-  SME2 kernel that adds an integer lane (`c/blake3_sme2_hybrid_aarch64.S`),
-  runs inside SME2 hashes of 256 KiB and more, and is tested.
-- **The Rust code around the kernels is tested**, and the tests are
-  checked themselves (below); proofs are kept for the assembly, which
-  testing reaches least.
-- **Every answer is also tested** against upstream's published vectors
-  and an independent reference implementation, and each process checks
-  its kernels against fixed answers before its first hash.
-- **The tests are checked themselves**: mutation testing plants likely
-  bugs throughout the library's Rust, one at a time, and each that every
-  test survives is listed with its reason.
+  flags value, as the CPU runs it, in 381 proofs that a solver checks
+  against a specification of the standard in Lean. Each kernel also
+  reads and writes only its own buffers and takes a path that depends
+  only on lengths. The one left, the SME2 kernel with an integer lane
+  (`c/blake3_sme2_hybrid_aarch64.S`), is proved at one and two groups of
+  chunks and tested beyond.
+- **The tests are tested.** Mutation testing plants each likely bug in
+  the library's Rust, one at a time, about 2,600 in all, and requires a
+  test to fail. Each one that survives is listed with its reason (most
+  change only speed, or run only on another kind of machine), and a
+  change that lets a new one survive is held until a test catches it.
+- **Every answer is checked** against the official test vectors and an
+  independent reference implementation, and each process checks its
+  kernels against fixed answers before its first hash.
 - **Memory safety is tested** under AddressSanitizer, ThreadSanitizer,
   Miri, and guard pages around every kernel's buffers.
 
-On x86-64 the fork's own code is tested, its kernels among them (Devon
-Jonte's passes of whole chunks and a partial one, in Rust intrinsics, beside
-upstream's assembly), and the proofs cover AArch64. The code awaits a line-by-line human
-review and an audit; the [README's warning](README.md) stands. "Proofs" states
-each claim precisely, with what it rests on; "What each check would
-catch" says which kinds of bug each step finds.
+The proofs cover the assembly, which tests reach least; the Rust around
+it is tested. On x86-64 the fork's own code is tested, its kernels among
+them (Devon Jonte's passes of whole chunks and a partial one, in Rust
+intrinsics, beside upstream's assembly). No person has yet reviewed the
+code line by line or audited it; the [README's warning](README.md)
+stands.
+
+**Where to look next:** "Proofs" states each claim precisely, with what
+it rests on, and how to run the proofs; "What each check would catch"
+says which kinds of bug each step finds; "The bugs these steps found"
+lists them.
 
 ## What is new, and so where the risk is
 
@@ -193,13 +199,14 @@ unrolled kernel code.
 - **Miri**, which interprets Rust and stops at undefined behaviour, over
   small versions of the unsafe paths in the `pure` build (Miri cannot run
   assembly or SIMD intrinsics): `test::unsafe_paths` (batches, the pool
-  with two callers; 13 minutes in the VM) and, since October 2,
-  `queue::test::test_miri_queue_round_trips` (every shape of queue, its
-  short messages gathered and its long ones as the pool's tasks; 5
-  minutes), which CI's Miri step runs: all pass, on six scheduling seeds
-  for the queue. It found bug 7 below. The pool's and the queue's
-  threads live for the whole process by design, and `-Zmiri-ignore-leaks`
-  accepts that.
+  with two callers), and the `test_miri_*` tests CI's Miri step runs on
+  every change: the stream (`stream::test::test_miri_stream`), the
+  pool's collections, outboards, and the `Verifier`, and x86's whole-
+  and-partial-chunk passes. Under Miri the pool splits work from 16 KiB
+  (512 KiB elsewhere), so these tests reach the same pool code on small
+  inputs, and each asserts it got there; CI's Miri step takes about three
+  minutes. All pass. Miri found bug 7 below. The pool's threads live for
+  the whole process by design, and `-Zmiri-ignore-leaks` accepts that.
 - **Coverage.** LLVM's source coverage over the library tests reaches
   93% of lines. The unexercised paths it showed became new tests (the
   guard-page tests among them). The rest is code for platforms the test
@@ -290,14 +297,15 @@ llvm-objdump 17 or later; details in [`tools/verify/README.md`](tools/verify/REA
 
 ```sh
 pypy3 tools/verify/prove_hybrid.py   # ends "327 of 327 cases proved"
-pypy3 tools/verify/prove_sme2.py     # ends "36 of 36 cases proved" (hours: the chunk kernel at every group count)
-pypy3 tools/verify/prove_sme2.py xof_every messages_every  # the other kernels at every group count (hours)
+pypy3 tools/verify/prove_sme2.py     # ends "38 of 38 cases proved" (hours: the chunk kernel at every group count)
+pypy3 tools/verify/prove_sme2.py xof_every messages_every  # ends "16 of 16 cases proved": the other kernels at every group count (hours)
 pypy3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
 
-All of them run on the fork's VM before each promotion that changes a
-kernel or the proof tools (`tools/verify/long-proofs.sh`), reported on
-GitHub as the commit's status "long proofs". Each case is proved when Z3
+All of them, 381 cases, run on the fork's VM after every change to a
+kernel or the proof tools lands (`tools/verify/long-proofs.sh`), reported
+on GitHub as the commit's status "long proofs"; a failure is fixed
+before the next such change. Each case is proved when Z3
 finds no input on which the code and the definition differ; one that
 fails prints `NOT PROVED` with what it could not prove, and the run ends
 with exit status 1.
@@ -420,6 +428,7 @@ names the commit that introduced the code and the one that fixed it, in
 |---|---|---|---|
 | Machine-code proofs of the kernels | any wrong result for any input; a read or write outside the kernel's buffers; a broken calling convention; a path that depends on data | planted errors (a rotation off by one, an add made an xor, a read past a buffer, a loop's wrong step) are each rejected (`mutants.py`) | a fault in the instruction models (the CPU and Arm checks below cover it), or in the CPU itself (the self-test covers it) |
 | Instruction models against the CPU and Arm's specification | a wrong model of an instruction the proofs rely on | the CPU check found the carry-flag error; Isla rejects planted model errors | loads, branches, and calls by contract, which the executor's run of the official vectors checks |
+| Mutation testing | a test suite that misses a likely bug: an operator, a bound, or a condition changed, a call or a result dropped | it found missing cases in `Hash`, the `Hasher`, `OutputReader`, `update_each`, and the self-test, and dead code, each fixed or removed; a mutant every test survives is either caught by a new test or listed with its reason | bugs unlike its changes; thread interleavings the tests leave to chance |
 | Test vectors and the reference implementation | any wrong digest at the lengths and shapes tested, on any platform | found bugs 1 and 2 below | untested lengths and shapes |
 | Startup self-test | a miscompiled, mislinked, or faulty-hardware kernel on the user's machine | its inputs run every kernel entry point (a unit test checks it each run), and each case's output feeds the next, so one wrong result changes every later one | faults that appear only after startup |
 | Sanitizers, Miri, guard pages | out-of-bounds access, use after free, data races, undefined behaviour in the paths tested | Miri found bug 7; controls with planted faults are caught | paths not exercised |

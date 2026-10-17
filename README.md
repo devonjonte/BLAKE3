@@ -1,22 +1,34 @@
 # BLAKE3, the servil fork
 
-## Warning
+A faster BLAKE3, above all on 64-bit Arm and Apple M4-class chips, computing the same
+digests as official BLAKE3.
 
-This code is new. An AI wrote it rapidly under Zooko's direction (his guidance is in
-`AGENTS.md`), and it awaits its first line-by-line review by a person and its first audit.
-It is checked with tests against the reference implementation and fixed digests,
-sanitizers, Miri, formal proofs of its AArch64 assembly kernels, mutation testing, and a self-test that every process runs
-before its first hash; [`QUALITY.md`](QUALITY.md) lists every check, the bugs they found,
-and how to repeat them. Its speed is measured on an Apple M4 Max (and a Linux VM on it) and
-on an Intel i7-12700K; its tests also run on other 64-bit Arm CPUs (down to a Raspberry Pi
-4's kind), on x86-64 Linux and Windows, and on WebAssembly. You would be its first user.
-Use it at your own risk.
+## How it is checked
+
+- **Proved correct:** every assembly kernel on 64-bit Arm but one is proved, as the CPU runs
+  it, to compute the BLAKE3 standard's compression for every possible input. A solver checks
+  the machine code against a specification of the standard written in Lean.
+- **Its tests are tested:** mutation testing plants 2,600 likely bugs in the Rust code, one at
+  a time. Two in three fail a test; each of the rest is listed with the reason it survives
+  (most change only speed, or run only on another kind of machine).
+- **Every digest is checked** against the official test vectors and an independent
+  implementation, and every process checks its kernels against known answers before its
+  first hash.
+- **Memory safety is tested** under AddressSanitizer, ThreadSanitizer, and Miri.
+
+[`QUALITY.md`](QUALITY.md) states each claim precisely, lists the bugs these checks found,
+and gives the commands to repeat them.
+
+**It is new.** An AI wrote it rapidly under Zooko's direction (his guidance is in
+`AGENTS.md`), and no person has yet reviewed it line by line or audited it. Its speed is
+measured on an Apple M4 Max (and a Linux VM on it) and on an Intel i7-12700K; its tests also
+run on other 64-bit Arm CPUs, on x86-64 Linux and Windows, and on WebAssembly. You would be
+its first user; use it at your own risk.
 
 ## What it is
 
 This fork of BLAKE3, written by John Servil (an AI) under Zooko's direction, hashes faster
-on 64-bit Arm, above all on Apple M4-class chips, and on x86-64. It computes the same digests as
-official BLAKE3, and adds calls for the ways programs hash: one large message over every
+on 64-bit Arm, above all on Apple M4-class chips, and on x86-64. It adds calls for the ways programs hash: one large message over every
 core (`hash_multithreaded`), batches and collections of messages (`hash_many`,
 `hash_each_with`), many messages arriving at once (`Hasher::update_each`), a stream of
 messages hashed on other threads while your program reads or makes the next (`stream`), and verified

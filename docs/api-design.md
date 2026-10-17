@@ -459,35 +459,32 @@ Signatures: inputs as `&[u8]` or owned buffers (the queue), one digest as
 `Hash` (constant-time equality), batch digests as `&mut [[u8; 32]]`,
 contract violations panic naming the rule broken.
 
-## The queue
+## The stream
 
-The queue maximises throughput, bytes or messages per second, and spends
-latency to buy it. It owes that handovers never slow
-the hashing threads, so its throughput is the hashing's for a program
-that keeps enough in flight (Little's law: in flight = rate x round
-trip). Its handler rules, shapes, and example are in `src/queue.rs`'s
-docs; the reasons:
+The stream maximises throughput, bytes or messages per second, for a
+program with many messages, and spends latency to buy it: inside
+`stream(mode, handler, |s| ...)`, each `submit` hands over a message and
+the place for its digest, the pool's threads hash it behind the program,
+and the handler receives the places back in submission order. Its rules
+and example are in `src/stream.rs`'s docs; the reasons:
 
-- **Event-based, through traits** (Zooko, September 27-28, 2026): results
-  arrive as calls to a handler the user implements; no polling, no
-  blocking, `submit` returns at once.
-- **Zero copying**: buffers pass by ownership, as Rust's io_uring
-  libraries do; an io_uring program reads into registered buffers and
-  submits the same ones.
-- **Zero allocation after warm-up** (`tests/queue_no_alloc.rs`); the
-  program's side matches it with a queue kept for good and a
-  `sync_channel` with room for everything in flight, as the docs' example
-  and the benchmark do (Zooko, September 28, 2026).
-- **One engine per process** (September 27, 2026): the pool, its hashing
-  threads, the SME2 unit's turn, and one delivery thread, which the user
-  never makes or configures. A queue is a cheap handle per stream, `Send
-  + Sync`, `submit(&self)`, so a handler may hold its own queue and
-  resubmit. Back-pressure is the program's own buffers.
+- **Digests into the program's own memory** (Zooko, October 16, 2026):
+  each submission names its place, so no digest is copied out of the
+  library and nothing is allocated per message.
+- **Messages borrowed for the stream's scope**: `stream` waits for every
+  task before it returns, so no thread reads a message after the scope
+  ends; the program's buffers are its own back-pressure.
+- **One scheduler for the pool** (October 16, 2026): a stream is one
+  source of tasks among the pool's, published with one store and taken
+  by compare-and-swap, with no lock and no shared queue; one-shot calls
+  are sources too.
+- **A size hint that is never part of the hash** (`submit_reader`'s, the
+  first parameter added ahead of its use: AGENTS, "Our APIs freeze at
+  1.0").
 
 **Later, optional**: an io_uring layer on Linux (a read's completion hands
-its buffer to the queue; a handler posts into the program's ring with
-`IORING_OP_MSG_RING`), and chaining (a compressor's output buffer becomes
-the hasher's input).
+its buffer to the stream), and chaining (a compressor's output becomes the
+hasher's input).
 
 ## How the benchmark measures each
 
