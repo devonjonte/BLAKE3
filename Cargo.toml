@@ -13,6 +13,10 @@ edition = "2024"
 [features]
 default = ["std"]
 
+# probe/devon-job-trace: record when each one-shot job's pieces start and on
+# which thread (lanes::job_trace), for examples/job_trace.rs. Probe only.
+job-trace = ["std"]
+
 # The NEON implementation does not participate in dynamic feature detection,
 # which is currently x86-only. If "neon" is on, NEON support is assumed. Note
 # that AArch64 always supports NEON, but support on ARMv7 varies. The NEON
@@ -185,3 +189,7 @@ overflow-checks = true
 [profile.mutants]
 inherits = "test"
 incremental = true
+
+[[example]]
+name = "job_trace"
+required-features = ["job-trace"]

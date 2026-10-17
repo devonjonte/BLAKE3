@@ -667,6 +667,8 @@ impl Pool {
         let slot = source.register();
         // Sound: the caller's frame outlives every access (it waits below).
         let ptr = &job as *const Job as *mut Job<'static>;
+        #[cfg(feature = "job-trace")]
+        job_trace::begin();
         let target = source.publish_job(ptr, pieces, own);
         if slot.is_some() && pieces > own + 1 {
             self.wake_for(pieces - own - 1);
@@ -677,11 +679,15 @@ impl Pool {
         }
         source.finished(own);
         while let Some(sources::Item::Piece(_, index)) = source.take() {
+            #[cfg(feature = "job-trace")]
+            job_trace::piece(true);
             // Sound: this thread took `index`, so it alone writes its slot.
             unsafe { job.hash_piece(index, pool_platform()) };
             source.finished(1);
         }
         source.wait(target);
+        #[cfg(feature = "job-trace")]
+        job_trace::end();
         if let Some(slot) = slot {
             sources::Source::unregister(slot);
         }
@@ -1039,6 +1045,8 @@ pub(crate) mod sources {
             match item {
                 Item::Task(task) => task.run(pool_platform()),
                 Item::Piece(job, index) => {
+                    #[cfg(feature = "job-trace")]
+                    super::job_trace::piece(false);
                     // Sound: the job lives until its pieces are finished,
                     // this one among them; this thread alone took `index`.
                     unsafe { (*job).hash_piece(index, pool_platform()) };
@@ -1687,5 +1695,73 @@ mod proofs {
         kani::assume(offset & (cap - 1) == 0 && offset < len);
         let piece = next_piece_len(len - offset, threads).min(cap);
         assert!(piece.is_power_of_two() && piece <= cap && offset & (piece - 1) == 0);
+    }
+}
+
+/// probe/devon-job-trace: when each one-shot job's pieces start, and on which
+/// thread, in a fixed array of events (no allocation, no lock): for
+/// examples/job_trace.rs. Each event packs the job's number (16 bits), its
+/// kind, the thread (8 bits: 0 the caller, n the n-th thread seen) and the
+/// nanoseconds since the job began (32 bits).
+#[cfg(feature = "job-trace")]
+pub mod job_trace {
+    use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+
+    const EVENTS: usize = 1 << 20;
+    static LOG: [AtomicU64; EVENTS] = [const { AtomicU64::new(0) }; EVENTS];
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    static JOB: AtomicU32 = AtomicU32::new(0);
+    static BEGAN_NS: AtomicU64 = AtomicU64::new(0);
+    static THREADS: AtomicU32 = AtomicU32::new(0);
+
+    /// An event's kind.
+    pub const BEGIN: u64 = 0;
+    pub const CALLER_PIECE: u64 = 1;
+    pub const WORKER_PIECE: u64 = 2;
+    pub const END: u64 = 3;
+
+    fn now_ns() -> u64 {
+        static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        ORIGIN.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+    }
+
+    fn thread() -> u64 {
+        std::thread_local! {
+            static ID: u64 = u64::from(THREADS.fetch_add(1, Ordering::Relaxed) + 1).min(255);
+        }
+        ID.with(|id| *id)
+    }
+
+    fn record(kind: u64, thread: u64) {
+        let at = now_ns().saturating_sub(BEGAN_NS.load(Ordering::Relaxed)).min(u64::from(u32::MAX));
+        let i = NEXT.fetch_add(1, Ordering::Relaxed);
+        if i < EVENTS {
+            let job = u64::from(JOB.load(Ordering::Relaxed)) & 0xffff;
+            LOG[i].store(job << 48 | kind << 40 | thread << 32 | at, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn begin() {
+        JOB.fetch_add(1, Ordering::Relaxed);
+        BEGAN_NS.store(now_ns(), Ordering::Relaxed);
+        record(BEGIN, 0);
+    }
+
+    pub(crate) fn piece(caller: bool) {
+        if caller { record(CALLER_PIECE, 0) } else { record(WORKER_PIECE, thread()) }
+    }
+
+    pub(crate) fn end() {
+        record(END, 0);
+    }
+
+    /// Every event so far, unpacked: (job, kind, thread, ns since its job
+    /// began), and forget them.
+    pub fn take() -> Vec<(u32, u64, u32, u32)> {
+        let n = NEXT.swap(0, Ordering::SeqCst).min(EVENTS);
+        (0..n).map(|i| {
+            let e = LOG[i].load(Ordering::SeqCst);
+            ((e >> 48) as u32, (e >> 40) & 0xff, ((e >> 32) & 0xff) as u32, e as u32)
+        }).collect()
     }
 }
