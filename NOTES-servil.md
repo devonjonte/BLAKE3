@@ -2855,3 +2855,41 @@ time run 4-8% slower than in the stream's earlier design (each message's
 place comes back alone, about 1-2 ns a message); equal-length short
 messages belong in `submit_batch`, 5-13% faster, and the stream's
 documentation says so. A cap on how many workers spin did not help.
+
+## Energy, and the M4 Max's three SME units (October 17, 2026)
+
+**Energy is a lab instrument** (Zooko): out of the benchmark, FROZEN, and
+the gate, where a number would become a goal; measured in experiments with
+the runner's `"powermetrics": true` (the chip's CPU power every 500 ms,
+`tools/runner/README.md`).
+
+**The per-process estimate is a model** (`proc_pid_rusage`'s
+`ri_energy_nj`, `probe/mac-energy`): against the chip's CPU power above
+idle (0.57-0.59 W), from -16% (integer work, one core, NEON build) to
++30% (NEON hashing, all cores), so it cannot compare builds whose
+instruction mix differs (jobs 1578-1581).
+
+**SME2 against NEON, one thread** (chip power, jobs 1582-1585): SME2 about
+690 pJ a byte at 6.2 GB/s, NEON about 1990 at 3.9: a third of the energy,
+1.6 times as fast. A multithreaded call is NEON on every worker in both
+builds (the caller alone on SME2), 1.3-1.5 nJ a byte.
+
+**Heat confounds energy.** Back-to-back full-load runs (40-60 W, about 25 s
+each) throttled within minutes: later runs slower and cheaper a byte
+(64 MiB 46.0 -> 34.7 GB/s, jobs 1589-1596). Each run since starts after a
+minute's rest, in an order that cancels drift (0, 1, 2, 3, 3, 2, 1, 0).
+
+**SME2 on the pool's workers** (`probe/sme-units`: the first K workers on
+SME2 without the turn, BLAKE3_SME2_E putting the first on the E-cores;
+the caller on SME2 as always; cool starts, 4 runs a side; jobs 1597-1620):
+
+| against K = 0 | 4 MiB | 64 MiB | batch of 1M x 64 B |
+|---|---|---|---|
+| K = 3, the first on E (4 SME2 threads, 3 units) | -2% time, -7% energy | level | -4% time, -10% energy |
+| K = 2, the first on E (one thread a unit) | -2.5%, -4% to -7% | level | -2.5%, -6% |
+
+Real (the time ranges apart) and small: with every core busy, the chip's
+power and memory set the pace (as on October 6, job 1384). Not built:
+workers of two kinds and the turn bypassed in the pool, for 2-4%. Worth
+another look with the stream's pool, with fewer busy cores, or on chips
+with more SME units.
