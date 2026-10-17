@@ -1,7 +1,7 @@
 use crate::{BLOCK_LEN, CVWords, IncrementCounter, portable};
 
 cfg_if::cfg_if! {
-    if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
+    if #[cfg(target_arch = "x86_64")] {
         cfg_if::cfg_if! {
             if #[cfg(blake3_avx512_ffi)] {
                 pub const MAX_SIMD_DEGREE: usize = 16;
@@ -29,7 +29,7 @@ cfg_if::cfg_if! {
 // allowed to use cmp::max, so we have to hardcode this additional constant
 // value. Get rid of this once cmp::max is a const fn.
 cfg_if::cfg_if! {
-    if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
+    if #[cfg(target_arch = "x86_64")] {
         cfg_if::cfg_if! {
             if #[cfg(blake3_avx512_ffi)] {
                 pub const MAX_SIMD_DEGREE_OR_2: usize = 16;
@@ -57,14 +57,12 @@ cfg_if::cfg_if! {
 /// proofs start from the value `initialize` records.
 pub enum Platform {
     Portable = 1,
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    SSE2 = 2,
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     SSE41 = 3,
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     AVX2 = 4,
     #[cfg(blake3_avx512_ffi)]
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     AVX512 = 5,
     #[cfg(blake3_neon)]
     NEON = 6,
@@ -115,6 +113,8 @@ impl Sme2Turn {
             let held = !SME2_BUSY.0.load(Ordering::Relaxed);
             if held {
                 SME2_BUSY.0.store(true, Ordering::Relaxed);
+            } else {
+                crate::ran(crate::Ran::TurnTaken);
             }
             return Sme2Turn { platform: if held { Platform::SME2 } else { Platform::NEON }, held };
         }
@@ -190,7 +190,7 @@ impl Platform {
             return Platform::Portable;
         }
 
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         {
             #[cfg(blake3_avx512_ffi)]
             {
@@ -203,9 +203,6 @@ impl Platform {
             }
             if sse41_detected() {
                 return Platform::SSE41;
-            }
-            if sse2_detected() {
-                return Platform::SSE2;
             }
         }
         // SME2 is detected at runtime; the kernels also require a 512-bit
@@ -236,14 +233,12 @@ impl Platform {
     pub fn name(&self) -> &'static str {
         match self {
             Platform::Portable => "portable",
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Platform::SSE2 => "SSE2",
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::SSE41 => "SSE4.1",
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX2 => "AVX2",
             #[cfg(blake3_avx512_ffi)]
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX512 => "AVX-512",
             #[cfg(blake3_neon)]
             Platform::NEON => "NEON",
@@ -260,12 +255,10 @@ impl Platform {
     pub fn compress_name(&self) -> &'static str {
         match self {
             Platform::Portable => "portable compression",
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Platform::SSE2 => "SSE2 compression",
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::SSE41 | Platform::AVX2 => "SSE4.1 compression",
             #[cfg(blake3_avx512_ffi)]
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX512 => "AVX-512 compression",
             #[cfg(blake3_neon)]
             Platform::NEON => "portable compression",
@@ -281,14 +274,12 @@ impl Platform {
     pub fn hash_many_name(&self) -> &'static str {
         match self {
             Platform::Portable => "portable hash_many",
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Platform::SSE2 => "SSE2 hash_many (4-way)",
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::SSE41 => "SSE4.1 hash_many (4-way)",
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX2 => "AVX2 hash_many (8-way)",
             #[cfg(blake3_avx512_ffi)]
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX512 => "AVX-512 hash_many (16-way)",
             #[cfg(all(blake3_neon, blake3_neon_hybrid))]
             Platform::NEON => "integer + NEON hybrid kernels (16 chunks per call)",
@@ -304,14 +295,12 @@ impl Platform {
     pub fn simd_degree(&self) -> usize {
         let degree = match self {
             Platform::Portable => 1,
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Platform::SSE2 => 4,
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::SSE41 => 4,
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX2 => 8,
             #[cfg(blake3_avx512_ffi)]
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX512 => 16,
             // Sixteen chunks per call reach the k10 kernel (see
             // neon_hybrid); the four-lane C kernel takes four.
@@ -345,18 +334,13 @@ impl Platform {
         match self {
             Platform::Portable => portable::compress_in_place(cv, block, block_len, counter, flags),
             // Safe because detect() checked for platform support.
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Platform::SSE2 => unsafe {
-                crate::sse2::compress_in_place(cv, block, block_len, counter, flags)
-            },
-            // Safe because detect() checked for platform support.
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::SSE41 | Platform::AVX2 => unsafe {
                 crate::sse41::compress_in_place(cv, block, block_len, counter, flags)
             },
             // Safe because detect() checked for platform support.
             #[cfg(blake3_avx512_ffi)]
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX512 => unsafe {
                 crate::avx512::compress_in_place(cv, block, block_len, counter, flags)
             },
@@ -435,18 +419,13 @@ impl Platform {
         match self {
             Platform::Portable => portable::compress_xof(cv, block, block_len, counter, flags),
             // Safe because detect() checked for platform support.
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Platform::SSE2 => unsafe {
-                crate::sse2::compress_xof(cv, block, block_len, counter, flags)
-            },
-            // Safe because detect() checked for platform support.
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::SSE41 | Platform::AVX2 => unsafe {
                 crate::sse41::compress_xof(cv, block, block_len, counter, flags)
             },
             // Safe because detect() checked for platform support.
             #[cfg(blake3_avx512_ffi)]
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX512 => unsafe {
                 crate::avx512::compress_xof(cv, block, block_len, counter, flags)
             },
@@ -498,21 +477,7 @@ impl Platform {
                 out,
             ),
             // Safe because detect() checked for platform support.
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Platform::SSE2 => unsafe {
-                crate::sse2::hash_many(
-                    inputs,
-                    key,
-                    counter,
-                    increment_counter,
-                    flags,
-                    flags_start,
-                    flags_end,
-                    out,
-                )
-            },
-            // Safe because detect() checked for platform support.
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::SSE41 => unsafe {
                 crate::sse41::hash_many(
                     inputs,
@@ -526,7 +491,7 @@ impl Platform {
                 )
             },
             // Safe because detect() checked for platform support.
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX2 => unsafe {
                 crate::avx2::hash_many(
                     inputs,
@@ -541,7 +506,7 @@ impl Platform {
             },
             // Safe because detect() checked for platform support.
             #[cfg(blake3_avx512_ffi)]
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX512 => unsafe {
                 crate::avx512::hash_many(
                     inputs,
@@ -617,7 +582,7 @@ impl Platform {
             // Safe because detect() checked for platform support.
             #[cfg(blake3_avx512_ffi)]
             #[cfg(unix)]
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             Platform::AVX512 => unsafe {
                 crate::avx512::xof_many(cv, block, block_len, counter, flags, out)
             },
@@ -665,16 +630,7 @@ impl Platform {
         Self::Portable
     }
 
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    pub fn sse2() -> Option<Self> {
-        if sse2_detected() {
-            Some(Self::SSE2)
-        } else {
-            None
-        }
-    }
-
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     pub fn sse41() -> Option<Self> {
         if sse41_detected() {
             Some(Self::SSE41)
@@ -683,7 +639,7 @@ impl Platform {
         }
     }
 
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     pub fn avx2() -> Option<Self> {
         if avx2_detected() {
             Some(Self::AVX2)
@@ -693,7 +649,7 @@ impl Platform {
     }
 
     #[cfg(blake3_avx512_ffi)]
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     pub fn avx512() -> Option<Self> {
         if avx512_detected() {
             Some(Self::AVX512)
@@ -727,7 +683,7 @@ impl Platform {
 // Note that AVX-512 is divided into multiple featuresets, and we use two of
 // them, F and VL.
 #[cfg(blake3_avx512_ffi)]
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 #[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
 pub fn avx512_detected() -> bool {
@@ -744,7 +700,7 @@ pub fn avx512_detected() -> bool {
     has_avx512::get()
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 #[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
 pub fn avx2_detected() -> bool {
@@ -761,7 +717,7 @@ pub fn avx2_detected() -> bool {
     has_avx2::get()
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 #[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
 pub fn sse41_detected() -> bool {
@@ -769,30 +725,9 @@ pub fn sse41_detected() -> bool {
         return false;
     }
 
-    // A testing-only short-circuit.
-    if cfg!(feature = "no_sse41") {
-        return false;
-    }
 
     cpufeatures::new!(has_sse41, "sse4.1");
     has_sse41::get()
-}
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[inline(always)]
-#[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
-pub fn sse2_detected() -> bool {
-    if cfg!(miri) {
-        return false;
-    }
-
-    // A testing-only short-circuit.
-    if cfg!(feature = "no_sse2") {
-        return false;
-    }
-
-    cpufeatures::new!(has_sse2, "sse2");
-    has_sse2::get()
 }
 
 /// The core's virtual counter (CNTVCT_EL0, which user code reads

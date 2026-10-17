@@ -160,6 +160,12 @@ fn join_tail(state: &mut State, start: Reading, reading: Reading) {
     state.last = Some(reading);
 }
 
+/// How long until the next tick reads the machine, in ns (0: now; u64::MAX
+/// where the platform gives no CPU times).
+pub fn until_due_ns() -> u64 {
+    DUE_NS.load(Ordering::Relaxed).saturating_sub(now_ns())
+}
+
 /// Read the machine once a window has passed since the last reading;
 /// otherwise nothing. Call it outside timed intervals: every measurement
 /// in this crate does. Another thread's tick in progress makes this one

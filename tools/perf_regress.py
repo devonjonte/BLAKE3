@@ -5,12 +5,29 @@ a commit, measured side by side.
     pypy3 tools/perf_regress.py check                  # against HEAD
     pypy3 tools/perf_regress.py check --against REV    # against a commit
     pypy3 tools/perf_regress.py compare OLD NEW        # two commits
+    pypy3 tools/perf_regress.py compare OLD NEW --full # every cell of a default run
+    pypy3 tools/perf_regress.py compare OLD NEW --bench OLD_BENCH NEW_BENCH
+                                   # an API change: each side's own cells
+    pypy3 tools/perf_regress.py compare OLD NEW --full --layouts 18 --rounds 4 --keep DIR
+                                   # 18 pairs of runs with 4 samples of every
+                                   # cell; every run's samples file kept in DIR
+    pypy3 tools/perf_regress.py compare OLD NEW --contenders sha256,sha256-ring --points "continuous 64 KiB"
+                                   # the cells a run with these measures
     pypy3 tools/perf_regress.py build                  # bench-hashes against the working tree
 
 It builds bench-hashes twice, once against the fork at the old commit and
 once against the new one (for `check`, a commit object made from the
-working tree), the same benchmark source in both, and runs
-`bench-hashes regress OLD NEW`, whose exit it returns: 0, no cell slower;
+working tree), the same benchmark source in both; or, with `--bench`, each
+side's own bench-hashes commit (an API change, whose cells call the new
+API: the old design through the old cells against the new design through
+the new ones; the instrument, the clocks crate and `regress`, stays the
+working tree's on both sides). It relinks each side once per pair
+(`--layouts`, LAYOUTS by default), each with its own random function order, the two sides'
+seeds apart so that identical code still meets a new layout in every run (a binary's
+layout alone moves cells by several percent: bench-hashes
+audit/variance-on-unchanged-code.md), and runs
+`bench-hashes regress OLD... -- NEW...`, pair i on the i-th layout of
+each side, whose exit it returns: 0, no cell slower;
 1, a cell slower; 2, no verdict (a run's load was busy or unobserved). The
 rule, its points, and its margins are bench-hashes' (`regress` in its
 src/main.rs, by clocks::summary), and its calibration is in
@@ -25,8 +42,10 @@ path.
 """
 import argparse
 import fcntl
+import glob
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -92,7 +111,25 @@ def target_root():
     return Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "bench-hashes/target"))
 
 
-def side_bench(side, commit):
+def bench_source(side, rev):
+    """The bench-hashes checkout a side copies: this checkout's, as it is;
+    or, for `rev`, a worktree of this checkout's bench-hashes repository at
+    that commit, under CACHE/side (moved only when `rev` does)."""
+    bench = ROOT / "bench-hashes"
+    if rev is None:
+        return bench
+    rev = git("rev-parse", f"{rev}^{{commit}}", cwd=bench)
+    tree = CACHE / side / "bench-src"
+    if not tree.exists():
+        git("worktree", "prune", cwd=bench)
+        tree.parent.mkdir(parents=True, exist_ok=True)
+        git("worktree", "add", "--detach", str(tree), rev, cwd=bench)
+    elif git("rev-parse", "HEAD", cwd=tree) != rev:
+        git("checkout", "--quiet", "--force", "--detach", rev, cwd=tree)
+    return tree
+
+
+def side_bench(side, commit, bench_rev=None):
     """The bench-hashes executable built against the fork at `commit`, in
     the side `side` ("old", "new", or the runner's "bench"): a fork worktree under CACHE/side with a copy of bench-hashes
     inside, and a target directory of its own. Each step changes only what
@@ -111,9 +148,10 @@ def side_bench(side, commit):
         git("worktree", "add", "--detach", str(checkout), commit)
     elif git("rev-parse", "HEAD", cwd=checkout) != commit:
         git("checkout", "--quiet", "--force", "--detach", commit, cwd=checkout)
-    # The benchmark as it is now, so only the fork differs between sides;
-    # everything but the lock, which the side derives.
-    bench, copy = ROOT / "bench-hashes", checkout / "bench-hashes"
+    # The benchmark as it is now, so only the fork differs between sides
+    # (or the side's own, with `bench_rev`); everything but the lock, which
+    # the side derives.
+    bench, copy = bench_source(side, bench_rev), checkout / "bench-hashes"
     skip = {"target", "benchmark-results", "tmp", ".git"}
     wanted = set()
     for path in sorted(bench.rglob("*")):
@@ -157,7 +195,58 @@ def side_bench(side, commit):
             and m["target"]["name"] == "bench-hashes"]
     assert len(exes) == 1, f"expected the bench-hashes executable, found {exes}"
     require_sme2_kernel(exes[0])
-    return exes[0]
+    return exes[0], copy, env
+
+
+# One layout per pair of `bench-hashes regress` (its REGRESS_PAIRS).
+LAYOUTS = 8
+
+
+def lld_dir():
+    """A directory holding `ld.lld`, for the C compiler's -B (Linux): the
+    one on PATH, or the newest versioned one."""
+    lld = shutil.which("ld.lld") or (sorted(glob.glob("/usr/bin/ld.lld-*")) or [None])[-1]
+    if lld is None:
+        sys.exit("perf_regress: relinking each pair's layout needs ld.lld (apt install lld)")
+    link = CACHE / "lld" / "ld.lld"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if not link.exists():
+        link.symlink_to(lld)
+    return link.parent
+
+
+def layouts(side, exe, copy, env, seeds):
+    """`exe` relinked once per seed, each with its functions in their own
+    random order (random.Random(seed)): a linker order file, which Mach-O's
+    ld and lld on Linux both take. The two sides take different seeds
+    (old 0 to LAYOUTS - 1, new LAYOUTS on), so that identical code on both
+    sides still meets a different layout in each run, as a real change does:
+    with one seed list, a check of a commit against itself ran the same
+    binary twice in every pair and never met layout noise. Each relink rebuilds the bench-hashes
+    crate alone; its dependencies stay built."""
+    nm = subprocess.run(["nm", exe], env=ENV, check=True, stdout=subprocess.PIPE, text=True).stdout
+    symbols = sorted({fields[2] for fields in (line.split() for line in nm.splitlines()) if len(fields) == 3 and fields[1] in "tT"})
+    exes = []
+    for seed in seeds:
+        order = CACHE / side / f"order-{seed}.txt"
+        shuffled = list(symbols)
+        random.Random(seed).shuffle(shuffled)
+        write_if_different(order, ("\n".join(shuffled) + "\n").encode())
+        if sys.platform == "darwin":
+            flags = [f"-Clink-arg=-Wl,-order_file,{order}"]
+        else:
+            flags = ["-Clink-arg=-fuse-ld=lld", f"-Clink-arg=-B{lld_dir()}", f"-Clink-arg=-Wl,--symbol-ordering-file={order}",
+                     "-Clink-arg=-Wl,--no-warn-symbol-ordering"]
+        out = subprocess.run(["cargo", "--config", PATCH, "--config", clocks_patch(), "rustc", "--release", "--bin", "bench-hashes",
+                              "--message-format=json-render-diagnostics", "--", *flags],
+                             cwd=copy, env=env, check=True, stdout=subprocess.PIPE, text=True).stdout
+        built = [json.loads(line)["executable"] for line in out.splitlines()
+                 if json.loads(line).get("reason") == "compiler-artifact" and json.loads(line).get("executable")]
+        assert len(built) == 1, f"expected the relinked bench-hashes, found {built}"
+        kept = CACHE / side / f"bench-hashes-{seed}"
+        shutil.copy2(built[0], kept)
+        exes.append(str(kept))
+    return exes
 
 
 def machine_has_sme2():
@@ -184,14 +273,48 @@ def require_sme2_kernel(exe):
                            "point CC at a compiler that assembles SME2 (CC=clang-19 in the VM)")
 
 
-def compare(old_rev, new):
+def provenance(name, fork, bench_rev):
+    """One side's sources, for the report: the fork commit, and the
+    bench-hashes commit (its own, or the checkout's HEAD and whether the
+    checkout differs from it)."""
+    bench = ROOT / "bench-hashes"
+    if bench_rev is not None:
+        source = git("rev-parse", "--short=12", f"{bench_rev}^{{commit}}", cwd=bench)
+    else:
+        dirty = git("status", "--porcelain", "--untracked-files=no", cwd=bench) != ""
+        source = git("rev-parse", "--short=12", "HEAD", cwd=bench) + (" plus uncommitted changes" if dirty else "")
+    return f"perf_regress: {name}: fork {git('rev-parse', '--short=12', fork)}, bench-hashes {source}"
+
+
+def compare(old_rev, new, bench=(None, None), pairs=LAYOUTS, regress=()):
     """Compare the fork at `old_rev` with `new` (a commit, or None for the
-    working tree): bench-hashes regress. Returns its exit code."""
-    old = side_bench("old", old_rev)
-    new_exe = side_bench("new", working_tree_commit() if new is None else new)
+    working tree): bench-hashes regress over each side's layouts, `pairs`
+    of them, with `regress`'s other options as given (which cells, rounds,
+    where to keep the samples: regress_options); with `bench`, each side's
+    own bench-hashes commit. Returns its exit code. It first prints what it
+    compares, so that a report carries what reproduces it."""
+    new_rev = working_tree_commit() if new is None else new
+    old = layouts("old", *side_bench("old", old_rev, bench[0]), range(pairs))
+    new_exes = layouts("new", *side_bench("new", new_rev, bench[1]), range(pairs, 2 * pairs))
     name = "the working tree" if new is None else new
     print(f"perf_regress: {name} against {old_rev}", file=sys.stderr, flush=True)
-    return subprocess.run([new_exe, "regress", old, new_exe], env=ENV).returncode
+    print(provenance("old", old_rev, bench[0]), file=sys.stderr, flush=True)
+    print(provenance("new", new_rev, bench[1]), file=sys.stderr, flush=True)
+    linker = "ld -order_file" if sys.platform == "darwin" else f"{os.path.realpath(lld_dir() / 'ld.lld')} --symbol-ordering-file"
+    print(f"perf_regress: {pairs} layouts a side, function order seeds 0-{pairs - 1} old and {pairs}-{2 * pairs - 1} new (random.Random(seed).shuffle of the sorted text symbols), {linker}; "
+          f"instrument: clocks and regress from {git('rev-parse', '--short=12', 'HEAD')}{' plus uncommitted changes' if git('status', '--porcelain', '--untracked-files=no') else ''}",
+          file=sys.stderr, flush=True)
+    return subprocess.run([new_exes[0], "regress", "--pairs", str(pairs), *regress, *old, "--", *new_exes], env=ENV).returncode
+
+
+def regress_options(args):
+    """compare's options that are regress's, as regress takes them: the
+    meaning of each is regress's (bench-hashes regress's usage)."""
+    return [*(["--full"] if args.full else []),
+            *(["--contenders", args.contenders] if args.contenders else []),
+            *(["--points", args.points] if args.points else []),
+            *(["--rounds", str(args.rounds)] if args.rounds else []),
+            *(["--keep", str(Path(args.keep).resolve())] if args.keep else [])]
 
 
 def main():
@@ -204,6 +327,14 @@ def main():
     p = sub.add_parser("compare", help="two commits")
     p.add_argument("old")
     p.add_argument("new")
+    p.add_argument("--full", action="store_true", help="every cell of a default run, not the check's points")
+    p.add_argument("--contenders", help="the cells a run with these contenders measures (regress --contenders)")
+    p.add_argument("--points", help="with --contenders, these points alone (regress --points)")
+    p.add_argument("--bench", nargs=2, metavar=("OLD_BENCH", "NEW_BENCH"),
+                   help="each side's own bench-hashes commit (an API change, its cells changed with it)")
+    p.add_argument("--layouts", type=int, default=LAYOUTS, help=f"pairs of runs, each side relinked for each (default {LAYOUTS})")
+    p.add_argument("--rounds", type=int, help="samples of every cell a run (default: a run's own)")
+    p.add_argument("--keep", help="a directory to keep every run's samples file in")
     p = sub.add_parser("build", help="build bench-hashes against the working tree, or a commit, as it is; "
                                      "print the executable's path")
     p.add_argument("--commit", help="a fork commit (default: the working tree)")
@@ -220,9 +351,11 @@ def main():
         except BlockingIOError:
             sys.exit(f"perf_regress: another perf_regress holds {CACHE / 'lock'}; run one at a time")
         if args.command == "build":
-            print(side_bench(args.side, args.commit or working_tree_commit()))
+            print(side_bench(args.side, args.commit or working_tree_commit())[0])
             return 0
-        return compare(args.against, None) if args.command == "check" else compare(args.old, args.new)
+        if args.command == "check":
+            return compare(args.against, None)
+        return compare(args.old, args.new, tuple(args.bench) if args.bench else (None, None), args.layouts, regress_options(args))
 
 
 if __name__ == "__main__":

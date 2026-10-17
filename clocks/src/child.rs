@@ -17,6 +17,17 @@
 //!   `ri_system_ptime` the P-cores' share of its CPU time. Elsewhere
 //!   `None`, and results say so.
 //!
+//! **Load while it runs.** Its CPU time is this process's own
+//! ([`crate::process_cpu_ns`]): reaped, through `getrusage`; running, read
+//! at every load window's boundary by a watcher thread that wakes once a
+//! window ([`crate::load::WINDOW_NS`]) and ticks [`crate::load`]. So a
+//! launcher's load windows stay a second long however long the child
+//! runs, and a busy second inside a long run is seen, not averaged away.
+//! The process is reaped only after the watcher stops, and the running
+//! entry cleared after the reaping, so its CPU time counts once. The
+//! running child's own threads count as it runs; a process it starts in
+//! turn counts once the child reaps it.
+//!
 //! Windows gives wall time alone here.
 
 use crate::Counts;
@@ -46,6 +57,67 @@ pub fn run(command: &mut std::process::Command) -> Run {
     let started = crate::now();
     let child = command.spawn().unwrap_or_else(|e| panic!("cannot start {command:?}: {e}"));
     imp::finish(child, started, started_ns)
+}
+
+/// The child [`run`] is running (its pid; 0 for none): one at a time.
+#[cfg(unix)]
+static RUNNING: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// The CPU time of the child [`run`] is running, so far (0 for none).
+#[cfg(unix)]
+pub(crate) fn running_cpu_ns() -> u64 {
+    match RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+        0 => 0,
+        pid => imp::cpu_so_far_ns(pid),
+    }
+}
+
+/// While the child `pid` runs: mark it running, and tick the load windows
+/// at each window's boundary on a thread of its own, until `exited`
+/// returns (the child exited, not yet reaped). Then stop the watcher; the
+/// caller reaps the child and calls [`stop_watching`].
+#[cfg(unix)]
+fn watch_until<T>(pid: i32, exited: impl FnOnce() -> T) -> T {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    assert_eq!(RUNNING.swap(pid, Ordering::SeqCst), 0, "clocks::child::run runs one child at a time");
+    let done = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let watcher = scope.spawn(|| {
+            while !done.load(Ordering::SeqCst) {
+                std::thread::park_timeout(std::time::Duration::from_nanos(crate::load::until_due_ns().max(1_000_000)));
+                if !done.load(Ordering::SeqCst) {
+                    crate::load::tick();
+                }
+            }
+        });
+        let result = exited();
+        done.store(true, Ordering::SeqCst);
+        watcher.thread().unpark();
+        watcher.join().expect("the load watcher");
+        result
+    })
+}
+
+/// After the child is reaped (its CPU time now in `getrusage`'s children).
+#[cfg(unix)]
+fn stop_watching() {
+    RUNNING.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Wait for `pid` to exit, leaving it to read before it is reaped.
+#[cfg(unix)]
+fn wait_exited(pid: i32) {
+    unsafe extern "C" {
+        fn waitid(idtype: i32, id: u32, info: *mut u8, options: i32) -> i32;
+    }
+    const P_PID: i32 = 1;
+    // WEXITED is 4 on both; WNOWAIT, Linux 0x01000000, macOS 0x20.
+    const WEXITED: i32 = 4;
+    const WNOWAIT: i32 = if cfg!(target_vendor = "apple") { 0x20 } else { 0x0100_0000 };
+    let mut info = [0u8; 128];
+    // Sound: `info` is writable and larger than a siginfo_t.
+    let rc = unsafe { waitid(P_PID, pid as u32, info.as_mut_ptr(), WEXITED | WNOWAIT) };
+    assert_eq!(rc, 0, "waitid on the child: {}", std::io::Error::last_os_error());
 }
 
 /// A `struct rusage`'s user and system time, as 64-bit words.
@@ -103,9 +175,29 @@ mod rusage {
 mod imp {
     use super::{Run, rusage};
 
+    /// A running (or exited, unreaped) process's user and system time, from
+    /// /proc/PID/stat (fields 14 and 15, in clock ticks).
+    pub fn cpu_so_far_ns(pid: i32) -> u64 {
+        unsafe extern "C" {
+            fn sysconf(name: i32) -> i64;
+        }
+        const SC_CLK_TCK: i32 = 2;
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { return 0 };
+        // After the command's closing parenthesis: state, then fields 4 on.
+        let fields: Vec<&str> = stat[stat.rfind(')').expect("/proc/PID/stat names the command") + 1..].split_whitespace().collect();
+        let ticks: u64 = fields[11].parse::<u64>().expect("utime") + fields[12].parse::<u64>().expect("stime");
+        // Sound: a plain query.
+        ticks * 1_000_000_000 / u64::try_from(unsafe { sysconf(SC_CLK_TCK) }).expect("sysconf(_SC_CLK_TCK) is positive")
+    }
+
     pub fn finish(child: std::process::Child, started: std::time::Instant, started_ns: u64) -> Run {
-        let (status, words) = rusage::reap(child.id() as i32);
-        let wall_ns = crate::since_ns(started);
+        let pid = child.id() as i32;
+        let wall_ns = super::watch_until(pid, || {
+            super::wait_exited(pid);
+            crate::since_ns(started)
+        });
+        let (status, words) = rusage::reap(pid);
+        super::stop_watching();
         Run {
             started_ns,
             wall_ns,
@@ -125,12 +217,8 @@ mod imp {
     use crate::{Counts, Level};
 
     unsafe extern "C" {
-        fn waitid(idtype: i32, id: u32, info: *mut u8, options: i32) -> i32;
         fn proc_pid_rusage(pid: i32, flavor: i32, buffer: *mut u64) -> i32;
     }
-    const P_PID: i32 = 1;
-    const WEXITED: i32 = 0x04;
-    const WNOWAIT: i32 = 0x20;
     const RUSAGE_INFO_V6: i32 = 6;
     // rusage_info_v6 as u64 words (<sys/resource.h>): ri_uuid (2 words),
     // ri_user_time 2, ri_system_time 3, ..., ri_diskio_bytesread 18, ...,
@@ -146,18 +234,30 @@ mod imp {
     const PINSTRUCTIONS: usize = 40;
     const PCYCLES: usize = 41;
 
+    /// A running (or exited, unreaped) process's user and system time
+    /// (proc_pid_rusage, in Mach time units).
+    pub fn cpu_so_far_ns(pid: i32) -> u64 {
+        let mut words = [0u64; 64];
+        // Sound: `words` is writable and longer than rusage_info_v6.
+        if unsafe { proc_pid_rusage(pid, RUSAGE_INFO_V6, words.as_mut_ptr()) } != 0 {
+            return 0;
+        }
+        crate::imp::mach_to_ns(words[USER_TIME] + words[SYSTEM_TIME])
+    }
+
     pub fn finish(child: std::process::Child, started: std::time::Instant, started_ns: u64) -> Run {
         let pid = child.id() as i32;
-        // Wait for the exit, leaving the process to read before it is reaped.
-        let mut info = [0u8; 128];
-        // Sound: `info` is writable and larger than a siginfo_t.
-        let rc = unsafe { waitid(P_PID, pid as u32, info.as_mut_ptr(), WEXITED | WNOWAIT) };
-        assert_eq!(rc, 0, "waitid on the child: {}", std::io::Error::last_os_error());
-        let wall_ns = crate::since_ns(started);
+        // Wait for the exit under the watcher, leaving the process to read
+        // before it is reaped.
+        let wall_ns = super::watch_until(pid, || {
+            super::wait_exited(pid);
+            crate::since_ns(started)
+        });
         let mut words = [0u64; 64];
         // Sound: `words` is writable and longer than rusage_info_v6.
         let usage = (unsafe { proc_pid_rusage(pid, RUSAGE_INFO_V6, words.as_mut_ptr()) } == 0).then_some(words);
         let (status, rusage_words) = rusage::reap(pid);
+        super::stop_watching();
         let ns = crate::imp::mach_to_ns;
         let counts = usage.map(|w| {
             let (time, ptime) = (w[USER_TIME] + w[SYSTEM_TIME], w[USER_PTIME] + w[SYSTEM_PTIME]);
@@ -190,15 +290,23 @@ mod imp {
     }
 }
 
-#[cfg(test)]
+/// The tests start processes (Unix only).
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    /// run's contract: one child at a time (the tests run on many threads).
+    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn one() -> std::sync::MutexGuard<'static, ()> {
+        ONE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     /// A shell that spins briefly: it succeeds, its wall time covers its
     /// CPU time, and a failing one reports failure.
     #[test]
-    #[cfg(unix)]
     fn a_child_is_timed_and_counted() {
+        let _one = one();
         let ok = run(std::process::Command::new("sh").args(["-c", "i=0; while [ $i -lt 20000 ]; do i=$((i+1)); done"]));
         assert!(ok.success, "{ok:?}");
         let cpu = ok.cpu_ns.expect("unix counts CPU time");
@@ -211,11 +319,46 @@ mod tests {
         assert!(!run(std::process::Command::new("sh").args(["-c", "exit 3"])).success);
     }
 
+    /// A child running across several windows leaves them a second long,
+    /// its CPU time this process's own in each (none reads as other
+    /// programs' load), the watcher's work done by its exit.
+    #[test]
+    fn a_running_childs_windows_stay_a_second_long() {
+        let _one = one();
+        let before = crate::load::windows().len();
+        // One process spinning about 3 s (a grandchild's CPU time would
+        // reach this process only when the child reaps it).
+        let child = run(std::process::Command::new("perl").args(["-e", "my $t = time; 1 while time - $t < 3"]));
+        assert!(child.wall_ns > 2_200_000_000, "the child ran long enough to span windows: {child:?}");
+        let windows = crate::load::windows();
+        let during: Vec<_> = windows[before..].iter().filter(|w| w.end_ns > child.started_ns && w.start_ns < child.started_ns + child.wall_ns).collect();
+        assert!(during.len() >= 2, "windows closed while it ran: {windows:?}");
+        assert!(during.iter().all(|w| w.end_ns - w.start_ns < 2 * crate::load::WINDOW_NS), "{during:?}");
+        assert!(during.iter().all(|w| w.other_milli_cpus < 500), "the child's own CPU is this process's: {during:?}");
+        assert_eq!(running_cpu_ns(), 0, "none running after the reaping");
+    }
+
+    /// The check above can fail: a sibling spinning beside the child, a
+    /// process that run did not start, reads as other programs' load in
+    /// the windows while the child runs.
+    #[test]
+    fn a_sibling_beside_the_child_reads_as_load() {
+        let _one = one();
+        let before = crate::load::windows().len();
+        let mut sibling = std::process::Command::new("perl").args(["-e", "my $t = time; 1 while time - $t < 4"]).spawn().expect("perl");
+        let child = run(std::process::Command::new("sleep").arg("3"));
+        sibling.kill().ok();
+        sibling.wait().expect("the sibling");
+        let windows = crate::load::windows();
+        let during: Vec<_> = windows[before..].iter().filter(|w| w.end_ns > child.started_ns && w.start_ns < child.started_ns + child.wall_ns).collect();
+        assert!(during.iter().any(|w| w.other_milli_cpus >= 700), "a spinning sibling is other load: {during:?}");
+    }
+
     /// A reaped child's CPU time counts as this process's own, so the
     /// load it puts on the machine is never read as other programs'.
     #[test]
-    #[cfg(unix)]
     fn a_reaped_childs_cpu_time_is_this_processs() {
+        let _one = one();
         let before = crate::process_cpu_ns();
         let child = run(std::process::Command::new("sh").args(["-c", "i=0; while [ $i -lt 50000 ]; do i=$((i+1)); done"]));
         let after = crate::process_cpu_ns();

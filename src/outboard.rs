@@ -364,9 +364,9 @@ fn subtree(cvs: &[CVBytes], size: u64, key: &CVWords, flags: u8, platform: Platf
 const BATCH_GROUPS: usize = 64;
 
 /// The chaining value, as a non-root subtree, of each group of `input`, the
-/// message's bytes from group `first` on.
+/// message's bytes from group `first` on; `input` is nonempty.
 fn group_cvs(input: &[u8], first_group: u64, key: &CVWords, flags: u8, platform: Platform) -> Vec<CVBytes> {
-    let mut cvs = vec![[0u8; 32]; input.len().div_ceil(GROUP_LEN).max(1)];
+    let mut cvs = vec![[0u8; 32]; input.len().div_ceil(GROUP_LEN)];
     group_cvs_into(input, first_group, key, flags, platform, &mut cvs);
     cvs
 }
@@ -376,9 +376,10 @@ pub(crate) fn group_cvs_into(input: &[u8], first_group: u64, key: &CVWords, flag
     groups_cvs_into(&groups_of_input(input), first_group, key, flags, platform, cvs);
 }
 
-/// `input`'s groups, in order (the empty input one empty group).
+/// `input`'s groups, in order; `input` is nonempty.
 fn groups_of_input(input: &[u8]) -> Vec<&[u8]> {
-    if input.is_empty() { vec![input] } else { input.chunks(GROUP_LEN).collect() }
+    debug_assert!(!input.is_empty(), "a nonempty input");
+    input.chunks(GROUP_LEN).collect()
 }
 
 /// The chaining value, as a non-root subtree, of each of `groups`, the

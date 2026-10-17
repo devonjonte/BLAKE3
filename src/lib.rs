@@ -1,5 +1,7 @@
-//! The official Rust implementation of the [BLAKE3] cryptographic hash
-//! function.
+//! The [BLAKE3] cryptographic hash function, in the servil fork: the same
+//! digests as official BLAKE3, faster on 64-bit Arm (above all Apple
+//! M4-class chips) and on x86-64, with a call for each way programs hash
+//! (the table below).
 //!
 //! # Examples
 //!
@@ -119,19 +121,20 @@
 //! before the process first hashes: a miscompilation, a faulty CPU, a
 //! binary built for another CPU, or tampering that breaks the digests.
 //! (What the code computes is the tests' and the proofs' to establish.) It
-//! hashes fixed inputs, chosen so that together they run every one of its
-//! assembly kernels on this machine (40 on AArch64, 9 elsewhere), each
-//! input carrying the previous output, and compares each result with the
-//! reference implementation's; on x86 it first checks that the CPU has the
+//! hashes fixed inputs (42 on AArch64, 9 elsewhere), chosen so that
+//! together they run every one of its assembly kernels on this machine (a
+//! unit test checks it on every run), each input carrying the previous
+//! output, and compares each result with the reference implementation's; on x86 it first checks that the CPU has the
 //! LZCNT and BMI1 instructions a build for newer CPUs assumes, which older
 //! ones run as other instructions instead of stopping. A difference means
 //! this build or this CPU computes wrong digests, and stops the program
 //! with a panic naming the code path. The check takes 0.1 to 0.2 ms once
 //! per process on AArch64 (Apple M4 Max, and a Linux VM on it) and about
-//! 28 us on x86-64 (i7-12700K, a performance core; 47 us on an efficiency
-//! core), in every build, with or without the `std` feature. Other threads that call `initialize`
-//! meanwhile wait for it, and stop with it if it fails. Without `std`, the panic goes to the
-//! program's panic handler, which aborts or halts.
+//! 28 µs on x86-64 (i7-12700K, a performance core; 47 µs on an efficiency
+//! core), in every build, with or without the `std` feature. Other threads
+//! that call `initialize` meanwhile wait for it, and stop with it if it
+//! fails. Without `std`, the panic goes to the program's panic handler,
+//! which aborts or halts.
 //!
 //! # Cargo Features
 //!
@@ -140,35 +143,28 @@
 //! method for [`Hasher`], and also the [`Read`] and [`Seek`] implementations
 //! for [`OutputReader`].
 //!
-//! The `mmap` feature (disabled by default, but enabled for [docs.rs]) adds the
+//! The `mmap` feature (off by default, on for [docs.rs]) adds the
 //! [`update_mmap`](Hasher::update_mmap) helper method for memory-mapped IO.
 //!
-//! The `zeroize` feature (disabled by default, but enabled for [docs.rs])
+//! The `zeroize` feature (off by default, on for [docs.rs])
 //! implements
 //! [`Zeroize`](https://docs.rs/zeroize/latest/zeroize/trait.Zeroize.html) for
 //! this crate's types.
 //!
-//! The `serde` feature (disabled by default, but enabled for [docs.rs]) implements
+//! The `serde` feature (off by default, on for [docs.rs]) implements
 //! [`serde::Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html) and
 //! [`serde::Deserialize`](https://docs.rs/serde/latest/serde/trait.Deserialize.html)
 //! for [`Hash`](struct@Hash).
 //!
-//! The NEON implementation is enabled by default for AArch64 but requires the
-//! `neon` feature for other ARM targets. Not all ARMv7 CPUs support NEON, and
-//! enabling this feature will produce a binary that's not portable to CPUs
-//! without NEON support.
+//! The `wasm32_simd` feature turns on the WebAssembly SIMD implementation
+//! for `wasm32` targets, and assumes the runtime has WebAssembly SIMD.
 //!
-//! The `wasm32_simd` feature enables the WASM SIMD implementation for all `wasm32-`
-//! targets. Similar to the `neon` feature, if `wasm32_simd` is enabled, WASM SIMD
-//! support is assumed. This may become the default in the future.
-//!
-//! The `traits-preview` feature enables implementations of traits from the
-//! RustCrypto [`digest`] crate, and re-exports that crate as `traits::digest`.
-//! However, the traits aren't stable, and they're expected to change in
-//! incompatible ways before that crate reaches 1.0. For that reason, this crate
-//! makes no SemVer guarantees for this feature, and callers who use it should
-//! expect breaking changes between patch versions. (The "-preview" feature name
-//! follows the conventions of the RustCrypto [`signature`] crate.)
+//! The `traits-preview` feature implements the traits of the RustCrypto
+//! [`digest`] crate, through which generic Rust code takes a hash function,
+//! and re-exports that crate as `traits::digest`. Those traits are still
+//! changing before that crate's 1.0, so this feature may change with any
+//! version of this crate. (The "-preview" name follows the RustCrypto
+//! [`signature`] crate's convention.)
 //!
 //! [BLAKE3]: https://blake3.io
 //! [docs.rs]: https://docs.rs/
@@ -200,10 +196,6 @@ pub use outboard::{outboard_multithreaded_with, outboard_with, verify_range_with
 #[doc(hidden)]
 pub use outboard::test_encoding;
 
-#[doc(hidden)]
-#[deprecated(since = "1.8.0", note = "use the hazmat module instead")]
-pub mod guts;
-
 pub mod hazmat;
 
 /// Undocumented and unstable, for benchmarks only.
@@ -215,7 +207,7 @@ pub mod platform;
 // The intrinsics AVX2 kernels: `avx2` itself without the assembly, and
 // everywhere on x86 the pass of whole chunks with a partial one (as in
 // rust_sse41).
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[cfg_attr(not(blake3_avx2_rust), allow(dead_code))]
 mod rust_avx2;
 #[cfg(blake3_avx2_rust)]
@@ -238,13 +230,7 @@ mod portable;
 #[cfg(blake3_sme2)]
 #[path = "ffi_sme2.rs"]
 mod sme2;
-#[cfg(blake3_sse2_rust)]
-#[path = "rust_sse2.rs"]
-mod sse2;
-#[cfg(blake3_sse2_ffi)]
-#[path = "ffi_sse2.rs"]
-mod sse2;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[cfg_attr(not(blake3_sse41_rust), allow(dead_code))]
 mod rust_sse41;
 #[cfg(blake3_sse41_rust)]
@@ -275,12 +261,59 @@ pub use stream::{stream, Stream};
 mod pair;
 mod self_test;
 
-/// The startup self-test's own time, for probes: it runs again (it has
-/// already passed once in this process). Hidden, unstable.
-#[cfg(not(miri))]
-#[doc(hidden)]
-pub fn __self_test_run_again() {
-    self_test::run_again();
+/// A kind of kernel a call ran, for the test that checks the kernel
+/// reports against the dispatch (test_kernel_reports_match_the_dispatch).
+/// Each build notes the kinds it has.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub(crate) enum Ran {
+    Scalar = 1,
+    Hybrid = 2,
+    Neon = 4,
+    Sme2 = 8,
+    Sme2x2 = 16,
+    Pool = 32,
+    /// The call wanted SME2 and another thread held the turn.
+    TurnTaken = 64,
+    /// The call followed a pause and took the pair kernel
+    /// (batch_after_pause), which the reports leave out.
+    AfterPause = 128,
+    /// The pool's CPUs each had a caller, so the call stayed on its thread.
+    PoolBusy = 256,
+}
+
+#[cfg(all(test, feature = "std"))]
+std::thread_local! {
+    /// The kinds this thread's calls ran since the test last cleared it.
+    pub(crate) static RAN: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
+}
+
+/// Note that `kind` happened: in the tests' record, and nothing in any
+/// other build (some of which have no kernel to note).
+#[inline(always)]
+#[allow(dead_code)]
+pub(crate) fn ran(kind: Ran) {
+    #[cfg(all(test, feature = "std"))]
+    RAN.with(|r| r.set(r.get() | kind as u32));
+    let _ = kind;
+}
+
+#[cfg(all(test, feature = "std"))]
+std::thread_local! {
+    /// The assembly entry points this thread's calls ran since the test
+    /// last cleared it, by address.
+    pub(crate) static RAN_ENTRIES: core::cell::RefCell<std::collections::BTreeSet<usize>> = const { core::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// Note that the assembly entry point at `entry`, a kernel of `kind`, ran
+/// (in the tests' record; nothing in any other build).
+#[inline(always)]
+#[allow(dead_code)]
+pub(crate) fn ran_kernel(kind: Ran, entry: *const ()) {
+    ran(kind);
+    #[cfg(all(test, feature = "std"))]
+    RAN_ENTRIES.with(|r| r.borrow_mut().insert(entry as usize));
+    let _ = entry;
 }
 
 use arrayvec::{ArrayString, ArrayVec};
@@ -657,7 +690,7 @@ impl Clone for ChunkState {
 
 impl ChunkState {
     // Try to avoid buffering as much as possible, by compressing directly from
-    // the input slice when full blocks are available (chunk_core.rs).
+    // the input slice when full blocks are available (src/hasher.rs).
     #[inline(always)]
     fn update(&mut self, input: &[u8]) -> &mut Self {
         self.absorb(input);
@@ -665,18 +698,6 @@ impl ChunkState {
         self
     }
 
-}
-
-// Don't derive(Debug), because the state may be secret.
-impl fmt::Debug for ChunkState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("ChunkState")
-            .field("count", &self.count())
-            .field("chunk_counter", &self.chunk_counter)
-            .field("flags", &self.flags)
-            .field("platform", &self.platform)
-            .finish()
-    }
 }
 
 #[cfg(feature = "zeroize")]
@@ -731,7 +752,7 @@ impl IncrementCounter {
 /// an i7-12700K's efficiency core ran the eight lanes up to 7% slower; a
 /// pass of eight lanes costs 1.6 times one of four on its performance
 /// core). AVX-512 keeps its own widths (unmeasured).
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[inline]
 fn spare_lane(platform: Platform, whole: usize, partial: usize) -> Option<usize> {
     match (platform, whole) {
@@ -770,7 +791,7 @@ fn compress_chunks_parallel(
     }
     // Whole chunks that leave a lane spare, and a partial one: one pass,
     // the partial chunk in the spare lane.
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     if let (false, Some(lanes)) = (chunks_exact.remainder().is_empty(), spare_lane(platform, chunks_array.len(), chunks_exact.remainder().len())) {
         let (whole, partial) = (&chunks_array[..], chunks_exact.remainder());
         // Sound: spare_lane admits each width only on a platform whose CPU
@@ -848,7 +869,7 @@ fn compress_parents_parallel(
 
     let mut parents_exact = child_chaining_values.chunks_exact(BLOCK_LEN);
     // Use MAX_SIMD_DEGREE_OR_2 rather than MAX_SIMD_DEGREE here: the walk
-    // (tree_core.rs) returns at least 2 values.
+    // (src/tree.rs) returns at least 2 values.
     let mut parents_array = ArrayVec::<&[u8; BLOCK_LEN], MAX_SIMD_DEGREE_OR_2>::new();
     for parent in &mut parents_exact {
         parents_array.push(parent.try_into().unwrap());
@@ -874,7 +895,7 @@ fn compress_parents_parallel(
     }
 }
 
-// Hash a subtree with the walk (tree_core.rs, `children`), condensing its
+// Hash a subtree with the walk (src/tree.rs, `children`), condensing its
 // chaining values down to a single parent node. Don't compress that
 // last parent node, however. Instead, return its message bytes (the
 // concatenated chaining values of its children). This is necessary when the
@@ -916,7 +937,7 @@ fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8) -> Hash {
     let whole = (blocks - 1) * BLOCK_LEN;
     let tail = &input[whole..];
     /// The padded last block, 64-byte aligned as hasher::Output's is
-    /// (chunk_core.rs explains).
+    /// (src/hasher.rs explains).
     #[repr(align(64))]
     struct Aligned64([u8; BLOCK_LEN]);
     let padded;
@@ -1084,7 +1105,9 @@ pub fn initialize_multithreaded() {
 /// Which of BLAKE3's three functions a call computes: the plain hash
 /// ([`hash`]), the keyed hash ([`keyed_hash`]), or key derivation
 /// ([`derive_key`]). Every call that takes a mode runs each one at the same
-/// speed.
+/// speed, but for `DeriveKey`, which first hashes its context string (once
+/// per call; [`DeriveKeyMaterial`](Mode::DeriveKeyMaterial) takes it hashed
+/// once for many calls).
 #[derive(Clone, Copy)]
 pub enum Mode<'a> {
     /// The default hash function, as [`hash`].
@@ -1094,6 +1117,9 @@ pub enum Mode<'a> {
     /// The key derivation function with this context string, as
     /// [`derive_key`]; the input is the key material.
     DeriveKey(&'a str),
+    /// The key derivation function with its context string already hashed
+    /// ([`hazmat::hash_derive_key_context`]); the input is the key material.
+    DeriveKeyMaterial(&'a hazmat::ContextKey),
 }
 
 impl Mode<'_> {
@@ -1103,6 +1129,7 @@ impl Mode<'_> {
             Mode::Hash => (*IV, 0),
             Mode::Keyed(key) => (platform::words_from_le_bytes_32(key), KEYED_HASH),
             Mode::DeriveKey(context) => (platform::words_from_le_bytes_32(&hazmat::hash_derive_key_context(context)), DERIVE_KEY_MATERIAL),
+            Mode::DeriveKeyMaterial(context_key) => (platform::words_from_le_bytes_32(context_key), DERIVE_KEY_MATERIAL),
         }
     }
 }
@@ -1249,6 +1276,7 @@ fn batch_after_pause(input: &[u8], message_len: usize, key: &CVWords, flags: u8,
     for (slot, message) in table.iter_mut().zip(input.chunks_exact(BLOCK_LEN)) {
         *slot = message.try_into().unwrap();
     }
+    ran(Ran::AfterPause);
     // Sound: the SHA-3 extension is here (above).
     unsafe { neon_hybrid::hash_pairs(&table[..count], key, flags, CHUNK_START, CHUNK_END | ROOT, message_len, out.as_flattened_mut()) };
     true
@@ -1531,10 +1559,12 @@ pub fn kernel_report() -> KernelReport {
 /// whole blocks up to 15 KiB. On x86 with AVX2 or AVX-512, messages of 2
 /// to 15 chunks hash across the messages at every step of their trees,
 /// from four or eight messages; other lengths run [`kernel_report`]'s
-/// kernel, one message per call.
+/// kernel, one message per call. Requires `message_len` of 1 or more (the
+/// report counts a batch in its messages' bytes).
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn kernel_report_many(message_len: usize) -> KernelReport {
+    assert!(message_len > 0, "messages of one byte or more");
     let platform = Platform::detect();
     let blocks = if (1..=CHUNK_LEN).contains(&message_len) { many::slot_len(message_len) / BLOCK_LEN } else { 0 };
     let mut kernels = Vec::with_capacity(3);
@@ -1562,7 +1592,7 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
                 why: "From this many messages, groups of sixteen are hashed side by side on the SME2 matrix unit, one message per lane: each chunk across the messages, then each level of the messages' trees; the last group's spare lanes repeat a message.",
             });
         }
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         if let Some(least) = many::across_from(message_len, platform) {
             kernels.push(Kernel {
                 from_len: least * message_len,
@@ -1585,12 +1615,17 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
                 name: "integer and NEON code, up to nine messages at a time",
                 why: "Two or more messages are hashed together, up to eight on the NEON vector units and one on the integer units at once; on SME2 this handles the messages left over below a group of sixteen.",
             });
-        } else {
-            kernels.push(Kernel {
-                from_len: 4 * message_len,
-                name: "NEON vectors, four messages at a time",
-                why: "From four messages, groups of four are hashed on the NEON vector units and any left over one call each; on SME2 this handles the messages left over below a group of sixteen.",
-            });
+        } else if message_len % BLOCK_LEN == 0 {
+            // Whole blocks, on the C NEON kernel: 64-byte messages from two
+            // (hash_run hands it any count), longer ones from three
+            // (hash_four_at_a_time pads three to four). A partial last
+            // block runs one call each.
+            let (least, why) = if message_len == BLOCK_LEN {
+                (2, "From two messages, the NEON vector units hash them four at a time.")
+            } else {
+                (3, "From three messages, groups of four are hashed on the NEON vector units, three left over padded to four with a repeat and one or two left over one call each.")
+            };
+            kernels.push(Kernel { from_len: least * message_len, name: "NEON vectors, four messages at a time", why });
         }
         #[cfg(blake3_sme2)]
         const _: () = assert!(many::ONE_BLOCK_PAD_MIN == 11 && many::ONE_BLOCK_PAD_AFTER_GROUPS == 5, "the words below name these counts");
@@ -1633,13 +1668,19 @@ pub fn kernel_report_many(message_len: usize) -> KernelReport {
 
 /// What [`hash_many_multithreaded`] runs by batch length:
 /// [`kernel_report_many`] plus, from the length at which a call may leave
-/// the calling thread, the split across threads.
+/// the calling thread, the split across threads (with one CPU, none).
+/// Requires [`initialize_multithreaded`], as the call does.
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn kernel_report_many_multithreaded(message_len: usize) -> KernelReport {
     let mut report = kernel_report_many(message_len);
+    if !lanes::splits() {
+        return report;
+    }
     report.kernels.push(Kernel {
-        from_len: lanes::MIN_SPLIT_LEN.max(2 * message_len),
+        // The split counts the batch's slots (each message's whole blocks,
+        // zero past its end), from two messages.
+        from_len: lanes::MIN_SPLIT_LEN.div_ceil(many::slot_len(message_len)).max(2) * message_len,
         name: "split over threads",
         why: "From here the batch is cut into ranges of messages that the calling thread and this crate's worker threads (one per CPU beyond the first) hash at once, each with integer and NEON code.",
     });
@@ -1648,11 +1689,16 @@ pub fn kernel_report_many_multithreaded(message_len: usize) -> KernelReport {
 
 /// What [`hash_multithreaded`] runs at each input length: [`kernel_report`]
 /// below the length at which a call may leave the calling thread, and from
-/// there the split across threads (its pieces run the kernels below it).
+/// there the split across threads (its pieces run the kernels below it;
+/// with one CPU, no split). Requires [`initialize_multithreaded`], as the
+/// call does.
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn kernel_report_multithreaded() -> KernelReport {
     let mut report = kernel_report();
+    if !lanes::splits() {
+        return report;
+    }
     report.kernels.retain(|kernel| kernel.from_len < lanes::MIN_SPLIT_LEN);
     report.kernels.push(Kernel {
         from_len: lanes::MIN_SPLIT_LEN,
@@ -1817,34 +1863,7 @@ pub(crate) struct HasherCore {
     cv_stack: CvStack,
 }
 
-/// The Hasher's stack, loop, chunk state, and nodes (src/stack_core.rs,
-/// src/hasher_core.rs, src/chunk_core.rs, proved in tools/verify/tree).
-pub(crate) mod hasher {
-    use crate::{CVBytes as Cv, MAX_DEPTH};
-    use crate::{BLOCK_LEN, CHUNK_END, CHUNK_LEN, CHUNK_START, PARENT, ROOT};
-    const DEPTH: usize = MAX_DEPTH + 1;
-    include!("stack_core.rs");
-    include!("hasher_core.rs");
-    include!("chunk_core.rs");
-
-    #[cfg(all(test, feature = "zeroize"))]
-    impl CvStack {
-        /// The array, for the zeroize test.
-        pub fn array(&self) -> Option<&[Cv; DEPTH]> {
-            self.cvs.as_ref()
-        }
-    }
-
-    #[cfg(feature = "zeroize")]
-    impl zeroize::Zeroize for CvStack {
-        fn zeroize(&mut self) {
-            if let Some(cvs) = &mut self.cvs {
-                cvs.zeroize();
-            }
-            self.len = 0;
-        }
-    }
-}
+mod hasher;
 use hasher::CvStack;
 
 /// What the Hasher's kernels take from the library (hasher::Hooks): with
@@ -2270,10 +2289,10 @@ impl HasherCore {
     // chunks (or bytes) so far.
     #[cfg(feature = "std")]
     fn merge_cv_stack(&mut self, chunk_counter: u64) {
-        // Account for non-zero cases of Hasher::set_input_offset, where there are no prior
-        // subtrees in the stack. Note that initial_chunk_counter is always 0 for callers who don't
-        // use the hazmat module.
-        let post_merge_stack_len = hasher::ones(chunk_counter - self.initial_chunk_counter);
+        // Its callers (the queue's hashers, and a Hasher's held group) start
+        // at offset zero; hazmat's offsets take the core's path.
+        debug_assert_eq!(self.initial_chunk_counter, 0, "a hasher at offset zero");
+        let post_merge_stack_len = hasher::ones(chunk_counter);
         let kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, false);
         self.cv_stack.merge(&kernels, post_merge_stack_len);
     }
@@ -2376,7 +2395,7 @@ impl HasherCore {
         let _ = pooled;
         self.assert_room(self.count(), input.len());
         // The partial chunk first (hasher::fill), then whole subtrees and the
-        // last chunk (hasher::feed), as src/hasher_core.rs describes.
+        // last chunk (hasher::feed), as src/hasher.rs describes.
         let fill_kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, pooled);
         let rest = hasher::fill(&fill_kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, input);
         if rest.is_empty() {

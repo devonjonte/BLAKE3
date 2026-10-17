@@ -543,6 +543,31 @@ cause: where the hash's code is").
   perf_regress (same cost as plain; a check that it stays so), no graph
   axis.
 
+## Decided October 16, 2026 (Zooko)
+
+- **The stream is the way forward** (fork #50, Devon Jonte): messages
+  hashed where they lie or written into the stream's ring, each
+  submission naming where its digests go in the caller's memory, one
+  handler taking the places back in order; a batch's tasks pushed in one
+  call, with a wake check sized to the list. It may replace the queue,
+  once measured against every FROZEN.md cell the queue serves; that
+  change to the benchmark's contract is Zooko's, with the numbers.
+- **One scheduler**: one-shot calls on the stream's task list (a job as
+  one entry with a cursor), level on their cells; Devon prototypes it.
+- **One `Mode`**: the crate's and hazmat's name the same modes; one type
+  serves both, with `DeriveKeyMaterial` beside `DeriveKey` (the variant
+  has landed on the crate's `Mode`, for the C API).
+- **A C API of our own** (`capi/b3.h`), designed fresh: no compatibility
+  with upstream's C API, whose users port with little work.
+- **`Stream::submit_reader`'s size hint stays**: cheap now, likely needed,
+  and it spares users a breaking change once the API freezes.
+- **The APIs freeze at 1.0** (AGENTS.md, "Our APIs freeze at 1.0"); until
+  then they change freely, every caller with them.
+- **Cut**: `guts`; 32-bit x86 and Arm, big-endian, Windows with MinGW,
+  the SSE2 kernel, Rust older than the latest stable, and upstream's C
+  library. `traits-preview` stays (generic Rust crypto code takes a hash
+  through it).
+
 ## The freeze
 
 bench-hashes calls exactly the interfaces above in exactly these

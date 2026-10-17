@@ -73,9 +73,9 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
         return hash_two_chunks(input, len, key, flags, outputs);
     }
     if outputs.len() < 2 || len > CHUNK_LEN {
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         return hash_long_or_single(input, len, key, flags, outputs, platform);
-        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+        #[cfg(not(target_arch = "x86_64"))]
         {
             for (i, output) in outputs.iter_mut().enumerate() {
                 *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
@@ -221,7 +221,7 @@ fn hash_two_chunks(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: 
 }
 
 /// Keep long-message tree work outside the short-message dispatcher's frame.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[inline(never)]
 fn hash_long_or_single(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
     if across_from(len, platform).is_some_and(|least| outputs.len() >= least) {
@@ -236,7 +236,7 @@ fn hash_long_or_single(input: &[u8], len: usize, key: &CVWords, flags: u8, outpu
 /// The chunks a message has below which [`hash_across`] takes it: from 16,
 /// a message's own chunks fill the widest lanes alone (as each.rs's
 /// ALONE_CHUNKS).
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 const ACROSS_CHUNKS: usize = 16;
 
 /// The fewest messages of `len` bytes that [`hash_across`] takes on
@@ -246,7 +246,7 @@ const ACROSS_CHUNKS: usize = 16;
 /// its whole ones, or two chunks). i7-12700K, six messages: 1500-6000 B
 /// x0.58-0.84 across; 4 KiB x1.13, 8 KiB x1.55, 12-15 KiB x1.15-1.23
 /// (their own lanes and parents ahead).
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 pub(crate) fn across_from(len: usize, platform: Platform) -> Option<usize> {
     let chunks = len.div_ceil(CHUNK_LEN);
     if !(2..ACROSS_CHUNKS).contains(&chunks) || !crate::pair::takes_platform(platform) {
@@ -263,7 +263,7 @@ pub(crate) fn across_from(len: usize, platform: Platform) -> Option<usize> {
 /// each message alone (its chaining value so far is that message's own);
 /// then each parent node, from the leaves up, across the messages, ROOT on
 /// the top one. Every value on the stack: the batch allocates nothing.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[inline(never)]
 fn hash_across(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
     let slot = slot_len(len);
@@ -274,12 +274,12 @@ fn hash_across(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut
 }
 
 /// The most messages [`hash_group_across`] takes at once: the widest lanes.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 pub(crate) const ACROSS_GROUP: usize = 16;
 
 /// [`hash_across`] for up to ACROSS_GROUP messages of `len` bytes each,
 /// wherever each lies (a batch's slots, or a queue's members).
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 pub(crate) fn hash_group_across(messages: &[&[u8]], len: usize, key: &CVWords, flags: u8, digests: &mut [[u8; OUT_LEN]], platform: Platform) {
     const GROUP: usize = ACROSS_GROUP;
     let (full, chunks) = (len / CHUNK_LEN, len.div_ceil(CHUNK_LEN));
@@ -322,7 +322,7 @@ pub(crate) fn hash_group_across(messages: &[&[u8]], len: usize, key: &CVWords, f
 /// chunks `first..first + n` of every message, into `cvs[first]`, from the
 /// chunk values in `cvs` (per chunk, then message), each parent across the
 /// messages.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 #[allow(clippy::too_many_arguments)]
 fn subtree_across(cvs: &mut [[[u8; OUT_LEN]; 16]; ACROSS_CHUNKS], first: usize, n: usize, count: usize, key: &CVWords, flags: u8, platform: Platform, top: bool) {
     if n == 1 {
@@ -531,12 +531,14 @@ fn hash_four_at_a_time<const N: usize>(lanes: &[&[u8; N]], key: &CVWords, flags:
     let (start, end) = (CHUNK_START, CHUNK_END | ROOT);
     // Keep the padded fourth lane for remainders of three. For other
     // x86 tails, the existing platform kernel avoids separate scalar hashes.
-    if cfg!(any(target_arch = "x86", target_arch = "x86_64")) && lanes.len() % 4 != 3 {
+    if cfg!(target_arch = "x86_64") && lanes.len() % 4 != 3 {
         platform.hash_many::<N>(lanes, key, 0, IncrementCounter::No, flags, start, end, outputs.as_flattened_mut());
         return;
     }
     let fours = lanes.len() / 4 * 4;
-    platform.hash_many::<N>(&lanes[..fours], key, 0, IncrementCounter::No, flags, start, end, outputs[..fours].as_flattened_mut());
+    if fours > 0 {
+        platform.hash_many::<N>(&lanes[..fours], key, 0, IncrementCounter::No, flags, start, end, outputs[..fours].as_flattened_mut());
+    }
     match lanes.len() - fours {
         3 => {
             let spare = [lanes[fours], lanes[fours + 1], lanes[fours + 2], lanes[fours + 2]];
@@ -759,11 +761,11 @@ mod test {
     /// Whole-block x86 batches on every available SIMD implementation,
     /// including tails and table boundaries, with independent reference
     /// digests in all three modes and output sentinels.
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     #[test]
     fn test_whole_blocks_x86_full_width() {
         #[allow(unused_mut)]
-        let mut platforms: Vec<_> = [Some(Platform::Portable), Platform::sse2(), Platform::sse41(), Platform::avx2()].into_iter().flatten().collect();
+        let mut platforms: Vec<_> = [Some(Platform::Portable), Platform::sse41(), Platform::avx2()].into_iter().flatten().collect();
         #[cfg(blake3_avx512_ffi)]
         platforms.extend(Platform::avx512());
         let key = [0x5Au8; crate::KEY_LEN];
@@ -804,7 +806,7 @@ mod test {
     /// portable platform (so Miri runs it), against the published vectors
     /// (test_vectors/test_vectors.json, byte i = i % 251), each message in
     /// its zero-padded slot.
-    #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     #[test]
     fn portable_across_partial_chunks_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
@@ -838,7 +840,7 @@ mod test {
 
     /// Published anchors exercise the two-chunk helper independently of
     /// SIMD availability, including under Miri on the portable platform.
-    #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     #[test]
     fn portable_two_chunk_batch_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
@@ -864,7 +866,7 @@ mod test {
         }
     }
 
-    #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     #[test]
     fn portable_four_chunk_batch_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
@@ -1024,44 +1026,5 @@ mod test {
         let mut input = [0u8; 256];
         input[120] = 1;
         crate::hash_many(&input, 100, &mut [[0u8; OUT_LEN]; 2]);
-    }
-}
-
-/// Proofs (Kani, `cargo kani`; QUALITY.md says how to run them).
-#[cfg(kani)]
-mod proofs {
-    use super::*;
-
-    /// A message's slot is whole blocks, at least one, and holds the
-    /// message with less than a block to spare: for every length a slice
-    /// can have.
-    #[kani::proof]
-    fn slot_len_is_whole_blocks() {
-        let len: usize = kani::any();
-        kani::assume(len <= isize::MAX as usize);
-        let slot = slot_len(len);
-        assert!(slot % BLOCK_LEN == 0 && slot >= BLOCK_LEN && slot >= len);
-        assert!(len == 0 || slot - len < BLOCK_LEN);
-    }
-
-    /// fill_table's unsafe slice covers only written slots: the first
-    /// `count` point at the messages in order, the rest repeat the last,
-    /// for every count and lane count it accepts (one-block messages).
-    #[kani::proof]
-    #[kani::unwind(22)]
-    #[kani::solver(cadical)]
-    fn fill_table_writes_every_lane() {
-        const MAX: usize = TABLE + 16;
-        let messages = [0u8; MAX * BLOCK_LEN];
-        let count: usize = kani::any();
-        let lanes: usize = kani::any();
-        kani::assume(0 < count && count <= lanes && lanes <= 20);
-        let mut slots: Slots<BLOCK_LEN> = [core::mem::MaybeUninit::uninit(); MAX];
-        let table = fill_table(&mut slots, &messages, count, lanes);
-        assert!(table.len() == lanes);
-        let i: usize = kani::any();
-        kani::assume(i < lanes);
-        let expected = i.min(count - 1) * BLOCK_LEN;
-        assert!(core::ptr::eq(table[i].as_ptr(), messages[expected..].as_ptr()));
     }
 }

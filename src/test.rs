@@ -593,6 +593,14 @@ fn test_xof_seek() {
         );
         assert!(reader.seek(std::io::SeekFrom::End(0)).is_err());
         assert!(reader.seek(std::io::SeekFrom::Current(-1000)).is_err());
+        // Back to the start exactly, and one byte before it; past the end
+        // of u64 stops at its end.
+        let at = reader.position() as i64;
+        assert_eq!(reader.seek(std::io::SeekFrom::Current(-at)).unwrap(), 0);
+        assert!(reader.seek(std::io::SeekFrom::Current(-1)).is_err());
+        reader.seek(std::io::SeekFrom::Start(u64::MAX - 1)).unwrap();
+        assert_eq!(reader.seek(std::io::SeekFrom::Current(2)).unwrap(), u64::MAX);
+        assert_eq!(std::format!("{reader:?}"), "OutputReader { position: 18446744073709551615 }");
     }
 }
 
@@ -677,36 +685,6 @@ fn test_hex_encoding_decoding() {
     assert_eq!(_result.to_string(), "invalid hex character: 0x80");
 }
 
-// This test is a mimized failure case for the Windows SSE2 bug described in
-// https://github.com/BLAKE3-team/BLAKE3/issues/206.
-//
-// Before that issue was fixed, this test would fail on Windows in the following configuration:
-//
-//     cargo test --features=no_avx512,no_avx2,no_sse41 --release
-//
-// Bugs like this one (stomping on a caller's register) are very sensitive to the details of
-// surrounding code, so it's not especially likely that this test will catch another bug (or even
-// the same bug) in the future. Still, there's no harm in keeping it.
-#[test]
-fn test_issue_206_windows_sse2() {
-    // This stupid loop has to be here to trigger the bug. I don't know why.
-    for _ in &[0] {
-        // The length 65 (two blocks) is significant. It doesn't repro with 64 (one block). It also
-        // doesn't repro with an all-zero input.
-        let input = &[0xff; 65];
-        let expected_hash = [
-            183, 235, 50, 217, 156, 24, 190, 219, 2, 216, 176, 255, 224, 53, 28, 95, 57, 148, 179,
-            245, 162, 90, 37, 121, 0, 142, 219, 62, 234, 204, 225, 161,
-        ];
-
-        // This throwaway call has to be here to trigger the bug.
-        crate::Hasher::new().update(input);
-
-        // This assert fails when the bug is triggered.
-        assert_eq!(crate::Hasher::new().update(input).finalize(), expected_hash);
-    }
-}
-
 #[test]
 fn test_hash_conversions() {
     let bytes1 = [42; 32];
@@ -749,7 +727,7 @@ const fn test_hash_const_conversions() {
 fn test_block_buffer_alignment() {
     // ChunkState.buf and Output.block are 64-byte aligned so that wide vector stores
     // into them (e.g. from memcpy) can store-to-load forward regardless of
-    // stack layout. See the comment on Output in chunk_core.rs, the measurements in
+    // stack layout. See the comment on Output in hasher.rs, the measurements in
     // https://github.com/zooko/bench-hashes/issues/2, and the before/after
     // benchmarks in https://github.com/BLAKE3-team/BLAKE3/pull/582.
     assert_eq!(64, core::mem::align_of::<crate::Output>());
@@ -766,6 +744,15 @@ fn test_zeroize() {
     let mut hash = crate::Hash([42; 32]);
     hash.zeroize();
     assert_eq!(hash.0, [0u8; 32]);
+
+    // A Hasher: its core, and the bytes it has staged.
+    let mut hasher = crate::Hasher::new_keyed(&[42; 32]);
+    hasher.update(&[42; 3000]);
+    assert!(hasher.staged > 0);
+    hasher.zeroize();
+    assert_eq!(hasher.staged, 0);
+    assert!(hasher.stage.iter().all(|b| unsafe { b.assume_init() } == 0));
+    assert_eq!(hasher.core.key, [0; 8]);
 
     let mut hasher = crate::HasherCore {
         chunk_state: crate::hasher::ChunkState {
@@ -1046,73 +1033,23 @@ fn test_miri_smoketest() {
     reader.fill(&mut [0]);
 }
 
-// I had to move these tests out of the deprecated guts module, because leaving them there causes
-// an un-silenceable warning: https://github.com/rust-lang/rust/issues/47238
-#[cfg(test)]
-#[allow(deprecated)]
-mod guts_tests {
-    use crate::guts::*;
-
-    #[test]
-    fn test_chunk() {
-        assert_eq!(
-            crate::hash(b"foo"),
-            ChunkState::new(0).update(b"foo").finalize(true)
-        );
-    }
-
-    #[test]
-    fn test_parents() {
-        let mut hasher = crate::Hasher::new();
-        let mut buf = [0; crate::CHUNK_LEN];
-
-        buf[0] = 'a' as u8;
-        hasher.update(&buf);
-        let chunk0_cv = ChunkState::new(0).update(&buf).finalize(false);
-
-        buf[0] = 'b' as u8;
-        hasher.update(&buf);
-        let chunk1_cv = ChunkState::new(1).update(&buf).finalize(false);
-
-        hasher.update(b"c");
-        let chunk2_cv = ChunkState::new(2).update(b"c").finalize(false);
-
-        let parent = parent_cv(&chunk0_cv, &chunk1_cv, false);
-        let root = parent_cv(&parent, &chunk2_cv, true);
-        assert_eq!(hasher.finalize(), root);
-    }
-}
-
-/// The kernel reports are well formed: ascending from 0, and the
-/// multithreaded report is the single-threaded one below the split, then
-/// the split entry, which starts where hash_multithreaded may leave the
-/// calling thread.
+/// The kernel reports' contract: kernels in ascending `from_len`, the
+/// first at 0, each named and explained (where each kernel runs is
+/// test_kernel_reports_match_the_dispatch's).
 #[test]
 #[cfg(feature = "std")]
 fn test_kernel_reports() {
-    let single = crate::kernel_report();
-    assert!(!single.platform.is_empty());
-    assert_eq!(single.kernels[0].from_len, 0);
-    assert!(single.kernels.windows(2).all(|pair| pair[0].from_len < pair[1].from_len));
-    let multi = crate::kernel_report_multithreaded();
-    assert_eq!(multi.platform, single.platform);
-    let below: Vec<_> = single.kernels.iter().filter(|kernel| kernel.from_len < crate::lanes::MIN_SPLIT_LEN).copied().collect();
-    assert_eq!(&multi.kernels[..multi.kernels.len() - 1], &below[..]);
-    assert_eq!(multi.kernels.last().unwrap().from_len, crate::lanes::MIN_SPLIT_LEN);
-    for kernel in &multi.kernels {
-        assert!(!kernel.name.is_empty() && !kernel.why.is_empty());
-    }
-    // The batch reports, for every message length a batch can take: the
-    // same shape, the split last, where a batch may leave the calling thread.
-    for message_len in [0, 1, 63, 64, 65, 128, 256, 1000, 1024, 1025, 40_000] {
-        let many = crate::kernel_report_many(message_len);
-        let many_multi = crate::kernel_report_many_multithreaded(message_len);
-        assert_eq!(many.kernels[0].from_len, 0, "{message_len}-byte messages");
-        assert!(many.kernels.windows(2).all(|pair| pair[0].from_len < pair[1].from_len), "{message_len}-byte messages");
-        assert_eq!(&many_multi.kernels[..many.kernels.len()], &many.kernels[..]);
-        assert_eq!(many_multi.kernels.len(), many.kernels.len() + 1);
-        assert!(many_multi.kernels.last().unwrap().from_len > many.kernels.last().unwrap().from_len);
-        assert!(many_multi.kernels.last().unwrap().from_len >= crate::lanes::MIN_SPLIT_LEN);
+    let check = |report: crate::KernelReport| {
+        assert!(!report.platform.is_empty());
+        assert_eq!(report.kernels[0].from_len, 0, "{report:?}");
+        assert!(report.kernels.windows(2).all(|pair| pair[0].from_len < pair[1].from_len), "{report:?}");
+        assert!(report.kernels.iter().all(|k| !k.name.is_empty() && !k.why.is_empty()), "{report:?}");
+    };
+    check(crate::kernel_report());
+    check(crate::kernel_report_multithreaded());
+    for message_len in [1, 63, 64, 65, 128, 256, 1000, 1024, 1025, 40_000] {
+        check(crate::kernel_report_many(message_len));
+        check(crate::kernel_report_many_multithreaded(message_len));
     }
 }
 
@@ -1452,4 +1389,166 @@ fn test_chunks_with_partial_against_reference() {
         assert_eq!(crate::keyed_hash(&key, m).as_bytes(), &expect(reference_impl::Hasher::new_keyed(&key)), "keyed_hash, len {len}");
         assert_eq!(crate::derive_key("partial test", m), expect(reference_impl::Hasher::new_derive_key("partial test")), "derive_key, len {len}");
     }
+}
+
+/// Hash's comparisons (constant time) and formats: equal and unequal
+/// against a Hash, a 32-byte array, and a slice, and a slice of another
+/// length; Display as the hex digest, Debug as Hash("hex").
+#[test]
+fn test_hash_comparisons_and_formats() {
+    let a = crate::hash(b"a");
+    let b = crate::hash(b"b");
+    assert!(a == a && a != b);
+    assert!(a == *a.as_bytes() && a != *b.as_bytes());
+    assert!(a == a.as_bytes()[..] && a != b.as_bytes()[..] && a != a.as_bytes()[..31]);
+    let hex = a.to_hex();
+    assert_eq!(hex.as_str(), "17762fddd969a453925d65717ac3eea21320b66b54342fde15128d6caf21215f");
+    #[cfg(feature = "std")]
+    {
+        assert_eq!(std::format!("{a}"), hex.as_str());
+        assert_eq!(std::format!("{a:?}"), std::format!("Hash({:?})", hex.as_str()));
+    }
+}
+
+/// A Hasher's Debug form names its flags and platform, and leaves out
+/// its bytes and chaining values (they may be secret).
+#[test]
+#[cfg(feature = "std")]
+fn test_debug_leaves_out_the_bytes() {
+    let mut hasher = crate::Hasher::new_keyed(&[0xab; 32]);
+    hasher.update(&[0xab; 70]);
+    let shown = std::format!("{hasher:?}");
+    assert!(shown.starts_with("Hasher {") && shown.contains("flags: 16") && shown.contains("platform"), "{shown}");
+    assert!(!shown.contains("171"), "{shown}");
+}
+
+/// A Hasher as an io::Write: write takes the whole input, and the digest
+/// is update's.
+#[test]
+#[cfg(feature = "std")]
+fn test_hasher_io_write() {
+    use std::io::Write;
+    let mut input = [0u8; 3000];
+    paint_test_input(&mut input);
+    let mut hasher = crate::Hasher::new();
+    assert_eq!(hasher.write(&input[..1000]).unwrap(), 1000);
+    hasher.write_all(&input[1000..]).unwrap();
+    hasher.flush().unwrap();
+    assert_eq!(hasher.finalize(), crate::hash(&input));
+}
+
+/// Each kernel report against the dispatch: at each kernel's first length
+/// and the length below the next kernel's, the calls run the kernel the
+/// report names, and below the next one, not that one. For `hash`,
+/// `hash_multithreaded`, and the batch reports at each kind of message
+/// length the batch dispatch distinguishes (a block, blocks to a chunk,
+/// two chunks, more).
+#[test]
+#[cfg(all(feature = "std", blake3_neon_hybrid))]
+fn test_kernel_reports_match_the_dispatch() {
+    use crate::{Ran, RAN};
+    let kind = |name: &str| -> u32 {
+        (match name {
+            "integer code, one call" | "integer code, one message per call" => Ran::Scalar,
+            "integer and NEON code side by side"
+            | "integer and NEON code, messages side by side"
+            | "integer and NEON code, up to nine messages at a time" => Ran::Hybrid,
+            "NEON vectors, four chunks at a time" | "NEON vectors, four messages at a time" => Ran::Neon,
+            "SME2, sixteen chunks at a time" | "SME2, sixteen messages side by side" | "SME2, sixteen messages at a time" => Ran::Sme2,
+            "SME2 with integer code beside it" => Ran::Sme2x2,
+            "split over threads" | "split over threads, SME2 on one for large inputs" => Ran::Pool,
+            other => panic!("a kernel this test knows: {other}"),
+        }) as u32
+    };
+    // The kinds one call ran on this thread; again when another test's
+    // call held the SME2 turn (this call then ran NEON in its place), or
+    // when the call followed a pause and took the pair kernel (the reports
+    // describe calls back to back), or when other tests' calls filled the
+    // pool. The call again comes right after.
+    let ran = |call: &dyn Fn()| loop {
+        RAN.with(|r| r.set(0));
+        call();
+        let kinds = RAN.with(|r| r.get());
+        if kinds & (Ran::TurnTaken as u32 | Ran::AfterPause as u32 | Ran::PoolBusy as u32) == 0 {
+            return kinds;
+        }
+    };
+    // Kernel i of `report` runs at units from_len / unit up to the next's,
+    // and every kind a call runs is one the report names at or below it
+    // (the last kernel's checked at twice its start, too).
+    // `also`: the kinds a call may run beside the report's (for a batch,
+    // what hash() of one message runs).
+    let check = |report: crate::KernelReport, unit: usize, also: u32, far: usize, at: &dyn Fn(usize) -> u32| {
+        // Any call above one chunk compresses its root on the integer
+        // kernel, so every kernel brings the integer kind with it.
+        let named = |n: usize| report.kernels.iter().filter(|k| k.from_len <= n * unit).fold(also, |m, k| m | kind(k.name) | Ran::Scalar as u32);
+        let ran = |n: usize| {
+            let kinds = at(n);
+            assert!(kinds & !named(n) == 0, "at {n} x {unit}, kinds {kinds:#b} beyond the report's {:#b}: {report:?}", named(n));
+            kinds
+        };
+        for (i, k) in report.kernels.iter().enumerate() {
+            let first = (k.from_len / unit).max(1);
+            assert!(ran(first) & kind(k.name) != 0, "{} at {first} x {unit}: {report:?}", k.name);
+            match report.kernels.get(i + 1) {
+                Some(next) => {
+                    let below = next.from_len / unit - 1;
+                    let kinds = ran(below);
+                    assert!(kinds & kind(k.name) != 0, "{} at {below} x {unit}: {report:?}", k.name);
+                    if kind(next.name) != kind(k.name) {
+                        assert!(kinds & kind(next.name) == 0, "{} below its start, {below} x {unit}: {report:?}", next.name);
+                    }
+                }
+                None => assert!(ran(2 * first) & kind(k.name) != 0, "{} at {} x {unit}: {report:?}", k.name, 2 * first),
+            }
+        }
+        // And far past the last start, where every kernel any length or
+        // count reaches runs: nothing beyond the report there either.
+        ran(far);
+    };
+    let mut input = vec![0u8; 2 << 20];
+    paint_test_input(&mut input);
+    // What hash() of `len` bytes may run, by its report.
+    let one = |len: usize| crate::kernel_report().kernels.iter().filter(|k| k.from_len <= len).fold(Ran::Scalar as u32, |m, k| m | kind(k.name));
+    check(crate::kernel_report(), 1, 0, input.len(), &|len| ran(&|| { crate::hash(&input[..len]); }));
+    check(crate::kernel_report_multithreaded(), 1, 0, input.len(), &|len| ran(&|| { crate::hash_multithreaded(&input[..len]); }));
+    for message_len in [64, 1000, 1024, 2000, 3000, 15 * 1024, 300_000] {
+        let slot = crate::many::slot_len(message_len);
+        let batch = |n: usize| -> std::vec::Vec<u8> {
+            let mut b = std::vec![0u8; n * slot];
+            for m in 0..n {
+                b[m * slot..][..message_len].copy_from_slice(&input[m % 7..][..message_len]);
+            }
+            b
+        };
+        // 64 messages pass every batch threshold below the split.
+        let far = 64.min(input.len() / message_len.max(1));
+        check(crate::kernel_report_many(message_len), message_len, one(message_len), far, &|n| {
+            let b = batch(n);
+            let out = std::vec![[0u8; 32]; n];
+            ran(&|| crate::hash_many(&b, message_len, &mut out.clone()))
+        });
+        check(crate::kernel_report_many_multithreaded(message_len), message_len, one(message_len), far, &|n| {
+            let b = batch(n);
+            let out = std::vec![[0u8; 32]; n];
+            ran(&|| crate::hash_many_multithreaded(&b, message_len, &mut out.clone()))
+        });
+    }
+}
+
+/// A context hashed once (Mode::DeriveKeyMaterial) derives what the
+/// context string derives (Mode::DeriveKey), one-shot and in a batch.
+#[test]
+fn test_derive_key_material_mode() {
+    let context = "BLAKE3 2026-10-16 derive key material test";
+    let context_key = crate::hazmat::hash_derive_key_context(context);
+    let (by_string, by_key) = (crate::Mode::DeriveKey(context), crate::Mode::DeriveKeyMaterial(&context_key));
+    let mut input = [0u8; 3000];
+    paint_test_input(&mut input);
+    assert_eq!(crate::hash_with(by_key, &input), crate::hash_with(by_string, &input));
+    assert_eq!(crate::hash_with(by_key, &input), crate::derive_key(context, &input));
+    let (mut a, mut b) = ([[0u8; 32]; 4], [[0u8; 32]; 4]);
+    crate::hash_many_with(by_key, &input[..4 * 128], 128, &mut a);
+    crate::hash_many_with(by_string, &input[..4 * 128], 128, &mut b);
+    assert_eq!(a, b);
 }

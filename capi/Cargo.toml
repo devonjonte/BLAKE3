@@ -1,0 +1,21 @@
+[package]
+name = "blake3-servil-c"
+version = "0.1.0"
+description = "BLAKE3, the servil fork's C API (b3.h)"
+edition = "2024"
+license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
+publish = false
+
+[lib]
+name = "b3"
+# The static and shared C libraries, and the Rust library its tests call.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+blake3-servil = { path = ".." }
+
+[dev-dependencies]
+serde_json = "1"
+
+[profile.release]
+panic = "abort"

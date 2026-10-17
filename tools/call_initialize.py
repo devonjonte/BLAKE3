@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Make every caller of this crate call `initialize()` first, as the crate's
 contract requires: each doc example (a hidden line), and each `main`,
-`#[test]`, and `#[bench]` function of the integration tests, examples,
-benches, b3sum, and test_vectors. A doc example that makes a
+`#[test]` function of the integration tests, examples, b3sum, and
+test_vectors. A doc example that makes a
 multithreaded call or uses a `stream` calls `initialize_multithreaded()`
 instead (its hidden `initialize()` line becomes that). A function that
 already calls an `initialize` is left as it is, so the script can run again
@@ -63,7 +63,7 @@ def first_statements(path, crate):
 
 for path in sorted(glob.glob(os.path.join(ROOT, "src", "**", "*.rs"), recursive=True)):
     doc_examples(path)
-for pattern, crate in [("tests/*.rs", "blake3_servil"), ("examples/*.rs", "blake3_servil"), ("benches/*.rs", "blake3_servil"),
+for pattern, crate in [("tests/*.rs", "blake3_servil"), ("examples/*.rs", "blake3_servil"),
                        ("b3sum/src/*.rs", "blake3"), ("b3sum/tests/*.rs", "blake3"), ("test_vectors/src/**/*.rs", "blake3")]:
     for path in sorted(glob.glob(os.path.join(ROOT, pattern), recursive=True)):
         first_statements(path, crate)

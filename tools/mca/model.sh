@@ -11,8 +11,9 @@
 # The rolled scalar kernel, a round of which runs seven times a compression:
 #   clang-16 --target=aarch64-linux-gnu -c c/blake3_neon_hybrid_aarch64.S -o $TMPDIR/k.o
 #   sh tools/mca/model.sh $TMPDIR/k.o blake3_hybrid_k1_round        # A53: 107 (x7 = 749)
-# The portable C compression, for each core's compiler tuning:
-#   gcc -O3 -mcpu=cortex-a53 -c c/blake3_portable.c -o $TMPDIR/p.o
+# The portable C compression, for each core's compiler tuning (official
+# BLAKE3's c/blake3_portable.c):
+#   gcc -O3 -mcpu=cortex-a53 -c blake3_portable.c -o $TMPDIR/p.o
 #   sh tools/mca/model.sh $TMPDIR/p.o blake3_compress_in_place_portable
 set -e
 obj=$1; shift

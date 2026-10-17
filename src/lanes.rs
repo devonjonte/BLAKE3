@@ -148,7 +148,7 @@ pub(crate) fn hash_with_key(input: &[u8], key: &crate::CVWords, flags: u8) -> Ha
 
 #[inline(never)]
 fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
-    let Some((pool, _caller)) = spare_pool() else { return crate::hash_serial(input, key, flags) };
+    let Some((pool, _caller)) = spare_pool() else { pool_busy(); return crate::hash_serial(input, key, flags) };
     let (pieces, mut cvs) = tree_cvs(pool, input, key, 0, flags);
     merge_root(&pieces, &mut cvs, key, flags)
 }
@@ -162,6 +162,14 @@ fn spare_pool() -> Option<(&'static Pool, Caller<'static>)> {
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let caller = Caller(&pool.callers);
     (callers < pool.cpus).then_some((pool, caller))
+}
+
+/// A call's note that other callers took the pool (with one CPU, it has no
+/// threads): for the kernel reports' test (crate::ran).
+fn pool_busy() {
+    if pool().cpus > 1 {
+        crate::ran(crate::Ran::PoolBusy);
+    }
 }
 
 /// The subtree pieces of `input` at chunk `counter` and their chaining
@@ -218,7 +226,7 @@ pub(crate) fn hash_many(input: &[u8], message_len: usize, key: &crate::CVWords, 
 fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, flags: u8, outputs: &mut [[u8; crate::OUT_LEN]]) {
     let slot = crate::many::slot_len(message_len);
     assert_eq!(Some(input.len()), slot.checked_mul(outputs.len()), "input holds one slot of whole blocks per output");
-    let Some((pool, _caller)) = spare_pool() else { return crate::hash_many_serial(input, message_len, key, flags, outputs) };
+    let Some((pool, _caller)) = spare_pool() else { pool_busy(); return crate::hash_many_serial(input, message_len, key, flags, outputs) };
     let pieces = cut_messages(outputs.len(), slot, pool.cpus);
     let work = Work::Messages { input, message_len, key: *key, flags, pieces: &pieces, outputs: outputs.as_mut_ptr() };
     pool.run_job(work, pieces.len(), 0, pool_platform());
@@ -625,6 +633,12 @@ pub(crate) fn require() {
     pool();
 }
 
+/// Whether a call may leave the calling thread: the process has more
+/// than one CPU. Requires the pool (`require`).
+pub(crate) fn splits() -> bool {
+    pool().cpus > 1
+}
+
 /// The pool, once [`initialize`] has created it.
 static POOL: OnceLock<Pool> = OnceLock::new();
 
@@ -662,6 +676,7 @@ impl Pool {
     /// thread's prefix; the workers' pieces start after it). A caller that
     /// finds no source slot free hashes every piece itself.
     fn run_job(&self, work: Work, pieces: usize, own: usize, own_platform: Platform) {
+        crate::ran(crate::Ran::Pool);
         let job = Job { work };
         let source = sources::job_source();
         let slot = source.register();
@@ -1176,13 +1191,13 @@ impl Task {
         if members.len() >= 2 && members.iter().all(|m| m.len == members[0].len) {
             match members[0].len {
                 crate::BLOCK_LEN => return self.run_equal_members::<{ crate::BLOCK_LEN }>(platform),
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                #[cfg(target_arch = "x86_64")]
                 128 => return self.run_equal_members::<128>(platform),
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                #[cfg(target_arch = "x86_64")]
                 256 => return self.run_equal_members::<256>(platform),
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                #[cfg(target_arch = "x86_64")]
                 512 => return self.run_equal_members::<512>(platform),
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                #[cfg(target_arch = "x86_64")]
                 CHUNK_LEN => return self.run_equal_members::<CHUNK_LEN>(platform),
                 _ => {}
             }
@@ -1293,8 +1308,8 @@ mod test {
     fn equal_members_match_the_reference() {
         #[allow(unused_mut)]
         let mut platforms: Vec<_> = [Some(Platform::Portable)].into_iter().flatten().collect();
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        platforms.extend([Platform::sse2(), Platform::sse41(), Platform::avx2()].into_iter().flatten());
+        #[cfg(target_arch = "x86_64")]
+        platforms.extend([Platform::sse41(), Platform::avx2()].into_iter().flatten());
         #[cfg(blake3_avx512_ffi)]
         platforms.extend(Platform::avx512());
         platforms.push(Platform::detect());
@@ -1643,49 +1658,5 @@ mod test {
                 });
             }
         });
-    }
-}
-
-/// Proofs (Kani, `cargo kani`; QUALITY.md says how to install it):
-/// properties the pool's cuts rest on, for every input, where the tests
-/// check chosen points.
-#[cfg(kani)]
-mod proofs {
-    use super::*;
-
-    /// A piece is a power of two between the bounds, and at most a
-    /// thread's share of what remains unless that share is below the
-    /// shortest piece: for every remaining length and 1 to 256 threads.
-    #[kani::proof]
-    #[kani::solver(cadical)]
-    fn next_piece_len_bounds() {
-        let remaining: usize = kani::any();
-        let threads: usize = kani::any();
-        kani::assume(threads > 0 && threads <= 256);
-        let piece = next_piece_len(remaining, threads);
-        assert!(piece.is_power_of_two() && MIN_PIECE_LEN <= piece && piece <= MAX_PIECE_LEN);
-        assert!(piece <= (remaining / threads).max(MIN_PIECE_LEN));
-        assert!(piece * 2 > (remaining / threads).clamp(MIN_PIECE_LEN, MAX_PIECE_LEN));
-    }
-
-    /// One step of cut_with_prefix's pool loop keeps its invariant: the
-    /// offset is a multiple of `cap`, a power of two (the last piece's
-    /// length, or MAX_PIECE_LEN at the start). The next piece is a power
-    /// of two no longer than `cap`, so the offset is a multiple of it and
-    /// it is a whole subtree there, and it becomes the next `cap`. By
-    /// induction every piece of the loop is a whole subtree at its offset,
-    /// no longer than the one before, for every length.
-    #[kani::proof]
-    #[kani::solver(cadical)]
-    fn cut_step_keeps_whole_subtrees() {
-        let len: usize = kani::any();
-        let offset: usize = kani::any();
-        let cap: usize = kani::any();
-        let threads: usize = kani::any();
-        kani::assume(threads >= 2 && threads <= 256);
-        kani::assume(cap.is_power_of_two() && cap <= MAX_PREFIX_PIECE_LEN.max(MAX_PIECE_LEN));
-        kani::assume(offset & (cap - 1) == 0 && offset < len);
-        let piece = next_piece_len(len - offset, threads).min(cap);
-        assert!(piece.is_power_of_two() && piece <= cap && offset & (piece - 1) == 0);
     }
 }

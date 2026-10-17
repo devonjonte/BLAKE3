@@ -17,8 +17,8 @@ pub unsafe fn hash_many<const N: usize>(
     assert!(out.len() >= inputs.len() * OUT_LEN);
     // On AArch64 cores with the SHA-3 extension, the integer + vector
     // kernels in neon_hybrid.rs are faster than the four-lane C kernel at
-    // every input count (see that module). The C kernel stays for
-    // 32-bit ARM and for cores without `xar`.
+    // every input count (see that module). The C kernel serves cores
+    // without the SHA-3 extension (its `xar`).
     #[cfg(blake3_neon_hybrid)]
     {
         let shape_covered = crate::neon_hybrid::covers(N, increment_counter);
@@ -39,6 +39,7 @@ pub unsafe fn hash_many<const N: usize>(
         }
     }
     unsafe {
+        crate::ran_kernel(crate::Ran::Neon, ffi::blake3_hash_many_neon as *const ());
         ffi::blake3_hash_many_neon(
             inputs.as_ptr() as *const *const u8,
             inputs.len(),

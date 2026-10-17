@@ -18,6 +18,14 @@
 //! assumption alone, that a pair is as likely to come out either way when
 //! nothing changed.
 //!
+//! **Before changing these rules**, read bench-hashes' `COMPARISONS.md`:
+//! each choice's evidence, what it gives up, the alternatives already set
+//! aside, and why the rules kept changing. In particular, [`verdict`] suits
+//! a check of a few cells (the regression check's): over a comparison's
+//! 700 cells it flags a dozen cells of unchanged code, and judging many
+//! cells at once needs their false discovery rate controlled (bench-hashes
+//! #11 with this fork's #44, adopted October 16, 2026).
+//!
 //! **Values** are nanoseconds per unit in fixed point, 64 integer and 64
 //! fractional bits (Q64.64, as bench-hashes' `Fixed`); ratios in permille;
 //! integers throughout, rounded once where a person reads them.
@@ -47,7 +55,11 @@ pub fn median_permille(ratios: &[u64]) -> u64 {
     let mut sorted = ratios.to_vec();
     sorted.sort_unstable();
     let n = sorted.len();
-    if n % 2 == 1 { sorted[n / 2] } else { (sorted[n / 2 - 1] + sorted[n / 2]).div_ceil(2) }
+    if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        (sorted[n / 2 - 1] + sorted[n / 2]).div_ceil(2)
+    }
 }
 
 /// The least number of `pairs` that must agree for the sign test to call a
@@ -61,9 +73,7 @@ pub fn least_count(pairs: usize) -> usize {
         choose[j] = choose[j - 1] * (pairs - j + 1) as u128 / j as u128;
     }
     let total = 1u128 << pairs;
-    (0..=pairs + 1)
-        .find(|&k| k <= pairs && choose[k..].iter().sum::<u128>() * 20 <= total)
-        .unwrap_or(pairs + 1)
+    (0..=pairs + 1).find(|&k| k <= pairs && choose[k..].iter().sum::<u128>() * 20 <= total).unwrap_or(pairs + 1)
 }
 
 /// What the pairs say of one cell.
@@ -101,6 +111,143 @@ pub fn verdict(ratios: &[u64], margin_permille: u64) -> Verdict {
         Some((_, high)) if median + margin_permille < 1000 && high < 1000 => Verdict::Faster,
         _ => Verdict::Level,
     }
+}
+
+/// Which cells of a comparison changed, every cell judged at once: for each
+/// cell, its pairs' means (old, new; fixed point, as [`mean`] gives them),
+/// a paired t-test on log(new / old); the cells whose p-values pass the
+/// Benjamini-Hochberg procedure at a false discovery rate of `q_permille`
+/// over all the cells; and of those, the ones whose geometric mean ratio
+/// lies beyond `margin_permille` slower or faster. The rest are level.
+///
+/// Why (bench-hashes audit/variance-on-unchanged-code.md, i7-12700K):
+/// unchanged code read faster or slower in 15-27 of 700 cells under a
+/// sign test per cell (5 pairs): cold calls vary in cycles with each
+/// run's address layout and each binary's link layout, and 700 tests at
+/// a few percent each add up. This rule found none in the same data, and
+/// the code's changes when every pair ran fresh layouts. Statistics need
+/// floating point here; inputs and verdicts stay exact.
+///
+/// Requires at least 3 pairs per cell, every cell the same count, and
+/// every mean positive.
+pub fn discoveries(cells: &[Vec<(u128, u128)>], q_permille: u64, margin_permille: u64) -> Vec<Verdict> {
+    let pairs = cells.first().map_or(0, Vec::len);
+    assert!(pairs >= 3 && cells.iter().all(|c| c.len() == pairs), "every cell has the same count of pairs, at least 3");
+    // (p-value, geometric mean ratio) per cell.
+    let tested: Vec<(f64, f64)> = cells
+        .iter()
+        .map(|c| {
+            let d: Vec<f64> = c
+                .iter()
+                .map(|&(old, new)| {
+                    assert!(old > 0 && new > 0, "means are positive");
+                    (new as f64).ln() - (old as f64).ln()
+                })
+                .collect();
+            let n = d.len() as f64;
+            let mu = d.iter().sum::<f64>() / n;
+            let var = d.iter().map(|x| (x - mu) * (x - mu)).sum::<f64>() / (n - 1.0);
+            let p = if var == 0.0 {
+                if mu == 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else {
+                t_two_sided(mu / (var / n).sqrt(), n - 1.0)
+            };
+            (p, mu.exp())
+        })
+        .collect();
+    // Benjamini-Hochberg: the largest rank k with p_(k) <= q k / m.
+    let m = cells.len();
+    let mut order: Vec<usize> = (0..m).collect();
+    order.sort_by(|&a, &b| tested[a].0.total_cmp(&tested[b].0));
+    let q = q_permille as f64 / 1000.0;
+    let passed = (1..=m).rev().find(|&k| tested[order[k - 1]].0 <= q * k as f64 / m as f64).unwrap_or(0);
+    let mut verdicts = vec![Verdict::Level; m];
+    let margin = margin_permille as f64 / 1000.0;
+    for &i in &order[..passed] {
+        let ratio = tested[i].1;
+        if ratio > 1.0 + margin {
+            verdicts[i] = Verdict::Slower;
+        } else if ratio < 1.0 - margin {
+            verdicts[i] = Verdict::Faster;
+        }
+    }
+    verdicts
+}
+
+/// Student's t two-sided p-value: P(|T| >= |t|) with `df` degrees of
+/// freedom, the regularized incomplete beta I(df / (df + t^2); df / 2, 1/2).
+fn t_two_sided(t: f64, df: f64) -> f64 {
+    incomplete_beta(df / 2.0, 0.5, df / (df + t * t))
+}
+
+/// The regularized incomplete beta I_x(a, b), by its continued fraction
+/// (Numerical Recipes, betai and betacf).
+fn incomplete_beta(a: f64, b: f64, x: f64) -> f64 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    if x >= 1.0 {
+        return 1.0;
+    }
+    let front = (ln_gamma(a + b) - ln_gamma(a) - ln_gamma(b) + a * x.ln() + b * (1.0 - x).ln()).exp();
+    if x < (a + 1.0) / (a + b + 2.0) {
+        front * beta_fraction(a, b, x) / a
+    } else {
+        1.0 - front * beta_fraction(b, a, 1.0 - x) / b
+    }
+}
+
+fn beta_fraction(a: f64, b: f64, x: f64) -> f64 {
+    let tiny = 1e-300;
+    let (qab, qap, qam) = (a + b, a + 1.0, a - 1.0);
+    let mut c = 1.0;
+    let mut d = 1.0 - qab * x / qap;
+    d = 1.0 / if d.abs() < tiny { tiny } else { d };
+    let mut h = d;
+    for m in 1..300 {
+        let m = m as f64;
+        let m2 = 2.0 * m;
+        for aa in [m * (b - m) * x / ((qam + m2) * (a + m2)), -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))] {
+            d = 1.0 + aa * d;
+            d = 1.0 / if d.abs() < tiny { tiny } else { d };
+            c = 1.0 + aa / c;
+            c = if c.abs() < tiny { tiny } else { c };
+            h *= d * c;
+        }
+        if (d * c - 1.0).abs() < 1e-15 {
+            break;
+        }
+    }
+    h
+}
+
+/// ln Gamma(x) for x > 0 (Lanczos, g = 7, 9 terms).
+fn ln_gamma(x: f64) -> f64 {
+    const G: [f64; 9] = [
+        0.999_999_999_999_809_9,
+        676.520_368_121_885_1,
+        -1_259.139_216_722_402_8,
+        771.323_428_777_653_1,
+        -176.615_029_162_140_6,
+        12.507_343_278_686_905,
+        -0.138_571_095_265_720_12,
+        9.984_369_578_019_572e-6,
+        1.505_632_735_149_311_6e-7,
+    ];
+    if x < 0.5 {
+        return (core::f64::consts::PI / (core::f64::consts::PI * x).sin()).ln() - ln_gamma(1.0 - x);
+    }
+    let x = x - 1.0;
+    let mut a = G[0];
+    let t = x + 7.5;
+    for (i, g) in G.iter().enumerate().skip(1) {
+        a += g / (x + i as f64);
+    }
+    0.5 * (2.0 * core::f64::consts::PI).ln() + (x + 0.5) * t.ln() - t + a.ln()
 }
 
 #[cfg(test)]
@@ -163,5 +310,30 @@ mod tests {
         }
         assert_eq!(interval_permille(&[1010, 1020, 1030, 1040, 1050, 1060, 1070, 1080]), Some((1020, 1070)));
         assert_eq!(interval_permille(&[1000; 4]), None);
+    }
+
+    /// Student's t at its tables' points: t = 2.776 with 4 degrees of
+    /// freedom is p = 0.05 two-sided; 2.228 with 10, 0.05; 3.169 with 10,
+    /// 0.01; t = 0, p = 1.
+    #[test]
+    fn t_p_values_match_the_tables() {
+        for (t, df, p) in [(2.776, 4.0, 0.05), (2.228, 10.0, 0.05), (3.169, 10.0, 0.01), (0.0, 4.0, 1.0)] {
+            assert!((t_two_sided(t, df) - p).abs() < 2e-4, "t {t} df {df}: {}", t_two_sided(t, df));
+        }
+    }
+
+    /// Three cells of five pairs: one 10% slower in every pair, one whose
+    /// pairs scatter 3% each way, one 1% faster in every pair (its
+    /// p-value passes, but it lies within a 3% margin). The slower cell is
+    /// still found among 1000 unchanged ones; at q = 0 nothing is.
+    #[test]
+    fn discoveries_judge_every_cell_at_once() {
+        let pairs = |ratios: &[u128]| ratios.iter().map(|&r| (1000u128 << 63, r << 63)).collect::<Vec<_>>();
+        let cells = vec![pairs(&[1100, 1102, 1098, 1101, 1099]), pairs(&[1030, 970, 1025, 975, 1000]), pairs(&[990, 991, 989, 990, 990])];
+        assert_eq!(discoveries(&cells, 50, 30), [Verdict::Slower, Verdict::Level, Verdict::Level]);
+        let mut many = vec![pairs(&[1030, 970, 1025, 975, 1000]); 1000];
+        many.push(pairs(&[1100, 1102, 1098, 1101, 1099]));
+        assert_eq!(discoveries(&many, 50, 30).iter().filter(|&&v| v != Verdict::Level).count(), 1);
+        assert!(discoveries(&many, 0, 30).iter().all(|&v| v == Verdict::Level));
     }
 }

@@ -307,11 +307,11 @@ pub fn busy_work(ns: u64) {
 }
 
 /// The CPU time this process has used, all its threads together, with
-/// that of its children it has reaped, in nanoseconds: for telling this
-/// process's share of the machine's busy time from other programs'
-/// ([`load`]; a benchmark of other programs, [`child`], counts what it ran
-/// as its own), never for timing a measurement. Zero where the platform
-/// has no such clock.
+/// that of its children it has reaped and of the one [`child::run`] is
+/// running, in nanoseconds: for telling this process's share of the
+/// machine's busy time from other programs' ([`load`]; a launcher counts
+/// what it runs as its own), never for timing a measurement. Zero where
+/// the platform has no such clock.
 pub fn process_cpu_ns() -> u64 {
     #[cfg(unix)]
     {
@@ -333,7 +333,7 @@ pub fn process_cpu_ns() -> u64 {
         let mut children = [0i64; 18];
         // Sound: `children` is writable and as long as a struct rusage.
         assert_eq!(unsafe { getrusage(RUSAGE_CHILDREN, children.as_mut_ptr()) }, 0, "getrusage(RUSAGE_CHILDREN)");
-        ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64 + child::rusage_cpu_ns(&children)
+        ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64 + child::rusage_cpu_ns(&children) + child::running_cpu_ns()
     }
     #[cfg(not(unix))]
     {

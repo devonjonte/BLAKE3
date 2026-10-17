@@ -7,8 +7,6 @@
 - Delete b3sum/Cargo.lock and recreate it with `cargo build` or similar.
     - Make sure to do this *after* the previous step.
 - Update the `-h` output in b3sum/README.md if it's changed.
-- Bump `BLAKE3_VERSION_STRING` in c/blake3.h.
-- Bump `VERSION` in c/CMakeLists.txt.
 - Make a version bump commit with change notes.
 - `git push` and make sure CI is green.
 - `git tag` the version bump commit with the new version number.

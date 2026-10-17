@@ -1,42 +1,86 @@
-# BLAKE3
+# BLAKE3, the servil fork
 
-# Warning
+## Warning
 
 This code is new. An AI wrote it rapidly under Zooko's direction (his guidance is in
-`AGENTS.md`). No person has reviewed it line by line, and nobody has audited it.
-It is checked with automated tests against the reference implementation and fixed digests,
-sanitizers, Miri, formal proofs, and a self-test that every process runs before its first
-hash; [`QUALITY.md`](QUALITY.md) lists every check, the
-bugs they found, and how to repeat them. It has been tested only on an Apple M4 Max. It has no
-users yet: you would be the first. Use it at your own risk.
+`AGENTS.md`), and it awaits its first line-by-line review by a person and its first audit.
+It is checked with tests against the reference implementation and fixed digests,
+sanitizers, Miri, formal proofs of its AArch64 assembly kernels, mutation testing, and a self-test that every process runs
+before its first hash; [`QUALITY.md`](QUALITY.md) lists every check, the bugs they found,
+and how to repeat them. Its speed is measured on an Apple M4 Max (and a Linux VM on it) and
+on an Intel i7-12700K; its tests also run on other 64-bit Arm CPUs (down to a Raspberry Pi
+4's kind), on x86-64 Linux and Windows, and on WebAssembly. You would be its first user.
+Use it at your own risk.
 
-# The servil fork
+## What it is
 
-This is my fork of BLAKE3, for faster hashing on 64-bit Arm, and above all on Apple M4-class
-chips; on other CPUs it runs upstream's code. It computes the same digests as the official
-crate, and adds calls for the ways programs hash: one large message over every core
-(`hash_multithreaded`), batches and collections of messages (`hash_many`, `hash_each_with`),
-many messages arriving at once (`Hasher::update_each`), a stream of messages hashed on other
-threads while your program reads or makes the next (`stream`), and verified streaming in
-iroh-blobs' format (`outboard_with`, `Verifier`).
+This fork of BLAKE3, written by John Servil (an AI) under Zooko's direction, hashes faster
+on 64-bit Arm, above all on Apple M4-class chips, and on x86-64. It computes the same digests as
+official BLAKE3, and adds calls for the ways programs hash: one large message over every
+core (`hash_multithreaded`), batches and collections of messages (`hash_many`,
+`hash_each_with`), many messages arriving at once (`Hasher::update_each`), a stream of
+messages hashed on other threads while your program reads or makes the next (`stream`), and verified
+streaming in the format [iroh-blobs](https://github.com/n0-computer/iroh-blobs) stores
+(`outboard_with`, `Verifier`).
 
-To use it, add
+It supports 64-bit Arm (Linux and macOS), x86-64 (Linux, macOS, and Windows with MSVC), and
+WebAssembly, with the latest stable Rust. [Official
+BLAKE3](https://github.com/BLAKE3-team/BLAKE3) serves other targets (32-bit x86 or Arm,
+big-endian CPUs, Windows with MinGW) and older compilers.
+
+[bench-hashes](https://github.com/johnservil/bench-hashes) measures it against other hashes
+on your own machine; here are its [full results on an Apple M4
+Max](https://johnservil.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.map.html).
+
+## Using it
+
+From Rust, add
 
 ```toml
 [dependencies]
 blake3-servil = { git = "https://github.com/johnservil/BLAKE3", branch = "servil" }
 ```
 
-and call `blake3_servil::hash` as you would `blake3::hash`. The
-[crate documentation](https://johnservil.github.io/BLAKE3/blake3_servil/) opens with a table
-of which call fits your data.
-[bench-hashes](https://github.com/johnservil/bench-hashes) measures it against other hashes on
-your own machine; here are its
-[full results on an Apple M4 Max](https://johnservil.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.map.html).
-`CONTRIBUTING.md` says how to work on the fork. Everything below is upstream's README, apart
-from the speed chart.
+and call it as you would official BLAKE3's `blake3` crate, under its own name, after one call
+of `initialize` (or `initialize_multithreaded`, for the multithreaded calls):
 
-# The BLAKE3 algorithm
+```rust
+blake3_servil::initialize(); // once, before any other call (it runs the self-test)
+let hash = blake3_servil::hash(b"foobarbaz");
+let mut hasher = blake3_servil::Hasher::new();
+hasher.update(b"foo");
+hasher.update(b"barbaz");
+assert_eq!(hasher.finalize(), hash);
+```
+
+The [crate documentation](https://johnservil.github.io/BLAKE3/blake3_servil/) opens with a
+table of which call fits your data. `keyed_hash` (a MAC) and `derive_key` (a KDF) work as in
+official BLAKE3, below.
+
+From C, build the library in `capi/` (`cargo build --release` there gives `libb3.a` and
+`libb3.so` or `libb3.dylib`), include [`capi/b3.h`](capi/b3.h), and link with `-lb3`:
+
+```c
+#include "b3.h"
+
+b3_mode plain = b3_plain();
+b3_digest digest = b3_hash(&plain, "foobarbaz", 9);
+```
+
+A mode (`b3_plain`, `b3_keyed`, `b3_derive_key`) says which of BLAKE3's three functions a
+call computes. Beside `b3_hash` are `b3_hash_many` for batches of messages, a
+`_multithreaded` form of each for other cores, and `b3_hasher` for a message in pieces,
+held in your memory. `b3.h` documents each call.
+
+The command-line `b3sum` prints the BLAKE3 hashes of files or of standard input:
+
+```bash
+cargo install --git https://github.com/johnservil/BLAKE3 b3sum
+```
+
+`CONTRIBUTING.md` says how to work on the fork.
+
+## The BLAKE3 algorithm
 
 BLAKE3 is a cryptographic hash function that is:
 
@@ -69,39 +113,11 @@ The default output size is 256 bits. The current version of
 [Bao](https://github.com/oconnor663/bao) implements verified streaming
 with BLAKE3.
 
-This repository is the official implementation of BLAKE3. It includes:
-
-* The [`blake3`](https://crates.io/crates/blake3) Rust crate, which
-  includes optimized implementations for SSE2, SSE4.1, AVX2, AVX-512,
-  NEON, and WASM, with automatic runtime CPU feature detection on x86.
-  The `rayon` feature provides multithreading.
-
-* The [`b3sum`](https://crates.io/crates/b3sum) Rust crate, which
-  provides a command line interface. It uses multithreading by default,
-  making it an order of magnitude faster than e.g. `sha256sum` on
-  typical desktop hardware.
-
-* The [C implementation](c), which like the Rust implementation includes SIMD
-  optimizations (all except WASM), CPU feature detection on x86, and optional
-  multithreading. See [`c/README.md`](c/README.md).
-
-* The [Rust reference implementation](reference_impl/reference_impl.rs),
-  which is discussed in Section 5.1 of the [BLAKE3
-  paper](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf).
-  This implementation is much smaller and simpler than the optimized
-  ones above. If you want to see how BLAKE3 works, or you're writing a
-  port that doesn't need multithreading or SIMD optimizations, start
-  here. Ports of the reference implementation to other languages are
-  hosted in separate repositories
-  ([C](https://github.com/oconnor663/blake3_reference_impl_c),
-  [Python](https://github.com/oconnor663/pure_python_blake3)).
-
-* A [set of test
-  vectors](https://github.com/BLAKE3-team/BLAKE3/blob/master/test_vectors/test_vectors.json)
-  that covers extended outputs, all three modes, and a variety of input
-  lengths.
-
-* [![Actions Status](https://github.com/BLAKE3-team/BLAKE3/workflows/tests/badge.svg)](https://github.com/BLAKE3-team/BLAKE3/actions)
+Official BLAKE3 ([BLAKE3-team/BLAKE3](https://github.com/BLAKE3-team/BLAKE3)) includes the
+`blake3` Rust crate, `b3sum`, a C implementation, the [Rust reference
+implementation](reference_impl/reference_impl.rs) (also here: start there to see how BLAKE3
+works), and [test vectors](test_vectors/test_vectors.json) covering extended outputs, all
+three modes, and many input lengths (also here).
 
 BLAKE3 was designed by:
 
@@ -120,63 +136,7 @@ designed to be fast, whereas password hashing should not be fast. If you
 hash passwords to store the hashes or if you derive keys from passwords,
 we recommend [Argon2](https://github.com/P-H-C/phc-winner-argon2).*
 
-## Usage
-
-### The `b3sum` utility
-
-The `b3sum` command line utility prints the BLAKE3 hashes of files or of
-standard input. Prebuilt binaries are available for Linux, Windows, and
-macOS (requiring the [unidentified developer
-workaround](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac))
-on the [releases page](https://github.com/BLAKE3-team/BLAKE3/releases).
-If you've [installed Rust and
-Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html),
-you can also build `b3sum` yourself with:
-
-```bash
-cargo install b3sum
-```
-
-If `rustup` didn't configure your `PATH` for you, you might need to go
-looking for the installed binary in e.g. `~/.cargo/bin`. You can test
-out how fast BLAKE3 is on your machine by creating a big file and
-hashing it, for example:
-
-```bash
-# Create a 1 GB file.
-head -c 1000000000 /dev/zero > /tmp/bigfile
-# Hash it with SHA-256.
-time openssl sha256 /tmp/bigfile
-# Hash it with BLAKE3.
-time b3sum /tmp/bigfile
-```
-
-### The `blake3` crate [![docs.rs](https://docs.rs/blake3/badge.svg)](https://docs.rs/blake3)
-
-To use BLAKE3 from Rust code, add a dependency on the `blake3` crate to
-your `Cargo.toml`. Here's an example of hashing some input bytes:
-
-```rust
-// Hash an input all at once.
-let hash1 = blake3::hash(b"foobarbaz");
-
-// Hash an input incrementally.
-let mut hasher = blake3::Hasher::new();
-hasher.update(b"foo");
-hasher.update(b"bar");
-hasher.update(b"baz");
-let hash2 = hasher.finalize();
-assert_eq!(hash1, hash2);
-
-// Extended output. OutputReader also implements Read and Seek.
-let mut output = [0; 1000];
-let mut output_reader = hasher.finalize_xof();
-output_reader.fill(&mut output);
-assert_eq!(hash1, output[..32]);
-
-// Print a hash as hex.
-println!("{}", hash1);
-```
+## The three modes
 
 Besides `hash`, BLAKE3 provides two other modes, `keyed_hash` and
 `derive_key`. The `keyed_hash` mode takes a 256-bit key:
@@ -184,10 +144,10 @@ Besides `hash`, BLAKE3 provides two other modes, `keyed_hash` and
 ```rust
 // MAC an input all at once.
 let example_key = [42u8; 32];
-let mac1 = blake3::keyed_hash(&example_key, b"example input");
+let mac1 = blake3_servil::keyed_hash(&example_key, b"example input");
 
 // MAC incrementally.
-let mut hasher = blake3::Hasher::new_keyed(&example_key);
+let mut hasher = blake3_servil::Hasher::new_keyed(&example_key);
 hasher.update(b"example input");
 let mac2 = hasher.finalize();
 assert_eq!(mac1, mac2);
@@ -203,16 +163,12 @@ application-specific. A good default format for the context string is
 const EMAIL_CONTEXT: &str = "BLAKE3 example 2020-01-07 17:10:44 email key";
 const API_CONTEXT: &str = "BLAKE3 example 2020-01-07 17:11:21 API key";
 let input_key_material = b"usually at least 32 random bytes, not a password";
-let email_key = blake3::derive_key(EMAIL_CONTEXT, input_key_material);
-let api_key = blake3::derive_key(API_CONTEXT, input_key_material);
+let email_key = blake3_servil::derive_key(EMAIL_CONTEXT, input_key_material);
+let api_key = blake3_servil::derive_key(API_CONTEXT, input_key_material);
 assert_ne!(email_key, api_key);
 ```
 
-### The C implementation
-
-See [`c/README.md`](c/README.md).
-
-### Other implementations
+## Other implementations
 
 There are too many implementations out there for us to keep track of,
 but some highlights include [an optimized Go
@@ -235,7 +191,7 @@ Alternatively, it is licensed under any of the following:
 * [Apache 2.0 with LLVM exceptions](./LICENSE_A2LLVM)
 
 
-## Adoption & deployment
+## BLAKE3's adoption and deployment
 
 * [Bazel](https://github.com/bazelbuild/bazel/releases/tag/6.4.0)
 * [Cargo](https://github.com/rust-lang/cargo/pull/14137)
