@@ -22,7 +22,7 @@ a full run; later ones run in full by default and take `--quick`.)
 
 (perf_regress's "full" judges every cell of a default run; "benches" gives
 each side its own bench-hashes commit, for an API change, its cells with
-it; both optional.)
+it; both optional. Every run's samples file lands in the job's samples/.)
     {"type": "example", "example": "scaling" | "host_lab", "fork_commit": "...",
      "features": ["no_sme2"]}
     {"type": "test", "fork_commit": "..."}
@@ -180,7 +180,9 @@ def benchmark(job, run, work, out):
 def perf_regress(job, run, work, out):
     old, new = hex_commit(job, "old_commit"), hex_commit(job, "new_commit")
     fork = run.checkouts(new, hex_commit(job, "bench_commit"))
-    cmd = [sys.executable, "tools/perf_regress.py", "compare", old, new]
+    # Every run's samples file, in the job's results (bench-hashes compare
+    # reads them again, CPU time with them).
+    cmd = [sys.executable, "tools/perf_regress.py", "compare", old, new, "--keep", str(out / "samples")]
     if job.get("full"):
         cmd.append("--full")
     if "benches" in job:
