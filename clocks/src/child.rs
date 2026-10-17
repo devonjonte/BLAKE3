@@ -64,6 +64,7 @@ impl Run {
             wall_ns: runs.iter().map(|r| r.wall_ns).sum(),
             success: runs.iter().all(|r| r.success),
             cpu_ns: sum(|r| r.cpu_ns),
+            energy_nj: sum(|r| r.energy_nj),
             max_rss_bytes: runs.iter().map(|r| r.max_rss_bytes).max().flatten(),
             storage_read_bytes: sum(|r| r.storage_read_bytes),
             major_faults: sum(|r| r.major_faults),
@@ -435,7 +436,7 @@ mod tests {
     /// missing count missing from the sum, failed if any one failed.
     #[test]
     fn runs_sum() {
-        let run = |wall_ns, rss, cpu: Option<u64>, success| Run { started_ns: wall_ns, wall_ns, success, cpu_ns: cpu, max_rss_bytes: Some(rss), storage_read_bytes: Some(1), major_faults: None, counts: None };
+        let run = |wall_ns, rss, cpu: Option<u64>, success| Run { started_ns: wall_ns, wall_ns, success, cpu_ns: cpu, energy_nj: cpu, max_rss_bytes: Some(rss), storage_read_bytes: Some(1), major_faults: None, counts: None };
         let sum = Run::sum(&[run(10, 5, Some(3), true), run(20, 7, Some(4), true)]);
         assert_eq!((sum.started_ns, sum.wall_ns, sum.cpu_ns, sum.max_rss_bytes, sum.storage_read_bytes, sum.major_faults, sum.success), (10, 30, Some(7), Some(7), Some(2), None, true));
         assert_eq!(Run::sum(&[run(1, 1, None, true), run(1, 1, Some(1), false)]).cpu_ns, None);
