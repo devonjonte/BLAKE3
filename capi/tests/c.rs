@@ -10,20 +10,21 @@ use std::process::Command;
 
 #[test]
 fn from_c() {
-    // The test binary is target/<profile>/deps/c-<hash>; the libraries go
-    // in target/<profile>, built here (`cargo test` builds only the Rust
-    // library the tests link), by the same cargo, profile, and target
-    // directory.
-    let exe = std::env::current_exe().unwrap();
-    let lib_dir = exe.parent().unwrap().parent().unwrap().to_path_buf();
+    // The libraries, built here (`cargo test` builds only the Rust library
+    // the tests link) by the same cargo and profile, in a target directory
+    // of the test's own (Cargo's place for an integration test's files;
+    // its own layout of target/ changes between versions).
     let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let target = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-libraries");
+    let release = !cfg!(debug_assertions);
     let mut build = Command::new(env!("CARGO"));
     build.args(["build", "--lib", "--manifest-path"]).arg(here.join("Cargo.toml"));
-    build.arg("--target-dir").arg(lib_dir.parent().unwrap());
-    if lib_dir.file_name().unwrap() == "release" {
+    build.arg("--target-dir").arg(&target);
+    if release {
         build.arg("--release");
     }
     assert!(build.status().unwrap().success(), "the C libraries build");
+    let lib_dir = target.join(if release { "release" } else { "debug" });
     let program = lib_dir.join("b3-check");
     let status = Command::new("cc")
         .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-I"])
