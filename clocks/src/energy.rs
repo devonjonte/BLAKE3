@@ -1,9 +1,9 @@
-//! The energy the CPU package has used, for what a measurement costs the
-//! machine beside what its caller waits for: CPU time counts the cycles a
-//! program's threads ran, spinning included; package energy also counts
-//! what they cost in power, and what they cost everything else on the
-//! package (a clock the whole package shares, lowered by cores waking and
-//! sleeping, shows here and nowhere in CPU time).
+//! The energy the CPU package has used: **a lab instrument**, for
+//! experiments and probes, never the benchmark, its reports, or the gate
+//! (Zooko, October 17, 2026: a number in every report becomes a goal, and
+//! the benchmark carries wall time and CPU time alone). It counts what CPU
+//! time cannot: the power a measurement's threads drew, and what they cost
+//! the rest of the package (a clock its cores share).
 //!
 //! **What it counts.** Linux: the `power` PMU's `energy-pkg` event (Intel
 //! and AMD RAPL), read through `perf_event_open` for the whole package,
@@ -16,9 +16,8 @@
 //! [`package_nj`] is `None`, and results say so.
 //!
 //! **Resolution.** RAPL updates about once a millisecond, so a sample of a
-//! millisecond reads within about one update's energy; a cell's energy
-//! per unit sums its samples' (as its CPU time does), which averages that
-//! out.
+//! millisecond reads within about one update's energy; an experiment
+//! summing many samples' energy averages that out.
 
 use std::sync::OnceLock;
 
