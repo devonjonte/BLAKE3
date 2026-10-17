@@ -716,7 +716,14 @@ fn main() -> anyhow::Result<()> {
             if files_failed == 1 { "" } else { "s" },
         );
     }
-    std::process::exit(if files_failed > 0 { 1 } else { 0 });
+    // Crash-only: the digests flushed, then straight to the kernel
+    // (_exit), skipping libc's exit-time teardown; the process's exit
+    // reclaims everything else.
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    // Sound: _exit takes any status and does not return.
+    unsafe { libc::_exit(if files_failed > 0 { 1 } else { 0 }) }
 }
 
 #[cfg(test)]
