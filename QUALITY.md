@@ -320,10 +320,10 @@ SME2 (clang 17 or later; set `CC=clang-19` or similar):
 
 ```sh
 git clone -b servil https://github.com/johnservil/BLAKE3 && cd BLAKE3
-cargo test --release --lib                        # 92 tests
-cargo test --release --lib --features no_sme2     # 87
-cargo test --release --lib --features pure        # 74
-cargo test --release --doc                        # 22
+cargo test --release --lib                        # 115 tests
+cargo test --release --lib --features no_sme2     # 110
+cargo test --release --lib --features pure        # 95
+cargo test --release --doc                        # 30
 cargo test --release --manifest-path test_vectors/Cargo.toml
 ```
 
