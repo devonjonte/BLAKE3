@@ -12,7 +12,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from z3 import Array, BitVec, BitVecSort, BitVecVal, Concat, Extract, Select, ULE, UGE, ZeroExt, simplify
+from z3 import Array, BitVec, BitVecSort, BitVecVal, Concat, Extract, Select, ULE, UGE, ULT, ZeroExt, simplify
 import aarch64
 import induction
 import prove_sme2
@@ -346,13 +346,100 @@ def prove_one_group(obj, gen_a, gen_b):
     return f"one group: {len(ends)} paths, every output its chunk's chaining value"
 
 
+def prove_every(obj, gen_a, gen_b):
+    """The hybrid kernel at every group count from 2 to 2^40, in one
+    induction over its group loop, the block loop by its proofs: group K's
+    chunk l hashes the chunk table[18 K + l] points to, at counter +
+    18 K + l, its output the standard's chaining value (the chain before
+    its last block, or chunk 16's whole value, a function of the chunk)."""
+    from z3 import BitVec as BV, URem, UDiv
+    g, k = BitVec("len_groups", 64), BitVec("len_k", 64)
+    lanes = [Array(f"msg{l}", BitVecSort(64), BitVecSort(8)) for l in range(18)]
+    key = byte_symbols("key", 32)
+    regions = {}
+    for l in range(18):
+        r = Region(f"lane{l}", g * 1024, False, (lambda a: lambda o: Select(a, aarch64.as_bv(o)))(lanes[l]))
+        r.symbolic_initial = True
+        regions[f"lane{l}"] = r
+    regions["key"] = Region("key", 32, False, lambda o: key[o])
+    regions["out"] = Region("out", g * 576, True, None)
+    def entry(offset):
+        """Table byte `offset`: byte offset % 8 of the pointer to group
+        offset / 144's chunk offset % 144 / 8."""
+        if isinstance(offset, int):
+            group, within = offset // 144, offset % 144
+            return (Ptr(f"lane{within // 8}", 1024 * group), within % 8)
+        o = aarch64.as_bv(offset)
+        within = induction.forced(aarch64._machine[0], URem(o, 144))
+        if within is None:
+            raise Unproved("a table read whose chunk the lengths leave open")
+        return (Ptr(f"lane{within // 8}", simplify(UDiv(o - within, 144) * 1024, som=True, bv_sort_ac=True)), within % 8)
+    table = Region("table", g * 144, False, entry)
+    table.symbolic_initial = True
+    regions["table"] = table
+    s = prove_sme2.HybridSetup(obj, regions)
+    m = s.m
+    m.lengths = {"len_groups", "len_k", "counter"}
+    m.assumptions = [UGE(g, 2), ULE(g, 1 << 40)]
+    counter = BitVec("counter", 64)
+    flags, start, end = (BitVec(x, 8) for x in ("flags", "start", "end"))
+    m.x[0], m.x[1], m.x[2] = Ptr("table", 0), Ptr("key", 0), counter
+    m.x[3] = Concat(BitVec("junk", 32), BitVecVal(0, 8), end, start, flags)
+    m.x[4], m.x[5] = Ptr("out", 0), g
+    funcs = [[Array(f"chain{l}_{w}", BitVecSort(64), BitVecSort(32)) for w in range(8)] for l in range(18)]
+    chains = lambda l, base: [Select(f, aarch64.as_bv(base)) for f in funcs[l]]
+    current = [0]
+    m.summaries = {HEAD: summary(gen_a, gen_b, gen_a.entry, chains, lambda b: chains(16, b), lambda b: chains(17, b), lanes, key, lambda: current[0])}
+    head = prove_sme2.loop_head(obj, lambda: prove_sme2.prove_chunks_x2(obj, 3, check=False), 2)
+    def check_group(mach, kval):
+        out = mach.regions["out"]
+        keys = set()
+        kv = aarch64.as_bv(kval) if not isinstance(kval, int) else BitVecVal(kval, 64)
+        base = kv * 1024
+        for l in range(18):
+            c = counter + 18 * kv + l
+            if l == 16:
+                want = chains(16, base)
+            elif l == 17:
+                want = comp(comp(chains(17, base), lanes[17], base + 64 * 14, c, flags), lanes[17], base + 64 * 15, c, flags | end)
+            else:
+                want = comp(chains(l, base), lanes[l], base + 64 * 15, c, flags | end)
+            offs = [aarch64.key(kv * 576 + 32 * l + j) for j in range(32)]
+            keys.update(offs)
+            if any(o not in out.bytes for o in offs):
+                raise Unproved(f"group output {l} is not wholly written")
+            pbl.compare(mach, spec.words([out.bytes[o] for o in offs]), want, f"group output {l}")
+        if set(out.bytes) != keys:
+            raise Unproved("the group writes output bytes outside its own")
+    s0 = induction.run_to(m, s.entry, head)
+    if s0.regions["out"].bytes:
+        raise Unproved("output written before the group loop")
+    s1 = induction.run_to(induction.snapshot(s0), head, head)
+    check_group(s1, 0)
+    gen = induction.Generalized(s0, s1, k)
+    current[0] = k
+    def check(endm, how):
+        if how == "head":
+            check_group(endm, k)
+            return
+        if not aarch64.holds(endm, g == k + 1):
+            raise Unproved("a path leaves the group loop before the last group")
+        if aarch64.concrete(endm.x[0]) != 16:
+            raise Unproved(f"returned {endm.x[0]}, not 16")
+        check_group(endm, k)
+        prove_sme2.prove_hybrid.check_abi(endm)
+    kinds = induction.loop_step(gen, s0, k, list(s0.assumptions) + [ULT(k, g), ULE(k, 1 << 39)], head, check)
+    return f"every group count: {kinds['head']} paths back to the group loop's head, {kinds['return']} out of it"
+
+
 def main():
     obj = prove_sme2.assemble_hybrid()
     gen_a, s1_a, what = half_a(obj)
     print(what, flush=True)
     gen_b, s9, what = half_b(obj, gen_a, s1_a)
     print(what, flush=True)
-    print(prove_one_group(obj, gen_a, gen_b))
+    print(prove_one_group(obj, gen_a, gen_b), flush=True)
+    print(prove_every(obj, gen_a, gen_b))
 
 
 if __name__ == "__main__":
