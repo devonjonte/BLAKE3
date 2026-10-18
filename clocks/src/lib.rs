@@ -1,11 +1,11 @@
-//! The one place the servil fork and bench-hashes read clocks. Every
-//! measurement reads two things through it (AGENTS.md, "Measuring"):
+//! The one place the servil fork and bench-hashes read clocks. A
+//! measurement reads these through it:
 //!
 //! - **Wall time**, what a caller waits for: the platform's hardware
 //!   counter through `std::time::Instant` ([`now`], [`since_ns`]):
 //!   `CLOCK_UPTIME_RAW` on Darwin, `CLOCK_MONOTONIC` on Linux,
 //!   `QueryPerformanceCounter` on Windows. A counter read can only
-//!   over-count, when the thread is interrupted, which a median absorbs.
+//!   over-count, when the thread is interrupted.
 //! - **The thread's counts per core kind** ([`Counts`]): cycles,
 //!   instructions, and time on performance and efficiency cores, from
 //!   Apple's `thread_selfcounts(THSC_TIME_CPI_PER_PERF_LEVEL)`, and on
@@ -15,12 +15,13 @@
 //!   lower where the core waited on the SME unit; the split says which
 //!   kind of core ran it. Other platforms give none ([`Counts::read`]
 //!   returns `None`), and results say so.
-//!
-//! Thread CPU time (`CLOCK_THREAD_CPUTIME_ID`) is left out: at 1 ms samples
-//! it agrees with the counter and adds an accounting layer to reason about;
-//! once suspected of inventing speed, it was cleared by experiment, and the
-//! moving variable was the core's frequency, which only cycles show
-//! (github.com/johnservil/measure-clocks3, CPU-TIME-CLOCKS-AND-FREQUENCY.md).
+//! - **The process's CPU time** ([`process_cpu_ns`]), all its threads
+//!   together: what a call costs the machine beside what its caller waits
+//!   for, read outside the timed interval (bench-hashes records it per solo
+//!   sample), and this process's share of the machine's busy time
+//!   ([`load`]).
+//! - **The CPU package's energy** ([`energy`]), where the platform counts
+//!   it.
 //!
 //! Read wall time alone inside a timed interval and the counts outside it:
 //! a counts read is a system call.
@@ -311,11 +312,11 @@ pub fn busy_work(ns: u64) {
 
 /// The CPU time this process has used, all its threads together, with
 /// that of its children it has reaped and of the one [`child::run`] is
-/// running, in nanoseconds: for telling this process's share of the
-/// machine's busy time from other programs' ([`load`]; a launcher counts
-/// what it runs as its own), never for timing a measurement. Zero where
-/// the platform has no such clock.
-pub fn process_cpu_ns() -> u64 {
+/// running, in nanoseconds: a sample's CPU time is the difference of two
+/// reads around it, and [`load`] tells this process's share of the
+/// machine's busy time from other programs' with it (a launcher counts
+/// what it runs as its own). `None` where the platform has no such clock.
+pub fn process_cpu_ns() -> Option<u64> {
     #[cfg(unix)]
     {
         #[repr(C)]
@@ -336,11 +337,11 @@ pub fn process_cpu_ns() -> u64 {
         let mut children = [0i64; 18];
         // Sound: `children` is writable and as long as a struct rusage.
         assert_eq!(unsafe { getrusage(RUSAGE_CHILDREN, children.as_mut_ptr()) }, 0, "getrusage(RUSAGE_CHILDREN)");
-        ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64 + child::rusage_cpu_ns(&children) + child::running_cpu_ns()
+        Some(ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64 + child::rusage_cpu_ns(&children) + child::running_cpu_ns())
     }
     #[cfg(not(unix))]
     {
-        0
+        None
     }
 }
 

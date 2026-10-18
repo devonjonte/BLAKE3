@@ -64,11 +64,12 @@ fn compare(args: &[String]) {
             println!("qualified: a run's load was {l}");
         }
     }
-    for (i, (key, _)) in olds[0].0.iter().enumerate() {
-        let ratios: Vec<u64> = olds.iter().zip(&news).map(|(o, n)| clocks::summary::ratio_permille(n.0[i].1, o.0[i].1)).collect();
-        let median = clocks::summary::median_permille(&ratios);
-        let v = clocks::summary::verdict(&ratios, 30);
-        println!("{key}: new/old median {}.{:03} {v:?} ratios {ratios:?}", median / 1000, median % 1000);
+    // Every cell judged at once, by the shared rule (a 5% false discovery
+    // rate, a 3% margin), each printed with the ratio judged.
+    let cells: Vec<Vec<(u128, u128)>> = (0..olds[0].0.len()).map(|i| olds.iter().zip(&news).map(|(o, n)| (o.0[i].1, n.0[i].1)).collect()).collect();
+    for ((key, _), judged) in olds[0].0.iter().zip(clocks::summary::discoveries(&cells, 50, 30)) {
+        let r = judged.ratio_permille;
+        println!("{key}: new/old x{}.{:03} {:?}", r / 1000, r % 1000, judged.verdict);
     }
 }
 
