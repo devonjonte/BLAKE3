@@ -766,11 +766,18 @@ impl Pool {
     /// finds nothing.
     fn serve(&self, me: usize) -> ! {
         let (word, bit) = (&self.parked[me / 64], 1u64 << (me % 64));
+        // Experiment: whether the last look found work (a call's pieces):
+        // then look a while longer before parking, as servil's workers did
+        // before #59 by falling asleep slowly, so a call right after finds
+        // them awake.
+        let mut worked = false;
         loop {
             if sources::run_one() {
+                worked = true;
                 continue;
             }
-            if sources::open() && spin_for_work() {
+            let after_job = std::mem::take(&mut worked);
+            if (sources::open() || after_job) && spin_for_work(after_job) {
                 continue;
             }
             // Park: the bit first, then one more look (a publisher stores,
@@ -805,7 +812,7 @@ impl Pool {
 const SPIN: std::time::Duration = std::time::Duration::from_micros(5);
 
 /// Look for work for up to SPIN: whether some appeared.
-fn spin_for_work() -> bool {
+fn spin_for_work(after_job: bool) -> bool {
     let started = std::time::Instant::now();
     loop {
         for _ in 0..16 {
@@ -814,7 +821,7 @@ fn spin_for_work() -> bool {
             }
             core::hint::spin_loop();
         }
-        if started.elapsed() >= SPIN || !sources::open() {
+        if started.elapsed() >= SPIN || (!after_job && !sources::open()) {
             return false;
         }
     }
