@@ -14,13 +14,10 @@ the bugs those steps found and what formal verification we have tried.
 | WebAssembly | upstream's portable Rust (SIMD128 with the `wasm32_simd` feature) | tested |
 
 - **The Arm kernels are proved correct.** Every assembly kernel on Arm
-  but one is proved to compute the BLAKE3 standard's compression for
-  every input, key, counter, and flags value, as the CPU runs it: 367
-  proofs that a solver checks against a specification of the standard
-  in Lean. Each kernel also reads and writes only its own buffers. The
-  one left, the SME2 kernel with an integer lane
-  (`c/blake3_sme2_hybrid_aarch64.S`), is proved at one and two groups of
-  chunks and tested beyond.
+  is proved to compute the BLAKE3 standard's compression for every
+  input, key, counter, and flags value, as the CPU runs it: 368 proofs
+  that a solver checks against a specification of the standard in Lean.
+  Each kernel also reads and writes only its own buffers.
 - **Secrets do not steer the Arm kernels.** The same proofs show that
   each kernel's branches, memory addresses, and table lookups depend
   only on lengths, never on the message or key. A kernel's time may
@@ -230,23 +227,25 @@ unrolled kernel code.
 ### What is proved
 
 On AArch64 (Apple Silicon, and other 64-bit Arm CPUs), every assembly
-kernel but the SME2 hybrid kernel (the NEON and integer kernels in
+kernel (the NEON and integer kernels in
 `c/blake3_neon_hybrid_aarch64.S`, the SME2 kernels in
-`c/blake3_sme2_aarch64.S`) is proved to compute what
+`c/blake3_sme2_aarch64.S`, and the SME2 kernel with an integer lane in
+`c/blake3_sme2_hybrid_aarch64.S`) is proved to compute what
 [C2SP's BLAKE3 standard](https://c2sp.org/BLAKE3) specifies, for every
 input, key, counter, and flags value: each output word equals the
 standard's. The SME2 kernels are proved at the 512-bit vector length of
-Apple's M4, and the chunk, parent, message, and extended-output kernels
-at every group count, by induction over their group loops; the message
+Apple's M4, and every one of them at every group count, by induction over their group loops; the message
 kernel at every message length from 2 to 16 blocks too, in the same
 induction. Its block loop, which the chunk kernel shares, is proved
 once, a pass for every pass and length: from any hash state, the
 standard's compression of the block in hand, the next block then in
-place. Each kernel also reads and writes only its own buffers, keeps
+place. The kernel with an integer lane's block loop is proved the same
+way, in two halves: its integer units hash chunk 16 in passes 0 to 7 and
+chunk 17 in passes 8 to 15. Each kernel also reads and writes only its own buffers, keeps
 the calling convention, and takes a path that depends only on lengths.
 
 The Rust code (the dispatch, the tree walk, the `Hasher`, the pool, the
-batch APIs) and the SME2 hybrid kernel are tested, and unproved; so are
+batch APIs) is tested, and unproved; so are
 x86-64 and wasm32.
 
 ### How to read what is proved
@@ -263,7 +262,7 @@ standard's appendix and the official test vectors.
 | Part | Statement | Checked by |
 |---|---|---|
 | The proofs' definition of the compression is the standard's | `tools/verify/lean/Sound.lean`: `symbolic_is_the_specifications` | Lean |
-| Each kernel computes that definition | `tools/verify/prove_hybrid.py`, `prove_sme2.py` (with `prove_block_loop.py` for the SME2 block loop): every output word equal to the definition's, which `lean_spec.py` reads from Lean's `compress.json` | Z3 |
+| Each kernel computes that definition | `tools/verify/prove_hybrid.py`, `prove_sme2.py` (with `prove_block_loop.py` and `prove_hybrid_loop.py` for the SME2 block loops): every output word equal to the definition's, which `lean_spec.py` reads from Lean's `compress.json` | Z3 |
 
 **What the proofs take on trust.** Lean rests on its kernel and three
 standard axioms (`propext`, `Classical.choice`, `Quot.sound`). The kernel
@@ -314,11 +313,11 @@ llvm-objdump 17 or later; details in [`tools/verify/README.md`](tools/verify/REA
 ```sh
 pypy3 tools/verify/prove_hybrid.py   # ends "327 of 327 cases proved"
 pypy3 tools/verify/prove_sme2.py     # ends "38 of 38 cases proved" (the longest, the chunk kernel at every group count, 15 minutes)
-pypy3 tools/verify/prove_sme2.py xof_every messages_every  # ends "2 of 2 cases proved": the other kernels at every group count (minutes)
+pypy3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # ends "3 of 3 cases proved": the other kernels at every group count (x2_every about 50 minutes)
 pypy3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
 
-All of them, 367 cases, run on the fork's VM after every change to a
+All of them, 368 cases, run on the fork's VM after every change to a
 kernel or the proof tools lands (`tools/verify/long-proofs.sh`), reported
 on GitHub as the commit's status "long proofs"; a failure is fixed
 before the next such change. Each case is proved when Z3
@@ -493,7 +492,7 @@ among them, and however often the hash is timed.
 
 1. **The instructions run, and the memory addresses they touch, depend
    only on the length.** Proved for every AArch64 assembly kernel, as
-   assembled (the SME2 hybrid kernel at one and two groups): each proof
+   assembled: each proof
    stops at any branch, memory address, or table index that depends on
    the key or the message. The Rust code around the kernels is written to
    branch on lengths alone, and tested, but no proof checks it; on x86-64
@@ -517,7 +516,6 @@ The test suites have run on an Apple M4 Max, under macOS and in a
 Debian 12 AArch64 VM on it (whose SME2 unit the VM exposes), and on
 CI's hosted machines; the sanitizers on both, Miri in the VM.
 
-Not yet proved: the SME2 kernel with an integer lane at more than two
-groups; that the Rust around the Arm kernels (the dispatch, the tree,
+Not yet proved: that the Rust around the Arm kernels (the dispatch, the tree,
 the `Hasher`) keeps secrets from steering a whole call, which is
 tested; and the x86-64 kernels, upstream's and the fork's.

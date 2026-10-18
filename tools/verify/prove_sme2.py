@@ -450,6 +450,9 @@ def cases(only):
     # The message kernel at every group count and every length, in one
     # induction with its block loop by its own proof (prove_block_loop).
     out.append(("messages_every", None, None))
+    # The kernel with an integer lane at every group count, likewise
+    # (prove_hybrid_loop).
+    out.append(("x2_every", None, None))
     # A name selects its cases; name:N the one whose argument is N.
     named = lambda c: c[0] in only or f"{c[0]}:{c[2]}" in only
     return [c for c in out if (named(c) if only else not c[0].endswith("every") or c[0] in ALWAYS)]
@@ -483,6 +486,14 @@ def prove_case(case):
             step = prove_block_loop.prove(OBJ)
             what = prove_block_loop.prove_every(OBJ)
             return case, f"proved (the message kernel's block loop, {step}; the kernel at {what}, {time.time() - t:.0f} s)"
+        elif name == "x2_every":
+            import prove_hybrid_loop as hl
+            if HYBRID_OBJ[0] is None:
+                HYBRID_OBJ[0] = assemble_hybrid()
+            gen_a, s1, half_a = hl.half_a(HYBRID_OBJ[0])
+            gen_b, _, half_b = hl.half_b(HYBRID_OBJ[0], gen_a, s1)
+            what = hl.prove_every(HYBRID_OBJ[0], gen_a, gen_b)
+            return case, f"proved (the kernel with an integer lane: its block loop, {half_a}; {half_b}; the kernel at {what}, {time.time() - t:.0f} s)"
         elif name == "xof_every":
             what = prove_xof_every(OBJ)
             return case, f"proved (the extended-output kernel at every group count: {what}, {time.time() - t:.0f} s)"
@@ -507,10 +518,12 @@ WORKERS = 5
 
 def main():
     import multiprocessing
-    # The longest case first, so it is not left to run alone at the end: the
-    # chunk kernel's induction (15 minutes, October 18).
+    # The longest cases first, so none is left to run alone at the end: the
+    # inductions of the kernel with an integer lane (about 50 minutes) and
+    # of the chunk kernel (15).
+    first = ("x2_every", "every")
     todo = sorted(cases(set(sys.argv[1:])),
-                  key=lambda c: (0,) if c[0] == "every" else (1,))
+                  key=lambda c: first.index(c[0]) if c[0] in first else len(first))
     failed = 0
     # A fresh process per case: the normal forms' caches keep their terms
     # alive (canon.py), so a worker that kept them would only grow. WORKERS
