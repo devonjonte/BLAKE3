@@ -246,6 +246,17 @@ fn mapped(file: &File) -> Option<memmap2::Mmap> {
     // a file another program truncates meanwhile is the caller's risk, as
     // with any mapping (upstream b3sum mapped every file).
     let map = unsafe { memmap2::Mmap::map(file) }.ok()?;
+    // Experiment (B3_ADVISE): the kernel's advice for a mapping, to test how
+    // a large file from storage is read.
+    if let Some(a) = std::env::var_os("B3_ADVISE") {
+        let advice = match a.to_str() {
+            Some("seq") => memmap2::Advice::Sequential,
+            Some("willneed") => memmap2::Advice::WillNeed,
+            Some("random") => memmap2::Advice::Random,
+            _ => panic!("B3_ADVISE: seq, willneed or random"),
+        };
+        let _ = map.advise(advice);
+    }
     if cfg!(target_os = "linux") {
         return Some(map);
     }
