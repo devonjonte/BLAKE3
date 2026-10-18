@@ -842,3 +842,20 @@ fn test_one_thread_matches_the_default() {
         assert_eq!(out, expected, "a file read, --num-threads {threads:?}");
     }
 }
+
+/// Pseudo-files among many (the batched path on Linux): each hashes as its
+/// content, whatever size it reports (/proc's report 0, /sys's 4096).
+#[test]
+#[cfg(target_os = "linux")]
+fn test_pseudo_files_among_many() {
+    blake3::initialize();
+    let names = ["/proc/version", "/sys/kernel/mm/transparent_hugepage/enabled", "/proc/version"];
+    let present: Vec<&str> = names.into_iter().filter(|p| fs::read(p).is_ok()).collect();
+    if present.len() < 2 {
+        return;
+    }
+    let output = cmd(b3sum_exe(), std::iter::once("--no-names").chain(present.iter().copied())).stdout_capture().stderr_capture().unchecked().run().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected: Vec<String> = present.iter().map(|p| blake3::hash(&fs::read(p).unwrap()).to_hex().to_string()).collect();
+    assert_eq!(expected.join("\n"), String::from_utf8_lossy(&output.stdout).trim_end());
+}
