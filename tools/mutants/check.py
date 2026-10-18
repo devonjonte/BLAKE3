@@ -101,7 +101,8 @@ def run(files, extra=(), shards=SHARDS, label="run"):
         # other status (a failing unmutated baseline) is no result.
         assert process.wait() in (0, 2, 3), f"cargo mutants failed ({process.returncode}) in {tree}"
         out = os.path.join(tree, "mutants-result", "mutants.out")
-        # No missed.txt when there was nothing to test (a diff of no mutants).
+        # No mutants.out when there was nothing to test (a diff of no
+        # mutants), so none of its files.
         missed = os.path.join(out, "missed.txt")
         for line in (open(missed).read().splitlines() if os.path.exists(missed) else []):
             m = NAME.match(line)
@@ -116,7 +117,8 @@ def run(files, extra=(), shards=SHARDS, label="run"):
             function = (mutant.get("function") or {}).get("function_name", "")
             m = NAME.match(mutant["name"])
             functions[(mutant["file"], function)].append((outcome["summary"], f"{m.group(1)}\t{m.group(2)}"))
-        shutil.copytree(out, os.path.join(kept, f"shard{k}"))
+        if os.path.exists(out):
+            shutil.copytree(out, os.path.join(kept, f"shard{k}"))
         subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
         shutil.rmtree(tree, ignore_errors=True)
     return names, functions
