@@ -11,6 +11,8 @@ digests as official BLAKE3.
 >   (the geometric mean of the pairs' ratios), so every comparison prints the figure it
 >   is judged by; the sign test goes; `process_cpu_ns` is `None` where a platform has no
 >   process CPU clock (#82).
+> - `hash()` inlined into its caller: a call after a pause fetches one code line fewer
+>   (after idling, 64 B messages 16.5% faster on an i7-12700K) (#83).
 
 ## How it is checked
 
