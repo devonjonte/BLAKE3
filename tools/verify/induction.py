@@ -47,9 +47,16 @@ def paths(m, pc, heads):
         m, pc, first = work.pop()
         while True:
             if pc in heads and not first:
+                m.stopped_at = pc
                 done.append((m, "head"))
                 break
             first = False
+            # Code taken by its proved effect (a loop by its induction): the
+            # summary sets the state and gives the address to go on from.
+            summary = getattr(m, "summaries", {}).get(pc)
+            if summary is not None:
+                pc = summary(m)
+                continue
             if pc not in m.code:
                 raise Unproved(f"execution reached {pc:#x}, outside the code under proof")
             mnem, ops = m.code[pc]
@@ -243,8 +250,9 @@ def constant_difference(a, b):
     syms = {}
     canon.symbols_of(diff, syms, set())
     values = set()
-    for _ in range(3):
-        point = [(v, BitVecVal(random.getrandbits(v.size()), v.size())) for v in syms.values()]
+    for r in range(3):
+        # Fresh random values each call (canon.sample's cache, keyed apart).
+        point = [(v, canon.sample(("difference", random.getrandbits(64), n), v, r)) for n, v in syms.items()]
         values.add(simplify(substitute(diff, *point)).as_long())
         if len(values) > 1:
             return None

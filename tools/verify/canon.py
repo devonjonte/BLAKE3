@@ -116,6 +116,19 @@ def set_context(assumptions, lengths):
     _context["lengths"] = set(lengths)
 
 
+def sample(n, v, r):
+    """Symbol `v` (named `n`) at sample point `r`: a random value; an array
+    (a message read at any offset) a random function of its index, so
+    bytes at different offsets differ. Only a fingerprint: equal leaves are
+    proved equal by the solver."""
+    from z3 import is_array, Lambda, Extract, BitVec as BV
+    if is_array(v):
+        i = BV("sample_index", v.domain().size())
+        a, b = (_values.setdefault((n, r, j), random.getrandbits(v.domain().size())) for j in (0, 1))
+        return Lambda([i], Extract(v.range().size() - 1, 0, i * a + b))
+    return BitVecVal(_values.setdefault((n, r), random.getrandbits(v.size())) % (1 << v.size()), v.size())
+
+
 def leaf(t):
     """A term with no rounds in it: equal leaves get one id. Leaves whose
     values agree at sample points are proved equal by the solver, under the
@@ -127,9 +140,7 @@ def leaf(t):
     print_ = []
     for r in range(ROUNDS):
         point = _context["points"][r] if r < len(_context["points"]) else {}
-        sub = [(v, point[n] if n in point else
-                BitVecVal(_values.setdefault((n, r), random.getrandbits(v.size())) % (1 << v.size()), v.size()))
-               for n, v in syms.items()]
+        sub = [(v, point[n] if n in point else sample(n, v, r)) for n, v in syms.items()]
         print_.append(simplify(substitute(t, *sub)).as_long() if sub else simplify(t).as_long())
     key = (t.size(), tuple(print_))
     for other, n in _leaves.get(key, []):
