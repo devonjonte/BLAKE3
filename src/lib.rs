@@ -1041,6 +1041,7 @@ fn hash_all_at_once(
 ///
 /// The first hash in a process first runs a self-test (see the crate's
 /// documentation), under 0.2 ms; [`initialize`] moves it to start-up.
+#[inline]
 pub fn hash(input: &[u8]) -> Hash {
     hash_serial(input, IV, 0)
 }
