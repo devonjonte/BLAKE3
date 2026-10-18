@@ -3060,7 +3060,7 @@ with more SME units.
 ## The kernel with an integer lane at every group count (October 18, 2026)
 
 `tools/verify/prove_hybrid_loop.py` proves `blake3_sme2x2_hash_chunks_512`
-at every group count from 2 to 2^40 (`prove_sme2.py x2_every`, about 52
+at every group count from 2 to 2^40 (`prove_sme2.py x2_every`, about 44
 minutes on the VM, one CPU), closing #40. It follows `prove_block_loop.py`.
 The block loop's 15 passes each hash a block of the 16 SME2 chunks and two
 blocks of one integer chunk: chunk 16 in passes 0-7 (its chaining value
@@ -3081,7 +3081,7 @@ induction generalized from a pointer's byte (both are tuples), which
 output bytes at symbolic offsets are found by parsing the memory key
 back into a term (`prove_hybrid_loop.term_of_key`).
 
-The group induction takes about 47 of the 52 minutes, against 15 for the
+The group induction takes about 40 of the 44 minutes (2627 s as a long-proof case), against 15 for the
 plain chunk kernel's; the table's 144-byte stride (`URem`/`UDiv` in the
 entry function, where the plain kernel masks with 127) is the likely
 cost, untested.
