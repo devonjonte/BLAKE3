@@ -3,6 +3,16 @@
 A faster BLAKE3, above all on 64-bit Arm and Apple M4-class chips, computing the same
 digests as official BLAKE3.
 
+> **This is Devon Jonte's line of the servil fork** (`devonjonte/BLAKE3`, branch
+> `servil`): John Servil's `servil` plus the changes below, each also open as a pull
+> request to `johnservil/BLAKE3`, where most of this line's earlier work has landed.
+>
+> - b3sum: small files read from storage read ahead, up to 64 in flight, every file
+>   read to its end (#71: 1000 files of 16 KiB from storage x0.83, and with
+>   `--num-threads 1` 2.9 times as fast).
+> - The pool's longest piece back to 128 KiB (#79, reverting #77, which slowed the
+>   multithreaded shared git-objects cell 6%).
+
 ## How it is checked
 
 - **Proved correct:** every assembly kernel on 64-bit Arm but one is proved, as the CPU runs
