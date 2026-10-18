@@ -2278,6 +2278,84 @@ of 0.5-0.8 us and give back 10-20% of the compute (rolling's cost in
 earlier measurements): about 10% for a second kernel family to
 generate, test, and self-test. Not built.
 
+## b3sum on Linux: streams, io_uring and the kernel's features, measured (October 18, 2026)
+
+The question was whether streams, io_uring, or another Linux feature
+make b3sum faster (i7-12700K, Linux 7.0, ext4 on a WD SN570 NVMe rated
+about 3.5 GB/s; bench-hashes b3sum with the balanced order, 4 link
+layouts a build, GNU sha256sum as the control; evidence in
+bench-hashes-validation/b3sum-uring, -thp, -nowait, -buffered,
+-spawn-while; branches experiment/devon-b3sum-*).
+
+Where b3sum stood: large files from storage already ran at 3.2-3.3 GB/s
+through a mapping and the kernel's readahead, and large cached files are
+compute-bound (1 GiB about 30 ms on 20 threads). The room was in many
+small files from storage, where b3sum kept one read a thread in flight.
+
+**What won: reads in flight, by the kernel's own readahead (#71).** Each
+small file is read first with preadv2(RWF_NOWAIT), which succeeds only
+from the page cache (a cached file costs what it did); one that misses is
+advised (posix_fadvise WILLNEED) and set aside, up to 64 across the
+threads. From storage, 1000 x 16 KiB x0.82, the mixed tree x0.96; with one
+thread 3 times as fast. Depth was the limit for few threads (one thread:
+4 in flight x0.51, 64 x0.27); with 20, the drive's random reads (about
+110,000 a second at 16 KiB). Growing the descriptor table while threads
+share it waits for an RCU grace period (10-13 ms at descriptors 64 and
+128), so b3sum grows it once before starting threads.
+
+**What did not, and why:**
+- io_uring with reads in flight a thread: as fast as the hint, with a
+  ring, a dependency and buffers a read. One thread driving the whole run
+  through one ring was 2.8x slower cached: io_uring hands statx to io-wq
+  threads, and one thread then does every open; SQPOLL (a polling kernel
+  thread a ring) 1.9x slower; IOSQE_ASYNC level to worse.
+- Streams, including Stream::submit_reader, which reads straight into the
+  stream's ring: slower for whole files (cached x1.18-1.35 with a stream a
+  thread, x1.5-2.2 with a few I/O threads feeding them). Opening and
+  reading a file costs the kernel about 8 us, hashing 16 KiB about 1.6 us:
+  a few threads cannot open files fast enough, and with many, handing a
+  file to the pool costs more than hashing it in place. As October 6
+  found, a read copies once whoever owns the buffer.
+- O_DIRECT for files that miss: x1.27-1.85 from storage (no readahead,
+  one read a thread at a time).
+- madvise WILLNEED or MADV_POPULATE_READ on mappings from storage: level,
+  and 9-42% slower.
+- Huge pages for mappings (MADV_HUGEPAGE): a 1 GiB file cached in 2 MiB
+  folios faults in in 0.2 ms, not 28, and unmaps in 0.2 ms, not 17, but
+  only when it entered the cache through such a mapping; b3sum's wall
+  time stayed level (its hashing is compute-bound) and system time rose
+  with mixed folio sizes.
+- Hashing large files by parallel pread of aligned subtrees (hazmat),
+  without mapping: slower cached (1 GiB mean 37.7 against 35.3 ms), more
+  CPU (the copy costs more than the faults and the teardown it saves).
+- Buffered output (1000 write calls became 4): at most about 5%, not
+  reliably seen. Restoring SIGPIPE's default made `b3sum * | head` end as
+  GNU's tools end (#72).
+- Fewer threads for few files: a thread costs 15-25 us to start, more
+  than a small file; starting one only while inputs remain helps runs of
+  a few small files 5-10% (#73). Fixed files a thread, or each thread
+  starting the next, cost large runs 17-47%.
+- A static non-PIE binary: start-up within a few us of /bin/true either
+  way. SHARED_POOL_LEN from 2 to 16 MiB: alike within the pilot's noise.
+
+**How a large file enters the page cache sets the cost of mapping it
+later.** Read in order (`cat`, sha256sum, one thread faulting in
+sequence), a 1 GiB file is cached in large folios, and a later b3sum run
+that unmaps it takes 31.6 ms; read from storage by b3sum's 20 threads
+faulting its mapping in parallel, it is cached in small folios, and the
+same run takes 46.8 ms (the readahead breaks into small pieces; large
+folios fault and unmap in batches). This is the bench's two-mode 1 GiB
+cell: fast or slow by whether sha256sum or a b3sum last read the file
+from storage. #56 leaves the teardown to exit, mostly after the parent
+sees it. madvise WILLNEED and fadvise WILLNEED did not change the folios;
+MADV_POPULATE_READ in order did, at 531 ms against 332 for the read.
+
+**The bench's order was biased** (bench-hashes #35): rotating the
+contenders kept each one's predecessor fixed, and the run after
+sha256sum (or after another b3sum, from storage) moved single-file cells
+up to 10%. The b3sum suite now uses the main run's Williams design; a
+same-code control then judged 20 of 20 cells level.
+
 ## b3sum: several files at once; which API it calls (October 6, 2026)
 
 Zooko asked whether b3sum could be faster through another API, a stream
