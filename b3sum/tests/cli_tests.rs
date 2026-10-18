@@ -23,6 +23,34 @@ fn test_pseudo_file() {
     assert_eq!(blake3::hash(&content).to_hex().to_string(), String::from_utf8_lossy(&output.stdout).trim_end());
 }
 
+/// A reader that goes away ends b3sum at once and quietly (SIGPIPE), as
+/// it ends GNU's tools: more results than a pipe holds, the reader gone
+/// after one line.
+#[test]
+#[cfg(unix)]
+fn test_reader_gone() {
+    use std::io::BufRead;
+    use std::os::unix::process::ExitStatusExt;
+    let dir = tempfile::tempdir().unwrap();
+    let files: Vec<PathBuf> = (0..2000).map(|i| {
+        let path = dir.path().join(format!("{i:04}"));
+        fs::write(&path, i.to_string()).unwrap();
+        path
+    }).collect();
+    let mut child = std::process::Command::new(b3sum_exe())
+        .args(&files)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    std::io::BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let output = child.wait_with_output().unwrap();
+    const SIGPIPE: i32 = 13; // on Linux and macOS
+    assert_eq!(output.status.signal(), Some(SIGPIPE), "{:?}", output.status);
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
 #[test]
 fn test_hash_one() {
     blake3::initialize();

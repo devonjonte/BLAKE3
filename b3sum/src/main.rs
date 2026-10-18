@@ -843,6 +843,14 @@ fn explain_sigbus() {
 fn main() -> anyhow::Result<()> {
     #[cfg(unix)]
     explain_sigbus();
+    // A reader that goes away (`b3sum * | head`) ends b3sum at once and
+    // quietly, as it ends GNU's tools: Rust ignores SIGPIPE, so b3sum's next
+    // write failed and panicked ("failed printing to stdout", status 101).
+    #[cfg(unix)]
+    // Sound: restoring a signal's default action.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL)
+    };
     blake3::initialize();
     let args = Args::parse()?;
     let threads = args.num_threads().unwrap_or_else(|| std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN));
