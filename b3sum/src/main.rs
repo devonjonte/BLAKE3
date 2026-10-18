@@ -792,7 +792,38 @@ fn check_one_checkfile(path: &Path, args: &Args, files_failed: &mut u64) -> anyh
     }
 }
 
+/// A mapped file that another program truncates while b3sum reads it
+/// raises SIGBUS at the first page past its new end, and that is by far
+/// the likeliest SIGBUS here; but a hardware memory error raises it too,
+/// so the message says what b3sum knows, then stops, rather than die
+/// unexplained. (Only write and _exit here: a signal handler may call
+/// nothing else.)
+#[cfg(unix)]
+fn explain_sigbus() {
+    static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    extern "C" fn on_sigbus(_: libc::c_int) {
+        // Once, whichever threads fault (an atomic swap is signal-safe).
+        if SAID.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            loop {
+                // Sound: pause is async-signal-safe; the first thread exits.
+                unsafe { libc::pause() };
+            }
+        }
+        const MESSAGE: &[u8] = b"b3sum: a bus error while reading a mapped file; most likely another program truncated it, so no digest of it would be right. Hash the files again once nothing writes to them.\n";
+        // Sound: write and _exit are async-signal-safe.
+        unsafe {
+            libc::write(2, MESSAGE.as_ptr().cast(), MESSAGE.len());
+            libc::_exit(1);
+        }
+    }
+    // Sound: a handler that calls only async-signal-safe functions.
+    let handler: extern "C" fn(libc::c_int) = on_sigbus;
+    unsafe { libc::signal(libc::SIGBUS, handler as libc::sighandler_t) };
+}
+
 fn main() -> anyhow::Result<()> {
+    #[cfg(unix)]
+    explain_sigbus();
     blake3::initialize();
     let args = Args::parse()?;
     let threads = args.num_threads().unwrap_or_else(|| std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN));
