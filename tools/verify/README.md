@@ -7,7 +7,7 @@ the compression function of the Lean specification of BLAKE3
 
     pypy3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9 (327 cases, 3.1 CPU-hours: about 12 minutes on 16 CPUs)
     pypy3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof, and the chunk and parent kernels at every group count (36 cases, hours); c/blake3_sme2_hybrid_aarch64.S: chunks_x2 (2 cases, 9 min)
-    pypy3 tools/verify/prove_sme2.py xof_every messages_every  # the other kernels at every group count (hours)
+    pypy3 tools/verify/prove_sme2.py xof_every messages_every  # the other kernels at every group count (minutes)
     pypy3 tools/verify/lean/emit.py                   # the definition, from the Lean specification (needs Lean)
     pypy3 tools/verify/cross_check.py                 # the NEON and integer models against the CPU
     pypy3 tools/verify/cross_check_sme.py             # the streaming SVE and SME2 models against the CPU (needs SME2)
@@ -36,8 +36,14 @@ parent kernel the same way (`parents_every`, under a minute); it preloads
 the next group's pairs, so each group's words differ instead (word w of
 group G is pair_w + G): hashing another group's pairs gives other terms.
 The extended-output kernel (`xof_every`, under a minute), and the message
-kernel at each message length of 2 to 16 blocks (`messages_every`, 2 to
-61 minutes each).
+kernel at every group count and every length of 2 to 16 blocks in one
+induction (`messages_every`, about 3 minutes, `prove_block_loop.py`): its
+block loop is proved once, a pass for every pass K and every length (from
+any hash state, with block K in ZA, the standard's compression of block K,
+block K + 1 then in ZA), and the group loop's proof takes the loop by that
+proof, its entry checked (the key; each lane's block 0 in ZA). Messages
+are arrays read at any offset there, so a group that read another
+group's bytes would compute other terms.
 
 ## What a proof shows
 

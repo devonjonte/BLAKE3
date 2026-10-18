@@ -10,7 +10,7 @@ the bugs those steps found and what formal verification we have tried.
 - **The assembly kernels are proved correct.** Every assembly kernel but
   one (NEON, integer, and SME2) is proved to compute the BLAKE3
   standard's compression function for every input, key, counter, and
-  flags value, as the CPU runs it, in 381 proofs that a solver checks
+  flags value, as the CPU runs it, in 367 proofs that a solver checks
   against a specification of the standard in Lean. Each kernel also
   reads and writes only its own buffers and takes a path that depends
   only on lengths. The one left, the SME2 kernel with an integer lane
@@ -301,11 +301,11 @@ llvm-objdump 17 or later; details in [`tools/verify/README.md`](tools/verify/REA
 ```sh
 pypy3 tools/verify/prove_hybrid.py   # ends "327 of 327 cases proved"
 pypy3 tools/verify/prove_sme2.py     # ends "38 of 38 cases proved" (hours: the chunk kernel at every group count)
-pypy3 tools/verify/prove_sme2.py xof_every messages_every  # ends "16 of 16 cases proved": the other kernels at every group count (hours)
+pypy3 tools/verify/prove_sme2.py xof_every messages_every  # ends "2 of 2 cases proved": the other kernels at every group count (minutes)
 pypy3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
 
-All of them, 381 cases, run on the fork's VM after every change to a
+All of them, 367 cases, run on the fork's VM after every change to a
 kernel or the proof tools lands (`tools/verify/long-proofs.sh`), reported
 on GitHub as the commit's status "long proofs"; a failure is fixed
 before the next such change. Each case is proved when Z3
