@@ -3,6 +3,23 @@
 A faster BLAKE3, above all on 64-bit Arm and Apple M4-class chips, computing the same
 digests as official BLAKE3.
 
+> **This is Devon Jonte's line of the servil fork** (`devonjonte/BLAKE3`, branch
+> `servil`): John Servil's `servil` plus the changes below, each also open as a pull
+> request to `johnservil/BLAKE3`. Measured as a whole on an i7-12700K (Linux 7.0, ext4
+> on NVMe), `bench-hashes b3sum` in its balanced order, 20 rounds, against John's
+> `servil`: many small files from storage x0.84, the mixed tree cached x0.89, 1 GiB
+> cached x0.87, a b3sum process per file x0.96; no cell slower.
+>
+> - b3sum: a changed file is an error (#53); crash-only exit (#68); `--num-threads N`
+>   means at most N threads hashing (#70, with the library's
+>   `initialize_multithreaded(Option<NonZeroUsize>)`); small files read from storage
+>   read ahead, up to 64 in flight (#71); quiet when its reader goes away (#72); file
+>   threads only while inputs remain (#73); no CPU-count probe for one file (#75).
+> - The pool's longest piece is 1 MiB, so a mapped file read from storage is cached in
+>   large folios (#77).
+> - NOTES: what was tried for b3sum with streams, io_uring and the kernel's features,
+>   and why most of it lost (#74).
+
 ## How it is checked
 
 - **Proved correct:** every assembly kernel on 64-bit Arm but one is proved, as the CPU runs
