@@ -3,6 +3,15 @@
 A faster BLAKE3, above all on 64-bit Arm and Apple M4-class chips, computing the same
 digests as official BLAKE3.
 
+> **This is Devon Jonte's line of the servil fork** (`devonjonte/BLAKE3`, branch
+> `servil`): John Servil's `servil` plus the change below, also open as a pull request
+> to `johnservil/BLAKE3`. Devon Jonte's bench-hashes fork measures with this line.
+>
+> - `clocks::summary`: one comparison rule. `discoveries` returns the ratio it judges
+>   (the geometric mean of the pairs' ratios), so every comparison prints the figure it
+>   is judged by; the sign test goes; `process_cpu_ns` is `None` where a platform has no
+>   process CPU clock (#82).
+
 ## How it is checked
 
 - **Proved correct:** every assembly kernel on 64-bit Arm but one is proved, as the CPU runs
