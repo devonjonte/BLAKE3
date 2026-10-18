@@ -155,3 +155,7 @@ overflow-checks = true
 [profile.mutants]
 inherits = "test"
 incremental = true
+
+[[example]]
+name = "region_probe"
+required-features = ["mmap"]
