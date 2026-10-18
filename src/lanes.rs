@@ -732,10 +732,14 @@ impl Pool {
 
     /// Wake one parked worker, if any: whether one was.
     pub(crate) fn wake_one(&self) -> bool {
+        // Experiment: start the search at a rotating position, so the wakes
+        // spread over the workers (and their cores) as servil's condvar did.
+        static CURSOR: AtomicUsize = AtomicUsize::new(0);
+        let start = (CURSOR.fetch_add(1, Ordering::Relaxed) % 64) as u32;
         for (w, word) in self.parked.iter().enumerate() {
             let mut bits = word.load(Ordering::SeqCst);
             while bits != 0 {
-                let bit = 1u64 << bits.trailing_zeros();
+                let bit = 1u64 << ((bits.rotate_right(start).trailing_zeros() + start) % 64);
                 let before = word.fetch_and(!bit, Ordering::SeqCst);
                 if before & bit != 0 {
                     let worker = w * 64 + bit.trailing_zeros() as usize;
