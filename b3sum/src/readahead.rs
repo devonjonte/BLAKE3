@@ -41,8 +41,19 @@ pub(crate) fn applies(args: &Args) -> bool {
 /// Hash every file of the run, printing in order: the files that failed.
 pub(crate) fn hash_inputs(args: &Args) -> u64 {
     let threads = crate::threads().get().min(args.file_args.len());
-    grow_descriptor_table(threads * BATCH + 64);
-    crate::hash_inputs_with(args, threads, hash_some, crate::print_output)
+    grow_descriptor_table(threads * std::env::var("B3_BATCH").ok().and_then(|v| v.parse().ok()).unwrap_or(BATCH) + 64);
+    use crate::experiment as e;
+    match args.experiment() {
+        "nowait" => crate::hash_inputs_with(args, threads, |a: &Args, n: &AtomicUsize, d: &mut dyn FnMut(usize, anyhow::Result<e::Out>) -> bool| e::hash_some_nowait(a, n, d, false), e::print),
+        "odirect" => crate::hash_inputs_with(args, threads, |a: &Args, n: &AtomicUsize, d: &mut dyn FnMut(usize, anyhow::Result<e::Out>) -> bool| e::hash_some_nowait(a, n, d, true), e::print),
+        "stream" if args.len() == blake3::OUT_LEN as u64 && args.seek() == 0 && !args.keyed() => {
+            crate::hash_inputs_with(args, threads, |a: &Args, n: &AtomicUsize, d: &mut dyn FnMut(usize, anyhow::Result<e::Out>) -> bool| {
+                blake3::initialize_multithreaded(Some(crate::pool_threads()));
+                e::hash_some_stream(a, n, d)
+            }, e::print)
+        }
+        _ => crate::hash_inputs_with(args, threads, hash_some, crate::print_output),
+    }
 }
 
 /// Room for `descriptors` open descriptors, made while this process has

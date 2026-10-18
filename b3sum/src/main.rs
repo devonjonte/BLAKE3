@@ -13,6 +13,8 @@ const NAME: &str = "b3sum";
 
 #[cfg(target_os = "linux")]
 mod readahead;
+#[cfg(target_os = "linux")]
+mod experiment;
 
 const DERIVE_KEY_ARG: &str = "derive_key";
 const KEYED_ARG: &str = "keyed";
@@ -66,6 +68,10 @@ struct Inner {
     /// `taskset -c LIST` (Linux).
     #[arg(long, value_name("NUM"))]
     num_threads: Option<std::num::NonZeroUsize>,
+
+    /// Experiments (hidden): base, readahead, nowait, odirect, stream
+    #[arg(long, hide = true, value_name("MODE"))]
+    experiment: Option<String>,
 
     /// No effect: b3sum chooses between reading and mapping each file
     #[arg(long)]
@@ -166,6 +172,16 @@ impl Args {
 
     fn seek(&self) -> u64 {
         self.inner.seek
+    }
+
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    fn experiment(&self) -> &str {
+        self.inner.experiment.as_deref().unwrap_or("readahead")
+    }
+
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    fn derive_key_context(&self) -> Option<&str> {
+        self.inner.derive_key.as_deref()
     }
 
     fn keyed(&self) -> bool {
@@ -658,7 +674,7 @@ fn parse_check_line(mut line: &str) -> anyhow::Result<ParsedCheckLine> {
 /// opening and reading each, which one thread does one at a time.
 fn hash_inputs(args: &Args) -> u64 {
     #[cfg(target_os = "linux")]
-    if readahead::applies(args) {
+    if readahead::applies(args) && args.experiment() != "base" {
         return readahead::hash_inputs(args);
     }
     hash_inputs_with(args, threads().get().min(args.file_args.len()), hash_some, print_output)
