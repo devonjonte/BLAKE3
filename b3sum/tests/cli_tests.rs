@@ -96,6 +96,23 @@ fn test_hash_many_sizes() {
     }
 }
 
+/// An error between results comes between them, also when the results are
+/// buffered (stdout not a terminal): stdout is flushed before stderr.
+#[test]
+fn test_error_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+    fs::write(&a, b"foo").unwrap();
+    fs::write(&b, b"bar").unwrap();
+    let missing = dir.path().join("missing");
+    let output = cmd!(b3sum_exe(), "--no-names", &a, &missing, &b).stderr_to_stdout().unchecked().read().unwrap();
+    let lines: Vec<&str> = output.lines().collect();
+    assert_eq!(lines.len(), 3, "{output}");
+    assert_eq!(lines[0], blake3::hash(b"foo").to_hex().as_str());
+    assert!(lines[1].starts_with("b3sum: ") && lines[1].contains("missing"), "{output}");
+    assert_eq!(lines[2], blake3::hash(b"bar").to_hex().as_str());
+}
+
 #[test]
 fn test_hash_many_tag() {
     blake3::initialize();
