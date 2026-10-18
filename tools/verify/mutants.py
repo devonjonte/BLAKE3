@@ -191,13 +191,13 @@ def main():
             print(f"block-loop mutant, {what} at {a:#x}: rejected ({e})")
     aarch64.disassemble = real
     # The kernel with an integer lane (prove_hybrid_loop): the integer
-    # chunk's pointer step in the loop, which half A sees; its switch to
-    # chunk 17, which half B sees; and the group loop's counter step,
-    # which only the induction over groups sees.
+    # chunk's pointer step in the loop and its table index, which the
+    # loop's halves see; and the group loop's counter step, which only the
+    # induction over groups sees.
     import prove_hybrid_loop as hl
     hobj = prove_sme2.assemble_hybrid()
     hsyms = aarch64.symbols(hobj)
-    hbase = real(hobj, hsyms["blake3_sme2x2_hash_chunks_512"], hsyms["blake3_sme2x2_hash_chunks_512_return"] + 4, llvm=True)
+    hbase = real(hobj, hsyms["blake3_sme2x2_hash_chunks_512"], prove_sme2.text_end(hobj), llvm=True)
     def halves():
         gen_a, s1, _ = hl.half_a(hobj)
         return gen_a, hl.half_b(hobj, gen_a, s1)[0]
@@ -205,7 +205,7 @@ def main():
     find = lambda m, o: next(a for a in loop if hbase[a] == (m, o))
     good = halves()
     for what, a, ins, prove in (("the integer chunk's pointer step", find("add", ["x27", "x27", "#0x40"]), ("add", ["x27", "x27", "#0x48"]), lambda: hl.half_a(hobj)),
-                                ("the switch to chunk 17", find("add", ["x30", "x30", "#0x10"]), ("add", ["x30", "x30", "#0x11"]), halves),
+                                ("the integer chunk's table index", find("add", ["x30", "x30", "#0x10"]), ("add", ["x30", "x30", "#0x11"]), halves),
                                 ("the group loop's counter step", next(a for a in sorted(hbase) if hbase[a] == ("add", ["x2", "x2", "#0x12"])), ("add", ["x2", "x2", "#0x11"]), lambda: hl.prove_every(hobj, *good))):
         code = dict(hbase)
         code[a] = ins

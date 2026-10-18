@@ -380,13 +380,18 @@ def assemble_hybrid():
     return obj
 
 
+def text_end(obj):
+    """The end of the object's .text (the hybrid file has no end symbol of
+    its own)."""
+    sizes = subprocess.run([aarch64.LLVM_OBJDUMP, "-h", obj], capture_output=True, text=True, check=True).stdout
+    return next(int(l.split()[2], 16) for l in sizes.splitlines() if " .text " in l)
+
+
 class HybridSetup(Setup):
     """Setup for the hybrid file: its code from the kernel's entry to the
-    end of .text (the file has no end symbol of its own)."""
+    end of .text."""
     def __init__(self, obj, regions):
-        sizes = subprocess.run([aarch64.LLVM_OBJDUMP, "-h", obj], capture_output=True, text=True, check=True).stdout
-        end = next(int(l.split()[2], 16) for l in sizes.splitlines() if " .text " in l)
-        syms = aarch64.symbols(obj)
+        end = text_end(obj)
         real = aarch64.disassemble
         aarch64.disassemble = lambda o, a, b: real(o, a, end, llvm=True)
         try:
