@@ -11,6 +11,9 @@ mod unit_tests;
 
 const NAME: &str = "b3sum";
 
+#[cfg(target_os = "linux")]
+mod readahead;
+
 const DERIVE_KEY_ARG: &str = "derive_key";
 const KEYED_ARG: &str = "keyed";
 const LENGTH_ARG: &str = "length";
@@ -654,8 +657,23 @@ fn parse_check_line(mut line: &str) -> anyhow::Result<ParsedCheckLine> {
 /// hash on several threads at once: a tree of small files costs mostly
 /// opening and reading each, which one thread does one at a time.
 fn hash_inputs(args: &Args) -> u64 {
-    let paths = &args.file_args;
-    let threads = threads().get().min(paths.len());
+    #[cfg(target_os = "linux")]
+    if readahead::applies(args) {
+        return readahead::hash_inputs(args);
+    }
+    hash_inputs_with(args, threads().get().min(args.file_args.len()), hash_some, print_output)
+}
+
+/// Hash the inputs on `threads` threads, each running `work` over
+/// the inputs whose turn `next` gives it, and print each result in order
+/// with `print` as soon as those before it are printed: the files that
+/// failed.
+fn hash_inputs_with<O: Send>(
+    args: &Args,
+    threads: usize,
+    work: impl Fn(&Args, &std::sync::atomic::AtomicUsize, &mut dyn FnMut(usize, anyhow::Result<O>) -> bool) + Sync,
+    print_one: impl Fn(O, &Path, &Args) -> anyhow::Result<()>,
+) -> u64 {
     // With --num-threads, the bound: the pool takes what the file threads
     // leave. By default the pool keeps one thread a CPU beside the file
     // threads, which keeps every core busy to the run's end: the bound
@@ -665,20 +683,21 @@ fn hash_inputs(args: &Args) -> u64 {
     if args.num_threads().is_some() {
         FILE_THREADS.store(threads, std::sync::atomic::Ordering::Relaxed);
     }
+    let paths = &args.file_args;
     let next = std::sync::atomic::AtomicUsize::new(0);
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     std::thread::scope(|scope| {
         for _ in 1..threads {
-            let (next, done_tx) = (&next, done_tx.clone());
-            scope.spawn(move || hash_some(args, next, |i, output| done_tx.send((i, output)).is_ok()));
+            let (next, done_tx, work) = (&next, done_tx.clone(), &work);
+            scope.spawn(move || work(args, next, &mut |i, output| done_tx.send((i, output)).is_ok()));
         }
         drop(done_tx);
         // This thread hashes too, and prints whatever is next in order.
         let mut failed = 0u64;
         let mut printed = 0;
         let mut waiting = std::collections::BTreeMap::new();
-        let mut print = |i: usize, output: anyhow::Result<blake3::OutputReader>, printed: &mut usize| {
-            if let Err(e) = output.and_then(|output| print_output(output, &paths[i], args)) {
+        let mut print = |i: usize, output: anyhow::Result<O>, printed: &mut usize| {
+            if let Err(e) = output.and_then(|output| print_one(output, &paths[i], args)) {
                 failed = failed.saturating_add(1);
                 eprintln!("{}: {}: {}", NAME, paths[i].to_string_lossy(), e);
             }
@@ -691,7 +710,7 @@ fn hash_inputs(args: &Args) -> u64 {
             }
             true
         };
-        hash_some(args, &next, &mut take);
+        work(args, &next, &mut take);
         for (i, output) in done_rx {
             take(i, output);
         }
@@ -701,7 +720,7 @@ fn hash_inputs(args: &Args) -> u64 {
 
 /// Hash the inputs whose turn `next` gives, one after another, giving each
 /// result to `done` (which returns false once nobody listens).
-fn hash_some(args: &Args, next: &std::sync::atomic::AtomicUsize, mut done: impl FnMut(usize, anyhow::Result<blake3::OutputReader>) -> bool) {
+fn hash_some(args: &Args, next: &std::sync::atomic::AtomicUsize, done: &mut dyn FnMut(usize, anyhow::Result<blake3::OutputReader>) -> bool) {
     loop {
         let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if i >= args.file_args.len() || !done(i, hash_path(args, &args.file_args[i])) {
