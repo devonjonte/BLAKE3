@@ -16,6 +16,8 @@ fn main() {
     let n: usize = args.get(1).map_or(1 << 20, |a| a.parse().expect("a size"));
     let calls: usize = args.get(2).map_or(2000, |a| a.parse().expect("a count"));
     let after_stream = args.get(3).is_some_and(|a| a == "after-stream");
+    // `after-sleep`: 1 ms asleep before each call, so it meets parked workers.
+    let after_sleep = args.get(3).is_some_and(|a| a == "after-sleep");
     let stream_first = args.get(3).is_some_and(|a| a == "stream-first");
     // The streams' messages: 64 of 16 KiB, or with BIG_STREAM=1 256 of
     // 64 KiB (16 MiB, about a bench sample of continuous 64 KiB messages).
@@ -23,6 +25,9 @@ fn main() {
     let messages: Vec<Vec<u8>> = (0..if big { 256u32 } else { 64 }).map(|i| i.to_le_bytes().repeat(if big { 16384 } else { 4096 })).collect();
     let mut places = vec![blake3_servil::Hash::from_bytes([0; 32]); messages.len()];
     let mut stream_once = || {
+        if after_sleep {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         if after_stream {
             blake3_servil::stream(blake3_servil::Mode::Hash, |_: &mut [blake3_servil::Hash]| {}, |s| {
                 for (m, place) in messages.iter().zip(places.iter_mut()) {
