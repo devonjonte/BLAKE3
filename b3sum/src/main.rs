@@ -185,11 +185,7 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
         let file = File::open(path)?;
         #[cfg(unix)]
         if let Some(map) = mapped(&file) {
-            // Beside other files, a file in the page cache takes the pool only
-            // from SHARED_POOL_LEN (see there); one read from storage, from
-            // POOL_LEN.
-            let pool_from = if args.file_args.len() > 1 && resident(&map) { SHARED_POOL_LEN } else { POOL_LEN };
-            update(&mut hasher, &map, pool_from);
+            update(&mut hasher, &map);
             hold(map);
         } else {
             update_from(&mut hasher, file)?;
@@ -284,16 +280,6 @@ const MAP_LEN: usize = POOL_LEN;
 /// multithreaded call hashes on the calling thread.
 const POOL_LEN: usize = 512 << 10;
 
-/// Where a file in the page cache takes the pool when b3sum hashes several
-/// files: b3sum's own threads hash the others meanwhile, and the pool's
-/// workers beside them oversubscribe the CPUs (i7-12700K, the mixed tree:
-/// each small file's hashing took three times as long while the 1-16 MiB
-/// files ran on the pool), while a 1 MiB file pays the pool's wake (about
-/// 100 us) to save less. A file read from storage keeps POOL_LEN: there the
-/// pool's page faults keep more reads in flight.
-#[cfg(unix)]
-const SHARED_POOL_LEN: usize = 8 << 20;
-
 /// The most threads b3sum hashes on (--num-threads, else one per CPU),
 /// set once in main before any input is hashed.
 static THREADS: std::sync::OnceLock<std::num::NonZeroUsize> = std::sync::OnceLock::new();
@@ -315,12 +301,12 @@ fn pool_threads() -> std::num::NonZeroUsize {
     std::num::NonZeroUsize::new(threads().get() - file_threads + 1).expect("at most threads() file threads")
 }
 
-/// Hash `input` into `hasher`: over the pool from `pool_from` (at least
-/// POOL_LEN), starting it at the first such input
+/// Hash `input` into `hasher`: over the pool from POOL_LEN, starting it at
+/// the first such input
 /// (`initialize_multithreaded`), so a run of small files starts no
 /// threads; on this thread below, or always with one thread.
-fn update(hasher: &mut blake3::Hasher, input: &[u8], pool_from: usize) {
-    if input.len() >= pool_from && pool_threads().get() > 1 {
+fn update(hasher: &mut blake3::Hasher, input: &[u8]) {
+    if input.len() >= POOL_LEN && pool_threads().get() > 1 {
         blake3::initialize_multithreaded(Some(pool_threads()));
         hasher.update_multithreaded(input);
     } else {
@@ -364,7 +350,7 @@ fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io:
         if threads().get() == 1 {
             // Each piece read, then hashed, on this thread.
             loop {
-                update(hasher, &first[..len], POOL_LEN);
+                update(hasher, &first[..len]);
                 if len < PIECE {
                     return Ok(());
                 }
@@ -372,7 +358,7 @@ fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io:
             }
         }
         if len < PIECE {
-            update(hasher, &first[..len], POOL_LEN);
+            update(hasher, &first[..len]);
             return Ok(());
         }
         std::thread::scope(|scope| {
@@ -392,11 +378,11 @@ fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io:
             free_tx.send(&mut second[..]).expect("the reader waits for a buffer");
             let mut current: &mut [u8] = &mut first[..];
             loop {
-                update(hasher, current, POOL_LEN);
+                update(hasher, current);
                 let (next, read) = full_rx.recv().expect("the reader sends every piece");
                 let len = read?;
                 if len < next.len() {
-                    update(hasher, &next[..len], POOL_LEN);
+                    update(hasher, &next[..len]);
                     return Ok(());
                 }
                 free_tx.send(current).expect("the reader waits for a buffer");
