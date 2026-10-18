@@ -36,6 +36,21 @@ fn test_reader_gone() {
     assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
 }
 
+/// A file whose reported size is not its content (Linux's /proc and /sys
+/// report 0 or 4096 bytes) hashes as its content, as other hash tools
+/// hash it: b3sum uses a file's size to choose how to read it, never to
+/// judge it.
+#[test]
+#[cfg(target_os = "linux")]
+fn test_pseudo_file() {
+    blake3::initialize();
+    // /proc/version: reported as 0 bytes, its content the same on every read.
+    let Ok(content) = fs::read("/proc/version") else { return };
+    let output = cmd!(b3sum_exe(), "--no-names", "/proc/version").stdout_capture().stderr_capture().unchecked().run().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(blake3::hash(&content).to_hex().to_string(), String::from_utf8_lossy(&output.stdout).trim_end());
+}
+
 #[test]
 fn test_hash_one() {
     blake3::initialize();
