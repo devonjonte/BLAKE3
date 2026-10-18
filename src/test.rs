@@ -48,9 +48,7 @@ pub const TEST_CASES_MAX: usize = 100 * CHUNK_LEN;
 
 // There's a test to make sure these two are equal below.
 pub const TEST_KEY: CVBytes = *b"whats the Elvish word for friend";
-pub const TEST_KEY_WORDS: CVWords = [
-    1952540791, 1752440947, 1816469605, 1752394102, 1919907616, 1868963940, 1919295602, 1684956521,
-];
+pub const TEST_KEY_WORDS: CVWords = [1952540791, 1752440947, 1816469605, 1752394102, 1919907616, 1868963940, 1919295602, 1684956521];
 
 // Paint the input with a repeating byte pattern. We use a cycle length of 251,
 // because that's the largest prime number less than 256. This makes it
@@ -62,16 +60,9 @@ pub fn paint_test_input(buf: &mut [u8]) {
     }
 }
 
-type CompressInPlaceFn =
-    unsafe fn(cv: &mut CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8);
+type CompressInPlaceFn = unsafe fn(cv: &mut CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8);
 
-type CompressXofFn = unsafe fn(
-    cv: &CVWords,
-    block: &[u8; BLOCK_LEN],
-    block_len: u8,
-    counter: u64,
-    flags: u8,
-) -> [u8; 64];
+type CompressXofFn = unsafe fn(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8) -> [u8; 64];
 
 // A shared helper function for platform-specific tests.
 pub fn test_compress_fn(compress_in_place_fn: CompressInPlaceFn, compress_xof_fn: CompressXofFn) {
@@ -83,35 +74,22 @@ pub fn test_compress_fn(compress_in_place_fn: CompressInPlaceFn, compress_xof_fn
     let counter = (5u64 << 32) + 6;
     let flags = crate::CHUNK_END | crate::ROOT | crate::KEYED_HASH;
 
-    let portable_out =
-        crate::portable::compress_xof(&initial_state, &block, block_len, counter as u64, flags);
+    let portable_out = crate::portable::compress_xof(&initial_state, &block, block_len, counter as u64, flags);
 
     let mut test_state = initial_state;
     unsafe { compress_in_place_fn(&mut test_state, &block, block_len, counter as u64, flags) };
     let test_state_bytes = crate::hasher::le_bytes(&test_state);
-    let test_xof =
-        unsafe { compress_xof_fn(&initial_state, &block, block_len, counter as u64, flags) };
+    let test_xof = unsafe { compress_xof_fn(&initial_state, &block, block_len, counter as u64, flags) };
 
     assert_eq!(&portable_out[..32], &test_state_bytes[..]);
     assert_eq!(&portable_out[..], &test_xof[..]);
 }
 
-type HashManyFn<A> = unsafe fn(
-    inputs: &[&A],
-    key: &CVWords,
-    counter: u64,
-    increment_counter: IncrementCounter,
-    flags: u8,
-    flags_start: u8,
-    flags_end: u8,
-    out: &mut [u8],
-);
+type HashManyFn<A> =
+    unsafe fn(inputs: &[&A], key: &CVWords, counter: u64, increment_counter: IncrementCounter, flags: u8, flags_start: u8, flags_end: u8, out: &mut [u8]);
 
 // A shared helper function for platform-specific tests.
-pub fn test_hash_many_fn(
-    hash_many_chunks_fn: HashManyFn<[u8; CHUNK_LEN]>,
-    hash_many_parents_fn: HashManyFn<[u8; 2 * OUT_LEN]>,
-) {
+pub fn test_hash_many_fn(hash_many_chunks_fn: HashManyFn<[u8; CHUNK_LEN]>, hash_many_parents_fn: HashManyFn<[u8; 2 * OUT_LEN]>) {
     // Test a few different initial counter values.
     // - 0: The base case.
     // - u32::MAX: The low word of the counter overflows for all inputs except the first.
@@ -130,11 +108,7 @@ pub fn test_hash_many_fn(
         // First hash chunks.
         let mut chunks = ArrayVec::<&[u8; CHUNK_LEN], NUM_INPUTS>::new();
         for i in 0..NUM_INPUTS {
-            chunks.push(
-                (&input_buf[i * CHUNK_LEN..][..CHUNK_LEN])
-                    .try_into()
-                    .unwrap(),
-            );
+            chunks.push((&input_buf[i * CHUNK_LEN..][..CHUNK_LEN]).try_into().unwrap());
         }
         let mut portable_chunks_out = [0; NUM_INPUTS * OUT_LEN];
         crate::portable::hash_many(
@@ -164,20 +138,13 @@ pub fn test_hash_many_fn(
         for n in 0..NUM_INPUTS {
             #[cfg(feature = "std")]
             dbg!(n);
-            assert_eq!(
-                &portable_chunks_out[n * OUT_LEN..][..OUT_LEN],
-                &test_chunks_out[n * OUT_LEN..][..OUT_LEN]
-            );
+            assert_eq!(&portable_chunks_out[n * OUT_LEN..][..OUT_LEN], &test_chunks_out[n * OUT_LEN..][..OUT_LEN]);
         }
 
         // Then hash parents.
         let mut parents = ArrayVec::<&[u8; 2 * OUT_LEN], NUM_INPUTS>::new();
         for i in 0..NUM_INPUTS {
-            parents.push(
-                (&input_buf[i * 2 * OUT_LEN..][..2 * OUT_LEN])
-                    .try_into()
-                    .unwrap(),
-            );
+            parents.push((&input_buf[i * 2 * OUT_LEN..][..2 * OUT_LEN]).try_into().unwrap());
         }
         let mut portable_parents_out = [0; NUM_INPUTS * OUT_LEN];
         crate::portable::hash_many(
@@ -193,37 +160,18 @@ pub fn test_hash_many_fn(
 
         let mut test_parents_out = [0; NUM_INPUTS * OUT_LEN];
         unsafe {
-            hash_many_parents_fn(
-                &parents[..],
-                &TEST_KEY_WORDS,
-                counter,
-                IncrementCounter::No,
-                crate::KEYED_HASH | crate::PARENT,
-                0,
-                0,
-                &mut test_parents_out,
-            );
+            hash_many_parents_fn(&parents[..], &TEST_KEY_WORDS, counter, IncrementCounter::No, crate::KEYED_HASH | crate::PARENT, 0, 0, &mut test_parents_out);
         }
         for n in 0..NUM_INPUTS {
             #[cfg(feature = "std")]
             dbg!(n);
-            assert_eq!(
-                &portable_parents_out[n * OUT_LEN..][..OUT_LEN],
-                &test_parents_out[n * OUT_LEN..][..OUT_LEN]
-            );
+            assert_eq!(&portable_parents_out[n * OUT_LEN..][..OUT_LEN], &test_parents_out[n * OUT_LEN..][..OUT_LEN]);
         }
     }
 }
 
 #[allow(unused)]
-type XofManyFunction = unsafe fn(
-    cv: &CVWords,
-    block: &[u8; BLOCK_LEN],
-    block_len: u8,
-    counter: u64,
-    flags: u8,
-    out: &mut [u8],
-);
+type XofManyFunction = unsafe fn(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8, out: &mut [u8]);
 
 // A shared helper function for platform-specific tests.
 #[allow(unused)]
@@ -249,13 +197,7 @@ pub fn test_xof_many_fn(xof_many_function: XofManyFunction) {
 
         let mut portable_out = [0u8; OUTPUT_SIZE];
         for (i, out_block) in portable_out.chunks_exact_mut(64).enumerate() {
-            out_block.copy_from_slice(&crate::portable::compress_xof(
-                &cv,
-                &block,
-                block_len as u8,
-                counter + i as u64,
-                flags,
-            ));
+            out_block.copy_from_slice(&crate::portable::compress_xof(&cv, &block, block_len as u8, counter + i as u64, flags));
         }
 
         let mut test_out = [0u8; OUTPUT_SIZE];
@@ -287,10 +229,7 @@ pub fn test_xof_many_fn(xof_many_function: XofManyFunction) {
 
 #[test]
 fn test_key_bytes_equal_key_words() {
-    assert_eq!(
-        TEST_KEY_WORDS,
-        crate::platform::words_from_le_bytes_32(&TEST_KEY),
-    );
+    assert_eq!(TEST_KEY_WORDS, crate::platform::words_from_le_bytes_32(&TEST_KEY),);
 }
 
 #[test]
@@ -343,17 +282,11 @@ fn test_compare_reference_impl() {
 
             // all at once
             let test_out = crate::hash(input);
-            assert_eq!(
-                test_out,
-                *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap()
-            );
+            assert_eq!(test_out, *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
             // incremental
             let mut hasher = crate::Hasher::new();
             hasher.update(input);
-            assert_eq!(
-                hasher.finalize(),
-                *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap()
-            );
+            assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
             assert_eq!(hasher.finalize(), test_out);
             // xof
             let mut extended = [0; OUT];
@@ -370,17 +303,11 @@ fn test_compare_reference_impl() {
 
             // all at once
             let test_out = crate::keyed_hash(&TEST_KEY, input);
-            assert_eq!(
-                test_out,
-                *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap()
-            );
+            assert_eq!(test_out, *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
             // incremental
             let mut hasher = crate::Hasher::new_keyed(&TEST_KEY);
             hasher.update(input);
-            assert_eq!(
-                hasher.finalize(),
-                *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap()
-            );
+            assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
             assert_eq!(hasher.finalize(), test_out);
             // xof
             let mut extended = [0; OUT];
@@ -402,14 +329,8 @@ fn test_compare_reference_impl() {
             // incremental
             let mut hasher = crate::Hasher::new_derive_key(context);
             hasher.update(input);
-            assert_eq!(
-                hasher.finalize(),
-                *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap()
-            );
-            assert_eq!(
-                hasher.finalize(),
-                *<&[u8; 32]>::try_from(&test_out[..32]).unwrap()
-            );
+            assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
+            assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&test_out[..32]).unwrap());
             // xof
             let mut extended = [0; OUT];
             hasher.finalize_xof().fill(&mut extended);
@@ -440,9 +361,7 @@ fn test_xof_partial_blocks() {
     reference_impl::Hasher::new().finalize(&mut reference_out);
 
     let mut all_at_once_out = [0u8; OUT_LEN];
-    crate::Hasher::new()
-        .finalize_xof()
-        .fill(&mut all_at_once_out);
+    crate::Hasher::new().finalize_xof().fill(&mut all_at_once_out);
     assert_eq!(reference_out, all_at_once_out);
 
     let mut partial_out = [0u8; OUT_LEN];
@@ -575,22 +494,13 @@ fn test_xof_seek() {
         reader.by_ref().take(102).read_to_end(&mut out3).unwrap();
         assert_eq!(&out[303..][..102], &out3[..]);
 
-        assert_eq!(
-            reader.seek(std::io::SeekFrom::Current(0)).unwrap(),
-            303 + 102
-        );
+        assert_eq!(reader.seek(std::io::SeekFrom::Current(0)).unwrap(), 303 + 102);
         reader.seek(std::io::SeekFrom::Current(-5)).unwrap();
-        assert_eq!(
-            reader.seek(std::io::SeekFrom::Current(0)).unwrap(),
-            303 + 102 - 5
-        );
+        assert_eq!(reader.seek(std::io::SeekFrom::Current(0)).unwrap(), 303 + 102 - 5);
         let mut out4 = [0; 17];
         assert_eq!(reader.read(&mut out4).unwrap(), 17);
         assert_eq!(&out[303 + 102 - 5..][..17], &out4[..]);
-        assert_eq!(
-            reader.seek(std::io::SeekFrom::Current(0)).unwrap(),
-            303 + 102 - 5 + 17
-        );
+        assert_eq!(reader.seek(std::io::SeekFrom::Current(0)).unwrap(), 303 + 102 - 5 + 17);
         assert!(reader.seek(std::io::SeekFrom::End(0)).is_err());
         assert!(reader.seek(std::io::SeekFrom::Current(-1000)).is_err());
         // Back to the start exactly, and one byte before it; past the end
@@ -633,10 +543,7 @@ fn test_reset() {
     keyed_hasher.update(&[42; 3 * CHUNK_LEN + 7]);
     keyed_hasher.reset();
     keyed_hasher.update(&[42; CHUNK_LEN + 3]);
-    assert_eq!(
-        keyed_hasher.finalize(),
-        crate::keyed_hash(key, &[42; CHUNK_LEN + 3]),
-    );
+    assert_eq!(keyed_hasher.finalize(), crate::keyed_hash(key, &[42; CHUNK_LEN + 3]),);
 
     let context = "BLAKE3 2020-02-12 10:20:58 reset test";
     let mut kdf = crate::Hasher::new_derive_key(context);
@@ -787,24 +694,14 @@ fn test_zeroize() {
     assert_eq!(hasher.chunk_state.buf_len, 0);
     assert_eq!(hasher.chunk_state.blocks_compressed, 0);
     assert_eq!(hasher.chunk_state.flags, 0);
-    assert!(matches!(
-        hasher.chunk_state.platform,
-        crate::Platform::Portable
-    ));
+    assert!(matches!(hasher.chunk_state.platform, crate::Platform::Portable));
     assert_eq!(hasher.initial_chunk_counter, 0);
     assert_eq!(hasher.key, [0; 8]);
     assert_eq!(hasher.cv_stack.len(), 0);
     assert_eq!(hasher.cv_stack.array(), Some(&[[0u8; 32]; crate::MAX_DEPTH + 1]));
 
     let mut output_reader = crate::OutputReader {
-        inner: crate::Output {
-            input_chaining_value: [42; 8],
-            block: [42; 64],
-            counter: 42,
-            block_len: 42,
-            flags: 42,
-            platform: crate::Platform::Portable,
-        },
+        inner: crate::Output { input_chaining_value: [42; 8], block: [42; 64], counter: 42, block_len: 42, flags: 42, platform: crate::Platform::Portable },
         position_within_block: 42,
     };
 
@@ -814,10 +711,7 @@ fn test_zeroize() {
     assert_eq!(output_reader.inner.counter, 0);
     assert_eq!(output_reader.inner.block_len, 0);
     assert_eq!(output_reader.inner.flags, 0);
-    assert!(matches!(
-        output_reader.inner.platform,
-        crate::Platform::Portable
-    ));
+    assert!(matches!(output_reader.inner.platform, crate::Platform::Portable));
     assert_eq!(output_reader.position_within_block, 0);
 }
 
@@ -828,10 +722,7 @@ fn test_update_reader() -> Result<(), std::io::Error> {
     // has substantial testing.
     let mut input = vec![0; 1_000_000];
     paint_test_input(&mut input);
-    assert_eq!(
-        crate::Hasher::new().update_reader(&input[..])?.finalize(),
-        crate::hash(&input),
-    );
+    assert_eq!(crate::Hasher::new().update_reader(&input[..])?.finalize(), crate::hash(&input),);
     Ok(())
 }
 
@@ -914,10 +805,7 @@ fn test_update_reader_interrupted() -> std::io::Result<()> {
     }
     impl<'a> InterruptingReader<'a> {
         fn new(slice: &'a [u8]) -> Self {
-            Self {
-                already_interrupted: false,
-                slice,
-            }
+            Self { already_interrupted: false, slice }
         }
     }
     impl<'a> io::Read for InterruptingReader<'a> {
@@ -954,12 +842,7 @@ fn test_mmap() -> Result<(), std::io::Error> {
     let mut tempfile = tempfile::NamedTempFile::new()?;
     tempfile.write_all(&input)?;
     tempfile.flush()?;
-    assert_eq!(
-        crate::Hasher::new()
-            .update_mmap(tempfile.path())?
-            .finalize(),
-        crate::hash(&input),
-    );
+    assert_eq!(crate::Hasher::new().update_mmap(tempfile.path())?.finalize(), crate::hash(&input),);
     Ok(())
 }
 
@@ -988,10 +871,7 @@ fn test_serde() {
     let hash: crate::Hash = [0xfe; 32].into();
 
     let json = serde_json::to_string(&hash).unwrap();
-    assert_eq!(
-        json,
-        "[254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254]",
-    );
+    assert_eq!(json, "[254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254,254]",);
     let hash2: crate::Hash = serde_json::from_str(&json).unwrap();
     assert_eq!(hash, hash2);
 
@@ -1000,11 +880,9 @@ fn test_serde() {
     assert_eq!(
         cbor,
         [
-            0x98, 0x20, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe,
-            0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe,
-            0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe,
-            0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe,
-            0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe,
+            0x98, 0x20, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe,
+            0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe,
+            0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe, 0x18, 0xfe,
         ]
     );
     let hash_from_cbor: crate::Hash = ciborium::from_reader(&cbor[..]).unwrap();
@@ -1016,9 +894,8 @@ fn test_serde() {
     // serialized bytestrings will probably exist forever in the wild, we should test that we can
     // still deserialize these from self-describing formats.
     let bytestring_cbor: &[u8] = &[
-        0x58, 0x20, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe,
-        0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe,
-        0xfe, 0xfe, 0xfe, 0xfe,
+        0x58, 0x20, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe,
+        0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe,
     ];
     let hash_from_bytestring_cbor: crate::Hash = ciborium::from_reader(bytestring_cbor).unwrap();
     assert_eq!(hash_from_bytestring_cbor, hash);
@@ -1149,7 +1026,6 @@ mod unsafe_paths {
             }
         });
     }
-
 }
 
 // Every platform's hash_many against the portable one, for every input
@@ -1188,7 +1064,12 @@ mod platform_hash_many {
                         for platform in platforms() {
                             let mut got = vec![0xAAu8; count * OUT_LEN + OUT_LEN];
                             platform.hash_many(table, &crate::test::TEST_KEY_WORDS, counter, increment, flags, start, end, &mut got[..count * OUT_LEN]);
-                            assert_eq!(&got[..count * OUT_LEN], &want[..], "{platform:?}, N = {N}, {count} inputs, increment {}, counter {counter}", increment.yes());
+                            assert_eq!(
+                                &got[..count * OUT_LEN],
+                                &want[..],
+                                "{platform:?}, N = {N}, {count} inputs, increment {}, counter {counter}",
+                                increment.yes()
+                            );
                             assert_eq!(got[count * OUT_LEN..], [0xAA; OUT_LEN], "{platform:?} wrote past its outputs");
                         }
                     }
@@ -1455,13 +1336,13 @@ fn test_hasher_io_write() {
 #[test]
 #[cfg(all(feature = "std", blake3_neon_hybrid))]
 fn test_kernel_reports_match_the_dispatch() {
-    use crate::{Ran, RAN};
+    use crate::{RAN, Ran};
     let kind = |name: &str| -> u32 {
         (match name {
             "integer code, one call" | "integer code, one message per call" => Ran::Scalar,
-            "integer and NEON code side by side"
-            | "integer and NEON code, messages side by side"
-            | "integer and NEON code, up to nine messages at a time" => Ran::Hybrid,
+            "integer and NEON code side by side" | "integer and NEON code, messages side by side" | "integer and NEON code, up to nine messages at a time" => {
+                Ran::Hybrid
+            }
             "NEON vectors, four chunks at a time" | "NEON vectors, four messages at a time" => Ran::Neon,
             "SME2, sixteen chunks at a time" | "SME2, sixteen messages side by side" | "SME2, sixteen messages at a time" => Ran::Sme2,
             "SME2 with integer code beside it" => Ran::Sme2x2,
@@ -1519,8 +1400,16 @@ fn test_kernel_reports_match_the_dispatch() {
     paint_test_input(&mut input);
     // What hash() of `len` bytes may run, by its report.
     let one = |len: usize| crate::kernel_report().kernels.iter().filter(|k| k.from_len <= len).fold(Ran::Scalar as u32, |m, k| m | kind(k.name));
-    check(crate::kernel_report(), 1, 0, input.len(), &|len| ran(&|| { crate::hash(&input[..len]); }));
-    check(crate::kernel_report_multithreaded(), 1, 0, input.len(), &|len| ran(&|| { crate::hash_multithreaded(&input[..len]); }));
+    check(crate::kernel_report(), 1, 0, input.len(), &|len| {
+        ran(&|| {
+            crate::hash(&input[..len]);
+        })
+    });
+    check(crate::kernel_report_multithreaded(), 1, 0, input.len(), &|len| {
+        ran(&|| {
+            crate::hash_multithreaded(&input[..len]);
+        })
+    });
     for message_len in [64, 1000, 1024, 2000, 3000, 15 * 1024, 300_000] {
         let slot = crate::many::slot_len(message_len);
         let batch = |n: usize| -> std::vec::Vec<u8> {

@@ -52,7 +52,12 @@ pub(crate) fn hash_inputs(args: &Args) -> u64 {
     let threads = crate::threads().get().min(args.file_args.len());
     let batch = DEPTH.div_ceil(threads).max(MIN_BATCH);
     grow_descriptor_table(threads * batch + 64);
-    crate::hash_inputs_with(args, threads, |args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow::Result<blake3::OutputReader>) -> bool| hash_some(args, next, done, batch), crate::print_output)
+    crate::hash_inputs_with(
+        args,
+        threads,
+        |args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow::Result<blake3::OutputReader>) -> bool| hash_some(args, next, done, batch),
+        crate::print_output,
+    )
 }
 
 /// Room for `descriptors` open descriptors, made while this process has

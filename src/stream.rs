@@ -235,7 +235,6 @@ impl Storage {
     }
 }
 
-
 /// Part `i` of a message in `pieces` parts, its digest at `out`: the
 /// message whole, or a piece.
 fn part_kind(i: usize, pieces: usize, out: *mut Hash) -> Kind {
@@ -820,15 +819,19 @@ mod test {
         let input = std::vec![9u8; 300_000];
         let mut got = places(9);
         let handed = core::cell::Cell::new(0);
-        stream(Mode::Hash, |d: &mut [Hash]| handed.set(handed.get() + d.len()), |s| {
-            for (round, outs) in got.chunks_mut(3).enumerate() {
-                for (len, out) in [0, 65, 70_000].into_iter().zip(outs) {
-                    s.submit(&input[..len], out);
+        stream(
+            Mode::Hash,
+            |d: &mut [Hash]| handed.set(handed.get() + d.len()),
+            |s| {
+                for (round, outs) in got.chunks_mut(3).enumerate() {
+                    for (len, out) in [0, 65, 70_000].into_iter().zip(outs) {
+                        s.submit(&input[..len], out);
+                    }
+                    s.finish();
+                    assert_eq!(handed.get(), 3 * (round + 1));
                 }
-                s.finish();
-                assert_eq!(handed.get(), 3 * (round + 1));
-            }
-        });
+            },
+        );
         assert_eq!(got[5], crate::hash(&input[..70_000]));
     }
 
@@ -841,12 +844,16 @@ mod test {
         for unwinding in [false, true] {
             let result = std::panic::catch_unwind(|| {
                 let mut got = places(4);
-                stream(Mode::Hash, |_: &mut [Hash]| {}, |s| {
-                    for (len, out) in [10, 100_000, 64, 300_000].into_iter().zip(&mut got) {
-                        s.submit(&input[..len], out);
-                    }
-                    assert!(!unwinding, "the body panics");
-                })
+                stream(
+                    Mode::Hash,
+                    |_: &mut [Hash]| {},
+                    |s| {
+                        for (len, out) in [10, 100_000, 64, 300_000].into_iter().zip(&mut got) {
+                            s.submit(&input[..len], out);
+                        }
+                        assert!(!unwinding, "the body panics");
+                    },
+                )
             });
             assert!(result.is_err());
         }

@@ -1,7 +1,7 @@
 //! The single-thread tree walk, in safe Rust over its kernels.
 
-use crate::platform::{Platform, MAX_SIMD_DEGREE_OR_2};
-use crate::{CVWords, CHUNK_LEN, OUT_LEN};
+use crate::platform::{MAX_SIMD_DEGREE_OR_2, Platform};
+use crate::{CHUNK_LEN, CVWords, OUT_LEN};
 
 /// A chaining value.
 pub(crate) type Cv = [u8; OUT_LEN];
@@ -60,7 +60,13 @@ pub fn wide<K: Kernels>(k: &K, input: &[u8], ahead: usize, counter: u64, out: &m
     let (a, b) = input.split_at(l);
     let mut cvs = [[0u8; OUT_LEN]; 2 * MAX];
     // The left half's values: one when it is a single chunk (degree 1).
-    let left_cap = if l == CHUNK_LEN { 1 } else if k.degree() < 2 { 2 } else { k.degree() };
+    let left_cap = if l == CHUNK_LEN {
+        1
+    } else if k.degree() < 2 {
+        2
+    } else {
+        k.degree()
+    };
     let (lo, hi) = cvs.split_at_mut(left_cap);
     let ln = wide(k, a, b.len() + ahead, counter, lo);
     let rn = wide(k, b, ahead, counter + (l / CHUNK_LEN) as u64, hi);
@@ -71,7 +77,6 @@ pub fn wide<K: Kernels>(k: &K, input: &[u8], ahead: usize, counter: u64, out: &m
     }
     k.parents(&cvs[..ln + rn], out)
 }
-
 
 /// The chaining values of the root's two children, for `input` of more
 /// than one chunk, its first chunk numbered `counter`: the walk's values,
@@ -152,9 +157,7 @@ impl Kernels for PlatformKernels<'_> {
         if matches!(self.platform, Platform::SME2) && crate::sme2::flat_takes(input.len()) {
             // Safe: the SME2 platform is selected only where the CPU has it,
             // and `out` holds simd_degree() values, which is sme2::DEGREE.
-            return Some(unsafe {
-                crate::sme2::compress_subtree_flat(input, ahead, self.key, counter, self.flags, out.as_flattened_mut())
-            });
+            return Some(unsafe { crate::sme2::compress_subtree_flat(input, ahead, self.key, counter, self.flags, out.as_flattened_mut()) });
         }
         None
     }

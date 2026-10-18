@@ -1,8 +1,8 @@
 //! The Hasher's stack of chaining values, its loop over the input, a
 //! chunk's state, and a node's output, in safe Rust over their kernels.
 
-use crate::{CVBytes as Cv, MAX_DEPTH};
 use crate::{BLOCK_LEN, CHUNK_END, CHUNK_LEN, CHUNK_START, PARENT, ROOT};
+use crate::{CVBytes as Cv, MAX_DEPTH};
 const DEPTH: usize = MAX_DEPTH + 1;
 
 /// The parent of two chaining values, the stack's one use of the kernels.

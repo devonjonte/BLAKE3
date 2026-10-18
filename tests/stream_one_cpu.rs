@@ -48,19 +48,23 @@ fn every_stream_completes_on_one_cpu() {
     let (singles, batches) = got.split_at_mut(3 * messages.len());
     let (small, large) = batches.split_at_mut(16);
     let mut singles = singles.iter_mut();
-    blake3_servil::stream(Mode::Hash, |d: &mut [Hash]| handed.set(handed.get() + d.len()), |s| {
-        for message in &messages {
-            s.submit(message, singles.next().unwrap());
-            s.submit_with(message.len(), |at, room| room.copy_from_slice(&message[at..][..room.len()]), singles.next().unwrap());
-            s.submit_reader(&message[..], None, singles.next().unwrap()).unwrap();
-            want.extend([reference(message); 3]);
-        }
-        for (count, out) in [(16, small), (4096, large)] {
-            s.submit_batch(&batch[..64 * count], 64, out);
-            want.extend(batch[..64 * count].chunks(64).map(reference));
-        }
-        s.finish();
-    });
+    blake3_servil::stream(
+        Mode::Hash,
+        |d: &mut [Hash]| handed.set(handed.get() + d.len()),
+        |s| {
+            for message in &messages {
+                s.submit(message, singles.next().unwrap());
+                s.submit_with(message.len(), |at, room| room.copy_from_slice(&message[at..][..room.len()]), singles.next().unwrap());
+                s.submit_reader(&message[..], None, singles.next().unwrap()).unwrap();
+                want.extend([reference(message); 3]);
+            }
+            for (count, out) in [(16, small), (4096, large)] {
+                s.submit_batch(&batch[..64 * count], 64, out);
+                want.extend(batch[..64 * count].chunks(64).map(reference));
+            }
+            s.finish();
+        },
+    );
     assert_eq!(handed.get(), want.len(), "every place handed back");
     assert!(got == want, "every digest, in its place, on one CPU");
 }

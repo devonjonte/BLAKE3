@@ -4,7 +4,7 @@
 //! (a load once it has).
 
 use blake3_servil::{Hash, Hasher, Mode, OUT_LEN};
-use core::ffi::{c_char, c_void, CStr};
+use core::ffi::{CStr, c_char, c_void};
 
 /// `b3_digest`.
 #[repr(C)]
@@ -29,10 +29,7 @@ pub struct B3Hasher {
 }
 
 const HASHER_SIZE: usize = 18432;
-const _: () = assert!(
-    size_of::<Hasher>() == HASHER_SIZE && align_of::<Hasher>() <= 64,
-    "b3.h's B3_HASHER_SIZE and alignment hold a Hasher"
-);
+const _: () = assert!(size_of::<Hasher>() == HASHER_SIZE && align_of::<Hasher>() <= 64, "b3.h's B3_HASHER_SIZE and alignment hold a Hasher");
 
 impl B3Mode {
     fn mode(&self) -> Mode<'_> {

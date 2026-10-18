@@ -49,8 +49,10 @@ fn modes() -> [Mode<'static>; 3] {
 }
 
 /// Each one-shot call's two full forms, single-threaded and multithreaded.
-const HASH_WITH: [(&str, fn(Mode, &[u8]) -> Hash); 2] = [("hash_with", blake3_servil::hash_with), ("hash_multithreaded_with", blake3_servil::hash_multithreaded_with)];
-const HASH_MANY_WITH: [(&str, fn(Mode, &[u8], usize, &mut [[u8; 32]])); 2] = [("hash_many_with", blake3_servil::hash_many_with), ("hash_many_multithreaded_with", blake3_servil::hash_many_multithreaded_with)];
+const HASH_WITH: [(&str, fn(Mode, &[u8]) -> Hash); 2] =
+    [("hash_with", blake3_servil::hash_with), ("hash_multithreaded_with", blake3_servil::hash_multithreaded_with)];
+const HASH_MANY_WITH: [(&str, fn(Mode, &[u8], usize, &mut [[u8; 32]])); 2] =
+    [("hash_many_with", blake3_servil::hash_many_with), ("hash_many_multithreaded_with", blake3_servil::hash_many_multithreaded_with)];
 
 /// Lengths past the official vectors, around the multithreaded split (512 KiB) and a subtree edge.
 const LARGE: [usize; 5] = [(512 << 10) - 1, 512 << 10, 1 << 20, (1 << 20) + 1, (3 << 20) + 12345];
@@ -109,7 +111,11 @@ fn a_message_in_pieces_matches_the_reference() {
             // Alternating with update, a piece at a time.
             let mut hasher = hashers(m);
             for (k, part) in data.chunks(piece).enumerate() {
-                if k % 3 == 1 { hasher.update(part); } else { hasher.update_multithreaded(part); }
+                if k % 3 == 1 {
+                    hasher.update(part);
+                } else {
+                    hasher.update_multithreaded(part);
+                }
             }
             assert_eq!(hasher.finalize(), expected, "update and update_multithreaded, {len} B in {piece} B pieces, mode {m}");
         }
@@ -149,7 +155,26 @@ fn padded_batch(count: usize, len: usize) -> (Vec<u8>, Vec<Vec<u8>>) {
 #[test]
 fn batches_every_form_match_the_reference() {
     blake3_servil::initialize_multithreaded(None);
-    for (count, len) in [(1, 64), (2, 64), (4, 64), (12, 64), (16, 64), (17, 64), (1000, 64), (12288, 64), (13000, 64), (5, 0), (7, 1), (9, 63), (33, 100), (20, 1024), (3, 1025), (40, 4000), (2, 70000), (20, 60000)] {
+    for (count, len) in [
+        (1, 64),
+        (2, 64),
+        (4, 64),
+        (12, 64),
+        (16, 64),
+        (17, 64),
+        (1000, 64),
+        (12288, 64),
+        (13000, 64),
+        (5, 0),
+        (7, 1),
+        (9, 63),
+        (33, 100),
+        (20, 1024),
+        (3, 1025),
+        (40, 4000),
+        (2, 70000),
+        (20, 60000),
+    ] {
         let (buffer, messages) = padded_batch(count, len);
         let expected: Vec<Vec<[u8; 32]>> = (0..3).map(|m| messages.iter().map(|message| reference(m, message)).collect()).collect();
         let mut out = vec![[0u8; 32]; count];
@@ -195,16 +220,20 @@ fn a_stream_puts_every_digest_in_its_place_and_hands_the_places_back_in_order() 
         let mut places = zeros(messages.len());
         let want_order: Vec<usize> = places.iter().map(|p| p as *const Hash as usize).collect();
         let mut order = Vec::new();
-        blake3_servil::stream(mode, |done: &mut [Hash]| order.extend(done.iter().map(|p| p as *const Hash as usize)), |s| {
-            for (i, (message, place)) in messages.iter().zip(&mut places).enumerate() {
-                match i % 3 {
-                    0 => s.submit(message, place),
-                    1 => s.submit_with(message.len(), |at, room| room.copy_from_slice(&message[at..][..room.len()]), place),
-                    _ => assert_eq!(s.submit_reader(&message[..], Some(message.len() as u64), place).unwrap(), message.len() as u64),
+        blake3_servil::stream(
+            mode,
+            |done: &mut [Hash]| order.extend(done.iter().map(|p| p as *const Hash as usize)),
+            |s| {
+                for (i, (message, place)) in messages.iter().zip(&mut places).enumerate() {
+                    match i % 3 {
+                        0 => s.submit(message, place),
+                        1 => s.submit_with(message.len(), |at, room| room.copy_from_slice(&message[at..][..room.len()]), place),
+                        _ => assert_eq!(s.submit_reader(&message[..], Some(message.len() as u64), place).unwrap(), message.len() as u64),
+                    }
                 }
-            }
-            s.finish();
-        });
+                s.finish();
+            },
+        );
         assert!(order == want_order, "every place handed back once, in order (mode {m})");
         for (i, message) in messages.iter().enumerate() {
             assert_eq!(*places[i].as_bytes(), reference(m, message), "message {i}, {} bytes, mode {m}", message.len());
@@ -223,16 +252,20 @@ fn a_streams_batches_fill_the_callers_places() {
     for (m, mode) in modes().into_iter().enumerate() {
         let mut places: Vec<Vec<Hash>> = cases.iter().map(|&(_, count)| zeros(count)).collect();
         let mut handed = Vec::new();
-        blake3_servil::stream(mode, |done: &mut [Hash]| handed.push(done.len()), |s| {
-            for (k, ((&(len, _), (buffer, _)), place)) in cases.iter().zip(&batches).zip(&mut places).enumerate() {
-                if k % 2 == 0 {
-                    s.submit_batch(buffer, len, place);
-                } else {
-                    s.submit_batch_with(len, |at, room| room.copy_from_slice(&buffer[at..][..room.len()]), place);
+        blake3_servil::stream(
+            mode,
+            |done: &mut [Hash]| handed.push(done.len()),
+            |s| {
+                for (k, ((&(len, _), (buffer, _)), place)) in cases.iter().zip(&batches).zip(&mut places).enumerate() {
+                    if k % 2 == 0 {
+                        s.submit_batch(buffer, len, place);
+                    } else {
+                        s.submit_batch_with(len, |at, room| room.copy_from_slice(&buffer[at..][..room.len()]), place);
+                    }
                 }
-            }
-            s.finish();
-        });
+                s.finish();
+            },
+        );
         assert_eq!(handed, cases.iter().map(|&(_, count)| count).collect::<Vec<_>>(), "each batch's place back whole, in order");
         for (k, (_, messages)) in batches.iter().enumerate() {
             for (i, message) in messages.iter().enumerate() {
@@ -253,12 +286,16 @@ fn bursts_of_large_batches_after_pauses_complete() {
     let expected: Vec<[u8; 32]> = messages.iter().map(|message| reference(0, message)).collect();
     let mut places = vec![zeros(4096); 4];
     for burst in 0..400 {
-        blake3_servil::stream(Mode::Hash, |_: &mut [Hash]| {}, |s| {
-            for place in places.iter_mut() {
-                s.submit_batch(&buffer, 64, place);
-            }
-            s.finish();
-        });
+        blake3_servil::stream(
+            Mode::Hash,
+            |_: &mut [Hash]| {},
+            |s| {
+                for place in places.iter_mut() {
+                    s.submit_batch(&buffer, 64, place);
+                }
+                s.finish();
+            },
+        );
         for place in &places {
             assert!(place.iter().map(|h| *h.as_bytes()).eq(expected.iter().copied()), "burst {burst}");
         }
@@ -315,12 +352,16 @@ fn streams_on_several_threads_keep_their_own_order() {
                 let messages: Vec<Vec<u8>> = (0..300).map(|i| input((i * 131 + t * 17) % 70_000)).collect();
                 let m = t % 3;
                 let mut places = zeros(messages.len());
-                blake3_servil::stream(modes()[m], |_: &mut [Hash]| {}, |s| {
-                    for (message, place) in messages.iter().zip(&mut places) {
-                        s.submit(message, place);
-                    }
-                    s.finish();
-                });
+                blake3_servil::stream(
+                    modes()[m],
+                    |_: &mut [Hash]| {},
+                    |s| {
+                        for (message, place) in messages.iter().zip(&mut places) {
+                            s.submit(message, place);
+                        }
+                        s.finish();
+                    },
+                );
                 for (i, message) in messages.iter().enumerate() {
                     assert_eq!(*places[i].as_bytes(), reference(m, message), "thread {t} message {i}");
                 }
@@ -338,19 +379,27 @@ fn a_panicking_handler_unwinds_and_the_pool_goes_on() {
     let message = input(100_000);
     let result = std::panic::catch_unwind(|| {
         let mut places = zeros(8);
-        blake3_servil::stream(Mode::Hash, |_: &mut [Hash]| panic!("a handler's panic"), |s| {
-            for place in places.iter_mut() {
-                s.submit(&message, place);
-            }
-            s.finish();
-        });
+        blake3_servil::stream(
+            Mode::Hash,
+            |_: &mut [Hash]| panic!("a handler's panic"),
+            |s| {
+                for place in places.iter_mut() {
+                    s.submit(&message, place);
+                }
+                s.finish();
+            },
+        );
     });
     assert!(result.is_err(), "the handler's panic reaches the caller");
     let mut place = Hash::from_bytes([0; 32]);
-    blake3_servil::stream(Mode::Hash, |_: &mut [Hash]| {}, |s| {
-        s.submit(&message, &mut place);
-        s.finish();
-    });
+    blake3_servil::stream(
+        Mode::Hash,
+        |_: &mut [Hash]| {},
+        |s| {
+            s.submit(&message, &mut place);
+            s.finish();
+        },
+    );
     assert_eq!(*place.as_bytes(), reference(0, &message));
     assert_eq!(*blake3_servil::hash_multithreaded(&input(3 << 20)).as_bytes(), reference(0, &input(3 << 20)));
 }

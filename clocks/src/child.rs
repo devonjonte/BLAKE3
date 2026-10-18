@@ -179,7 +179,11 @@ mod rusage {
 
     pub fn max_rss_bytes(w: &Words) -> u64 {
         // Linux counts KiB, macOS bytes.
-        if cfg!(target_vendor = "apple") { w[4] as u64 } else { w[4] as u64 * 1024 }
+        if cfg!(target_vendor = "apple") {
+            w[4] as u64
+        } else {
+            w[4] as u64 * 1024
+        }
     }
 
     pub fn major_faults(w: &Words) -> u64 {
@@ -194,7 +198,7 @@ mod rusage {
 
 #[cfg(all(unix, not(target_vendor = "apple")))]
 mod imp {
-    use super::{Run, rusage};
+    use super::{rusage, Run};
 
     /// A running (or exited, unreaped) process's user and system time, from
     /// /proc/PID/stat (fields 14 and 15, in clock ticks).
@@ -234,7 +238,7 @@ mod imp {
 
 #[cfg(target_vendor = "apple")]
 mod imp {
-    use super::{Run, rusage};
+    use super::{rusage, Run};
     use crate::{Counts, Level};
 
     unsafe extern "C" {
@@ -364,7 +368,10 @@ mod tests {
         let during: Vec<_> = windows[before..].iter().filter(|w| w.end_ns > child.started_ns && w.start_ns < child.started_ns + child.wall_ns).collect();
         assert!(during.len() >= 2, "windows closed while it ran: {windows:?}");
         assert!(during.iter().all(|w| w.end_ns - w.start_ns < 2 * crate::load::WINDOW_NS), "{during:?}");
-        assert!(during.iter().all(|w| w.other_milli_cpus < background + 500), "the child's own CPU is this process's (other load before it: {background}): {during:?}");
+        assert!(
+            during.iter().all(|w| w.other_milli_cpus < background + 500),
+            "the child's own CPU is this process's (other load before it: {background}): {during:?}"
+        );
         assert_eq!(running_cpu_ns(), 0, "none running after the reaping");
     }
 
@@ -382,7 +389,10 @@ mod tests {
         sibling.wait().expect("the sibling");
         let windows = crate::load::windows();
         let during: Vec<_> = windows[before..].iter().filter(|w| w.end_ns > child.started_ns && w.start_ns < child.started_ns + child.wall_ns).collect();
-        assert!(during.iter().any(|w| w.other_milli_cpus >= background + 700), "a spinning sibling is other load (other load before it: {background}): {during:?}");
+        assert!(
+            during.iter().any(|w| w.other_milli_cpus >= background + 700),
+            "a spinning sibling is other load (other load before it: {background}): {during:?}"
+        );
     }
 
     /// A child's threads that exit while it runs still count as its own:
@@ -405,7 +415,10 @@ mod tests {
         let windows = crate::load::windows();
         let during: Vec<_> = windows[before..].iter().filter(|w| w.end_ns > child.started_ns && w.start_ns < child.started_ns + child.wall_ns).collect();
         assert!(!during.is_empty(), "{windows:?}");
-        assert!(during.iter().all(|w| w.other_milli_cpus < background + 500), "a child's exited threads are this process's (other load before it: {background}): {during:?}");
+        assert!(
+            during.iter().all(|w| w.other_milli_cpus < background + 500),
+            "a child's exited threads are this process's (other load before it: {background}): {during:?}"
+        );
     }
 
     /// The helper for the test above: does nothing unless that test set
@@ -428,9 +441,21 @@ mod tests {
     /// missing count missing from the sum, failed if any one failed.
     #[test]
     fn runs_sum() {
-        let run = |wall_ns, rss, cpu: Option<u64>, success| Run { started_ns: wall_ns, wall_ns, success, cpu_ns: cpu, max_rss_bytes: Some(rss), storage_read_bytes: Some(1), major_faults: None, counts: None };
+        let run = |wall_ns, rss, cpu: Option<u64>, success| Run {
+            started_ns: wall_ns,
+            wall_ns,
+            success,
+            cpu_ns: cpu,
+            max_rss_bytes: Some(rss),
+            storage_read_bytes: Some(1),
+            major_faults: None,
+            counts: None,
+        };
         let sum = Run::sum(&[run(10, 5, Some(3), true), run(20, 7, Some(4), true)]);
-        assert_eq!((sum.started_ns, sum.wall_ns, sum.cpu_ns, sum.max_rss_bytes, sum.storage_read_bytes, sum.major_faults, sum.success), (10, 30, Some(7), Some(7), Some(2), None, true));
+        assert_eq!(
+            (sum.started_ns, sum.wall_ns, sum.cpu_ns, sum.max_rss_bytes, sum.storage_read_bytes, sum.major_faults, sum.success),
+            (10, 30, Some(7), Some(7), Some(2), None, true)
+        );
         assert_eq!(Run::sum(&[run(1, 1, None, true), run(1, 1, Some(1), false)]).cpu_ns, None);
         assert!(!Run::sum(&[run(1, 1, None, true), run(1, 1, None, false)]).success);
     }

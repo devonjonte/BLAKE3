@@ -15,12 +15,16 @@ fn main() {
     let count = 200 + seed % 300;
     let message = |i: usize| &data[i..i + lens[(i + seed) % lens.len()]];
     let mut got = vec![Hash::from_bytes([0; 32]); count];
-    blake3_servil::stream(Mode::Hash, |_: &mut [Hash]| {}, |s| {
-        for (i, place) in got.iter_mut().enumerate() {
-            s.submit(message(i), place);
-        }
-        s.finish();
-    });
+    blake3_servil::stream(
+        Mode::Hash,
+        |_: &mut [Hash]| {},
+        |s| {
+            for (i, place) in got.iter_mut().enumerate() {
+                s.submit(message(i), place);
+            }
+            s.finish();
+        },
+    );
     for (i, digest) in got.iter().enumerate() {
         assert_eq!(*digest, blake3_servil::hash(message(i)), "stream message {i}, {} bytes, seed {seed}", message(i).len());
     }

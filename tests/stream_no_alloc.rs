@@ -68,16 +68,20 @@ fn a_warm_stream_allocates_nothing() {
         let (singles, batches) = places.split_at_mut(3 * messages.len());
         let (small, large) = batches.split_at_mut(16);
         let mut singles = singles.iter_mut();
-        blake3_servil::stream(Mode::Hash, |hashes: &mut [Hash]| hashes.iter().for_each(|h| sum[0] ^= h.as_bytes()[0]), |s| {
-            for message in &messages {
-                s.submit(message, singles.next().unwrap());
-                s.submit_with(message.len(), |at, room| room.copy_from_slice(&message[at..][..room.len()]), singles.next().unwrap());
-                s.submit_reader(&message[..], None, singles.next().unwrap()).unwrap();
-            }
-            s.submit_batch(&batch[..64 * 16], 64, small);
-            s.submit_batch(&batch, 64, large);
-            s.finish();
-        });
+        blake3_servil::stream(
+            Mode::Hash,
+            |hashes: &mut [Hash]| hashes.iter().for_each(|h| sum[0] ^= h.as_bytes()[0]),
+            |s| {
+                for message in &messages {
+                    s.submit(message, singles.next().unwrap());
+                    s.submit_with(message.len(), |at, room| room.copy_from_slice(&message[at..][..room.len()]), singles.next().unwrap());
+                    s.submit_reader(&message[..], None, singles.next().unwrap()).unwrap();
+                }
+                s.submit_batch(&batch[..64 * 16], 64, small);
+                s.submit_batch(&batch, 64, large);
+                s.finish();
+            },
+        );
     });
     std::hint::black_box(sum);
     assert_eq!(made, 0, "streams after warm-up: allocations");

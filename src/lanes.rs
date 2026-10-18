@@ -68,9 +68,9 @@
 
 use crate::hazmat::ChainingValue;
 #[cfg(test)]
-use crate::hazmat::{self, Mode};
-#[cfg(test)]
 use crate::hazmat::HasherExt;
+#[cfg(test)]
+use crate::hazmat::{self, Mode};
 use crate::platform::Platform;
 use crate::{CHUNK_LEN, Hash};
 #[cfg(test)]
@@ -116,7 +116,6 @@ pub(crate) fn poll_pause(yielded: &mut std::time::Instant) {
     }
 }
 
-
 /// How long a caller polls for its last pieces before sleeping.
 pub(crate) const SPIN_BEFORE_SLEEP: std::time::Duration = std::time::Duration::from_micros(200);
 
@@ -151,7 +150,10 @@ pub(crate) fn hash_with_key(input: &[u8], key: &crate::CVWords, flags: u8) -> Ha
 
 #[inline(never)]
 fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
-    let Some((pool, _caller)) = spare_pool() else { pool_busy(); return crate::hash_serial(input, key, flags) };
+    let Some((pool, _caller)) = spare_pool() else {
+        pool_busy();
+        return crate::hash_serial(input, key, flags);
+    };
     let (pieces, mut cvs) = tree_cvs(pool, input, key, 0, flags);
     merge_root(&pieces, &mut cvs, key, flags)
 }
@@ -195,12 +197,7 @@ fn tree_cvs(pool: &Pool, input: &[u8], key: &crate::CVWords, counter: u64, flags
 /// Requires a power-of-two number of chunks, at least MIN_SPLIT_LEN
 /// bytes, and `counter` a multiple
 /// of that number, as `Hasher::update` hands out.
-pub(crate) fn subtree_children(
-    input: &[u8],
-    key: &crate::CVWords,
-    counter: u64,
-    flags: u8,
-) -> [u8; 2 * crate::OUT_LEN] {
+pub(crate) fn subtree_children(input: &[u8], key: &crate::CVWords, counter: u64, flags: u8) -> [u8; 2 * crate::OUT_LEN] {
     assert!(input.len().is_power_of_two() && input.len() >= MIN_SPLIT_LEN, "a whole subtree of at least MIN_SPLIT_LEN bytes");
     assert_eq!(counter % (input.len() / CHUNK_LEN) as u64, 0, "a subtree starts at a multiple of its chunk count");
     let Some((pool, _caller)) = spare_pool() else { return crate::compress_subtree_to_parent_node(input, 0, key, counter, flags, pool_platform()) };
@@ -229,7 +226,10 @@ pub(crate) fn hash_many(input: &[u8], message_len: usize, key: &crate::CVWords, 
 fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, flags: u8, outputs: &mut [[u8; crate::OUT_LEN]]) {
     let slot = crate::many::slot_len(message_len);
     assert_eq!(Some(input.len()), slot.checked_mul(outputs.len()), "input holds one slot of whole blocks per output");
-    let Some((pool, _caller)) = spare_pool() else { pool_busy(); return crate::hash_many_serial(input, message_len, key, flags, outputs) };
+    let Some((pool, _caller)) = spare_pool() else {
+        pool_busy();
+        return crate::hash_many_serial(input, message_len, key, flags, outputs);
+    };
     let pieces = cut_messages(outputs.len(), slot, pool.threads);
     let work = Work::Messages { input, message_len, key: *key, flags, pieces: &pieces, outputs: outputs.as_mut_ptr() };
     pool.run_job(work, pieces.len(), 0, pool_platform());
@@ -331,34 +331,14 @@ enum Work<'a> {
     /// Ranges of a message's 16 KiB groups, wherever each lies (`offset`
     /// and `len` count groups, from `first_group`); one chaining value each
     /// (crate::outboard).
-    Groups {
-        groups: &'a [&'a [u8]],
-        first_group: u64,
-        pieces: &'a [Piece],
-        key: crate::CVWords,
-        flags: u8,
-        cvs: *mut ChainingValue,
-    },
+    Groups { groups: &'a [&'a [u8]], first_group: u64, pieces: &'a [Piece], key: crate::CVWords, flags: u8, cvs: *mut ChainingValue },
     /// Ranges of a batch of messages of one length, each in its slot of
     /// whole blocks in `input` (`offset` and `len` count messages); one
     /// digest each.
-    Messages {
-        input: &'a [u8],
-        message_len: usize,
-        key: crate::CVWords,
-        flags: u8,
-        pieces: &'a [Piece],
-        outputs: *mut [u8; crate::OUT_LEN],
-    },
+    Messages { input: &'a [u8], message_len: usize, key: crate::CVWords, flags: u8, pieces: &'a [Piece], outputs: *mut [u8; crate::OUT_LEN] },
     /// Ranges of a collection's items (`offset` and `len` count items),
     /// each under MIN_SPLIT_LEN; one digest each.
-    Each {
-        items: &'a [&'a [u8]],
-        key: crate::CVWords,
-        flags: u8,
-        pieces: &'a [Piece],
-        outputs: *mut [u8; crate::OUT_LEN],
-    },
+    Each { items: &'a [&'a [u8]], key: crate::CVWords, flags: u8, pieces: &'a [Piece], outputs: *mut [u8; crate::OUT_LEN] },
 }
 
 /// Any value on a cache line of its own.
@@ -371,7 +351,6 @@ impl<T> std::ops::Deref for OwnLine<T> {
         &self.0
     }
 }
-
 
 impl Job<'_> {
     /// Hash piece `index` into its slot. The caller has taken `index`
@@ -546,8 +525,7 @@ fn merge_to_children(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::C
     debug_assert_eq!(pieces[0].offset, 0);
     debug_assert!(pieces.last().unwrap().len > 0);
     debug_assert!(pieces[..pieces.len() - 1].iter().all(|p| p.len >= MIN_PIECE_LEN));
-    debug_assert!(pieces.windows(2).all(|w| w[0].len.is_power_of_two()
-        && w[0].len >= w[1].len && w[0].offset + w[0].len == w[1].offset));
+    debug_assert!(pieces.windows(2).all(|w| w[0].len.is_power_of_two() && w[0].len >= w[1].len && w[0].offset + w[0].len == w[1].offset));
     let platform = pool_platform();
     let mut count = cvs.len();
     let mut width = MIN_PIECE_LEN;
@@ -559,9 +537,7 @@ fn merge_to_children(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::C
         let mut write = prefix;
         while read + 1 < count {
             let children = (count - read).min(2 * crate::MAX_SIMD_DEGREE_OR_2);
-            let parents = crate::compress_parents_parallel(
-                cvs[read..read + children].as_flattened(), key, flags, platform, &mut out,
-            );
+            let parents = crate::compress_parents_parallel(cvs[read..read + children].as_flattened(), key, flags, platform, &mut out);
             cvs[write..write + parents].as_flattened_mut().copy_from_slice(&out[..parents * crate::OUT_LEN]);
             read += children;
             write += parents;
@@ -624,10 +600,7 @@ pub(crate) fn initialize(threads: usize) {
         .name("blake3-worker-1".into())
         .spawn(move || {
             for worker in 2..threads {
-                std::thread::Builder::new()
-                    .name(format!("blake3-worker-{worker}"))
-                    .spawn(move || worker_main(worker - 1))
-                    .expect("spawning a BLAKE3 worker");
+                std::thread::Builder::new().name(format!("blake3-worker-{worker}")).spawn(move || worker_main(worker - 1)).expect("spawning a BLAKE3 worker");
             }
             worker_main(0)
         })
@@ -1136,7 +1109,18 @@ impl Task {
     /// A task over `input` at chunk `counter`, its mode, kind, and
     /// destinations still to fill in.
     pub(crate) fn of(input: &[u8], counter: u64) -> Task {
-        Task { input: input.as_ptr(), len: input.len(), counter, batch: None, key: [0; 8], flags: 0, out: core::ptr::null_mut(), left: core::ptr::null(), members: 0, member: [NO_MEMBER; MEMBERS] }
+        Task {
+            input: input.as_ptr(),
+            len: input.len(),
+            counter,
+            batch: None,
+            key: [0; 8],
+            flags: 0,
+            out: core::ptr::null_mut(),
+            left: core::ptr::null(),
+            members: 0,
+            member: [NO_MEMBER; MEMBERS],
+        }
     }
 
     /// An empty task of short messages (with `batch`, batches of messages
@@ -1334,7 +1318,11 @@ mod test {
         let key = [0x5Au8; crate::KEY_LEN];
         let context = "equal queue members";
         let context_key = crate::hazmat::hash_derive_key_context(context);
-        let modes = [(*crate::IV, 0), (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH), (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL)];
+        let modes = [
+            (*crate::IV, 0),
+            (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
+            (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL),
+        ];
         let counts: &[usize] = if cfg!(miri) { &[2, 3] } else { &[2, 3, 4, 7, 8, 15, 16, 17, 63, MEMBERS] };
         let offsets: &[usize] = if cfg!(miri) { &[0, 1] } else { &[0, 1, 7, 63] };
         for len in [64, 128, 192, 256, 512, 1024] {
@@ -1426,7 +1414,9 @@ mod test {
                 assert_eq!(offset, len);
                 let mut cvs: Vec<ChainingValue> = pieces
                     .iter()
-                    .map(|p| crate::hash_all_at_once(&input[p.offset..][..p.len], crate::IV, (p.offset / CHUNK_LEN) as u64, 0, Platform::detect()).chaining_value())
+                    .map(|p| {
+                        crate::hash_all_at_once(&input[p.offset..][..p.len], crate::IV, (p.offset / CHUNK_LEN) as u64, 0, Platform::detect()).chaining_value()
+                    })
                     .collect();
                 assert_eq!(merge_root(&pieces, &mut cvs, crate::IV, 0), crate::hash(&input[..len]), "{len} {threads}");
             }
@@ -1688,13 +1678,17 @@ mod test {
         let pool = pool();
         let workers = pool.threads - 1;
         let all_parked = || (0..workers).all(|w| pool.parked[w / 64].load(Ordering::SeqCst) & (1 << (w % 64)) != 0);
-        crate::stream(crate::Mode::Hash, |_: &mut [Hash]| {}, |s| {
-            let started = std::time::Instant::now();
-            while !all_parked() {
-                assert!(started.elapsed() < std::time::Duration::from_secs(10), "a worker stayed awake while the stream was open and idle");
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-            s.finish();
-        });
+        crate::stream(
+            crate::Mode::Hash,
+            |_: &mut [Hash]| {},
+            |s| {
+                let started = std::time::Instant::now();
+                while !all_parked() {
+                    assert!(started.elapsed() < std::time::Duration::from_secs(10), "a worker stayed awake while the stream was open and idle");
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                s.finish();
+            },
+        );
     }
 }
