@@ -145,9 +145,62 @@ def half_a(obj, groups=1):
     return gen, s1, f"half A: {len(ends)} paths of passes 1 to 7, each the standard's compressions (chunk 16 stored at pass 7)"
 
 
+def half_b(obj, gen_a, s1_a, groups=1):
+    """Passes 8 to 14: pass 8 run from half A's invariant at pass 8 (every
+    position it leaves unknown fresh), switching to chunk 17; 9 to 14 by
+    induction, out of the loop after 14."""
+    from z3 import BitVec as BV
+    s, m, lanes, key, (counter, flags, start, end) = setup(obj, groups)
+    s8 = gen_a.machine(s1_a, BitVecVal(7, 64))   # K = 1 + 7
+    s8.assumptions, s8.lengths = [], {"len_k"}
+    h8 = [[s8.v[i][l] for i in range(8)] for l in range(16)]
+    s9 = induction.run_to(induction.snapshot(s8), HEAD, HEAD)
+    s10 = induction.run_to(induction.snapshot(s9), HEAD, HEAD)
+    kw = spec.words(key)
+    for l in range(16):
+        pbl.compare(s9, [s9.v[i][l] for i in range(8)], comp(h8[l], lanes[l], 64 * 8, counter + l, flags), f"lane {l} after pass 8")
+    c = comp(comp(kw, lanes[17], 0, counter + 17, flags | start), lanes[17], 64, counter + 17, flags)
+    pbl.compare(s9, integer_state(s9), c, "chunk 17 after pass 8 (its blocks 0 and 1)")
+    print("pass 8: each SME2 chunk's block 8, and chunk 17's blocks 0 and 1 under the key, with the start flag", flush=True)
+    k = BV("len_k", 64)
+    gen = pbl.BlockGeneralized(s9, s10, k)
+    K = k + 9
+    passes = 0
+    while True:
+        passes += 1
+        mk = gen.machine(s9, k)
+        mk.assumptions = [ULE(k, 5)]   # pass K = 9 + k, 9 to 14
+        mk.lengths = {"len_k"}
+        h = [[mk.v[i][l] for i in range(8)] for l in range(16)]
+        hi = integer_state(mk)
+        ends = induction.paths(mk, HEAD, {HEAD, EXIT})
+        forget = set()
+        import canon
+        for e, _ in ends:
+            canon.set_context(e.assumptions, e.lengths)
+            forget.update(b for b in induction.mismatches(e, gen, k + 1)
+                          if not (b[0] == "v" and b[1] < 8) and not (b[0] == "x" and b[1] in INT))
+            canon.set_context([], set())
+        print(f"  pass {passes}: {len(ends)} paths, {len(forget)} positions left unknown {sorted(map(str, forget))[:8]}", flush=True)
+        if not forget:
+            break
+        for pos in forget:
+            gen.forget(pos)
+    for e, _ in ends:
+        if e.stopped_at == EXIT and not aarch64.holds(e, K == 14):
+            raise Unproved("the loop exits before pass 14")
+        for l in range(16):
+            pbl.compare(e, [e.v[i][l] for i in range(8)], comp(h[l], lanes[l], 64 * K, counter + l, flags), f"lane {l} after pass K")
+        c = comp(comp(hi, lanes[17], 128 * (K - 8), counter + 17, flags), lanes[17], 128 * (K - 8) + 64, counter + 17, flags)
+        pbl.compare(e, integer_state(e), c, "chunk 17 after pass K (its blocks 2K - 16 and 2K - 15)")
+    return gen, s9, f"half B: {len(ends)} paths of passes 9 to 14, each the standard's compressions, out of the loop after 14"
+
+
 def main():
     obj = prove_sme2.assemble_hybrid()
-    gen, s1, what = half_a(obj)
+    gen_a, s1_a, what = half_a(obj)
+    print(what, flush=True)
+    gen_b, s9, what = half_b(obj, gen_a, s1_a)
     print(what)
 
 
