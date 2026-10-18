@@ -632,7 +632,11 @@ fn parse_check_line(mut line: &str) -> anyhow::Result<ParsedCheckLine> {
 /// opening and reading each, which one thread does one at a time.
 fn hash_inputs(args: &Args) -> u64 {
     let paths = &args.file_args;
-    let threads = threads().get().min(paths.len());
+    // One file, one thread: the thread count (available_parallelism reads
+    // the process's cgroup files on Linux, eight system calls, about 16 us a
+    // run) is never needed for one (a large one asks for the pool, which
+    // asks).
+    let threads = if paths.len() == 1 { 1 } else { threads().get().min(paths.len()) };
     // With --num-threads, the bound: the pool takes what the file threads
     // leave. By default the pool keeps one thread a CPU beside the file
     // threads, which keeps every core busy to the run's end: the bound
