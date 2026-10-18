@@ -1657,10 +1657,24 @@ pub fn kernel_report_multithreaded() -> KernelReport {
         return report;
     }
     report.kernels.retain(|kernel| kernel.from_len < lanes::MIN_SPLIT_LEN);
-    report.kernels.push(Kernel {
-        from_len: lanes::MIN_SPLIT_LEN,
-        name: "split over threads, SME2 on one for large inputs",
-        why: "From here the input is cut into whole subtrees that the calling thread and this crate's worker threads (by default one per CPU beyond the first) hash at once, the workers with integer and NEON code. Once its share comes to 128 KiB or more (with sixteen threads, inputs from about 1.3 MiB), the calling thread hashes a share sized to its speed on SME2, with integer code beside it from 256 KiB pieces.",
+    // SME2's part where this CPU has it; elsewhere every thread runs the
+    // single-threaded kernels on its share.
+    #[cfg(blake3_sme2)]
+    let sme2 = matches!(platform::Platform::detect(), platform::Platform::SME2);
+    #[cfg(not(blake3_sme2))]
+    let sme2 = false;
+    report.kernels.push(if sme2 {
+        Kernel {
+            from_len: lanes::MIN_SPLIT_LEN,
+            name: "split over threads, SME2 on one for large inputs",
+            why: "From here the input is cut into whole subtrees that the calling thread and this crate's worker threads (by default one per CPU beyond the first) hash at once, the workers with integer and NEON code. Once its share comes to 128 KiB or more (with sixteen threads, inputs from about 1.3 MiB), the calling thread hashes a share sized to its speed on SME2, with integer code beside it from 256 KiB pieces.",
+        }
+    } else {
+        Kernel {
+            from_len: lanes::MIN_SPLIT_LEN,
+            name: "split over threads",
+            why: "From here the input is cut into whole subtrees that the calling thread and this crate's worker threads (by default one per CPU beyond the first) hash at once, each with the kernels a single-threaded call of its share's length runs.",
+        }
     });
     report
 }
