@@ -245,9 +245,20 @@ fn mapped(file: &File) -> Option<memmap2::Mmap> {
     // a file another program truncates meanwhile is the caller's risk, as
     // with any mapping (upstream b3sum mapped every file).
     let map = unsafe { memmap2::Mmap::map(file) }.ok()?;
-    if cfg!(target_os = "linux") {
+    #[cfg(target_os = "linux")]
+    {
+        // Huge pages where the kernel can: a file this mapping brings in
+        // from storage is cached in 2 MiB folios and mapped 2 MiB an entry,
+        // and so is a file cached that way before (by an earlier run). A
+        // cached 1 GiB file then faults in in 0.2 ms, not 28, and unmaps
+        // (at exit, after HOLD_PAGES) in 0.2 ms, not 17; from storage, a
+        // 256 MiB file faulted in in 76 ms, not 113 (i7-12700K, ext4,
+        // Linux 7.0; bench-hashes-validation/b3sum-thp). A file cached in
+        // small folios (read by another program) keeps 4 KiB entries.
+        let _ = map.advise(memmap2::Advice::HugePage);
         return Some(map);
     }
+    #[cfg(not(target_os = "linux"))]
     resident(&map).then_some(map)
 }
 
