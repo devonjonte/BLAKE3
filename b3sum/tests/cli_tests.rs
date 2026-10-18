@@ -69,8 +69,8 @@ fn test_hash_many() {
     assert_eq!(expected_no_names, output_no_names);
 }
 
-/// Many files of many sizes, more than b3sum keeps in flight (on Linux,
-/// read ahead 4 a thread), each digest the library's and in
+/// Many files of many sizes, more than b3sum keeps in flight (on Linux, up
+/// to 64 read ahead), each digest the library's and in
 /// the order given: empty files, small ones, and ones beside the 512 KiB
 /// boundary where mapping takes over.
 #[test]
@@ -88,8 +88,12 @@ fn test_hash_many_sizes() {
         expected += &format!("{}\n", blake3::hash(&bytes).to_hex());
         files.push(path);
     }
-    let output = cmd(b3sum_exe(), ["--no-names".into()].into_iter().chain(files.iter().map(|p| p.clone().into_os_string()))).read().unwrap();
-    assert_eq!(expected.trim_end(), output);
+    // One thread holds the deepest batch (64 files), two half of it.
+    for threads in [&["--num-threads=1"][..], &["--num-threads=2"], &[]] {
+        let args = ["--no-names"].iter().chain(threads).map(Into::into).chain(files.iter().map(|p| p.clone().into_os_string()));
+        let output = cmd(b3sum_exe(), args.collect::<Vec<std::ffi::OsString>>()).read().unwrap();
+        assert_eq!(expected.trim_end(), output, "{threads:?}");
+    }
 }
 
 #[test]
