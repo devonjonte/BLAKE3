@@ -743,6 +743,14 @@ fn check_one_checkfile(path: &Path, args: &Args, files_failed: &mut u64) -> anyh
 }
 
 fn main() -> anyhow::Result<()> {
+    // A reader that goes away (`b3sum * | head`) ends b3sum at once and
+    // quietly, as it ends GNU's tools: Rust ignores SIGPIPE, so b3sum's next
+    // write failed and panicked ("failed printing to stdout", status 101).
+    #[cfg(unix)]
+    // Sound: restoring a signal's default action.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL)
+    };
     blake3::initialize();
     let args = Args::parse()?;
     if args.num_threads().is_some() {
