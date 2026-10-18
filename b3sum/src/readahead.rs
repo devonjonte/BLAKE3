@@ -1,17 +1,18 @@
 //! Many files at once (Linux): b3sum keeps up to DEPTH files read from
 //! storage in flight across its file threads, where it kept one a thread.
 //!
-//! Each small file (a regular file below `SMALL`) is opened, and its
-//! metadata read, as before, then read with preadv2(RWF_NOWAIT), which
-//! succeeds only from the page cache: a cached file is read and hashed at
-//! once, at today's cost. A file that misses is advised (posix_fadvise
-//! WILLNEED, which starts its reads from storage and returns) and set
-//! aside; once the thread holds its batch of such files, it reads and
-//! hashes each in turn, by which time the reads have arrived or are on the
-//! way. The change check (size and modification time as when opened)
-//! follows each read. Larger files, other kinds of file, and any file whose
-//! read or check is not exactly as expected go to `hash_path`, as before:
-//! the fast path never decides a digest alone.
+//! Each small file (a regular file reporting 1 byte to `SMALL`) is opened,
+//! its size read as a hint for how to read it, then read with
+//! preadv2(RWF_NOWAIT), which succeeds only from the page cache: a cached
+//! file is read and hashed at once, at today's cost. A file that misses is
+//! advised (posix_fadvise WILLNEED, which starts its reads from storage
+//! and returns) and set aside; once the thread holds its batch of such
+//! files, it reads and hashes each in turn, by which time the reads have
+//! arrived or are on the way. A file is read to its reported size or its
+//! end, whichever comes first (a /sys file reports 4096 bytes and holds a
+//! few). Files reporting 0 bytes (empty, or /proc's, which hold more),
+//! larger files, other kinds of file, and read errors go to `hash_path`, as
+//! before.
 //!
 //! Measured (bench-hashes-validation/b3sum-uring): from storage, 1000 files
 //! of 16 KiB with one thread took 0.27 of today's time, with 20 threads 0.86
@@ -24,7 +25,7 @@
 //! first (WILLNEED walks a cached file's pages: x1.07-1.17 for one thread).
 
 use crate::Args;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom};
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -102,7 +103,10 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
             }
             let small = std::fs::File::open(&paths[i]).and_then(|file| Ok((file.metadata()?, file)));
             let (opened, file) = match small {
-                Ok((opened, file)) if opened.is_file() && opened.len() < SMALL => (opened, file),
+                // A size is a hint for how to read, not what the file holds:
+                // a file reporting 0 bytes (an empty one, or one of /proc's,
+                // which report 0 and hold more) is read to its end below.
+                Ok((opened, file)) if opened.is_file() && opened.len() > 0 && opened.len() < SMALL => (opened, file),
                 // Not for the batch (or an error, which hash_path reports).
                 _ => {
                     if !done(i, crate::hash_path(args, &paths[i])) {
@@ -112,9 +116,10 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
                 }
             };
             buffer.resize(opened.len() as usize, 0);
-            let cached = read_cached(&file, &mut buffer);
-            if cached == buffer.len() {
-                if !done(i, checked(args, i, &file, &opened, &buffer)) {
+            let (cached, end) = read_cached(&file, &mut buffer);
+            if cached == buffer.len() || end {
+                // All of it, or all there is (a /sys file reports more).
+                if !done(i, Ok(hashed(args, &buffer[..cached]))) {
                     return;
                 }
                 continue;
@@ -126,11 +131,12 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
         for Missed { index, mut file, opened, mut bytes } in missed {
             let at = bytes.len();
             bytes.resize(opened.len() as usize, 0);
-            let output = if file.seek(SeekFrom::Start(at as u64)).is_ok() && file.read_exact(&mut bytes[at..]).is_ok() {
-                checked(args, index, &file, &opened, &bytes)
-            } else {
-                // Anything unexpected: as before, which reports it.
-                crate::hash_path(args, &paths[index])
+            // To the size or the end, whichever comes first.
+            let read = file.seek(SeekFrom::Start(at as u64)).and_then(|_| crate::fill(&mut file, &mut bytes[at..]));
+            let output = match read {
+                Ok(n) => Ok(hashed(args, &bytes[..at + n])),
+                // A read error: as before, which reports it.
+                Err(_) => crate::hash_path(args, &paths[index]),
             };
             if !done(index, output) {
                 return;
@@ -140,31 +146,31 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
 }
 
 /// The bytes the page cache holds of `file` from its start, read into
-/// `buffer` without waiting for storage (preadv2 with RWF_NOWAIT): how many.
-fn read_cached(file: &std::fs::File, buffer: &mut [u8]) -> usize {
+/// `buffer` without waiting for storage (preadv2 with RWF_NOWAIT): how
+/// many, and whether the file ended there (a read of 0; a read that would
+/// wait for storage fails instead).
+fn read_cached(file: &std::fs::File, buffer: &mut [u8]) -> (usize, bool) {
     let mut done = 0;
     while done < buffer.len() {
         let iov = libc::iovec { iov_base: buffer[done..].as_mut_ptr().cast(), iov_len: buffer.len() - done };
         // Sound: one iovec over the buffer's unread part.
         let n = unsafe { libc::preadv2(file.as_raw_fd(), &iov, 1, done as i64, libc::RWF_NOWAIT) };
-        if n <= 0 {
+        if n == 0 {
+            return (done, true);
+        }
+        if n < 0 {
             break;
         }
         done += n as usize;
     }
-    done
+    (done, false)
 }
 
-/// `bytes`, all of file `index` as read, hashed if the file is unchanged
-/// since it was opened, else hashed as before (which reports a change).
-fn checked(args: &Args, index: usize, file: &std::fs::File, opened: &std::fs::Metadata, bytes: &[u8]) -> anyhow::Result<blake3::OutputReader> {
-    let unchanged = file.metadata().is_ok_and(|now| now.len() == opened.len() && now.modified().ok() == opened.modified().ok());
-    if !unchanged {
-        return crate::hash_path(args, &args.file_args[index]);
-    }
+/// `bytes`, a file's content, hashed.
+fn hashed(args: &Args, bytes: &[u8]) -> blake3::OutputReader {
     let mut hasher = args.base_hasher.clone();
     hasher.update(bytes);
     let mut output = hasher.finalize_xof();
     output.set_position(args.seek());
-    Ok(output)
+    output
 }
