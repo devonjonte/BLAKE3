@@ -185,6 +185,10 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
         let file = File::open(path)?;
         #[cfg(unix)]
         if let Some(map) = mapped(&file) {
+            #[cfg(target_os = "linux")]
+            if std::env::var_os("B3_REGIONS").is_some() && map.len() >= REGIONS_FROM && threads().get() > 1 && !resident(&map) {
+                populate_regions(&map);
+            }
             update(&mut hasher, &map);
             hold(map);
         } else {
@@ -255,6 +259,33 @@ fn mapped(file: &File) -> Option<memmap2::Mmap> {
         return Some(map);
     }
     resident(&map).then_some(map)
+}
+
+/// Pilot (B3_REGIONS): the shortest file faulted in by regions.
+#[cfg(target_os = "linux")]
+const REGIONS_FROM: usize = 64 << 20;
+
+/// Pilot: eight threads each fault one contiguous eighth of `map` in, in
+/// order (MADV_POPULATE_READ), while the pool hashes: readahead ramps within
+/// each region, so the file is cached in large folios (the pool's interleaved
+/// pieces leave small ones). The threads hash nothing and end on their own.
+#[cfg(target_os = "linux")]
+fn populate_regions(map: &memmap2::Mmap) {
+    const REGIONS: usize = 8;
+    let (base, len) = (map.as_ptr() as usize, map.len());
+    let step = (len / REGIONS).next_multiple_of(2 << 20);
+    for i in 0..REGIONS {
+        let start = i * step;
+        if start >= len {
+            break;
+        }
+        let n = step.min(len - start);
+        std::thread::spawn(move || {
+            // Sound: advice on this process's own mapping, which b3sum leaves
+            // mapped to its exit or unmaps after hashing (then the call fails).
+            unsafe { libc::madvise((base + start) as *mut libc::c_void, n, 22 /* MADV_POPULATE_READ */) };
+        });
+    }
 }
 
 /// Whether `map`'s first page is in the page cache (mincore): a file read
