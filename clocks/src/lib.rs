@@ -17,9 +17,10 @@
 //!   returns `None`), and results say so.
 //! - **The process's CPU time** ([`process_cpu_ns`]), all its threads
 //!   together: what a call costs the machine beside what its caller waits
-//!   for, read outside the timed interval (bench-hashes records it per solo
-//!   sample), and this process's share of the machine's busy time
-//!   ([`load`]).
+//!   for, read outside the timed interval (bench-hashes records it for each
+//!   solo sample of its nonstop cells; a sample after a gap has none, the
+//!   gap's other work being no part of the call's), and this process's share
+//!   of the machine's busy time ([`load`]).
 //! - **The CPU package's energy** ([`energy`]), where the platform counts
 //!   it.
 //!

@@ -1,8 +1,9 @@
 //! Equal-length batch probe: hash_many at 128 B-4 KiB messages. Times via
 //! clocks::measure (2 ms batches, producer outside timing); summaries and
 //! verdicts via clocks::summary. `run OUT` writes ns/units per cell;
-//! `compare OLD... -- NEW...` pairs runs in order and prints each cell's
-//! median ratio and sign-test verdict.
+//! `compare OLD... -- NEW...` pairs runs in order and judges every cell at
+//! once (clocks::summary::discoveries), printing each cell's verdict and the
+//! ratio judged, the geometric mean of its pairs' ratios.
 use std::fmt::Write as _;
 
 const LENGTHS: [usize; 6] = [128, 256, 512, 1024, 2048, 4096];
