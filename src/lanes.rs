@@ -673,10 +673,12 @@ impl Pool {
             unsafe { job.hash_piece(index, own_platform) };
         }
         source.finished(own);
-        while let Some(sources::Item::Piece(_, index)) = source.take() {
-            // Sound: this thread took `index`, so it alone writes its slot.
-            unsafe { job.hash_piece(index, pool_platform()) };
-            source.finished(1);
+        while let Some(sources::Item::Pieces(_, index, n)) = source.take() {
+            // Sound: this thread took these, so it alone writes their slots.
+            for i in index..index + n {
+                unsafe { job.hash_piece(i, pool_platform()) };
+            }
+            source.finished(n);
         }
         source.wait(target);
         if let Some(slot) = slot {
@@ -837,10 +839,11 @@ pub(crate) mod sources {
     unsafe impl Sync for Source {}
     unsafe impl Send for Source {}
 
-    /// What a claim takes: a stream's task, or a job's piece.
+    /// What a claim takes: a stream's task, or a run of a job's pieces
+    /// (`n` from `index`, consecutive).
     pub(crate) enum Item {
         Task(Task),
-        Piece(*const Job<'static>, usize),
+        Pieces(*const Job<'static>, usize, usize),
     }
 
     impl Source {
@@ -915,8 +918,15 @@ pub(crate) mod sources {
                 if c >= p {
                     return None;
                 }
-                match self.claimed.compare_exchange_weak(c, c + 1, Ordering::AcqRel, Ordering::Acquire) {
-                    Ok(_) if self.ring.is_empty() => return Some(Item::Piece(self.job.load(Ordering::Relaxed), c - self.base.load(Ordering::Relaxed))),
+                // A job's pieces go in runs, consecutive, sized to the work
+                // left (guided self-scheduling): each worker reads its input
+                // front to back, so a mapped file from storage meets the
+                // kernel's readahead stream by stream (official's I/O
+                // pattern), and runs shrink to one piece near the end for
+                // balance. A stream's tasks go one at a time.
+                let n = if self.ring.is_empty() { ((p - c) / (2 * pool().threads)).max(1) } else { 1 };
+                match self.claimed.compare_exchange_weak(c, c + n, Ordering::AcqRel, Ordering::Acquire) {
+                    Ok(_) if self.ring.is_empty() => return Some(Item::Pieces(self.job.load(Ordering::Relaxed), c - self.base.load(Ordering::Relaxed), n)),
                     // Sound: this thread alone took slot c, written before
                     // `published` passed it.
                     Ok(_) => return Some(Item::Task(unsafe { (*self.ring[c % self.ring.len()].get()).assume_init_read() })),
@@ -929,7 +939,7 @@ pub(crate) mod sources {
         pub(crate) fn take_task(&self) -> Option<Task> {
             match self.take() {
                 Some(Item::Task(task)) => Some(task),
-                Some(Item::Piece(..)) => unreachable!("a stream's source carries tasks"),
+                Some(Item::Pieces(..)) => unreachable!("a stream's source carries tasks"),
                 None => None,
             }
         }
@@ -1048,11 +1058,13 @@ pub(crate) mod sources {
             }
             match item {
                 Item::Task(task) => task.run(pool_platform()),
-                Item::Piece(job, index) => {
+                Item::Pieces(job, index, n) => {
                     // Sound: the job lives until its pieces are finished,
-                    // this one among them; this thread alone took `index`.
-                    unsafe { (*job).hash_piece(index, pool_platform()) };
-                    source.finished(1);
+                    // these among them; this thread alone took them.
+                    for i in index..index + n {
+                        unsafe { (*job).hash_piece(i, pool_platform()) };
+                    }
+                    source.finished(n);
                 }
             }
             true
