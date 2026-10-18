@@ -146,6 +146,7 @@ def half_a(obj, groups=1):
             if got is None:
                 raise Unproved("pass 7 leaves chunk 16's chaining value unstored")
             pbl.compare(e, got, c, "chunk 16's chaining value, stored at pass 7")
+    gen.entry = entry_of(s0)
     return gen, s1, f"half A: {len(ends)} paths of passes 1 to 7, each the standard's compressions (chunk 16 stored at pass 7)"
 
 
@@ -211,44 +212,71 @@ def changes(gen_a, gen_b):
     return xs, stack, preds
 
 
-def summary(gen_a, gen_b, chains, chain16, chain17, lanes, key, group_base=lambda: 0, chunk=lambda l: l):
-    """The block loop by its two halves' proofs: from a group's first
-    arrival (pass 0) to the exit after pass 14. z0-z7 the SME2 chunks'
-    chains over blocks 0 to 14; chunk 16's chaining value stored where
-    pass 7 stores it; chunk 17's chain over its blocks 0 to 13 in its state
-    registers, and its pointer and counter as pass 8 sets them; block 15 in
-    ZA; the rest the loop changes unknown."""
+def summary(gen_a, gen_b, entry, chains, chain16, chain17, lanes, key, group=lambda: 0):
+    """The block loop by its two halves' proofs, from a group's first
+    arrival (pass 0) to its exit after pass 14. It checks the loop's whole
+    entry state is half A's, moved to group `group()`'s chunks, table
+    entries, counter and output: the key in z0-z7, each SME2 chunk's
+    block 0 in ZA, x7, x9 and x12-x15 as on entry, x0 and the stack slots
+    the loop reads (`entry`, half A's values at group 0, with a function
+    moving them to group K). It leaves z0-z7 the SME2 chunks' chains over
+    blocks 0 to 14; chunk 16's chaining value stored at output 16, as pass
+    7 stores it; chunk 17's chain over its blocks 0 to 13 in its state
+    registers, its pointer and counter as pass 8 sets them; block 15 in ZA;
+    and the rest the loop changes unknown."""
     from z3 import BitVec as BV
     xs, stack, preds = changes(gen_a, gen_b)
     fresh = [0]
     def unknown(size):
         fresh[0] += 1
         return BV(f"after_hybrid_loop{fresh[0]}", size)
+    def same_ptr(m, got, want):
+        return isinstance(got, Ptr) and isinstance(want, Ptr) and got.region == want.region and \
+            aarch64.holds(m, aarch64.as_bv(got.offset) == aarch64.as_bv(want.offset))
     def run(m):
+        K = aarch64.as_bv(group())
+        base = K * 1024
         if aarch64.concrete(m.x[7]) != 0:
             raise Unproved("the block loop entered other than at its first pass")
+        for r, v in ((9, 64), (12, 0), (13, 4), (14, 8), (15, 12)):
+            if not aarch64.holds(m, aarch64.as_bv(m.x[r]) == v):
+                raise Unproved(f"x{r} entering the block loop differs from half A's")
+        sp = m.x["sp"]
+        for where, want in entry(K):
+            x0 = isinstance(where, str)
+            got = m.x[0] if x0 else m.load(sp + where, 8 if where < 0xc8 else 4)
+            ok = same_ptr(m, got, want) if isinstance(want, Ptr) else \
+                not isinstance(got, Ptr) and aarch64.holds(m, aarch64.as_bv(got) == want)
+            if not ok:
+                raise Unproved(f"{where if x0 else hex(where)} entering the block loop differs from half A's")
         kw = spec.words(key)
         for l in range(16):
             pbl.compare(m, [m.v[i][l] for i in range(8)], kw, f"lane {l} entering the block loop (the key)")
-        base = aarch64.as_bv(group_base())
+        names = [a.decl().name() for a in lanes[:16]]
+        seen = set()
         for row, cells in enumerate(m.za[0]):
             for col, cell in enumerate(cells):
                 w = pbl.lane_word(cell)
-                if w is None or not any(w[0].eq(a) for a in lanes[:16]) or \
-                        next((c for c in range(0, 64, 4) if aarch64.holds(m, aarch64.as_bv(w[1]) == base + c)), None) is None:
+                if w is None or w[0].decl().name() not in names:
+                    raise Unproved(f"ZA tile 0 cell {row},{col} holds no SME2 chunk's bytes entering the loop")
+                j = next((c for c in range(0, 64, 4) if aarch64.holds(m, aarch64.as_bv(w[1]) == base + c)), None)
+                if j is None:
                     raise Unproved(f"ZA tile 0 cell {row},{col} holds other than the group's block 0 entering the loop")
-        # Chunk 17's pointer and counter as pass 8 sets them (table entry 17,
-        # the counter saved at sp + 0xa8, plus 17), the pointer two blocks a
-        # pass on to pass 15's blocks 14 and 15.
+                seen.add((w[0].decl().name(), j))
+        if len(seen) != 256:
+            raise Unproved("ZA tile 0 holds other than every SME2 chunk's block 0 entering the loop")
+        # Chunk 17's pointer and counter as pass 8 sets them (table entry
+        # 17, the counter saved at sp + 0xa8, plus 17), the pointer two
+        # blocks a pass on to pass 15's blocks 14 and 15.
         table17 = m.load(m.x[0] + 8 * 17, 8)
-        sp = m.x["sp"]
         if not isinstance(table17, Ptr):
             raise Unproved("table entry 17 is no pointer entering the loop")
         saved = m.load(sp + 0xa8, 8)
+        out = m.load(sp + 0xb8, 8)
         for r in xs:
             m.x[r] = unknown(64)
         m.x[7] = BitVecVal(15, 64)
-        m.x[9] = aarch64.as_bv(m.x[9]) + 64 * 15
+        m.x[9] = BitVecVal(64 * 16, 64)
         m.x[27] = Ptr(table17.region, aarch64.as_bv(table17.offset) + 128 * 7)
         m.x[28] = aarch64.as_bv(saved) + 17
         for w, r in enumerate(INT):
@@ -265,8 +293,28 @@ def summary(gen_a, gen_b, chains, chain16, chain17, lanes, key, group_base=lambd
         st = m.regions["stack"]
         for o in stack:
             st.bytes[o] = unknown(8)
+        c16 = chain16(base)
+        for w in range(8):
+            m.store(out + 32 * 16 + 4 * w, c16[w], 4)
         return EXIT
     return run
+
+
+def entry_of(s0):
+    """Half A's entry state at group 0 (x0 and the stack slots the loop
+    reads), as a function moving it to group K: the table 144 bytes a
+    group on, the counter 18 a group, the output 576 bytes; the key and
+    the flags words the same."""
+    sp = s0.x["sp"]
+    at0 = {"x0": s0.x[0]}
+    for o in (0xa0, 0xa8, 0xb8, 0xc8, 0xcc, 0xd0):
+        at0[o] = s0.load(sp + o, 8 if o < 0xc8 else 4)
+    def moved(K):
+        def on(v, by):
+            return Ptr(v.region, aarch64.as_bv(v.offset) + by) if isinstance(v, Ptr) else aarch64.as_bv(v) + by
+        return [("x0", on(at0["x0"], 144 * K)), (0xa0, at0[0xa0]), (0xa8, on(at0[0xa8], 18 * K)),
+                (0xb8, on(at0[0xb8], 576 * K)), (0xc8, at0[0xc8]), (0xcc, at0[0xcc]), (0xd0, at0[0xd0])]
+    return moved
 
 
 def prove_one_group(obj, gen_a, gen_b):
@@ -278,18 +326,7 @@ def prove_one_group(obj, gen_a, gen_b):
     tab = [[BV(f"chain{l}_{w}", 32) for w in range(8)] for l in range(16)]
     c16 = [BV(f"chain16_{w}", 32) for w in range(8)]
     c17 = [BV(f"chain17_{w}", 32) for w in range(8)]
-    m.summaries = {HEAD: summary(gen_a, gen_b, lambda l, b: tab[l], lambda b: c16, lambda b: c17, lanes, key)}
-    # Chunk 16's chaining value: half A proves pass 7 stores it at output 16,
-    # and that no other pass of either half writes the output.
-    run = m.summaries[HEAD]
-    def with_c16(mm):
-        nxt = run(mm)
-        out = mm.regions["out"]
-        for w in range(8):
-            for j in range(4):
-                out.bytes[32 * 16 + 4 * w + j] = Extract(8 * j + 7, 8 * j, c16[w])
-        return nxt
-    m.summaries = {HEAD: with_c16}
+    m.summaries = {HEAD: summary(gen_a, gen_b, gen_a.entry, lambda l, b: tab[l], lambda b: c16, lambda b: c17, lanes, key)}
     ends = induction.paths(m, s.entry, set())
     for e, how in ends:
         if how != "return" or aarch64.concrete(e.x[0]) != 16:
