@@ -169,6 +169,27 @@ def main():
         except (Unproved, KeyError) as e:
             print(f"induction mutant, {what} at {a:#x}: rejected ({e})")
     aarch64.disassemble = real
+    # The message kernel's block loop (prove_block_loop): its next block's
+    # offset off by 8, which only the step from one pass to the next sees,
+    # and a rotation after the loop, which only the composed proof sees.
+    import prove_block_loop
+    msgs = ssyms["blake3_sme2_hash16_messages_512"]
+    msgs_end = min(v for v in ssyms.values() if v > msgs)
+    step_at = next(a for a, (m, o) in sorted(sbase.items()) if msgs <= a < msgs_end and m == "add" and o == ["x9", "x9", "#0x40"])
+    after = [a for a, (m, o) in sorted(sbase.items()) if prove_block_loop.EXIT <= a < msgs_end and m == "xar"]
+    m_, o_ = sbase[after[len(after) // 2]]
+    for what, a, ins, prove in (("the block loop's offset step", step_at, ("add", ["x9", "x9", "#0x48"]), prove_block_loop.prove),
+                                ("a rotation after the block loop", after[len(after) // 2], (m_, o_[:-1] + [f"#{int(o_[-1].lstrip('#'), 0) % 31 + 1}"]), prove_block_loop.prove_one_group)):
+        code = dict(sbase)
+        code[a] = ins
+        aarch64.disassemble = lambda *x, code=code, **k: code
+        try:
+            prove(sobj)
+            print(f"block-loop mutant, {what} at {a:#x}: PROVED (the proof is vacuous here)")
+            failures += 1
+        except (Unproved, KeyError) as e:
+            print(f"block-loop mutant, {what} at {a:#x}: rejected ({e})")
+    aarch64.disassemble = real
     sys.exit(1 if failures else 0)
 
 
