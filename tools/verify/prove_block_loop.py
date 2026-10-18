@@ -11,7 +11,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from z3 import Array, BitVec, BitVecSort, BitVecVal, Concat, Select, ULE, UGE, ULT, ZeroExt
+from z3 import Array, BitVec, BitVecSort, BitVecVal, Concat, Function, LShR, Select, ULE, UGE, ULT, ZeroExt, simplify
 import aarch64
 import induction
 import prove_sme2
@@ -192,7 +192,7 @@ def prove(obj):
     return f"every pass K >= 1: {len(ends)} paths (back to the head with block K + 1 in ZA, or out after the last), each the standard's compression of block K"
 
 
-def summary(n, chains, lanes, key):
+def summary(n, chains, lanes, key, group_base=lambda: 0):
     """The block loop by its proof (prove): from a group's first arrival
     (pass 0, the key in z0-z7, block 0 in ZA) to its exit after n - 1
     passes: z0-z7 the chain over blocks 0 to n - 2 (`chains`, by lane),
@@ -211,25 +211,28 @@ def summary(n, chains, lanes, key):
         kw = spec.words(key)
         for l in range(16):
             compare(m, [m.v[i][l] for i in range(8)], kw, f"lane {l} entering the block loop (the key)")
-        want = {}
-        for l in range(16):
-            for j in range(16):
-                want[(lanes[l].decl().name(), 4 * j)] = True
+        # Each lane's block 0, the group's (at its base), every word once.
+        base = aarch64.as_bv(group_base())
+        names = [a.decl().name() for a in lanes]
         seen = set()
         for row, cells in enumerate(m.za[0]):
             for col, cell in enumerate(cells):
                 w = lane_word(cell)
-                o = aarch64.concrete(aarch64.as_bv(w[1])) if w else None
-                if w is None or o is None or (w[0].decl().name(), o) not in want:
-                    raise Unproved(f"ZA tile 0 cell {row},{col} holds no lane's block 0 entering the loop")
-                seen.add((w[0].decl().name(), o))
-        if seen != set(want):
+                if w is None or w[0].decl().name() not in names:
+                    raise Unproved(f"ZA tile 0 cell {row},{col} holds no lane's bytes entering the loop")
+                j = aarch64.concrete(simplify(aarch64.as_bv(w[1]) - base))
+                if j is None:
+                    j = next((c for c in range(0, 64, 4) if aarch64.holds(m, aarch64.as_bv(w[1]) == base + c)), None)
+                if j is None or j % 4 or not 0 <= j < 64:
+                    raise Unproved(f"ZA tile 0 cell {row},{col} holds other than the group's block 0 entering the loop")
+                seen.add((w[0].decl().name(), j))
+        if len(seen) != 256:
             raise Unproved("ZA tile 0 holds other than every lane's block 0 entering the loop")
         m.x[7] = m.x[6]
         m.x[9] = aarch64.as_bv(m.x[9]) + 64 * (n - 1)
         m.x[8], m.x[10] = unknown(64), unknown(64)
         for r in range(32):
-            m.v[r] = [chains[l][r] if r < 8 else unknown(32) for l in range(16)] if r < 8 else [unknown(32) for _ in range(16)]
+            m.v[r] = [chains(l, base)[r] for l in range(16)] if r < 8 else [unknown(32) for _ in range(16)]
         for row, cells in enumerate(m.za[0]):
             for col, cell in enumerate(cells):
                 w = lane_word(cell)
@@ -250,7 +253,8 @@ def prove_one_group(obj):
     before it, written as the chain the loop's proof establishes."""
     from z3 import If, BitVec as BV
     s, m, lanes, key, (n, counter, flags, start, end, step, last_len) = setup(obj)
-    chains = [[BV(f"chain{l}_{w}", 32) for w in range(8)] for l in range(16)]
+    table_ = [[BV(f"chain{l}_{w}", 32) for w in range(8)] for l in range(16)]
+    chains = lambda l, base: table_[l]
     m.summaries = {HEAD: summary(n, chains, lanes, key)}
     ends = induction.paths(m, s.entry, set())
     length = If(last_len == 0, BitVecVal(64, 32), ZeroExt(26, last_len))
@@ -262,17 +266,107 @@ def prove_one_group(obj):
         prove_sme2.prove_hybrid.check_abi(e)
         out = e.regions["out"]
         for l in range(16):
-            want = spec.compress(chains[l], block_words(lanes[l], 64 * (n - 1)), counter, length, ZeroExt(24, flags | end))[:8]
+            want = spec.compress(chains(l, 0), block_words(lanes[l], 64 * (n - 1)), counter, length, ZeroExt(24, flags | end))[:8]
             if any(32 * l + j not in out.bytes for j in range(32)):
                 raise Unproved(f"output {l} is not wholly written")
             compare(e, spec.words([out.bytes[32 * l + j] for j in range(32)]), want, f"lane {l}'s output")
     return f"one group, every length from 3 to 16 blocks: {len(ends)} paths, each lane's output the last block's compression of its chain"
 
 
+def prove_every(obj):
+    """The message kernel at every group count from 2 to 2^40 and every
+    length from 3 to 16 blocks, in one induction over its group loop (as
+    prove_sme2.prove_messages_every for one length at a time), the block
+    loop by its proof: group K's lane l hashes the message table[16 K + l]
+    points to, at counter + step K, its output the last block's compression
+    of the chain over the blocks before it (the chain a function of the
+    lane and the group's chunk)."""
+    from z3 import If, BitVec as BV
+    n = BitVec("len_blocks", 64)
+    g, k = BitVec("len_groups", 64), BitVec("len_k", 64)
+    lanes = [Array(f"msg{l}", BitVecSort(64), BitVecSort(8)) for l in range(16)]
+    key = byte_symbols("key", 32)
+    regions = {}
+    for l in range(16):
+        r = Region(f"lane{l}", g * 1024, False, (lambda a: lambda o: Select(a, aarch64.as_bv(o)))(lanes[l]))
+        r.symbolic_initial = True
+        regions[f"lane{l}"] = r
+    regions["key"] = Region("key", 32, False, lambda o: key[o])
+    regions["out"] = Region("out", g * 512, True, None)
+    def entry(offset):
+        """Table byte `offset`: byte offset % 8 of the pointer to group
+        offset / 128's chunk for lane (offset % 128) / 8."""
+        if isinstance(offset, int):
+            group, within = offset // 128, offset % 128
+            return (Ptr(f"lane{within // 8}", 1024 * group), within % 8)
+        within = induction.forced(aarch64._machine[0], offset & 127)
+        if within is None:
+            raise Unproved("a table read whose lane the lengths leave open")
+        first = simplify(aarch64.as_bv(offset) - within % 8, som=True, bv_sort_ac=True)
+        return (Ptr(f"lane{within // 8}", simplify(LShR(first, 7) * 1024, som=True, bv_sort_ac=True)), within % 8)
+    table = Region("table", g * 128, False, entry)
+    table.symbolic_initial = True
+    regions["table"] = table
+    s = prove_sme2.SmeSetup(obj, "blake3_sme2_hash16_messages_512", regions)
+    m = s.m
+    m.lengths = {"len_groups", "len_k", "len_blocks", "counter", "step"}
+    m.assumptions = [UGE(g, 2), ULE(g, 1 << 40), UGE(n, 3), ULE(n, 16)]
+    counter = BitVec("counter", 64)
+    flags, start, end, step = (BitVec(x, 8) for x in ("flags", "start", "end", "step"))
+    last_len = BitVec("last_len", 6)
+    m.x[0], m.x[1], m.x[2] = Ptr("table", 0), Ptr("key", 0), counter
+    m.x[3] = Concat(BitVecVal(0, 18), last_len, step, BitVecVal(0, 8), end, start, flags)
+    m.x[4], m.x[5], m.x[6] = Ptr("out", 0), g, n
+    # Each lane's chain, as a function of the group's chunk (an array, so
+    # canon fingerprints it as it does the messages).
+    funcs = [[Array(f"chain{l}_{w}", BitVecSort(64), BitVecSort(32)) for w in range(8)] for l in range(16)]
+    chains = lambda l, base: [Select(f, aarch64.as_bv(base)) for f in funcs[l]]
+    current = [0]
+    group_base = lambda: aarch64.as_bv(current[0] * 1024) if not isinstance(current[0], int) else BitVecVal(current[0] * 1024, 64)
+    m.summaries = {HEAD: summary(n, chains, lanes, key, group_base)}
+    head = prove_sme2.loop_head(obj, lambda: prove_sme2.prove_messages(obj, 3, 3, 0, check=False), 2)
+    length = If(last_len == 0, BitVecVal(64, 32), ZeroExt(26, last_len))
+    def check_group(mach, kval):
+        out = mach.regions["out"]
+        keys = set()
+        kv = aarch64.as_bv(kval) if not isinstance(kval, int) else BitVecVal(kval, 64)
+        c = counter + ZeroExt(56, step) * kv
+        for l in range(16):
+            base = kv * 1024
+            want = spec.compress(chains(l, base), block_words(lanes[l], base + 64 * (n - 1)), c, length, ZeroExt(24, flags | end))[:8]
+            offs = [aarch64.key(kv * 512 + 32 * l + j) for j in range(32)]
+            keys.update(offs)
+            if any(o not in out.bytes for o in offs):
+                raise Unproved(f"group output {l} is not wholly written")
+            compare(mach, spec.words([out.bytes[o] for o in offs]), want, f"group output {l}")
+        if set(out.bytes) != keys:
+            raise Unproved("the group writes output bytes outside its own")
+    s0 = induction.run_to(m, s.entry, head)
+    if s0.regions["out"].bytes:
+        raise Unproved("output written before the group loop")
+    s1 = induction.run_to(induction.snapshot(s0), head, head)
+    check_group(s1, 0)
+    gen = induction.Generalized(s0, s1, k)
+    current[0] = k
+    def check(endm, how):
+        if how == "head":
+            check_group(endm, k)
+            return
+        if not aarch64.holds(endm, g == k + 1):
+            raise Unproved("a path leaves the group loop before the last group")
+        if aarch64.concrete(endm.x[0]) != 16:
+            raise Unproved(f"returned {endm.x[0]}, not 16")
+        check_group(endm, k)
+        prove_sme2.prove_hybrid.check_abi(endm)
+    kinds = induction.loop_step(gen, s0, k, list(s0.assumptions) + [ULT(k, g), ULE(k, 1 << 39)], head, check)
+    return f"every group count and every length from 3 to 16 blocks: {kinds['head']} paths back to the group loop's head, {kinds['return']} out of it"
+
+
 def main():
     obj = prove_sme2.assemble()
     print(prove(obj), flush=True)
-    print(prove_one_group(obj))
+    print(prove_one_group(obj), flush=True)
+    print(prove_every(obj))
 
 
 if __name__ == "__main__":
