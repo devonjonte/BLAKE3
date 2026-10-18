@@ -98,7 +98,7 @@ pub(crate) const MIN_SPLIT_LEN: usize = if cfg!(miri) { 16 * 1024 } else { 512 *
 const MIN_PIECE_LEN: usize = 8 * CHUNK_LEN;
 
 /// The longest piece.
-const MAX_PIECE_LEN: usize = 128 * CHUNK_LEN;
+const MAX_PIECE_LEN: usize = 1024 * CHUNK_LEN;
 
 /// Between polls a thread spins in user space, and every YIELD_EVERY it
 /// hands the CPU to any runnable thread (a caller the OS has queued
