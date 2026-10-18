@@ -26,6 +26,10 @@ fn one_thread_starts_no_workers() {
     // No other thread: no workers, no SME2 thread.
     #[cfg(target_os = "linux")]
     assert!(threads() <= before, "{before} threads before, {} after", threads());
-    let other = std::panic::catch_unwind(|| blake3_servil::initialize_multithreaded(NonZeroUsize::new(3)));
-    assert!(other.is_err(), "another number panics");
+    // Where panics unwind (wasm32 aborts on them).
+    #[cfg(panic = "unwind")]
+    {
+        let other = std::panic::catch_unwind(|| blake3_servil::initialize_multithreaded(NonZeroUsize::new(3)));
+        assert!(other.is_err(), "another number panics");
+    }
 }
