@@ -23,11 +23,12 @@ HEAD = 0x21c   # the block loop's head (cmp x5, #1)
 EXIT = 0xcc0   # its exit: the last block's compression
 
 
-def setup(obj, groups=1):
+def setup(obj, groups=1, chunks=False):
     """A group of 16 messages of n blocks (n symbolic, 2 to 16), each
     lane's bytes an array read at any offset; with groups = 2, more to come
-    (the loop then prefetches the next group's table entries)."""
-    n = BitVec("len_blocks", 64)
+    (the loop then prefetches the next group's table entries). With
+    `chunks`, the chunk kernel's entry: 16 blocks, lane l at counter + l."""
+    n = BitVecVal(16, 64) if chunks else BitVec("len_blocks", 64)
     lanes = [Array(f"msg{l}", BitVecSort(64), BitVecSort(8)) for l in range(16)]
     key = byte_symbols("key", 32)
     regions = {}
@@ -42,7 +43,7 @@ def setup(obj, groups=1):
         for j in range(8):
             table.bytes[8 * i + j] = (Ptr(f"input{i % 16}", 0), j)
     regions["table"] = table
-    s = prove_sme2.SmeSetup(obj, "blake3_sme2_hash16_messages_512", regions)
+    s = prove_sme2.SmeSetup(obj, "blake3_sme2_hash16_chunks_512" if chunks else "blake3_sme2_hash16_messages_512", regions)
     m = s.m
     counter = BitVec("counter", 64)
     flags, start, end, step = (BitVec(x, 8) for x in ("flags", "start", "end", "step"))
@@ -50,8 +51,13 @@ def setup(obj, groups=1):
     m.lengths = {"len_blocks", "len_k"}
     m.assumptions = [UGE(n, 2), ULE(n, 16)]
     m.x[0], m.x[1], m.x[2] = Ptr("table", 0), Ptr("key", 0), counter
-    m.x[3] = Concat(BitVecVal(0, 18), last_len, step, BitVecVal(0, 8), end, start, flags)
-    m.x[4], m.x[5], m.x[6] = Ptr("out", 0), BitVecVal(groups, 64), n
+    if chunks:
+        m.x[3] = Concat(BitVec("junk", 32), BitVecVal(0, 8), end, start, flags)
+        m.x[4], m.x[5] = Ptr("out", 0), BitVecVal(groups, 64)
+    else:
+        m.x[3] = Concat(BitVecVal(0, 18), last_len, step, BitVecVal(0, 8), end, start, flags)
+        m.x[4], m.x[5], m.x[6] = Ptr("out", 0), BitVecVal(groups, 64), n
+    s.lane_counter = (lambda l: counter + l) if chunks else (lambda l: counter)
     return s, m, lanes, key, (n, counter, flags, start, end, step, last_len)
 
 
@@ -123,13 +129,14 @@ def compare(m, got, want, what):
         canon.set_context([], set())
 
 
-def prove(obj):
+def prove(obj, chunks=False):
     """The step, with the last group (x5 = 1) and with more to come (2)."""
-    return "; ".join(f"{groups} group{'s' if groups > 1 else ''} to go: {prove_step(obj, groups)}" for groups in (1, 2))
+    return "; ".join(f"{groups} group{'s' if groups > 1 else ''} to go: {prove_step(obj, groups, chunks)}" for groups in (1, 2))
 
 
-def prove_step(obj, groups):
-    s, m, lanes, key, (n, counter, flags, start, end, step, last_len) = setup(obj, groups)
+def prove_step(obj, groups, chunks=False):
+    s, m, lanes, key, (n, counter, flags, start, end, step, last_len) = setup(obj, groups, chunks)
+    lc = s.lane_counter
     s0 = induction.run_to(m, s.entry, HEAD)
     s1 = induction.snapshot(s0)
     s1.assumptions = s1.assumptions + [UGE(n, 3)]
@@ -139,27 +146,29 @@ def prove_step(obj, groups):
     for l in range(16):
         h = [s0.v[i][l] for i in range(8)]
         compare(s0, h, kw, f"lane {l} at the head before block 0 (the key)")
-        want = spec.compress(kw, block_words(lanes[l], 0), counter, BitVecVal(64, 32), ZeroExt(24, flags | start))[:8]
+        want = spec.compress(kw, block_words(lanes[l], 0), lc(l), BitVecVal(64, 32), ZeroExt(24, flags | start))[:8]
         compare(s1, [s1.v[i][l] for i in range(8)], want, f"lane {l} after block 0")
     print("the first pass: block 0 under the key, with the start flag, every lane", flush=True)
     # Two-block messages: the first pass is the last, out of the loop with
     # block 1 in ZA.
     two = induction.snapshot(s0)
     two.assumptions = [a for a in two.assumptions] + [n == 2]
-    outs = induction.paths(two, HEAD, {HEAD, EXIT})
-    if [e.stopped_at for e, _ in outs] != [EXIT]:
+    outs = [] if chunks else induction.paths(two, HEAD, {HEAD, EXIT})
+    if chunks:
+        pass
+    elif [e.stopped_at for e, _ in outs] != [EXIT]:
         raise Unproved("with two blocks, the first pass does not leave the loop")
-    out = outs[0][0]
-    for l in range(16):
-        want = spec.compress(kw, block_words(lanes[l], 0), counter, BitVecVal(64, 32), ZeroExt(24, flags | start))[:8]
-        compare(out, [out.v[i][l] for i in range(8)], want, f"lane {l} after block 0 of two")
-    for row, cells in enumerate(out.za[0]):
-        for col, cell in enumerate(cells):
-            w0, w1 = lane_word(s0.za[0][row][col]), lane_word(cell)
-            if not (w0 and w1 and w0[0].eq(w1[0]) and aarch64.holds(out, aarch64.as_bv(w1[1]) == aarch64.as_bv(w0[1]) + 64)):
-                raise Unproved(f"with two blocks, ZA cell {row},{col} holds other than block 1 at the loop's exit")
-    if not aarch64.holds(out, aarch64.as_bv(out.x[7]) == 1):
-        raise Unproved("with two blocks, the loop's counter leaves other than 1")
+    for out, _ in outs:
+        for l in range(16):
+            want = spec.compress(kw, block_words(lanes[l], 0), counter, BitVecVal(64, 32), ZeroExt(24, flags | start))[:8]
+            compare(out, [out.v[i][l] for i in range(8)], want, f"lane {l} after block 0 of two")
+        for row, cells in enumerate(out.za[0]):
+            for col, cell in enumerate(cells):
+                w0, w1 = lane_word(s0.za[0][row][col]), lane_word(cell)
+                if not (w0 and w1 and w0[0].eq(w1[0]) and aarch64.holds(out, aarch64.as_bv(w1[1]) == aarch64.as_bv(w0[1]) + 64)):
+                    raise Unproved(f"with two blocks, ZA cell {row},{col} holds other than block 1 at the loop's exit")
+        if not aarch64.holds(out, aarch64.as_bv(out.x[7]) == 1):
+            raise Unproved("with two blocks, the loop's counter leaves other than 1")
     # Passes K >= 1 from the arrivals at K = 1 and 2 (four blocks or more for
     # the second arrival; the step itself covers three on).
     s1.assumptions = s1.assumptions + [UGE(n, 4)]
@@ -194,7 +203,7 @@ def prove_step(obj, groups):
     for end, _ in ends:
         at = end.stopped_at
         for l in range(16):
-            compare(end, [end.v[i][l] for i in range(8)], expect(h[l], lanes[l], 64 * K, counter, flags), f"lane {l} after block K ({at:#x})")
+            compare(end, [end.v[i][l] for i in range(8)], expect(h[l], lanes[l], 64 * K, lc(l), flags), f"lane {l} after block K ({at:#x})")
         if at == EXIT and not aarch64.holds(end, K + 2 == n):
             raise Unproved("the loop exits before its last pass")
     changed = []
@@ -299,7 +308,7 @@ def prove_one_group(obj):
     return f"one group, every length from 2 to 16 blocks: {len(ends)} paths, each lane's output the last block's compression of its chain"
 
 
-def prove_every(obj):
+def prove_every(obj, chunks=False):
     """The message kernel at every group count from 2 to 2^40 and every
     length from 3 to 16 blocks, in one induction over its group loop (as
     prove_sme2.prove_messages_every for one length at a time), the block
@@ -308,7 +317,7 @@ def prove_every(obj):
     of the chain over the blocks before it (the chain a function of the
     lane and the group's chunk)."""
     from z3 import If, BitVec as BV
-    n = BitVec("len_blocks", 64)
+    n = BitVecVal(16, 64) if chunks else BitVec("len_blocks", 64)
     g, k = BitVec("len_groups", 64), BitVec("len_k", 64)
     lanes = [Array(f"msg{l}", BitVecSort(64), BitVecSort(8)) for l in range(16)]
     key = byte_symbols("key", 32)
@@ -333,7 +342,7 @@ def prove_every(obj):
     table = Region("table", g * 128, False, entry)
     table.symbolic_initial = True
     regions["table"] = table
-    s = prove_sme2.SmeSetup(obj, "blake3_sme2_hash16_messages_512", regions)
+    s = prove_sme2.SmeSetup(obj, "blake3_sme2_hash16_chunks_512" if chunks else "blake3_sme2_hash16_messages_512", regions)
     m = s.m
     m.lengths = {"len_groups", "len_k", "len_blocks", "counter", "step"}
     m.assumptions = [UGE(g, 2), ULE(g, 1 << 40), UGE(n, 2), ULE(n, 16)]
@@ -341,8 +350,12 @@ def prove_every(obj):
     flags, start, end, step = (BitVec(x, 8) for x in ("flags", "start", "end", "step"))
     last_len = BitVec("last_len", 6)
     m.x[0], m.x[1], m.x[2] = Ptr("table", 0), Ptr("key", 0), counter
-    m.x[3] = Concat(BitVecVal(0, 18), last_len, step, BitVecVal(0, 8), end, start, flags)
-    m.x[4], m.x[5], m.x[6] = Ptr("out", 0), g, n
+    if chunks:
+        m.x[3] = Concat(BitVec("junk", 32), BitVecVal(0, 8), end, start, flags)
+        m.x[4], m.x[5] = Ptr("out", 0), g
+    else:
+        m.x[3] = Concat(BitVecVal(0, 18), last_len, step, BitVecVal(0, 8), end, start, flags)
+        m.x[4], m.x[5], m.x[6] = Ptr("out", 0), g, n
     # Each lane's chain, as a function of the group's chunk (an array, so
     # canon fingerprints it as it does the messages).
     funcs = [[Array(f"chain{l}_{w}", BitVecSort(64), BitVecSort(32)) for w in range(8)] for l in range(16)]
@@ -350,14 +363,14 @@ def prove_every(obj):
     current = [0]
     group_base = lambda: aarch64.as_bv(current[0] * 1024) if not isinstance(current[0], int) else BitVecVal(current[0] * 1024, 64)
     m.summaries = {HEAD: summary(n, chains, lanes, key, group_base)}
-    head = prove_sme2.loop_head(obj, lambda: prove_sme2.prove_messages(obj, 3, 3, 0, check=False), 2)
-    length = If(last_len == 0, BitVecVal(64, 32), ZeroExt(26, last_len))
+    head = prove_sme2.loop_head(obj, (lambda: prove_sme2.prove_chunks(obj, 3, 0, False, check=False)) if chunks else (lambda: prove_sme2.prove_messages(obj, 3, 3, 0, check=False)), 2)
+    length = BitVecVal(64, 32) if chunks else If(last_len == 0, BitVecVal(64, 32), ZeroExt(26, last_len))
     def check_group(mach, kval):
         out = mach.regions["out"]
         keys = set()
         kv = aarch64.as_bv(kval) if not isinstance(kval, int) else BitVecVal(kval, 64)
-        c = counter + ZeroExt(56, step) * kv
         for l in range(16):
+            c = counter + 16 * kv + l if chunks else counter + ZeroExt(56, step) * kv
             base = kv * 1024
             want = spec.compress(chains(l, base), block_words(lanes[l], base + 64 * (n - 1)), c, length, ZeroExt(24, flags | end))[:8]
             offs = [aarch64.key(kv * 512 + 32 * l + j) for j in range(32)]
@@ -385,7 +398,8 @@ def prove_every(obj):
         check_group(endm, k)
         prove_sme2.prove_hybrid.check_abi(endm)
     kinds = induction.loop_step(gen, s0, k, list(s0.assumptions) + [ULT(k, g), ULE(k, 1 << 39)], head, check)
-    return f"every group count and every length from 2 to 16 blocks: {kinds['head']} paths back to the group loop's head, {kinds['return']} out of it"
+    what = "the chunk kernel at every group count" if chunks else "every group count and every length from 2 to 16 blocks"
+    return f"{what}: {kinds['head']} paths back to the group loop's head, {kinds['return']} out of it"
 
 
 def main():
