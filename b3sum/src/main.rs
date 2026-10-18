@@ -688,6 +688,12 @@ fn hash_inputs_with<O: Send>(
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     std::thread::scope(|scope| {
         for _ in 1..threads {
+            // Only while inputs remain: a thread costs 15-25 us to start,
+            // more than a small file takes, so a run of a few small files
+            // starts a few.
+            if next.load(std::sync::atomic::Ordering::Relaxed) >= paths.len() {
+                break;
+            }
             let (next, done_tx, work) = (&next, done_tx.clone(), &work);
             scope.spawn(move || work(args, next, &mut |i, output| done_tx.send((i, output)).is_ok()));
         }
