@@ -3056,3 +3056,32 @@ power and memory set the pace (as on October 6, job 1384). Not built:
 workers of two kinds and the turn bypassed in the pool, for 2-4%. Worth
 another look with the stream's pool, with fewer busy cores, or on chips
 with more SME units.
+
+## The kernel with an integer lane at every group count (October 18, 2026)
+
+`tools/verify/prove_hybrid_loop.py` proves `blake3_sme2x2_hash_chunks_512`
+at every group count from 2 to 2^40 (`prove_sme2.py x2_every`, about 52
+minutes on the VM, one CPU), closing #40. It follows `prove_block_loop.py`.
+The block loop's 15 passes each hash a block of the 16 SME2 chunks and two
+blocks of one integer chunk: chunk 16 in passes 0-7 (its chaining value
+stored at pass 7), chunk 17 in passes 8-14 and the 15th after the loop.
+So the loop is proved in two halves, each one pass by induction over its
+passes (half A from pass 0's state, half B from half A's invariant at
+pass 8); about 3 minutes together. The summary the group induction uses
+checks the loop's whole entry state against half A's moved to group K:
+the key in z0-z7, each SME2 chunk's block 0 in ZA, x7, x9, x12-x15, x0
+(the table, 144 bytes a group) and the stack slots the loop reads (the
+key pointer, the counter at 18 a group, the output at 576 bytes a group,
+the three flags words); the read-before-write set came from the loop's
+code. The halves also show that only pass 7 writes the output.
+
+Two tool fixes came with it: `induction.generalized` tells a byte the
+induction generalized from a pointer's byte (both are tuples), which
+`prove_block_loop`'s list of what the loop changes had confused; and
+output bytes at symbolic offsets are found by parsing the memory key
+back into a term (`prove_hybrid_loop.term_of_key`).
+
+The group induction takes about 47 of the 52 minutes, against 15 for the
+plain chunk kernel's; the table's 144-byte stride (`URem`/`UDiv` in the
+entry function, where the plain kernel masks with 127) is the likely
+cost, untested.
