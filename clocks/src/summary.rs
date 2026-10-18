@@ -8,23 +8,18 @@
 //!
 //! **Comparing two programs** takes pairs of runs, one of each, back to back
 //! and in alternating order, so that drift between the runs falls on both
-//! sides alike. Each pair gives one ratio per cell, new mean over old
-//! ([`ratio_permille`]). Most of a measurement's uncertainty lies between
-//! runs (where the program's code landed, where its threads were placed),
-//! which no figure from inside one run can see; the pairs see it. A cell is
-//! slower ([`verdict`]) when the median of its ratios exceeds 1 plus the
-//! margin and an exact sign test says the new side was slower in more pairs
-//! than chance would give, at one-sided p <= 5% ([`least_count`]): one
-//! assumption alone, that a pair is as likely to come out either way when
-//! nothing changed.
+//! sides alike. Each pair gives one ratio per cell, new mean over old. Most
+//! of a measurement's uncertainty lies between runs (where the program's
+//! code landed, where its threads were placed), which no figure from inside
+//! one run can see; the pairs see it. A cell's change is the geometric mean
+//! of its pairs' ratios ([`geometric_mean_permille`]), and every cell of a
+//! comparison is judged at once ([`discoveries`]): a paired t-test on the
+//! log ratios, the false discovery rate controlled over all the cells, and
+//! a margin. Callers print the ratio each [`Judgment`] carries: the figure
+//! judged.
 //!
 //! **Before changing these rules**, read bench-hashes' `COMPARISONS.md`:
-//! each choice's evidence, what it gives up, the alternatives already set
-//! aside, and why the rules kept changing. In particular, [`verdict`] suits
-//! a check of a few cells (the regression check's): over a comparison's
-//! 700 cells it flags a dozen cells of unchanged code, and judging many
-//! cells at once needs their false discovery rate controlled (bench-hashes
-//! #11 with this fork's #44, adopted October 16, 2026).
+//! each choice's evidence and what it gives up.
 //!
 //! **Values** are nanoseconds per unit in fixed point, 64 integer and 64
 //! fractional bits (Q64.64, as bench-hashes' `Fixed`); ratios in permille;
@@ -48,34 +43,6 @@ pub fn ratio_permille(new: u128, old: u128) -> u64 {
     u64::try_from((new * 1000 + old / 2) / old).expect("a ratio fits in u64")
 }
 
-/// The median of permille ratios (for an even count, the mean of the two
-/// middle ones, rounded up). Requires some.
-pub fn median_permille(ratios: &[u64]) -> u64 {
-    assert!(!ratios.is_empty(), "a median needs a value");
-    let mut sorted = ratios.to_vec();
-    sorted.sort_unstable();
-    let n = sorted.len();
-    if n % 2 == 1 {
-        sorted[n / 2]
-    } else {
-        (sorted[n / 2 - 1] + sorted[n / 2]).div_ceil(2)
-    }
-}
-
-/// The least number of `pairs` that must agree for the sign test to call a
-/// change at one-sided p <= 5%: the least k with P(X >= k) <= 1/20 for X
-/// binomial(pairs, 1/2). `pairs + 1` (never) when even all of them cannot.
-/// Requires `pairs` from 1 to 64.
-pub fn least_count(pairs: usize) -> usize {
-    assert!((1..=64).contains(&pairs), "a sign test over 1 to 64 pairs");
-    let mut choose = vec![1u128; pairs + 1]; // C(pairs, j)
-    for j in 1..=pairs {
-        choose[j] = choose[j - 1] * (pairs - j + 1) as u128 / j as u128;
-    }
-    let total = 1u128 << pairs;
-    (0..=pairs + 1).find(|&k| k <= pairs && choose[k..].iter().sum::<u128>() * 20 <= total).unwrap_or(pairs + 1)
-}
-
 /// What the pairs say of one cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
@@ -84,33 +51,33 @@ pub enum Verdict {
     Level,
 }
 
-/// The ratios the pairs leave plausible for the cell's median ratio (new
-/// over old, permille): the sign test's interval, the [`least_count`]-th
-/// ratio from each end, about 90% two-sided (each side one-sided p <= 5%).
-/// A median ratio outside it is one the sign test rejects. `None` when the
-/// pairs are too few for the test to reject anything.
-pub fn interval_permille(ratios: &[u64]) -> Option<(u64, u64)> {
-    let n = ratios.len();
-    let k = least_count(n);
-    if k > n {
-        return None;
-    }
-    let mut sorted = ratios.to_vec();
-    sorted.sort_unstable();
-    Some((sorted[n - k], sorted[k - 1]))
+/// A cell's judgment: its verdict and the ratio judged, the geometric mean
+/// of its pairs' ratios (new over old, permille).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Judgment {
+    pub verdict: Verdict,
+    pub ratio_permille: u64,
 }
 
-/// A cell's verdict from its pairs' ratios (new over old, permille): slower
-/// when the median exceeds 1000 + `margin_permille` and the whole
-/// [`interval_permille`] lies above 1000 (at least [`least_count`] pairs
-/// slower); faster alike, below.
-pub fn verdict(ratios: &[u64], margin_permille: u64) -> Verdict {
-    let median = median_permille(ratios);
-    match interval_permille(ratios) {
-        Some((low, _)) if median > 1000 + margin_permille && low > 1000 => Verdict::Slower,
-        Some((_, high)) if median + margin_permille < 1000 && high < 1000 => Verdict::Faster,
-        _ => Verdict::Level,
-    }
+/// The mean of the pairs' log ratios, ln(new / old). Requires some pairs,
+/// every mean positive.
+fn mean_log_ratio(pairs: &[(u128, u128)]) -> f64 {
+    assert!(!pairs.is_empty(), "a ratio needs pairs");
+    pairs
+        .iter()
+        .map(|&(old, new)| {
+            assert!(old > 0 && new > 0, "means are positive");
+            (new as f64).ln() - (old as f64).ln()
+        })
+        .sum::<f64>()
+        / pairs.len() as f64
+}
+
+/// The geometric mean of the pairs' ratios, new over old (each pair's means
+/// as [`mean`] gives them), in permille, rounded: the change [`discoveries`]
+/// judges. Requires some pairs, every mean positive.
+pub fn geometric_mean_permille(pairs: &[(u128, u128)]) -> u64 {
+    (mean_log_ratio(pairs).exp() * 1000.0).round() as u64
 }
 
 /// Which cells of a comparison changed, every cell judged at once: for each
@@ -130,22 +97,16 @@ pub fn verdict(ratios: &[u64], margin_permille: u64) -> Verdict {
 ///
 /// Requires at least 3 pairs per cell, every cell the same count, and
 /// every mean positive.
-pub fn discoveries(cells: &[Vec<(u128, u128)>], q_permille: u64, margin_permille: u64) -> Vec<Verdict> {
+pub fn discoveries(cells: &[Vec<(u128, u128)>], q_permille: u64, margin_permille: u64) -> Vec<Judgment> {
     let pairs = cells.first().map_or(0, Vec::len);
     assert!(pairs >= 3 && cells.iter().all(|c| c.len() == pairs), "every cell has the same count of pairs, at least 3");
     // (p-value, geometric mean ratio) per cell.
     let tested: Vec<(f64, f64)> = cells
         .iter()
         .map(|c| {
-            let d: Vec<f64> = c
-                .iter()
-                .map(|&(old, new)| {
-                    assert!(old > 0 && new > 0, "means are positive");
-                    (new as f64).ln() - (old as f64).ln()
-                })
-                .collect();
+            let mu = mean_log_ratio(c);
+            let d: Vec<f64> = c.iter().map(|&(old, new)| (new as f64).ln() - (old as f64).ln()).collect();
             let n = d.len() as f64;
-            let mu = d.iter().sum::<f64>() / n;
             let var = d.iter().map(|x| (x - mu) * (x - mu)).sum::<f64>() / (n - 1.0);
             let p = if var == 0.0 {
                 if mu == 0.0 {
@@ -175,7 +136,7 @@ pub fn discoveries(cells: &[Vec<(u128, u128)>], q_permille: u64, margin_permille
             verdicts[i] = Verdict::Faster;
         }
     }
-    verdicts
+    verdicts.into_iter().zip(cells).map(|(verdict, c)| Judgment { verdict, ratio_permille: geometric_mean_permille(c) }).collect()
 }
 
 /// Student's t two-sided p-value: P(|T| >= |t|) with `df` degrees of
@@ -261,55 +222,14 @@ mod tests {
         assert_eq!(ratio_permille(mean([(110, 100)]), mean([(100, 100)])), 1100);
     }
 
-    /// The sign test's thresholds, by hand from the binomial: 6 pairs need
-    /// all 6 (1/64 = 1.6%; 5 or more is 7/64 = 10.9%); 8 need 7 (9/256 =
-    /// 3.5%; 6 or more, 37/256 = 14.5%); 10 need 9 (11/1024 = 1.1%; 8 or
-    /// more, 56/1024 = 5.5%); 4 never suffice (1/16 = 6.25%).
+    /// The geometric mean of the ratios: 1.21 and 1 give 1.1; 1.1 and 1/1.1
+    /// give 1; a single pair gives its own ratio.
     #[test]
-    fn the_sign_tests_thresholds() {
-        assert_eq!(least_count(4), 5);
-        assert_eq!(least_count(6), 6);
-        assert_eq!(least_count(8), 7);
-        assert_eq!(least_count(10), 9);
-    }
-
-    #[test]
-    fn verdicts() {
-        // Seven of eight pairs slower, the median 5% up: slower at 3%.
-        let ratios = [1050, 1060, 1040, 1055, 1048, 990, 1052, 1070];
-        assert_eq!(median_permille(&ratios), 1051);
-        assert_eq!(verdict(&ratios, 30), Verdict::Slower);
-        // The same at a 10% margin: level.
-        assert_eq!(verdict(&ratios, 100), Verdict::Level);
-        // A median beyond the margin from two wild pairs, but only six of
-        // eight above 1: level (the sign test).
-        let wild = [1200, 1300, 1040, 1035, 1045, 1033, 970, 980];
-        assert_eq!(verdict(&wild, 30), Verdict::Level);
-        assert_eq!(verdict(&[940, 950, 960, 955, 945, 1010, 950, 948], 30), Verdict::Faster);
-    }
-
-    /// The interval is the sign test inverted: over every set of up to 9
-    /// pairs from a few ratios, the verdict through it equals the counts'.
-    #[test]
-    fn the_interval_is_the_sign_test() {
-        let values = [940u64, 990, 1000, 1010, 1060];
-        for n in 1..=9usize {
-            for code in 0..values.len().pow(n as u32) {
-                let ratios: Vec<u64> = (0..n).map(|i| values[code / values.len().pow(i as u32) % values.len()]).collect();
-                let k = least_count(n);
-                let median = median_permille(&ratios);
-                let counted = if median > 1030 && ratios.iter().filter(|&&r| r > 1000).count() >= k {
-                    Verdict::Slower
-                } else if median + 30 < 1000 && ratios.iter().filter(|&&r| r < 1000).count() >= k {
-                    Verdict::Faster
-                } else {
-                    Verdict::Level
-                };
-                assert_eq!(verdict(&ratios, 30), counted, "{ratios:?}");
-            }
-        }
-        assert_eq!(interval_permille(&[1010, 1020, 1030, 1040, 1050, 1060, 1070, 1080]), Some((1020, 1070)));
-        assert_eq!(interval_permille(&[1000; 4]), None);
+    fn the_change_is_the_geometric_mean_of_the_ratios() {
+        let pair = |old: u128, new: u128| (old << 64, new << 64);
+        assert_eq!(geometric_mean_permille(&[pair(100, 121), pair(100, 100)]), 1100);
+        assert_eq!(geometric_mean_permille(&[pair(100, 110), pair(110, 100)]), 1000);
+        assert_eq!(geometric_mean_permille(&[pair(200, 150)]), 750);
     }
 
     /// Student's t at its tables' points: t = 2.776 with 4 degrees of
@@ -330,10 +250,13 @@ mod tests {
     fn discoveries_judge_every_cell_at_once() {
         let pairs = |ratios: &[u128]| ratios.iter().map(|&r| (1000u128 << 63, r << 63)).collect::<Vec<_>>();
         let cells = vec![pairs(&[1100, 1102, 1098, 1101, 1099]), pairs(&[1030, 970, 1025, 975, 1000]), pairs(&[990, 991, 989, 990, 990])];
-        assert_eq!(discoveries(&cells, 50, 30), [Verdict::Slower, Verdict::Level, Verdict::Level]);
+        let judged = discoveries(&cells, 50, 30);
+        assert_eq!(judged.iter().map(|j| j.verdict).collect::<Vec<_>>(), [Verdict::Slower, Verdict::Level, Verdict::Level]);
+        // Each judgment carries the ratio judged: the pairs' geometric mean.
+        assert_eq!(judged.iter().map(|j| j.ratio_permille).collect::<Vec<_>>(), [1100, 1000, 990]);
         let mut many = vec![pairs(&[1030, 970, 1025, 975, 1000]); 1000];
         many.push(pairs(&[1100, 1102, 1098, 1101, 1099]));
-        assert_eq!(discoveries(&many, 50, 30).iter().filter(|&&v| v != Verdict::Level).count(), 1);
-        assert!(discoveries(&many, 0, 30).iter().all(|&v| v == Verdict::Level));
+        assert_eq!(discoveries(&many, 50, 30).iter().filter(|j| j.verdict != Verdict::Level).count(), 1);
+        assert!(discoveries(&many, 0, 30).iter().all(|j| j.verdict == Verdict::Level));
     }
 }

@@ -463,9 +463,9 @@ mod tests {
     #[test]
     fn a_reaped_childs_cpu_time_is_this_processs() {
         let _one = one();
-        let before = crate::process_cpu_ns();
+        let before = crate::process_cpu_ns().expect("unix has a process CPU clock");
         let child = run(std::process::Command::new("sh").args(["-c", "i=0; while [ $i -lt 50000 ]; do i=$((i+1)); done"]));
-        let after = crate::process_cpu_ns();
+        let after = crate::process_cpu_ns().expect("unix has a process CPU clock");
         assert!(after - before >= child.cpu_ns.unwrap(), "{before} {after} {child:?}");
     }
 }

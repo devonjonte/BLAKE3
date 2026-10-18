@@ -90,7 +90,7 @@ impl Reading {
     fn take() -> Option<Reading> {
         let at_ns = now_ns();
         let machine = imp::read()?;
-        Some(Reading { at_ns, machine, own_ns: crate::process_cpu_ns() })
+        Some(Reading { at_ns, machine, own_ns: crate::process_cpu_ns()? })
     }
 }
 
