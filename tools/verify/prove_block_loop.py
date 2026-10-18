@@ -219,7 +219,7 @@ def prove_step(obj, groups, chunks=False):
         if kinds:
             changed.append(("za", t, "/".join(sorted(kinds))))
     for name, mem in gen.mem.items():
-        if any(b is None or isinstance(b, tuple) for b in mem.values()):
+        if any(induction.generalized(b) for b in mem.values()):
             changed.append(("mem", name, ""))
     if gen.p is not None:
         changed += [("p", q, "") for q, v in gen.p.items() if v is None]

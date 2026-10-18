@@ -137,7 +137,11 @@ def half_a(obj, groups=1):
             pbl.compare(e, [e.v[i][l] for i in range(8)], comp(h[l], lanes[l], 64 * K, counter + l, flags), f"lane {l} after pass K")
         c = comp(comp(hi, lanes[16], 128 * K, counter + 16, flags), lanes[16], 128 * K + 64, counter + 16, flags | end if last else flags)
         pbl.compare(e, integer_state(e), c, "chunk 16 after pass K (its blocks 2K and 2K + 1)")
+        if not last and len(e.regions["out"].bytes) != len(mk.regions["out"].bytes):
+            raise Unproved("a pass of half A before pass 7 writes the output")
         if last:
+            if len(e.regions["out"].bytes) != 32 + len(mk.regions["out"].bytes):
+                raise Unproved("pass 7 writes the output beyond chunk 16's chaining value")
             got = stored(e, 32 * 16)
             if got is None:
                 raise Unproved("pass 7 leaves chunk 16's chaining value unstored")
@@ -187,6 +191,8 @@ def half_b(obj, gen_a, s1_a, groups=1):
         for pos in forget:
             gen.forget(pos)
     for e, _ in ends:
+        if len(e.regions["out"].bytes) != len(mk.regions["out"].bytes):
+            raise Unproved("a pass of half B writes the output")
         if e.stopped_at == EXIT and not aarch64.holds(e, K == 14):
             raise Unproved("the loop exits before pass 14")
         for l in range(16):
@@ -196,12 +202,120 @@ def half_b(obj, gen_a, s1_a, groups=1):
     return gen, s9, f"half B: {len(ends)} paths of passes 9 to 14, each the standard's compressions, out of the loop after 14"
 
 
+def changes(gen_a, gen_b):
+    """What the loop changes, by its two inductions: general registers,
+    vector registers, predicates, and stack bytes."""
+    xs = sorted({r for g in (gen_a, gen_b) for r, v in g.x.items() if isinstance(v, tuple)})
+    stack = sorted({o for g in (gen_a, gen_b) for o, b in g.mem.get("stack", {}).items() if induction.generalized(b)})
+    preds = sorted({q for g in (gen_a, gen_b) for q, v in (g.p or {}).items() if v is None})
+    return xs, stack, preds
+
+
+def summary(gen_a, gen_b, chains, chain16, chain17, lanes, key, group_base=lambda: 0, chunk=lambda l: l):
+    """The block loop by its two halves' proofs: from a group's first
+    arrival (pass 0) to the exit after pass 14. z0-z7 the SME2 chunks'
+    chains over blocks 0 to 14; chunk 16's chaining value stored where
+    pass 7 stores it; chunk 17's chain over its blocks 0 to 13 in its state
+    registers, and its pointer and counter as pass 8 sets them; block 15 in
+    ZA; the rest the loop changes unknown."""
+    from z3 import BitVec as BV
+    xs, stack, preds = changes(gen_a, gen_b)
+    fresh = [0]
+    def unknown(size):
+        fresh[0] += 1
+        return BV(f"after_hybrid_loop{fresh[0]}", size)
+    def run(m):
+        if aarch64.concrete(m.x[7]) != 0:
+            raise Unproved("the block loop entered other than at its first pass")
+        kw = spec.words(key)
+        for l in range(16):
+            pbl.compare(m, [m.v[i][l] for i in range(8)], kw, f"lane {l} entering the block loop (the key)")
+        base = aarch64.as_bv(group_base())
+        for row, cells in enumerate(m.za[0]):
+            for col, cell in enumerate(cells):
+                w = pbl.lane_word(cell)
+                if w is None or not any(w[0].eq(a) for a in lanes[:16]) or \
+                        next((c for c in range(0, 64, 4) if aarch64.holds(m, aarch64.as_bv(w[1]) == base + c)), None) is None:
+                    raise Unproved(f"ZA tile 0 cell {row},{col} holds other than the group's block 0 entering the loop")
+        # Chunk 17's pointer and counter as pass 8 sets them (table entry 17,
+        # the counter saved at sp + 0xa8, plus 17), the pointer two blocks a
+        # pass on to pass 15's blocks 14 and 15.
+        table17 = m.load(m.x[0] + 8 * 17, 8)
+        sp = m.x["sp"]
+        if not isinstance(table17, Ptr):
+            raise Unproved("table entry 17 is no pointer entering the loop")
+        saved = m.load(sp + 0xa8, 8)
+        for r in xs:
+            m.x[r] = unknown(64)
+        m.x[7] = BitVecVal(15, 64)
+        m.x[9] = aarch64.as_bv(m.x[9]) + 64 * 15
+        m.x[27] = Ptr(table17.region, aarch64.as_bv(table17.offset) + 128 * 7)
+        m.x[28] = aarch64.as_bv(saved) + 17
+        for w, r in enumerate(INT):
+            m.x[r] = ZeroExt(32, chain17(base)[w])
+        for r in range(32):
+            m.v[r] = [chains(l, base)[r] for l in range(16)] if r < 8 else [unknown(32) for _ in range(16)]
+        for row, cells in enumerate(m.za[0]):
+            for col, cell in enumerate(cells):
+                w = pbl.lane_word(cell)
+                o = aarch64.as_bv(w[1]) + 64 * 15
+                m.za[0][row][col] = Concat(*[Select(w[0], o + j) for j in reversed(range(4))])
+        for q in preds:
+            m.p[q] = None
+        st = m.regions["stack"]
+        for o in stack:
+            st.bytes[o] = unknown(8)
+        return EXIT
+    return run
+
+
+def prove_one_group(obj, gen_a, gen_b):
+    """The hybrid kernel on one group, its block loop by its proofs: each
+    output the standard's chaining value of its chunk, its last block's
+    compression of the chain before it."""
+    from z3 import BitVec as BV
+    s, m, lanes, key, (counter, flags, start, end) = setup(obj)
+    tab = [[BV(f"chain{l}_{w}", 32) for w in range(8)] for l in range(16)]
+    c16 = [BV(f"chain16_{w}", 32) for w in range(8)]
+    c17 = [BV(f"chain17_{w}", 32) for w in range(8)]
+    m.summaries = {HEAD: summary(gen_a, gen_b, lambda l, b: tab[l], lambda b: c16, lambda b: c17, lanes, key)}
+    # Chunk 16's chaining value: half A proves pass 7 stores it at output 16,
+    # and that no other pass of either half writes the output.
+    run = m.summaries[HEAD]
+    def with_c16(mm):
+        nxt = run(mm)
+        out = mm.regions["out"]
+        for w in range(8):
+            for j in range(4):
+                out.bytes[32 * 16 + 4 * w + j] = Extract(8 * j + 7, 8 * j, c16[w])
+        return nxt
+    m.summaries = {HEAD: with_c16}
+    ends = induction.paths(m, s.entry, set())
+    for e, how in ends:
+        if how != "return" or aarch64.concrete(e.x[0]) != 16:
+            raise Unproved("a path ends other than at the kernel's return of 16")
+        prove_sme2.prove_hybrid.check_abi(e)
+        for l in range(16):
+            got = stored(e, 32 * l)
+            if got is None:
+                raise Unproved(f"output {l} is not wholly written")
+            pbl.compare(e, got, comp(tab[l], lanes[l], 64 * 15, counter + l, flags | end), f"output {l}")
+        pbl.compare(e, stored(e, 32 * 16), c16, "output 16 (chunk 16's chaining value)")
+        want17 = comp(comp(c17, lanes[17], 64 * 14, counter + 17, flags), lanes[17], 64 * 15, counter + 17, flags | end)
+        got17 = stored(e, 32 * 17)
+        if got17 is None:
+            raise Unproved("output 17 is not wholly written")
+        pbl.compare(e, got17, want17, "output 17 (chunk 17's last two blocks)")
+    return f"one group: {len(ends)} paths, every output its chunk's chaining value"
+
+
 def main():
     obj = prove_sme2.assemble_hybrid()
     gen_a, s1_a, what = half_a(obj)
     print(what, flush=True)
     gen_b, s9, what = half_b(obj, gen_a, s1_a)
-    print(what)
+    print(what, flush=True)
+    print(prove_one_group(obj, gen_a, gen_b))
 
 
 if __name__ == "__main__":

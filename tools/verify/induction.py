@@ -90,6 +90,12 @@ def run_to(m, pc, head):
     return ends[0][0]
 
 
+def generalized(b):
+    """Whether an invariant's memory byte is one the induction generalized
+    (unknown, None, or a step), as against a value or a pointer's byte."""
+    return b is None or (isinstance(b, tuple) and isinstance(b[0], str))
+
+
 class Generalized:
     """Two arrivals at a loop head made one state at iteration K."""
     def __init__(self, s0, s1, k):
