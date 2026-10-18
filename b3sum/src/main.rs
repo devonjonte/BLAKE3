@@ -282,7 +282,7 @@ const POOL_LEN: usize = 512 << 10;
 /// 100 us) to save less. A file read from storage keeps POOL_LEN: there the
 /// pool's page faults keep more reads in flight.
 #[cfg(unix)]
-const SHARED_POOL_LEN: usize = 8 << 20;
+const SHARED_POOL_LEN: usize = POOL_LEN;
 
 /// Hash `input` into `hasher`: over the pool from `pool_from` (at least
 /// POOL_LEN), starting it at the first such input
