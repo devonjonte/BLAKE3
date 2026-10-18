@@ -37,7 +37,7 @@ the bugs those steps found and what formal verification we have tried.
   Miri, and guard pages around every kernel's buffers.
 
 The proofs cover the assembly, which tests reach least; the Rust around
-it is tested. No person has yet reviewed the code line by line or
+it is tested. No human has yet reviewed the code line by line or
 audited it; the [README's warning](README.md) stands.
 
 **Where to look next:** "Proofs" states each claim precisely, with what
@@ -144,12 +144,11 @@ whole set itself when the change removes or alters test code.
 sides (906 of 1026), over the default, one-CPU, and no-std runs. Most of
 the rest are the branches of other machines (the std build on a CPU
 without the SHA-3 extension or without SME2, which CI's AArch64 job now
-runs), the pool's scheduling races, and fail-stop arms.
-The aim is
-every branch side of the code users run, each one reached by a test or
-named as unreachable in the code, and every mutant either caught or
-explained; a branch that is not worth a test is a sign the branch is not
-worth keeping.
+runs), the pool's scheduling races, and fail-stop arms. The aim is every
+branch side of the code users run, each one reached by a test or named
+as unreachable in the code, and every mutant either caught or explained;
+a branch that is not worth a test is a sign the branch is not worth
+keeping.
 
 **The suites** (the fork's `src/test.rs` and each module's tests), among
 them: every case of `hash_many` on every platform the CPU has, and of the
@@ -492,11 +491,11 @@ among them, and however often the hash is timed.
 
 1. **The instructions run, and the memory addresses they touch, depend
    only on the length.** Proved for every AArch64 assembly kernel, as
-   assembled: each proof
-   stops at any branch, memory address, or table index that depends on
-   the key or the message. The Rust code around the kernels is written to
-   branch on lengths alone, and tested, but no proof checks it; on x86-64
-   upstream's kernels make the same design choice, unproved here.
+   assembled: each proof stops at any branch, memory address, or table
+   index that depends on the key or the message. The Rust code around
+   the kernels is written to branch on lengths alone, and tested, but no
+   proof checks it; on x86-64 upstream's kernels make the same design
+   choice, unproved here.
 2. **Each instruction takes the same time whatever values it computes
    on.** That is a promise of the CPU. Arm CPUs make it, for a listed set
    of instructions, while data-independent timing (DIT) is enabled. The
@@ -511,7 +510,7 @@ among them, and however often the hash is timed.
 
 ## Not yet done
 
-No person has reviewed the code line by line, and nobody has audited it.
+No human has reviewed the code line by line, and nobody has audited it.
 The test suites have run on an Apple M4 Max, under macOS and in a
 Debian 12 AArch64 VM on it (whose SME2 unit the VM exposes), and on
 CI's hosted machines; the sanitizers on both, Miri in the VM.
