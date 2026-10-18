@@ -214,13 +214,8 @@ mod avx2;
 #[path = "ffi_avx512.rs"]
 mod avx512;
 #[cfg(blake3_neon)]
-#[path = "ffi_neon.rs"]
-mod neon;
-#[cfg(blake3_neon_hybrid)]
 #[path = "ffi_neon_hybrid.rs"]
 mod neon_hybrid;
-#[cfg(all(blake3_neon, target_arch = "aarch64"))]
-mod neon_xof;
 mod portable;
 #[cfg(target_arch = "x86_64")]
 #[cfg_attr(not(blake3_sse41_rust), allow(dead_code))]
@@ -753,11 +748,11 @@ fn compress_chunks_parallel(input: &[u8], key: &CVWords, chunk_counter: u64, fla
     // Whole chunks and a partial one, on the NEON hybrids: where a q kernel
     // covers the count, the partial chunk runs on the scalar units beside
     // the whole chunks rather than after them.
-    #[cfg(blake3_neon_hybrid)]
+    #[cfg(blake3_neon)]
     let hybrids = matches!(platform, Platform::NEON);
     #[cfg(blake3_sme2)]
     let hybrids = hybrids || matches!(platform, Platform::SME2);
-    #[cfg(blake3_neon_hybrid)]
+    #[cfg(blake3_neon)]
     if !chunks_exact.remainder().is_empty()
         && hybrids
         && neon_hybrid::partial_pays(chunks_array.len(), chunks_exact.remainder().len())
@@ -851,7 +846,7 @@ fn compress_subtree_to_parent_node(input: &[u8], ahead: usize, key: &CVWords, ch
 // into a zero-padded buffer, which is the copy ChunkState::update() makes
 // too. The scalar kernel runs on every AArch64 core, so this path needs no
 // platform check.
-#[cfg(blake3_neon_hybrid)]
+#[cfg(blake3_neon)]
 #[inline]
 fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8) -> Hash {
     debug_assert!(input.len() <= CHUNK_LEN);
@@ -1149,7 +1144,7 @@ fn hash_serial_from(platform: Platform, input: &[u8], key: &CVWords, flags: u8) 
     // One comparison on the path of a chunk or less: everything else is
     // out of line, so that path's code stays as small as it was (a call
     // after other work fetches every line of it from DRAM).
-    #[cfg(all(blake3_neon_hybrid, feature = "std"))]
+    #[cfg(all(blake3_neon, feature = "std"))]
     if (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
         prefetch_after_pause(input.len(), turn.platform(), false);
     }
@@ -1162,13 +1157,13 @@ fn hash_serial_from(platform: Platform, input: &[u8], key: &CVWords, flags: u8) 
 /// x0.61, 8 KiB x0.51, 16 KiB x0.66; 32 KiB and up level, the hashing's
 /// own time dwarfing it; jobs 971-975). The streaming paths (Hasher,
 /// batches, the streams' tasks) run back to back with their code near.
-#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[cfg(all(blake3_neon, feature = "std"))]
 const PREFETCH_BELOW: usize = 64 * 1024;
 
 /// After a pause (code_may_be_cold), prefetch the kernels hashing `len`
 /// bytes runs: a one-shot call's (prefetch_kernels), or with `fresh_hasher`
 /// a fresh Hasher's first update's (prefetch_update_kernels).
-#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[cfg(all(blake3_neon, feature = "std"))]
 // Cold for layout: the path of a chunk or less falls through past its
 // call, on the lines it had before the call existed.
 #[cold]
@@ -1187,7 +1182,7 @@ fn prefetch_after_pause(len: usize, platform: Platform, fresh_hasher: bool) {
 /// 100 us ago (or never). Calls back to back find their code near, where
 /// the prefetch would cost them 2-4% (jobs 972-975); one that follows a
 /// pause is the one other work may have taken the code from.
-#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[cfg(all(blake3_neon, feature = "std"))]
 #[inline]
 fn code_may_be_cold() -> bool {
     std::thread_local! {
@@ -1200,7 +1195,7 @@ fn code_may_be_cold() -> bool {
 
 /// Batches of one-block messages up to this many prefetch their code after
 /// a pause: past it the hashing's own time dwarfs a cold kernel's.
-#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[cfg(all(blake3_neon, feature = "std"))]
 const PREFETCH_BATCH_BELOW: usize = 64;
 
 /// Batches of 1 to this many one-block messages run on the pair kernel
@@ -1209,7 +1204,7 @@ const PREFETCH_BATCH_BELOW: usize = 64;
 /// message's kernel (3.9 KB), and after a pause the code comes from memory
 /// (Mac jobs 1320-1337: 12 and 16 run faster after idling and slower after
 /// other work this way).
-#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[cfg(all(blake3_neon, feature = "std"))]
 const PAIRS_AFTER_PAUSE_UPTO: usize = 8;
 
 /// After a pause (code_may_be_cold), a batch of `count` one-block
@@ -1217,7 +1212,7 @@ const PAIRS_AFTER_PAUSE_UPTO: usize = 8;
 /// (true: done); otherwise its kernels' code prefetched (false: hash it as
 /// usual), SME2's message kernel where it takes the batch, else the
 /// hybrids' parent plans.
-#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[cfg(all(blake3_neon, feature = "std"))]
 #[cold]
 #[inline(never)]
 fn batch_after_pause(input: &[u8], message_len: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]], platform: Platform) -> bool {
@@ -1251,7 +1246,7 @@ fn batch_after_pause(input: &[u8], message_len: usize, key: &CVWords, flags: u8,
 
 /// Prefetch the code of the kernels hashing `len` bytes on `platform`
 /// runs: SME2's from 16 chunks, else the hybrids', chunks to root.
-#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[cfg(all(blake3_neon, feature = "std"))]
 fn prefetch_kernels(len: usize, platform: Platform) {
     #[cfg(blake3_sme2)]
     if matches!(platform, Platform::SME2) && len >= SME2_SIZED_LEN {
@@ -1276,7 +1271,7 @@ fn prefetch_kernels(len: usize, platform: Platform) {
 /// Prefetch the code a fresh Hasher's update of `len` bytes runs: the
 /// subtrees its loop cuts (hasher::subtree_len from counter 0, up to the last
 /// chunk, which waits in the chunk state), each one's kernels.
-#[cfg(all(blake3_neon_hybrid, feature = "std"))]
+#[cfg(all(blake3_neon, feature = "std"))]
 fn prefetch_update_kernels(len: usize, platform: Platform) {
     if !neon_hybrid::sha3_detected() {
         return;
@@ -1369,7 +1364,7 @@ fn hash_many_serial_from(platform: Platform, input: &[u8], message_len: usize, k
     let turn = platform::Sme2Turn::take(platform, many::sme2_sized(message_len, out.len()));
     // A small batch of one-block messages after a pause fetches its kernels'
     // code in parallel (as hash_serial does): its time is mostly that code.
-    #[cfg(all(blake3_neon_hybrid, feature = "std"))]
+    #[cfg(all(blake3_neon, feature = "std"))]
     if message_len <= BLOCK_LEN && (1..=PREFETCH_BATCH_BELOW).contains(&out.len()) && batch_after_pause(input, message_len, key, flags, out, turn.platform()) {
         return;
     }
@@ -1695,7 +1690,7 @@ impl Hasher {
         // A fresh hasher's first update is a one-shot call's work (a
         // Hasher per message, the digest traits): it prefetches its code
         // after a pause, as hash() does.
-        #[cfg(all(blake3_neon_hybrid, feature = "std"))]
+        #[cfg(all(blake3_neon, feature = "std"))]
         if self.count() == 0 && (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
             prefetch_after_pause(input.len(), self.core.chunk_state.platform, true);
         }
