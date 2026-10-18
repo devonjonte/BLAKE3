@@ -778,8 +778,13 @@ impl Pool {
             while word.load(Ordering::SeqCst) & bit != 0 {
                 std::thread::park();
             }
-            // Woken: pay the wakes owed before working.
-            while self.owed.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok() {
+            // Woken: pay up to two of the wakes owed, then work; the woken
+            // pay the rest, so the wakes spread as a tree and each worker
+            // starts its first piece sooner.
+            for _ in 0..2 {
+                if self.owed.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_err() {
+                    break;
+                }
                 if !self.wake_one() {
                     self.owed.store(0, Ordering::SeqCst);
                     break;
