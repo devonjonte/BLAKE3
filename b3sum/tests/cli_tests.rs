@@ -97,6 +97,33 @@ fn test_hash_many() {
     assert_eq!(expected_no_names, output_no_names);
 }
 
+/// Many files of many sizes, more than b3sum keeps in flight (on Linux, up
+/// to 64 read ahead), each digest the library's and in
+/// the order given: empty files, small ones, and ones beside the 512 KiB
+/// boundary where mapping takes over.
+#[test]
+fn test_hash_many_sizes() {
+    blake3::initialize();
+    let dir = tempfile::tempdir().unwrap();
+    let sizes = [0usize, 1, 64, 1023, 1024, 1025, 16 << 10, (512 << 10) - 1, 512 << 10, (512 << 10) + 1];
+    let mut expected = String::new();
+    let mut files = Vec::new();
+    for i in 0..300 {
+        let len = sizes[i % sizes.len()];
+        let bytes: Vec<u8> = (0..len).map(|j| (j as u32 * 31 + i as u32) as u8).collect();
+        let path = dir.path().join(format!("{i:03}"));
+        fs::write(&path, &bytes).unwrap();
+        expected += &format!("{}\n", blake3::hash(&bytes).to_hex());
+        files.push(path);
+    }
+    // One thread holds the deepest batch (64 files), two half of it.
+    for threads in [&["--num-threads=1"][..], &["--num-threads=2"], &[]] {
+        let args = ["--no-names"].iter().chain(threads).map(Into::into).chain(files.iter().map(|p| p.clone().into_os_string()));
+        let output = cmd(b3sum_exe(), args.collect::<Vec<std::ffi::OsString>>()).read().unwrap();
+        assert_eq!(expected.trim_end(), output, "{threads:?}");
+    }
+}
+
 #[test]
 fn test_hash_many_tag() {
     blake3::initialize();
