@@ -94,7 +94,11 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
     let mut more = true;
     while more {
         let mut missed = Vec::with_capacity(batch);
-        while missed.len() < batch {
+        // Pilot (B3_LARGE_AHEAD): large files that missed the cache, advised
+        // whole and hashed after the batch.
+        let mut large: Vec<usize> = Vec::new();
+        let large_ahead = std::env::var_os("B3_LARGE_AHEAD").is_some();
+        while missed.len() + large.len() < batch {
             let i = next.fetch_add(1, Ordering::Relaxed);
             if i >= paths.len() {
                 more = false;
@@ -103,6 +107,19 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
             let small = std::fs::File::open(&paths[i]).and_then(|file| Ok((file.metadata()?, file)));
             let (opened, file) = match small {
                 Ok((opened, file)) if opened.is_file() && opened.len() < SMALL => (opened, file),
+                Ok((opened, file)) if large_ahead && opened.is_file() => {
+                    let mut first = [0u8; 1];
+                    if read_cached(&file, &mut first) == 1 {
+                        if !done(i, crate::hash_path(args, &paths[i])) {
+                            return;
+                        }
+                    } else {
+                        // Sound: advice on an open descriptor.
+                        unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_WILLNEED) };
+                        large.push(i);
+                    }
+                    continue;
+                }
                 // Not for the batch (or an error, which hash_path reports).
                 _ => {
                     if !done(i, crate::hash_path(args, &paths[i])) {
@@ -122,6 +139,11 @@ fn hash_some(args: &Args, next: &AtomicUsize, done: &mut dyn FnMut(usize, anyhow
             // Sound: advice on an open descriptor.
             unsafe { libc::posix_fadvise(file.as_raw_fd(), cached as i64, 0, libc::POSIX_FADV_WILLNEED) };
             missed.push(Missed { index: i, file, opened, bytes: buffer[..cached].to_vec() });
+        }
+        for index in large {
+            if !done(index, crate::hash_path(args, &paths[index])) {
+                return;
+            }
         }
         for Missed { index, mut file, opened, mut bytes } in missed {
             let at = bytes.len();
