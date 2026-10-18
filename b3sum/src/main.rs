@@ -11,6 +11,9 @@ mod unit_tests;
 
 const NAME: &str = "b3sum";
 
+#[cfg(unix)]
+mod pread;
+
 const DERIVE_KEY_ARG: &str = "derive_key";
 const KEYED_ARG: &str = "keyed";
 const LENGTH_ARG: &str = "length";
@@ -173,6 +176,15 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
         update_from(&mut hasher, io::stdin())?;
     } else {
         let file = File::open(path)?;
+        #[cfg(unix)]
+        if std::env::var_os("B3_PREAD").is_some() && !args.keyed() && args.inner.derive_key.is_none() {
+            let len = file.metadata()?.len();
+            if len > 8 << 20 {
+                let mut output = pread::hash(&file, len, std::thread::available_parallelism().map_or(1, |n| n.get()))?;
+                output.set_position(args.seek());
+                return Ok(output);
+            }
+        }
         #[cfg(unix)]
         if let Some(map) = mapped(&file) {
             // Beside other files, a file in the page cache takes the pool only
