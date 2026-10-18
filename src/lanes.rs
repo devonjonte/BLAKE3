@@ -821,7 +821,9 @@ fn spin_for_work(after_job: bool) -> bool {
             }
             core::hint::spin_loop();
         }
-        if started.elapsed() >= SPIN || (!after_job && !sources::open()) {
+        // Experiment: 50 us after a call's pieces, SPIN while a stream is open.
+        let limit = if after_job { std::time::Duration::from_micros(50) } else { SPIN };
+        if started.elapsed() >= limit || (!after_job && !sources::open()) {
             return false;
         }
     }
