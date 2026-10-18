@@ -196,7 +196,8 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
             // Beside other files, a file in the page cache takes the pool only
             // from SHARED_POOL_LEN (see there); one read from storage, from
             // POOL_LEN.
-            let pool_from = if args.file_args.len() > 1 && resident(&map) { SHARED_POOL_LEN } else { POOL_LEN };
+            let shared = std::env::var("B3_SHARED").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(SHARED_POOL_LEN);
+            let pool_from = if args.file_args.len() > 1 && resident(&map) { shared } else { POOL_LEN };
             update(&mut hasher, &map, pool_from);
             hashed_len = map.len() as u64;
             hold(map);
