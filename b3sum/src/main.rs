@@ -11,6 +11,29 @@ mod unit_tests;
 
 const NAME: &str = "b3sum";
 
+/// Where results go: stdout, line by line on a terminal, else in blocks of
+/// 64 KiB, as GNU's tools write (a run of 1000 small files made 1000 write
+/// calls, one a line). Flushed before anything goes to stderr (so the two
+/// keep their order), before a mapped file is hashed (a truncation's
+/// SIGBUS ends the process at once), and at exit.
+static OUT: std::sync::OnceLock<std::sync::Mutex<Box<dyn Write + Send>>> = std::sync::OnceLock::new();
+
+fn out() -> std::sync::MutexGuard<'static, Box<dyn Write + Send>> {
+    OUT.get_or_init(|| {
+        use std::io::IsTerminal;
+        let stdout = io::stdout();
+        let writer: Box<dyn Write + Send> = if stdout.is_terminal() { Box::new(io::LineWriter::new(stdout)) } else { Box::new(io::BufWriter::with_capacity(64 << 10, stdout)) };
+        std::sync::Mutex::new(writer)
+    })
+    .lock()
+    .expect("no writer panics holding stdout")
+}
+
+/// The results written so far, out to stdout.
+fn flush_out() -> io::Result<()> {
+    out().flush()
+}
+
 const DERIVE_KEY_ARG: &str = "derive_key";
 const KEYED_ARG: &str = "keyed";
 const LENGTH_ARG: &str = "length";
@@ -175,6 +198,9 @@ fn hash_path(args: &Args, path: &Path) -> anyhow::Result<blake3::OutputReader> {
         let file = File::open(path)?;
         #[cfg(unix)]
         if let Some(map) = mapped(&file) {
+            // A truncation while mapped ends the process (SIGBUS): what is
+            // printed stays printed.
+            let _ = flush_out();
             // Beside other files, a file in the page cache takes the pool only
             // from SHARED_POOL_LEN (see there); one read from storage, from
             // POOL_LEN.
@@ -375,7 +401,7 @@ fn write_hex_output(mut output: blake3::OutputReader, args: &Args) -> anyhow::Re
         output.fill(&mut block);
         let hex_str = hex::encode(&block[..]);
         let take_bytes = cmp::min(len, block.len() as u64);
-        print!("{}", &hex_str[..2 * take_bytes as usize]);
+        write!(out(), "{}", &hex_str[..2 * take_bytes as usize])?;
         len -= take_bytes;
     }
     Ok(())
@@ -383,9 +409,7 @@ fn write_hex_output(mut output: blake3::OutputReader, args: &Args) -> anyhow::Re
 
 fn write_raw_output(output: blake3::OutputReader, args: &Args) -> anyhow::Result<()> {
     let mut output = output.take(args.len());
-    let stdout = std::io::stdout();
-    let mut handler = stdout.lock();
-    std::io::copy(&mut output, &mut handler)?;
+    std::io::copy(&mut output, &mut *out())?;
 
     Ok(())
 }
@@ -607,6 +631,7 @@ fn hash_inputs(args: &Args) -> u64 {
         let mut print = |i: usize, output: anyhow::Result<blake3::OutputReader>, printed: &mut usize| {
             if let Err(e) = output.and_then(|output| print_output(output, &paths[i], args)) {
                 failed = failed.saturating_add(1);
+                let _ = flush_out();
                 eprintln!("{}: {}: {}", NAME, paths[i].to_string_lossy(), e);
             }
             *printed += 1;
@@ -644,7 +669,7 @@ fn print_output(output: blake3::OutputReader, path: &Path, args: &Args) -> anyho
     }
     if args.no_names() {
         write_hex_output(output, args)?;
-        println!();
+        writeln!(out())?;
         return Ok(());
     }
     let FilepathString {
@@ -652,16 +677,16 @@ fn print_output(output: blake3::OutputReader, path: &Path, args: &Args) -> anyho
         is_escaped,
     } = filepath_to_string(path);
     if is_escaped {
-        print!("\\");
+        write!(out(), "\\")?;
     }
     if args.tag() {
-        print!("BLAKE3 ({}) = ", filepath_string);
+        write!(out(), "BLAKE3 ({}) = ", filepath_string)?;
         write_hex_output(output, args)?;
-        println!();
+        writeln!(out())?;
         return Ok(());
     }
     write_hex_output(output, args)?;
-    println!("  {}", filepath_string);
+    writeln!(out(), "  {}", filepath_string)?;
     Ok(())
 }
 
@@ -678,6 +703,7 @@ fn check_one_line(line: &str, args: &Args) -> bool {
     } = match parse_result {
         Ok(parsed) => parsed,
         Err(e) => {
+            let _ = flush_out();
             eprintln!("{}: {}", NAME, e);
             return false;
         }
@@ -695,18 +721,18 @@ fn check_one_line(line: &str, args: &Args) -> bool {
             found_hash = found_hash_bytes.into();
         }
         Err(e) => {
-            println!("{}: FAILED ({})", file_string, e);
+            writeln!(out(), "{}: FAILED ({})", file_string, e).expect("writing to stdout");
             return false;
         }
     };
     // This is a constant-time comparison.
     if expected_hash == found_hash {
         if !args.quiet() {
-            println!("{}: OK", file_string);
+            writeln!(out(), "{}: OK", file_string).expect("writing to stdout");
         }
         true
     } else {
-        println!("{}: FAILED", file_string);
+        writeln!(out(), "{}: FAILED", file_string).expect("writing to stdout");
         false
     }
 }
@@ -743,6 +769,14 @@ fn check_one_checkfile(path: &Path, args: &Args, files_failed: &mut u64) -> anyh
 }
 
 fn main() -> anyhow::Result<()> {
+    // A reader that goes away (`b3sum * | head`) ends b3sum at once, as it
+    // ends GNU's tools: Rust ignores SIGPIPE, which made each later result
+    // a write error or a panic.
+    #[cfg(unix)]
+    // Sound: restoring a signal's default action.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL)
+    };
     blake3::initialize();
     let args = Args::parse()?;
     if args.num_threads().is_some() {
@@ -752,11 +786,16 @@ fn main() -> anyhow::Result<()> {
     // Note that file_args automatically includes `-` if nothing is given.
     if args.check() {
         for path in &args.file_args {
-            check_one_checkfile(path, &args, &mut files_failed)?;
+            if let Err(e) = check_one_checkfile(path, &args, &mut files_failed) {
+                let _ = flush_out();
+                return Err(e);
+            }
         }
     } else {
         files_failed = hash_inputs(&args);
     }
+    // Flushed: the results before the warning, and all of them before exit.
+    flush_out()?;
     if args.check() && files_failed > 0 {
         eprintln!(
             "{}: WARNING: {} computed checksum{} did NOT match",
