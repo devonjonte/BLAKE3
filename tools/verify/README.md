@@ -30,8 +30,10 @@ group) for one and two groups (not yet at every group count, where the
 library calls it with 8 or more), and the message kernel at every message length of 2 to 16
 blocks with the last block of any length. The chunk kernel at every group
 count up to 2^40 groups, its last group storing all 16 values, by
-induction over its group loop (`prove_sme2.py every`, 85 minutes): every
-read of a chunk is checked to lie in the current group's own chunk. The
+induction over its group loop (`prove_sme2.py every`, 15 minutes), its
+block loop by its own proof as the message kernel's (below): each
+lane's bytes are an array, so a group that read another group's chunk
+would compute other terms. The
 parent kernel the same way (`parents_every`, under a minute); it preloads
 the next group's pairs, so each group's words differ instead (word w of
 group G is pair_w + G): hashing another group's pairs gives other terms.

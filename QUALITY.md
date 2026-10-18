@@ -519,6 +519,5 @@ CI's hosted machines; the sanitizers on both, Miri in the VM.
 
 Not yet proved: the SME2 kernel with an integer lane at more than two
 groups; that the Rust around the Arm kernels (the dispatch, the tree,
-the `Hasher`) keeps secrets from steering a whole call, which it was
-proved to do at chosen lengths until October 16, 2026, and is tested; and
-the x86-64 kernels, upstream's and the fork's.
+the `Hasher`) keeps secrets from steering a whole call, which is
+tested; and the x86-64 kernels, upstream's and the fork's.
