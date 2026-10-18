@@ -1042,7 +1042,61 @@ fn hash_all_at_once(
 /// The first hash in a process first runs a self-test (see the crate's
 /// documentation), under 0.2 ms; [`initialize`] moves it to start-up.
 pub fn hash(input: &[u8]) -> Hash {
+    plant::call(input.len() as u64, || {
+        core::hint::black_box(hash_serial(core::hint::black_box(input), IV, 0));
+    });
     hash_serial(input, IV, 0)
+}
+
+/// PLANT (probe/devon-plant41-*, the statistic evaluation of bench-hashes
+/// #41; calibration only, never for release): PLANT picks one.
+#[cfg(feature = "std")]
+mod plant {
+    #[allow(dead_code)]
+    #[derive(PartialEq)]
+    enum Kind {
+        /// Each call adds 6% of its work to a debt; a call whose debt
+        /// reaches a whole call's work repeats itself once: +6% work in
+        /// expectation at every length.
+        Uniform6,
+        /// One call in 10 repeats itself twice: that call 3x, the mean +20%.
+        Rare10x3,
+        /// One call in 2,000 sleeps 300 us: contamination, no extra work.
+        Stall2000,
+    }
+    const PLANT: Kind = Kind::Rare10x3;
+    std::thread_local! {
+        static CALLS: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+        static DEBT: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+    }
+    /// Before a call of `work` units (bytes, or messages); `again` repeats it.
+    pub(crate) fn call(work: u64, mut again: impl FnMut()) {
+        let n = CALLS.with(|c| c.replace(c.get() + 1));
+        match PLANT {
+            Kind::Uniform6 => {
+                let debt = DEBT.with(|d| d.replace(d.get() + work * 6)) + work * 6;
+                if work > 0 && debt >= work * 100 {
+                    DEBT.with(|d| d.set(debt - work * 100));
+                    again();
+                }
+            }
+            Kind::Rare10x3 => {
+                if n % 10 == 0 {
+                    again();
+                    again();
+                }
+            }
+            Kind::Stall2000 => {
+                if n % 2000 == 0 {
+                    std::thread::sleep(std::time::Duration::from_micros(300));
+                }
+            }
+        }
+    }
+}
+#[cfg(not(feature = "std"))]
+mod plant {
+    pub(crate) fn call(_work: u64, _again: impl FnMut()) {}
 }
 
 /// The hash of `input`, using other CPU cores where that is faster: the same
@@ -1409,6 +1463,12 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
 /// each. Messages longer than 15 KiB cost what [`hash`] costs. For the
 /// same hashes over several cores, see [`hash_many_multithreaded`].
 pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
+    plant::call(out.len() as u64, || {
+        let mut spare = [[0u8; OUT_LEN]; 1];
+        // Repeat the whole batch: hash it into `out` again (same digests).
+        hash_many_serial(core::hint::black_box(input), message_len, IV, 0, out);
+        core::hint::black_box(&mut spare);
+    });
     hash_many_serial(input, message_len, IV, 0, out);
 }
 
