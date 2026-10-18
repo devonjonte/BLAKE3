@@ -48,6 +48,15 @@ fn is_windows_target() -> bool {
     env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows"
 }
 
+/// Windows builds take MSVC's assembler: the fork supports Windows with
+/// MSVC alone (README); official BLAKE3 serves MinGW and Clang there.
+fn assert_msvc_asm() {
+    assert!(
+        use_msvc_asm(),
+        "blake3-servil builds for Windows with MSVC (cl) alone; for MinGW, or Clang in place of cl, use official BLAKE3 (https://github.com/BLAKE3-team/BLAKE3)"
+    );
+}
+
 fn use_msvc_asm() -> bool {
     const MSVC_NAMES: &[&str] = &["", "cl", "cl.exe"];
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
@@ -177,13 +186,9 @@ fn build_sse41_avx2_assembly() {
     println!("cargo::rustc-cfg=blake3_avx2_ffi");
     let mut build = new_build();
     if is_windows_target() {
-        if use_msvc_asm() {
-            build.file("c/blake3_sse41_x86-64_windows_msvc.asm");
-            build.file("c/blake3_avx2_x86-64_windows_msvc.asm");
-        } else {
-            build.file("c/blake3_sse41_x86-64_windows_gnu.S");
-            build.file("c/blake3_avx2_x86-64_windows_gnu.S");
-        }
+        assert_msvc_asm();
+        build.file("c/blake3_sse41_x86-64_windows_msvc.asm");
+        build.file("c/blake3_avx2_x86-64_windows_msvc.asm");
     } else {
         // All non-Windows implementations are assumed to support
         // Linux-style assembly. These files do contain a small
@@ -201,12 +206,9 @@ fn build_avx512_assembly() {
     let mut build = new_build();
     let mut is_msvc = false;
     if is_windows_target() {
-        if use_msvc_asm() {
-            build.file("c/blake3_avx512_x86-64_windows_msvc.asm");
-            is_msvc = true;
-        } else {
-            build.file("c/blake3_avx512_x86-64_windows_gnu.S");
-        }
+        assert_msvc_asm();
+        build.file("c/blake3_avx512_x86-64_windows_msvc.asm");
+        is_msvc = true;
     } else {
         build.file("c/blake3_avx512_x86-64_unix.S");
     }
@@ -409,14 +411,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "cargo::rerun-if-changed={}",
             file?.path().to_str().expect("utf-8")
         );
-    }
-
-    // When compiling with clang-cl for windows, it adds .asm files to the root
-    // which we need to delete so cargo doesn't get angry
-    if is_windows_target() && !use_msvc_asm() {
-        let _ = std::fs::remove_file("blake3_avx2_x86-64_windows_gnu.asm");
-        let _ = std::fs::remove_file("blake3_avx512_x86-64_windows_gnu.asm");
-        let _ = std::fs::remove_file("blake3_sse41_x86-64_windows_gnu.asm");
     }
 
     Ok(())
