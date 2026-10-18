@@ -234,115 +234,6 @@ def loop_head(obj, run, taken):
     return heads[0]
 
 
-def prove_chunks_every(obj, stored):
-    """hash16_chunks_512 at every number of groups from 2 (1 and 2 are the
-    concrete cases), by induction over its group loop (induction.py): group
-    K's lane l hashes the chunk table[16 K + l] points to, at counter + 16 K
-    + l, into out[32 (16 K + l)..]. Each group's chunks are arbitrary (one
-    set of symbols, since each step is proved for any)."""
-    import canon
-    from z3 import ULE, UGE, ULT
-    lanes = [byte_symbols(f"in{l}_", 1024) for l in range(16)]
-    key = byte_symbols("key", 32)
-    g, k = BitVec("len_groups", 64), BitVec("len_k", 64)
-    # Group G's chunk for lane l lies at offset 1024 G of lane l's region.
-    # Each group's chunks are arbitrary: every group reads the same symbols,
-    # and a read is allowed only inside the current group's chunk (group 0
-    # in the concrete runs to the loop's head, K in the induction step), so
-    # a kernel that reads another group's table entry or chunk fails.
-    current = [0]
-    def chunk_byte(l):
-        def byte(offset):
-            m = aarch64._machine[0]
-            group = offset // 1024 if isinstance(offset, int) else LShR(offset, 10)
-            within = offset % 1024 if isinstance(offset, int) else induction.forced(m, offset & 1023)
-            same_group = (group == current[0]) if isinstance(group, int) and isinstance(current[0], int) else \
-                within is not None and (aarch64.concrete(aarch64.as_bv(offset) - within - aarch64.as_bv(current[0]) * 1024) == 0
-                                        or aarch64.holds(m, aarch64.as_bv(group) == aarch64.as_bv(current[0])))
-            if within is None or not same_group:
-                raise Unproved(f"a read of lane {l} outside the current group's chunk")
-            return lanes[l][within]
-        return byte
-    regions = {}
-    for l in range(16):
-        regions[f"lane{l}"] = Region(f"lane{l}", g * 1024, False, chunk_byte(l))
-        regions[f"lane{l}"].symbolic_initial = True
-    regions["key"] = Region("key", 32, False, lambda o: key[o])
-    regions["out"] = Region("out", g * 512, True, None)
-    def entry(offset):
-        """Table byte `offset`: byte offset % 8 of the pointer to group
-        offset / 128's chunk for lane (offset % 128) / 8."""
-        if isinstance(offset, int):
-            group, within = offset // 128, offset % 128
-            base = 1024 * group
-        else:
-            within = induction.forced(aarch64._machine[0], offset & 127)
-            if within is None:
-                raise Unproved("a table read whose lane the lengths leave open")
-            # From the entry's first byte, so all eight bytes name one pointer.
-            first = simplify(aarch64.as_bv(offset) - within % 8, som=True, bv_sort_ac=True)
-            base = simplify(LShR(first, 7) * 1024, som=True, bv_sort_ac=True)
-        return (Ptr(f"lane{within // 8}", base), within % 8)
-    table = Region("table", g * 128, False, entry)
-    table.symbolic_initial = True
-    regions["table"] = table
-    s = SmeSetup(obj, "blake3_sme2_hash16_chunks_512", regions)
-    m = s.m
-    # The counter takes part in conditions (its carry), each decided by the solver.
-    m.lengths = {"len_groups", "len_k", "counter"}
-    m.assumptions = [UGE(g, 2), ULE(g, 1 << 40)]
-    counter = BitVec("counter", 64)
-    flags, start, end = (BitVec(x, 8) for x in ("flags", "start", "end"))
-    m.x[0], m.x[1], m.x[2] = Ptr("table", 0), Ptr("key", 0), counter
-    m.x[3] = Concat(BitVec("junk", 32), BitVecVal(stored, 8), end, start, flags)
-    m.x[4], m.x[5] = Ptr("out", 0), g
-    head = loop_head(obj, lambda: prove_chunks(obj, 3, 0, False, check=False), 2)
-    zero = BitVecVal(0, 8)
-    def want_group(kval, count=16):
-        cvs = []
-        for l in range(count):
-            c = counter + kval * 16 + l
-            cv = spec.words(key)
-            for b in range(16):
-                f = ZeroExt(24, flags | (start if b == 0 else zero) | (end if b == 15 else zero))
-                cv = spec.compress(cv, spec.words(lanes[l][64 * b:64 * b + 64]), c, BitVecVal(64, 32), f)[:8]
-            cvs.append(cv)
-        return cvs
-    def check_group(mach, kval, count=16):
-        out = mach.regions["out"]
-        keys = set()
-        for l, cv in enumerate(want_group(kval, count)):
-            offs = [aarch64.key(aarch64.as_bv(kval * 512 if not isinstance(kval, int) else BitVecVal(kval * 512, 64)) + 32 * l + j) for j in range(32)]
-            keys.update(offs)
-            if any(o not in out.bytes for o in offs):
-                raise Unproved(f"group output {l} is not wholly written")
-            got = spec.words([out.bytes[o] for o in offs])
-            for w in range(8):
-                if not same(got[w], cv[w]):
-                    raise Unproved(f"group output {l}, word {w}, differs from the specification")
-        if set(out.bytes) != keys:
-            raise Unproved("the group writes output bytes outside its own")
-    s0 = induction.run_to(m, s.entry, head)
-    if s0.regions["out"].bytes:
-        raise Unproved("output written before the group loop")
-    s1 = induction.run_to(induction.snapshot(s0), head, head)
-    check_group(s1, 0)
-    gen = induction.Generalized(s0, s1, k)
-    current[0] = k
-    def check(endm, how):
-        if how == "head":
-            check_group(endm, k)
-            return
-        if not aarch64.holds(endm, g == k + 1):
-            raise Unproved("a path leaves the group loop before the last group")
-        if aarch64.concrete(endm.x[0]) != 16:
-            raise Unproved(f"returned {endm.x[0]}, not 16")
-        check_group(endm, k, stored or 16)
-        prove_hybrid.check_abi(endm)
-    kinds = induction.loop_step(gen, s0, k, list(s0.assumptions) + [ULT(k, g), ULE(k, 1 << 39)], head, check)
-    return f"{kinds['head']} paths back to the group loop's head, {kinds['return']} out of it"
-
-
 def prove_parents_every(obj):
     """hash16_parents_512 at every number of groups from 2 to 2^40 (1 and 2
     are the concrete cases), by induction over its group loop: group K's
@@ -583,8 +474,10 @@ def prove_case(case):
             steps = prove_messages(OBJ, groups, blocks, stored)
             what = f"{groups} groups of {blocks}-block messages, the last block of any length, the last group storing {stored or 16}"
         elif name == "every":
-            what = prove_chunks_every(OBJ, 0)
-            return case, f"proved (the chunk kernel at every group count, the last group storing 16: {what}, {time.time() - t:.0f} s)"
+            import prove_block_loop
+            step = prove_block_loop.prove(OBJ, chunks=True)
+            what = prove_block_loop.prove_every(OBJ, chunks=True)
+            return case, f"proved (the chunk kernel's block loop, {step}; {what}, the last group storing 16, {time.time() - t:.0f} s)"
         elif name == "messages_every":
             import prove_block_loop
             step = prove_block_loop.prove(OBJ)
@@ -615,7 +508,7 @@ WORKERS = 5
 def main():
     import multiprocessing
     # The longest case first, so it is not left to run alone at the end: the
-    # chunk kernel's induction (4.3 hours, October 16).
+    # chunk kernel's induction (15 minutes, October 18).
     todo = sorted(cases(set(sys.argv[1:])),
                   key=lambda c: (0,) if c[0] == "every" else (1,))
     failed = 0
