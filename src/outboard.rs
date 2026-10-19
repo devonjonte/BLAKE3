@@ -291,9 +291,8 @@ impl Verifier {
     }
 }
 
-/// A whole message's encoding, as [`Verifier`] reads it: for the docs and
-/// tests.
-#[doc(hidden)]
+/// A whole message's encoding, as [`Verifier`] reads it: for the tests.
+#[cfg(test)]
 pub fn test_encoding(mode: Mode, input: &[u8]) -> Vec<u8> {
     let (_, outboard) = outboard_with(mode, input);
     let mut out = Vec::with_capacity(input.len() + outboard.len());

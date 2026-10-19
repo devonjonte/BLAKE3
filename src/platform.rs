@@ -491,28 +491,33 @@ impl Platform {
     // Explicit platform constructors, for benchmarks.
 
     #[cfg(target_arch = "x86_64")]
+    #[cfg(test)]
     pub fn sse41() -> Option<Self> {
         if sse41_detected() { Some(Self::SSE41) } else { None }
     }
 
     #[cfg(target_arch = "x86_64")]
+    #[cfg(test)]
     pub fn avx2() -> Option<Self> {
         if avx2_detected() { Some(Self::AVX2) } else { None }
     }
 
     #[cfg(blake3_avx512_ffi)]
     #[cfg(target_arch = "x86_64")]
+    #[cfg(test)]
     pub fn avx512() -> Option<Self> {
         if avx512_detected() { Some(Self::AVX512) } else { None }
     }
 
     #[cfg(blake3_neon)]
+    #[cfg(test)]
     pub fn neon() -> Option<Self> {
         // Assumed to be safe if the "neon" feature is on.
         Some(Self::NEON)
     }
 
     #[cfg(blake3_sme2)]
+    #[cfg(test)]
     pub fn sme2() -> Option<Self> {
         if sme2_detected() { Some(Self::SME2) } else { None }
     }

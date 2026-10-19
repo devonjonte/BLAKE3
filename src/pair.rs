@@ -136,8 +136,12 @@ mod test {
                 out
             };
             assert_eq!(hash(m).as_bytes(), &expect(reference_impl::Hasher::new()), "hash, len {len}");
-            assert_eq!(keyed_hash(&key, m).as_bytes(), &expect(reference_impl::Hasher::new_keyed(&key)), "keyed_hash, len {len}");
-            assert_eq!(derive_key("pair test", m), expect(reference_impl::Hasher::new_derive_key("pair test")), "derive_key, len {len}");
+            assert_eq!(hash_with(Mode::Keyed(&key), m).as_bytes(), &expect(reference_impl::Hasher::new_keyed(&key)), "keyed_hash, len {len}");
+            assert_eq!(
+                *hash_with(Mode::DeriveKey("pair test"), m).as_bytes(),
+                expect(reference_impl::Hasher::new_derive_key("pair test")),
+                "derive_key, len {len}"
+            );
         }
     }
 }

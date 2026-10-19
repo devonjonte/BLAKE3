@@ -411,7 +411,7 @@ mod test {
         let mut input = vec![0u8; 3 * crate::STAGE_LEN];
         crate::test::paint_test_input(&mut input);
         let keys = [[1u8; 32], [2u8; 32]];
-        let mut hashers: Vec<Hasher> = (0..6).map(|i| Hasher::new_keyed(&keys[i % 2])).collect();
+        let mut hashers: Vec<Hasher> = (0..6).map(|i| Hasher::new_with(crate::Mode::Keyed(&keys[i % 2]))).collect();
         // Each hasher a group in, its message at a different offset into the
         // input; then one turn of two pieces each, which stage its second
         // group from its start and fill it (held), and 7 bytes more.
@@ -426,17 +426,17 @@ mod test {
         Hasher::update_each(&mut hashers, &turn);
         for (i, h) in hashers.iter().enumerate() {
             let message = &input[start(i)..start(i) + 2 * crate::STAGE_LEN + 7];
-            assert_eq!(h.finalize(), crate::keyed_hash(&keys[i % 2], message), "hasher {i}");
+            assert_eq!(h.finalize(), crate::hash_with(crate::Mode::Keyed(&keys[i % 2]), message), "hasher {i}");
         }
         // And each hasher's first group (chunk counter zero, which hands
         // its core the group's two halves), six at once: a first piece
         // longer than a chunk, so it is staged from offset zero.
-        let mut fresh: Vec<Hasher> = (0..6).map(|i| Hasher::new_keyed(&keys[i % 2])).collect();
+        let mut fresh: Vec<Hasher> = (0..6).map(|i| Hasher::new_with(crate::Mode::Keyed(&keys[i % 2]))).collect();
         let turn: Vec<(usize, &[u8])> =
             (0..6).flat_map(|i| [(i, &input[start(i)..start(i) + 1100]), (i, &input[start(i) + 1100..start(i) + group + 7])]).collect();
         Hasher::update_each(&mut fresh, &turn);
         for (i, h) in fresh.iter().enumerate() {
-            assert_eq!(h.finalize(), crate::keyed_hash(&keys[i % 2], &input[start(i)..start(i) + group + 7]), "fresh hasher {i}");
+            assert_eq!(h.finalize(), crate::hash_with(crate::Mode::Keyed(&keys[i % 2]), &input[start(i)..start(i) + group + 7]), "fresh hasher {i}");
         }
     }
 
@@ -479,7 +479,8 @@ mod test {
         for multithreaded in [false, true] {
             let key = [5u8; 32];
             // Every third hasher keyed: a turn's held groups in two kinds.
-            let mut hashers: Vec<Hasher> = (0..lens.len()).map(|i| if i % 3 == 1 { Hasher::new_keyed(&key) } else { Hasher::new() }).collect();
+            let mut hashers: Vec<Hasher> =
+                (0..lens.len()).map(|i| if i % 3 == 1 { Hasher::new_with(crate::Mode::Keyed(&key)) } else { Hasher::new() }).collect();
             let mut done = vec![0usize; lens.len()];
             let mut k = 0;
             while done.iter().zip(&lens).any(|(d, l)| d < l) {
@@ -501,7 +502,7 @@ mod test {
             let mut out = vec![[0u8; OUT_LEN]; lens.len()];
             Hasher::finalize_each(&hashers, &which, &mut out);
             for (k, &i) in which.iter().enumerate() {
-                let want = if i % 3 == 1 { crate::keyed_hash(&key, &input[..lens[i]]) } else { crate::hash(&input[..lens[i]]) };
+                let want = if i % 3 == 1 { crate::hash_with(crate::Mode::Keyed(&key), &input[..lens[i]]) } else { crate::hash(&input[..lens[i]]) };
                 assert_eq!(&out[k], want.as_bytes(), "len {} multithreaded {multithreaded}", lens[i]);
             }
         }

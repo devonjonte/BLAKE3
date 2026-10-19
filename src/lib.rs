@@ -61,9 +61,9 @@
 //! calls.
 //!
 //! **Keyed hashing and key derivation** run at the plain hash's speed:
-//! [`keyed_hash`], [`derive_key`], and for every other call a [`Mode`],
+//! the keyed hash and key derivation, through a [`Mode`],
 //! taken by its `_with` form ([`hash_with`], [`hash_many_with`], ...),
-//! by [`Hasher::new_keyed`] and [`Hasher::new_derive_key`], and by a
+//! by [`Hasher::new_with`], and by a
 //! [`stream`].
 //!
 //! **Hashing now and then** (rather than nonstop) is slower per byte on
@@ -93,8 +93,7 @@
 //! # Memory
 //!
 //! - **A [`Hasher`] is about 18 KiB**; box it where that matters.
-//! - **Single-threaded calls allocate nothing**: [`hash`], [`keyed_hash`],
-//!   [`derive_key`], [`hash_with`], [`hash_many`], [`hash_many_with`],
+//! - **Single-threaded calls allocate nothing**: [`hash`], [`hash_with`], [`hash_many`], [`hash_many_with`],
 //!   [`Hasher::update`] and [`Hasher::finalize`], and [`OutputReader`].
 //!   [`Hasher::update_reader`] uses a 1 MiB buffer while it reads past
 //!   64 KiB, and [`hash_each_with`] 32 bytes for each chunk of its messages
@@ -155,7 +154,6 @@
 //! for [`OutputReader`].
 //!
 //! The `mmap` feature (off by default, on for [docs.rs]) adds the
-//! [`update_mmap`](Hasher::update_mmap) helper method for memory-mapped IO.
 //!
 //! The `zeroize` feature (off by default, on for [docs.rs])
 //! implements
@@ -1044,8 +1042,7 @@ pub fn initialize_multithreaded(threads: Option<core::num::NonZeroUsize>) {
 }
 
 /// Which of BLAKE3's three functions a call computes: the plain hash
-/// ([`hash`]), the keyed hash ([`keyed_hash`]), or key derivation
-/// ([`derive_key`]). Every call that takes a mode runs each one at the same
+/// ([`hash`]), the keyed hash, or key derivation. Every call that takes a mode runs each one at the same
 /// speed, but for `DeriveKey`, which first hashes its context string (once
 /// per call; [`DeriveKeyMaterial`](Mode::DeriveKeyMaterial) takes it hashed
 /// once for many calls).
@@ -1053,10 +1050,10 @@ pub fn initialize_multithreaded(threads: Option<core::num::NonZeroUsize>) {
 pub enum Mode<'a> {
     /// The default hash function, as [`hash`].
     Hash,
-    /// The keyed hash function with this key, as [`keyed_hash`].
+    /// The keyed hash function with this key.
     Keyed(&'a [u8; KEY_LEN]),
-    /// The key derivation function with this context string, as
-    /// [`derive_key`]; the input is the key material.
+    /// The key derivation function with this context string; the input
+    /// is the key material.
     DeriveKey(&'a str),
     /// The key derivation function with its context string already hashed
     /// ([`hazmat::hash_derive_key_context`]); the input is the key material.
@@ -1082,7 +1079,7 @@ impl Mode<'_> {
 /// # blake3_servil::initialize();
 /// use blake3_servil::Mode;
 /// let key = [7u8; 32];
-/// assert_eq!(blake3_servil::hash_with(Mode::Keyed(&key), b"foo"), blake3_servil::keyed_hash(&key, b"foo"));
+/// assert_eq!(blake3_servil::hash_with(Mode::Keyed(&key), b"foo").as_bytes().len(), 32);
 /// ```
 pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
     let (key, flags) = mode.key_and_flags();
@@ -1096,7 +1093,7 @@ pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
 /// use blake3_servil::Mode;
 /// let key = [7u8; 32];
 /// let input = vec![1u8; 1 << 20];
-/// assert_eq!(blake3_servil::hash_multithreaded_with(Mode::Keyed(&key), &input), blake3_servil::keyed_hash(&key, &input));
+/// assert_eq!(blake3_servil::hash_multithreaded_with(Mode::Keyed(&key), &input), blake3_servil::hash_with(Mode::Keyed(&key), &input));
 /// ```
 #[cfg(feature = "std")]
 pub fn hash_multithreaded_with(mode: Mode, input: &[u8]) -> Hash {
@@ -1107,7 +1104,7 @@ pub fn hash_multithreaded_with(mode: Mode, input: &[u8]) -> Hash {
 
 /// The whole input on the calling thread, in the given mode: the one-chunk
 /// kernel call up to CHUNK_LEN, the subtree walk above. hash(),
-/// keyed_hash(), derive_key(), and hash_multithreaded()'s short path all come
+/// hash() in its modes and hash_multithreaded()'s short path all come
 /// through here.
 #[inline]
 fn hash_serial(input: &[u8], key: &CVWords, flags: u8) -> Hash {
@@ -1380,7 +1377,7 @@ pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8;
 /// let nodes = vec![1u8; 20 * 64];
 /// let mut macs = vec![[0u8; 32]; 20];
 /// blake3_servil::hash_many_with(Mode::Keyed(&key), &nodes, 64, &mut macs);
-/// assert_eq!(macs[5], *blake3_servil::keyed_hash(&key, &[1u8; 64]).as_bytes());
+/// assert_eq!(macs[5], *blake3_servil::hash_with(blake3_servil::Mode::Keyed(&key), &[1u8; 64]).as_bytes());
 /// ```
 pub fn hash_many_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
     let (key, flags) = mode.key_and_flags();
@@ -1396,7 +1393,7 @@ pub fn hash_many_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[
 /// let nodes = vec![1u8; 20000 * 64];
 /// let mut macs = vec![[0u8; 32]; 20000];
 /// blake3_servil::hash_many_multithreaded_with(Mode::Keyed(&key), &nodes, 64, &mut macs);
-/// assert_eq!(macs[5], *blake3_servil::keyed_hash(&key, &[1u8; 64]).as_bytes());
+/// assert_eq!(macs[5], *blake3_servil::hash_with(blake3_servil::Mode::Keyed(&key), &[1u8; 64]).as_bytes());
 /// ```
 #[cfg(feature = "std")]
 pub fn hash_many_multithreaded_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
@@ -1648,101 +1645,12 @@ pub fn kernel_report_multithreaded() -> KernelReport {
     report
 }
 
-/// The keyed hash function.
-///
-/// This is suitable for use as a message authentication code, for example to
-/// replace an HMAC instance. In that use case, the constant-time equality
-/// checking provided by [`Hash`](struct.Hash.html) is almost always a security
-/// requirement, and callers need to be careful not to compare MACs as raw
-/// bytes.
-///
-/// For an incremental version that accepts multiple writes, see [`Hasher::new_keyed`],
-/// [`Hasher::update`], and [`Hasher::finalize`]. These two lines are equivalent:
-///
-/// ```
-/// # blake3_servil::initialize();
-/// # const KEY: &[u8; 32] = &[0; 32];
-/// let mac = blake3_servil::keyed_hash(KEY, b"foo");
-/// # let mac1 = mac;
-///
-/// let mac = blake3_servil::Hasher::new_keyed(KEY).update(b"foo").finalize();
-/// # let mac2 = mac;
-/// # assert_eq!(mac1, mac2);
-/// ```
-///
-/// For output sizes other than 32 bytes, see [`Hasher::finalize_xof`], and [`OutputReader`].
-///
-/// It runs on the calling thread, at [`hash`]'s speed; for other cores too,
-/// call [`hash_multithreaded_with`] with [`Mode::Keyed`].
-pub fn keyed_hash(key: &[u8; KEY_LEN], input: &[u8]) -> Hash {
-    let key_words = platform::words_from_le_bytes_32(key);
-    hash_serial(input, &key_words, KEYED_HASH)
-}
-
-/// The key derivation function.
-///
-/// Given cryptographic key material of any length and a context string of any
-/// length, this function outputs a 32-byte derived subkey. **The context string
-/// should be hardcoded, globally unique, and application-specific.** A good
-/// default format for such strings is `"[application] [commit timestamp]
-/// [purpose]"`, e.g., `"example.com 2019-12-25 16:18:03 session tokens v1"`.
-///
-/// Key derivation is important when you want to use the same key in multiple
-/// algorithms or use cases. Using the same key with different cryptographic
-/// algorithms is generally forbidden, and deriving a separate subkey for each
-/// use case protects you from bad interactions. Derived keys also mitigate the
-/// damage from one part of your application accidentally leaking its key.
-///
-/// As a rare exception to that general rule, however, it is possible to use
-/// `derive_key` itself with key material that you are already using with
-/// another algorithm. You might need to do this if you're adding features to
-/// an existing application, which does not yet use key derivation internally.
-/// However, you still must not share key material with algorithms that forbid
-/// key reuse entirely, like a one-time pad. For more on this, see sections 6.2
-/// and 7.8 of the [BLAKE3 paper](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf).
-///
-/// Note that BLAKE3 is not a password hash, and **`derive_key` should never be
-/// used with passwords.** Instead, use a dedicated password hash like
-/// [Argon2]. Password hashes are entirely different from generic hash
-/// functions, with opposite design requirements.
-///
-/// For an incremental version that accepts multiple writes, see [`Hasher::new_derive_key`],
-/// [`Hasher::update`], and [`Hasher::finalize`]. These two statements are equivalent:
-///
-/// ```
-/// # blake3_servil::initialize();
-/// # const CONTEXT: &str = "example.com 2019-12-25 16:18:03 session tokens v1";
-/// let key = blake3_servil::derive_key(CONTEXT, b"key material, not a password");
-/// # let key1 = key;
-///
-/// let key: [u8; 32] = blake3_servil::Hasher::new_derive_key(CONTEXT)
-///     .update(b"key material, not a password")
-///     .finalize()
-///     .into();
-/// # let key2 = key;
-/// # assert_eq!(key1, key2);
-/// ```
-///
-/// For output sizes other than 32 bytes, see [`Hasher::finalize_xof`], and [`OutputReader`].
-///
-/// It runs on the calling thread, at [`hash`]'s speed; for other cores too,
-/// call [`hash_multithreaded_with`] with [`Mode::DeriveKey`].
-///
-/// [Argon2]: https://en.wikipedia.org/wiki/Argon2
-pub fn derive_key(context: &str, key_material: &[u8]) -> [u8; OUT_LEN] {
-    let context_key = hazmat::hash_derive_key_context(context);
-    let context_key_words = platform::words_from_le_bytes_32(&context_key);
-    hash_serial(key_material, &context_key_words, DERIVE_KEY_MATERIAL).0
-}
-
 /// A message's hash, fed in pieces: [`update`](Hasher::update) with each
 /// piece, in order, then [`finalize`](Hasher::finalize). The pieces may be
 /// of any lengths; the hash is the same as [`hash`] of them all at once.
 ///
 /// A `Hasher` is about 18 KiB (it holds short pieces until it has 16 KiB
 /// to hash at once); box it where that matters.
-///
-/// The `mmap` Cargo feature adds a method for memory-mapped files.
 ///
 /// # Examples
 ///
@@ -1968,24 +1876,11 @@ impl Hasher {
         Self::from_core(HasherCore::new_internal(IV, 0))
     }
 
-    /// Construct a new `Hasher` for the keyed hash function. See
-    /// [`keyed_hash`].
-    ///
-    /// [`keyed_hash`]: fn.keyed_hash.html
-    pub fn new_keyed(key: &[u8; KEY_LEN]) -> Self {
-        let key_words = platform::words_from_le_bytes_32(key);
-        Self::from_core(HasherCore::new_internal(&key_words, KEYED_HASH))
-    }
-
-    /// Construct a new `Hasher` for the key derivation function. See
-    /// [`derive_key`]. The context string should be hardcoded, globally
-    /// unique, and application-specific.
-    ///
-    /// [`derive_key`]: fn.derive_key.html
-    pub fn new_derive_key(context: &str) -> Self {
-        let context_key = hazmat::hash_derive_key_context(context);
-        let context_key_words = platform::words_from_le_bytes_32(&context_key);
-        Self::from_core(HasherCore::new_internal(&context_key_words, DERIVE_KEY_MATERIAL))
+    /// Construct a new `Hasher` in a [`Mode`]: the keyed hash, or key
+    /// derivation with a context string or a context hashed once.
+    pub fn new_with(mode: Mode) -> Self {
+        let (key, flags) = mode.key_and_flags();
+        Self::from_core(HasherCore::new_internal(&key, flags))
     }
 
     /// Reset the `Hasher` to its initial state.
@@ -2089,9 +1984,7 @@ impl Hasher {
     ///
     /// The most common implementer of
     /// [`std::io::Read`](https://doc.rust-lang.org/std/io/trait.Read.html) might be
-    /// [`std::fs::File`](https://doc.rust-lang.org/std/fs/struct.File.html), but note that memory
-    /// mapping can be faster than this method for hashing large files. See
-    /// [`update_mmap`](Hasher::update_mmap), which requires the `mmap` Cargo feature.
+    /// [`std::fs::File`](https://doc.rust-lang.org/std/fs/struct.File.html).
     ///
     /// This method requires the `std` Cargo feature, which is enabled by default.
     ///
@@ -2112,58 +2005,6 @@ impl Hasher {
     #[cfg(feature = "std")]
     pub fn update_reader(&mut self, reader: impl std::io::Read) -> std::io::Result<&mut Self> {
         io::copy_wide(reader, self)?;
-        Ok(self)
-    }
-
-    /// As [`update`](Hasher::update), but reading the contents of a file using memory mapping.
-    ///
-    /// Not all files can be memory mapped, and memory mapping small files can be slower than
-    /// reading them the usual way. In those cases, this method will fall back to standard file IO.
-    /// The heuristic for whether to use memory mapping is currently very simple (file size >=
-    /// 16 KiB), and it might change at any time.
-    ///
-    /// Like [`update`](Hasher::update), this method is single-threaded. In this author's
-    /// experience, memory mapping improves single-threaded performance by ~10% for large files
-    /// that are already in cache. This probably varies between platforms, and as always it's a
-    /// good idea to benchmark your own use case. For several threads, map the file and call
-    /// [`update_multithreaded`](Hasher::update_multithreaded) on it.
-    ///
-    /// There's a correctness reason that this method takes
-    /// [`Path`](https://doc.rust-lang.org/stable/std/path/struct.Path.html) instead of
-    /// [`File`](https://doc.rust-lang.org/std/fs/struct.File.html): reading from a memory-mapped
-    /// file ignores the seek position of the original file handle (it neither respects the current
-    /// position nor updates the position). This difference in behavior would've caused
-    /// `update_mmap` and [`update_reader`](Hasher::update_reader) to give different answers and
-    /// have different side effects in some cases. Taking a
-    /// [`Path`](https://doc.rust-lang.org/stable/std/path/struct.Path.html) avoids this problem by
-    /// making it clear that a new [`File`](https://doc.rust-lang.org/std/fs/struct.File.html) is
-    /// opened internally.
-    ///
-    /// This method requires the `mmap` Cargo feature, which is disabled by default but enabled on
-    /// [docs.rs](https://docs.rs).
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use std::io;
-    /// # use std::path::Path;
-    /// # fn main() -> io::Result<()> {
-    /// # blake3_servil::initialize();
-    /// let path = Path::new("file.dat");
-    /// let mut hasher = blake3_servil::Hasher::new();
-    /// hasher.update_mmap(path)?;
-    /// println!("{}", hasher.finalize());
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[cfg(feature = "mmap")]
-    pub fn update_mmap(&mut self, path: impl AsRef<std::path::Path>) -> std::io::Result<&mut Self> {
-        let mut file = std::fs::File::open(path.as_ref())?;
-        if let Some(mmap) = io::maybe_mmap_file(&mut file)? {
-            self.update(&mmap);
-        } else {
-            io::copy_wide(&file, self)?;
-        }
         Ok(self)
     }
 }

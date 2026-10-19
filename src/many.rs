@@ -1090,8 +1090,10 @@ mod test {
         let context = "blake3-servil many modes test";
         let context_key = crate::hazmat::hash_derive_key_context(context);
         let modes: [(CVWords, u8, &dyn Fn(&[u8]) -> [u8; OUT_LEN]); 2] = [
-            (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH, &|m| *crate::keyed_hash(&key, m).as_bytes()),
-            (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL, &|m| crate::derive_key(context, m)),
+            (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH, &|m| *crate::hash_with(crate::Mode::Keyed(&key), m).as_bytes()),
+            (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL, &|m| {
+                *crate::hash_with(crate::Mode::DeriveKey(context), m).as_bytes()
+            }),
         ];
         for len in [0, 1, 63, BLOCK_LEN, 100, 256, 1000, CHUNK_LEN, CHUNK_LEN + 1, 2000, 2 * CHUNK_LEN, 4000, 15 * CHUNK_LEN, 16 * CHUNK_LEN + 5] {
             for count in [1, 2, 3, 4, 5, 10, 11, 12, 16, 17, 21, 33, 129] {

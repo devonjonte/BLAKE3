@@ -1473,7 +1473,7 @@ mod test {
             assert_eq!(want, hash(&input[..len]), "len = {len}");
             let key = [42u8; KEY_LEN];
             assert_eq!(
-                crate::keyed_hash(&key, &input[..len]),
+                crate::hash_with(crate::Mode::Keyed(&key), &input[..len]),
                 hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
                 "keyed len = {len}"
             );
@@ -1499,7 +1499,7 @@ mod test {
                 for piece in [1000, MIN_SPLIT_LEN, 4 * MIN_SPLIT_LEN, 1 << 20, usize::MAX] {
                     let first = first.min(len);
                     let mut hasher = Hasher::new();
-                    let mut keyed = Hasher::new_keyed(&key);
+                    let mut keyed = Hasher::new_with(crate::Mode::Keyed(&key));
                     hasher.update_multithreaded(&input[..first]);
                     keyed.update_multithreaded(&input[..first]);
                     for part in input[first..len].chunks(piece.min(len.max(1))) {
@@ -1508,7 +1508,7 @@ mod test {
                     }
                     let what = format!("len {len}, first {first}, pieces of {piece}");
                     assert_eq!(hasher.finalize(), crate::hash(&input[..len]), "{what}");
-                    assert_eq!(keyed.finalize(), crate::keyed_hash(&key, &input[..len]), "keyed {what}");
+                    assert_eq!(keyed.finalize(), crate::hash_with(crate::Mode::Keyed(&key), &input[..len]), "keyed {what}");
                 }
             }
         }
