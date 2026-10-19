@@ -35,8 +35,6 @@
 - `hash()` is inlined into its caller: a small call after the program has
   been idle fetches one code line fewer (64 bytes 16.5% faster on an
   i7-12700K).
-- `kernel_report_multithreaded` names the SME2 thread only on CPUs with
-  SME2 (on x86 it named it too).
 - **One scheduler**: the pool's workers take every multithreaded call's
   work, and every stream's, from sources each call or stream publishes
   (a ring and two counters, no lock), and park each on its own token. On
