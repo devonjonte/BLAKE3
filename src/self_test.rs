@@ -358,7 +358,7 @@ fn chunk_values(platform: Platform, input: &[u8], key: &[u8; 32], out: &mut [u8]
         let turn = crate::platform::Sme2Turn::take(platform, true);
         if matches!(turn.platform(), Platform::SME2) {
             let flags = crate::KEYED_HASH as u32 | (crate::CHUNK_START as u32) << 8 | (crate::CHUNK_END as u32) << 16;
-            crate::ran_kernel(crate::Ran::Sme2x2, crate::sme2::ffi::blake3_sme2x2_hash_chunks_512 as *const ());
+            crate::ran_kernel(crate::sme2::ffi::blake3_sme2x2_hash_chunks_512 as *const ());
             // Sound: SME2 was detected, and the table holds 18 chunk pointers per group.
             let lanes = unsafe {
                 crate::sme2::ffi::blake3_sme2x2_hash_chunks_512(

@@ -272,25 +272,17 @@ pub use stream::{Stream, stream};
 mod pair;
 mod self_test;
 
-/// A kind of kernel a call ran, for the test that checks the kernel
-/// reports against the dispatch (test_kernel_reports_match_the_dispatch).
-/// Each build notes the kinds it has.
+/// A kind of kernel or path a call ran, for the tests that check which
+/// path a call took. Each build notes the kinds it has.
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
 pub(crate) enum Ran {
-    Scalar = 1,
-    Hybrid = 2,
-    Neon = 4,
-    Sme2 = 8,
-    Sme2x2 = 16,
-    Pool = 32,
+    /// The call went to the pool.
+    Pool = 1,
     /// The call wanted SME2 and another thread held the turn.
-    TurnTaken = 64,
-    /// The call followed a pause and took the pair kernel
-    /// (batch_after_pause), which the reports leave out.
-    AfterPause = 128,
+    TurnTaken = 2,
     /// The pool's CPUs each had a caller, so the call stayed on its thread.
-    PoolBusy = 256,
+    PoolBusy = 4,
 }
 
 #[cfg(all(test, feature = "std"))]
@@ -316,12 +308,11 @@ std::thread_local! {
     pub(crate) static RAN_ENTRIES: core::cell::RefCell<std::collections::BTreeSet<usize>> = const { core::cell::RefCell::new(std::collections::BTreeSet::new()) };
 }
 
-/// Note that the assembly entry point at `entry`, a kernel of `kind`, ran
-/// (in the tests' record; nothing in any other build).
+/// Note that the assembly entry point at `entry` ran (in the tests'
+/// record; nothing in any other build).
 #[inline(always)]
 #[allow(dead_code)]
-pub(crate) fn ran_kernel(kind: Ran, entry: *const ()) {
-    ran(kind);
+pub(crate) fn ran_kernel(entry: *const ()) {
     #[cfg(all(test, feature = "std"))]
     RAN_ENTRIES.with(|r| r.borrow_mut().insert(entry as usize));
     let _ = entry;
@@ -1234,7 +1225,6 @@ fn batch_after_pause(input: &[u8], message_len: usize, key: &CVWords, flags: u8,
     for (slot, message) in table.iter_mut().zip(input.chunks_exact(BLOCK_LEN)) {
         *slot = message.try_into().unwrap();
     }
-    ran(Ran::AfterPause);
     // Sound: the SHA-3 extension is here (above).
     unsafe { neon_hybrid::hash_pairs(&table[..count], key, flags, CHUNK_START, CHUNK_END | ROOT, message_len, out.as_flattened_mut()) };
     true
@@ -1420,249 +1410,6 @@ pub fn hash_many_multithreaded_with(mode: Mode, input: &[u8], message_len: usize
     lanes::require();
     let (key, flags) = mode.key_and_flags();
     lanes::hash_many(input, message_len, &key, flags, out);
-}
-
-/// One kernel [`hash`] runs, from `from_len` input bytes up to the next
-/// kernel's `from_len`.
-#[cfg(feature = "std")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[doc(hidden)]
-pub struct Kernel {
-    /// The smallest input length, in bytes, this kernel handles.
-    pub from_len: usize,
-    /// A short name for a report or a legend.
-    pub name: &'static str,
-    /// One or two sentences on what changes at `from_len`.
-    pub why: &'static str,
-}
-
-/// The kernels this CPU runs, by input length, in ascending `from_len`
-/// with the first at 0. `platform` names the selection
-/// (`"SME2"`, `"NEON"`, `"AVX2"`, ...).
-#[cfg(feature = "std")]
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[doc(hidden)]
-pub struct KernelReport {
-    pub platform: &'static str,
-    pub kernels: Vec<Kernel>,
-}
-
-/// What [`hash`] runs on this CPU at each input length. Read at run
-/// time from the same detection [`hash`] uses, so a report built from it
-/// describes the measurement it accompanies.
-#[cfg(feature = "std")]
-#[doc(hidden)]
-pub fn kernel_report() -> KernelReport {
-    let platform = Platform::detect();
-    let mut kernels = Vec::with_capacity(4);
-    #[cfg(blake3_neon_hybrid)]
-    {
-        kernels.push(Kernel {
-            from_len: 0,
-            name: "integer code, one call",
-            why: "Inputs of one chunk (1 KiB) or less are hashed in one call of integer-only code that keeps its whole state in registers.",
-        });
-        if neon_hybrid::sha3_detected() {
-            // The NEON platform hands hash_many sixteen chunks at a time;
-            // SME2 hands the hybrids the remainder below a group of sixteen.
-            let why = if platform.simd_degree() == 16 {
-                "Above one chunk the input is hashed several chunks at a time, up to sixteen per call: some chunks on the integer units and the rest on the NEON vector units, at once."
-            } else {
-                "Above one chunk the input is hashed several chunks at a time, up to fifteen per call: some chunks on the integer units and the rest on the NEON vector units, at once. Below sixteen chunks this is the method; above, it hashes what SME2 leaves over."
-            };
-            kernels.push(Kernel { from_len: CHUNK_LEN + 1, name: "integer and NEON code side by side", why });
-        } else {
-            kernels.push(Kernel {
-                from_len: CHUNK_LEN + 1,
-                name: "NEON vectors, four chunks at a time",
-                why: "Above one chunk the input is hashed four chunks at a time on the NEON vector units; this CPU lacks the instructions the faster mixed code needs.",
-            });
-        }
-        #[cfg(blake3_sme2)]
-        if matches!(platform, Platform::SME2) {
-            kernels.push(Kernel {
-                from_len: sme2::GROUP * CHUNK_LEN,
-                name: "SME2, sixteen chunks at a time",
-                why: "Sixteen whole chunks fill the 512-bit vectors of the SME2 matrix unit; fewer than sixteen left over go to the integer and NEON code. From 32 KiB each whole subtree of the input runs on SME2 alone, its parent nodes included.",
-            });
-            kernels.push(Kernel {
-                from_len: sme2::LANE_MIN_CHUNKS * CHUNK_LEN,
-                name: "SME2 with integer code beside it",
-                why: "From 256 KiB each whole subtree of up to 1 MiB runs on SME2 while the integer units hash two chunks of every eighteen beside it.",
-            });
-        }
-    }
-    #[cfg(not(blake3_neon_hybrid))]
-    {
-        kernels.push(Kernel {
-            from_len: 0,
-            name: platform.compress_name(),
-            why: "Inputs of one chunk (1 KiB) or less run one compression per block on the calling platform's compress kernel.",
-        });
-        if platform.simd_degree() > 1 {
-            kernels.push(Kernel {
-                from_len: CHUNK_LEN + 1,
-                name: platform.hash_many_name(),
-                why: "Above one chunk the tree is hashed several chunks at a time, up to the platform's SIMD degree per call.",
-            });
-        }
-    }
-    KernelReport { platform: platform.name(), kernels }
-}
-
-/// What [`hash_many`] runs on a batch of messages of `message_len` bytes,
-/// by the batch's length in bytes: `from_len` is the batch's length at
-/// which each kernel starts. Messages of 1 to 16 whole blocks (64 B to
-/// 1 KiB) are hashed several at a time, and on SME2 so are messages of
-/// whole blocks up to 15 KiB. On x86 with AVX2 or AVX-512, messages of 2
-/// to 15 chunks hash across the messages at every step of their trees,
-/// from four or eight messages; other lengths run [`kernel_report`]'s
-/// kernel, one message per call. Requires `message_len` of 1 or more (the
-/// report counts a batch in its messages' bytes).
-#[cfg(feature = "std")]
-#[doc(hidden)]
-pub fn kernel_report_many(message_len: usize) -> KernelReport {
-    assert!(message_len > 0, "messages of one byte or more");
-    let platform = Platform::detect();
-    let blocks = if (1..=CHUNK_LEN).contains(&message_len) { many::slot_len(message_len) / BLOCK_LEN } else { 0 };
-    let mut kernels = Vec::with_capacity(3);
-    if blocks == 0 {
-        let one = kernel_report();
-        let kernel = one.kernels.iter().rev().find(|kernel| kernel.from_len <= message_len).expect("a kernel from 0");
-        kernels.push(Kernel { from_len: 0, name: kernel.name, why: "Messages of this length are hashed one call each, as one input of that length." });
-        #[cfg(blake3_neon_hybrid)]
-        if (CHUNK_LEN + 1..=2 * CHUNK_LEN).contains(&message_len) && neon_hybrid::sha3_detected() {
-            kernels.push(Kernel {
-                from_len: 2 * message_len,
-                name: "integer and NEON code, messages side by side",
-                why: "From two messages of two chunks, every first chunk is hashed in one pass over the vector and integer units, every second chunk in another, then every root, up to sixteen messages at a time.",
-            });
-        }
-        #[cfg(blake3_sme2)]
-        if matches!(platform, Platform::SME2) && (CHUNK_LEN + 1..=15 * CHUNK_LEN).contains(&message_len) {
-            kernels.push(Kernel {
-                from_len: many::sme2_chunked_min(message_len) * message_len,
-                name: "SME2, sixteen messages side by side",
-                why: "From this many messages, groups of sixteen are hashed side by side on the SME2 matrix unit, one message per lane: each chunk across the messages, then each level of the messages' trees; the last group's spare lanes repeat a message.",
-            });
-        }
-        #[cfg(target_arch = "x86_64")]
-        if let Some(least) = many::across_from(message_len, platform) {
-            kernels.push(Kernel {
-                from_len: least * message_len,
-                name: platform.hash_many_name(),
-                why: "From this many messages, every step of their trees runs across the messages, up to sixteen at a time: each whole chunk, the partial chunk's blocks but its last (that one per message), and each parent node; only the top parents carry ROOT.",
-            });
-        }
-        return KernelReport { platform: one.platform, kernels };
-    }
-    #[cfg(blake3_neon_hybrid)]
-    {
-        kernels.push(Kernel {
-            from_len: 0,
-            name: "integer code, one message per call",
-            why: "A single message runs the same one-call integer code as one input.",
-        });
-        if neon_hybrid::sha3_detected() {
-            kernels.push(Kernel {
-                from_len: 2 * message_len,
-                name: "integer and NEON code, up to nine messages at a time",
-                why: "Two or more messages are hashed together, up to eight on the NEON vector units and one on the integer units at once; on SME2 this handles the messages left over below a group of sixteen.",
-            });
-        } else if message_len % BLOCK_LEN == 0 {
-            // Whole blocks, on the C NEON kernel: 64-byte messages from two
-            // (hash_run hands it any count), longer ones from three
-            // (hash_four_at_a_time pads three to four). A partial last
-            // block runs one call each.
-            let (least, why) = if message_len == BLOCK_LEN {
-                (2, "From two messages, the NEON vector units hash them four at a time.")
-            } else {
-                (
-                    3,
-                    "From three messages, groups of four are hashed on the NEON vector units, three left over padded to four with a repeat and one or two left over one call each.",
-                )
-            };
-            kernels.push(Kernel { from_len: least * message_len, name: "NEON vectors, four messages at a time", why });
-        }
-        #[cfg(blake3_sme2)]
-        const _: () = assert!(many::ONE_BLOCK_PAD_MIN == 11 && many::ONE_BLOCK_PAD_AFTER_GROUPS == 5, "the words below name these counts");
-        #[cfg(blake3_sme2)]
-        if matches!(platform, Platform::SME2) && blocks == 1 {
-            kernels.push(Kernel {
-                from_len: many::ONE_BLOCK_PAD_MIN * message_len,
-                name: "SME2, sixteen messages at a time",
-                why: "From eleven messages, groups of sixteen fill the SME2 matrix unit's vectors, one message per lane, the last group's spare lanes repeating a message; up to four left over past whole groups go to the NEON code.",
-            });
-        }
-        #[cfg(blake3_sme2)]
-        const _: () = assert!(many::SME2_TAIL_MIN == 10 && many::SME2_TAIL_MIN_AFTER_GROUPS == 5, "the words below name these counts");
-        #[cfg(blake3_sme2)]
-        if matches!(platform, Platform::SME2) && blocks > 1 {
-            kernels.push(Kernel {
-                from_len: many::SME2_TAIL_MIN * message_len,
-                name: "SME2, sixteen messages at a time",
-                why: "From ten messages, groups of sixteen fill the SME2 matrix unit's vectors, one message per lane, the last group's spare lanes repeating a message; up to four left over past whole groups go to the NEON code.",
-            });
-        }
-    }
-    #[cfg(not(blake3_neon_hybrid))]
-    {
-        kernels.push(Kernel {
-            from_len: 0,
-            name: platform.compress_name(),
-            why: "A single message runs one compression per block on the calling platform's compress kernel.",
-        });
-        if platform.simd_degree() > 1 {
-            kernels.push(Kernel {
-                from_len: 2 * message_len,
-                name: platform.hash_many_name(),
-                why: "Two or more messages are hashed together, up to the platform's SIMD degree per call.",
-            });
-        }
-    }
-    KernelReport { platform: platform.name(), kernels }
-}
-
-/// What [`hash_many_multithreaded`] runs by batch length:
-/// [`kernel_report_many`] plus, from the length at which a call may leave
-/// the calling thread, the split across threads (with one CPU, none).
-/// Requires [`initialize_multithreaded`], as the call does.
-#[cfg(feature = "std")]
-#[doc(hidden)]
-pub fn kernel_report_many_multithreaded(message_len: usize) -> KernelReport {
-    let mut report = kernel_report_many(message_len);
-    if !lanes::splits() {
-        return report;
-    }
-    report.kernels.push(Kernel {
-        // The split counts the batch's slots (each message's whole blocks,
-        // zero past its end), from two messages.
-        from_len: lanes::MIN_SPLIT_LEN.div_ceil(many::slot_len(message_len)).max(2) * message_len,
-        name: "split over threads",
-        why: "From here the batch is cut into ranges of messages that the calling thread and this crate's worker threads (by default one per CPU beyond the first) hash at once, each with integer and NEON code.",
-    });
-    report
-}
-
-/// What [`hash_multithreaded`] runs at each input length: [`kernel_report`]
-/// below the length at which a call may leave the calling thread, and from
-/// there the split across threads (its pieces run the kernels below it;
-/// with one CPU, no split). Requires [`initialize_multithreaded`], as the
-/// call does.
-#[cfg(feature = "std")]
-#[doc(hidden)]
-pub fn kernel_report_multithreaded() -> KernelReport {
-    let mut report = kernel_report();
-    if !lanes::splits() {
-        return report;
-    }
-    report.kernels.retain(|kernel| kernel.from_len < lanes::MIN_SPLIT_LEN);
-    report.kernels.push(Kernel {
-        from_len: lanes::MIN_SPLIT_LEN,
-        name: "split over threads, SME2 on one for large inputs",
-        why: "From here the input is cut into whole subtrees that the calling thread and this crate's worker threads (by default one per CPU beyond the first) hash at once, the workers with integer and NEON code. Once its share comes to 128 KiB or more (with sixteen threads, inputs from about 1.3 MiB), the calling thread hashes a share sized to its speed on SME2, with integer code beside it from 256 KiB pieces.",
-    });
-    report
 }
 
 /// The keyed hash function.

@@ -34,11 +34,6 @@
 - **Breaking: the deprecated `guts` module goes** (`hazmat` serves it).
 - `Mode::DeriveKeyMaterial` takes a derived key's context already hashed
   (`hazmat::hash_derive_key_context`), for many calls with one context.
-- Each kernel report (`kernel_report` and its forms) is checked against
-  the dispatch by a test, which found four wrong: the batch split counts
-  the messages' slots (512 messages of 1000 bytes, not 524); with one CPU
-  nothing splits; without the SHA-3 extension NEON runs batches of 64-byte
-  messages from two and other whole blocks from three.
 - The startup self-test checks, in a test on every run, that it reaches
   every assembly kernel this machine has; it gained two cases on AArch64
   (42), for the SME2 kernel at a counter per group and, on CPUs without
