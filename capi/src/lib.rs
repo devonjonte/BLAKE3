@@ -71,6 +71,12 @@ unsafe fn hasher_mut<'a>(hasher: *mut B3Hasher) -> &'a mut Hasher {
     unsafe { &mut *(hasher as *mut Hasher) }
 }
 
+/// `b3_version`: the library's version, as `b3.h`'s `B3_VERSION`.
+#[unsafe(no_mangle)]
+pub extern "C" fn b3_version() -> *const c_char {
+    c"0.8.0".as_ptr()
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn b3_plain() -> B3Mode {
     B3Mode { kind: 0, key: [0; 32] }

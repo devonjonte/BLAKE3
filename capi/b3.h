@@ -7,9 +7,18 @@
  * nothing extra. Calls that use other CPU cores (`_multithreaded`) start
  * the library's threads at their first use; they last for the process.
  *
- * Link with -lb3_servil (libb3_servil.a or libb3_servil.so / libb3_servil.dylib, built by `cargo build
- * --release` in capi/). C11, or C++11.
+ * Threads: any call may be made from any thread. A b3_mode is a value and
+ * may be shared and read by any number of threads at once. A b3_hasher is
+ * used by one thread at a time. After fork(), the child has none of the
+ * library's threads; its calls still finish, on the calling thread.
+ *
+ * Link with -lb3_servil (libb3_servil.a, or libb3_servil.so /
+ * libb3_servil.dylib, built by `cargo build --release` in capi/; the
+ * shared library carries its version in its soname). C11, or C++11.
+ * B3_VERSION names the header's version; b3_version() the library's, so a
+ * program can check that the two agree.
  */
+#define B3_VERSION "0.8.0"
 #ifndef B3_H
 #define B3_H
 
@@ -19,6 +28,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* The library's version, the same text as B3_VERSION in the header it was
+ * built with. */
+const char *b3_version(void);
 
 /* A digest: 32 bytes. */
 typedef struct {
