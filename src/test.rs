@@ -1169,7 +1169,9 @@ mod guard_pages {
         #[cfg(blake3_avx512_ffi)]
         platforms.extend(platform::Platform::avx512());
         #[cfg(target_arch = "aarch64")]
-        platforms.extend([platform::Platform::neon(), platform::Platform::sme2()].into_iter().flatten());
+        platforms.extend(platform::Platform::neon());
+        #[cfg(blake3_sme2)]
+        platforms.extend(platform::Platform::sme2());
         // The kernels this CPU has are the ones checked: none left out.
         #[cfg(target_arch = "x86_64")]
         {
