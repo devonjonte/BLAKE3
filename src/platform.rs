@@ -522,12 +522,6 @@ impl Platform {
         if sme2_detected() { Some(Self::SME2) } else { None }
     }
 
-    #[cfg(blake3_wasm32_simd)]
-    #[cfg(test)]
-    pub fn wasm32_simd() -> Option<Self> {
-        // Assumed to be safe if the "wasm32_simd" feature is on.
-        Some(Self::WASM32_SIMD)
-    }
 }
 
 /// The x86-64 features the platforms check, as bits: [`SSE41`], [`AVX2`],
