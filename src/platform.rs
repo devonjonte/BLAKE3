@@ -521,7 +521,6 @@ impl Platform {
     pub fn sme2() -> Option<Self> {
         if sme2_detected() { Some(Self::SME2) } else { None }
     }
-
 }
 
 /// The x86-64 features the platforms check, as bits: [`SSE41`], [`AVX2`],
