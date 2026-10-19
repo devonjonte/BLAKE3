@@ -15,6 +15,7 @@ digests as official BLAKE3.
 >   (after idling, 64 B messages 16.5% faster on an i7-12700K) (#83).
 > - A one-shot job's pieces claimed in consecutive runs (#87): b3sum reads a large file
 >   from storage as official BLAKE3 does (256 MiB 82.4 -> 79.5 ms, ahead of official).
+> - `collect()` hashes a waiting task when none is done: no spin forever without workers (#88).
 
 ## How it is checked
 
