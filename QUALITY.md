@@ -1,9 +1,7 @@
 # How blake3-servil is checked
 
-BLAKE3 is a cryptographic hash function: it turns data of any size into
-a 32-byte fingerprint, called a digest. The same data always produces
-the same digest. blake3-servil is a modified BLAKE3 implementation that
-aims to produce exactly the official digests, faster.
+blake3-servil is a modified BLAKE3 implementation that aims to produce
+exactly the official digests, faster.
 
 Most of the extra speed comes from code written for specific processors
 and from splitting work across processor cores. That is also where
@@ -12,9 +10,8 @@ different ways.
 
 ## Proof of the fastest Arm code
 
-The fastest parts are small routines called kernels. Some are written in
-assembly language, the human-readable form of the instructions a
-processor executes.
+The fastest parts are small routines called kernels, some of them
+written in assembly.
 
 For almost all of the new Arm kernels, the project uses formal
 verification. Instead of testing selected inputs, a computer-checked
