@@ -3085,3 +3085,13 @@ The group induction takes about 40 of the 44 minutes (2627 s as a long-proof cas
 plain chunk kernel's; the table's 144-byte stride (`URem`/`UDiv` in the
 entry function, where the plain kernel masks with 127) is the likely
 cost, untested.
+
+## Data-independent timing (DIT): its cost on the VM (October 19, 2026)
+
+Zooko asked for the cost of turning DIT on (PSTATE.DIT, `msr DIT, #1`). Probe `probe/dit` (55b7c09): every thread that hashes turns it on, callers in each call's `Platform::detect` and the pool's workers and SME2 thread at their start; `dit_is_on` tests it in a caller. VM, `perf_regress compare servil probe/dit --contenders blake3-servil-mt,blake3-servil-st`, 8 fresh-layout pairs, 340 cells (`tmp/night/perf-dit-vm-samples`):
+
+- the median cell: x1.002;
+- judged slower (3% margin): lent messages of 4 KiB, +4.7% to +5.1% in all four of its cells (st and mt, solo and shared, every pair), and shared `ContinuousMessages` 64 B, +6.9%;
+- no other cell is judged slower; the idle cells' ranges (x0.84 to x1.21) are their usual spread.
+
+So DIT costs nothing measurable on the VM except one path, 4 KiB (four chunks), where some instruction DIT makes constant-time is slower. Open: which kernel and instruction (a probe of the 4 KiB path with and without DIT), and the Mac, where the M4's DIT, not the host's virtualisation of it, decides.
