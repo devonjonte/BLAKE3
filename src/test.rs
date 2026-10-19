@@ -1165,7 +1165,9 @@ mod guard_pages {
         #[allow(unused_mut)]
         let mut platforms: Vec<platform::Platform> = Vec::new();
         #[cfg(target_arch = "x86_64")]
-        platforms.extend([platform::Platform::sse41(), platform::Platform::avx2(), platform::Platform::avx512()].into_iter().flatten());
+        platforms.extend([platform::Platform::sse41(), platform::Platform::avx2()].into_iter().flatten());
+        #[cfg(blake3_avx512_ffi)]
+        platforms.extend(platform::Platform::avx512());
         #[cfg(target_arch = "aarch64")]
         platforms.extend([platform::Platform::neon(), platform::Platform::sme2()].into_iter().flatten());
         // The kernels this CPU has are the ones checked: none left out.
