@@ -1033,6 +1033,30 @@ mod test {
         }
     }
 
+    /// The arrangement for whole blocks where the NEON plans are absent
+    /// (x86-64, WebAssembly: groups of four, a spare fourth lane for three
+    /// left over, one call each for one or two), run here with `plans`
+    /// false on every platform this CPU has, so the AArch64 tests and
+    /// mutants reach it too.
+    #[test]
+    fn test_hash_blocks_without_plans() {
+        #[allow(unused_mut)]
+        let mut platforms = vec![Platform::detect(), Platform::Portable];
+        #[cfg(blake3_neon)]
+        platforms.push(Platform::neon().expect("NEON on AArch64"));
+        for count in 0..=40 {
+            let input = messages(4 * BLOCK_LEN, count);
+            for &platform in &platforms {
+                let mut out = vec![[0xAAu8; OUT_LEN]; count + 16];
+                hash_blocks::<{ 4 * BLOCK_LEN }>(&input, crate::IV, 0, &mut out[..count], platform, false, BLOCK_LEN);
+                assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count}: a store past the last output");
+                for (i, digest) in out[..count].iter().enumerate() {
+                    assert_eq!(*digest, *crate::hash(message(&input, 256, i)).as_bytes(), "{platform:?}, message {i} of {count}");
+                }
+            }
+        }
+    }
+
     /// Messages of 2 to 15 chunks (whole blocks) on every platform this
     /// CPU has: on SME2 sixteen side by side, every tree shape from two
     /// chunks to fifteen, the last chunk whole or short, at counts that

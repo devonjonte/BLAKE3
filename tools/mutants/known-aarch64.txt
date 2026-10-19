@@ -2,7 +2,8 @@
 # SME2 and the SHA-3 extension), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/each.rs src/ffi_neon.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/hasher.rs src/hazmat.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/neon_xof.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/self_test.rs src/traits.rs src/tree.rs
+files: src/each.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/hasher.rs src/hazmat.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/neon_xof.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/self_test.rs src/traits.rs src/tree.rs
+src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace < with <= in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
 src/each.rs	replace < with == in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
 src/each.rs	replace >= with < in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
@@ -35,6 +36,7 @@ src/ffi_neon_hybrid.rs	replace prefetch_parent_code with ()	1	speed: whether and
 src/ffi_neon_hybrid.rs	replace prefetch_tree_code with ()	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace sha3_detected -> bool with true	1	detection, on a machine with SHA-3: a wrong no runs the NEON kernels (equally correct), a wrong yes is this machine's answer
 src/ffi_neon_hybrid.rs	replace | with ^ in compress_in_place	1	equivalent: | and ^ agree on flag bits that never overlap
+src/ffi_neon_hybrid.rs	replace | with ^ in xof_many	1	equivalent: | and ^ agree on flag bits that never overlap
 src/ffi_sme2.rs	replace prefetch_code with ()	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/hasher.rs	replace - with + in feed	1	speed: ahead is a prefetch hint (how far the SME2 walk prefetches past its input)
 src/hasher.rs	replace - with / in feed	1	speed: ahead is a prefetch hint (how far the SME2 walk prefetches past its input)
@@ -256,16 +258,17 @@ src/lib.rs	replace | with ^ in hash_all_at_once	1	equivalent: | and ^ agree on f
 src/lib.rs	replace | with ^ in hash_one_chunk_root	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace || with && in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
 src/many.rs	delete ! in across_from	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/many.rs	delete match arm 3 in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	delete match arm 3 in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace != with == in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/many.rs	replace != with == in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace != with == in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace % with + in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/many.rs	replace % with + in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace % with + in hash_chunked	1	speed: moves a threshold between equally correct paths
+src/many.rs	replace % with + in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace % with / in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace % with / in hash_chunked	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace % with / in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace % with / in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace && with || in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/many.rs	replace && with || in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace && with || in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace && with || in hash_run_short	1	speed: moves a threshold between equally correct paths
 src/many.rs	replace && with || in sme2_sized	5	speed: moves a threshold between equally correct paths
 src/many.rs	replace * with + in hash_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
@@ -273,7 +276,7 @@ src/many.rs	replace * with + in hash_group_across	5	x86 only: compiled out on AA
 src/many.rs	replace * with + in hash_long_or_single	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace * with + in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace * with / in hash_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/many.rs	replace * with / in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace * with / in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace * with / in hash_group_across	5	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace * with / in hash_long_or_single	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace * with / in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
@@ -287,7 +290,7 @@ src/many.rs	replace + with - in hash_group_across	1	x86 only: compiled out on AA
 src/many.rs	replace + with - in subtree_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace - with + in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
 src/many.rs	replace - with + in hash_chunked	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace - with + in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace - with + in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace - with + in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace - with + in subtree_across	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace - with / in hash_blocks	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
@@ -318,7 +321,7 @@ src/many.rs	replace > with == in hash_group_across	2	x86 only: compiled out on A
 src/many.rs	replace > with == in sme2_sized	2	speed: moves a threshold between equally correct paths
 src/many.rs	replace > with >= in hash_blocks	2	speed: moves a threshold between equally correct paths; and an SME2 call with no lanes, which does nothing
 src/many.rs	replace > with >= in hash_chunked	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace > with >= in hash_four_at_a_time	1	another machine: the path without the NEON plans (CPUs without the SHA-3 extension; CI's QEMU job runs it)
+src/many.rs	replace > with >= in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace > with >= in hash_group_across	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace > with >= in hash_many_on	1	speed: moves a threshold between equally correct paths (test::dispatch pins the others)
 src/many.rs	replace > with >= in hash_run	1	speed: moves a threshold between equally correct paths

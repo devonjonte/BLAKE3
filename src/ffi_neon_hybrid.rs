@@ -668,18 +668,11 @@ unsafe fn run_plan(
     }
 }
 
-/// Whether [`hash_many`] takes inputs of N bytes: whole chunks at
-/// incrementing counters, or 1 to 16 whole blocks at one counter (parents,
-/// and separate messages of whole blocks; the parent kernels run any
-/// block count).
-pub fn covers(n: usize, increment_counter: IncrementCounter) -> bool {
-    (n == CHUNK_LEN && increment_counter.yes()) || (!increment_counter.yes() && n % BLOCK_LEN == 0 && (BLOCK_LEN..=CHUNK_LEN).contains(&n))
-}
-
 /// `hash_many` for whole chunks (`N == CHUNK_LEN`, counter incrementing)
 /// on the chunk plans, and for inputs of 1 to 16 whole blocks at one
-/// counter (parents, separate messages) on the parent plans. Other shapes
-/// ([`covers`] false) are not produced by this crate and stop the program.
+/// counter (parents, separate messages) on the parent plans: the shapes
+/// `Platform::hash_many` takes. Another N cannot compile, and incrementing
+/// counters on less than a chunk stop.
 ///
 /// Unsafe because the CPU must have NEON.
 pub unsafe fn hash_many<const N: usize>(
@@ -729,10 +722,12 @@ unsafe fn hash_many_in<const N: usize>(
 ) {
     assert!(out.len() >= inputs.len() * OUT_LEN);
     assert!((1..=BLOCK_LEN).contains(&last_len), "a last block of 1 to 64 bytes");
-    let (plans, kernels, counter_step): (&[&[usize]; 17], &[Option<Kernel>], u64) = match (N, increment_counter.yes()) {
-        (CHUNK_LEN, true) => (family.chunk_plans, family.chunk_kernels, 1),
-        _ if covers(N, increment_counter) => (family.parent_plans, family.parent_kernels, 0),
-        _ => panic!("hash_many shape the NEON kernels do not cover: N = {N}, increment = {}", increment_counter.yes()),
+    const { assert!(N > 0 && N % BLOCK_LEN == 0 && N <= CHUNK_LEN, "1 to 16 whole blocks") };
+    let (plans, kernels, counter_step): (&[&[usize]; 17], &[Option<Kernel>], u64) = if increment_counter.yes() {
+        assert_eq!(N, CHUNK_LEN, "incrementing counters hash whole chunks");
+        (family.chunk_plans, family.chunk_kernels, 1)
+    } else {
+        (family.parent_plans, family.parent_kernels, 0)
     };
     let packed = flags as u64 | (flags_start as u64) << 8 | (flags_end as u64) << 16 | (last_len as u64) << 24;
     let blocks = N / BLOCK_LEN;
