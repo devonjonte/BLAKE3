@@ -25,10 +25,12 @@ digests as official BLAKE3.
 - **Every digest is checked** against the official test vectors and an independent
   implementation, and every process checks its kernels against known answers before its
   first hash.
-- **Memory safety is tested** under AddressSanitizer, ThreadSanitizer, and Miri.
+- **Memory safety is tested** under AddressSanitizer, ThreadSanitizer, and Miri, and
+  guard pages catch any kernel reading or writing outside its buffers.
 
-[`QUALITY.md`](QUALITY.md) states each claim precisely, lists the bugs these checks found,
-and gives the commands to repeat them.
+[`QUALITY.md`](QUALITY.md) tells what these checks found and how far each reaches; the
+[quality manual](docs/quality-manual.md) states each claim precisely and gives the
+commands to repeat them.
 
 **It is new.** An AI wrote it rapidly under Zooko's direction (his guidance is in
 `AGENTS.md`), and no person has yet reviewed it line by line or audited it. Its speed is

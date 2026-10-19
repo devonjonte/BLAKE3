@@ -86,7 +86,7 @@ A release is a commit everyone can stand behind: every check that the main line 
 
 **The pages users read**, rewritten for the release and read as a newcomer would (AGENTS.md, "write each page for a reader who holds only the page"):
 - `README.md`: the servil preface;
-- `QUALITY.md`: what is proved, what is tested, what is open;
+- `QUALITY.md`: the overview of what is proved, tested, and open; `docs/quality-manual.md`: every check and how to run it;
 - `CHANGELOG.md`: what changed for users since the last release, in their terms;
 - the supported-platforms table: exactly what CI runs.
 
