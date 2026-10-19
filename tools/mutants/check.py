@@ -73,10 +73,10 @@ def run(files, extra=(), shards=SHARDS, label="run"):
     every mutant's outcome by function. Each shard's results are kept in
     tmp/mutants-last/<label>/ for a look afterwards."""
     # The public features on, so the code behind them is tested too (the
-    # build variants, pure, no_sme2, and the like, are their own builds).
+    # build variants, pure and the like, are their own builds).
     # A mutant whose tests outlast TIMEOUT is a hang, which the check counts
     # as caught.
-    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize,traits-preview", "--timeout", str(TIMEOUT),
+    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "mmap,serde,zeroize", "--timeout", str(TIMEOUT),
             *extra]
     for f in files:
         args += ["--file", f]

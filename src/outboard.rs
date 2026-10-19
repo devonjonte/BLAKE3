@@ -113,7 +113,8 @@ pub fn verify_range_with(mode: Mode, hash: &Hash, len: u64, outboard: &[u8], fir
 /// ```
 /// # blake3_servil::initialize();
 /// use blake3_servil::{Mode, Verifier};
-/// # let (input, encoding) = (vec![5u8; 50_000], blake3_servil::test_encoding(Mode::Hash, &vec![5u8; 50_000]));
+/// # let input = vec![5u8; 5_000];
+/// # let encoding = input.clone(); // one group: its encoding is itself
 /// let hash = blake3_servil::hash(&input);
 /// let mut verifier = Verifier::new(Mode::Hash, &hash, input.len() as u64);
 /// let mut received = Vec::new();
