@@ -170,13 +170,6 @@
 //! The `wasm32_simd` feature turns on the WebAssembly SIMD implementation
 //! for `wasm32` targets, and assumes the runtime has WebAssembly SIMD.
 //!
-//! The `traits-preview` feature implements the traits of the RustCrypto
-//! [`digest`] crate, through which generic Rust code takes a hash function,
-//! and re-exports that crate as `traits::digest`. Those traits are still
-//! changing before that crate's 1.0, so this feature may change with any
-//! version of this crate. (The "-preview" name follows the RustCrypto
-//! [`signature`] crate's convention.)
-//!
 //! [BLAKE3]: https://blake3.io
 //! [docs.rs]: https://docs.rs/
 //! [`Read`]: https://doc.rust-lang.org/std/io/trait.Read.html
@@ -203,15 +196,12 @@ pub use each::{hash_each_multithreaded_with, hash_each_with};
 mod outboard;
 #[cfg(feature = "std")]
 #[doc(hidden)]
-pub use outboard::test_encoding;
 #[cfg(feature = "std")]
 pub use outboard::{GROUP_LEN, Verifier, outboard_multithreaded_with, outboard_with, verify_range_with};
 
 pub mod hazmat;
 
-/// Undocumented and unstable, for benchmarks only.
-#[doc(hidden)]
-pub mod platform;
+mod platform;
 
 // Platform-specific implementations of the compression function. These
 // BLAKE3-specific cfg flags are set in build.rs.
@@ -253,9 +243,6 @@ mod sse41;
 #[cfg(blake3_wasm32_simd)]
 #[path = "wasm32_simd.rs"]
 mod wasm32_simd;
-
-#[cfg(feature = "traits-preview")]
-pub mod traits;
 
 #[cfg(feature = "std")]
 mod io;
@@ -1756,14 +1743,6 @@ pub fn derive_key(context: &str, key_material: &[u8]) -> [u8; OUT_LEN] {
 /// to hash at once); box it where that matters.
 ///
 /// The `mmap` Cargo feature adds a method for memory-mapped files.
-///
-/// When the `traits-preview` Cargo feature is enabled, this type implements
-/// several commonly used traits from the
-/// [`digest`](https://crates.io/crates/digest) crate. However, those
-/// traits aren't stable, and they're expected to change in incompatible ways
-/// before that crate reaches 1.0. For that reason, this crate makes no SemVer
-/// guarantees for this feature, and callers who use it should expect breaking
-/// changes between patch versions.
 ///
 /// # Examples
 ///

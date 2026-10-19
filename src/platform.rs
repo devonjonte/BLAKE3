@@ -490,10 +490,6 @@ impl Platform {
 
     // Explicit platform constructors, for benchmarks.
 
-    pub fn portable() -> Self {
-        Self::Portable
-    }
-
     #[cfg(target_arch = "x86_64")]
     pub fn sse41() -> Option<Self> {
         if sse41_detected() { Some(Self::SSE41) } else { None }
@@ -599,11 +595,6 @@ pub fn avx512_detected() -> bool {
         return false;
     }
 
-    // A testing-only short-circuit.
-    if cfg!(feature = "no_avx512") {
-        return false;
-    }
-
     // A build for CPUs that have it (`-C target-cpu=...` or
     // `-C target-feature=...`) needs no check: run elsewhere, it stops
     // at its first such instruction (SIGILL), in the startup self-test.
@@ -618,11 +609,6 @@ pub fn avx512_detected() -> bool {
 #[inline(always)]
 pub fn avx2_detected() -> bool {
     if cfg!(miri) {
-        return false;
-    }
-
-    // A testing-only short-circuit.
-    if cfg!(feature = "no_avx2") {
         return false;
     }
 
@@ -800,11 +786,6 @@ pub fn sme2_detected() -> bool {
 #[cfg(blake3_sme2)]
 fn sme2_detect_uncached() -> bool {
     if cfg!(miri) {
-        return false;
-    }
-
-    // A testing-only short-circuit.
-    if cfg!(feature = "no_sme2") {
         return false;
     }
 

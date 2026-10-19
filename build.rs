@@ -10,14 +10,6 @@ fn is_pure() -> bool {
     defined("CARGO_FEATURE_PURE")
 }
 
-fn is_no_neon() -> bool {
-    defined("CARGO_FEATURE_NO_NEON")
-}
-
-fn is_no_sme2() -> bool {
-    defined("CARGO_FEATURE_NO_SME2")
-}
-
 fn is_wasm32_simd() -> bool {
     defined("CARGO_FEATURE_WASM32_SIMD")
 }
@@ -230,8 +222,7 @@ fn assembles(name: &str, flag: &str, source: &str) -> bool {
 // GCC 14+). With an older compiler the crate builds without the SME2 kernel,
 // with a warning: only CPUs with SME2 (Apple M4 and later) run it, and the
 // NEON and scalar kernels serve every AArch64 CPU. Common Linux systems
-// (Debian 12, Raspberry Pi OS) ship such compilers. Callers who want a
-// NEON-only build regardless say so with the `no_sme2` feature.
+// (Debian 12, Raspberry Pi OS) ship such compilers.
 fn c_compiler_supports_sme2() -> bool {
     let compiler = new_build().get_compiler().path().to_owned();
     let supported = assembles("sme2", "-march=armv9-a+sme2", ".arch armv9-a+sme2\nsmstart sm\nsmstop sm\n");
@@ -356,7 +347,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Little-endian AArch64 (32-bit ARM is unsupported: official BLAKE3
     // serves it).
-    if !is_no_neon() && !is_pure() && is_aarch64() && is_little_endian() {
+    if !is_pure() && is_aarch64() && is_little_endian() {
         println!("cargo::rustc-cfg=blake3_neon");
         build_neon_c_intrinsics();
         let hybrid = is_aarch64() && c_compiler_supports_sha3();
@@ -373,7 +364,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // SME2 with 512-bit streaming vectors and the NEON hybrids otherwise.
         let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
         let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-        if hybrid && !is_no_sme2() && (target_vendor == "apple" || target_os == "linux") {
+        if hybrid && (target_vendor == "apple" || target_os == "linux") {
             if c_compiler_supports_sme2() {
                 build_sme2_assembly();
             }

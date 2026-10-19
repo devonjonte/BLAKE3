@@ -157,7 +157,7 @@ implementation; every platform's batch kernel at every input shape (1 to
 16 blocks, keyed flags, a counter whose low word overflows mid-batch,
 pointer tables forward, reversed, and strided), against the portable one;
 the pool's cuts and merges, its thread caps, and 32 callers at once; and
-the same suites in the builds without SME2 (`no_sme2`) and without any
+the same suites in the builds without any
 SIMD (`pure`).
 
 **Every process checks itself before its first hash.** The tests prove
@@ -332,7 +332,7 @@ SME2 (clang 17 or later; set `CC=clang-19` or similar):
 ```sh
 git clone -b servil https://github.com/johnservil/BLAKE3 && cd BLAKE3
 cargo test --release --lib                        # 115 tests
-cargo test --release --lib --features no_sme2     # 110
+cargo test --release --lib      # 110
 cargo test --release --lib --features pure        # 95
 cargo test --release --doc                        # 30
 cargo test --release --manifest-path test_vectors/Cargo.toml

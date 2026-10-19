@@ -42,12 +42,11 @@ On AArch64 Linux and macOS the build includes the SME2 kernel when the C
 compiler assembles SME2: Clang 17 or later (Xcode 15 or later), or GCC 14
 or later with binutils 2.41. With an older compiler it builds without the
 kernel and warns (`CC=clang-19 cargo build` adds it on Debian 12, for
-example). The `no_sme2` feature leaves the kernel out on purpose. On a
+example). On a
 CPU with SME2, `perf_regress` stops when the build lacks the kernel.
 
 ```sh
 cargo test --release --lib --tests
-cargo test --release --lib --tests --features no_sme2
 cargo test --release --lib --tests --features pure
 cargo test --release --doc
 cargo test --release --manifest-path test_vectors/Cargo.toml

@@ -28,11 +28,11 @@ it; both optional. Every run's samples file lands in the job's samples/.)
 (Any job may add "powermetrics": true: the chip's CPU, GPU, and ANE power
 every 500 ms beside it, in its results' powermetrics.txt.)
     {"type": "example", "example": "scaling" | "host_lab" | "energy_probe" | "job_trace",
-     "fork_commit": "...", "features": ["no_sme2"], "args": ["message", "1048576"]}
+     "fork_commit": "...", "args": ["message", "1048576"]}
     {"type": "test", "fork_commit": "..."}
 
 (A test job runs the fork's suites natively: the library tests in the
-default, no_sme2, and pure builds, the doc tests, the integration tests in
+default and pure builds, the doc tests, the integration tests in
 tests/ (the planned API's contract), and the official vectors.)
 
 (A benchmark job with "repeat": N runs the benchmark N times back to
@@ -78,8 +78,8 @@ PATCH = 'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'
 # blake3, blake3-mt, blake3-servil: bench-hashes' keys before September 25, 2026.
 CONTENDERS = {"blake3-official", "blake3-official-mt", "blake3", "blake3-servil-st", "blake3-servil", "blake3-servil-mt", "blake3-mt",
               "sha256", "sha256-ring", "sha256-cc", "sha1dc", "sha3-256", "blake3-commonware"}
-EXAMPLES = {"scaling", "host_lab", "energy_probe", "job_trace", "sme_units"}
-FEATURES = {"no_sme2", "pure", "job-trace"}
+EXAMPLES = {"host_lab", "energy_probe", "job_trace", "sme_units"}
+FEATURES = {"pure", "job-trace"}
 DEFAULT_LIMIT = 1800
 MAX_LIMIT = 7200
 
@@ -232,7 +232,7 @@ def example(job, run, work, out):
 
 def test(job, run, work, out):
     fork = run.checkouts(hex_commit(job, "fork_commit"), None)
-    for features in [[], ["--features", "no_sme2"], ["--features", "pure"]]:
+    for features in [[], ["--features", "pure"]]:
         run.run(["cargo", "test", "--release", "--lib", *features], cwd=fork)
     run.run(["cargo", "test", "--release", "--doc"], cwd=fork)
     if (fork / "tests").is_dir():
