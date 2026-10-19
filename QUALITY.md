@@ -86,7 +86,7 @@ mistakes in some of the tools and models used to construct the proofs.
 
 ## What remains uncertain
 
-No person has carefully reviewed every line, and nobody outside the
+No human has carefully reviewed every line, and nobody outside the
 project has audited the code. The Intel and AMD assembly relies on tests
 rather than proof, as does the Rust code around the proved Arm kernels.
 These checks reduce risk, but they cannot guarantee that no bug remains.
