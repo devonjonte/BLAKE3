@@ -43,8 +43,9 @@ Eight bugs, all fixed; none is known to have reached a user.
   digests: an SME2 kernel mishandling one-block messages, and a hidden
   upstream function silently dropping a partial block (also reported
   upstream).
-- **Review** found one that could have: `update_reader` losing bytes
-  before an error, caught about 20 minutes after it landed.
+- **Its author rereading the change** (John Servil, an AI) found one
+  that could have: `update_reader` losing bytes before an error, fixed 7
+  minutes after it was written.
 - **Miri** found a data race by Rust's aliasing rules that no test could
   have seen as a wrong digest.
 - **The proofs' model of x86 assembly**, still in progress, found that
