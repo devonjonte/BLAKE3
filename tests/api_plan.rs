@@ -66,8 +66,8 @@ fn one_message_every_form_matches_the_vectors() {
         let data = input(len);
         assert_eq!(blake3_servil::hash(&data), Hash::from(expected[0]), "hash, {len} bytes");
         assert_eq!(blake3_servil::hash_multithreaded(&data), Hash::from(expected[0]), "hash_multithreaded, {len} bytes");
-        assert_eq!(blake3_servil::keyed_hash(KEY, &data), Hash::from(expected[1]), "keyed_hash, {len} bytes");
-        assert_eq!(blake3_servil::derive_key(CONTEXT, &data), expected[2], "derive_key, {len} bytes");
+        assert_eq!(blake3_servil::hash_with(Mode::Keyed(KEY), &data), Hash::from(expected[1]), "keyed_hash, {len} bytes");
+        assert_eq!(*blake3_servil::hash_with(Mode::DeriveKey(CONTEXT), &data).as_bytes(), expected[2], "derive_key, {len} bytes");
         for (m, mode) in modes().into_iter().enumerate() {
             for (name, form) in HASH_WITH {
                 assert_eq!(form(mode, &data), Hash::from(expected[m]), "{name} mode {m}, {len} bytes");
@@ -86,8 +86,8 @@ fn a_message_in_pieces_matches_the_reference() {
     blake3_servil::initialize_multithreaded(None);
     let hashers = |m: usize| match m {
         0 => blake3_servil::Hasher::new(),
-        1 => blake3_servil::Hasher::new_keyed(KEY),
-        _ => blake3_servil::Hasher::new_derive_key(CONTEXT),
+        1 => blake3_servil::Hasher::new_with(Mode::Keyed(KEY)),
+        _ => blake3_servil::Hasher::new_with(Mode::DeriveKey(CONTEXT)),
     };
     let cases: [(usize, usize); 8] = [
         (64 << 10, 64 << 10),

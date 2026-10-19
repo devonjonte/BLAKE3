@@ -157,14 +157,14 @@ use crate::{CHUNK_LEN, CVWords, Hasher, IV, KEY_LEN, OUT_LEN};
 
 /// Extension methods for [`Hasher`]. This is the main entrypoint to the `hazmat` module.
 pub trait HasherExt {
-    /// Similar to [`Hasher::new_derive_key`] but using a pre-hashed [`ContextKey`] from
+    /// Similar to [`Hasher::new_with`] with [`Mode::DeriveKeyMaterial`](crate::Mode::DeriveKeyMaterial) but using a pre-hashed [`ContextKey`] from
     /// [`hash_derive_key_context`].
     ///
     /// The [`hash_derive_key_context`] function is the _only_ valid source of the [`ContextKey`].
-    /// Any other source ([`hash`](crate::hash), [`keyed_hash`](crate::keyed_hash), arbitrary bytes
+    /// Any other source ([`hash`](crate::hash), a keyed hash, arbitrary bytes
     /// from the caller) violates the security requirements.
     ///
-    /// Calling [`derive_key`](crate::derive_key) or [`Hasher::new_derive_key`] in a loop will
+    /// Calling [`derive_key`](crate::derive_key) or [`Hasher::new_with`] with [`Mode::DeriveKeyMaterial`](crate::Mode::DeriveKeyMaterial) in a loop will
     /// re-hash the context string every time. This constructor function is a performance
     /// optimization to avoid that repeated work. If you hardcode the [`ContextKey`], the
     /// derive-key mode becomes zero-overhead, like the keyed mode.
@@ -181,7 +181,7 @@ pub trait HasherExt {
     /// hasher.update(b"bar");
     /// let derived_key = *hasher.finalize().as_bytes();
     ///
-    /// assert_eq!(derived_key, blake3_servil::derive_key("foo", b"bar"));
+    /// assert_eq!(derived_key, *blake3_servil::hash_with(blake3_servil::Mode::DeriveKey("foo"), b"bar").as_bytes());
     /// ```
     fn new_from_context_key(context_key: &ContextKey) -> Self;
 
@@ -384,12 +384,12 @@ pub enum Mode<'a> {
     /// The default [`hash`][crate::hash] mode. Subtrees must be hashed with [`Hasher::new`].
     Hash,
 
-    /// The [`keyed_hash`][crate::keyed_hash] mode. Subtrees must be hashed with
-    /// [`Hasher::new_keyed`].
+    /// The keyed hash mode. Subtrees must be hashed with
+    /// [`Hasher::new_with`].
     KeyedHash(&'a [u8; KEY_LEN]),
 
     /// The [`derive_key`][crate::derive_key] mode. Subtrees must be hashed with either
-    /// [`Hasher::new_derive_key`] or [`Hasher::new_from_context_key`]. The [`ContextKey`] comes
+    /// [`Hasher::new_with`] with [`Mode::DeriveKeyMaterial`](crate::Mode::DeriveKeyMaterial) or [`Hasher::new_from_context_key`]. The [`ContextKey`] comes
     /// from [`hash_derive_key_context`].
     DeriveKeyMaterial(&'a ContextKey),
 }
@@ -498,9 +498,9 @@ pub fn merge_subtrees_root_xof(left_child: &ChainingValue, right_child: &Chainin
 /// An alias to distinguish [`hash_derive_key_context`] outputs from other keys.
 pub type ContextKey = [u8; KEY_LEN];
 
-/// Hash a [`derive_key`](crate::derive_key) context string and return a [`ContextKey`].
+/// Hash a key-derivation context string and return a [`ContextKey`].
 ///
-/// This has the same security requirement as [`derive_key`](crate::derive_key). **The context
+/// This has the same security requirement as key derivation. **The context
 /// string should be hardcoded, globally unique, and application-specific.**
 ///
 /// The _only_ valid uses for the returned [`ContextKey`] are
@@ -519,7 +519,7 @@ pub type ContextKey = [u8; KEY_LEN];
 /// hasher.update(b"bar");
 /// let derived_key = *hasher.finalize().as_bytes();
 ///
-/// assert_eq!(derived_key, blake3_servil::derive_key("foo", b"bar"));
+/// assert_eq!(derived_key, *blake3_servil::hash_with(blake3_servil::Mode::DeriveKey("foo"), b"bar").as_bytes());
 /// ```
 pub fn hash_derive_key_context(context: &str) -> ContextKey {
     crate::hash_serial(context.as_bytes(), IV, crate::DERIVE_KEY_CONTEXT).0
@@ -626,11 +626,11 @@ mod test {
         let key = &[44; 32];
 
         let mut expected_output = [0; 100];
-        Hasher::new_keyed(&key).update(&input).finalize_xof().fill(&mut expected_output);
+        Hasher::new_with(crate::Mode::Keyed(&key)).update(&input).finalize_xof().fill(&mut expected_output);
 
         let mut hazmat_output = [0; 100];
-        let left = Hasher::new_keyed(key).update(group0).finalize_non_root();
-        let right = Hasher::new_keyed(key).set_input_offset(group0.len() as u64).update(group1).finalize_non_root();
+        let left = Hasher::new_with(crate::Mode::Keyed(key)).update(group0).finalize_non_root();
+        let right = Hasher::new_with(crate::Mode::Keyed(key)).set_input_offset(group0.len() as u64).update(group1).finalize_non_root();
         merge_subtrees_root_xof(&left, &right, Mode::KeyedHash(&key)).fill(&mut hazmat_output);
         assert_eq!(expected_output, hazmat_output);
     }
@@ -640,7 +640,7 @@ mod test {
         let context = "foo";
         let mut input = [0; 1025];
         crate::test::paint_test_input(&mut input);
-        let expected = crate::derive_key(context, &input);
+        let expected = *crate::hash_with(crate::Mode::DeriveKey(context), &input).as_bytes();
 
         let cx_key = hash_derive_key_context(context);
         let left = Hasher::new_from_context_key(&cx_key).update(&input[..1024]).finalize_non_root();

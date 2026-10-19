@@ -302,10 +302,10 @@ fn test_compare_reference_impl() {
             reference_hasher.finalize(&mut expected_out);
 
             // all at once
-            let test_out = crate::keyed_hash(&TEST_KEY, input);
+            let test_out = crate::hash_with(crate::Mode::Keyed(&TEST_KEY), input);
             assert_eq!(test_out, *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
             // incremental
-            let mut hasher = crate::Hasher::new_keyed(&TEST_KEY);
+            let mut hasher = crate::Hasher::new_with(crate::Mode::Keyed(&TEST_KEY));
             hasher.update(input);
             assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
             assert_eq!(hasher.finalize(), test_out);
@@ -324,10 +324,10 @@ fn test_compare_reference_impl() {
             reference_hasher.finalize(&mut expected_out);
 
             // all at once
-            let test_out = crate::derive_key(context, input);
+            let test_out = *crate::hash_with(crate::Mode::DeriveKey(context), input).as_bytes();
             assert_eq!(test_out, expected_out[..32]);
             // incremental
-            let mut hasher = crate::Hasher::new_derive_key(context);
+            let mut hasher = crate::Hasher::new_with(crate::Mode::DeriveKey(context));
             hasher.update(input);
             assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
             assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&test_out[..32]).unwrap());
@@ -347,7 +347,7 @@ fn test_compare_reference_impl_long_xof() {
     reference_hasher.finalize(&mut reference_output);
 
     let mut test_output = [0u8; 32 * BLOCK_LEN - 1];
-    let mut test_hasher = crate::Hasher::new_keyed(&TEST_KEY);
+    let mut test_hasher = crate::Hasher::new_with(crate::Mode::Keyed(&TEST_KEY));
     test_hasher.update(b"hello world");
     test_hasher.finalize_xof().fill(&mut test_output);
 
@@ -539,18 +539,18 @@ fn test_reset() {
     assert_eq!(hasher.finalize(), crate::hash(&[42; CHUNK_LEN + 3]));
 
     let key = &[99; crate::KEY_LEN];
-    let mut keyed_hasher = crate::Hasher::new_keyed(key);
+    let mut keyed_hasher = crate::Hasher::new_with(crate::Mode::Keyed(key));
     keyed_hasher.update(&[42; 3 * CHUNK_LEN + 7]);
     keyed_hasher.reset();
     keyed_hasher.update(&[42; CHUNK_LEN + 3]);
-    assert_eq!(keyed_hasher.finalize(), crate::keyed_hash(key, &[42; CHUNK_LEN + 3]),);
+    assert_eq!(keyed_hasher.finalize(), crate::hash_with(crate::Mode::Keyed(key), &[42; CHUNK_LEN + 3]),);
 
     let context = "BLAKE3 2020-02-12 10:20:58 reset test";
-    let mut kdf = crate::Hasher::new_derive_key(context);
+    let mut kdf = crate::Hasher::new_with(crate::Mode::DeriveKey(context));
     kdf.update(&[42; 3 * CHUNK_LEN + 7]);
     kdf.reset();
     kdf.update(&[42; CHUNK_LEN + 3]);
-    let expected = crate::derive_key(context, &[42; CHUNK_LEN + 3]);
+    let expected = *crate::hash_with(crate::Mode::DeriveKey(context), &[42; CHUNK_LEN + 3]).as_bytes();
     assert_eq!(kdf.finalize(), expected);
 
     // A reset after the stack holds values (past the stage, which keeps
@@ -662,7 +662,7 @@ fn test_zeroize() {
     assert_eq!(hash.0, [0u8; 32]);
 
     // A Hasher: its core, and the bytes it has staged.
-    let mut hasher = crate::Hasher::new_keyed(&[42; 32]);
+    let mut hasher = crate::Hasher::new_with(crate::Mode::Keyed(&[42; 32]));
     hasher.update(&[42; 3000]);
     assert!(hasher.staged > 0);
     hasher.zeroize();
@@ -736,8 +736,8 @@ fn test_long_xof_matches_reference() {
     for (mode, len) in [(0, 0usize), (0, 1), (0, 1024), (0, 3000), (1, 100), (2, 777)] {
         let (mut ours, mut reference) = match mode {
             0 => (crate::Hasher::new(), reference_impl::Hasher::new()),
-            1 => (crate::Hasher::new_keyed(&TEST_KEY), reference_impl::Hasher::new_keyed(&TEST_KEY)),
-            _ => (crate::Hasher::new_derive_key("long xof"), reference_impl::Hasher::new_derive_key("long xof")),
+            1 => (crate::Hasher::new_with(crate::Mode::Keyed(&TEST_KEY)), reference_impl::Hasher::new_keyed(&TEST_KEY)),
+            _ => (crate::Hasher::new_with(crate::Mode::DeriveKey("long xof")), reference_impl::Hasher::new_derive_key("long xof")),
         };
         ours.update(&input[..len]);
         reference.update(&input[..len]);
@@ -830,39 +830,6 @@ fn test_update_reader_interrupted() -> std::io::Result<()> {
 }
 
 #[test]
-#[cfg(feature = "mmap")]
-// NamedTempFile isn't Miri-compatible
-#[cfg(not(miri))]
-fn test_mmap() -> Result<(), std::io::Error> {
-    // This is a brief test, since update_mmap() is mostly a wrapper around update(), which already
-    // has substantial testing.
-    use std::io::prelude::*;
-    let mut input = vec![0; 1_000_000];
-    paint_test_input(&mut input);
-    let mut tempfile = tempfile::NamedTempFile::new()?;
-    tempfile.write_all(&input)?;
-    tempfile.flush()?;
-    assert_eq!(crate::Hasher::new().update_mmap(tempfile.path())?.finalize(), crate::hash(&input),);
-    Ok(())
-}
-
-#[test]
-#[cfg(feature = "mmap")]
-#[cfg(target_os = "linux")]
-fn test_mmap_virtual_file() -> Result<(), std::io::Error> {
-    // Virtual files like /proc/version can't be mmapped, because their contents don't actually
-    // exist anywhere in memory. Make sure we fall back to regular file IO in these cases.
-    let virtual_filepath = "/proc/version";
-    let mut mmap_hasher = crate::Hasher::new();
-    // We'll fail right here if the fallback doesn't work.
-    mmap_hasher.update_mmap(virtual_filepath)?;
-    let mut read_hasher = crate::Hasher::new();
-    read_hasher.update_reader(std::fs::File::open(virtual_filepath)?)?;
-    assert_eq!(mmap_hasher.finalize(), read_hasher.finalize());
-    Ok(())
-}
-
-#[test]
 #[cfg(feature = "std")]
 #[cfg(feature = "serde")]
 fn test_serde() {
@@ -909,7 +876,7 @@ fn test_serde() {
 // obvious breaks. (For example, constant_time_eq is not compatible with Miri.)
 #[test]
 fn test_miri_smoketest() {
-    let mut hasher = crate::Hasher::new_derive_key("Miri smoketest");
+    let mut hasher = crate::Hasher::new_with(crate::Mode::DeriveKey("Miri smoketest"));
     hasher.update(b"foo");
     #[cfg(feature = "std")]
     hasher.update_reader(&b"bar"[..]).unwrap();
@@ -1331,8 +1298,12 @@ fn test_chunks_with_partial_against_reference() {
             out
         };
         assert_eq!(crate::hash(m).as_bytes(), &expect(reference_impl::Hasher::new()), "hash, len {len}");
-        assert_eq!(crate::keyed_hash(&key, m).as_bytes(), &expect(reference_impl::Hasher::new_keyed(&key)), "keyed_hash, len {len}");
-        assert_eq!(crate::derive_key("partial test", m), expect(reference_impl::Hasher::new_derive_key("partial test")), "derive_key, len {len}");
+        assert_eq!(crate::hash_with(crate::Mode::Keyed(&key), m).as_bytes(), &expect(reference_impl::Hasher::new_keyed(&key)), "keyed_hash, len {len}");
+        assert_eq!(
+            *crate::hash_with(crate::Mode::DeriveKey("partial test"), m).as_bytes(),
+            expect(reference_impl::Hasher::new_derive_key("partial test")),
+            "derive_key, len {len}"
+        );
     }
 }
 
@@ -1360,7 +1331,7 @@ fn test_hash_comparisons_and_formats() {
 #[test]
 #[cfg(feature = "std")]
 fn test_debug_leaves_out_the_bytes() {
-    let mut hasher = crate::Hasher::new_keyed(&[0xab; 32]);
+    let mut hasher = crate::Hasher::new_with(crate::Mode::Keyed(&[0xab; 32]));
     hasher.update(&[0xab; 70]);
     let shown = std::format!("{hasher:?}");
     assert!(shown.starts_with("Hasher {") && shown.contains("flags: 16") && shown.contains("platform"), "{shown}");
@@ -1499,7 +1470,7 @@ fn test_derive_key_material_mode() {
     let mut input = [0u8; 3000];
     paint_test_input(&mut input);
     assert_eq!(crate::hash_with(by_key, &input), crate::hash_with(by_string, &input));
-    assert_eq!(crate::hash_with(by_key, &input), crate::derive_key(context, &input));
+    assert_eq!(crate::hash_with(by_key, &input), *crate::hash_with(crate::Mode::DeriveKey(context), &input).as_bytes());
     let (mut a, mut b) = ([[0u8; 32]; 4], [[0u8; 32]; 4]);
     crate::hash_many_with(by_key, &input[..4 * 128], 128, &mut a);
     crate::hash_many_with(by_string, &input[..4 * 128], 128, &mut b);

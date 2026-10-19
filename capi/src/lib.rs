@@ -156,10 +156,7 @@ pub unsafe extern "C" fn b3_hasher_init(hasher: *mut B3Hasher, mode: *const B3Mo
     assert!(!hasher.is_null(), "b3: the hasher is NULL");
     let mode = unsafe { self::mode(mode) };
     let new = match mode.mode() {
-        Mode::Hash => Hasher::new(),
-        Mode::Keyed(key) => Hasher::new_keyed(key),
-        Mode::DeriveKeyMaterial(context_key) => blake3_servil::hazmat::HasherExt::new_from_context_key(context_key),
-        Mode::DeriveKey(_) => unreachable!("b3_mode holds a hashed context"),
+        _ => Hasher::new_with(mode.mode()),
     };
     // Sound: the memory is the caller's, sized and aligned for a Hasher,
     // which owns nothing to drop.

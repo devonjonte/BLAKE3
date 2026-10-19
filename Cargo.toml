@@ -27,10 +27,6 @@ wasm32_simd = []
 # toggles a runtime feature check on 64-bit ARM targets.
 std = ["constant_time_eq/std"]
 
-# The `mmap` feature (disabled by default, but enabled for docs.rs) adds the
-# `update_mmap` helper method for memory-mapped IO.
-mmap = ["std", "dep:memmap2"]
-
 # Implement the zeroize::Zeroize trait for types in this crate.
 zeroize = ["dep:zeroize", "arrayvec/zeroize"]
 
@@ -49,8 +45,8 @@ zeroize = ["dep:zeroize", "arrayvec/zeroize"]
 pure = []
 
 [package.metadata.docs.rs]
-# Document the mmap method and the Serialize/Deserialize/Zeroize impls on docs.rs.
-features = ["mmap", "serde", "zeroize"]
+# Document the Serialize/Deserialize/Zeroize impls on docs.rs.
+features = ["serde", "zeroize"]
 
 # The integration tests exercise the pool and the queue, which need std.
 [[test]]
@@ -74,7 +70,6 @@ required-features = ["std"]
 arrayvec = { version = "0.7.4", default-features = false }
 constant_time_eq = { version = "0.4.2", default-features = false }
 cfg-if = "1.0.0"
-memmap2 = { version = "0.9", optional = true }
 serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
 zeroize = { version = "1", default-features = false, optional = true }
 

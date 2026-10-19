@@ -693,7 +693,7 @@ mod test {
             for extra in [0, 1, 1000] {
                 let data = &input[..chunks * CHUNK_LEN + extra];
                 assert_eq!(*crate::hash(data).as_bytes(), reference(data, false), "{chunks} chunks + {extra}");
-                assert_eq!(*crate::keyed_hash(&key, data).as_bytes(), reference(data, true), "keyed, {chunks} chunks + {extra}");
+                assert_eq!(*crate::hash_with(crate::Mode::Keyed(&key), data).as_bytes(), reference(data, true), "keyed, {chunks} chunks + {extra}");
                 let mut hasher = crate::Hasher::new();
                 hasher.update(&data[..3 * CHUNK_LEN]);
                 hasher.update(&data[3 * CHUNK_LEN..]);
