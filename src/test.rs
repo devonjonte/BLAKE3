@@ -1093,7 +1093,7 @@ mod platform_hash_many {
 // after one), outputs likewise, so a kernel that reads or writes one byte
 // outside its buffers stops the test with a fault. The assembly kernels'
 // accesses are invisible to the sanitizers; these are not.
-#[cfg(all(feature = "std", target_arch = "aarch64", any(target_vendor = "apple", target_os = "linux")))]
+#[cfg(all(feature = "std", any(target_arch = "aarch64", target_arch = "x86_64"), any(target_vendor = "apple", target_os = "linux")))]
 mod guard_pages {
     use crate::*;
 
@@ -1137,6 +1137,57 @@ mod guard_pages {
         let mut g = Guarded::new(len, at_end);
         crate::test::paint_test_input(g.bytes());
         g
+    }
+
+    /// Every platform's `hash_many` with each input in its own pages,
+    /// flush against an inaccessible page: a kernel that reads past an
+    /// input's end (into what, in a contiguous buffer, would be the next
+    /// input) faults here: upstream's AVX2 and AVX-512 kernels did, at two
+    /// to seven inputs past the groups of eight or sixteen (they loaded a
+    /// whole vector and kept its first 16 bytes). 1 to 17 inputs of 1, 2
+    /// and 16 blocks, at one counter and at incrementing ones, on every
+    /// kernel this CPU runs.
+    #[test]
+    fn test_hash_many_each_input_against_a_guard_page() {
+        fn check<const N: usize>(platforms: &[platform::Platform], increment: IncrementCounter) {
+            for count in 1..=17 {
+                let mut pages: Vec<Guarded> = (0..count).map(|_| filled(N, true)).collect();
+                let inputs: Vec<&[u8; N]> = pages.iter_mut().map(|g| -> &[u8; N] { unsafe { &*(g.bytes().as_ptr() as *const [u8; N]) } }).collect();
+                let mut want = vec![0u8; count * OUT_LEN];
+                platform::Platform::Portable.hash_many::<N>(&inputs, IV, 0, increment, 0, CHUNK_START, CHUNK_END, &mut want);
+                for &platform in platforms {
+                    let mut got = vec![0u8; count * OUT_LEN];
+                    platform.hash_many::<N>(&inputs, IV, 0, increment, 0, CHUNK_START, CHUNK_END, &mut got);
+                    assert!(got == want, "{platform:?}, {count} inputs of {N} bytes");
+                }
+            }
+        }
+        #[allow(unused_mut)]
+        let mut platforms: Vec<platform::Platform> = Vec::new();
+        #[cfg(target_arch = "x86_64")]
+        platforms.extend([platform::Platform::sse41(), platform::Platform::avx2(), platform::Platform::avx512()].into_iter().flatten());
+        #[cfg(target_arch = "aarch64")]
+        platforms.extend([platform::Platform::neon(), platform::Platform::sme2()].into_iter().flatten());
+        // The kernels this CPU has are the ones checked: none left out.
+        #[cfg(target_arch = "x86_64")]
+        {
+            assert_eq!(
+                platforms.iter().any(|p| matches!(p, platform::Platform::AVX2)),
+                std::is_x86_feature_detected!("avx2"),
+                "AVX2 checked where the CPU has it: {platforms:?}"
+            );
+            #[cfg(blake3_avx512_ffi)]
+            assert_eq!(
+                platforms.iter().any(|p| matches!(p, platform::Platform::AVX512)),
+                std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl"),
+                "AVX-512 checked where the CPU has it: {platforms:?}"
+            );
+            assert!(cfg!(blake3_avx2_ffi) || cfg!(blake3_avx2_rust), "an AVX2 kernel built");
+        }
+        check::<BLOCK_LEN>(&platforms, IncrementCounter::No);
+        check::<{ 2 * BLOCK_LEN }>(&platforms, IncrementCounter::No);
+        check::<CHUNK_LEN>(&platforms, IncrementCounter::No);
+        check::<CHUNK_LEN>(&platforms, IncrementCounter::Yes);
     }
 
     #[test]
