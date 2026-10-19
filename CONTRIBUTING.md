@@ -26,7 +26,7 @@ The README lists what the fork adds for callers; the code is laid out so:
 - `capi/`: the C API, `b3.h`, a thin layer over the crate
   (`capi/src/lib.rs`), tested from Rust against the official test vectors
   and from C (`capi/tests/`).
-- `tools/verify/`: the proofs (QUALITY.md, "Proofs"); `tools/mutants/`:
+- `tools/verify/`: the proofs (docs/quality-manual.md, "Proofs"); `tools/mutants/`:
   mutation testing and the list of mutants known to survive.
 
 `NOTES-servil.md` holds the design and the measurements behind it,
@@ -108,7 +108,7 @@ branches; a candidate joins `servil` as a fast-forward once every check
 above passes, mutation testing passes on a change to the Rust
 (`tools/mutants/check.py --since servil`), and the regression check finds no slowdown
 on AArch64 Linux in a VM and natively on an Apple M4 Max. The proofs
-(QUALITY.md says how to run them) run after a change to an AArch64
+(docs/quality-manual.md says how to run them) run after a change to an AArch64
 kernel or the proof tools lands; a failure is fixed first. Pull requests are welcome
 against `servil`; say in yours which machines you measured on.
 
