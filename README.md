@@ -13,6 +13,9 @@ digests as official BLAKE3.
 >   from storage as official BLAKE3 does (256 MiB 82.4 -> 79.5 ms, ahead of official).
 > - `collect()` hashes a waiting task when none is done: no spin forever without workers (#88).
 > - The kernel reports go, before v0.8 (#96).
+> - Guard-page tests for the collection calls (#95); the CHANGELOG as 0.8's announcement
+>   (#93); QUALITY.md an overview with the manual in docs/ and `tools/qa_coverage.py` (#97);
+>   the mean sets its slowest hundredth of samples aside (#98).
 
 ## How it is checked
 
