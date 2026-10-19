@@ -30,7 +30,7 @@ pub unsafe fn hash_many<const N: usize>(
         }
     }
     unsafe {
-        crate::ran_kernel(crate::Ran::Neon, ffi::blake3_hash_many_neon as *const ());
+        crate::ran_kernel(ffi::blake3_hash_many_neon as *const ());
         ffi::blake3_hash_many_neon(
             inputs.as_ptr() as *const *const u8,
             inputs.len(),
