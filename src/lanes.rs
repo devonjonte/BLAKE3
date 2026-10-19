@@ -615,6 +615,12 @@ pub(crate) fn require() {
     pool();
 }
 
+/// Whether a call may leave the calling thread: the process has more
+/// than one CPU. Requires the pool (`require`).
+pub(crate) fn splits() -> bool {
+    pool().threads > 1
+}
+
 /// The pool, once [`initialize`] has created it.
 static POOL: OnceLock<Pool> = OnceLock::new();
 

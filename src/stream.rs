@@ -149,33 +149,42 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// assert_eq!(digests[7], blake3_servil::hash(&messages[7]));
 /// ```
 pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: impl for<'s> FnOnce(&'s mut Stream<'env, D>) -> T) -> T {
-    crate::lanes::require();
-    let (key, flags) = mode.key_and_flags();
-    let s = Storage::take();
-    // A slot, where some thread beside this one can take tasks (with one
-    // CPU none can: then every task is hashed here as it is handed over,
-    // as when every slot is taken).
-    let slot = if crate::lanes::splits() { s.source.register() } else { None };
-    crate::lanes::sources::opened();
-    let mut stream = Stream {
-        key,
-        flags,
-        s,
-        slot,
-        done,
-        open_first: 0,
-        next: 0,
-        delivered: 0,
-        head: 0,
-        tail: 0,
-        open: None,
-        stack: arrayvec::ArrayVec::new(),
-        pieces: 0,
-        env: PhantomData,
-    };
+    let mut stream = Stream::open(mode, done);
     let result = body(&mut stream);
     assert_eq!(stream.delivered, stream.next, "a stream's body calls finish last");
     result
+}
+
+impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
+    /// A stream outside [`stream`]'s scope, for the C API: the same
+    /// contract, with the program holding the stream and ending it
+    /// (`finish`, then drop). Dropping a stream waits for its tasks.
+    pub(crate) fn open(mode: Mode, done: D) -> Self {
+        crate::lanes::require();
+        let (key, flags) = mode.key_and_flags();
+        let s = Storage::take();
+        // A slot, where some thread beside this one can take tasks (with one
+        // CPU none can: then every task is hashed here as it is handed over,
+        // as when every slot is taken).
+        let slot = if crate::lanes::splits() { s.source.register() } else { None };
+        crate::lanes::sources::opened();
+        Stream {
+            key,
+            flags,
+            s,
+            slot,
+            done,
+            open_first: 0,
+            next: 0,
+            delivered: 0,
+            head: 0,
+            tail: 0,
+            open: None,
+            stack: arrayvec::ArrayVec::new(),
+            pieces: 0,
+            env: PhantomData,
+        }
+    }
 }
 
 /// A stream's entries, and room for their tasks in the pool's list: kept
