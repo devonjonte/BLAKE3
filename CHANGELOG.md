@@ -14,6 +14,29 @@
   `Queue::messages` becomes `submit` or `submit_with`; `Queue::pieces`,
   `submit_reader` or `submit_with`; `Queue::fixed`, `submit_batch` with a
   place of one digest per message. The queue's delivery thread is gone.
+- b3sum reads every file to its end: a file's reported size only chooses
+  how to read it, so a file that grows, or a pseudo-file in `/proc` or
+  `/sys` that misstates its size, hashes as what it holds.
+- `b3sum ... | head` ends quietly when its reader goes away, as GNU's
+  tools do (it panicked, status 101), and a bus error reading a mapped file
+  (most likely another program truncated it) says so instead of ending
+  unexplained.
+- `b3sum --num-threads N` hashes on at most N threads in all: N files at
+  once, one file on N threads, or a few large files sharing the rest; 1
+  hashes on one thread. The default is unchanged.
+- b3sum on Linux keeps up to 64 small files read from storage in flight
+  across its file threads: from storage, 1000 files of 16 KiB take 7.7 ms
+  on an i7-12700K (official b3sum 1.8.2: 64 ms).
+- b3sum's small runs start less: a file thread only while files remain
+  to take (ten 4 KiB files start 7), no CPU count for one file without
+  `--num-threads` (eight system calls on Linux), and an exit with no
+  teardown once its output is written (Unix `_exit`; Windows
+  `TerminateProcess`).
+- `hash()` is inlined into its caller: a small call after the program has
+  been idle fetches one code line fewer (64 bytes 16.5% faster on an
+  i7-12700K).
+- `kernel_report_multithreaded` names the SME2 thread only on CPUs with
+  SME2 (on x86 it named it too).
 - **One scheduler**: the pool's workers take every multithreaded call's
   work, and every stream's, from sources each call or stream publishes
   (a ring and two counters, no lock), and park each on its own token. On
@@ -72,10 +95,10 @@
   build, saying so. Each call then loads the detected platform instead of
   checking the self-test and detecting the CPU again, so the check costs
   nothing.
-- **Breaking: a program that makes multithreaded calls or uses a `Queue`
+- **Breaking: a program that makes multithreaded calls or uses a stream
   calls `initialize_multithreaded()` first**, in place of `initialize()`;
   such a call before it panics (one load per call). It starts the first
-  worker and the queue's delivery thread and returns; the first worker
+  worker and returns; the first worker
   starts the others, and calls run on the workers started so far. The
   first multithreaded call no longer starts the threads, nor waits for 19
   of them one after another: b3sum hashes a 1 MiB file in the page cache
@@ -146,7 +169,6 @@
   each 128 KiB of input), a queue up to the buffers you keep in flight, and
   once per process the self-test and the threads, which `initialize()`
   and `initialize_multithreaded()` move to start-up.
-  `initialize_multithreaded()` now starts the queue's delivery thread too.
 - Simpler: no thread budgets and no time-or-energy choice. A call's
   threading is in its name, and its one option is the mode. Each one-shot
   call has a full form that takes a `Mode`: `hash_with(mode, input)`,
@@ -155,8 +177,7 @@
   gone; the queue's constructors take a mode and a handler
   (`Queue::messages(mode, handler)`, `Queue::pieces(mode, handler)`,
   `Queue::fixed(message_len, mode, handler)`), and a queue always hashes
-  on every thread that pays. `b3sum --num-threads` is accepted and
-  ignored, with a warning.
+  on every thread that pays.
 - One-shot calls of 1-64 KiB (`hash`, `keyed_hash`, `derive_key`, and
   `hash_multithreaded` below its split) that follow a pause fetch their
   code from memory in parallel instead of line by line: on an Apple M4 Max,
