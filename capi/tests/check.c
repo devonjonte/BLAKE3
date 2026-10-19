@@ -13,6 +13,7 @@ static void print(const char *what, const uint8_t *bytes, size_t len) {
 }
 
 int main(void) {
+  if (strcmp(b3_version(), B3_VERSION) != 0) return 2; /* the header and the library disagree */
   printf("hasher %zu %zu\n", sizeof(b3_hasher), _Alignof(b3_hasher));
   static uint8_t input[100000];
   for (size_t i = 0; i < sizeof input; i++) input[i] = (uint8_t)(i % 251);

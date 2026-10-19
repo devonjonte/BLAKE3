@@ -25,6 +25,16 @@ fn from_c() {
     }
     assert!(build.status().unwrap().success(), "the C libraries build");
     let lib_dir = target.join(if release { "release" } else { "debug" });
+    // The shared library's soname carries its major.minor (build.rs), so
+    // the loader looks for that name: the link an installer makes.
+    let (major, minor) = (env!("CARGO_PKG_VERSION_MAJOR"), env!("CARGO_PKG_VERSION_MINOR"));
+    let (built, named) = if cfg!(target_os = "macos") {
+        ("libb3_servil.dylib".to_string(), format!("libb3_servil.{major}.{minor}.dylib"))
+    } else {
+        ("libb3_servil.so".to_string(), format!("libb3_servil.so.{major}.{minor}"))
+    };
+    let _ = std::fs::remove_file(lib_dir.join(&named));
+    std::os::unix::fs::symlink(&built, lib_dir.join(&named)).unwrap();
     let program = lib_dir.join("b3-check");
     let status = Command::new("cc")
         .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-I"])
