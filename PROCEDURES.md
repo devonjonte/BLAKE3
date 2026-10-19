@@ -71,7 +71,7 @@ A promotion fast-forwards `servil` to the candidate, records the gate's evidence
 
 # Releases
 
-A release is a commit everyone can stand behind: every check that the main line runs once per change, run once more on that exact commit, plus the user-facing pages rewritten for it. Each step names what does it. `tools/release-check.py` (written during the v0.8 release, from these steps) verifies every mechanical one on the release commit and prints what is left; until it exists, run each command by hand.
+A release is a commit everyone can stand behind: every check that the main line runs once per change, run once more on that exact commit, plus the user-facing pages rewritten for it. Each step names what does it. `pypy3 tools/release-check.py [COMMIT]` reads where each mechanical step left its result (CI, the long-proofs status, the runner's verdicts, the night's logs) and prints PASS, FAIL, or OPEN with the command that makes the evidence; it runs nothing heavy itself, so it can be run at any time of day.
 
 **What goes in.** Agree with Zooko which open candidates, PRs and issues the release takes, and record the list in the release's tracking issue (one issue, its checklist ticked as each item lands). Every candidate lands through the main line's gate (above). A release blocks on every open issue labelled for it.
 
