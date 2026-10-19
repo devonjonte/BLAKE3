@@ -12,7 +12,6 @@ overview, read [QUALITY.md](../QUALITY.md) first.
 |---|---|---|
 | 64-bit Arm: Apple Silicon, Linux and macOS | the fork's assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved**, and tested |
 | x86-64: Linux, macOS, Windows (MSVC) | upstream's assembly, unchanged, and the fork's own kernels in Rust intrinsics | tested |
-| WebAssembly | upstream's portable Rust (SIMD128 with the `wasm32_simd` feature) | tested |
 
 ## What is new, and so where the risk is
 
@@ -126,7 +125,7 @@ implementation; every platform's batch kernel at every input shape (1 to
 16 blocks, keyed flags, a counter whose low word overflows mid-batch,
 pointer tables forward, reversed, and strided), against the portable one;
 the pool's cuts and merges, its thread caps, and 32 callers at once; and
-the same suites in the builds without SME2 (`no_sme2`) and without any
+the same suites in the builds without any
 SIMD (`pure`).
 
 **Every process checks itself before its first hash.** The tests prove
@@ -176,7 +175,7 @@ unrolled kernel code.
   clean.
 - **CI on other targets** (GitHub Actions): the suites on Linux x86-64
   and arm64 (without SME2, and without SHA-3 under QEMU), macOS, Windows
-  with MSVC, and wasm32 (wasmtime).
+  with MSVC.
 - **Miri**, which interprets Rust and stops at undefined behaviour, over
   small versions of the unsafe paths in the `pure` build (Miri cannot run
   assembly or SIMD intrinsics): `test::unsafe_paths` (batches, the pool
@@ -218,7 +217,7 @@ the calling convention, and takes a path that depends only on lengths.
 
 The Rust code (the dispatch, the tree walk, the `Hasher`, the pool, the
 batch APIs) is tested, and unproved; so are
-x86-64 and wasm32.
+x86-64.
 
 ### How to read what is proved
 
@@ -305,7 +304,6 @@ SME2 (clang 17 or later; set `CC=clang-19` or similar):
 ```sh
 git clone -b servil https://github.com/johnservil/BLAKE3 && cd BLAKE3
 cargo test --release --lib                        # 115 tests
-cargo test --release --lib --features no_sme2     # 110
 cargo test --release --lib --features pure        # 95
 cargo test --release --doc                        # 30
 cargo test --release --manifest-path test_vectors/Cargo.toml
