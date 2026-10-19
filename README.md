@@ -13,6 +13,8 @@ digests as official BLAKE3.
 >   process CPU clock (#82).
 > - `hash()` inlined into its caller: a call after a pause fetches one code line fewer
 >   (after idling, 64 B messages 16.5% faster on an i7-12700K) (#83).
+> - A one-shot job's pieces claimed in consecutive runs (#87): b3sum reads a large file
+>   from storage as official BLAKE3 does (256 MiB 82.4 -> 79.5 ms, ahead of official).
 
 ## How it is checked
 
