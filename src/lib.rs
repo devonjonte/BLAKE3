@@ -153,8 +153,6 @@
 //! method for [`Hasher`], and also the [`Read`] and [`Seek`] implementations
 //! for [`OutputReader`].
 //!
-//! The `mmap` feature (off by default, on for [docs.rs]) adds the
-//!
 //! The `zeroize` feature (off by default, on for [docs.rs])
 //! implements
 //! [`Zeroize`](https://docs.rs/zeroize/latest/zeroize/trait.Zeroize.html) for
