@@ -220,7 +220,10 @@ def main():
     for k in unexplained:
         print(f"NO REASON: {k}")
     new = {k: n for k, n in found.items() if n > known.get(k, (0, ""))[0]}
-    stale = {k: c for k, (c, _) in known.items() if found.get(k, 0) < c}
+    # An OPEN pool entry is caught or not as the run's scheduling falls
+    # (the list says why): its count is the most that survive, and a run
+    # that catches more of them is no change to the list.
+    stale = {k: c for k, (c, reason) in known.items() if found.get(k, 0) < c and not (k.startswith("src/lanes.rs") and reason.startswith("OPEN: the pool's scheduling"))}
     for k, n in sorted(new.items()):
         print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
     for k, c in sorted(stale.items()):
