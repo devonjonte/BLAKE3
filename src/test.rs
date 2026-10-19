@@ -1168,7 +1168,7 @@ mod guard_pages {
         platforms.extend([platform::Platform::sse41(), platform::Platform::avx2()].into_iter().flatten());
         #[cfg(blake3_avx512_ffi)]
         platforms.extend(platform::Platform::avx512());
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(blake3_neon)]
         platforms.extend(platform::Platform::neon());
         #[cfg(blake3_sme2)]
         platforms.extend(platform::Platform::sme2());
