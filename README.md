@@ -1,50 +1,24 @@
 # BLAKE3, the servil fork
 
-A faster BLAKE3, above all on 64-bit Arm and Apple M4-class chips, computing the same
-digests as official BLAKE3.
+A faster [BLAKE3](https://blake3.io), computing the same digests as official BLAKE3. It
+is fastest on 64-bit Arm, above all on Apple M4-class chips, and faster on x86-64 too.
 
-## How it is checked
+**It is new.** An AI, John Servil, wrote it under Zooko's direction, and no person has
+reviewed it line by line or audited it. Its checks are unusually thorough (below), but you
+would be among its first users: use it at your own risk.
 
-- **Proved correct:** every assembly kernel on 64-bit Arm but one is proved, as the CPU runs
-  it, to compute the BLAKE3 standard's compression for every possible input. A solver checks
-  the machine code against a specification of the standard written in Lean.
-- **Its tests are tested:** mutation testing plants 2,500 likely bugs in the Rust code, one at
-  a time. Two in three fail a test; each of the rest is listed with the reason it survives
-  (most change only speed, or run only on another kind of machine).
-- **Every digest is checked** against the official test vectors and an independent
-  implementation, and every process checks its kernels against known answers before its
-  first hash.
-- **Memory safety is tested** under AddressSanitizer, ThreadSanitizer, and Miri, and
-  guard pages catch any kernel reading or writing outside its buffers.
+## What you get
 
-[`QUALITY.md`](QUALITY.md) tells what these checks found and how far each reaches; the
-[quality manual](docs/quality-manual.md) states each claim precisely and gives the
-commands to repeat them.
-
-**It is new.** An AI wrote it rapidly under Zooko's direction (his guidance is in
-`AGENTS.md`), and no person has yet reviewed it line by line or audited it. Its speed is
-measured on an Apple M4 Max (and a Linux VM on it) and on an Intel i7-12700K; its tests also
-run on other 64-bit Arm CPUs, on x86-64 Linux and Windows. You would be
-its first user; use it at your own risk.
-
-## What it is
-
-This fork of BLAKE3, written by John Servil (an AI) under Zooko's direction, hashes faster
-on 64-bit Arm, above all on Apple M4-class chips, and on x86-64. It adds calls for the ways programs hash: one large message over every
-core (`hash_multithreaded`), batches and collections of messages (`hash_many`,
-`hash_each_with`), many messages arriving at once (`Hasher::update_each`), a stream of
-messages hashed on other threads while your program reads or makes the next (`stream`), and verified
-streaming in the format [iroh-blobs](https://github.com/n0-computer/iroh-blobs) stores
-(`outboard_with`, `Verifier`).
-
-It supports 64-bit Arm (Linux and macOS), x86-64 (Linux, macOS, and Windows with MSVC), and
-with the latest stable Rust. [Official
-BLAKE3](https://github.com/BLAKE3-team/BLAKE3) serves other targets (32-bit x86 or Arm,
-big-endian CPUs, Windows with MinGW) and older compilers.
-
-[bench-hashes](https://github.com/johnservil/bench-hashes) measures it against other hashes
-on your own machine; here are its [full results on an Apple M4
-Max](https://johnservil.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.map.html).
+- The same `hash`, `Hasher`, keyed hash and key derivation as official BLAKE3, with one
+  change: call `initialize()` once first, and choose the keyed hash or key derivation with
+  a `Mode`.
+- Calls for the ways programs hash a lot: one large message over every core
+  (`hash_multithreaded`); batches of equal-length messages (`hash_many`); a collection of
+  messages of any lengths (`hash_each_with`); and a `stream` that hashes your messages on
+  other threads while your program reads or makes the next ones.
+- Verified streaming in the format [iroh-blobs](https://github.com/n0-computer/iroh-blobs)
+  stores (`outboard_with`, `Verifier`).
+- A C library, `libb3_servil`, and the command-line `b3sum`.
 
 ## Using it
 
@@ -55,24 +29,30 @@ From Rust, add
 blake3-servil = { git = "https://github.com/johnservil/BLAKE3", branch = "servil" }
 ```
 
-and call it as you would official BLAKE3's `blake3` crate, under its own name, after one call
-of `initialize` (or `initialize_multithreaded`, for the multithreaded calls):
+and call it as you would official BLAKE3's `blake3` crate, under its own name:
 
 ```rust
+use blake3_servil::Mode;
+
 blake3_servil::initialize(); // once, before any other call (it runs the self-test)
 let hash = blake3_servil::hash(b"foobarbaz");
+
 let mut hasher = blake3_servil::Hasher::new();
 hasher.update(b"foo");
 hasher.update(b"barbaz");
 assert_eq!(hasher.finalize(), hash);
+
+let key = [42u8; 32];
+let mac = blake3_servil::hash_with(Mode::Keyed(&key), b"message");
+let subkey = blake3_servil::hash_with(Mode::DeriveKey("example.com 2026-10-19 session keys"), b"key material");
 ```
 
 The [crate documentation](https://johnservil.github.io/BLAKE3/blake3_servil/) opens with a
-table of which call fits your data. `keyed_hash` (a MAC) and `derive_key` (a KDF) work as in
-official BLAKE3, below.
+table of which call fits your data.
 
-From C, build the library in `capi/` (`cargo build --release` there gives `libb3_servil.a` and
-`libb3_servil.so` or `libb3_servil.dylib`), include [`capi/b3.h`](capi/b3.h), and link with `-lb3_servil`:
+From C, build the library in `capi/` (`cargo build --release` there gives `libb3_servil.a`
+and `libb3_servil.so` or `libb3_servil.dylib`), include [`capi/b3.h`](capi/b3.h), and link
+with `-lb3_servil`:
 
 ```c
 #include "b3.h"
@@ -81,10 +61,7 @@ b3_mode plain = b3_plain();
 b3_digest digest = b3_hash(&plain, "foobarbaz", 9);
 ```
 
-A mode (`b3_plain`, `b3_keyed`, `b3_derive_key`) says which of BLAKE3's three functions a
-call computes. Beside `b3_hash` are `b3_hash_many` for batches of messages, a
-`_multithreaded` form of each for other cores, and `b3_hasher` for a message in pieces,
-held in your memory. `b3.h` documents each call.
+`b3.h` documents each call.
 
 The command-line `b3sum` prints the BLAKE3 hashes of files or of standard input:
 
@@ -92,146 +69,58 @@ The command-line `b3sum` prints the BLAKE3 hashes of files or of standard input:
 cargo install --git https://github.com/johnservil/BLAKE3 b3sum
 ```
 
-`CONTRIBUTING.md` says how to work on the fork.
+## How it is checked
 
-## The BLAKE3 algorithm
+- **Proved correct:** every assembly kernel on 64-bit Arm is proved, as the CPU runs it, to
+  compute the BLAKE3 standard's compression for every possible input, to stay within the
+  memory it is given, and to take the same path whatever the input's bytes. A solver checks
+  the machine code against a specification of the standard written in Lean.
+- **Its tests are tested:** mutation testing plants about 2,500 likely bugs in the Rust
+  code, one at a time. Nearly two in three fail a test; each of the rest is listed with the
+  reason it survives (most change only speed, or run only on another kind of machine).
+- **Every digest is checked** against the official test vectors and an independent
+  implementation, and every process checks its kernels against known answers before its
+  first hash.
+- **Memory safety is tested** under AddressSanitizer, ThreadSanitizer, Miri, and guard
+  pages: tests that put each input beside memory the program may not touch, so a kernel
+  reading one byte too far crashes the test. This is how the fork found a read past the end
+  of an input in official BLAKE3's AVX2 and AVX-512 kernels, fixed here and reported there.
 
-BLAKE3 is a cryptographic hash function that is:
+[`QUALITY.md`](QUALITY.md) explains these checks for a newcomer, and the
+[quality manual](docs/quality-manual.md) states each claim precisely with the commands to
+repeat it.
 
-- **Much faster** than MD5, SHA-1, SHA-2, SHA-3, and BLAKE2.
-- **Secure**, unlike MD5 and SHA-1. And secure against length extension,
-  unlike SHA-2.
-- **Highly parallelizable** across any number of threads and SIMD lanes,
-  because it's a Merkle tree on the inside.
-- Capable of **verified streaming** and **incremental updates**, again
-  because it's a Merkle tree.
-- A **PRF**, **MAC**, **KDF**, and **XOF**, as well as a regular hash.
-- **One algorithm with no variants**, which is fast on x86-64 and also
-  on smaller architectures.
+## Where it runs
 
-For the original benchmarks and the design, see the
-[BLAKE3 paper](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf).
+64-bit Arm (Linux and macOS) and x86-64 (Linux, and Windows with MSVC), with the latest
+stable Rust. Those are the targets its checks run on, and the only ones it claims. [Official
+BLAKE3](https://github.com/BLAKE3-team/BLAKE3) serves the rest: 32-bit CPUs, big-endian
+CPUs, WebAssembly, Intel Macs, Windows with MinGW, and older compilers.
 
-<p align="center">
-<img src="https://johnservil.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.chart.svg" alt="Hashing one 1 MiB message on an Apple M4 Max: BLAKE3 on every core and on one core beside SHA-256, SHA3-256, and SHA-1, in GB/s">
-</p>
+## How fast
 
-<p align="center">From <a href="https://github.com/johnservil/bench-hashes">bench-hashes</a>' latest record on an Apple M4 Max (<a href="https://johnservil.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.map.html">every size</a>; <a href="https://github.com/johnservil/bench-hashes/blob/main/METHODOLOGY.md">how it measures</a>)</p>
+[bench-hashes](https://github.com/johnservil/bench-hashes) measures it against official
+BLAKE3 and other hashes on your own machine, for the ways programs hash: one message, many
+messages, after idling, with other work beside, and so on. Its published results are the
+[map for an Apple M4 Max](https://johnservil.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.map.html);
+[METHODOLOGY.md](https://github.com/johnservil/bench-hashes/blob/main/METHODOLOGY.md)
+says how it measures.
 
-BLAKE3 is based on an optimized instance of the established hash
-function [BLAKE2](https://blake2.net) and on the [original Bao tree
-mode](https://github.com/oconnor663/bao/blob/master/docs/spec_0.9.1.md).
-The specifications and design rationale are available in the [BLAKE3
-paper](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf).
-The default output size is 256 bits. The current version of
-[Bao](https://github.com/oconnor663/bao) implements verified streaming
-with BLAKE3.
+## About BLAKE3
 
-Official BLAKE3 ([BLAKE3-team/BLAKE3](https://github.com/BLAKE3-team/BLAKE3)) includes the
-`blake3` Rust crate, `b3sum`, a C implementation, the [Rust reference
-implementation](reference_impl/reference_impl.rs) (also here: start there to see how BLAKE3
-works), and [test vectors](test_vectors/test_vectors.json) covering extended outputs, all
-three modes, and many input lengths (also here).
+BLAKE3 was designed by Jack O'Connor, Samuel Neves, Jean-Philippe Aumasson and Zooko. It
+is fast, secure, parallel (a Merkle tree inside), and one algorithm with no variants; it
+serves as a hash, MAC, KDF and XOF. The [BLAKE3
+paper](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf) gives the design
+and [C2SP](https://c2sp.org/BLAKE3) the specification. BLAKE3 is not a password hash; for
+passwords, use [Argon2](https://github.com/P-H-C/phc-winner-argon2).
 
-BLAKE3 was designed by:
+This repository also carries the [Rust reference
+implementation](reference_impl/reference_impl.rs), the clearest place to see how BLAKE3
+works, and the [test vectors](test_vectors/test_vectors.json).
 
-* [@oconnor663] (Jack O'Connor)
-* [@sneves] (Samuel Neves)
-* [@veorq] (Jean-Philippe Aumasson)
-* [@zookozcash] (Zooko)
+## Contributing and licenses
 
-The development of BLAKE3 was sponsored by [Electric Coin Company](https://electriccoin.co).
-
-BLAKE3 is also [specified](https://c2sp.org/BLAKE3) in the [Community
-Cryptography Specification Project (C2SP)](https://c2sp.org).
-
-*NOTE: BLAKE3 is not a password hashing algorithm, because it's
-designed to be fast, whereas password hashing should not be fast. If you
-hash passwords to store the hashes or if you derive keys from passwords,
-we recommend [Argon2](https://github.com/P-H-C/phc-winner-argon2).*
-
-## The three modes
-
-Besides `hash`, BLAKE3 provides two other modes, `keyed_hash` and
-`derive_key`. The `keyed_hash` mode takes a 256-bit key:
-
-```rust
-// MAC an input all at once.
-let example_key = [42u8; 32];
-let mac1 = blake3_servil::keyed_hash(&example_key, b"example input");
-
-// MAC incrementally.
-let mut hasher = blake3_servil::Hasher::new_keyed(&example_key);
-hasher.update(b"example input");
-let mac2 = hasher.finalize();
-assert_eq!(mac1, mac2);
-```
-
-The `derive_key` mode takes a context string and some key material (not a
-password). The context string should be hardcoded, globally unique, and
-application-specific. A good default format for the context string is
-`"[application] [commit timestamp] [purpose]"`:
-
-```rust
-// Derive a couple of subkeys for different purposes.
-const EMAIL_CONTEXT: &str = "BLAKE3 example 2020-01-07 17:10:44 email key";
-const API_CONTEXT: &str = "BLAKE3 example 2020-01-07 17:11:21 API key";
-let input_key_material = b"usually at least 32 random bytes, not a password";
-let email_key = blake3_servil::derive_key(EMAIL_CONTEXT, input_key_material);
-let api_key = blake3_servil::derive_key(API_CONTEXT, input_key_material);
-assert_ne!(email_key, api_key);
-```
-
-## Other implementations
-
-There are too many implementations out there for us to keep track of,
-but some highlights include [an optimized Go
-implementation](https://github.com/zeebo/blake3), [Wasm bindings for
-Node.js and browsers](https://github.com/connor4312/blake3), [binary
-wheels for Python](https://github.com/oconnor663/blake3-py), [.NET
-bindings](https://github.com/xoofx/Blake3.NET), and [a pure Java
-implementation](https://commons.apache.org/proper/commons-codec/apidocs/org/apache/commons/codec/digest/Blake3.html).
-
-## Contributing
-
-Please see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Licenses
-
-This work is released into the public domain with [CC0 1.0](./LICENSE_CC0).
-Alternatively, it is licensed under any of the following:
-
-* [Apache 2.0](./LICENSE_A2)
-* [Apache 2.0 with LLVM exceptions](./LICENSE_A2LLVM)
-
-
-## BLAKE3's adoption and deployment
-
-* [Bazel](https://github.com/bazelbuild/bazel/releases/tag/6.4.0)
-* [Cargo](https://github.com/rust-lang/cargo/pull/14137)
-* [Ccache](https://ccache.dev/releasenotes.html#_ccache_4_0)
-* [Chia](https://github.com/Chia-Network/chia-blockchain/blob/main/CHANGELOG.md#10beta8-aka-beta-18---2020-07-16)
-* [Clickhouse](https://github.com/ClickHouse/ClickHouse/blob/master/rust/chcache/Cargo.toml#L7)
-* [Farcaster](https://www.farcaster.xyz/)
-* [IPFS](https://github.com/ipfs/go-verifcid/issues/13)
-* [Iroh](https://www.iroh.computer/blog/blake3-hazmat-api)
-* [LLVM](https://reviews.llvm.org/D121510)
-* [Mold](https://arxiv.org/html/2608.23228v1)
-* [Nix](https://github.com/NixOS/nix/pull/12379)
-* [Nym](https://github.com/nymtech/nym/blob/59056a22c5e6b01a38da2124662bd1fa3c8abef2/common/nymsphinx/params/src/lib.rs#L5)
-* [OpenZFS](https://github.com/openzfs/zfs/)
-* [Redox](https://www.redox-os.org/news/pkgar-introduction/)
-* [Solana](https://docs.rs/solana-program/1.9.5/solana_program/blake3/index.html)
-* [Tekken 8](https://x.com/rodarmor/status/1751567502050771189)
-* [Wasmer](https://github.com/wasmerio/wasmer/blob/4f935a8c162bf604df223003e434e4f7ca253688/lib/cache/src/hash.rs#L21)
-
-
-## Miscellany
-
-- [@veorq] and [@oconnor663] did [an interview with Cryptography FM](https://cryptography.fireside.fm/3).
-- [@oconnor663] did [an interview with Saito](https://www.youtube.com/watch?v=cJkmIt7yN_E).
-
-[@oconnor663]: https://github.com/oconnor663
-[@sneves]: https://github.com/sneves
-[@veorq]: https://github.com/veorq
-[@zookozcash]: https://github.com/zookozcash
+[CONTRIBUTING.md](CONTRIBUTING.md) says how to work on the fork. This work is released into
+the public domain with [CC0 1.0](./LICENSE_CC0), or alternatively under [Apache
+2.0](./LICENSE_A2) or [Apache 2.0 with LLVM exceptions](./LICENSE_A2LLVM).
