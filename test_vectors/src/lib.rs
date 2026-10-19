@@ -98,10 +98,10 @@ pub fn generate_json() -> String {
         blake3::Hasher::new().update(&input).finalize_xof().fill(&mut hash_out);
 
         let mut keyed_hash_out = [0; OUTPUT_LEN];
-        blake3::Hasher::new_keyed(TEST_KEY).update(&input).finalize_xof().fill(&mut keyed_hash_out);
+        blake3::Hasher::new_with(blake3::Mode::Keyed(TEST_KEY)).update(&input).finalize_xof().fill(&mut keyed_hash_out);
 
         let mut derive_key_out = [0; OUTPUT_LEN];
-        blake3::Hasher::new_derive_key(TEST_CONTEXT).update(&input).finalize_xof().fill(&mut derive_key_out);
+        blake3::Hasher::new_with(blake3::Mode::DeriveKey(TEST_CONTEXT)).update(&input).finalize_xof().fill(&mut derive_key_out);
 
         cases.push(Case {
             input_len,
@@ -199,14 +199,14 @@ mod tests {
         assert_eq!(&expected_hash[..32], hasher.finalize().as_bytes());
 
         let mut out = vec![0; expected_keyed_hash.len()];
-        let mut hasher = blake3::Hasher::new_keyed(key);
+        let mut hasher = blake3::Hasher::new_with(blake3::Mode::Keyed(key));
         hasher.update(input);
         hasher.finalize_xof().fill(&mut out);
         assert_eq!(expected_keyed_hash, &out[..]);
         assert_eq!(&expected_keyed_hash[..32], hasher.finalize().as_bytes());
 
         let mut out = vec![0; expected_derive_key.len()];
-        let mut hasher = blake3::Hasher::new_derive_key(TEST_CONTEXT);
+        let mut hasher = blake3::Hasher::new_with(blake3::Mode::DeriveKey(TEST_CONTEXT));
         hasher.update(input);
         hasher.finalize_xof().fill(&mut out);
         assert_eq!(expected_derive_key, &out[..]);
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(&expected_hash[..32], hasher.finalize().as_bytes());
 
         let mut out = vec![0; expected_keyed_hash.len()];
-        let mut hasher = blake3::Hasher::new_keyed(key);
+        let mut hasher = blake3::Hasher::new_with(blake3::Mode::Keyed(key));
         for i in 0..input.len() {
             hasher.update(&[input[i]]);
             assert_eq!(i as u64 + 1, hasher.count());
@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(&expected_keyed_hash[..32], hasher.finalize().as_bytes());
 
         let mut out = vec![0; expected_derive_key.len()];
-        let mut hasher = blake3::Hasher::new_derive_key(TEST_CONTEXT);
+        let mut hasher = blake3::Hasher::new_with(blake3::Mode::DeriveKey(TEST_CONTEXT));
         for i in 0..input.len() {
             hasher.update(&[input[i]]);
             assert_eq!(i as u64 + 1, hasher.count());
@@ -247,8 +247,8 @@ mod tests {
 
     fn test_recursive(key: &[u8; blake3::KEY_LEN], input: &[u8], expected_hash: &[u8], expected_keyed_hash: &[u8], expected_derive_key: &[u8]) {
         assert_eq!(&expected_hash[..32], blake3::hash(input).as_bytes());
-        assert_eq!(&expected_keyed_hash[..32], blake3::keyed_hash(key, input).as_bytes(),);
-        assert_eq!(expected_derive_key[..32], blake3::derive_key(TEST_CONTEXT, input));
+        assert_eq!(&expected_keyed_hash[..32], blake3::hash_with(blake3::Mode::Keyed(key), input).as_bytes(),);
+        assert_eq!(expected_derive_key[..32], *blake3::hash_with(blake3::Mode::DeriveKey(TEST_CONTEXT), input).as_bytes());
     }
 
     #[test]

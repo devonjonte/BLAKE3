@@ -388,7 +388,7 @@ pub enum Mode<'a> {
     /// [`Hasher::new_with`].
     KeyedHash(&'a [u8; KEY_LEN]),
 
-    /// The [`derive_key`][crate::derive_key] mode. Subtrees must be hashed with either
+    /// The key derivation mode. Subtrees must be hashed with either
     /// [`Hasher::new_with`] with [`Mode::DeriveKeyMaterial`](crate::Mode::DeriveKeyMaterial) or [`Hasher::new_from_context_key`]. The [`ContextKey`] comes
     /// from [`hash_derive_key_context`].
     DeriveKeyMaterial(&'a ContextKey),
