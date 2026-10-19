@@ -152,7 +152,10 @@ pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: im
     crate::lanes::require();
     let (key, flags) = mode.key_and_flags();
     let s = Storage::take();
-    let slot = s.source.register();
+    // A slot, where some thread beside this one can take tasks (with one
+    // CPU none can: then every task is hashed here as it is handed over,
+    // as when every slot is taken).
+    let slot = if crate::lanes::splits() { s.source.register() } else { None };
     crate::lanes::sources::opened();
     let mut stream = Stream {
         key,

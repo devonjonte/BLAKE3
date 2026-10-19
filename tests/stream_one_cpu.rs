@@ -67,4 +67,34 @@ fn every_stream_completes_on_one_cpu() {
     );
     assert_eq!(handed.get(), want.len(), "every place handed back");
     assert!(got == want, "every digest, in its place, on one CPU");
+
+    // A caller with a few places that collects until one comes back (once,
+    // collect only handed back what was done, and with no other thread to
+    // hash, nothing ever was: it waited forever, fork issue #86).
+    let mut places = vec![Hash::from_bytes([0; 32]); 4];
+    let free = std::cell::RefCell::new(places.iter_mut().collect::<Vec<_>>());
+    let cycled = std::cell::RefCell::new(Vec::new());
+    blake3_servil::stream(
+        Mode::Hash,
+        |d: &mut [Hash]| {
+            cycled.borrow_mut().push(d[0]);
+            free.borrow_mut().push(&mut d[0]);
+        },
+        |s| {
+            for message in &messages[..4] {
+                for _ in 0..8 {
+                    let place = loop {
+                        if let Some(place) = free.borrow_mut().pop() {
+                            break place;
+                        }
+                        s.collect();
+                    };
+                    s.submit(message, place);
+                }
+            }
+            s.finish();
+        },
+    );
+    let want: Vec<Hash> = messages[..4].iter().flat_map(|m| [reference(m); 8]).collect();
+    assert!(cycled.into_inner() == want, "a few places cycled by collect, on one CPU");
 }
