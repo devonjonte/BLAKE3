@@ -954,7 +954,6 @@ mod unsafe_paths {
     /// A batch and an input, from two threads at once through the
     /// multithreaded full forms.
     #[test]
-    #[cfg_attr(target_family = "wasm", ignore = "spawns threads, which this target lacks")]
     fn test_pool_from_two_callers() {
         let batch = input(1024 * 64, 1);
         let tree = input(65 * 1024 + 3, 2);

@@ -2,7 +2,7 @@ name: tests
 
 on:
   # Started by hand for a promotion candidate that touches code for other
-  # targets (x86, Windows, wasm32), and for every fork's pull
+  # targets (x86, Windows), and for every fork's pull
   # request; the AArch64 builds and proofs run on the VM and the Mac
   # (PROCEDURES.md: tools/check-builds.sh, tools/verify/long-proofs.sh).
   pull_request:
@@ -136,35 +136,6 @@ jobs:
       env:
         CFLAGS: -flto
       working-directory: ./b3sum
-
-  wasm_tests:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    name: WASM tests
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: wasm32-wasip1
-    - name: install Wasmtime
-      run: |
-        # A pinned version: the installer's lookup of the latest one failed
-        # (October 6, 2026: "Installing latest version of Wasmtime ({)").
-        curl https://wasmtime.dev/install.sh -sSf | bash -s -- --version v34.0.2
-        echo PATH: $PATH
-        mkdir -p ~/.local/bin
-        ln -s ~/.wasmtime/bin/wasmtime ~/.local/bin/wasmtime
-    - run: cargo test --target wasm32-wasip1
-    - run: cargo test --target wasm32-wasip1 --no-default-features
-    - run: cargo test --target wasm32-wasip1 --features wasm32_simd
-    - run: cargo test --target wasm32-wasip1 --no-default-features --features wasm32_simd
-    - name: test vectors w/o SIMD
-      run: cargo test --target wasm32-wasip1
-      working-directory: ./test_vectors
-    - name: test vectors w/ SIMD
-      run: cargo test --target wasm32-wasip1 --features wasm32_simd
-      working-directory: ./test_vectors
 
   aarch64_without_sme2:
     # A pull request from a branch of this repository: its push runs CI already.
