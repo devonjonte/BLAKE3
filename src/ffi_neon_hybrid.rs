@@ -331,7 +331,7 @@ pub unsafe fn compress_blocks(cv: &mut CVWords, blocks: *const u8, count: usize,
     let cv_ptr = cv.as_mut_ptr();
     unsafe {
         let last = blocks.add((count - 1) * BLOCK_LEN);
-        crate::ran_kernel(crate::Ran::Scalar, asm::blake3_hybrid_c1 as *const ());
+        crate::ran_kernel(asm::blake3_hybrid_c1 as *const ());
         asm::blake3_hybrid_c1(blocks, count as u64, cv_ptr, counter, packed, cv_ptr as *mut u8, last);
     }
 }
@@ -357,7 +357,7 @@ pub fn compress_in_place(cv: &mut CVWords, block: &[u8; BLOCK_LEN], block_len: u
     // Safe: the block is 64 readable bytes and the count is 1.
     unsafe {
         let block = block.as_ptr();
-        crate::ran_kernel(crate::Ran::Scalar, asm::blake3_hybrid_c1 as *const ());
+        crate::ran_kernel(asm::blake3_hybrid_c1 as *const ());
         asm::blake3_hybrid_c1(block, 1, cv_ptr, counter, packed, cv_ptr as *mut u8, block);
     }
 }
@@ -390,7 +390,7 @@ pub unsafe fn hash_chunk(
     debug_assert!(last_len as usize <= BLOCK_LEN);
     let packed = flags as u64 | (flags_start as u64) << 8 | (flags_end as u64) << 16 | (last_len as u64) << 24;
     unsafe {
-        crate::ran_kernel(crate::Ran::Scalar, asm::blake3_hybrid_c1 as *const ());
+        crate::ran_kernel(asm::blake3_hybrid_c1 as *const ());
         asm::blake3_hybrid_c1(input, blocks as u64, key.as_ptr(), counter, packed, out.as_mut_ptr(), last.as_ptr());
     }
 }
@@ -490,7 +490,7 @@ pub unsafe fn hash_chunks_with_partial(
     let (chunks, counter, out) = (&chunks[lead..], counter + lead as u64, &mut out[lead * OUT_LEN..]);
     let n = chunks.len();
     let kernel = partial_kernel(n);
-    crate::ran_kernel(crate::Ran::Hybrid, kernel as *const ());
+    crate::ran_kernel(kernel as *const ());
     if n == 1 {
         // q1's pair takes the whole chunk twice (slots 0 and 2); the
         // partial chunk is slot 1; the duplicate's value is dropped.
@@ -534,7 +534,7 @@ pub unsafe fn hash_pairs(inputs: &[&[u8; BLOCK_LEN]], key: &CVWords, flags: u8, 
     assert!(out.len() >= inputs.len() * OUT_LEN && (1..=BLOCK_LEN).contains(&last_len), "a digest per input, a last block of 1 to 64 bytes");
     let packed = flags as u64 | (flags_start as u64) << 8 | (flags_end as u64) << 16 | (last_len as u64) << 24;
     let pair = PARENT_KERNELS[2].expect("the pair kernel");
-    crate::ran_kernel(crate::Ran::Hybrid, pair as *const ());
+    crate::ran_kernel(pair as *const ());
     let table = inputs.as_ptr() as *const *const u8;
     let whole = inputs.len() / 2 * 2;
     for p in (0..whole).step_by(2) {
@@ -569,7 +569,7 @@ unsafe fn run_plan(
     let mut done = 0;
     for &size in plan {
         let kernel = kernels[size].expect("plan names an existing kernel");
-        crate::ran_kernel(crate::Ran::Hybrid, kernel as *const ());
+        crate::ran_kernel(kernel as *const ());
         unsafe {
             kernel(inputs.add(done), blocks as u64, key.as_ptr(), counter + done as u64 * counter_step, packed_flags, out[done * OUT_LEN..].as_mut_ptr());
         }

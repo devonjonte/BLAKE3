@@ -54,7 +54,7 @@ fn main() {
     blake3_servil::initialize();
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
     let counts: Vec<usize> = [1, 2, 4, 8, 12, 16].into_iter().filter(|&n| n <= cpus).collect();
-    println!("platform {}; per thread, median/slowest in ns per unit (the clock each ran at, - without cycle counts)", blake3_servil::kernel_report().platform);
+    println!("per thread, median/slowest in ns per unit (the clock each ran at, - without cycle counts)");
     let ns = |ps: u64| format!("{}.{:03}", ps / 1000, ps % 1000);
     for (label, len, batch) in [("hash 1 MiB, ns/B", 1 << 20, false), ("hash_many 4096 x 64 B, ns/msg", 4096 * 64, true)] {
         let mut line = format!("{label:30}");
