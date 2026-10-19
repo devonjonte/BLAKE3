@@ -1,6 +1,33 @@
 # Changelog
 
-## Unreleased
+Each release's announcement, newest first: what the release gives you,
+how to upgrade, and every change since the release before it, stated as
+the new release behaves (Zooko, October 19, 2026). `git log` holds each
+step on the way, the reverted ones too.
+
+## 0.8.0 (unreleased)
+
+**blake3-servil 0.8: BLAKE3, proved and faster.** The same digests as
+official BLAKE3, faster above all on 64-bit Arm and Apple M4-class chips.
+Its Arm assembly is proved correct for every input, everything else is
+tested, and the tests are tested ([QUALITY.md](QUALITY.md)). New since
+0.3: a stream for inputs one after another, collections and many
+messages at once, verified streaming (outboards and a `Verifier`), a C
+API, and a faster `b3sum`.
+
+**Upgrading from 0.3:**
+
+1. Call `blake3_servil::initialize()` once before any other call, or
+   `initialize_multithreaded(None)` if the program makes multithreaded
+   calls or uses a stream.
+2. Replace `Queue` with `stream()` (`Queue::messages` becomes `submit`
+   or `submit_with`, `Queue::pieces` `submit_reader`, `Queue::fixed`
+   `submit_batch`).
+3. Replace `guts` with `hazmat`.
+4. Check your target: 64-bit Arm, x86-64, or WebAssembly, with the
+   latest stable Rust. Other targets stay with official BLAKE3.
+
+### Every change
 
 - **Breaking: `initialize_multithreaded` takes the number of threads**
   the multithreaded calls hash on, `Option<NonZeroUsize>`: `None` for one
