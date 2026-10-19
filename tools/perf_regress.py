@@ -262,15 +262,12 @@ def machine_has_sme2():
 def require_sme2_kernel(exe):
     """Fail stop when this machine has SME2 and the build left the kernel
     out (the fork builds without it when the C compiler cannot assemble
-    SME2): the check would measure NEON alone and miss every SME2 change."""
+    SME2): the check would measure NEON alone and miss every SME2 change.
+    The kernel's own symbol in the executable says whether it is there."""
     if not machine_has_sme2():
         return
-    with tempfile.TemporaryDirectory() as tmp:
-        out = subprocess.run([exe, "--contenders", "blake3-servil-st,sha256", "--points", "16 KiB", "--rounds", "1"],
-                             cwd=tmp, env=ENV, check=True, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, text=True).stdout
-    assert "SME2" in out, ("this CPU has SME2, and the fork was built without its SME2 kernel: "
-                           "point CC at a compiler that assembles SME2 (CC=clang-19 in the VM)")
+    assert b"blake3_sme2_hash16_chunks_512" in Path(exe).read_bytes(), ("this CPU has SME2, and the fork was built without its SME2 kernel: "
+                                                                        "point CC at a compiler that assembles SME2 (CC=clang-19 in the VM)")
 
 
 def provenance(name, fork, bench_rev):
