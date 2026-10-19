@@ -150,9 +150,6 @@ API, and a faster `b3sum`.
   the size (64 bytes about a third faster after other work on an Apple M4
   Max, 2-4% slower nonstop), and a batch of up to 8 one-block messages on
   the smallest batch kernel (4 messages after a pause 340 -> 161 ns each).
-- A `Queue` keeps fewer workers awake and feeds each of them more: its
-  long messages, 64-byte messages, and batches hash 15-45% faster (1 KiB
-  messages 20% slower).
 - A `Hasher` gathers updates shorter than 16 KiB until the message's next
   16 KiB boundary, and hashes them 16 chunks side by side: a message that
   arrives in network-sized pieces hashes nearly as fast as one in whole
@@ -163,8 +160,7 @@ API, and a faster `b3sum`.
   ns/B, against 0.51 one `update` per piece and SHA-256's 0.31.
 - `hash_each_multithreaded_with` hashes a collection over this crate's
   threads: a repository's objects 7.8 times faster than on one thread.
-- `Queue::messages`: messages shorter than 64 KiB share tasks, as batches
-  do (pipelined 16 KiB messages a quarter faster).
+- A stream's messages shorter than 64 KiB share tasks, as batches do.
 - `hash_each_with(mode, items, out)` hashes a collection of messages of any
   lengths in one call, short ones side by side in the SIMD lanes: on an
   Apple M4 Max a repository's objects or a store's files under 16 KiB take
@@ -191,7 +187,7 @@ API, and a faster `b3sum`.
   effect.
 - The crate docs say what each call allocates ("Memory"): single-threaded
   calls nothing, multithreaded calls a list of their pieces (48 bytes for
-  each 128 KiB of input), a queue up to the buffers you keep in flight, and
+  each 128 KiB of input), a stream its ring, and
   once per process the self-test and the threads, which `initialize()`
   and `initialize_multithreaded()` move to start-up.
 - Simpler: no thread budgets and no time-or-energy choice. A call's
@@ -199,10 +195,8 @@ API, and a faster `b3sum`.
   call has a full form that takes a `Mode`: `hash_with(mode, input)`,
   `hash_multithreaded_with`, `hash_many_with(mode, input, message_len,
   out)`, `hash_many_multithreaded_with`. `Threads` and `Efficiency` are
-  gone; the queue's constructors take a mode and a handler
-  (`Queue::messages(mode, handler)`, `Queue::pieces(mode, handler)`,
-  `Queue::fixed(message_len, mode, handler)`), and a queue always hashes
-  on every thread that pays.
+  gone; `stream(mode, handler, body)` takes a mode and a handler, and a
+  stream always hashes on every thread that pays.
 - One-shot calls of 1-64 KiB (`hash`, `keyed_hash`, `derive_key`, and
   `hash_multithreaded` below its split) that follow a pause fetch their
   code from memory in parallel instead of line by line: on an Apple M4 Max,
@@ -216,7 +210,7 @@ API, and a faster `b3sum`.
   `Hasher::update`) keeps its speed: on an Apple M4 Max, 64-128 MiB take
   about 10% less time, at the rate of an 8 MiB input.
 - `initialize_multithreaded` returns once every worker thread has
-  started, and a warm `Queue` allocates nothing on macOS too (the standard
+  started, and a warm stream allocates nothing on macOS too (the standard
   library there allocates a lock at its first use, which the worker
   threads met after `initialize_multithreaded` had returned).
 - Extended output (`OutputReader::fill`, `Hasher::finalize_xof`) runs
@@ -228,17 +222,15 @@ API, and a faster `b3sum`.
   cache takes 23-33% less time.
 - Builds with an assembler too old for the SHA-3 extension (GNU as before
   2.30) succeed, without the integer + NEON and SME2 kernels, with a
-  warning; builds for `wasm32-wasip1` pass their tests (`Queue` needs
+  warning; builds for `wasm32-wasip1` pass their tests (a stream needs
   threads, which that target lacks).
 
 - `Hasher::update_multithreaded` is public: `Hasher::update` over several
   threads, with the same result, for updates of 512 KiB or more; shorter
   ones run on the calling thread. A long message read in shorter pieces
-  hashes fastest through `Queue::pieces`.
-- `Queue` is faster for a stream of inputs: on an Apple M4 Max about 2x for
-  messages one after another and 2.5-4x for batches of 64-byte messages,
-  with the program keeping enough in flight. Worker threads sleep as soon
-  as they find nothing to take; nothing keeps running between calls.
+  hashes fastest through a stream's `submit_reader`.
+- Worker threads sleep as soon as they find nothing to take; nothing keeps
+  running between calls.
 - `hash_multithreaded` and `hash_many_multithreaded` leave the calling
   thread from 512 KiB (was 768 KiB): on an Apple M4 Max a 512 KiB input
   after a pause hashes about 40% faster.
