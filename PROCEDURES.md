@@ -19,7 +19,7 @@ Speed is this fork's purpose, so no commit that makes it slower may enter git un
 - *Exit 1, a regression:* the hook aborts the commit. Do not commit around it. Find the cause and fix it, or, when the slowdown is the deliberate price of something worth more (correctness, simplicity with a measured cost), stop and ask the user; if they accept it, commit with `git commit --no-verify` and state the regressed cells, their numbers, and the user's decision in the commit message.
 - *Exit 2, no verdict:* `clocks` found other programs keeping the machine busy during a run, or saw no load window. Stop whatever else is running and check again.
 
-**Releases:** `python3 tools/gen-ver.py X.Y.Z` from a clean tree (Zooko's technique, copied from bench-hashes: a commit setting X.Y.Z, a second setting X.Y.Z+<first commit>, a lightweight tag vX.Y.Z+<first commit>; push `servil`, then the tag by name). Before a release, run `check --against <previous release tag>`. Each commit is checked only against its parent, so slowdowns too small to flag one at a time could add up; the release check sees their sum. After pushing the tag, build b3sum's release binary on each machine, `sh tools/b3sum-release.sh` at the tag (Linux: statically linked, the recommended build; the Mac: as macOS links), and attach each `dist/b3sum-VERSION-TARGET` with its `.sha256` and `.b3` to the tag's GitHub release.
+**Releases** follow the checklist in "Releases" below.
 
 **eBASH, after each release** (once the submission is due: NOTES-servil.md, "eBASH"):
 1. `sh supercop/make-tarball.sh vX.Y.Z+<commit>` pins SUPERCOP's `crypto_hash/blake3/rust_servil` to the release and writes its tarball into `supercop/`, in place of the last one; commit both and push.
@@ -68,6 +68,42 @@ A candidate reaches `servil` only when all of these hold, and, if it changes com
 A regression the user accepts, as the section above describes, lands with the user's decision, the regressed cells, and their numbers in the merge's message (for a fast-forward, the promoted commit's message; amend the message only, leaving the measured tree unchanged). The user accepts such trades under this rule (September 25, 2026; revised September 27): every slowed cell stays ahead of every competitor, the gains outweigh the losses, and the user decides; a streaming API's cells may not slow to speed up another API (AGENTS.md, "The streaming APIs first"). A candidate waiting on the Mac waits on its branch; the VM's verdict alone does not promote it.
 
 A promotion fast-forwards `servil` to the candidate, records the gate's evidence (suites, both verdicts, their job numbers) as a note on the tip (`git notes --ref=perf add`; push `servil` with `refs/notes/perf`), and deletes the candidate branch here and on GitHub. After a promotion, pin bench-hashes to the new tip (`cargo update -p blake3-servil` in bench-hashes, commit the `Cargo.lock`, push): that pin is what users measure, and records are made on it.
+
+# Releases
+
+A release is a commit everyone can stand behind: every check that the main line runs once per change, run once more on that exact commit, plus the user-facing pages rewritten for it. Each step names what does it. `tools/release-check.py` (written during the v0.8 release, from these steps) verifies every mechanical one on the release commit and prints what is left; until it exists, run each command by hand.
+
+**What goes in.** Agree with Zooko which open candidates, PRs and issues the release takes, and record the list in the release's tracking issue (one issue, its checklist ticked as each item lands). Every candidate lands through the main line's gate (above). A release blocks on every open issue labelled for it.
+
+**The release commit.** Once everything is in, these run on `servil`'s tip, each recorded in the tracking issue:
+
+1. CI, every job, by `workflow_dispatch` on the tip.
+2. `sh tools/check-builds.sh`: every build variant.
+3. `pypy3 tools/perf_regress.py check --against <previous release tag>`, on the VM and as a Mac job. Each commit is checked only against its parent, so slowdowns too small to flag one at a time could add up; this check sees their sum.
+4. The long proofs (`long-proofs.yml`, or `tools/verify/long-proofs.sh`), every kernel.
+5. The full mutation run (`pypy3 tools/mutants/check.py`): every survivor known and explained.
+6. `cargo publish --dry-run` in the root, and in `b3sum/`: the packages build from what they contain.
+
+**The pages users read**, rewritten for the release and read as a newcomer would (AGENTS.md, "write each page for a reader who holds only the page"):
+- `README.md`: the servil preface;
+- `QUALITY.md`: what is proved, what is tested, what is open;
+- `CHANGELOG.md`: what changed for users since the last release, in their terms;
+- the supported-platforms table: exactly what CI runs.
+
+**Benchmark results.** A full bench-hashes run on the release commit, on the Mac (and on any other machine whose owner offers one), published to bench-hashes' GitHub Pages with the release named on the map.
+
+**Version and tag.** `python3 tools/gen-ver.py X.Y.Z` from a clean tree. It makes a commit setting X.Y.Z, a second setting X.Y.Z+<first commit>, and a lightweight tag vX.Y.Z+<first commit> (Zooko's technique, copied from bench-hashes). Push `servil`, then the tag by name.
+
+**What users download.**
+- `cargo publish` in the root, then in `b3sum/` (the library on crates.io; `cargo install` builds b3sum on the user's machine).
+- b3sum's release binaries, from a clean tree at the tag, on each machine: `sh tools/b3sum-release.sh`. On Linux this links statically, the recommended build; on the Mac, as macOS links. Attach each `dist/b3sum-VERSION-TARGET`, with its `.sha256` and `.b3`, to the tag's GitHub release.
+- The C library: `cargo build --release` in `capi/`. Attach `libb3_servil.a`, the shared library, and `b3.h`.
+- The GitHub release's text: the CHANGELOG entry.
+
+**Afterwards.**
+- eBASH: the steps below, pinned to the new tag.
+- The night's checks resume on the main line.
+- The tracking issue closes, with links to the release and the published results.
 
 # Before a question goes to Zooko
 
