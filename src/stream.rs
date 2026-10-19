@@ -516,10 +516,15 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
 
     /// Hand back every place whose digests are done, in order, without
     /// waiting; and hand the open task to the pool, so what it holds
-    /// starts hashing.
+    /// starts hashing. When none is done, hash one task no thread has
+    /// taken on this thread, so a caller that loops on `collect` for a
+    /// free place makes progress where the pool has no workers (one CPU,
+    /// or `initialize_multithreaded(Some(1))`), and otherwise helps.
     pub fn collect(&mut self) {
         self.publish();
-        self.deliver();
+        if self.deliver() == 0 {
+            self.run_waiting();
+        }
     }
 
     /// Hand back every place, in order, once its digests are done: this
