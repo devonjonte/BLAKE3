@@ -14,10 +14,8 @@ edition = "2024"
 default = ["std"]
 
 # The Wasm SIMD implementation does not participate in dynamic feature detection,
-# which is currently x86-only. If "wasm_simd" is on, Wasm SIMD support is assumed.
 # Note that not all Wasm implementations support the Wasm SIMD specification.
 # This may become the default in the future.
-wasm32_simd = []
 
 # Enables std::io traits, including impl Write for Hasher, impl Read and Seek
 # for OutputReader, and the Hasher::update_reader method. This feature is

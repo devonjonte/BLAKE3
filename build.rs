@@ -10,10 +10,6 @@ fn is_pure() -> bool {
     defined("CARGO_FEATURE_PURE")
 }
 
-fn is_wasm32_simd() -> bool {
-    defined("CARGO_FEATURE_WASM32_SIMD")
-}
-
 fn is_ci() -> bool {
     defined("BLAKE3_CI")
 }
@@ -76,10 +72,6 @@ fn use_msvc_asm() -> bool {
 
 fn is_aarch64() -> bool {
     target_components()[0] == "aarch64"
-}
-
-fn is_wasm32() -> bool {
-    target_components()[0] == "wasm32"
 }
 
 fn endianness() -> String {
@@ -291,13 +283,6 @@ fn build_neon_c_intrinsics() {
     build.compile("blake3_neon");
 }
 
-fn build_wasm32_simd() {
-    assert!(is_wasm32());
-    // No C code to compile here. Set the cfg flags that enable the Wasm SIMD.
-    // The regular Cargo build will compile it.
-    println!("cargo::rustc-cfg=blake3_wasm32_simd");
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // If CFLAGS is set, make sure LTO is disabled by appending -fno-lto. (We can't do this with
     // .flag() later on, because CFLAGS takes precedence.) Any mismatch between the C compiler and
@@ -323,7 +308,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "blake3_neon",
         "blake3_neon_hybrid",
         "blake3_sme2",
-        "blake3_wasm32_simd",
     ];
     for cfg_name in all_cfgs {
         // https://doc.rust-lang.org/cargo/reference/build-scripts.html#outputs-of-the-build-script
@@ -369,10 +353,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 build_sme2_assembly();
             }
         }
-    }
-
-    if is_wasm32() && is_wasm32_simd() {
-        build_wasm32_simd();
     }
 
     // The `cc` crate doesn't automatically emit rerun-if directives for the

@@ -22,7 +22,7 @@ and gives the commands to repeat them.
 **It is new.** An AI wrote it rapidly under Zooko's direction (his guidance is in
 `AGENTS.md`), and no person has yet reviewed it line by line or audited it. Its speed is
 measured on an Apple M4 Max (and a Linux VM on it) and on an Intel i7-12700K; its tests also
-run on other 64-bit Arm CPUs, on x86-64 Linux and Windows, and on WebAssembly. You would be
+run on other 64-bit Arm CPUs, on x86-64 Linux and Windows. You would be
 its first user; use it at your own risk.
 
 ## What it is
@@ -36,7 +36,7 @@ streaming in the format [iroh-blobs](https://github.com/n0-computer/iroh-blobs) 
 (`outboard_with`, `Verifier`).
 
 It supports 64-bit Arm (Linux and macOS), x86-64 (Linux, macOS, and Windows with MSVC), and
-WebAssembly, with the latest stable Rust. [Official
+with the latest stable Rust. [Official
 BLAKE3](https://github.com/BLAKE3-team/BLAKE3) serves other targets (32-bit x86 or Arm,
 big-endian CPUs, Windows with MinGW) and older compilers.
 

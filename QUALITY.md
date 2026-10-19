@@ -11,7 +11,6 @@ the bugs those steps found and what formal verification we have tried.
 |---|---|---|
 | 64-bit Arm: Apple Silicon, Linux and macOS | the fork's assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved**, and tested |
 | x86-64: Linux, macOS, Windows (MSVC) | upstream's assembly, unchanged, and the fork's own kernels in Rust intrinsics | tested |
-| WebAssembly | upstream's portable Rust (SIMD128 with the `wasm32_simd` feature) | tested |
 
 - **The Arm kernels are proved correct.** Every assembly kernel on Arm
   is proved to compute the BLAKE3 standard's compression for every
@@ -203,7 +202,7 @@ unrolled kernel code.
   clean.
 - **CI on other targets** (GitHub Actions): the suites on Linux x86-64
   and arm64 (without SME2, and without SHA-3 under QEMU), macOS, Windows
-  with MSVC, and wasm32 (wasmtime).
+  with MSVC.
 - **Miri**, which interprets Rust and stops at undefined behaviour, over
   small versions of the unsafe paths in the `pure` build (Miri cannot run
   assembly or SIMD intrinsics): `test::unsafe_paths` (batches, the pool
@@ -245,7 +244,7 @@ the calling convention, and takes a path that depends only on lengths.
 
 The Rust code (the dispatch, the tree walk, the `Hasher`, the pool, the
 batch APIs) is tested, and unproved; so are
-x86-64 and wasm32.
+x86-64.
 
 ### How to read what is proved
 

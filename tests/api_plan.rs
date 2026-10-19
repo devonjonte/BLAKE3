@@ -211,7 +211,6 @@ fn zeros(n: usize) -> Vec<Hash> {
 /// place, and read: each digest in its place, every place handed back
 /// once, in submission order, in every mode.
 #[test]
-#[cfg_attr(target_family = "wasm", ignore = "a stream needs threads, which this target lacks")]
 fn a_stream_puts_every_digest_in_its_place_and_hands_the_places_back_in_order() {
     blake3_servil::initialize_multithreaded(None);
     let lens: Vec<usize> = vectors().iter().map(|(len, _)| *len).chain(LARGE).collect();
@@ -244,7 +243,6 @@ fn a_stream_puts_every_digest_in_its_place_and_hands_the_places_back_in_order() 
 /// Batches of fixed-length messages, borrowed and written in place: one
 /// digest per message in the caller's place, the place handed back whole.
 #[test]
-#[cfg_attr(target_family = "wasm", ignore = "a stream needs threads, which this target lacks")]
 fn a_streams_batches_fill_the_callers_places() {
     blake3_servil::initialize_multithreaded(None);
     let cases = [(64, 1), (64, 4096), (100, 7), (1024, 300), (1500, 33)];
@@ -279,7 +277,6 @@ fn a_streams_batches_fill_the_callers_places() {
 /// pool's workers to park: every batch completes (a queue once hung here:
 /// fork NOTES, "The queue hung without SME2").
 #[test]
-#[cfg_attr(target_family = "wasm", ignore = "a stream needs threads, which this target lacks")]
 fn bursts_of_large_batches_after_pauses_complete() {
     blake3_servil::initialize_multithreaded(None);
     let (buffer, messages) = padded_batch(4096, 64);
@@ -307,7 +304,6 @@ fn bursts_of_large_batches_after_pauses_complete() {
 /// the handler (a free list the handler fills and the body takes from)
 /// until 1000 messages are hashed, each digest read as its place comes back.
 #[test]
-#[cfg_attr(target_family = "wasm", ignore = "a stream needs threads, which this target lacks")]
 fn a_stream_cycles_a_fixed_set_of_places() {
     blake3_servil::initialize_multithreaded(None);
     let messages: Vec<Vec<u8>> = (0..1000).map(|i| input(1 + i * 7 % 3000)).collect();
@@ -343,7 +339,6 @@ fn a_stream_cycles_a_fixed_set_of_places() {
 /// Streams on several threads at once, in different modes, share the
 /// workers and keep their own order.
 #[test]
-#[cfg_attr(target_family = "wasm", ignore = "a stream needs threads, which this target lacks")]
 fn streams_on_several_threads_keep_their_own_order() {
     blake3_servil::initialize_multithreaded(None);
     std::thread::scope(|scope| {
@@ -373,7 +368,6 @@ fn streams_on_several_threads_keep_their_own_order() {
 /// A handler that panics unwinds on the caller's thread, after the threads
 /// are done with the stream's messages; the pool goes on serving.
 #[test]
-#[cfg_attr(target_family = "wasm", ignore = "a stream needs threads, which this target lacks")]
 fn a_panicking_handler_unwinds_and_the_pool_goes_on() {
     blake3_servil::initialize_multithreaded(None);
     let message = input(100_000);

@@ -17,8 +17,6 @@ cfg_if::cfg_if! {
         pub const MAX_SIMD_DEGREE: usize = 16;
     } else if #[cfg(blake3_neon)] {
         pub const MAX_SIMD_DEGREE: usize = 4;
-    } else if #[cfg(blake3_wasm32_simd)] {
-        pub const MAX_SIMD_DEGREE: usize = 4;
     } else {
         pub const MAX_SIMD_DEGREE: usize = 1;
     }
@@ -43,8 +41,6 @@ cfg_if::cfg_if! {
         pub const MAX_SIMD_DEGREE_OR_2: usize = 16;
     } else if #[cfg(blake3_neon)] {
         pub const MAX_SIMD_DEGREE_OR_2: usize = 4;
-    } else if #[cfg(blake3_wasm32_simd)] {
-        pub const MAX_SIMD_DEGREE_OR_2: usize = 4;
     } else {
         pub const MAX_SIMD_DEGREE_OR_2: usize = 2;
     }
@@ -68,9 +64,6 @@ pub enum Platform {
     NEON = 6,
     #[cfg(blake3_sme2)]
     SME2 = 7,
-    #[cfg(blake3_wasm32_simd)]
-    #[allow(non_camel_case_types)]
-    WASM32_SIMD = 8,
 }
 
 /// One SME2 call at a time per process (all but always: two calls taking
@@ -222,10 +215,6 @@ impl Platform {
         {
             return Platform::NEON;
         }
-        #[cfg(blake3_wasm32_simd)]
-        {
-            return Platform::WASM32_SIMD;
-        }
         Platform::Portable
     }
 
@@ -244,8 +233,6 @@ impl Platform {
             Platform::NEON => "NEON",
             #[cfg(blake3_sme2)]
             Platform::SME2 => "SME2",
-            #[cfg(blake3_wasm32_simd)]
-            Platform::WASM32_SIMD => "WASM32 SIMD",
         }
     }
 
@@ -264,8 +251,6 @@ impl Platform {
             Platform::NEON => "portable compression",
             #[cfg(blake3_sme2)]
             Platform::SME2 => "portable compression",
-            #[cfg(blake3_wasm32_simd)]
-            Platform::WASM32_SIMD => "WASM32 SIMD compression",
         }
     }
 
@@ -287,8 +272,6 @@ impl Platform {
             Platform::NEON => "NEON hash_many (4-way)",
             #[cfg(blake3_sme2)]
             Platform::SME2 => "SME2 hash_many",
-            #[cfg(blake3_wasm32_simd)]
-            Platform::WASM32_SIMD => "WASM32 SIMD hash_many (4-way)",
         }
     }
 
@@ -316,8 +299,6 @@ impl Platform {
             Platform::NEON => 4,
             #[cfg(blake3_sme2)]
             Platform::SME2 => crate::sme2::DEGREE,
-            #[cfg(blake3_wasm32_simd)]
-            Platform::WASM32_SIMD => 4,
         };
         debug_assert!(degree <= MAX_SIMD_DEGREE);
         degree
@@ -341,8 +322,6 @@ impl Platform {
             Platform::NEON => portable::compress_in_place(cv, block, block_len, counter, flags),
             #[cfg(blake3_sme2)]
             Platform::SME2 => crate::neon_hybrid::compress_in_place(cv, block, block_len, counter, flags),
-            #[cfg(blake3_wasm32_simd)]
-            Platform::WASM32_SIMD => crate::wasm32_simd::compress_in_place(cv, block, block_len, counter, flags),
         }
     }
 
@@ -385,8 +364,6 @@ impl Platform {
             Platform::NEON => portable::compress_xof(cv, block, block_len, counter, flags),
             #[cfg(blake3_sme2)]
             Platform::SME2 => portable::compress_xof(cv, block, block_len, counter, flags),
-            #[cfg(blake3_wasm32_simd)]
-            Platform::WASM32_SIMD => crate::wasm32_simd::compress_xof(cv, block, block_len, counter, flags),
         }
     }
 
@@ -432,9 +409,6 @@ impl Platform {
             // Safe because detect() checked for SME2 with a 512-bit vector length.
             #[cfg(blake3_sme2)]
             Platform::SME2 => unsafe { crate::sme2::hash_many(inputs, key, counter, increment_counter, flags, flags_start, flags_end, out) },
-            // Assumed to be safe if the "wasm32_simd" feature is on.
-            #[cfg(blake3_wasm32_simd)]
-            Platform::WASM32_SIMD => unsafe { crate::wasm32_simd::hash_many(inputs, key, counter, increment_counter, flags, flags_start, flags_end, out) },
         }
     }
 

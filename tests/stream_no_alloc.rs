@@ -5,7 +5,7 @@
 //! harness, so nothing allocates beside it (the harness's notice that a test
 //! has run over 60 seconds allocates on the main thread). The pool needs
 //! threads, which wasm lacks; there the binary does nothing.
-#![cfg_attr(any(target_family = "wasm", miri), allow(unused))]
+#![cfg_attr(miri, allow(unused))]
 
 use blake3_servil::{Hash, Mode};
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -46,12 +46,12 @@ fn allocations_after_warm_up(warm: usize, rounds: usize, mut round: impl FnMut()
 
 fn main() {
     blake3_servil::initialize();
-    #[cfg(not(any(target_family = "wasm", miri)))]
+    #[cfg(not(miri))]
     a_warm_stream_allocates_nothing();
     println!("a warm stream allocates nothing: ok");
 }
 
-#[cfg(not(any(target_family = "wasm", miri)))]
+#[cfg(not(miri))]
 fn a_warm_stream_allocates_nothing() {
     blake3_servil::initialize_multithreaded(None);
     // The threads start in the background (each start allocates, for the

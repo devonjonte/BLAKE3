@@ -163,9 +163,6 @@
 //! [`serde::Deserialize`](https://docs.rs/serde/latest/serde/trait.Deserialize.html)
 //! for [`Hash`](struct@Hash).
 //!
-//! The `wasm32_simd` feature turns on the WebAssembly SIMD implementation
-//! for `wasm32` targets, and assumes the runtime has WebAssembly SIMD.
-//!
 //! [BLAKE3]: https://blake3.io
 //! [docs.rs]: https://docs.rs/
 //! [`Read`]: https://doc.rust-lang.org/std/io/trait.Read.html
@@ -235,10 +232,6 @@ use rust_sse41 as sse41;
 #[cfg(blake3_sse41_ffi)]
 #[path = "ffi_sse41.rs"]
 mod sse41;
-
-#[cfg(blake3_wasm32_simd)]
-#[path = "wasm32_simd.rs"]
-mod wasm32_simd;
 
 #[cfg(feature = "std")]
 mod io;
@@ -1388,93 +1381,6 @@ pub fn hash_many_multithreaded_with(mode: Mode, input: &[u8], message_len: usize
     lanes::require();
     let (key, flags) = mode.key_and_flags();
     lanes::hash_many(input, message_len, &key, flags, out);
-}
-
-/// The keyed hash function.
-///
-/// This is suitable for use as a message authentication code, for example to
-/// replace an HMAC instance. In that use case, the constant-time equality
-/// checking provided by [`Hash`](struct.Hash.html) is almost always a security
-/// requirement, and callers need to be careful not to compare MACs as raw
-/// bytes.
-///
-/// For an incremental version that accepts multiple writes, see [`Hasher::new_keyed`],
-/// [`Hasher::update`], and [`Hasher::finalize`]. These two lines are equivalent:
-///
-/// ```
-/// # blake3_servil::initialize();
-/// # const KEY: &[u8; 32] = &[0; 32];
-/// let mac = blake3_servil::keyed_hash(KEY, b"foo");
-/// # let mac1 = mac;
-///
-/// let mac = blake3_servil::Hasher::new_keyed(KEY).update(b"foo").finalize();
-/// # let mac2 = mac;
-/// # assert_eq!(mac1, mac2);
-/// ```
-///
-/// For output sizes other than 32 bytes, see [`Hasher::finalize_xof`], and [`OutputReader`].
-///
-/// It runs on the calling thread, at [`hash`]'s speed; for other cores too,
-/// call [`hash_multithreaded_with`] with [`Mode::Keyed`].
-pub fn keyed_hash(key: &[u8; KEY_LEN], input: &[u8]) -> Hash {
-    let key_words = platform::words_from_le_bytes_32(key);
-    hash_serial(input, &key_words, KEYED_HASH)
-}
-
-/// The key derivation function.
-///
-/// Given cryptographic key material of any length and a context string of any
-/// length, this function outputs a 32-byte derived subkey. **The context string
-/// should be hardcoded, globally unique, and application-specific.** A good
-/// default format for such strings is `"[application] [commit timestamp]
-/// [purpose]"`, e.g., `"example.com 2019-12-25 16:18:03 session tokens v1"`.
-///
-/// Key derivation is important when you want to use the same key in multiple
-/// algorithms or use cases. Using the same key with different cryptographic
-/// algorithms is generally forbidden, and deriving a separate subkey for each
-/// use case protects you from bad interactions. Derived keys also mitigate the
-/// damage from one part of your application accidentally leaking its key.
-///
-/// As a rare exception to that general rule, however, it is possible to use
-/// `derive_key` itself with key material that you are already using with
-/// another algorithm. You might need to do this if you're adding features to
-/// an existing application, which does not yet use key derivation internally.
-/// However, you still must not share key material with algorithms that forbid
-/// key reuse entirely, like a one-time pad. For more on this, see sections 6.2
-/// and 7.8 of the [BLAKE3 paper](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf).
-///
-/// Note that BLAKE3 is not a password hash, and **`derive_key` should never be
-/// used with passwords.** Instead, use a dedicated password hash like
-/// [Argon2]. Password hashes are entirely different from generic hash
-/// functions, with opposite design requirements.
-///
-/// For an incremental version that accepts multiple writes, see [`Hasher::new_derive_key`],
-/// [`Hasher::update`], and [`Hasher::finalize`]. These two statements are equivalent:
-///
-/// ```
-/// # blake3_servil::initialize();
-/// # const CONTEXT: &str = "example.com 2019-12-25 16:18:03 session tokens v1";
-/// let key = blake3_servil::derive_key(CONTEXT, b"key material, not a password");
-/// # let key1 = key;
-///
-/// let key: [u8; 32] = blake3_servil::Hasher::new_derive_key(CONTEXT)
-///     .update(b"key material, not a password")
-///     .finalize()
-///     .into();
-/// # let key2 = key;
-/// # assert_eq!(key1, key2);
-/// ```
-///
-/// For output sizes other than 32 bytes, see [`Hasher::finalize_xof`], and [`OutputReader`].
-///
-/// It runs on the calling thread, at [`hash`]'s speed; for other cores too,
-/// call [`hash_multithreaded_with`] with [`Mode::DeriveKey`].
-///
-/// [Argon2]: https://en.wikipedia.org/wiki/Argon2
-pub fn derive_key(context: &str, key_material: &[u8]) -> [u8; OUT_LEN] {
-    let context_key = hazmat::hash_derive_key_context(context);
-    let context_key_words = platform::words_from_le_bytes_32(&context_key);
-    hash_serial(key_material, &context_key_words, DERIVE_KEY_MATERIAL).0
 }
 
 /// A message's hash, fed in pieces: [`update`](Hasher::update) with each

@@ -1567,7 +1567,6 @@ mod test {
     /// Many concurrent callers on one process: every result is right, and
     /// each call waits for its workers and leaves every result complete.
     #[test]
-    #[cfg_attr(target_family = "wasm", ignore = "spawns threads, which this target lacks")]
     fn test_concurrent_callers_agree() {
         let mut input = vec![0u8; 8 * MIN_SPLIT_LEN + 1];
         crate::test::paint_test_input(&mut input);
@@ -1633,7 +1632,6 @@ mod test {
 
     /// Concurrent batch callers beside tree callers: every digest right.
     #[test]
-    #[cfg_attr(target_family = "wasm", ignore = "spawns threads, which this target lacks")]
     fn test_concurrent_batch_callers_agree() {
         let mut buffer = vec![0u8; 8 * MIN_SPLIT_LEN];
         crate::test::paint_test_input(&mut buffer);
