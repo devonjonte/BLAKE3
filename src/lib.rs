@@ -1041,10 +1041,36 @@ pub fn initialize() {
 /// let hash = blake3_servil::hash_multithreaded(&[0u8; 1 << 20]);
 /// assert_eq!(hash, blake3_servil::hash(&[0u8; 1 << 20]));
 /// ```
+/// Experiment (bench-hashes / BLAKE3 #85): on a hybrid Intel CPU under
+/// Linux, the performance cores' logical CPUs that this process may run on
+/// (`/sys/bus/event_source/devices/cpu_core/cpus` within the affinity in
+/// `/proc/self/status`): past them, efficiency cores added CPU time and no
+/// speed. None elsewhere, or where neither file says.
+#[cfg(feature = "std")]
+fn p_cores() -> Option<usize> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    // A CPU list as Linux writes one: "0-15", "0-3,8,10-11".
+    let list = |text: &str| -> Option<Vec<usize>> {
+        let mut cpus = Vec::new();
+        for part in text.trim().split(',').filter(|p| !p.is_empty()) {
+            let (a, b) = part.split_once('-').unwrap_or((part, part));
+            cpus.extend(a.parse::<usize>().ok()?..=b.parse::<usize>().ok()?);
+        }
+        Some(cpus)
+    };
+    let p = list(&std::fs::read_to_string("/sys/bus/event_source/devices/cpu_core/cpus").ok()?)?;
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let allowed = list(status.lines().find_map(|l| l.strip_prefix("Cpus_allowed_list:"))?)?;
+    let n = allowed.iter().filter(|c| p.contains(c)).count();
+    (n > 1).then_some(n)
+}
+
 #[cfg(feature = "std")]
 pub fn initialize_multithreaded(threads: Option<core::num::NonZeroUsize>) {
     static STARTED: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    let cpus = || std::thread::available_parallelism().map_or(1, |n| n.get());
+    let cpus = || p_cores().unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
     let started = *STARTED.get_or_init(|| {
         let threads = threads.map_or_else(cpus, |n| n.get());
         initialize();
