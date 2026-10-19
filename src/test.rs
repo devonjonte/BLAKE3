@@ -1221,6 +1221,47 @@ mod guard_pages {
         }
     }
 
+    /// The collection and many-message entry points, each item in its own
+    /// pages flush against a guard page (then flush after one): the calls
+    /// that gather items from separate places into lanes read no byte
+    /// outside any item.
+    #[test]
+    fn test_each_item_against_a_guard_page() {
+        use crate::Mode;
+        let mut lens: Vec<usize> = (0..=130).collect();
+        lens.extend([255, 256, 1000, 1023, 1024, 1025, 1089, 1500, 2047, 2048, 3072, 3839, 4096, 7935, 8191, 16383, 16384, 16385, 65536 + 7]);
+        for count in [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 33] {
+            for &len in &lens {
+                for at_end in [true, false] {
+                    let guarded: Vec<Guarded> = (0..count).map(|i| filled(len + (i % 3), at_end)).collect();
+                    let items: Vec<&[u8]> = guarded.iter().map(|g| unsafe { core::slice::from_raw_parts(g.base.add(g.start), g.len) }).collect();
+                    let want: Vec<[u8; 32]> = items.iter().map(|m| *crate::test::reference_hash(m).as_bytes()).collect();
+                    let mut got = vec![[0u8; 32]; count];
+                    crate::hash_each_with(Mode::Hash, &items, &mut got);
+                    assert_eq!(got, want, "hash_each_with, {count} x {len} B, at end {at_end}");
+                    let mut got = vec![[0u8; 32]; count];
+                    crate::hash_each_multithreaded_with(Mode::Hash, &items, &mut got);
+                    assert_eq!(got, want, "hash_each_multithreaded_with, {count} x {len} B, at end {at_end}");
+                    let mut hashers: Vec<crate::Hasher> = (0..count).map(|_| crate::Hasher::new()).collect();
+                    let pieces: Vec<(usize, &[u8])> = items.iter().copied().enumerate().collect();
+                    crate::Hasher::update_each(&mut hashers, &pieces);
+                    for (i, h) in hashers.iter().enumerate() {
+                        assert_eq!(*h.finalize().as_bytes(), want[i], "update_each, {count} x {len} B, at end {at_end}");
+                    }
+                    if count == 1 {
+                        let (hash, _) = crate::outboard_with(Mode::Hash, items[0]);
+                        assert_eq!(*hash.as_bytes(), want[0], "outboard_with, {len} B, at end {at_end}");
+                        let mut h = crate::Hasher::new();
+                        for piece in items[0].chunks(1000) {
+                            h.update(piece);
+                        }
+                        assert_eq!(*h.finalize().as_bytes(), want[0], "update in 1000 B pieces, {len} B");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_xof_inside_guard_pages() {
         // Extended output written flush against a guard page after the
