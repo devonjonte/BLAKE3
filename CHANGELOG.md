@@ -24,11 +24,42 @@ API, and a faster `b3sum`.
    or `submit_with`, `Queue::pieces` `submit_reader`, `Queue::fixed`
    `submit_batch`).
 3. Replace `guts` with `hazmat`.
-4. Check your target: 64-bit Arm, x86-64, or WebAssembly, with the
-   latest stable Rust. Other targets stay with official BLAKE3.
+4. Choose a mode with `Mode`: `keyed_hash(key, input)` becomes
+   `hash_with(Mode::Keyed(key), input)`, `derive_key(context, material)`
+   becomes `hash_with(Mode::DeriveKey(context), material)`, and
+   `Hasher::new_keyed` and `Hasher::new_derive_key` become
+   `Hasher::new_with(mode)`.
+5. Check your target: 64-bit Arm (Linux, macOS) or x86-64 (Linux,
+   Windows with MSVC), with the latest stable Rust. Other targets stay
+   with official BLAKE3.
 
 ### Every change
 
+- **Breaking: one way to choose a mode.** `keyed_hash`, `derive_key`,
+  `Hasher::new_keyed` and `Hasher::new_derive_key` are gone; a `Mode`
+  (`Hash`, `Keyed`, `DeriveKey`, `DeriveKeyMaterial`) goes to `hash_with`,
+  `hash_multithreaded_with`, `hash_many_with` and `Hasher::new_with`.
+- **Breaking: removed before 0.8, each for simplicity:** the hidden
+  `platform` module (the door through which official BLAKE3's AVX2 and
+  AVX-512 over-read is reachable from safe code); the `mmap` feature and
+  `Hasher::update_mmap` (map the file yourself and call `update`, or use
+  `update_reader`); the `traits-preview` feature (the RustCrypto `digest`
+  traits); the testing-only `no_avx2`, `no_avx512`, `no_neon` and
+  `no_sme2` features (`pure` stays); the kernel reports
+  (`kernel_report*`, `Kernel`, `KernelReport`); and WebAssembly, which
+  official BLAKE3 serves.
+- **The AVX2 and AVX-512 `hash_many` kernels no longer read past an
+  input's end.** Their two- and four-input paths loaded a whole vector
+  and kept its first 16 bytes: up to 16 (AVX2) or 48 (AVX-512) bytes past
+  an input, a fault when the input ends at an unmapped page. This fork's
+  batch API reached it; official BLAKE3's public API does not, and the
+  bug is reported there (BLAKE3-team/BLAKE3#598). The guard-page tests
+  run on x86-64 too, and one puts every input against a guard page on
+  every kernel the CPU has.
+- **A stream on one CPU makes progress** (#86): with no thread beside its
+  caller to take tasks, a stream hashes each task on the caller as it is
+  handed over, so a caller that loops on `collect()` for a free place gets
+  one (it waited forever).
 - **Breaking: `initialize_multithreaded` takes the number of threads**
   the multithreaded calls hash on, `Option<NonZeroUsize>`: `None` for one
   a CPU, as before; `Some(1)` hashes on the calling thread alone, with no
@@ -72,9 +103,8 @@ API, and a faster `b3sum`.
   `b3_derive_key`, the context hashed once), digests as values, the
   one-shot and batch calls on one thread or many, and a hasher in the
   caller's memory. It builds as `libb3_servil`, and compiles as C11 and C++11.
-- **Breaking: the supported targets are 64-bit Arm (Linux, macOS),
-  x86-64 (Linux, macOS, Windows with MSVC), and WebAssembly, with the
-  latest stable Rust.** 32-bit x86 and Arm, big-endian CPUs, Windows with
+- **Breaking: the supported targets are 64-bit Arm (Linux, macOS) and
+  x86-64 (Linux, Windows with MSVC), with the latest stable Rust.** 32-bit x86 and Arm, big-endian CPUs, Windows with
   MinGW, the SSE2 kernel (x86 CPUs without SSE4.1), and older compilers
   go to official BLAKE3; with them go the `neon`, `prefer_intrinsics`,
   `no_sse2`, `no_sse41`, and `digest` features, and upstream's C library.
@@ -197,7 +227,7 @@ API, and a faster `b3sum`.
   out)`, `hash_many_multithreaded_with`. `Threads` and `Efficiency` are
   gone; `stream(mode, handler, body)` takes a mode and a handler, and a
   stream always hashes on every thread that pays.
-- One-shot calls of 1-64 KiB (`hash`, `keyed_hash`, `derive_key`, and
+- One-shot calls of 1-64 KiB (`hash` in every mode, and
   `hash_multithreaded` below its split) that follow a pause fetch their
   code from memory in parallel instead of line by line: on an Apple M4 Max,
   a call after other work takes about 40% less time at 4 KiB, 45% at
@@ -222,8 +252,7 @@ API, and a faster `b3sum`.
   cache takes 23-33% less time.
 - Builds with an assembler too old for the SHA-3 extension (GNU as before
   2.30) succeed, without the integer + NEON and SME2 kernels, with a
-  warning; builds for `wasm32-wasip1` pass their tests (a stream needs
-  threads, which that target lacks).
+  warning.
 
 - `Hasher::update_multithreaded` is public: `Hasher::update` over several
   threads, with the same result, for updates of 512 KiB or more; shorter
