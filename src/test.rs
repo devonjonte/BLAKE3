@@ -1175,14 +1175,14 @@ mod guard_pages {
         {
             assert_eq!(
                 platforms.iter().any(|p| matches!(p, platform::Platform::AVX2)),
-                std::is_x86_feature_detected!("avx2"),
-                "AVX2 checked where the CPU has it: {platforms:?}"
+                platform::avx2_detected(),
+                "AVX2 checked where the build and the CPU have it: {platforms:?}"
             );
             #[cfg(blake3_avx512_ffi)]
             assert_eq!(
                 platforms.iter().any(|p| matches!(p, platform::Platform::AVX512)),
-                std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl"),
-                "AVX-512 checked where the CPU has it: {platforms:?}"
+                platform::avx512_detected(),
+                "AVX-512 checked where the build and the CPU have it: {platforms:?}"
             );
             assert!(cfg!(blake3_avx2_ffi) || cfg!(blake3_avx2_rust), "an AVX2 kernel built");
         }
