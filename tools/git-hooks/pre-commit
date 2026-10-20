@@ -1,8 +1,9 @@
 #!/bin/sh
 # blake3-servil pre-commit hook: the performance-regression check (the
-# working tree against HEAD, side by side), for commits that touch code.
+# working tree against HEAD: `bench-hashes check`, which measures the
+# cells whose code the commit touches), for commits that touch code.
 # A confirmed regression (exit 1) aborts the commit; no verdict (exit 2:
-# the machine's state changed during the check) warns and lets it through.
+# other programs kept the machine busy) warns and lets it through.
 # `git commit --no-verify` skips the check after review.
 #
 # The check measures the working tree, which is what is being committed
@@ -11,12 +12,10 @@
 # Install: sh tools/install-git-hooks.sh (the VM's vm/setup.sh does it).
 code=$(git diff --cached --name-only -- src c build.rs Cargo.toml Cargo.lock)
 [ -z "$code" ] && exit 0
-# PyPy where installed: the scripts use the standard library alone.
-python=$(command -v pypy3 || command -v python3)
 # The tree being committed, before and after: the check must leave it alone
 # (a check that rewrote the index once committed HEAD's tree instead).
 tree=$(git write-tree)
-"$python" "$(git rev-parse --show-toplevel)/tools/perf_regress.py" check
+(cd "$(git rev-parse --show-toplevel)/bench-hashes" && cargo run --release --quiet -- check)
 verdict=$?
 if [ "$(git write-tree)" != "$tree" ]; then
     echo "pre-commit: the performance check changed the index being committed; commit aborted."

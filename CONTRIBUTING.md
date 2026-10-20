@@ -43,7 +43,7 @@ compiler assembles SME2: Clang 17 or later (Xcode 15 or later), or GCC 14
 or later with binutils 2.41. With an older compiler it builds without the
 kernel and warns (`CC=clang-19 cargo build` adds it on Debian 12, for
 example). On a
-CPU with SME2, `perf_regress` stops when the build lacks the kernel.
+CPU with SME2, the check stops when the build lacks the kernel.
 
 ```sh
 cargo test --release --lib --tests
@@ -89,8 +89,8 @@ inside this checkout:
 
 ```sh
 git clone https://github.com/johnservil/bench-hashes
-pypy3 tools/perf_regress.py check       # the working tree against HEAD (python3 where PyPy is absent)
-pypy3 tools/perf_regress.py compare OLD NEW
+cd bench-hashes && cargo run --release -- check                 # the working tree against HEAD
+cd bench-hashes && cargo run --release -- check --against OLD   # a checkout at NEW
 ```
 
 It builds the benchmark against both versions of the fork and runs them

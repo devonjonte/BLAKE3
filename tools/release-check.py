@@ -10,10 +10,11 @@ command that makes it). Exit status 0 only when every step passes.
 
 - CI: GitHub's workflow runs on the commit (every job succeeded).
 - Long proofs: the commit's GitHub status "long proofs" (long-proofs.sh).
-- Mac perf_regress: runner/results/*/verdict.json whose job names this
-  commit as new_commit and the previous release as old_commit.
-- VM perf_regress: tmp/night/perf-release-vm.log, written by
-  `pypy3 tools/perf_regress.py compare <previous tag> <commit>`.
+- Mac check: runner/results/*/verdict.json whose job names this commit as
+  new_commit and the previous release as old_commit (a "check" job with
+  "cells": "all").
+- VM check: tmp/night/check-release-vm.log, written by
+  `cd bench-hashes && cargo run --release -- check --against <previous tag> --cells all`.
 - Full mutation run: tmp/night/mutants-release.log ending "each known and
   explained", from `pypy3 tools/mutants/check.py` on the commit.
 - check-builds: tmp/night/check-builds-release.log ending "every build passes".
@@ -84,11 +85,11 @@ def main():
         j = json.load(open(job))
         if j.get("new_commit") == commit and (previous is None or j.get("old_commit") == git("rev-parse", previous)):
             mac = v["status"]
-    step("Mac perf_regress against the previous release", (mac == "no regression") if mac else None,
-         f"a runner job with old_commit {previous or '<previous tag>'} and new_commit {commit[:10]}")
+    step("Mac check against the previous release", (mac == "no regression") if mac else None,
+         f"a check job (cells all) with old_commit {previous or '<previous tag>'} and new_commit {commit[:10]}")
 
-    step("VM perf_regress against the previous release", log_ends_with("tmp/night/perf-release-vm.log", "no cell slower"),
-         f"pypy3 tools/perf_regress.py compare {previous or '<previous tag>'} {commit[:10]} > tmp/night/perf-release-vm.log")
+    step("VM check against the previous release", log_ends_with("tmp/night/check-release-vm.log", "no cell slower"),
+         f"(cd bench-hashes && cargo run --release -- check --against {previous or '<previous tag>'} --cells all) > tmp/night/check-release-vm.log")
     step("full mutation run", log_ends_with("tmp/night/mutants-release.log", "each known and explained"),
          "pypy3 tools/mutants/check.py > tmp/night/mutants-release.log (overnight)")
     step("check-builds", log_ends_with("tmp/night/check-builds-release.log", "every build passes"),
