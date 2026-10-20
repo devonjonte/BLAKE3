@@ -1,277 +1,79 @@
 # Changelog
 
-Each release's announcement, newest first: what the release gives you,
-how to upgrade, and every change since the release before it, stated as
-the new release behaves (Zooko, October 19, 2026). `git log` holds each
-step on the way, the reverted ones too.
+What changed in each release that a user meets: what it gives, how to
+come to it, and what breaks. `git log` holds every step on the way.
 
 ## 0.8.0 (unreleased)
 
 **blake3-servil 0.8: BLAKE3, proved and faster.** The same digests as
-official BLAKE3, faster above all on 64-bit Arm and Apple M4-class chips.
-Its Arm assembly is proved correct for every input, everything else is
-tested, and the tests are tested ([QUALITY.md](QUALITY.md)). New since
-0.3: a stream for inputs one after another, collections and many
-messages at once, verified streaming (outboards and a `Verifier`), a C
-API, and a faster `b3sum`.
+official BLAKE3, faster on 64-bit Arm and on x86-64. Every Arm kernel is
+proved correct for every input, everything else is tested, and the tests
+are tested ([QUALITY.md](QUALITY.md)). Beyond official BLAKE3: a stream
+for inputs one after another, collections and many messages at once,
+verified streaming (outboards and a `Verifier`), a C API, and a faster
+`b3sum`.
 
-**Upgrading from 0.3:**
+**Coming from official BLAKE3:**
 
-1. Call `blake3_servil::initialize()` once before any other call, or
+1. Check your target: 64-bit Arm (Linux, macOS) or x86-64 (Linux, Windows
+   with MSVC), with the latest stable Rust. 32-bit CPUs, big-endian CPUs,
+   WebAssembly, Windows with MinGW and older compilers stay with official
+   BLAKE3.
+2. Call `blake3_servil::initialize()` once before any other call, or
    `initialize_multithreaded(None)` if the program makes multithreaded
-   calls or uses a stream.
-2. Replace `Queue` with `stream()` (`Queue::messages` becomes `submit`
-   or `submit_with`, `Queue::pieces` `submit_reader`, `Queue::fixed`
-   `submit_batch`).
-3. Replace `guts` with `hazmat`.
-4. Choose a mode with `Mode`: `keyed_hash(key, input)` becomes
+   calls or uses a stream. A call before it panics, saying so.
+3. Choose a mode with `Mode`: `keyed_hash(key, input)` becomes
    `hash_with(Mode::Keyed(key), input)`, `derive_key(context, material)`
    becomes `hash_with(Mode::DeriveKey(context), material)`, and
-   `Hasher::new_keyed` and `Hasher::new_derive_key` become
-   `Hasher::new_with(mode)`.
-5. Check your target: 64-bit Arm (Linux, macOS) or x86-64 (Linux,
-   Windows with MSVC), with the latest stable Rust. Other targets stay
-   with official BLAKE3.
+   `Hasher::new_keyed` / `new_derive_key` become `Hasher::new_with(mode)`.
+   `hash(input)` and `Hasher::new()` are as they were.
+4. Threads are this crate's, not Rayon's: `Hasher::update_rayon` becomes
+   `update_multithreaded`, and `hash_multithreaded(input)` hashes one
+   message over the threads. There is no `rayon` feature.
+5. Gone, with what to use instead: the `mmap` feature and
+   `Hasher::update_mmap` (map the file yourself and call `update`, or use
+   `update_reader`); the `traits-preview` feature (the RustCrypto `digest`
+   traits); the `guts` and `hazmat` modules (subtrees by hand: the
+   verified-streaming calls below serve the tree, and
+   `hash_derive_key_context` is at the crate root); the hidden `platform`
+   module; the testing features `no_avx2`, `no_avx512`, `no_neon` and
+   `no_sme2` (`pure` stays).
+6. `b3sum`: `--num-threads N` means at most N threads in all (1: one
+   thread); `--no-mmap` has no effect; every file is read to its end; a
+   broken pipe ends it quietly, as GNU's tools do.
 
-### Every change
+**New calls**, each documented with its speed in the crate docs ("Which
+call to use"): `hash_many` / `hash_many_multithreaded` for messages of
+one length in one buffer; `hash_each_with` / `hash_each_multithreaded_with`
+for a collection of any lengths; `Hasher::update_each` for many messages
+in progress at once; `stream()` for inputs one after another, hashed
+behind the caller; `outboard_with`, `verify_range_with` and `Verifier`
+for verified streaming in iroh-blobs' format; a C API in `capi/b3.h`
+(`libb3_servil`, C11 and C++11).
 
-- **Breaking: one way to choose a mode.** `keyed_hash`, `derive_key`,
-  `Hasher::new_keyed` and `Hasher::new_derive_key` are gone; a `Mode`
-  (`Hash`, `Keyed`, `DeriveKey`, `DeriveKeyMaterial`) goes to `hash_with`,
-  `hash_multithreaded_with`, `hash_many_with` and `Hasher::new_with`.
-- **Breaking: removed before 0.8, each for simplicity:** the hidden
-  `platform` module (the door through which official BLAKE3's AVX2 and
-  AVX-512 over-read is reachable from safe code); the `mmap` feature and
-  `Hasher::update_mmap` (map the file yourself and call `update`, or use
-  `update_reader`); the `traits-preview` feature (the RustCrypto `digest`
-  traits); the testing-only `no_avx2`, `no_avx512`, `no_neon` and
-  `no_sme2` features (`pure` stays); the kernel reports
-  (`kernel_report*`, `Kernel`, `KernelReport`); and WebAssembly, which
-  official BLAKE3 serves.
-- **The AVX2 and AVX-512 `hash_many` kernels no longer read past an
-  input's end.** Their two- and four-input paths loaded a whole vector
-  and kept its first 16 bytes: up to 16 (AVX2) or 48 (AVX-512) bytes past
-  an input, a fault when the input ends at an unmapped page. This fork's
-  batch API reached it; official BLAKE3's public API does not, and the
-  bug is reported there (BLAKE3-team/BLAKE3#598). The guard-page tests
-  run on x86-64 too, and one puts every input against a guard page on
-  every kernel the CPU has.
-- **A stream on one CPU makes progress** (#86): with no thread beside its
-  caller to take tasks, a stream hashes each task on the caller as it is
-  handed over, so a caller that loops on `collect()` for a free place gets
-  one (it waited forever).
-- **Breaking: `initialize_multithreaded` takes the number of threads**
-  the multithreaded calls hash on, `Option<NonZeroUsize>`: `None` for one
-  a CPU, as before; `Some(1)` hashes on the calling thread alone, with no
-  workers. Call it as `initialize_multithreaded(None)` to keep the old
-  behavior.
-- **Breaking: `Queue` is gone, and `stream()` takes its place** (Zooko,
-  October 16, 2026). A stream borrows the program's messages (or has them
-  written or read into its ring), writes each digest into the place the
-  program names, and hands the places back in order to one handler.
-  `Queue::messages` becomes `submit` or `submit_with`; `Queue::pieces`,
-  `submit_reader` or `submit_with`; `Queue::fixed`, `submit_batch` with a
-  place of one digest per message. The queue's delivery thread is gone.
-- b3sum reads every file to its end: a file's reported size only chooses
-  how to read it, so a file that grows, or a pseudo-file in `/proc` or
-  `/sys` that misstates its size, hashes as what it holds.
-- `b3sum ... | head` ends quietly when its reader goes away, as GNU's
-  tools do (it panicked, status 101), and a bus error reading a mapped file
-  (most likely another program truncated it) says so instead of ending
-  unexplained.
-- `b3sum --num-threads N` hashes on at most N threads in all: N files at
-  once, one file on N threads, or a few large files sharing the rest; 1
-  hashes on one thread. The default is unchanged.
-- b3sum on Linux keeps up to 64 small files read from storage in flight
-  across its file threads: from storage, 1000 files of 16 KiB take 7.7 ms
-  on an i7-12700K (official b3sum 1.8.2: 64 ms).
-- b3sum's small runs start less: a file thread only while files remain
-  to take (ten 4 KiB files start 7), no CPU count for one file without
-  `--num-threads` (eight system calls on Linux), and an exit with no
-  teardown once its output is written (Unix `_exit`; Windows
-  `TerminateProcess`).
-- `hash()` is inlined into its caller: a small call after the program has
-  been idle fetches one code line fewer (64 bytes 16.5% faster on an
-  i7-12700K).
-- **One scheduler**: the pool's workers take every multithreaded call's
-  work, and every stream's, from sources each call or stream publishes
-  (a ring and two counters, no lock), and park each on its own token. On
-  an i7-12700K against the stream on the earlier pool: no cell slower,
-  messages 5-49% faster, collections 12-20%, `hash_multithreaded` on
-  1 MiB 7%.
-- **A C API**, `capi/b3.h`: a mode as a value (`b3_plain`, `b3_keyed`,
-  `b3_derive_key`, the context hashed once), digests as values, the
-  one-shot and batch calls on one thread or many, and a hasher in the
-  caller's memory. It builds as `libb3_servil`, and compiles as C11 and C++11.
-- **Breaking: the supported targets are 64-bit Arm (Linux, macOS) and
-  x86-64 (Linux, Windows with MSVC), with the latest stable Rust.** 32-bit x86 and Arm, big-endian CPUs, Windows with
-  MinGW, the SSE2 kernel (x86 CPUs without SSE4.1), and older compilers
-  go to official BLAKE3; with them go the `neon`, `prefer_intrinsics`,
-  `no_sse2`, `no_sse41`, and `digest` features, and upstream's C library.
-  GCC 12 is the oldest C compiler supported.
-- **Every Arm kernel is generated assembly, and proved.** CPUs without
-  the SHA-3 extension (Cortex-A72, Neoverse N1) run the integer + NEON
-  kernels built on scalar and quad units (`kn`, `pn`), in place of
-  upstream's C NEON kernel, which goes with its headers; extended output
-  on NEON runs the `x4` and `x8` kernels, in place of Rust intrinsics. An
-  assembler that knows armv8.2-a+sha3 is required (GNU as 2.30, LLVM 7),
-  or the `pure` feature. `platform::Platform::hash_many` takes the shapes
-  the crate makes on every platform: whole chunks at incrementing
-  counters, or 1 to 16 blocks at one counter.
-- **Breaking: the deprecated `guts` module goes** (`hazmat` serves it).
-- `Mode::DeriveKeyMaterial` takes a derived key's context already hashed
-  (`hazmat::hash_derive_key_context`), for many calls with one context.
-- The startup self-test checks, in a test on every run, that it reaches
-  every assembly kernel this machine has; it gained two cases on AArch64
-  (42), for the SME2 kernel at a counter per group and, on CPUs without
-  SME2, the three-chunk hybrid kernel.
-- The startup self-test checks the build and the machine, leaving what
-  the code computes to the tests and proofs: on x86-64 and the other
-  non-AArch64 targets it runs each kernel once in 9 small cases (from 40),
-  28 us in a fresh process on an i7-12700K's performance core, from 109.
-  On x86 it first stops a binary built for CPUs with LZCNT or BMI1 on a
-  CPU without them, which runs those instructions as others and would
-  compute wrong digests (seen under QEMU's Ivy Bridge).
-- On x86-64 with SSE4.1 or AVX2, whole chunks and a partial one after
-  them hash in one pass, the partial chunk in a lane the whole ones leave
-  spare: three whole chunks in four lanes, five to seven in eight (AVX2).
-  On an i7-12700K, hash() of 3839 bytes takes 1.55 us from 2.11 (x0.74),
-  8191 bytes 1.76 from 3.31 (x0.53); after other work 3839 and 7935 bytes
-  x0.90 and x0.85; other lengths level.
-- `Verifier::update_multithreaded` checks a piece's groups over this
-  crate's threads when the piece holds 512 KiB of them or more: a 64 MiB
-  encoding verifies at 0.105-0.112 ns/B in 1-4 MiB pieces, from
-  0.274-0.287 with `update` (i7-12700K); pieces under 512 KiB run as
-  `update`.
-- The scalar one-chunk kernel loads each step's four message words before
-  its arithmetic and interleaves the step's four G functions, so in-order
-  cores (Cortex-A53, as in the Raspberry Pi 3) no longer wait on each load:
-  llvm-mca predicts a chunk-or-less message and every single compression
-  about 3x faster there (unmeasured on the hardware); the same size of code,
-  level on the M4 Max VM.
-- The crate builds with any C compiler and CFLAGS: one whose assembler
-  predates SME2 (GCC 12 with binutils 2.40, as on Debian 12) leaves out the
-  SME2 kernel with a warning even when CFLAGS sets its own -march, such as
-  -march=native, under which the build used to fail.
-- **Breaking: every program calls `initialize()` (or
-  `initialize_multithreaded()`) once, before any other call.** It runs the
-  startup self-test and detects the CPU; a call before it panics, in every
-  build, saying so. Each call then loads the detected platform instead of
-  checking the self-test and detecting the CPU again, so the check costs
-  nothing.
-- **Breaking: a program that makes multithreaded calls or uses a stream
-  calls `initialize_multithreaded()` first**, in place of `initialize()`;
-  such a call before it panics (one load per call). It starts the first
-  worker and returns; the first worker
-  starts the others, and calls run on the workers started so far. The
-  first multithreaded call no longer starts the threads, nor waits for 19
-  of them one after another: b3sum hashes a 1 MiB file in the page cache
-  in 1.06 ms, from 1.41 (official 1.22; i7-12700K, Linux).
-- On x86-64 with AVX2 or AVX-512, a message of 1089 to 2047 bytes (a whole
-  chunk and a partial one, as a 1500-byte packet) hashes the two chunks'
-  first blocks side by side, on the kernels' existing two-input path: the
-  chain of dependent blocks at 1536 bytes falls from 25 to 18, at 2047 from
-  33 to 18 (instructions per call under qemu: 1536 bytes 11577 -> 8281;
-  unmeasured on x86 hardware).
-- The API documentation is rewritten for choosing a call and predicting
-  its speed: a table of which call fits which data, and each call's speed
-  on an Apple M4 Max.
-- b3sum hashes several files at once on several threads, printing their
-  lines in order: a tree of 1000 files hashes 1.6-3.4x as fast on an
-  Apple M4 Max (read from storage: 16 KiB files 5.90 -> 1.72 ns/B).
-- The startup self-test runs in every build, `no_std` ones included
-  (they skipped it): a build or CPU that computes wrong digests stops
-  with a panic naming the code path, and threads hashing meanwhile stop
-  too. It allocates nothing now (about 45 KiB of stack while it runs),
-  and `initialize` is available without `std`.
-- Calls made now and then, after other work or a pause, run faster: a
-  message of a chunk or less hashes on a one-chunk kernel a quarter of
-  the size (64 bytes about a third faster after other work on an Apple M4
-  Max, 2-4% slower nonstop), and a batch of up to 8 one-block messages on
-  the smallest batch kernel (4 messages after a pause 340 -> 161 ns each).
-- A `Hasher` gathers updates shorter than 16 KiB until the message's next
-  16 KiB boundary, and hashes them 16 chunks side by side: a message that
-  arrives in network-sized pieces hashes nearly as fast as one in whole
-  buffers. A `Hasher` is now about 18 KiB.
-- `Hasher::update_each` takes a turn's pieces for many hashers in one call;
-  the whole groups it gathers from different messages hash together. On
-  an Apple M4 Max a server's 256 uploads in 1448-byte pieces hash at 0.25
-  ns/B, against 0.51 one `update` per piece and SHA-256's 0.31.
-- `hash_each_multithreaded_with` hashes a collection over this crate's
-  threads: a repository's objects 7.8 times faster than on one thread.
-- A stream's messages shorter than 64 KiB share tasks, as batches do.
-- `hash_each_with(mode, items, out)` hashes a collection of messages of any
-  lengths in one call, short ones side by side in the SIMD lanes: on an
-  Apple M4 Max a repository's objects or a store's files under 16 KiB take
-  about a quarter less time than one `hash` call each.
-- Verified streaming and range reads: `outboard_with` and
-  `outboard_multithreaded_with` return a message's hash and its outboard,
-  the parent nodes above its 16 KiB groups (the layout iroh-blobs stores),
-  and `verify_range_with` checks any range of whole groups against the
-  hash as it arrives. Building an outboard costs about what hashing costs.
-- Many messages in progress at once: `Hasher::update_each` and
-  `Hasher::update_each_multithreaded` feed a turn's pieces to their
-  hashers in one call, and `Hasher::finalize_each` gives the hashes of
-  those that ended. `hash_each_multithreaded_with` is `hash_each_with`
-  with this crate's threads allowed.
-- `Verifier` checks a whole message as it arrives in iroh-blobs' wire
-  format (bao-tree's pre-order encoding with 16 KiB blocks), in pieces of
-  any length, and gives back each group once it is checked.
-- `b3sum` hashes on this crate's own worker threads instead of Rayon's.
-  A file of 512 KiB or more already in the page cache is mapped and
-  hashed in place; any other input, standard input included, is read
-  4 MiB at a time while the threads hash the last piece. On an Apple M4 Max (`bench-hashes b3sum`) a
-  1 GiB file in the page cache takes 37 ms (was 69; official b3sum 1.8.2,
-  46), and one read from storage 159 ms (was 367). `--no-mmap` has no
-  effect.
-- The crate docs say what each call allocates ("Memory"): single-threaded
-  calls nothing, multithreaded calls a list of their pieces (48 bytes for
-  each 128 KiB of input), a stream its ring, and
-  once per process the self-test and the threads, which `initialize()`
-  and `initialize_multithreaded()` move to start-up.
-- Simpler: no thread budgets and no time-or-energy choice. A call's
-  threading is in its name, and its one option is the mode. Each one-shot
-  call has a full form that takes a `Mode`: `hash_with(mode, input)`,
-  `hash_multithreaded_with`, `hash_many_with(mode, input, message_len,
-  out)`, `hash_many_multithreaded_with`. `Threads` and `Efficiency` are
-  gone; `stream(mode, handler, body)` takes a mode and a handler, and a
-  stream always hashes on every thread that pays.
-- One-shot calls of 1-64 KiB (`hash` in every mode, and
-  `hash_multithreaded` below its split) that follow a pause fetch their
-  code from memory in parallel instead of line by line: on an Apple M4 Max,
-  a call after other work takes about 40% less time at 4 KiB, 45% at
-  8 KiB, and 40% at 16 KiB (16 KiB now ahead of hardware SHA-256 there).
-  Calls back to back are unchanged. M1-M3 Macs gain alike (4 KiB 26%
-  less time, 8-16 KiB 35%, 32 KiB 23%). A `Hasher` used once per message
-  (and the RustCrypto digest traits, which use it) gains the same: 4 KiB
-  27% less time, 8 KiB 35%.
-- Hashing an input much larger than the caches on one thread (`hash`,
-  `Hasher::update`) keeps its speed: on an Apple M4 Max, 64-128 MiB take
-  about 10% less time, at the rate of an 8 MiB input.
-- `initialize_multithreaded` returns once every worker thread has
-  started, and a warm stream allocates nothing on macOS too (the standard
-  library there allocates a lock at its first use, which the worker
-  threads met after `initialize_multithreaded` had returned).
-- Extended output (`OutputReader::fill`, `Hasher::finalize_xof`) runs
-  sixteen blocks at a time on SME2 and eight on NEON: about 4.5x as fast
-  on Apple M4 and later from 1 KiB (0.70 -> 0.155 ns per byte), and 2.3x
-  on M1-M3 and other AArch64 CPUs (0.70 -> 0.30).
-- `Hasher::update_reader` reads in 1 MiB pieces once a reader has more
-  than 64 KiB: on an Apple M4 Max, hashing a file of 8-64 MiB in the page
-  cache takes 23-33% less time.
-- Builds with an assembler too old for the SHA-3 extension (GNU as before
-  2.30) succeed, without the integer + NEON and SME2 kernels, with a
-  warning.
+**Behaviour a user may notice:**
 
-- `Hasher::update_multithreaded` is public: `Hasher::update` over several
-  threads, with the same result, for updates of 512 KiB or more; shorter
-  ones run on the calling thread. A long message read in shorter pieces
-  hashes fastest through a stream's `submit_reader`.
-- Worker threads sleep as soon as they find nothing to take; nothing keeps
-  running between calls.
-- `hash_multithreaded` and `hash_many_multithreaded` leave the calling
-  thread from 512 KiB (was 768 KiB): on an Apple M4 Max a 512 KiB input
-  after a pause hashes about 40% faster.
+- A panic on one of this crate's threads, or in a caller while its
+  multithreaded call is in progress (a bug in this crate), ends the
+  process with the panic's message, rather than leaving a call waiting
+  forever.
+- The startup self-test runs in every build, `no_std` included, and a
+  build or CPU that computes wrong digests stops with a panic naming the
+  code path. On x86-64 a binary built for CPUs with LZCNT or BMI1 stops
+  on a CPU without them.
+- The AVX2 and AVX-512 batch kernels no longer read past an input's end
+  (official BLAKE3's did, reachable there only through its hidden
+  `platform` module: BLAKE3-team/BLAKE3#598).
+- Worker threads sleep as soon as they find nothing to take; nothing runs
+  between calls. `initialize_multithreaded` returns once the first worker
+  has started; the rest start behind it.
+- A `Hasher` is about 18 KiB: it gathers updates shorter than 16 KiB to
+  hash them side by side, so a message arriving in network-sized pieces
+  hashes nearly as fast as one in whole buffers.
+- Building needs a C compiler (GCC 12 or later, or Clang) and, for the
+  Arm kernels, an assembler that knows armv8.2-a+sha3 (GNU as 2.30,
+  LLVM 7); without one the build warns and leaves those kernels out, or
+  build with the `pure` feature.
 
 ## 0.3.0
 
