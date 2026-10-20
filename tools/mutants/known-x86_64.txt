@@ -5,4 +5,3 @@
 files: src/each.rs src/ffi_avx2.rs src/ffi_sse41.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/rust_avx2.rs src/rust_sse41.rs src/self_test.rs src/tree.rs
 src/lib.rs	replace | with ^ in ran	1	test-only record of which kernels ran; on x86 nothing reads it (AArch64's kernel-coverage test does)
 src/outboard.rs	replace | with ^ in groups_cvs_into	1	equivalent: | and ^ agree on flag bits that never overlap (the mode flags and PARENT)
-src/lib.rs	replace Hasher::from_core -> Self with Default::default()	1	the tool's artifact: Default is Hasher::new, which calls from_core, so the mutant calls itself (a tight loop at opt-level 3, which no test can end)

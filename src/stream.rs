@@ -740,6 +740,8 @@ mod test {
     /// and a partial one), borrowed and written in place, in each mode,
     /// against hash_with, in order; far more entries and bytes than a
     /// stream holds at once, so it fills, wraps its ring, and waits.
+    /// Keep: it detects, by hanging, mutants the mutation check skips
+    /// (tools/mutants/hangs.txt: publish, take).
     #[test]
     fn test_stream_against_hash_with() {
         let mut input = std::vec![0u8; (1 << 20) + 200];

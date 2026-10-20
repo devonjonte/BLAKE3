@@ -52,6 +52,20 @@ def read_known():
     return files, known
 
 
+HANGS = os.path.join(ROOT, "tools", "mutants", "hangs.txt")
+
+
+def read_hangs():
+    """The mutants skipped because they hang the tests (tools/mutants/hangs.txt), as cargo-mutants exclude patterns."""
+    patterns = []
+    for line in open(HANGS):
+        line = line.rstrip("\n")
+        if line and not line.startswith("#"):
+            _file, mutant, _test, _why = line.split("\t")
+            patterns += ["--exclude-re", re.escape(mutant)]
+    return patterns
+
+
 SHARDS = 3  # runs at once, each in its own worktree and build
 # The seconds a mutant's tests may take: the unmutated tests take 1.5 s on
 # the VM and 2 s on an i7-12700K (October 20), a caught mutant's at most
@@ -78,7 +92,7 @@ def run(files, extra=(), shards=SHARDS, label="run"):
     # A mutant whose tests outlast TIMEOUT is a hang, which the check counts
     # as caught.
     args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "serde,zeroize", "--timeout", str(TIMEOUT),
-            *extra]
+            *read_hangs(), *extra]
     for f in files:
         args += ["--file", f]
     runs = []

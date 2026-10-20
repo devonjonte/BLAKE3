@@ -5,6 +5,9 @@
 //! i is i % 251, every mode) and, for inputs past the vectors' largest, the
 //! reference implementation (reference_impl/). Nothing here computes an
 //! expected answer with this crate.
+//!
+//! Keep: it detects, by hanging, mutants the mutation check skips
+//! (tools/mutants/hangs.txt: register, unregister).
 
 use blake3_servil::{Hash, Mode};
 

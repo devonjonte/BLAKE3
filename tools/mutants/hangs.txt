@@ -1,0 +1,22 @@
+# Mutants the check skips because they hang the tests (a piece or task no
+# thread will finish, which the caller waits for): each was seen to hang the
+# named test, which carries a comment pointing here, so the test stays and
+# the mutation of its subject stays understood. Turning each hang into a
+# failure would complicate the source beyond a loop variant's one assert.
+# A line: file <TAB> mutant (function and change) <TAB> test that hangs <TAB> why.
+src/lanes.rs	replace sources::Source::publish_job -> usize with 1	lanes::test::test_hash_many_pool_agrees	the job's pieces are miscounted; the caller waits for pieces that do not exist
+src/lanes.rs	replace + with * in sources::Source::publish_job	lanes::test::test_hash_many_pool_agrees	the job's pieces are miscounted; the caller waits for pieces that do not exist
+src/lanes.rs	replace + with - in sources::Source::publish_job	lanes::test::test_hash_many_pool_agrees	the job's pieces are miscounted; the caller waits for pieces that do not exist
+src/lanes.rs	replace sources::Source::take -> Option<Item> with None	lanes::test::test_hash_many_pool_agrees	no thread takes a piece; the caller waits for it
+src/lanes.rs	replace + with * in sources::Source::take	lanes::test::test_hash_many_pool_agrees	the claimed count runs away from the published; the caller waits for a piece nobody owns
+src/lanes.rs	replace % with / in sources::Source::take	stream::test::test_stream_against_hash_with	a task is read from the wrong ring slot; the stream waits for the right one
+src/lanes.rs	replace sources::Source::publish with ()	stream::test::test_stream_against_hash_with	tasks are never published; the stream waits for their results
+src/lanes.rs	replace + with * in sources::Source::publish	stream::test::test_stream_against_hash_with	the published count runs away; the stream waits for results that never come
+src/lanes.rs	replace << with >> in Pool::wake_one	lanes::test::test_hash_many_pool_agrees	the wrong worker is marked woken; the right one sleeps on with its piece
+src/lanes.rs	replace & with ^ in Pool::wake_one	lanes::test::test_update_multithreaded_matches_hash	a parked worker's bit is set instead of cleared; it is never woken
+src/lanes.rs	replace sources::Source::register -> Option<usize> with Some(0)	tests/api_plan.rs	every caller shares one source slot; one waits for another's pieces
+src/lanes.rs	replace sources::Source::register -> Option<usize> with Some(1)	tests/api_plan.rs	every caller shares one source slot; one waits for another's pieces
+src/lanes.rs	delete ! in sources::Source::unregister	tests/api_plan.rs	a slot is never given back; the next caller waits for one
+src/lanes.rs	replace > with == in splits	tests/stream_collect_no_workers.rs	a stream on one CPU splits as if it had workers and waits for them
+src/lib.rs	replace Hasher::from_core -> Self with Default::default()	each::test::test_hash_each_matches_hash_with	the tool's artifact: Default is Hasher::new, which calls from_core, so the mutant calls itself (a tight loop at opt-level 3)
+src/lib.rs	replace Hasher::gather -> &mut Self with Box::leak(Box::new(Default::default()))	each::test::test_hash_each_matches_hash_with	Default::default() reaches a checked entry from inside the running self-test, which then waits for itself

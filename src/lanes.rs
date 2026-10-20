@@ -1544,6 +1544,8 @@ mod test {
     /// `Hasher::update_multithreaded` against `hash`, fed in pieces of
     /// several sizes after a first piece that leaves the counter unaligned
     /// (so `update` shrinks the subtrees it hands the pool), keyed too.
+    /// Keep: it detects, by hanging, mutants the mutation check skips
+    /// (tools/mutants/hangs.txt: wake_one).
     #[test]
     fn test_update_multithreaded_matches_hash() {
         let mut input = vec![0u8; (5 * MIN_SPLIT_LEN + 1025).max(3 << 20) + 12345];
@@ -1668,6 +1670,8 @@ mod test {
 
     /// The pool gives the single-threaded digests, for one-block
     /// messages, whole-block messages, and messages longer than a chunk.
+    /// Keep: it detects, by hanging, mutants the mutation check skips
+    /// (tools/mutants/hangs.txt: publish_job, take, wake_one).
     #[test]
     fn test_hash_many_pool_agrees() {
         let mut buffer = vec![0u8; 4 * MIN_SPLIT_LEN];

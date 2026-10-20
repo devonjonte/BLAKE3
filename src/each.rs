@@ -513,6 +513,8 @@ mod test {
 
     /// Every length around chunk and lane boundaries, in every mode, mixed in
     /// one call, against `hash_with` on each.
+    /// Keep: it detects, by hanging, mutants the mutation check skips
+    /// (tools/mutants/hangs.txt: Hasher::from_core, Hasher::gather).
     #[test]
     fn test_hash_each_matches_hash_with() {
         let mut input = vec![0u8; 40 * CHUNK_LEN];
