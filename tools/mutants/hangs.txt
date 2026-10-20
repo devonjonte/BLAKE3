@@ -22,3 +22,18 @@ src/lib.rs	replace Hasher::from_core -> Self with Default::default()	each::test:
 src/lib.rs	replace Hasher::gather -> &mut Self with Box::leak(Box::new(Default::default()))	each::test::test_hash_each_matches_hash_with	Default::default() reaches a checked entry from inside the running self-test, which then waits for itself
 src/lanes.rs	replace + with * in sources::Source::finished	lanes::test::test_a_parked_caller_is_woken_by_the_last_piece	the count that decides the wake-up is wrong; the parked caller is never unparked
 src/lanes.rs	replace == with != in sources::Source::finished	lanes::test::test_a_parked_caller_is_woken_by_the_last_piece	the last piece does not unpark the caller
+src/lanes.rs	replace += with *= in hash_each	each::test::test_hash_each_multithreaded	the cut's byte count stays 0; pieces are cut forever
+src/lanes.rs	replace initialize with ()	each::test::test_hash_each_multithreaded	no pool; the first multithreaded call waits for workers that never start
+src/lanes.rs	replace + with - in sources::Source::take	each::test::test_hash_each_multithreaded	the claimed count runs backward; the caller waits for a piece nobody owns
+src/lanes.rs	replace << with >> in sources::Source::register	tests/api_plan.rs	the slot's bit is wrong; a caller waits on another's source
+src/lanes.rs	replace Pool::wake_one -> bool with true	tests/api_plan.rs	a worker is reported woken that was not; its piece waits
+src/lanes.rs	replace Pool::wake_one -> bool with false	tests/api_plan.rs	no worker is woken; the pieces wait
+src/lanes.rs	replace != with == in Pool::wake_one	tests/api_plan.rs	the parked bits are read backward; nobody is woken
+src/lanes.rs	replace & with | in Pool::wake_one	lanes::test::test_update_multithreaded_matches_hash	a parked worker's bit is set instead of cleared; it is never woken
+src/lanes.rs	replace Pool::any_parked -> bool with false	tests/stream_collect_one_worker.rs	no parked worker is ever seen; a waiting task wakes nobody
+src/lanes.rs	replace != with == in Pool::any_parked	tests/stream_collect_one_worker.rs	parked workers read as none; a waiting task wakes nobody
+src/lanes.rs	replace sources::Source::waiting -> usize with 0	tests/stream_collect_one_worker.rs	no task ever reads as waiting; nobody is woken for it
+src/lanes.rs	replace sources::Source::wake_for_waiting with ()	tests/stream_collect_one_worker.rs	a waiting task wakes nobody (the #86 and #101 hang)
+src/lanes.rs	replace > with == in sources::Source::wake_for_waiting	tests/stream_collect_one_worker.rs	a waiting task wakes nobody unless the count is exactly 0
+src/lanes.rs	replace splits -> bool with true	tests/stream_collect_no_workers.rs	a stream on one CPU takes a slot and waits for workers that do not exist
+src/lanes.rs	replace > with >= in splits	tests/stream_collect_no_workers.rs	as above: one thread counts as able to split

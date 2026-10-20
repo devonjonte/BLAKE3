@@ -5,6 +5,9 @@
 //! not exist: BLAKE3 #86). A binary of its own, since the pool is the
 //! process's; a watchdog fails the test where it would hang. (Devon Jonte,
 //! PR #88's test.)
+//!
+//! Keep: it detects, by hanging, mutants the mutation check skips
+//! (tools/mutants/hangs.txt: any_parked, waiting, wake_for_waiting).
 
 use blake3_servil::{Hash, Mode};
 

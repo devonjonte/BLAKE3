@@ -329,6 +329,8 @@ mod test {
     /// A collection past the split (items around chunk, lane, and the
     /// split's own length, a few of 512 KiB and more), every mode: the
     /// multithreaded form gives hash_each_with's digests.
+    /// Keep: it detects, by hanging, mutants the mutation check skips
+    /// (tools/mutants/hangs.txt: hash_each, initialize, Source::take).
     #[test]
     fn test_hash_each_multithreaded() {
         let mut input = vec![0u8; 3 << 20];
