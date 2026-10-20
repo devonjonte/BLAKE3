@@ -1,6 +1,5 @@
-//! Tests of the planned API (docs/api-design.md), written before it is
-//! built: they state its contract, and the implementation's job is to make
-//! them pass. Expected answers come from independent sources only: the
+//! Tests of the API's contract, written before it was built: the
+//! implementation's job is to make them pass. Expected answers come from independent sources only: the
 //! official BLAKE3 test vectors (test_vectors/test_vectors.json: input byte
 //! i is i % 251, every mode) and, for inputs past the vectors' largest, the
 //! reference implementation (reference_impl/). Nothing here computes an
