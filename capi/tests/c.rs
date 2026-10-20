@@ -66,6 +66,7 @@ fn from_c() {
     let out = Command::new(&program).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let out = String::from_utf8(out.stdout).unwrap();
+    assert!(out.contains("stream ok\n"), "the C stream's digests match b3_hash's");
 
     blake3_servil::initialize_multithreaded(None);
     let input: Vec<u8> = (0..100000).map(|i| (i % 251) as u8).collect();
@@ -88,7 +89,8 @@ fn from_c() {
     let first = out.lines().next().unwrap();
     assert_eq!(first, format!("hasher {} 64", size_of::<blake3_servil::Hasher>()), "b3.h's B3_HASHER_SIZE");
     assert!(align_of::<blake3_servil::Hasher>() <= 64);
-    let got: Vec<&str> = out.lines().skip(1).map(|l| l.split(' ').nth(1).unwrap()).collect();
+    // The stream's own check prints its verdict last.
+    let got: Vec<&str> = out.lines().skip(1).filter(|l| *l != "stream ok").map(|l| l.split(' ').nth(1).unwrap()).collect();
     assert_eq!(got.len(), expected.len(), "{out}");
     for (i, (g, e)) in got.iter().zip(&expected).enumerate() {
         assert_eq!(g, e, "line {i}: {}", out.lines().nth(i).unwrap());

@@ -113,6 +113,31 @@ b3_digest b3_hasher_finalize(const b3_hasher *hasher);
  * `out`. Its first 32 bytes are the digest. */
 void b3_hasher_output(const b3_hasher *hasher, uint64_t offset, void *out, size_t len);
 
+/* A stream: messages one after another, hashed on other CPU cores while
+ * your program reads or makes the next ones; the fastest way to hash many
+ * things. Begin one, submit each message with the place its digest goes
+ * (your memory, which stays yours), and finish. Each place comes back to
+ * `done` once its digests are in it, in submission order, on the thread
+ * that calls the stream: during a submit when the stream is full (it holds
+ * up to 1024 messages in flight), during b3_stream_collect, and during
+ * b3_stream_finish, which hands back every place and ends the stream.
+ * Every message and place submitted lives until b3_stream_finish. A
+ * message stays unhashed in a task still open until the task fills or you
+ * call collect or finish, so call one of them when you need a digest soon.
+ *
+ * A batch (b3_stream_submit_batch) is laid out as for b3_hash_many and
+ * comes back as one place of `count` digests: for many short messages of
+ * one length, batches hash several at a time and are faster than one
+ * submit each. `ctx` goes to `done` unread. */
+typedef struct b3_stream b3_stream;
+typedef void (*b3_done)(void *ctx, b3_digest *places, size_t count);
+
+b3_stream *b3_stream_begin(const b3_mode *mode, b3_done done, void *ctx);
+void b3_stream_submit(b3_stream *stream, const void *input, size_t len, b3_digest *out);
+void b3_stream_submit_batch(b3_stream *stream, const void *input, size_t message_len, size_t count, b3_digest *out);
+void b3_stream_collect(b3_stream *stream);
+void b3_stream_finish(b3_stream *stream);
+
 #ifdef __cplusplus
 }
 #endif
