@@ -99,7 +99,11 @@ node taken, the `Hasher`'s stage takes at least a byte per pass, a file
 copy that goes on has read at least a byte. Each costs one comparison per
 pass, far below the hashing beside it. A panic on a pool worker ends the
 process for the same reason: the caller waiting for that worker's piece
-would otherwise wait forever. The mutants profile builds the release
+would otherwise wait forever. Where a hang could only be turned into a
+failure by more than one such assert, the mutant is skipped instead:
+`tools/mutants/hangs.txt` lists each with the test it was seen to hang,
+and that test carries a comment pointing back, so the test stays and the
+skipped mutation stays understood. The mutants profile builds the release
 configuration, so a mutant that only a debug assertion or an overflow
 check would catch counts as uncaught, as it would be for a user.
 
