@@ -1256,11 +1256,10 @@ mod guard_pages {
 
 /// The Hasher's stage: pieces of many lengths across 16 KiB boundaries,
 /// update and update_multithreaded mixed, finalize midway and after more
-/// input, and subtrees at input offsets (hazmat), against one-shot hashes.
+/// input, and subtrees at input offsets, against one-shot hashes.
 #[test]
 #[cfg(feature = "std")]
 fn test_hasher_gathers() {
-    use crate::hazmat::HasherExt;
     let mut input = vec![0u8; 300_000];
     paint_test_input(&mut input);
     let pieces = [1, 1448, 4096, 1448, 16384, 31, 16383, 65536, 16385, 7, 1000];
@@ -1509,4 +1508,166 @@ mod dispatch {
             assert_eq!(at(len, count), names(want), "{count} messages of {len} bytes");
         }
     }
+}
+
+/// Subtrees hashed apart and merged, the independent computation the
+/// pool's and the Hasher's tests check themselves against: a Hasher
+/// positioned at a subtree's offset, its chaining value, and the parent of
+/// two chaining values (`hasher::parent_output` under a mode).
+pub(crate) trait SubtreeHasher {
+    /// Position the hasher at `offset` bytes into the whole input, before
+    /// any input (a subtree's offset bounds its length: `max_subtree_len`).
+    fn set_input_offset(&mut self, offset: u64) -> &mut Self;
+    /// The chaining value of the chunk or subtree hashed so far.
+    fn finalize_non_root(&self) -> CVBytes;
+}
+
+impl SubtreeHasher for crate::Hasher {
+    fn set_input_offset(&mut self, offset: u64) -> &mut Self {
+        assert_eq!(self.count(), 0, "hasher has already accepted input");
+        self.core.set_input_offset(offset);
+        self
+    }
+
+    fn finalize_non_root(&self) -> CVBytes {
+        assert_ne!(self.count(), 0, "empty subtrees are never valid");
+        self.final_output().chaining_value()
+    }
+}
+
+/// The parent node of two chaining values under `mode`.
+pub(crate) fn parent(left: &CVBytes, right: &CVBytes, mode: crate::Mode) -> crate::Output {
+    let (key, flags) = mode.key_and_flags();
+    crate::hasher::parent_output(left, right, &key, flags, crate::Platform::detect())
+}
+
+#[test]
+fn test_max_subtree_len() {
+    assert_eq!(crate::max_subtree_len(0), None);
+    // (chunk index, max chunks)
+    let cases = [(1, 1), (2, 2), (3, 1), (4, 4), (5, 1), (6, 2), (7, 1), (8, 8)];
+    for (chunk_index, max_chunks) in cases {
+        let input_offset = chunk_index * CHUNK_LEN as u64;
+        assert_eq!(crate::max_subtree_len(input_offset), Some(max_chunks * CHUNK_LEN as u64));
+    }
+}
+
+/// The left subtree's bytes: the largest power of two strictly below the
+/// input's length (the BLAKE3 paper, section 2.1), by the spec's formula.
+#[test]
+fn test_left_len() {
+    for len in [CHUNK_LEN + 1, 2 * CHUNK_LEN, 2 * CHUNK_LEN + 1, 3 * CHUNK_LEN, 4 * CHUNK_LEN, 4 * CHUNK_LEN + 1, 5 * CHUNK_LEN + 100, 1000 * CHUNK_LEN - 1] {
+        let spec = ((len as u64 + 1) / 2).next_power_of_two() as usize;
+        assert_eq!(crate::tree::left_len(len), spec, "{len}");
+    }
+}
+
+#[test]
+#[should_panic]
+fn test_empty_subtree_should_panic() {
+    crate::Hasher::new().finalize_non_root();
+}
+
+#[test]
+#[should_panic]
+fn test_unaligned_offset_should_panic() {
+    crate::Hasher::new().set_input_offset(1);
+}
+
+#[test]
+#[should_panic]
+fn test_hasher_already_accepted_input_should_panic() {
+    crate::Hasher::new().update(b"x").set_input_offset(0);
+}
+
+#[test]
+#[should_panic]
+fn test_too_much_input_should_panic() {
+    crate::Hasher::new().set_input_offset(CHUNK_LEN as u64).update(&[0; CHUNK_LEN + 1]);
+}
+
+#[test]
+#[should_panic]
+fn test_set_input_offset_cant_finalize() {
+    crate::Hasher::new().set_input_offset(CHUNK_LEN as u64).finalize();
+}
+
+#[test]
+#[should_panic]
+fn test_set_input_offset_cant_finalize_xof() {
+    crate::Hasher::new().set_input_offset(CHUNK_LEN as u64).finalize_xof();
+}
+
+/// Every test case hashed as subtrees of 1 to 32 chunks, merged layer by
+/// layer, against the one-shot hash.
+#[test]
+fn test_grouped_hash() {
+    const MAX_CHUNKS: usize = (TEST_CASES_MAX + 1) / CHUNK_LEN;
+    let mut input_buf = [0; TEST_CASES_MAX];
+    paint_test_input(&mut input_buf);
+    for subtree_chunks in [1, 2, 4, 8, 16, 32] {
+        let subtree_len = subtree_chunks * CHUNK_LEN;
+        for &case in TEST_CASES {
+            if case <= subtree_len {
+                continue;
+            }
+            let input = &input_buf[..case];
+            let expected_hash = crate::hash(input);
+            let mut chaining_values = ArrayVec::<CVBytes, MAX_CHUNKS>::new();
+            let mut subtree_offset = 0;
+            while subtree_offset < input.len() {
+                let take = core::cmp::min(subtree_len, input.len() - subtree_offset);
+                let subtree_cv = crate::Hasher::new().set_input_offset(subtree_offset as u64).update(&input[subtree_offset..][..take]).finalize_non_root();
+                chaining_values.push(subtree_cv);
+                subtree_offset += take;
+            }
+            assert!(chaining_values.len() >= 2);
+            while chaining_values.len() > 2 {
+                let n = chaining_values.len();
+                for i in 0..(n / 2) {
+                    chaining_values[i] = parent(&chaining_values[2 * i], &chaining_values[2 * i + 1], crate::Mode::Hash).chaining_value();
+                }
+                if n % 2 == 1 {
+                    chaining_values[n / 2] = chaining_values[n - 1];
+                }
+                chaining_values.truncate(n / 2 + n % 2);
+            }
+            assert_eq!(chaining_values.len(), 2);
+            assert_eq!(
+                expected_hash,
+                parent(&chaining_values[0], &chaining_values[1], crate::Mode::Hash).root_hash(),
+                "{case} bytes in subtrees of {subtree_chunks} chunks"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_keyed_hash_xof_from_subtrees() {
+    let group0 = &[42; 4096];
+    let group1 = &[43; 4095];
+    let mut input = [0; 8191];
+    input[..4096].copy_from_slice(group0);
+    input[4096..].copy_from_slice(group1);
+    let key = &[44; 32];
+    let mut expected_output = [0; 100];
+    crate::Hasher::new_with(crate::Mode::Keyed(key)).update(&input).finalize_xof().fill(&mut expected_output);
+    let mut output = [0; 100];
+    let left = crate::Hasher::new_with(crate::Mode::Keyed(key)).update(group0).finalize_non_root();
+    let right = crate::Hasher::new_with(crate::Mode::Keyed(key)).set_input_offset(group0.len() as u64).update(group1).finalize_non_root();
+    crate::OutputReader::new(parent(&left, &right, crate::Mode::Keyed(key))).fill(&mut output);
+    assert_eq!(expected_output, output);
+}
+
+#[test]
+fn test_derive_key_from_subtrees() {
+    let context = "foo";
+    let mut input = [0; 1025];
+    paint_test_input(&mut input);
+    let expected = *crate::hash_with(crate::Mode::DeriveKey(context), &input).as_bytes();
+    let cx_key = crate::hash_derive_key_context(context);
+    let mode = crate::Mode::DeriveKeyMaterial(&cx_key);
+    let left = crate::Hasher::new_with(mode).update(&input[..1024]).finalize_non_root();
+    let right = crate::Hasher::new_with(mode).set_input_offset(1024).update(&input[1024..]).finalize_non_root();
+    assert_eq!(expected, parent(&left, &right, mode).root_hash().0);
 }

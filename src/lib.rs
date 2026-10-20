@@ -192,9 +192,6 @@ mod outboard;
 #[cfg(feature = "std")]
 pub use outboard::{GROUP_LEN, Verifier, outboard_multithreaded_with, outboard_with, verify_range_with};
 
-#[cfg(test)]
-mod hazmat;
-
 mod platform;
 
 // Platform-specific implementations of the compression function. These
@@ -1822,7 +1819,7 @@ impl HasherCore {
     #[cfg(feature = "std")]
     fn merge_cv_stack(&mut self, chunk_counter: u64) {
         // Its callers (the queue's hashers, and a Hasher's held group) start
-        // at offset zero; hazmat's offsets take the core's path.
+        // at offset zero; a positioned subtree's offset takes the core's path.
         debug_assert_eq!(self.initial_chunk_counter, 0, "a hasher at offset zero");
         let post_merge_stack_len = hasher::ones(chunk_counter);
         let kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, false);
@@ -1940,7 +1937,7 @@ impl HasherCore {
     }
 
     /// Requires that `len` more bytes after `count` fit the subtree that
-    /// set_input_offset started (hazmat::max_subtree_len).
+    /// set_input_offset started (max_subtree_len).
     pub(crate) fn assert_room(&self, count: u64, len: usize) {
         let input_offset = self.initial_chunk_counter * CHUNK_LEN as u64;
         if let Some(max) = max_subtree_len(input_offset) {
@@ -1949,7 +1946,7 @@ impl HasherCore {
     }
 
     /// Start the subtree at byte `offset` of the message (the outboard's
-    /// positioned subtrees; hazmat's set_input_offset in the tests).
+    /// positioned subtrees; set_input_offset in the tests).
     #[cfg(any(feature = "std", test))]
     pub(crate) fn set_input_offset(&mut self, offset: u64) -> &mut Self {
         assert_eq!(self.count(), 0, "hasher has already accepted input");

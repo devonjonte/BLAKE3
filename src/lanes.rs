@@ -10,7 +10,7 @@
 //! # Pieces
 //!
 //! The input is cut at chunk boundaries into pieces, each a valid BLAKE3
-//! subtree (see [`crate::hazmat::left_subtree_len`]), from the front: each piece
+//! subtree (see `tree::left_len`), from the front: each piece
 //! is about a thread's share of what remains ([`next_piece_len`]), a power
 //! of two chunks within [`MIN_PIECE_LEN`] and [`MAX_PIECE_LEN`]. Pieces
 //! shrink toward the end, so a thread that is slow (an efficiency core, or
@@ -67,11 +67,9 @@
 //! split from 29 us to 2 ms on a two-CPU machine).
 
 use crate::CVBytes as ChainingValue;
-#[cfg(test)]
-use crate::hazmat::HasherExt;
-#[cfg(test)]
-use crate::hazmat::{self, Mode};
 use crate::platform::Platform;
+#[cfg(test)]
+use crate::test::SubtreeHasher;
 use crate::{CHUNK_LEN, Hash};
 #[cfg(test)]
 use crate::{Hasher, KEY_LEN};
@@ -497,19 +495,19 @@ fn sme2_prefix(len: usize, threads: usize) -> usize {
 /// tiling one subtree): the piece's own value for one piece, else the
 /// parent of its two halves, cut at the subtree's left-subtree boundary.
 #[cfg(test)]
-fn subtree_cv(pieces: &[Piece], cvs: &[ChainingValue], mode: Mode) -> ChainingValue {
+fn subtree_cv(pieces: &[Piece], cvs: &[ChainingValue], mode: crate::Mode) -> ChainingValue {
     debug_assert_eq!(pieces.len(), cvs.len());
     if pieces.len() == 1 {
         return cvs[0];
     }
     let offset = pieces[0].offset;
     let len: usize = pieces.iter().map(|p| p.len).sum();
-    let boundary = offset + hazmat::left_subtree_len(len as u64) as usize;
+    let boundary = offset + crate::tree::left_len(len);
     let split = pieces.partition_point(|p| p.offset < boundary);
     assert!(split > 0 && split < pieces.len() && pieces[split].offset == boundary, "pieces do not tile the tree");
     let left = subtree_cv(&pieces[..split], &cvs[..split], mode);
     let right = subtree_cv(&pieces[split..], &cvs[split..], mode);
-    hazmat::merge_subtrees_non_root(&left, &right, mode)
+    crate::test::parent(&left, &right, mode).chaining_value()
 }
 
 /// Merge a shrinking cut in place, a level at a time. `pieces` tiles the
@@ -1575,7 +1573,7 @@ mod test {
             );
             let context_key = crate::hash_derive_key_context("lanes test");
             assert_eq!(
-                *Hasher::new_from_context_key(&context_key).update(&input[..len]).finalize().as_bytes(),
+                *Hasher::new_with(crate::Mode::DeriveKeyMaterial(&context_key)).update(&input[..len]).finalize().as_bytes(),
                 *hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL).as_bytes(),
                 "derive len = {len}"
             );
@@ -1633,10 +1631,10 @@ mod test {
                             hasher.finalize_non_root()
                         })
                         .collect();
-                    let split = pieces.partition_point(|p| p.offset < hazmat::left_subtree_len(len as u64) as usize);
-                    let left = subtree_cv(&pieces[..split], &cvs[..split], Mode::Hash);
-                    let right = subtree_cv(&pieces[split..], &cvs[split..], Mode::Hash);
-                    assert_eq!(want, hazmat::merge_subtrees_root(&left, &right, Mode::Hash));
+                    let split = pieces.partition_point(|p| p.offset < crate::tree::left_len(len));
+                    let left = subtree_cv(&pieces[..split], &cvs[..split], crate::Mode::Hash);
+                    let right = subtree_cv(&pieces[split..], &cvs[split..], crate::Mode::Hash);
+                    assert_eq!(want, crate::test::parent(&left, &right, crate::Mode::Hash).root_hash());
                     assert_eq!(want, merge_root(&pieces, &mut cvs, crate::IV, 0), "len = {len}, threads = {threads}");
                 }
             }
@@ -1656,12 +1654,16 @@ mod test {
                     let pieces = cut_subtrees(len, threads);
                     let mut cvs = vec![[0u8; crate::OUT_LEN]; pieces.len()];
                     crate::test::paint_test_input(cvs.as_flattened_mut());
-                    let split = pieces.partition_point(|p| p.offset < hazmat::left_subtree_len(len as u64) as usize);
-                    for mode in [Mode::Hash, Mode::KeyedHash(&key), Mode::DeriveKeyMaterial(&context_key)] {
+                    let split = pieces.partition_point(|p| p.offset < crate::tree::left_len(len));
+                    for mode in [crate::Mode::Hash, crate::Mode::Keyed(&key), crate::Mode::DeriveKeyMaterial(&context_key)] {
                         let left = subtree_cv(&pieces[..split], &cvs[..split], mode);
                         let right = subtree_cv(&pieces[split..], &cvs[split..], mode);
-                        let want = hazmat::merge_subtrees_root(&left, &right, mode);
-                        assert_eq!(want, merge_root(&pieces, &mut cvs.clone(), &mode.key_words(), mode.flags_byte()), "len={len}, threads={threads}");
+                        let want = crate::test::parent(&left, &right, mode).root_hash();
+                        assert_eq!(
+                            want,
+                            merge_root(&pieces, &mut cvs.clone(), &mode.key_and_flags().0, mode.key_and_flags().1),
+                            "len={len}, threads={threads}"
+                        );
                     }
                 }
             }

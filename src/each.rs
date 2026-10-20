@@ -357,12 +357,12 @@ mod test {
         }
     }
 
-    /// Hashers of subtrees at input offsets (hazmat) in update_each's turns,
+    /// Hashers of subtrees at input offsets in update_each's turns,
     /// beside hashers of whole messages: they hold no groups, and each
     /// gives the chaining value one update of its subtree gives.
     #[test]
     fn test_update_each_at_offsets() {
-        use crate::hazmat::HasherExt;
+        use crate::test::SubtreeHasher;
         let mut input = vec![0u8; 1 << 20];
         crate::test::paint_test_input(&mut input);
         // (offset, length): subtrees within what their offsets allow.
