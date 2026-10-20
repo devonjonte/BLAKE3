@@ -555,6 +555,8 @@ fn merge_to_children(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::C
             cvs[write] = cvs[read];
             write += 1;
         }
+        // The loop's variant: a level merges at least one pair.
+        assert!(write < count, "a level of the tree merged nothing");
         count = write;
         width *= 2;
     }
