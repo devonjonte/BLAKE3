@@ -2,7 +2,10 @@
 //! crate's major.minor, so a program built against one release cannot
 //! load another's library and misread its `b3_hasher` layout unnoticed.
 fn main() {
+    // X.Y.Z without the build metadata (+<commit>): the linker's version
+    // numbers are digits and dots.
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
+    let version = version.split('+').next().unwrap();
     let mut parts = version.split('.');
     let (major, minor) = (parts.next().unwrap(), parts.next().unwrap());
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();

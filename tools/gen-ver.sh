@@ -11,7 +11,10 @@
 #
 # A library's own Cargo.lock is untracked; where a b3sum/ crate depends on
 # it, b3sum's requirement (X.Y.Z, without the hash: requirements take no
-# build metadata) and b3sum's lock carry the version instead.
+# build metadata) and b3sum's lock carry the version instead, and the C
+# library's crate and header (capi/) take the full version too, so every
+# system the version reaches (crates.io, git's tag, b3sum --version,
+# b3_version(), the .pc file) shows the same string.
 set -eu
 version=${1:?usage: sh tools/gen-ver.sh X.Y.Z}
 case $version in *[!0-9.]*|*..*|.*|*.) echo "a version is X.Y.Z: $version" >&2; exit 2;; esac
@@ -30,6 +33,10 @@ if [ -f b3sum/Cargo.toml ]; then
     sed -i.bak "s/^\(blake3 = { version = \"\)[^\"]*\(\", path = \"\.\.\"\)/\1$version\2/" b3sum/Cargo.toml && rm b3sum/Cargo.toml.bak
     (cd b3sum && cargo update -q -p "$crate")
     files="$files b3sum/Cargo.toml b3sum/Cargo.lock"
+    # The C library: its crate's version and the header's B3_VERSION.
+    sed -i.bak "0,/^version = \"[^\"]*\"/s//version = \"$full\"/" capi/Cargo.toml && rm capi/Cargo.toml.bak
+    sed -i.bak "s/^#define B3_VERSION \"[^\"]*\"/#define B3_VERSION \"$full\"/" capi/b3.h && rm capi/b3.h.bak
+    files="$files capi/Cargo.toml capi/b3.h"
 else
     cargo update -q -p "$crate"
     files="$files Cargo.lock"
