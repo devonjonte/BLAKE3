@@ -92,7 +92,7 @@ A release is a commit everyone can stand behind: every check that the main line 
 
 **Benchmark results.** A full bench-hashes run on the release commit, on the Mac (and on any other machine whose owner offers one), published to bench-hashes' GitHub Pages with the release named on the map.
 
-**Version and tag.** `python3 tools/gen-ver.py X.Y.Z` from a clean tree. It makes a commit setting X.Y.Z, a second setting X.Y.Z+<first commit>, and a lightweight tag vX.Y.Z+<first commit> (Zooko's technique, copied from bench-hashes). Push `servil`, then the tag by name.
+**Version and tag.** `sh tools/gen-ver.sh X.Y.Z` from a clean tree: one commit on top of HEAD setting the version to X.Y.Z+<HEAD's hash> (b3sum's requirement and lock with it), and the tag vX.Y.Z+<hash> on it. The hash in the version string names the code commit, so a holder of the string alone can check they have the right code.
 
 **What users download.**
 - `cargo publish` in the root, then in `b3sum/` (the library on crates.io; `cargo install` builds b3sum on the user's machine).
