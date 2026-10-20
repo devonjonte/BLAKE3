@@ -1737,10 +1737,8 @@ impl Hasher {
         OutputReader::new(self.final_output())
     }
 
-    /// Return the total number of bytes hashed so far.
-    ///
-    /// [`hazmat::HasherExt::set_input_offset`] does not affect this value. This only counts bytes
-    /// passed to [`update`](Hasher::update).
+    /// Return the total number of bytes hashed so far: the bytes passed to
+    /// [`update`](Hasher::update) and its forms.
     pub fn count(&self) -> u64 {
         self.core.count() + self.staged as u64
     }
