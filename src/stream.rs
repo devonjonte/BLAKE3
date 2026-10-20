@@ -533,7 +533,12 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// starts hashing.
     pub fn collect(&mut self) {
         self.publish();
-        self.deliver();
+        // Nothing back: a worker for any task still waiting (the caller
+        // takes none here; in steady flow the workers are awake and this
+        // costs a comparison).
+        if self.deliver() == 0 && self.slot.is_some() {
+            self.s.source.wake_for_waiting();
+        }
     }
 
     /// Hand back every place, in order, once its digests are done: this

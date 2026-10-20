@@ -938,6 +938,18 @@ pub(crate) mod sources {
             self.published.load(Ordering::Acquire).saturating_sub(self.claimed.load(Ordering::Acquire))
         }
 
+        /// Wake a parked worker for a task this stream has published that no
+        /// thread has taken: `publish` wakes one for the second task in
+        /// waiting, expecting the caller to take a lone one, and a caller
+        /// that only collects never does (it waited forever, the workers
+        /// asleep: the C API's stream test on an i7-12700K).
+        pub(crate) fn wake_for_waiting(&self) {
+            let pool = pool();
+            if self.waiting() > 0 && pool.any_parked() {
+                pool.wake_one();
+            }
+        }
+
         /// Count `n` of the caller's job's pieces finished (their outputs
         /// written before); the last one wakes a caller parked for it.
         pub(crate) fn finished(&self, n: usize) {
