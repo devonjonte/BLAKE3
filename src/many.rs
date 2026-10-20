@@ -874,12 +874,12 @@ mod test {
         for len in [128, 256, 512, CHUNK_LEN, 2047, 2048, 2049, 4095, 4096, 4097] {
             for count in (0..=33).chain([63, 64, 127, 128, 129, 255]) {
                 let bytes = messages(len, count);
-                for offset in 0..64 {
-                    let mut allocation = vec![0; offset + bytes.len()];
-                    allocation[offset..].copy_from_slice(&bytes);
-                    let input = &allocation[offset..];
-                    for (key_words, flags) in modes {
-                        let want: Vec<_> = (0..count)
+                // The reference digests, once per mode: the input's
+                // alignment below changes nothing about them.
+                let wants: Vec<Vec<_>> = modes
+                    .iter()
+                    .map(|&(_, flags)| {
+                        (0..count)
                             .map(|i| {
                                 let mut h = if flags == 0 {
                                     reference_impl::Hasher::new()
@@ -888,16 +888,25 @@ mod test {
                                 } else {
                                     reference_impl::Hasher::new_derive_key(context)
                                 };
-                                h.update(message(input, len, i));
+                                h.update(message(&bytes, len, i));
                                 let mut digest = [0; OUT_LEN];
                                 h.finalize(&mut digest);
                                 digest
                             })
-                            .collect();
+                            .collect()
+                    })
+                    .collect();
+                // Four alignments of the input (a wrong pointer step shows
+                // at any of them): 64 took the suite from 2 s to 16 s.
+                for offset in [0, 1, 7, 63] {
+                    let mut allocation = vec![0; offset + bytes.len()];
+                    allocation[offset..].copy_from_slice(&bytes);
+                    let input = &allocation[offset..];
+                    for ((key_words, flags), want) in modes.iter().zip(&wants) {
                         for &platform in &platforms {
                             let mut out = vec![[0xAA; OUT_LEN]; count + 1];
-                            hash_many_on(input, len, &key_words, flags, &mut out[..count], platform);
-                            assert_eq!(&out[..count], &want, "{platform:?}, {count} x {len}, offset {offset}, flags {flags}");
+                            hash_many_on(input, len, key_words, *flags, &mut out[..count], platform);
+                            assert_eq!(&out[..count], want, "{platform:?}, {count} x {len}, offset {offset}, flags {flags}");
                             assert_eq!(out[count], [0xAA; OUT_LEN]);
                         }
                     }

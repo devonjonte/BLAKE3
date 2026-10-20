@@ -54,9 +54,10 @@ def read_known():
 
 SHARDS = 3  # runs at once, each in its own worktree and build
 # The seconds a mutant's tests may take: the unmutated tests take 1.5 s on
-# the VM and 10 s on an i7-12700K, a caught mutant's at most 2.5 s on the
-# VM (October 16), so a mutant still running at 20 s hangs.
-TIMEOUT = 20
+# the VM and 2 s on an i7-12700K (October 20), a caught mutant's at most
+# 2.5 s on the VM, so a mutant still running at 30 s hangs (Zooko: a
+# hang's cost is paid on every hang, a slow test's misclassification once).
+TIMEOUT = 30
 # Each process's address space, builds' and tests' alike: a mutant that
 # allocates without end fails its test here, and leaves the machine's
 # memory to the rest (one of 57 GB took the long proofs' memory).
