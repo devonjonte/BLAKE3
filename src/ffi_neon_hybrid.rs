@@ -128,7 +128,7 @@ pub fn xof_many(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, mut counte
     let mut done = 0;
     while out.len() - done >= 4 * BLOCK_LEN {
         let (kernel, blocks): (Kernel, usize) = if out.len() - done >= 8 * BLOCK_LEN { (asm::blake3_hybrid_x8, 8) } else { (asm::blake3_hybrid_x4, 4) };
-        crate::ran_kernel(crate::Ran::Hybrid, kernel as *const ());
+        crate::ran_kernel(kernel as *const ());
         // Sound: every table entry points at the 64-byte block; the kernel
         // writes 64 bytes a block within `out[done..]`.
         unsafe { kernel(table.as_ptr(), 1, cv.as_ptr(), counter, packed, out[done..].as_mut_ptr()) };
@@ -496,12 +496,12 @@ pub(crate) fn entries() -> std::vec::Vec<(std::string::String, *const ())> {
     let family = family();
     for (size, k) in family.chunk_kernels.iter().enumerate() {
         if let Some(k) = k {
-            out.push((std::format!("chunk kernel {size}"), *k as *const ()));
+            out.push((std::format!("k{size}"), *k as *const ()));
         }
     }
     for (size, k) in family.parent_kernels.iter().enumerate() {
         if let Some(k) = k {
-            out.push((std::format!("parent kernel {size}"), *k as *const ()));
+            out.push((std::format!("p{size}"), *k as *const ()));
         }
     }
     if sha3_detected() {

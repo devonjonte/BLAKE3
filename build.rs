@@ -265,7 +265,6 @@ fn build_neon_hybrid_assembly() {
     build.compile("blake3_neon_hybrid_assembly");
 }
 
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // If CFLAGS is set, make sure LTO is disabled by appending -fno-lto. (We can't do this with
     // .flag() later on, because CFLAGS takes precedence.) Any mismatch between the C compiler and
@@ -282,15 +281,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // As of Rust 1.80, unrecognized config names are warnings. Give Cargo all of our config names.
-    let all_cfgs = [
-        "blake3_sse41_ffi",
-        "blake3_sse41_rust",
-        "blake3_avx2_ffi",
-        "blake3_avx2_rust",
-        "blake3_avx512_ffi",
-        "blake3_neon",
-        "blake3_sme2",
-    ];
+    let all_cfgs = ["blake3_sse41_ffi", "blake3_sse41_rust", "blake3_avx2_ffi", "blake3_avx2_rust", "blake3_avx512_ffi", "blake3_neon", "blake3_sme2"];
     for cfg_name in all_cfgs {
         // https://doc.rust-lang.org/cargo/reference/build-scripts.html#outputs-of-the-build-script
         println!("cargo::rustc-check-cfg=cfg({cfg_name}, values(none()))");

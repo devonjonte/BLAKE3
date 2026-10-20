@@ -11,7 +11,7 @@ overview, read [QUALITY.md](../QUALITY.md) first.
 | Platform | Its kernels | Checked |
 |---|---|---|
 | 64-bit Arm: Apple Silicon, Linux and macOS | the fork's assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved**, and tested |
-| x86-64: Linux, macOS, Windows (MSVC) | upstream's assembly, unchanged, and the fork's own kernels in Rust intrinsics | tested |
+| x86-64: Linux, Windows (MSVC) | upstream's assembly, unchanged, and the fork's own kernels in Rust intrinsics | tested |
 
 ## What is new, and so where the risk is
 
@@ -305,13 +305,13 @@ Z3 (an AArch64 Linux machine with PyPy and `python3-z3`, Clang and
 llvm-objdump 17 or later; details in [`tools/verify/README.md`](../tools/verify/README.md)):
 
 ```sh
-pypy3 tools/verify/prove_hybrid.py   # ends "327 of 327 cases proved"
+pypy3 tools/verify/prove_hybrid.py   # ends "414 of 414 cases proved"
 pypy3 tools/verify/prove_sme2.py     # ends "38 of 38 cases proved" (the longest, the chunk kernel at every group count, 15 minutes)
 pypy3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # ends "3 of 3 cases proved": the other kernels at every group count (x2_every about 50 minutes)
 pypy3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
 
-All of them, 368 cases, run on the fork's VM after every change to a
+All of them, 455 cases, run on the fork's VM after every change to a
 kernel or the proof tools lands (`tools/verify/long-proofs.sh`), reported
 on GitHub as the commit's status "long proofs"; a failure is fixed
 before the next such change. Each case is proved when Z3
