@@ -1603,6 +1603,9 @@ impl Hasher {
             let at = (self.core.initial_chunk_counter * CHUNK_LEN as u64 + self.count()) % STAGE_LEN as u64;
             let to_boundary = STAGE_LEN - at as usize;
             let take = cmp::min(to_boundary, input.len());
+            // The loop's variant: every pass stages at least one byte of
+            // the input, which is not empty (`at` is below STAGE_LEN).
+            assert!(take > 0, "the stage took nothing");
             self.stage(&input[..take]);
             input = &input[take..];
             if take < to_boundary {

@@ -196,6 +196,10 @@ impl Verifier {
                     let (bytes, rest) = input.split_at(need);
                     input = rest;
                     self.take(node, bytes, &mut nodes);
+                    // The loop's variant: the node taken has left the top
+                    // of the list (a parent's children stand there, each
+                    // nearer the leaves), so the list shrinks toward empty.
+                    assert!(self.nodes.last() != Some(&node), "the verifier's node list did not advance");
                 }
                 if !self.check(&nodes, &mut verified, pooled) {
                     return false;
@@ -213,6 +217,7 @@ impl Verifier {
             }
             let mut nodes = Vec::new();
             self.take(node, &gathered, &mut nodes);
+            assert!(self.nodes.last() != Some(&node), "the verifier's node list did not advance");
             let ok = self.check(&nodes, &mut verified, pooled);
             gathered.clear();
             self.gathered = gathered;

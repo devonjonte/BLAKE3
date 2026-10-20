@@ -122,6 +122,8 @@ overflow-checks = true
 
 # Mutation testing (tools/mutants/check.py): the test profile, built
 # incrementally, since cargo-mutants rebuilds the crate once per mutant.
+# Mutation testing builds what users run: a mutant that only a debug
+# assertion or an overflow check would catch is uncaught in a release.
 [profile.mutants]
-inherits = "test"
+inherits = "release"
 incremental = true

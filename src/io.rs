@@ -29,6 +29,9 @@ pub(crate) fn copy_wide(mut reader: impl io::Read, hasher: &mut crate::Hasher) -
         if n < buffer.len() {
             return Ok(());
         }
+        // The loop's variant: a pass that goes on filled the buffer, so it
+        // read at least one byte; the reader has that many fewer.
+        assert!(filled > 0, "a full buffer with nothing read");
         start = 0;
     }
 }
