@@ -83,9 +83,7 @@ src/lanes.rs	replace / with * in sme2_prefix	1	speed: how the work is cut among 
 src/lanes.rs	replace - with + in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with / in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace >= with < in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
-src/lanes.rs	replace < with <= in merge_to_children	1	equivalent in a release build: the merge it changes gives the same tree for every shape the tests hash against the reference (on AArch64 a debug_assert of the function's own invariant caught it; the release build has none)
-src/lanes.rs	replace + with * in merge_to_children	1	equivalent in a release build: the merge it changes gives the same tree for every shape the tests hash against the reference (on AArch64 a debug_assert of the function's own invariant caught it; the release build has none)
-src/lanes.rs	replace * with + in merge_to_children	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
+src/lanes.rs	replace * with + in merge_to_children	1	array capacity: 2 + MAX children a call instead of 2 * MAX, the same tree in more calls
 src/lanes.rs	replace > with < in initialize	1	speed: whether the pool starts its SME2 thread (without it the NEON workers do its share; the same results)
 src/lanes.rs	delete ! in initialize	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace && with || in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
