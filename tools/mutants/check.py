@@ -54,8 +54,8 @@ def read_known():
 
 SHARDS = 3  # runs at once, each in its own worktree and build
 # The seconds a mutant's tests may take: the unmutated tests take 1.5 s on
-# the VM and a caught mutant's at most 2.5 s (October 16), so a mutant
-# still running at 10 s hangs.
+# the VM and 10 s on an i7-12700K, a caught mutant's at most 2.5 s on the
+# VM (October 16), so a mutant still running at 20 s hangs.
 TIMEOUT = 20
 # Each process's address space, builds' and tests' alike: a mutant that
 # allocates without end fails its test here, and leaves the machine's
