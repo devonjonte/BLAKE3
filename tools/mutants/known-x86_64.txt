@@ -5,3 +5,40 @@
 files: src/each.rs src/ffi_avx2.rs src/ffi_sse41.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/rust_avx2.rs src/rust_sse41.rs src/self_test.rs src/tree.rs
 src/lib.rs	replace | with ^ in ran	1	test-only record of which kernels ran; on x86 nothing reads it (AArch64's kernel-coverage test does)
 src/outboard.rs	replace | with ^ in groups_cvs_into	1	equivalent: | and ^ agree on flag bits that never overlap (the mode flags and PARENT)
+src/lanes.rs	replace < with <= in hash_with_key	1	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
+src/lanes.rs	replace pool_busy with ()	1	test-only record: PoolBusy marks a pool other callers held; the past-the-split assertion accepts Pool as well
+src/lanes.rs	replace > with == in pool_busy	1	test-only record: PoolBusy marks a pool other callers held; the past-the-split assertion accepts Pool as well
+src/lanes.rs	replace > with < in pool_busy	1	test-only record: PoolBusy marks a pool other callers held; the past-the-split assertion accepts Pool as well
+src/lanes.rs	replace || with && in hash_many	1	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
+src/lanes.rs	replace < with == in hash_many	2	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
+src/lanes.rs	replace < with > in hash_many	2	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
+src/lanes.rs	replace < with <= in hash_many	2	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
+src/lanes.rs	replace && with || in initialize	2	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
+src/lanes.rs	replace > with == in initialize	1	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
+src/lanes.rs	replace > with >= in initialize	1	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
+src/lanes.rs	replace + with * in sources::Source::publish	1	the pool's scheduling: when a second waiting task wakes a worker (one later here); the caller takes what waits meanwhile
+src/lanes.rs	replace + with - in sources::Source::publish_job	1	own is 0 on x86 (the SME2 thread's prefix of pieces): base + 0 and base - 0 agree
+src/lanes.rs	replace sources::Source::take_task -> Option<Task> with None	1	the pool's scheduling: a stream whose tasks no worker takes hashes them on the caller (right, and slower)
+src/lanes.rs	replace && with || in sources::Source::wake_for_waiting	1	the pool's scheduling: whether a waiting task wakes a parked worker; the caller takes what waits meanwhile
+src/lanes.rs	replace > with >= in sources::Source::wake_for_waiting	1	the pool's scheduling: whether a waiting task wakes a parked worker; the caller takes what waits meanwhile
+src/many.rs	replace || with && in hash_many_on	1	speed: moves a threshold between equally correct paths (hash_long_or_single and the batch kernels agree; SME2's branch is compiled out on x86)
+src/many.rs	replace < with == in hash_many_on	1	speed: moves a threshold between equally correct paths (hash_long_or_single and the batch kernels agree; SME2's branch is compiled out on x86)
+src/many.rs	replace < with > in hash_many_on	1	speed: moves a threshold between equally correct paths (hash_long_or_single and the batch kernels agree; SME2's branch is compiled out on x86)
+src/many.rs	replace < with <= in hash_many_on	1	speed: moves a threshold between equally correct paths (hash_long_or_single and the batch kernels agree; SME2's branch is compiled out on x86)
+src/many.rs	replace > with >= in hash_many_on	1	speed: moves a threshold between equally correct paths (hash_long_or_single and the batch kernels agree; SME2's branch is compiled out on x86)
+src/many.rs	replace sme2_chunked_min -> usize with 1	1	SME2 only: called under cfg(blake3_sme2) alone
+src/many.rs	replace chunked -> bool with false	1	SME2 only: cfg!(blake3_sme2) is false on x86, so chunked() is false whatever the rest
+src/many.rs	replace && with || in chunked	1	SME2 only: cfg!(blake3_sme2) is false on x86, so chunked() is false whatever the rest
+src/many.rs	replace + with - in chunked	1	SME2 only: cfg!(blake3_sme2) is false on x86, so chunked() is false whatever the rest
+src/many.rs	replace + with * in chunked	1	SME2 only: cfg!(blake3_sme2) is false on x86, so chunked() is false whatever the rest
+src/many.rs	replace * with + in chunked	1	SME2 only: cfg!(blake3_sme2) is false on x86, so chunked() is false whatever the rest
+src/many.rs	replace * with / in chunked	1	SME2 only: cfg!(blake3_sme2) is false on x86, so chunked() is false whatever the rest
+src/many.rs	replace % with / in hash_blocks	1	SME2 only: platform_is_sme2 is false on x86, so the padded tail and on_sme2 are 0 whatever the arithmetic
+src/many.rs	replace % with + in hash_blocks	1	SME2 only: platform_is_sme2 is false on x86, so the padded tail and on_sme2 are 0 whatever the arithmetic
+src/many.rs	replace >= with < in hash_blocks	1	SME2 only: platform_is_sme2 is false on x86, so the padded tail and on_sme2 are 0 whatever the arithmetic
+src/many.rs	replace > with < in hash_blocks	2	SME2 only: platform_is_sme2 is false on x86, so the padded tail and on_sme2 are 0 whatever the arithmetic
+src/tree.rs	replace * with + in wide	1	array capacity: 2 + MAX holds the two halves' values on AVX2 (16 of 18); an AVX-512 machine (32) would overflow and catch it there
+src/tree.rs	replace <= with > in root_children	1	equivalent: the SMALL and MAX arrays are capacities; children() fills either, the small one in more rounds
+src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::degree -> usize with 1	1	speed: moves a threshold between equally correct paths (a degree of 1 hashes one chunk at a time; simd_degree itself has its test)
+src/hasher.rs	replace > with == in feed	1	equally correct paths: a flat subtree value at the update's first subtree too (Feed::subtree_cv is right wherever the kernels have one; the first is kept off it for speed)
+src/hasher.rs	replace > with >= in feed	1	equally correct paths: a flat subtree value at the update's first subtree too (Feed::subtree_cv is right wherever the kernels have one; the first is kept off it for speed)
