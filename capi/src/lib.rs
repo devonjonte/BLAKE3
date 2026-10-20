@@ -97,7 +97,7 @@ pub unsafe extern "C" fn b3_derive_key(context: *const c_char) -> B3Mode {
     blake3_servil::initialize();
     assert!(!context.is_null(), "b3: the context is NULL");
     let context = unsafe { CStr::from_ptr(context) }.to_str().expect("b3: the context is UTF-8");
-    B3Mode { kind: 2, key: blake3_servil::hazmat::hash_derive_key_context(context) }
+    B3Mode { kind: 2, key: blake3_servil::hash_derive_key_context(context) }
 }
 
 /// # Safety

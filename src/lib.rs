@@ -192,7 +192,8 @@ mod outboard;
 #[cfg(feature = "std")]
 pub use outboard::{GROUP_LEN, Verifier, outboard_multithreaded_with, outboard_with, verify_range_with};
 
-pub mod hazmat;
+#[cfg(test)]
+mod hazmat;
 
 mod platform;
 
@@ -889,7 +890,7 @@ fn hash_all_at_once(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8, 
     // The input is a complete subtree at chunk_counter, or the whole
     // input (including empty) at counter zero. Its byte offset fits u64.
     debug_assert!(chunk_counter <= u64::MAX / CHUNK_LEN as u64);
-    debug_assert!(chunk_counter == 0 || (!input.is_empty() && input.len() as u64 <= hazmat::max_subtree_len(chunk_counter * CHUNK_LEN as u64).unwrap()));
+    debug_assert!(chunk_counter == 0 || (!input.is_empty() && input.len() as u64 <= max_subtree_len(chunk_counter * CHUNK_LEN as u64).unwrap()));
 
     // If the whole subtree is one chunk, hash it directly with a ChunkState.
     if input.len() <= CHUNK_LEN {
@@ -1023,6 +1024,46 @@ pub fn initialize_multithreaded(threads: Option<core::num::NonZeroUsize>) {
     }
 }
 
+/// An alias to distinguish [`hash_derive_key_context`] outputs from other keys.
+pub type ContextKey = [u8; KEY_LEN];
+
+/// Hash a key-derivation context string and return a [`ContextKey`].
+///
+/// This has the same security requirement as key derivation. **The context
+/// string should be hardcoded, globally unique, and application-specific.**
+///
+/// Its one use is [`Mode::DeriveKeyMaterial`]: a program that derives many
+/// keys from one context hashes the context once.
+///
+/// # Example
+///
+/// ```
+/// # blake3_servil::initialize();
+/// use blake3_servil::Mode;
+///
+/// let context_key = blake3_servil::hash_derive_key_context("foo");
+/// let derived = blake3_servil::hash_with(Mode::DeriveKeyMaterial(&context_key), b"bar");
+/// assert_eq!(derived, blake3_servil::hash_with(Mode::DeriveKey("foo"), b"bar"));
+/// ```
+pub fn hash_derive_key_context(context: &str) -> ContextKey {
+    hash_serial(context.as_bytes(), IV, DERIVE_KEY_CONTEXT).0
+}
+
+/// The most bytes a subtree starting at byte `input_offset` of a message
+/// can hold: `None` at offset zero (the whole message), else the largest
+/// power-of-two multiple of a chunk the offset is aligned to. Requires a
+/// whole-chunk offset.
+#[inline(always)]
+pub(crate) fn max_subtree_len(input_offset: u64) -> Option<u64> {
+    if input_offset == 0 {
+        return None;
+    }
+    assert_eq!(input_offset % CHUNK_LEN as u64, 0);
+    let counter = input_offset / CHUNK_LEN as u64;
+    let max_chunks = 1 << counter.trailing_zeros();
+    Some(max_chunks * CHUNK_LEN as u64)
+}
+
 /// Which of BLAKE3's three functions a call computes: the plain hash
 /// ([`hash`]), the keyed hash, or key derivation. Every call that takes a mode runs each one at the same
 /// speed, but for `DeriveKey`, which first hashes its context string (once
@@ -1038,8 +1079,8 @@ pub enum Mode<'a> {
     /// is the key material.
     DeriveKey(&'a str),
     /// The key derivation function with its context string already hashed
-    /// ([`hazmat::hash_derive_key_context`]); the input is the key material.
-    DeriveKeyMaterial(&'a hazmat::ContextKey),
+    /// ([`hash_derive_key_context`]); the input is the key material.
+    DeriveKeyMaterial(&'a ContextKey),
 }
 
 impl Mode<'_> {
@@ -1048,7 +1089,7 @@ impl Mode<'_> {
         match self {
             Mode::Hash => (*IV, 0),
             Mode::Keyed(key) => (platform::words_from_le_bytes_32(key), KEYED_HASH),
-            Mode::DeriveKey(context) => (platform::words_from_le_bytes_32(&hazmat::hash_derive_key_context(context)), DERIVE_KEY_MATERIAL),
+            Mode::DeriveKey(context) => (platform::words_from_le_bytes_32(&hash_derive_key_context(context)), DERIVE_KEY_MATERIAL),
             Mode::DeriveKeyMaterial(context_key) => (platform::words_from_le_bytes_32(context_key), DERIVE_KEY_MATERIAL),
         }
     }
@@ -1900,7 +1941,7 @@ impl HasherCore {
     /// set_input_offset started (hazmat::max_subtree_len).
     pub(crate) fn assert_room(&self, count: u64, len: usize) {
         let input_offset = self.initial_chunk_counter * CHUNK_LEN as u64;
-        if let Some(max) = hazmat::max_subtree_len(input_offset) {
+        if let Some(max) = max_subtree_len(input_offset) {
             assert!(len as u64 <= max - count, "the subtree starting at {} contains at most {} bytes (found {})", input_offset, max, count + len as u64,);
         }
     }

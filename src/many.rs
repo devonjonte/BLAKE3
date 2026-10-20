@@ -865,7 +865,7 @@ mod test {
         platforms.extend(Platform::avx512());
         let key = [0x5Au8; crate::KEY_LEN];
         let context = "Linux whole-block batch dispatch";
-        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let context_key = crate::hash_derive_key_context(context);
         let modes = [
             (*crate::IV, 0),
             (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
@@ -916,7 +916,7 @@ mod test {
     fn portable_across_partial_chunks_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
-        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let context_key = crate::hash_derive_key_context(context);
         let modes = [
             (*crate::IV, 0),
             (crate::platform::words_from_le_bytes_32(key), crate::KEYED_HASH),
@@ -974,7 +974,7 @@ mod test {
     fn portable_two_chunk_batch_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
-        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let context_key = crate::hash_derive_key_context(context);
         let modes = [
             (*crate::IV, 0),
             (crate::platform::words_from_le_bytes_32(key), crate::KEYED_HASH),
@@ -1003,7 +1003,7 @@ mod test {
     fn portable_four_chunk_batch_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
-        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let context_key = crate::hash_derive_key_context(context);
         let modes = [
             (*crate::IV, 0),
             (crate::platform::words_from_le_bytes_32(key), crate::KEYED_HASH),
@@ -1088,7 +1088,7 @@ mod test {
         platforms.push(Platform::neon().expect("NEON on AArch64"));
         let key = [0x5Au8; crate::KEY_LEN];
         let context = "blake3-servil many modes test";
-        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let context_key = crate::hash_derive_key_context(context);
         let modes: [(CVWords, u8, &dyn Fn(&[u8]) -> [u8; OUT_LEN]); 2] = [
             (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH, &|m| *crate::hash_with(crate::Mode::Keyed(&key), m).as_bytes()),
             (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL, &|m| {
