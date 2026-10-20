@@ -74,7 +74,7 @@ unsafe fn hasher_mut<'a>(hasher: *mut B3Hasher) -> &'a mut Hasher {
 /// `b3_version`: the library's version, as `b3.h`'s `B3_VERSION`.
 #[unsafe(no_mangle)]
 pub extern "C" fn b3_version() -> *const c_char {
-    c"0.8.0".as_ptr()
+    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr().cast()
 }
 
 #[unsafe(no_mangle)]
