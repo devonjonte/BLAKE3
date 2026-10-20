@@ -107,6 +107,14 @@ skipped mutation stays understood. The mutants profile builds the release
 configuration, so a mutant that only a debug assertion or an overflow
 check would catch counts as uncaught, as it would be for a user.
 
+**Which tests do the catching.** Each mutant's log names every test
+that failed on it (`cargo test --no-fail-fast`, so every test binary
+runs), and `check.py` writes the matrix (`catchers.tsv`) and the smallest
+set of tests that still catches every mutant any test catches (a greedy
+set cover). Tests outside that set are candidates for removal, read one
+by one: a test's worth goes beyond the mutants it catches (a contract's
+`should_panic`, a hang, a shape no mutant models).
+
 **What mutation testing finds**, over the whole library on the VM
 (October 17, with the stream): of 2511 mutants, 1678 fail a test or
 hang, and 166 do not compile. Each of the other 667 is listed with its

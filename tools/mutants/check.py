@@ -105,10 +105,13 @@ def run(files, extra=(), shards=SHARDS, label="run"):
         # target-dir would otherwise give the shards one, and each would
         # test the others' builds).
         env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"))
-        shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
+        # --no-fail-fast: every test binary runs even after one fails, so
+        # a mutant's log names every test that catches it (catchers).
+        shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests", "--no-fail-fast"]
         runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=cap_memory)))
     names = collections.Counter()
     functions = collections.defaultdict(list)  # (file, function) -> [(outcome, name)]
+    catchers = {}  # mutant name -> the tests that failed on it (binary::test), or hung
     kept = os.path.join(ROOT, "tmp", "mutants-last", label)
     shutil.rmtree(kept, ignore_errors=True)
     for k, (tree, process) in enumerate(runs):
@@ -132,11 +135,74 @@ def run(files, extra=(), shards=SHARDS, label="run"):
             function = (mutant.get("function") or {}).get("function_name", "")
             m = NAME.match(mutant["name"])
             functions[(mutant["file"], function)].append((outcome["summary"], f"{m.group(1)}\t{m.group(2)}"))
+            if outcome["summary"] in ("CaughtMutant", "Timeout"):
+                catchers[f"{m.group(1)}\t{m.group(2)}"] = read_catchers(os.path.join(out, outcome["log_path"]))
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
         subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
         shutil.rmtree(tree, ignore_errors=True)
+    if catchers:
+        os.makedirs(kept, exist_ok=True)
+        with open(os.path.join(kept, "catchers.tsv"), "w") as f:
+            for name, tests in sorted(catchers.items()):
+                f.write(f"{name}\t{' '.join(sorted(tests))}\n")
+        tests_by_catch = collections.defaultdict(set)
+        for name, tests in catchers.items():
+            for t in tests:
+                tests_by_catch[t].add(name)
+        cover = smallest_cover(tests_by_catch)
+        spare = sorted(set(tests_by_catch) - cover)
+        print(f"catchers: {len(catchers)} mutants caught or hung, by {len(tests_by_catch)} tests; "
+              f"{len(cover)} of them catch every one of those mutants ({kept}/catchers.tsv)")
+        for t in spare:
+            print(f"  outside the smallest cover: {t} ({len(tests_by_catch[t])} catches, all made by the cover)")
     return names, functions
+
+
+def smallest_cover(tests_by_catch):
+    """A smallest set of tests that still catches every mutant any test
+    catches: the greedy cover (each step the test catching the most
+    mutants still uncovered), within a few tests of the true minimum at
+    this size. Tests outside it are candidates for removal; the decision
+    is a reading, since a test's worth goes beyond the mutants it catches
+    (a contract's should_panic, a hang, a shape no mutant models)."""
+    uncovered = set().union(*tests_by_catch.values())
+    cover = set()
+    while uncovered:
+        best = max(tests_by_catch, key=lambda t: (len(tests_by_catch[t] & uncovered), -len(tests_by_catch[t]), t))
+        gain = tests_by_catch[best] & uncovered
+        if not gain:
+            break
+        cover.add(best)
+        uncovered -= gain
+    return cover
+
+
+TEST_LINE = re.compile(r"^test (\S+) \.\.\. (ok|FAILED|ignored)")
+BINARY = re.compile(r"Running `.*/deps/([A-Za-z0-9_]+)-[0-9a-f]+`")
+
+
+def read_catchers(log):
+    """The tests that caught a mutant, from its cargo test log: each
+    `test NAME ... FAILED`, as binary::NAME; for a hang, the tests that
+    started and never finished (the hanging ones, within its binary)."""
+    tests, binary, started = set(), "", set()
+    for line in open(log, errors="replace"):
+        b = BINARY.search(line)
+        if b:
+            binary = b.group(1)
+            started.clear()
+            continue
+        m = TEST_LINE.match(line)
+        if m:
+            started.discard(m.group(1))
+            if m.group(2) == "FAILED":
+                tests.add(f"{binary}::{m.group(1)}")
+        elif line.startswith("test ") and line.rstrip().endswith("..."):
+            started.add(line.split()[1])
+    # A hung binary's output ends mid-run: the tests announced and unfinished.
+    tests.update(f"{binary}::{t}" for t in started)
+    return tests
 
 
 def confirm(found, known, differ=None):
