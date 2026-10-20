@@ -67,6 +67,14 @@ CPUs, big-endian CPUs, WebAssembly, Intel Macs, Windows with MinGW, and older co
 
 ## How fast
 
+One 128 MiB message, hashed by a program that had paused, on an Intel i7-12700K:
+
+<img src="https://devonjonte.github.io/bench-hashes/benchmark-results/12thGenIntelRCoreTMi712700K.linux70038generic/bench-hashes.chart.svg" alt="Hashing one 128 MiB message after a pause on an i7-12700K: BLAKE3 on every core and on one core beside SHA-256, SHA3-256 and SHA-1, in GB/s" width="720">
+
+`b3sum` against the system's sum programs on a tree of 1000 files:
+
+<img src="https://devonjonte.github.io/bench-hashes/benchmark-results/12thGenIntelRCoreTMi712700K.linux70038generic/b3sum.chart.svg" alt="Hashing a tree of 1000 files on an i7-12700K: b3sum, on every core and on one thread, beside sha256sum, sha1sum and md5sum, in GB/s" width="720">
+
 [bench-hashes](https://github.com/johnservil/bench-hashes) measures it against official
 BLAKE3 and other hashes on your own machine, for the ways programs hash. Published maps:
 an [Intel i7-12700K](https://devonjonte.github.io/bench-hashes/) and an
