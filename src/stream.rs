@@ -156,10 +156,12 @@ pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: im
 }
 
 impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
-    /// A stream outside [`stream`]'s scope, for the C API: the same
-    /// contract, with the program holding the stream and ending it
-    /// (`finish`, then drop). Dropping a stream waits for its tasks.
-    pub(crate) fn open(mode: Mode, done: D) -> Self {
+    /// A stream outside [`stream`]'s scope, for the C API (`capi/`): the
+    /// same contract, with the program holding the stream and ending it
+    /// (`finish`, then drop). Dropping a stream waits for its tasks. Rust
+    /// programs call [`stream`], whose scope holds the contract for them.
+    #[doc(hidden)]
+    pub fn open(mode: Mode, done: D) -> Self {
         crate::lanes::require();
         let (key, flags) = mode.key_and_flags();
         let s = Storage::take();

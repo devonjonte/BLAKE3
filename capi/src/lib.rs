@@ -3,7 +3,7 @@
 //! every `extern "C"` panic does). Each call initializes the crate first
 //! (a load once it has).
 
-use blake3_servil::{Hash, Hasher, Mode, OUT_LEN};
+use blake3_servil::{Hash, Hasher, Mode, OUT_LEN, Stream};
 use core::ffi::{CStr, c_char, c_void};
 
 /// `b3_digest`.
@@ -208,4 +208,89 @@ pub unsafe extern "C" fn b3_hasher_output(hasher: *const B3Hasher, offset: u64, 
     reader.set_position(offset);
     // Sound by the contract: room for `len` bytes at `out`.
     reader.fill(unsafe { core::slice::from_raw_parts_mut(out as *mut u8, len) });
+}
+
+/// The C handler: called with each place handed back, in order, on the
+/// thread that made the stream's calls.
+pub type B3Done = unsafe extern "C" fn(ctx: *mut c_void, places: *mut Digest, count: usize);
+
+/// What the stream's handler is in Rust: the C function and its context.
+type Done = Box<dyn FnMut(&'static mut [Hash])>;
+
+/// `b3_stream`: a [`Stream`] the program holds between `b3_stream_begin`
+/// and `b3_stream_finish`. The messages and places a C program submits
+/// live as long as the stream (its contract), which `'static` stands for
+/// here.
+pub struct B3Stream {
+    stream: Stream<'static, Done>,
+    finished: bool,
+}
+
+unsafe fn stream_mut<'a>(stream: *mut B3Stream) -> &'a mut B3Stream {
+    assert!(!stream.is_null(), "b3: the stream is NULL");
+    let s = unsafe { &mut *stream };
+    assert!(!s.finished, "b3: the stream is finished; begin another");
+    s
+}
+
+/// # Safety
+/// `mode` is a mode; `done` is a function; `ctx` is passed to it unread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn b3_stream_begin(mode: *const B3Mode, done: B3Done, ctx: *mut c_void) -> *mut B3Stream {
+    blake3_servil::initialize_multithreaded(None);
+    let mode = unsafe { self::mode(mode) };
+    let ctx = ctx as usize;
+    let handler: Done = Box::new(move |places: &mut [Hash]| {
+        // Sound: a Hash is a Digest (both 32 bytes, repr(transparent)).
+        unsafe { done(ctx as *mut c_void, places.as_mut_ptr() as *mut Digest, places.len()) }
+    });
+    Box::into_raw(Box::new(B3Stream { stream: Stream::open(mode.mode(), handler), finished: false }))
+}
+
+/// # Safety
+/// `stream` came from `b3_stream_begin` and is not finished; `input` holds
+/// `len` bytes (NULL only with `len` 0) and `out` a digest's room, both
+/// alive until `b3_stream_finish`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn b3_stream_submit(stream: *mut B3Stream, input: *const c_void, len: usize, out: *mut Digest) {
+    let s = unsafe { stream_mut(stream) };
+    assert!(!out.is_null(), "b3: the digest's place is NULL");
+    // Sound by the contract: both live until finish, which is 'static to
+    // the stream; a Digest is a Hash.
+    let input: &'static [u8] = unsafe { bytes(input, len, "the input") };
+    s.stream.submit(input, unsafe { &mut *(out as *mut Hash) });
+}
+
+/// # Safety
+/// As `b3_stream_submit`, with `input` holding `count` strides of
+/// `message_len` (NULL only with `count` 0) and `out` room for `count`
+/// digests.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn b3_stream_submit_batch(stream: *mut B3Stream, input: *const c_void, message_len: usize, count: usize, out: *mut Digest) {
+    let s = unsafe { stream_mut(stream) };
+    let (input, places) = unsafe { batch(input, message_len, count, out) };
+    // Sound: the batch and its places live until finish; a [u8; 32] is a Hash.
+    let input: &'static [u8] = unsafe { core::slice::from_raw_parts(input.as_ptr(), input.len()) };
+    let places: &'static mut [Hash] = unsafe { core::slice::from_raw_parts_mut(places.as_mut_ptr() as *mut Hash, places.len()) };
+    s.stream.submit_batch(input, message_len, places);
+}
+
+/// # Safety
+/// `stream` came from `b3_stream_begin` and is not finished.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn b3_stream_collect(stream: *mut B3Stream) {
+    unsafe { stream_mut(stream) }.stream.collect();
+}
+
+/// # Safety
+/// `stream` came from `b3_stream_begin` and is not finished. After this
+/// call the stream is gone; its messages and places are the program's
+/// again, every place handed back.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn b3_stream_finish(stream: *mut B3Stream) {
+    let s = unsafe { stream_mut(stream) };
+    s.stream.finish();
+    s.finished = true;
+    // Sound: made by Box::into_raw in b3_stream_begin, finished once.
+    drop(unsafe { Box::from_raw(stream) });
 }

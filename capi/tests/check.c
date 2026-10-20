@@ -12,6 +12,35 @@ static void print(const char *what, const uint8_t *bytes, size_t len) {
   printf("\n");
 }
 
+/* The stream test's state: four places cycled, each coming back with the
+ * digest of message next_check, checked against b3_hash. */
+struct stream_ctx {
+  b3_digest *free_places[4];
+  int free_count;
+  size_t next_check;
+  size_t slens[7];
+  const uint8_t *input;
+  const b3_mode *mode;
+  int bad;
+};
+
+static void done(void *ctxp, b3_digest *d, size_t count) {
+  struct stream_ctx *c = ctxp;
+  for (size_t k = 0; k < count; k++) {
+    size_t i = c->next_check++;
+    b3_digest want = b3_hash(c->mode, c->input, c->slens[i % 7]);
+    if (memcmp(want.bytes, d[k].bytes, 32) != 0) c->bad = 1;
+    c->free_places[c->free_count++] = &d[k];
+  }
+}
+
+static void batch_done(void *ctxp, b3_digest *d, size_t count) {
+  (void)d;
+  *(int *)ctxp += (int)count;
+}
+
+static b3_digest c_places[4];
+
 int main(void) {
   if (strcmp(b3_version(), B3_VERSION) != 0) return 2; /* the header and the library disagree */
   printf("hasher %zu %zu\n", sizeof(b3_hasher), _Alignof(b3_hasher));
@@ -46,5 +75,31 @@ int main(void) {
       print(what, batch[i].bytes, 32);
     }
   }
+  /* A stream: 300 messages of lengths cycling through 7 values, through 4
+   * places cycled by collect; then a batch of 16 64-byte messages in one
+   * place. Every digest is checked against b3_hash; "stream ok" says so. */
+  {
+    struct stream_ctx c = {{&c_places[0], &c_places[1], &c_places[2], &c_places[3]}, 4, 0, {0, 1, 64, 1025, 4096, 65536, 100000}, input, &modes[0], 0};
+    b3_stream *s = b3_stream_begin(&modes[0], done, &c);
+    for (size_t i = 0; i < 300; i++) {
+      while (c.free_count == 0) b3_stream_collect(s);
+      b3_digest *place = c.free_places[--c.free_count];
+      b3_stream_submit(s, input, c.slens[i % 7], place);
+    }
+    b3_stream_finish(s);
+    if (c.next_check != 300 || c.bad) return 3;
+    b3_digest bplaces[16];
+    int batch_back = 0;
+    s = b3_stream_begin(&modes[1], batch_done, &batch_back);
+    b3_stream_submit_batch(s, input, 64, 16, bplaces);
+    b3_stream_finish(s);
+    if (batch_back != 16) return 4;
+    for (int i = 0; i < 16; i++) {
+      b3_digest want = b3_hash(&modes[1], input + 64 * i, 64);
+      if (memcmp(want.bytes, bplaces[i].bytes, 32) != 0) return 5;
+    }
+    printf("stream ok\n");
+  }
   return 0;
 }
+
