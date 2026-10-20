@@ -1357,6 +1357,21 @@ fn worker_main(me: usize) {
 mod test {
     use super::*;
 
+    /// Every call gives its place among the pool's callers back: after many
+    /// calls in a row the count is what the tests running beside this one
+    /// hold, far below what the calls would have left behind (the pool
+    /// would then be "busy" for every later call, which hashes alone).
+    #[test]
+    fn test_callers_give_their_place_back() {
+        let pool = pool();
+        let input = std::vec![0x3Cu8; 4 * MIN_SPLIT_LEN];
+        let calls = 8 * pool.threads;
+        for _ in 0..calls {
+            assert_eq!(crate::hash_multithreaded(&input), crate::hash(&input));
+        }
+        assert!(pool.callers.load(Ordering::SeqCst) < calls, "callers left behind");
+    }
+
     /// A caller whose last piece outlasts its polling parks, and the
     /// worker finishing that piece wakes it (the pool's pieces shrink
     /// toward the end, so a job's own wait rarely parks; this one must).

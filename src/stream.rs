@@ -755,6 +755,10 @@ mod test {
             let want_handed: std::vec::Vec<(usize, usize)> = got.iter().map(|h| (h as *const Hash as usize, 1)).collect();
             let mut handed = std::vec::Vec::new();
             stream(mode, record(&mut handed), |s| {
+                // With workers to hand tasks to, the stream has its slot
+                // among the pool's sources (a stream without one hashes
+                // every task on the caller: right, and slower).
+                assert_eq!(s.slot.is_some(), std::thread::available_parallelism().map_or(1, |n| n.get()) > 1);
                 for (i, out) in got.iter_mut().enumerate() {
                     // Borrowed, written in place (in reads of up to 1000
                     // bytes), or each in turn.
