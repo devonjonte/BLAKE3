@@ -1378,7 +1378,7 @@ fn test_hasher_io_write() {
 #[test]
 fn test_derive_key_material_mode() {
     let context = "BLAKE3 2026-10-16 derive key material test";
-    let context_key = crate::hazmat::hash_derive_key_context(context);
+    let context_key = crate::hash_derive_key_context(context);
     let (by_string, by_key) = (crate::Mode::DeriveKey(context), crate::Mode::DeriveKeyMaterial(&context_key));
     let mut input = [0u8; 3000];
     paint_test_input(&mut input);

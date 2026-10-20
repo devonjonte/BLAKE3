@@ -66,7 +66,7 @@
 //! behind a poller (two threads spinning without yielding took a 128 KiB
 //! split from 29 us to 2 ms on a two-CPU machine).
 
-use crate::hazmat::ChainingValue;
+use crate::CVBytes as ChainingValue;
 #[cfg(test)]
 use crate::hazmat::HasherExt;
 #[cfg(test)]
@@ -1317,7 +1317,7 @@ mod test {
         platforms.push(Platform::detect());
         let key = [0x5Au8; crate::KEY_LEN];
         let context = "equal queue members";
-        let context_key = crate::hazmat::hash_derive_key_context(context);
+        let context_key = crate::hash_derive_key_context(context);
         let modes = [
             (*crate::IV, 0),
             (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
@@ -1443,7 +1443,7 @@ mod test {
                     assert!(p.len <= MAX_PIECE_LEN);
                     if i > 0 {
                         assert_eq!(p.offset, pieces[i - 1].offset + pieces[i - 1].len);
-                        let max = hazmat::max_subtree_len(p.offset as u64).unwrap();
+                        let max = crate::max_subtree_len(p.offset as u64).unwrap();
                         assert!(p.len as u64 <= max, "piece {i} for {len}: {p:?} exceeds {max}");
                     }
                 }
@@ -1477,7 +1477,7 @@ mod test {
                 hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
                 "keyed len = {len}"
             );
-            let context_key = hazmat::hash_derive_key_context("lanes test");
+            let context_key = crate::hash_derive_key_context("lanes test");
             assert_eq!(
                 *Hasher::new_from_context_key(&context_key).update(&input[..len]).finalize().as_bytes(),
                 *hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL).as_bytes(),
@@ -1550,7 +1550,7 @@ mod test {
     #[test]
     fn test_simd_merge_matches_recursive() {
         let key = [93u8; KEY_LEN];
-        let context_key = hazmat::hash_derive_key_context("parallel merge test");
+        let context_key = crate::hash_derive_key_context("parallel merge test");
         for threads in [2, 3, 16, 64, 512] {
             for base in [MIN_SPLIT_LEN, 1 << 20, 8 << 20, 64 << 20] {
                 for tail in [0, 1, 63, 64, 1023, 1024, 1025, 8191] {
