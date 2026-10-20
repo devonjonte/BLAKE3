@@ -152,7 +152,7 @@ Misuse and misfortune (several of a program's threads calling at once, other loa
 
 Each document serves one audience; keep it to that audience's needs.
 
-1. **The servil team** (Zooko, and John Servil, his AI assistant; future sessions of both), who change these two repositories: this file, `PROCEDURES.md`, `NOTES-servil.md`, and bench-hashes' `AGENTS.md`, `PROCEDURES.md`, `NEXT-STEPS.md`, and `NOTES.md`. Everything we know, need, or decided goes here.
+1. **The servil team** (Zooko, and John Servil, his AI assistant; future sessions of both), who change these two repositories: this file, `PROCEDURES.md`, `NOTES-servil.md`, and bench-hashes' `AGENTS.md`, `PROCEDURES.md`, `NEXT-STEPS.md`, and `COMPARISONS.md`. Everything we know, need, or decided goes here; history stays in `git log`.
 2. **People who run the benchmark or use the crate**: bench-hashes' `README.md` (how to run it, read the results, and share them; also the GitHub Pages home page), its `METHODOLOGY.md` (how it measures, for readers who investigate), the graph itself, and the servil preface of this repository's `README.md`. They need no development setup and none of our conventions.
 3. **Other developer teams, human and AI**, who change the code and cooperate with us: `CONTRIBUTING.md` here and in bench-hashes. It holds the bare necessities (layout, build and test, the regression check, the rules that keep results comparable) and points at our notes without asking anyone to follow them.
 
