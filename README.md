@@ -33,8 +33,7 @@ Its checks go further than most:
 - Memory use is checked with sanitizers, Miri, and guard pages that catch a kernel reading
   one byte too far.
 
-[`QUALITY.md`](QUALITY.md) explains each check, what the checks found, and what remains
-open.
+Details: [`QUALITY.md`](QUALITY.md).
 
 ## Using it
 
