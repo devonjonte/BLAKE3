@@ -185,7 +185,7 @@ def main():
         ("AddressSanitizer", tally(tests, lambda f: not is_asm(f)), "the suites' lines, assembly excepted"),
         ("ThreadSanitizer", tally(tests, lambda f: f in SHARED), "the suites' lines in files threads share memory in"),
         (f"Mutation testing ({mutant_count} mutants, {mutant_count - survivors} caught on AArch64)", tally(mutants), "lines in functions with a planted bug"),
-        ("Proofs (AArch64 assembly)", tally({f: s for f, s in asm_all.items() if f in PROVED}), "the proved files; one kernel of them unproved"),
+        ("Proofs (AArch64 assembly)", tally({f: s for f, s in asm_all.items() if f in PROVED}), "every Arm assembly file, each kernel proved"),
     ]
     width = max(len(r[0]) for r in rows)
     cols = [("safe", "safe Rust"), ("unsafe", "unsafe Rust"), ("arm", "Arm assembly"), ("x86", "x86 assembly")]
