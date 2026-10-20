@@ -120,6 +120,9 @@ fn update_turn(hashers: &mut [Hasher], pieces: &[(usize, &[u8])], pooled: bool) 
             }
         }
         hash_held(hashers, &held);
+        // The loop's variant: every held group was hashed, so each waiting
+        // piece gathers on the next pass and the bytes in play shrink.
+        assert!(held.iter().all(|&i| hashers[i].held_group().is_none()), "a held group outlived its turn");
         held.clear();
         core::mem::swap(&mut turn, &mut waiting);
         waiting.clear();
