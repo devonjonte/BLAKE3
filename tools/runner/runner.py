@@ -17,22 +17,21 @@ at most 7200):
 
 (bench-hashes before its git dependency on the fork took `--thorough` for
 a full run; later ones run in full by default and take `--quick`.)
-    {"type": "perf_regress", "old_commit": "...", "new_commit": "...",
-     "bench_commit": "...", "full": true, "benches": ["OLD", "NEW"],
-     "contenders": [...], "points": [...]}
+    {"type": "check", "old_commit": "...", "new_commit": "...",
+     "bench_commit": "...", "cells": "all", "pairs": N}
 
-(perf_regress's "full" judges every cell of a default run; "benches" gives
-each side its own bench-hashes commit, for an API change, its cells with
-it; both optional. Every run's samples file lands in the job's samples/.)
+(bench-hashes check measures the cells whose code the change touches, or
+every cell with "cells": "all"; "pairs" is the pairs of runs, its default
+check's. Every run's samples file lands in the job's samples/.)
 
 (Any job may add "powermetrics": true: the chip's CPU, GPU, and ANE power
 every 500 ms beside it, in its results' powermetrics.txt.)
     {"type": "example", "example": "scaling" | "host_lab" | "energy_probe" | "job_trace",
-     "fork_commit": "...", "features": ["no_sme2"], "args": ["message", "1048576"]}
+     "fork_commit": "...", "args": ["message", "1048576"]}
     {"type": "test", "fork_commit": "..."}
 
 (A test job runs the fork's suites natively: the library tests in the
-default, no_sme2, and pure builds, the doc tests, the integration tests in
+default and pure builds, the doc tests, the integration tests in
 tests/ (the planned API's contract), and the official vectors.)
 
 (A benchmark job with "repeat": N runs the benchmark N times back to
@@ -45,9 +44,9 @@ samples, and trace; host_lab's report.
 The checkouts persist between jobs (CHECKOUTS: the fork, bench-hashes
 inside it), moved to each job's commits with a forced checkout that
 rewrites only the files that differ, so Cargo rebuilds only what changed:
-the fork's target directory serves test and example jobs, perf_regress's
-sides (tmp/perf-ab/ in the fork) its jobs, and a side of its own (built by
-this runner's perf_regress.py, the fork as it is) benchmark jobs.
+the fork's target directory serves test and example jobs, check's
+sides (target/check/ in the fork) its jobs, and bench-hashes' own build
+against the fork as it is (`bench-hashes build-against`) benchmark jobs.
 """
 import json
 import os
@@ -64,9 +63,6 @@ FORK_URL = "https://github.com/johnservil/BLAKE3.git"
 BENCH_URL = "https://github.com/johnservil/bench-hashes.git"
 HOME = Path.home()
 CHECKOUTS = HOME / "checkouts"
-# The perf_regress.py installed beside this runner (setup-mac.sh copies
-# both), which builds benchmark jobs' sides.
-PERF_REGRESS = Path(__file__).resolve().parent / "perf_regress.py"
 DONE_FILE = HOME / ".benchrunner_done"
 CARGO_BIN = HOME / ".cargo" / "bin"
 
@@ -78,8 +74,8 @@ PATCH = 'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'
 # blake3, blake3-mt, blake3-servil: bench-hashes' keys before September 25, 2026.
 CONTENDERS = {"blake3-official", "blake3-official-mt", "blake3", "blake3-servil-st", "blake3-servil", "blake3-servil-mt", "blake3-mt",
               "sha256", "sha256-ring", "sha256-cc", "sha1dc", "sha3-256", "blake3-commonware"}
-EXAMPLES = {"scaling", "host_lab", "energy_probe", "job_trace", "sme_units"}
-FEATURES = {"no_sme2", "pure", "job-trace"}
+EXAMPLES = {"host_lab", "energy_probe", "job_trace", "sme_units"}
+FEATURES = {"pure", "job-trace"}
 DEFAULT_LIMIT = 1800
 MAX_LIMIT = 7200
 
@@ -137,7 +133,7 @@ class Job:
     def checkouts(self, fork_commit, bench_commit):
         """The fork with bench-hashes nested inside it, where bench-hashes'
         path dependency (`..`) expects the fork; both kept between jobs.
-        The fork's status leaves out bench-hashes and perf_regress's tmp/,
+        The fork's status leaves out bench-hashes and check's target/,
         as the maintainers' checkout does."""
         CHECKOUTS.mkdir(exist_ok=True)
         fork = CHECKOUTS / "fork"
@@ -169,10 +165,12 @@ def benchmark(job, run, work, out):
     assert isinstance(repeat, int) and 1 <= repeat <= 100, "repeat must be 1-100"
     fork_commit = hex_commit(job, "fork_commit")
     fork = run.checkouts(fork_commit, hex_commit(job, "bench_commit"))
-    # Built in a side directory that owns its lock and target directory (the
-    # fork as it is); Cargo rebuilds only what changed.
-    exe = run.run([sys.executable, str(PERF_REGRESS), "--root", str(fork), "build", "--side", "bench",
-                   "--commit", fork_commit], cwd=fork, capture=True).strip().splitlines()[-1]
+    # bench-hashes built against the fork checkout as it is, in a side
+    # directory that owns its lock and target directory (the committed lock
+    # is never written); Cargo rebuilds only what changed. The one build
+    # mechanism, check's (bench-hashes #54).
+    exe = run.run(["cargo", "run", "--release", "--quiet", "--", "build-against", str(fork)],
+                  cwd=fork / "bench-hashes", capture=True).strip().splitlines()[-1]
     # Each run from its result folder: the benchmark writes
     # benchmark-results/ relative to its working directory.
     for folder in [out] if repeat == 1 else [out / f"run-{i}" for i in range(1, repeat + 1)]:
@@ -182,28 +180,25 @@ def benchmark(job, run, work, out):
     return "ok"
 
 
-def perf_regress(job, run, work, out):
+def check(job, run, work, out):
+    """bench-hashes check: the fork at new_commit, with bench-hashes at
+    bench_commit nested inside it, against old_commit. check builds both
+    sides itself (under the fork's target/check/), relinks each per pair,
+    and measures the cells whose code the change touches ("cells": "all"
+    measures every one). Its exit is the verdict: 0 no cell slower, 1 a
+    regression, 2 no verdict (other programs kept the machine busy)."""
     old, new = hex_commit(job, "old_commit"), hex_commit(job, "new_commit")
     fork = run.checkouts(new, hex_commit(job, "bench_commit"))
-    # Every run's samples file, in the job's results (bench-hashes compare
-    # reads them again, CPU time with them).
-    cmd = [sys.executable, "tools/perf_regress.py", "compare", old, new, "--keep", str(out / "samples")]
-    if job.get("full"):
-        cmd.append("--full")
-    # The cells a run with these contenders (and points) measures, every one
-    # judged: perf_regress compare --contenders, --points.
-    if "contenders" in job:
-        assert job["contenders"] and set(job["contenders"]) <= CONTENDERS, f"contenders must come from {sorted(CONTENDERS)}"
-        cmd += ["--contenders", ",".join(job["contenders"])]
-    if "points" in job:
-        assert job["points"] and all(isinstance(p, str) and p.replace(" ", "").isalnum() for p in job["points"]), \
-            "points are labels such as \"64 B\" or \"1024\""
-        cmd += ["--points", ",".join(job["points"])]
-    if "benches" in job:
-        assert isinstance(job["benches"], list) and len(job["benches"]) == 2, "benches: two bench-hashes commits"
-        cmd += ["--bench", *(hex_commit({"bench": b}, "bench") for b in job["benches"])]
+    cmd = ["cargo", "run", "--release", "--quiet", "--", "check", "--against", old, "--keep", str(out / "samples")]
+    if job.get("cells") == "all":
+        cmd += ["--cells", "all"]
+    elif "cells" in job:
+        raise AssertionError("cells: \"all\", or left out (the cells the change touches)")
+    if "pairs" in job:
+        assert isinstance(job["pairs"], int) and job["pairs"] >= 3, "pairs: 3 or more"
+        cmd += ["--pairs", str(job["pairs"])]
     try:
-        run.run(cmd, cwd=fork)
+        run.run(cmd, cwd=fork / "bench-hashes")
         return "no regression"
     except subprocess.CalledProcessError as e:
         if e.returncode in (1, 2):
@@ -232,7 +227,7 @@ def example(job, run, work, out):
 
 def test(job, run, work, out):
     fork = run.checkouts(hex_commit(job, "fork_commit"), None)
-    for features in [[], ["--features", "no_sme2"], ["--features", "pure"]]:
+    for features in [[], ["--features", "pure"]]:
         run.run(["cargo", "test", "--release", "--lib", *features], cwd=fork)
     run.run(["cargo", "test", "--release", "--doc"], cwd=fork)
     if (fork / "tests").is_dir():
@@ -241,7 +236,7 @@ def test(job, run, work, out):
     return "passed"
 
 
-HANDLERS = {"benchmark": benchmark, "perf_regress": perf_regress, "example": example, "test": test}
+HANDLERS = {"benchmark": benchmark, "check": check, "example": example, "test": test}
 
 
 def power():

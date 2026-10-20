@@ -8,9 +8,9 @@ Jobs go in the checkout's `runner/jobs/`; results come back in
 bench-hashes (inside the fork's) in `~benchrunner/checkouts/` and moves
 them to each job's commits, so Cargo rebuilds only what changed: a
 benchmark job builds bench-hashes against the fork as it is, through
-this checkout's `tools/perf_regress.py build` (installed beside `runner.py`), in a directory with its
-own `Cargo.lock` (the committed lock is never written), and perf_regress
-jobs find their sides from the job before. The job format is the docstring at the top of
+`bench-hashes build-against` (in a directory with its own `Cargo.lock`;
+the committed lock is never written), and check jobs build their two
+sides the same way under the fork's `target/check/`. The job format is the docstring at the top of
 `runner.py`.
 
 ## The account (once)
@@ -37,7 +37,7 @@ the runner) and starts it. Steps already done are skipped, so the same
 command starts the runner every time, including after a change to
 `runner.py`. Ctrl-C stops the runner after the current job.
 
-While a job that times runs (`benchmark`, `example`, `perf_regress`),
+While a job that times runs (`benchmark`, `example`, `check`),
 nothing else should run on the Mac, the VM included; a `test` job (the
 fork's suites, natively) needs no quiet machine.
 
