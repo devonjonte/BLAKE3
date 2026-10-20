@@ -84,6 +84,25 @@ tests; the tests check the calls into them, and every other platform.)
   change between equally correct paths (a speed threshold, listed as
   such), or code that does nothing (removed).
 
+**Contracts are `debug_assert!`s; hangs get an `assert!`.** A contract
+(a precondition, an internal consistency) is checked with
+`debug_assert!`: a breach is the caller's fault, and a release pays
+nothing for the check. The one exception is a check whose absence would
+let a breach *hang* rather than fail: those are plain `assert!`s, because
+a hang is the failure we cannot stand, for users and for mutation testing
+alike (a mutant that broke a loop's progress used to hang the tests until
+the tool's timeout, 30 s each, 85 of them in a run; now it fails at once).
+Most such checks are *loop variants* (Meyer's term, from Design by
+Contract: a quantity that falls on every pass and cannot fall forever),
+asserted beside the loop: the verifier's list of nodes advances on every
+node taken, the `Hasher`'s stage takes at least a byte per pass, a file
+copy that goes on has read at least a byte. Each costs one comparison per
+pass, far below the hashing beside it. A panic on a pool worker ends the
+process for the same reason: the caller waiting for that worker's piece
+would otherwise wait forever. The mutants profile builds the release
+configuration, so a mutant that only a debug assertion or an overflow
+check would catch counts as uncaught, as it would be for a user.
+
 **What mutation testing finds**, over the whole library on the VM
 (October 17, with the stream): of 2511 mutants, 1678 fail a test or
 hang, and 166 do not compile. Each of the other 667 is listed with its

@@ -1002,7 +1002,10 @@ pub fn initialize() {
 /// so far. The
 /// threads wait asleep whenever no call has work for them (their memory:
 /// see [Memory](crate#memory)). Later calls return at once, and must ask
-/// for the same number: another `Some` panics.
+/// for the same number: another `Some` panics. A panic on a worker thread
+/// (a bug in this crate) ends the process, its message printed, rather
+/// than leaving the call that waits for that worker's piece waiting
+/// forever.
 ///
 /// ```
 /// blake3_servil::initialize_multithreaded(None);

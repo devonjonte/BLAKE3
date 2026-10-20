@@ -201,6 +201,9 @@ impl Verifier {
                     // nearer the leaves), so the list shrinks toward empty.
                     assert!(self.nodes.last() != Some(&node), "the verifier's node list did not advance");
                 }
+                // The outer loop's variant: this path took at least the
+                // node the piece was seen to hold whole.
+                assert!(!nodes.is_empty(), "a piece holding a node whole took none");
                 if !self.check(&nodes, &mut verified, pooled) {
                     return false;
                 }
@@ -415,6 +418,8 @@ pub(crate) fn groups_cvs_into(groups: &[&[u8]], first_group: u64, key: &CVWords,
     let mut first = 0;
     while first < full {
         let n = BATCH_GROUPS.min(full - first);
+        // The loop's variant: each batch takes at least one group.
+        assert!(n > 0, "an empty batch of groups");
         chunk_refs.clear();
         chunk_refs.extend(groups[first..first + n].iter().flat_map(|g| g.chunks_exact(CHUNK_LEN)).map(|c| <&[u8; CHUNK_LEN]>::try_from(c).unwrap()));
         let mut values = chunk_refs.len();

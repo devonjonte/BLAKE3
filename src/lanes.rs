@@ -296,6 +296,17 @@ fn cut_messages(count: usize, message_len: usize, threads: usize) -> Vec<Piece> 
     pieces
 }
 
+/// Ends the process if dropped: held while a job is published, forgotten
+/// once its workers are done, so it drops only when the caller unwinds
+/// with workers possibly still reading its frame.
+struct AbortOnUnwind;
+
+impl Drop for AbortOnUnwind {
+    fn drop(&mut self) {
+        std::process::abort()
+    }
+}
+
 /// A counted call (spare_pool), until it returns, unwinding too.
 struct Caller<'a>(&'a AtomicUsize);
 
@@ -662,8 +673,13 @@ impl Pool {
         let job = Job { work };
         let source = sources::job_source();
         let slot = source.register();
-        // Sound: the caller's frame outlives every access (it waits below).
+        // Sound: the caller's frame outlives every access: it waits below,
+        // and should it unwind before that (a bug in this crate), the
+        // process ends rather than leaving workers reading a gone frame and
+        // the next call waiting forever (the guard is forgotten once the
+        // wait is over: nothing runs on the normal path).
         let ptr = &job as *const Job as *mut Job<'static>;
+        let published = AbortOnUnwind;
         let target = source.publish_job(ptr, pieces, own);
         if slot.is_some() && pieces > own + 1 {
             self.wake_for(pieces - own - 1);
@@ -681,6 +697,7 @@ impl Pool {
             source.finished(n);
         }
         source.wait(target);
+        core::mem::forget(published);
         if let Some(slot) = slot {
             sources::Source::unregister(slot);
         }
@@ -1262,6 +1279,13 @@ impl Task {
 /// streams' tasks while any wait, and parks as soon as none does; every
 /// publish wakes it first.
 fn sme2_main() {
+    // As for a worker: a panic here ends the process rather than hanging
+    // the callers waiting on it.
+    let _ = std::panic::catch_unwind(sme2_serve);
+    std::process::abort()
+}
+
+fn sme2_serve() -> ! {
     assert!(SME2_THREAD.set(std::thread::current()).is_ok(), "one SME2 thread");
     loop {
         if let Some(task) = sources::take_stream_task() {
@@ -1318,9 +1342,15 @@ pub(crate) fn run_task(task: Task) {
 }
 
 fn worker_main(me: usize) {
-    let pool = pool();
-    assert!(pool.handles[me].set(std::thread::current()).is_ok(), "each worker sets its thread once");
-    pool.serve(me)
+    // A worker that panicked would die quietly while callers wait for its
+    // piece forever (their stacks are the work); the process ends instead,
+    // the panic's message printed first by the panic hook.
+    let _ = std::panic::catch_unwind(move || {
+        let pool = pool();
+        assert!(pool.handles[me].set(std::thread::current()).is_ok(), "each worker sets its thread once");
+        pool.serve(me)
+    });
+    std::process::abort()
 }
 
 #[cfg(test)]
