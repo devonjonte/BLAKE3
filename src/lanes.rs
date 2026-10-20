@@ -1357,6 +1357,32 @@ fn worker_main(me: usize) {
 mod test {
     use super::*;
 
+    /// A caller whose last piece outlasts its polling parks, and the
+    /// worker finishing that piece wakes it (the pool's pieces shrink
+    /// toward the end, so a job's own wait rarely parks; this one must).
+    /// Keep: it detects, by hanging, mutants the mutation check skips
+    /// (tools/mutants/hangs.txt: Source::finished).
+    #[test]
+    fn test_a_parked_caller_is_woken_by_the_last_piece() {
+        let source = sources::job_source();
+        let target = source.publish_job(core::ptr::null_mut(), 1, 0);
+        // An unpark this thread received earlier would let one park()
+        // return at once and hide a missing wake-up.
+        std::thread::park_timeout(core::time::Duration::ZERO);
+        let started = std::time::Instant::now();
+        // A plain thread: a scope's thread unparks the scope's owner as it
+        // ends, which would hide a missing wake-up too.
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(10 * SPIN_BEFORE_SLEEP);
+            let Some(sources::Item::Pieces(_, _, n)) = source.take() else { panic!("the one piece") };
+            assert_eq!(n, 1, "the one piece");
+            source.finished(n);
+        });
+        source.wait(target);
+        assert!(started.elapsed() >= 10 * SPIN_BEFORE_SLEEP, "the caller waited for the piece");
+        worker.join().unwrap();
+    }
+
     /// Members of one length side by side, against the reference
     /// implementation: every platform this machine runs, the three modes,
     /// equal and mixed lengths, unaligned inputs; the slots beside the

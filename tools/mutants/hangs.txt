@@ -20,3 +20,5 @@ src/lanes.rs	delete ! in sources::Source::unregister	tests/api_plan.rs	a slot is
 src/lanes.rs	replace > with == in splits	tests/stream_collect_no_workers.rs	a stream on one CPU splits as if it had workers and waits for them
 src/lib.rs	replace Hasher::from_core -> Self with Default::default()	each::test::test_hash_each_matches_hash_with	the tool's artifact: Default is Hasher::new, which calls from_core, so the mutant calls itself (a tight loop at opt-level 3)
 src/lib.rs	replace Hasher::gather -> &mut Self with Box::leak(Box::new(Default::default()))	each::test::test_hash_each_matches_hash_with	Default::default() reaches a checked entry from inside the running self-test, which then waits for itself
+src/lanes.rs	replace + with * in sources::Source::finished	lanes::test::test_a_parked_caller_is_woken_by_the_last_piece	the count that decides the wake-up is wrong; the parked caller is never unparked
+src/lanes.rs	replace == with != in sources::Source::finished	lanes::test::test_a_parked_caller_is_woken_by_the_last_piece	the last piece does not unpark the caller
