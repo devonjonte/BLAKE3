@@ -56,6 +56,10 @@ name = "stream_one_cpu"
 required-features = ["std"]
 
 [[test]]
+name = "stream_collect_no_workers"
+required-features = ["std"]
+
+[[test]]
 name = "stream_no_alloc"
 harness = false
 required-features = ["std"]
