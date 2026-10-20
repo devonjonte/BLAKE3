@@ -546,6 +546,8 @@ fn merge_to_children(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::C
         let mut write = prefix;
         while read + 1 < count {
             let children = (count - read).min(2 * crate::MAX_SIMD_DEGREE_OR_2);
+            // The inner loop's variant: each call merges at least one pair.
+            assert!(children >= 2, "a parents call with under two children");
             let parents = crate::compress_parents_parallel(cvs[read..read + children].as_flattened(), key, flags, platform, &mut out);
             cvs[write..write + parents].as_flattened_mut().copy_from_slice(&out[..parents * crate::OUT_LEN]);
             read += children;
