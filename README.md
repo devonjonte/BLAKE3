@@ -3,6 +3,10 @@
 A faster [BLAKE3](https://blake3.io) for 64-bit Arm and x86-64. It computes the same
 digests as official BLAKE3.
 
+> Devon Jonte's line of the fork: John Servil's
+> [`servil`](https://github.com/johnservil/BLAKE3) plus changes offered there as pull
+> requests.
+
 ## How fast
 
 <img src="https://devonjonte.github.io/bench-hashes/benchmark-results/12thGenIntelRCoreTMi712700K.linux70038generic/bench-hashes.chart.svg" alt="Hashing one 128 MiB message after a pause on an i7-12700K: BLAKE3 multi-core and on one core beside SHA-256, SHA3-256 and SHA-1, in GB/s" width="720">
