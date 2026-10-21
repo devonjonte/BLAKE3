@@ -54,6 +54,11 @@ def forms(code):
                       ", ".join(ops))
         if max(list(vec.values()) + [0]) > 3 or len(gpr) > 4 or len(msk) > 2:
             continue
+        if mnem in ("blendvps", "blendvpd", "pblendvb"):
+            # The mask is xmm0 by definition; the disassembler prints it
+            # as a third operand, which the assembler rejects. The model
+            # takes the two-operand form (selector xmm0).
+            text = ", ".join(text.split(", ")[:2])
         seen.setdefault((mnem, text), None)
     return list(seen)
 

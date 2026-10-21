@@ -627,7 +627,9 @@ def vector(m, mnem, base, vex, ops, nxt):
             parts = load_lanes(m, s, 1 if base == "movd" else 2)
         new = (parts + [BitVecVal(0, 32)] * 4)[:4]
         w = 4
-        m.vwrite(dst, new, True)
+        # Legacy movd/movq zero the rest of the xmm register and keep the
+        # lanes above it; the VEX forms zero those too.
+        m.vwrite(dst, new, vex)
         return nxt
     elif base in ("paddd", "psubd", "pxor", "pxord", "por", "pand"):
         a, b = A(), B()
