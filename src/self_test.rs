@@ -127,7 +127,7 @@ pub(crate) const CASES: &[(Case, &str)] = &[
     (Xof { len: 1500, skip: 64, out: 1100 }, "extended output of sixteen blocks and more (the SME2 extended-output kernel)"),
 ];
 
-/// The cases elsewhere (x86-64, x86, wasm32, portable builds), each kernel
+/// The cases elsewhere (x86-64 and portable builds), each kernel
 /// and each of the Rust paths around them once, on a small input: x86's
 /// assembly has one-block, extended-output, and many-input kernels
 /// (compress_in_place, compress_xof, hash_many, and on AVX-512 xof_many),
