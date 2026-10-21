@@ -463,3 +463,4 @@ src/lib.rs	delete ! in HasherCore::update_pooled	2	speed: whether the update tak
 src/lib.rs	replace >= with < in HasherCore::update_pooled	2	speed: whether the update takes the SME2 turn
 src/lib.rs	replace > with >= in OutputReader::fill	2	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in OutputReader::fill	2	equivalent: | and ^ agree on flag bits that never overlap
+src/lanes.rs	replace * with / in sme2_prefix	1	speed: how much of a message the SME2 thread takes first; on x86 there is no SME2 thread
