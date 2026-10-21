@@ -35,8 +35,14 @@ Details: [`QUALITY.md`](QUALITY.md).
 
 ```toml
 [dependencies]
-blake3-servil = { git = "https://github.com/johnservil/BLAKE3", branch = "servil" }
+# A release's commit by its full hash: Cargo fetches exactly that code.
+blake3-servil = { git = "https://github.com/johnservil/BLAKE3", rev = "<the release's commit>" }
 ```
+
+`git ls-remote --tags https://github.com/johnservil/BLAKE3` lists each
+release with its commit. A release's version, `X.Y.Z+<hash>`, names the
+commit of its code, so the version alone identifies what you have
+(`b3sum --version` and the C library's `b3_version()` print it).
 
 ```rust
 blake3_servil::initialize(); // once, before any other call

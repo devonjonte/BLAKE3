@@ -67,7 +67,7 @@ A candidate reaches `servil` only when all of these hold, and, if it changes com
 
 A regression the user accepts, as the section above describes, lands with the user's decision, the regressed cells, and their numbers in the merge's message (for a fast-forward, the promoted commit's message; amend the message only, leaving the measured tree unchanged). The user accepts such trades under this rule (September 25, 2026; revised September 27): every slowed cell stays ahead of every competitor, the gains outweigh the losses, and the user decides; a streaming API's cells may not slow to speed up another API (AGENTS.md, "The streaming APIs first"). A candidate waiting on the Mac waits on its branch; the VM's verdict alone does not promote it.
 
-A promotion fast-forwards `servil` to the candidate, records the gate's evidence (suites, both verdicts, their job numbers) as a note on the tip (`git notes --ref=perf add`; push `servil` with `refs/notes/perf`), and deletes the candidate branch here and on GitHub. After a promotion, pin bench-hashes to the new tip (`cargo update -p blake3-servil` in bench-hashes, commit the `Cargo.lock`, push): that pin is what users measure, and records are made on it.
+A promotion fast-forwards `servil` to the candidate, records the gate's evidence (suites, both verdicts, their job numbers) as a note on the tip (`git notes --ref=perf add`; push `servil` with `refs/notes/perf`), and deletes the candidate branch here and on GitHub. After a promotion, pin bench-hashes to the new tip (both `rev`s in its `Cargo.toml` set to the tip's full hash, a build, commit `Cargo.toml` and `Cargo.lock`, push): that pin is what users measure, and records are made on it.
 
 # Releases
 
@@ -92,7 +92,7 @@ A release is a commit everyone can stand behind: every check that the main line 
 
 **Benchmark results.** A full bench-hashes run on the release commit, on the Mac (and on any other machine whose owner offers one), published to bench-hashes' GitHub Pages with the release named on the map.
 
-**Version and tag.** `python3 tools/gen-ver.py X.Y.Z` from a clean tree: one commit on top of HEAD setting the version to X.Y.Z+<HEAD's hash> (b3sum's requirement and lock with it), and the tag vX.Y.Z+<hash> on it. The hash in the version string names the code commit, so a holder of the string alone can check they have the right code.
+**Version and tag.** `python3 tools/gen-ver.py X.Y.Z` from a clean tree: one commit on top of HEAD writing X.Y.Z+<HEAD's hash> into every string the release reaches (the crate, b3sum's own version, the C library's crate, header and pkg-config file, the CHANGELOG's title; b3sum's requirement on the crate is `=X.Y.Z`), and the tag vX.Y.Z+<hash> on it. The hash in the version string names the code commit, so a holder of the string alone can check they have the right code. It prints the dependency line for the release notes: the release commit by its full hash (`rev`), the form Cargo enforces.
 
 **What users download.**
 - `cargo publish` in the root, then in `b3sum/` (the library on crates.io; `cargo install` builds b3sum on the user's machine).

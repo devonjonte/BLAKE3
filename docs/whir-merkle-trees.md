@@ -33,8 +33,10 @@ hash_many`, after the `size == 0` case:
 and in `Cargo.toml`:
 
 ```toml
-blake3-servil = { git = "https://github.com/johnservil/BLAKE3", branch = "servil" }
+blake3-servil = { git = "https://github.com/johnservil/BLAKE3", rev = "<the release's commit>" }
 ```
+
+(a release's commit by its full hash, as the fork's README shows).
 
 With this change, all 264 of WHIR's library tests pass (worldfnd/whir
 c03a4a5, `cargo test --release --lib`), `test_eq_digest` included, with

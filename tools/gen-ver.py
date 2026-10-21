@@ -71,3 +71,6 @@ else:
 git("commit", "-q", "--no-verify", "-m", f"Version {full}", "--", *files)
 git("tag", f"v{full}")
 print(f"v{full}")
+# The dependency line for the release notes: the release commit by its full
+# hash, which Cargo fetches exactly (a requirement's +metadata it ignores).
+print(f'{crate} = {{ git = "{git("remote", "get-url", "origin")}", rev = "{git("rev-parse", "HEAD")}" }}')
