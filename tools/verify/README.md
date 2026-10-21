@@ -177,3 +177,16 @@ modelled"; add it to `aarch64.py` (scalar) or `vector.py` (NEON), then to
 `cross_check.py`'s coverage by running it (it finds every form itself). A
 new kernel needs a harness stating its contract (`prove_table`,
 `prove_partial`, `prove_c1` are the patterns) and a line in `cases`.
+
+Lessons the tools were built on:
+- Cache Z3 terms by id only while holding them: ids are reused, and a
+  stale entry could equate different terms.
+- Give each proof case a fresh process: the caches grow, and 16 workers
+  in one ran the VM out of memory.
+- A harness that hands every group the same symbols can prove a kernel
+  that never advances its pointer: give each group's data its own
+  offset, and check that every read lies in the current group's region
+  (a kernel that preloads the next group then fails the check: the
+  proof may be incomplete, never unsound).
+- Plant a mutant in each step of a loop the induction proves (its
+  pointers, its counter) and see the proof reject it.

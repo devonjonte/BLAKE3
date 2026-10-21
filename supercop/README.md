@@ -66,3 +66,34 @@ Zooko
 The email and the tarball are all Dan reads: the submission succeeds when he adds it with
 one action, so it looks like the code already in SUPERCOP (its layout, file names and
 conventions).
+
+## What decides it, and what is open
+
+eBASH's own pages (`call-hash.html`, `tips.html`, `supercop.html`) and SUPERCOP's tree
+(its `crypto_*` examples, `do-part`, `OPERATIONS`) win over our habits. The BLAKE3 team's
+implementations stay untouched: their code is widely used, and their timings must keep
+predicting it.
+
+**Changes made with eBASH in mind** (Zooko, October 12, 2026): eBASH should predict what
+our users see. A change that also speeds the fork up for users in plausible cases is made;
+one that makes eBASH more representative of users is made; one that makes it less
+representative stays out; one where we can't tell may go in.
+
+**How SUPERCOP picks.** On each machine it times every implementation of
+`crypto_hash_blake3`, with each compiler, hashing 1536 bytes, keeps the fastest, and
+measures only that one at every length to 64 KiB, each call waited for (so the crate's
+after-a-pause prefetch never runs). When the crate wins at 1536 bytes, its own choice of
+kernel by length gives every point.
+
+**eBASH's Arm machines** (those that ran SUPERCOP in the past year): Neoverse N1, Cortex-A72
+(Pi 4), Cortex-A76 (Pi 5), Cortex-A53 (Pi 3), with no SHA-3 and no SME2. There the crate runs
+upstream's four-lane NEON C kernel for whole chunks and its own scalar kernel for single
+compressions (messages to 1 KiB, partial chunks, parents, roots).
+
+Open:
+- Whether the scalar kernel beats upstream's portable C on the Cortex-A72 and A76: it runs
+  more instructions (`hash()` of 64 bytes 1178 against 1002, of 1 KiB 17138 against 14612,
+  under qemu's models, October 15, 2026), and a Raspberry Pi answers it.
+- SME2 depends on the C compiler: with Debian 12's GCC the crate builds without it, and
+  SUPERCOP may keep that build by its 1536-byte timing. Assembling the kernels with rustc's
+  own assembler would give every build SME2.
