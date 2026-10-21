@@ -147,9 +147,23 @@ as lengths may steer a branch or an address, so a branch on data still
 stops a proof; equalities of lengths are proved under the path's
 assumptions.
 
-Not proved here: the x86 kernels, and the library's
-Rust (the dispatch, the tree walk, the Hasher, the threads), which the
-tests cover.
+Not proved here: the library's Rust (the dispatch, the tree walk, the
+Hasher, the threads), which the tests cover.
+
+**The x86-64 kernels, in progress.** `x86.py` models the instructions
+the x86-64 kernels use, on the same executor as the AArch64 model (a
+fault on an access outside a region, the calling convention checked).
+`cross_check_x86.py` runs every register-only form the kernels use on
+the CPU and by the model, on random states: 116 forms agree on an
+i7-12700K; the AVX-512 forms need an AVX-512 CPU and are skipped without
+one (CI's `x86_model` job). `prove_x86.py` proves cases against the same
+Lean specification: `compress_in_place` and `compress_xof` for SSE4.1
+and AVX-512, under the Unix and Windows conventions, and `hash_many` at
+the counts run so far, and AVX-512 `xof_many` at one to three blocks.
+Open: `hash_many` at the larger counts, `xof_many` at four blocks and
+more (the kernel agrees with the specification at random points there,
+`x86_xof_point.py`; the model's normal form gives out), and every count
+by induction, as the AArch64 group loops are proved.
 
 **Code changed for the proofs.** The SME2 message kernel took the last
 block's length with a branch (0 for 64), so a proof had to fix the
