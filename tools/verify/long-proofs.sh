@@ -41,7 +41,7 @@ run generated sh -c 'pypy3 tools/gen_neon_hybrid.py | cmp - c/blake3_neon_hybrid
 run helpers pypy3 -m unittest discover -s tools/verify -p test_helpers.py
 run prove_hybrid pypy3 tools/verify/prove_hybrid.py
 run prove_sme2 pypy3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof chunks_x2 every parents_every xof_every messages_every x2_every
-run prove_x86 pypy3 tools/verify/prove_x86.py compress xof hash_many
+run prove_x86 pypy3 tools/verify/prove_x86.py compress xof hash_many partial
 run cross_check pypy3 tools/verify/cross_check.py
 run mutants pypy3 tools/verify/mutants.py
 hash=$(cat "$logs"/*.txt | cargo run -q --release --manifest-path b3sum/Cargo.toml -- --no-names | cut -c1-16)
