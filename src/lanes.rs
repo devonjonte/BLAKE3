@@ -1381,6 +1381,11 @@ mod test {
     /// (tools/mutants/hangs.txt: Source::finished).
     #[test]
     fn test_a_parked_caller_is_woken_by_the_last_piece() {
+        // The pool, and with it the startup self-test, on this thread
+        // first: a failure there fails the test here, where on the worker
+        // thread below it would end that thread alone and leave the wait
+        // waiting forever (a broken build's every mutant hung this test).
+        let _ = pool();
         let source = sources::job_source();
         let target = source.publish_job(core::ptr::null_mut(), 1, 0);
         // An unpark this thread received earlier would let one park()
