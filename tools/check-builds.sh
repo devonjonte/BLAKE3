@@ -26,4 +26,6 @@ RUSTFLAGS="-D warnings" step cargo check -q --release --manifest-path b3sum/Carg
 # The C API (capi/): its Rust tests, and b3.h compiled as C11 and run.
 RUSTFLAGS="-D warnings" step cargo nextest run --cargo-quiet --release --manifest-path capi/Cargo.toml
 RUSTFLAGS="-D warnings" step cargo check -q --tests --examples --target x86_64-unknown-linux-gnu
+RUSTFLAGS="-D warnings" step cargo check -q --tests --target x86_64-unknown-linux-gnu --no-default-features
+RUSTFLAGS="-D warnings" step cargo check -q --tests --target x86_64-unknown-linux-gnu --features pure
 echo "check-builds: every build passes"

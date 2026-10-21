@@ -251,6 +251,7 @@ pub fn test_xof_many_fn(xof_many_function: XofManyFunction) {
     }
 }
 
+#[cfg(feature = "std")]
 pub(crate) fn reference_hash(input: &[u8]) -> crate::Hash {
     let mut hasher = reference_impl::Hasher::new();
     hasher.update(input);
