@@ -79,17 +79,6 @@
 //! the cores themselves, so a program gets the most from one thread making
 //! them.
 //!
-//! **CPUs with performance and efficiency cores** (Intel's since Alder
-//! Lake): a multithreaded call or stream uses every core, and afterwards
-//! the OS sometimes leaves the calling thread on an efficiency core for a
-//! while, where single-threaded hashing runs at about half speed (AVX2's
-//! 256-bit operations run as two halves there). Measured on an i7-12700K
-//! under Linux 7.0: beside nonstop multithreaded streams, 7% of 16 KiB
-//! single-threaded hashes ran partly on an efficiency core, 2.2 times
-//! slower, about 6% on their average. A program that alternates the two
-//! and needs its single-threaded speed steady can keep that thread on the
-//! performance cores (`sched_setaffinity` on Linux).
-//!
 //! # Memory
 //!
 //! - **A [`Hasher`] is about 18 KiB**; box it where that matters.
@@ -956,6 +945,17 @@ pub fn hash(input: &[u8]) -> Hash {
 /// **Several callers at once**: calls from several threads of one program
 /// share the cores in turn, each getting a fair part; a call that finds the
 /// cores all busy hashes on its own thread, at [`hash`]'s speed.
+///
+/// **CPUs with performance and efficiency cores** (Intel's since Alder
+/// Lake): a multithreaded call or stream uses every core, and afterwards
+/// the OS sometimes leaves the calling thread on an efficiency core for a
+/// while, where single-threaded hashing runs at about half speed (AVX2's
+/// 256-bit operations run as two halves there). Measured on an i7-12700K
+/// under Linux 7.0: beside nonstop multithreaded streams, 7% of 16 KiB
+/// single-threaded hashes ran partly on an efficiency core, 2.2 times
+/// slower, about 6% on their average. A program that alternates the two
+/// and needs its single-threaded speed steady can keep that thread on the
+/// performance cores (`sched_setaffinity` on Linux).
 ///
 /// The program calls [`initialize_multithreaded`] first; a call before it
 /// panics.
