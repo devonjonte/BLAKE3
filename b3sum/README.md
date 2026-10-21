@@ -12,7 +12,7 @@ With [Rust and Cargo](https://doc.rust-lang.org/cargo/getting-started/installati
 installed:
 
 ```
-cargo install --git https://github.com/johnservil/BLAKE3 b3sum
+cargo install --git https://github.com/devonjonte/BLAKE3 b3sum
 ```
 
 On Linux, build it statically linked instead: each run then starts in about two thirds
@@ -20,7 +20,7 @@ of the time, which matters where `b3sum` runs once per file. Give your machine's
 (`aarch64-unknown-linux-gnu` on 64-bit Arm):
 
 ```
-RUSTFLAGS="-C target-feature=+crt-static" cargo install --git https://github.com/johnservil/BLAKE3 b3sum --target x86_64-unknown-linux-gnu
+RUSTFLAGS="-C target-feature=+crt-static" cargo install --git https://github.com/devonjonte/BLAKE3 b3sum --target x86_64-unknown-linux-gnu
 ```
 
 Cargo puts the binary in `~/.cargo/bin`. (`cargo install b3sum` and the prebuilt
