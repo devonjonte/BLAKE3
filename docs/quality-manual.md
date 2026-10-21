@@ -11,7 +11,8 @@ overview, read [QUALITY.md](../QUALITY.md) first.
 | Platform | Its kernels | Checked |
 |---|---|---|
 | 64-bit Arm: Apple Silicon, Linux and macOS | the fork's assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved**, and tested |
-| x86-64: Linux, Windows (MSVC) | upstream's assembly, unchanged, and the fork's own kernels in Rust intrinsics | tested |
+| x86-64: Linux, Windows (MSVC) | upstream's assembly, unchanged | **proved in part** (below), and tested |
+| | the fork's own kernels in Rust intrinsics | tested |
 
 ## What is new, and so where the risk is
 
@@ -262,9 +263,29 @@ way, in two halves: its integer units hash chunk 16 in passes 0 to 7 and
 chunk 17 in passes 8 to 15. Each kernel also reads and writes only its own buffers, keeps
 the calling convention, and takes a path that depends only on lengths.
 
-The Rust code (the dispatch, the tree walk, the `Hasher`, the pool, the
-batch APIs) is tested, and unproved; so are
-x86-64.
+On x86-64, upstream's assembly kernels (SSE4.1, AVX2, AVX-512, each under
+the Unix and the Windows calling convention) are proved the same way,
+against the same definition, by `tools/verify/prove_x86.py`, as far as
+these cases:
+
+- one compression (`compress_in_place`, `compress_xof`): SSE4.1 and
+  AVX-512 (AVX2 has none of its own), both conventions;
+- `hash_many`, Unix convention: every case of the tool's list, for all
+  three instruction sets: input counts up to two passes of the vector
+  width, block counts 1, 2 and 16, and the one-counter case;
+- `hash_many`, Windows convention: SSE4.1 25 of 25 cases, AVX2 49 of 49,
+  AVX-512 71 of 97 (none has failed);
+- AVX-512 `xof_many`: one to three blocks.
+
+Open: `hash_many` at every count (by induction) and the remaining
+Windows cases, `xof_many` from four blocks (the kernel agrees at random
+points; the normal form does not yet reach it), and the AVX-512
+instruction forms checked against a CPU that has them. These ran on an
+i7-12700K, outside the long proofs' run below.
+
+The fork's own x86-64 kernels in Rust intrinsics, and the Rust code (the
+dispatch, the tree walk, the `Hasher`, the pool, the batch APIs), are
+tested, and unproved.
 
 ### How to read what is proved
 
@@ -280,7 +301,7 @@ standard's appendix and the official test vectors.
 | Part | Statement | Checked by |
 |---|---|---|
 | The proofs' definition of the compression is the standard's | `tools/verify/lean/Sound.lean`: `symbolic_is_the_specifications` | Lean |
-| Each kernel computes that definition | `tools/verify/prove_hybrid.py`, `prove_sme2.py` (with `prove_block_loop.py` and `prove_hybrid_loop.py` for the SME2 block loops): every output word equal to the definition's, which `lean_spec.py` reads from Lean's `compress.json` | Z3 |
+| Each kernel computes that definition | `tools/verify/prove_hybrid.py`, `prove_sme2.py` (with `prove_block_loop.py` and `prove_hybrid_loop.py` for the SME2 block loops), and on x86-64 `prove_x86.py`: every output word equal to the definition's, which `lean_spec.py` reads from Lean's `compress.json` | Z3 |
 
 **What the proofs take on trust.** Lean rests on its kernel and three
 standard axioms (`propext`, `Classical.choice`, `Quot.sound`). The kernel
@@ -291,7 +312,10 @@ instruction's model is checked against the CPU on random states and, for
 322 of the 325 NEON and integer forms and 19 of the 23 streaming forms,
 proved equal to Arm's own specification of the architecture (Sail's
 Armv9.4, run by Isla); the rest, and the matrix unit's loads and stores,
-are checked against the CPU.
+are checked against the CPU. The x86-64 proofs rest likewise on
+`x86.py`'s model of each x86 instruction they meet, checked against the
+CPU (116 forms on an i7-12700K, and in CI on GitHub's x86 machines; the
+AVX-512 forms wait for a CPU that has them).
 
 **How the checkers are checked.**
 
@@ -333,6 +357,14 @@ pypy3 tools/verify/prove_hybrid.py   # ends "414 of 414 cases proved"
 pypy3 tools/verify/prove_sme2.py     # ends "38 of 38 cases proved" (the longest, the chunk kernel at every group count, 15 minutes)
 pypy3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # ends "3 of 3 cases proved": the other kernels at every group count (x2_every about 50 minutes)
 pypy3 tools/verify/mutants.py        # wrong kernels, each rejected
+```
+
+The x86-64 proofs run on any machine with PyPy, `python3-z3`, Clang and
+LLVM's `llvm-ml`; their instruction model is checked against the CPU by
+`tools/verify/cross_check_x86.py`, in CI on every change:
+
+```sh
+pypy3 tools/verify/prove_x86.py      # every case of its list, or name some
 ```
 
 All of them, 455 cases, run on the fork's VM after every change to a
@@ -531,8 +563,8 @@ among them, and however often the hash is timed.
    assembled: each proof stops at any branch, memory address, or table
    index that depends on the key or the message. The Rust code around
    the kernels is written to branch on lengths alone, and tested, but no
-   proof checks it; on x86-64 upstream's kernels make the same design
-   choice, unproved here.
+   proof checks it. On x86-64 the same checks hold wherever the x86
+   proofs above have run.
 2. **Each instruction takes the same time whatever values it computes
    on.** That is a promise of the CPU. BLAKE3 asks it only of additions,
    rotations, exclusive ors, loads and stores, and no CPU we know of
@@ -558,6 +590,7 @@ The test suites have run on an Apple M4 Max, under macOS and in a
 Debian 12 AArch64 VM on it (whose SME2 unit the VM exposes), and on
 CI's hosted machines; the sanitizers on both, Miri in the VM.
 
-Not yet proved: that the Rust around the Arm kernels (the dispatch, the tree,
+Not yet proved: that the Rust around the kernels (the dispatch, the tree,
 the `Hasher`) keeps secrets from steering a whole call, which is
-tested; and the x86-64 kernels, upstream's and the fork's.
+tested; upstream's x86-64 assembly beyond the cases above; and the
+fork's x86-64 kernels in Rust intrinsics.

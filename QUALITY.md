@@ -8,7 +8,7 @@ and from splitting work across processor cores. That is also where
 mistakes are most likely, so the project checks the code in several
 different ways.
 
-## Proof of the fastest Arm code
+## Proofs of the kernels
 
 The fastest parts are small routines called kernels, some of them
 written in assembly.
@@ -21,9 +21,14 @@ input. The proof also shows that a kernel stays within the memory it is
 given and that the instructions it chooses depend on the input's length,
 not on its contents.
 
-This proof has a limited scope. It covers the Arm assembly kernels. It
-does not cover the assembly used on Intel and AMD processors, or the
-Rust code that prepares work and combines results.
+On Intel and AMD processors, the assembly kernels (upstream BLAKE3's,
+unchanged) are being proved the same way. Their single compressions are
+proved. Their batch kernels are proved for the input sizes and counts
+checked so far, but not yet for every count, and one form of extended
+output is still open.
+
+The proofs do not cover the fork's own Intel and AMD kernels, written in
+Rust, or the Rust code that prepares work and combines results.
 
 ## Tests, and tests of the tests
 
@@ -87,8 +92,9 @@ mistakes in some of the tools and models used to construct the proofs.
 ## What remains uncertain
 
 No human has carefully reviewed every line, and nobody outside the
-project has audited the code. The Intel and AMD assembly relies on tests
-rather than proof, as does the Rust code around the proved Arm kernels.
+project has audited the code. Where the Intel and AMD proofs are not yet
+complete, and in the fork's own Intel and AMD kernels and the Rust code
+around the proved kernels, tests carry the checking alone.
 These checks reduce risk, but they cannot guarantee that no bug remains.
 
 ## Run the checks
