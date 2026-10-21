@@ -22,6 +22,14 @@ Kernels: k<n> hashes n chunks. Composition per kernel:
   k8: two scalars + quad + pair  k9: scalar + two quads
   k10: two scalars + two quads
 
+CPUs without SHA-3 (no `xar`) run a second family: kn2, kn4, kn5, kn6, kn8
+and pn2, pn4, pn5, pn6, pn10, of scalars and quads (whose rotates are
+`rev32`, `tbl`, and `shl` + `sri`), chosen by `sha3_detected()`; counts 3
+and 7 run a kernel and k1 after it. x4 and x8 are quads with an extended-
+output stage. Every Arm kernel is this generator's assembly, proved as
+assembled (tools/verify); a kernel in intrinsics is whatever the compiler
+emits, and no proof covers it.
+
 C ABI, every kernel:
   fn(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64,
      packed_flags: u64, out: *mut u8)
@@ -65,6 +73,11 @@ Tried and set aside (VM unless said; E-core cycles from the Mac):
     12-27% faster nonstop, 8-38% after a pause (Mac).
   - Estimated, not built: a direct small-tree path (1-2% at 4 KiB) and
     the parents and root folded into k4 (about 3.6%).
+  - k9 and k10 for CPUs without SHA-3 (they use no `xar`): llvm-mca
+    predicts k9 161 cycles a chunk-block against the four-lane C
+    kernel's 184-198 on the Cortex-A57 model, 122 against 129-134 on the
+    Neoverse N1, about 4x slower on the A53, so they would need a choice
+    by CPU type. Waiting for such a machine to measure on.
 
 Run from the repository root:
 
@@ -877,7 +890,12 @@ def lean_kernel(name, sc, last):
     return L
 
 
-# The one-chunk kernel's rounds as a loop (lean_kernel).
+# The one-chunk kernel's rounds as a loop (lean_kernel): it made `hash` of a
+# chunk or less 25-33% faster now and then on the M4 Max (its code stays in
+# cache), 2-4% slower nonstop. Unrolled, llvm-mca predicts 13% fewer cycles
+# on the Cortex-A72 and 10% on the N1 back to back, the pattern SUPERCOP
+# measures, but it models no instruction cache; rolled stays (Zooko,
+# October 13, 2026).
 ROLLED_K1 = True
 
 
