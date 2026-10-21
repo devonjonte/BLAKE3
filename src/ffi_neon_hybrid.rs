@@ -160,7 +160,13 @@ const CHUNK_KERNELS: [Option<Kernel>; 11] = [
     Some(asm::blake3_hybrid_k10),
 ];
 
-/// Kernel sizes per chunk count 1..=16, largest first.
+/// Kernel sizes per chunk count 1..=16, largest first. Each count's plan is
+/// the one with the smallest worst ratio to the best plan across a P-core,
+/// an E-core and the VM, except 4 and 8 chunks, where Zooko chose P-core
+/// speed (k4, k8, with two scalar lanes). Ten whole chunks keep one k10 call
+/// and the partial chunk after it (every split cost more); one whole chunk
+/// with a partial one uses q1 from five partial blocks (below that P-cores
+/// lost up to 14%).
 const CHUNK_PLANS: [&[usize]; 17] =
     [&[], &[1], &[2], &[3], &[4], &[5], &[6], &[7], &[8], &[9], &[10], &[8, 3], &[9, 3], &[10, 3], &[10, 4], &[10, 5], &[10, 6]];
 

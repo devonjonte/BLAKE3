@@ -73,7 +73,12 @@ pub enum Platform {
 /// process's other threads to E-cores on an M4 Max (4-10% of a sleeping
 /// thread's following work; the turn took the benchmark's small cells'
 /// E-core samples from 5.1% to none). Calls too small for the SME2 kernels
-/// (`sme2_sized` false) leave the turn alone.
+/// (`sme2_sized` false) leave the turn alone. The flag is a plain load and
+/// store, no read-modify-write: two calls taking it at one instant can both
+/// get it, which costs only what running SME2 at once always cost. Its
+/// accepted costs (Zooko, September 2026): two programs sharing the machine
+/// lose the cells where each held an SME unit, and their small batches
+/// 6-16%.
 pub(crate) struct Sme2Turn {
     platform: Platform,
     #[cfg(blake3_sme2)]

@@ -29,8 +29,9 @@ The README lists what the fork adds for callers; the code is laid out so:
 - `tools/verify/`: the proofs (docs/quality-manual.md, "Proofs"); `tools/mutants/`:
   mutation testing and the list of mutants known to survive.
 
-`NOTES-servil.md` holds the design and the measurements behind it,
-including the ideas tried and rejected.
+Each part's design, the measurements behind it, and the ideas tried and
+set aside sit in its own documentation: the module's, the generator's
+header, the tool's README.
 
 ## Build and test
 
@@ -179,9 +180,7 @@ lists what it takes and ticks each step:
 
 ## Maintainers' notes
 
-`AGENTS.md` and `NOTES-servil.md` here, and `AGENTS.md`
-and `FROZEN.md` in bench-hashes, are the maintainers' working notes: their
-environment and the reasoning behind past decisions; the current work is
-in the issues. Contributing
-needs none of them; `NOTES-servil.md` is worth reading before you
-change a kernel or the thread pool.
+`AGENTS.md` here, and `AGENTS.md` and `FROZEN.md` in bench-hashes, are the
+maintainers' working notes: their environment and the reasoning behind
+past decisions; the current work is in the issues. Contributing needs none
+of them.
