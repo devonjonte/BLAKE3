@@ -52,7 +52,7 @@
 //! 14-21% with four, 1-6% with sixteen; the VM on it alike. Pieces on
 //! SME2 handed out one at a time lost (8-128 KiB, with the caller's
 //! bookkeeping between them): the SME unit's slow state follows about
-//! 0.2 µs of other work between its kernels (NOTES-servil.md).
+//! 0.2 µs of other work between its kernels (`sme2`'s documentation).
 //!
 //! # Waiting
 //!
@@ -68,7 +68,10 @@
 //! after [`SPIN_BEFORE_SLEEP`]; its polls yield the CPU every
 //! [`YIELD_EVERY`], so a runnable thread never waits a scheduler quantum
 //! behind a poller (two threads spinning without yielding took a 128 KiB
-//! split from 29 us to 2 ms on a two-CPU machine).
+//! split from 29 us to 2 ms on a two-CPU machine). Idle threads cost the
+//! busy ones unless they sleep: beside eight hashing threads, eight
+//! spinning on loads cost them 18% (VM and Mac), `sched_yield` in a loop
+//! 36% on the VM.
 //!
 //! # Tried and set aside
 //!

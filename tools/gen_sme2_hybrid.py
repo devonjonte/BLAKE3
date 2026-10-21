@@ -4,7 +4,9 @@ an integer BLAKE3 lane beside the sixteen streaming-vector lanes.
 
 Why: the core issues SME2 vector ops to the SME unit one per cycle and
 keeps executing independent integer ops beside them at about four per
-cycle, on P- and E-cores alike (probe/sme-scalar, NOTES-servil.md). One
+cycle, on P- and E-cores alike (probe/sme-scalar: a loop of 24 SME2
+vector ops and 96 integer ops of BLAKE3's pattern takes 24 cycles on a
+P-core, the longer of the two alone, never their sum). One
 SME2 block step (sixteen chunks' compressions) takes about 700 cycles; a
 scalar compression is a 168-cycle dependency chain. So `k` scalar blocks
 fit beside each SME2 block step, and a group hashes 16 + k chunks: the

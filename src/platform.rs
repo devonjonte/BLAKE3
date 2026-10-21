@@ -66,9 +66,13 @@ pub enum Platform {
 /// the turn at the same instant can both get it): the turn a call takes
 /// before it runs SME2 kernels, and the platform it runs on. A call finding
 /// another SME2 call running takes NEON instead. Two SME2 threads of a process can
-/// share one SME unit, each at half speed or less, slower than NEON; and
-/// three of them at once sent the process's other threads to E-cores on an
-/// M4 Max (NOTES-servil.md). Calls too small for the SME2 kernels
+/// share one SME unit (macOS keeps a thread group on one P-cluster), each
+/// at half speed or less, slower than NEON (n threads each hashing 1 MiB:
+/// 0.170, 0.176, 0.322, 0.47 ns/B a thread on SME2 for n = 1, 2, 4, 8,
+/// NEON 0.25 throughout); and SME2 calls running together sent the
+/// process's other threads to E-cores on an M4 Max (4-10% of a sleeping
+/// thread's following work; the turn took the benchmark's small cells'
+/// E-core samples from 5.1% to none). Calls too small for the SME2 kernels
 /// (`sme2_sized` false) leave the turn alone.
 pub(crate) struct Sme2Turn {
     platform: Platform,

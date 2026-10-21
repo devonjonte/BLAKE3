@@ -13,6 +13,30 @@
 //! selects NEON otherwise, so a return value other than 16 here is a
 //! contract violation and stops the program.
 //!
+//! # The SME unit's slow state
+//!
+//! The SME unit runs SME2 kernels at full speed back to back. About 0.2 µs
+//! of other work on the core between them puts it in a slow state for the
+//! next ones (M4 Max P-core, 8 MiB in 64 KiB pieces: 0.152 ns/B back to back
+//! and with 0.1 µs of scalar work between pieces, 0.179 at 0.25 µs,
+//! 0.195-0.20 from 0.5 µs, about 2.5 µs a piece; the VM alike); streaming
+//! sessions back to back cost nothing. The core's cycles per ns show the
+//! state (3.93 fast, 3.20-3.30 slow: the difference is time the core waits
+//! on the unit), which classifies a measurement better than comparing wall
+//! times across runs. So the SME2 paths keep NEON and other work from
+//! falling between their kernels: the flat walk, the padded groups, the
+//! remainders' placement. Three placements put the unit there as well:
+//! 32-byte chaining-value stores off a 32-byte boundary; a deep stack frame,
+//! whose page probes land among the buffers the unit is about to use (so
+//! the flat walk's scratch is the thread's, not the stack's); and buffers at
+//! one address mod 4 KiB (so the scratch sits on a 4 KiB boundary, its
+//! buffers at 0, 1 and 3 KiB). The unit writing lines the core has just
+//! written costs too (a zeroed scratch output 46 ns a message against 38
+//! written in place), so the kernels store only the lanes asked for, and
+//! scratch stays uninitialised. Streaming mode also lowers a P-core's
+//! clock: the same integer loop ran 13% longer inside it (3.93 cycles per
+//! ns against 4.51).
+//!
 //! What SME2 buys over the NEON hybrids, nonstop on an M4 Max (probe/sme2-worth):
 //! one thread 1.5-1.7x (hash of 64 KiB-64 MiB 0.25 -> 0.15-0.17 ns/B),
 //! batches 1.9x (18.2 -> 9.4 ns a message), outboards 1.5x, a Hasher fed
@@ -140,7 +164,7 @@ pub unsafe fn hash_many<const N: usize>(
     // past the idle time (about a quarter of a microsecond) after which the
     // SME unit drops to a state about 20% slower that lasts tens of
     // microseconds, so the next SME2 work, this call's or the next one's,
-    // runs slow (NOTES-servil.md, "SME2 remainders").
+    // runs slow (the slow state, in this module's documentation).
     let rest = inputs.len() - done;
     if N == BLOCK_LEN && !increment_counter.yes() && done > 0 && rest >= OVERLAP_MIN {
         let mut last = [0u8; GROUP * OUT_LEN];
@@ -357,8 +381,8 @@ pub fn flat_takes(len: usize) -> bool {
  * plain kernel in groups of 16, with nothing left over (n is a multiple of
  * 16); then each parent level from n / 2 down to DEGREE values goes to the
  * parent kernel, every level a multiple of 16. No NEON work falls between
- * SME2 kernels, so the SME unit never idles on our account (NOTES-servil.md,
- * "SME2 remainders"). Out of line: its 56 KiB of stack arrays belong to
+ * SME2 kernels, so the SME unit never idles on our account (the slow
+ * state, in this module's documentation). Out of line: its 56 KiB of stack arrays belong to
  * large inputs alone. Unsafe because the CPU must have SME2 with 512-bit
  * streaming vectors; `flat_takes(input.len())` must hold, and `out` must
  * have room for DEGREE values.
@@ -373,8 +397,8 @@ pub unsafe fn compress_subtree_flat(input: &[u8], ahead: usize, key: &CVWords, c
 /// sixteen parents run as one padded SME2 group each (lanes past the
 /// level's parents compress bytes nobody reads), so no NEON or scalar work
 /// falls between the SME2 kernels: 0.25 µs of other work between them puts
-/// the SME unit in its slow state for the next ones (NOTES-servil.md,
-/// "SME2 remainders"). Unsafe for the reasons of [`compress_subtree_flat`].
+/// the SME unit in its slow state for the next ones (the module's
+/// documentation). Unsafe for the reasons of [`compress_subtree_flat`].
 #[inline(never)]
 pub unsafe fn compress_subtree_flat_to_parent(input: &[u8], ahead: usize, key: &CVWords, chunk_counter: u64, flags: u8) -> [u8; crate::BLOCK_LEN] {
     let mut out = [0u8; crate::BLOCK_LEN];
@@ -439,7 +463,7 @@ unsafe fn walk_on_stack(input: &[u8], key: &CVWords, chunk_counter: u64, flags: 
 /// 0.18 ns/B with the block at a multiple of 1 KiB mod 4 KiB and 0.22 at
 /// 0x680, 0x700, 0xe80, 0xf00, so a process's first spawned thread (its
 /// block at 0xd00) ran slow, and its main thread by chance (September 26,
-/// 2026; fork NOTES, "The slow state, measured directly").
+/// 2026).
 #[repr(C, align(4096))]
 struct Scratch([core::mem::MaybeUninit<u8>; SCRATCH]);
 

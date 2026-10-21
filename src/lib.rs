@@ -1509,7 +1509,7 @@ impl hasher::Hooks for HasherHooks<'_> {
         // walk runs it down to its own chaining value, so one value goes
         // on the stack and about one merge runs on the core between SME2
         // kernels (about 0.2 us of other work between them puts the SME
-        // unit in its slow state; NOTES-servil.md).
+        // unit in its slow state: `sme2`'s documentation).
         #[cfg(blake3_sme2)]
         if !self.pooled && matches!(self.platform, Platform::SME2) && sme2::flat_takes(input.len()) {
             // Safe: the SME2 platform is selected only where the CPU has it.

@@ -3,8 +3,10 @@
 whole 1024-byte chunks at once, one chunk on the integer ALUs beside two or
 four chunks per NEON unit.
 
-Why: a single chunk is a dependency chain. The scalar G runs at 12 cycles a
-step on the integer units; the NEON "dup layout" G (one 32-bit word held
+Why: a single chunk is a dependency chain: a block takes 168 cycles on the
+integer units, about 2.6 cycles a byte against hardware SHA-256's 1.4-1.6,
+so below about 2 KiB nothing catches SHA-256 on these cores. The scalar G
+runs at 12 cycles a step on the integer units; the NEON "dup layout" G (one 32-bit word held
 twice per 64-bit lane so `xar` rotates it) at 16-18; the classic four-lane
 NEON G at 27-29. Integer and vector units have separate pipes and register
 files, so a scalar chunk beside NEON work costs nothing extra. NEON register
@@ -50,8 +52,10 @@ C ABI, every kernel:
 Tried and set aside (VM unless said; E-core cycles from the Mac):
   - Two scalar chunks in place of the pair for two chunks (k2): 2 KiB 919
     -> 1291 ns; their d rows' spills sit on the chain.
-  - A second scalar lane elsewhere: two scalar lanes cost E-cores 14-30%
-    more cycles. Only k4/k6/k8/k10 and p4 keep two: p4 because four
+  - A second scalar lane elsewhere: one scalar lane beside NEON pays on
+    P- and E-cores alike (p3, p5, p7, p9 beat their kernels in turn by
+    8-38%), but a second costs E-cores what it saves P-cores (k4 1.16 /
+    2.41 cycles a byte, P / E; k6 1.00 / 2.07). Only k4/k6/k8/k10 and p4 keep two: p4 because four
     64-byte messages run 13-14% faster on P-cores and the VM (Zooko,
     September 27, 2026: hash_many is built for top speed).
   - k4 as two pairs, and the other plans with no second scalar chunk:
