@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The release checklist's mechanical steps, read from where each gate
-left its result, for one commit (PROCEDURES.md, "Releases").
+left its result, for one commit (CONTRIBUTING.md, "Releases").
 
     pypy3 tools/release-check.py [COMMIT]        # default: servil's tip
 

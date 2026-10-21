@@ -56,7 +56,7 @@ cargo test --release --doc
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API
 sh tools/check-builds.sh            # the builds the suites leave out
-pypy3 tools/mutants/check.py        # about an hour: every surviving mutant known
+pypy3 tools/mutants/check.py        # about 25 minutes: every surviving mutant known
 ```
 
 A change that makes a mutant survive, or lets a listed one be caught,
@@ -105,20 +105,81 @@ again on a quiet machine). `sh tools/install-git-hooks.sh` installs a pre-commit
 that runs it for every commit that touches code. To run the full
 benchmark against your working tree, see bench-hashes' `CONTRIBUTING.md`.
 
+A regression holds the commit: find its cause and fix it. When the
+slowdown is the price of something worth more (correctness, a simpler
+design), the maintainers decide; an accepted one lands with `--no-verify`
+and its slowed cells, their numbers, and the decision in its message. A
+streaming API's cells never slow to speed up another API. A commit in
+`src/` or `c/` that leaves the machine code as it was (code for other
+targets, tests, comments) skips the check with `--no-verify` and a line
+in its message saying why. Commits made without the hook are checked
+before they are pushed, each against its parent, and a run of them also
+last against first, which sees slowdowns each step kept under the
+margin.
+
 ## Branches and changes
 
 `servil` is the main line. Work happens on `candidate/<topic>`
-branches; a candidate joins `servil` as a fast-forward once every check
-above passes, mutation testing passes on a change to the Rust
-(`tools/mutants/check.py --since servil`), and the regression check finds no slowdown
-on AArch64 Linux in a VM and natively on an Apple M4 Max. The proofs
-(docs/quality-manual.md says how to run them) run after a change to an AArch64
-kernel or the proof tools lands; a failure is fixed first. Pull requests are welcome
-against `servil`; say in yours which machines you measured on.
+branches; a candidate joins `servil` as a fast-forward of its tip (so
+what was checked is what lands) once:
+
+- every suite above passes, and `sh tools/check-builds.sh`;
+- CI passes on it, started by hand (`workflow_dispatch`) when it changes
+  code for targets the VM and Mac do not run (x86-64, Windows, AArch64
+  without SME2);
+- mutation testing passes on a change to the Rust
+  (`pypy3 tools/mutants/check.py --since servil`: the mutants in the
+  changed lines, and the ones the last map says a changed test catches);
+- the regression check finds no slowdown on AArch64 Linux in a VM and
+  natively on an Apple M4 Max. A candidate that changes no compiled code
+  needs no speed check: it would compare identical code.
+
+Jobs of hours run on `servil` overnight: the whole mutation run, and the
+long proofs (`sh tools/verify/long-proofs.sh servil`, which posts the
+commit's "long proofs" status) after a change to an AArch64 kernel or
+the proof tools. A failure there is fixed first, before the next change
+to a kernel. After a candidate lands, bench-hashes pins the new tip
+(both `rev`s in its `Cargo.toml`, the full hash): that pin is what its
+users measure. Pull requests are welcome against `servil`; say in yours
+which machines you measured on.
+
+## Releases
+
+A release is a commit everyone can stand behind: every check the main
+line runs once per change, run once more on that commit, and the pages
+users read rewritten for it. `pypy3 tools/release-check.py [COMMIT]`
+reads where each step left its result and prints PASS, FAIL, or OPEN
+with the command that makes the evidence. The release's tracking issue
+lists what it takes and ticks each step:
+
+1. CI, every job, on the tip; `sh tools/check-builds.sh`.
+2. `bench-hashes check --against <previous release tag> --cells all`, on
+   the VM and the Mac: each commit was checked against its parent alone,
+   and this sees what small slowdowns add up to.
+3. The long proofs, every kernel; the full mutation run.
+4. `cargo publish --dry-run` in the root and in `b3sum/`.
+5. The pages, read as a newcomer would: the README's servil preface,
+   `QUALITY.md` and `docs/quality-manual.md`, `CHANGELOG.md` (what
+   changed for users, in their terms), the supported-platforms table
+   (exactly what CI runs).
+6. A full bench-hashes run on the release commit on the Mac, published to
+   bench-hashes' pages with the release named on the map.
+7. `pypy3 tools/gen-ver.py X.Y.Z` from a clean tree: one commit writing
+   `X.Y.Z+<its parent's hash>` into every version string (the crate,
+   b3sum, the C library's crate, header and pkg-config file, the
+   CHANGELOG's title) and the tag on it; it prints the dependency line
+   for the release notes.
+8. `cargo publish` in the root, then `b3sum/`; b3sum's binaries from a
+   clean tree at the tag on each machine (`sh tools/b3sum-release.sh`,
+   statically linked on Linux), each with its `.sha256` and `.b3`; the C
+   library (`cargo build --release` in `capi/`: the static and shared
+   libraries and `b3.h`); the GitHub release, its text the CHANGELOG
+   entry.
+9. The eBASH submission, pinned to the tag (`supercop/README.md`).
 
 ## Maintainers' notes
 
-`AGENTS.md`, `PROCEDURES.md`, and `NOTES-servil.md` here, and `AGENTS.md`
+`AGENTS.md` and `NOTES-servil.md` here, and `AGENTS.md`
 and `FROZEN.md` in bench-hashes, are the maintainers' working notes: their
 environment and the reasoning behind past decisions; the current work is
 in the issues. Contributing

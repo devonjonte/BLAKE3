@@ -37,9 +37,29 @@ the runner) and starts it. Steps already done are skipped, so the same
 command starts the runner every time, including after a change to
 `runner.py`. Ctrl-C stops the runner after the current job.
 
-While a job that times runs (`benchmark`, `example`, `check`),
-nothing else should run on the Mac, the VM included; a `test` job (the
-fork's suites, natively) needs no quiet machine.
+## Running a job
+
+Write `runner/jobs/NNN-name.json` naming pushed commits (the runner
+fetches branches alone: push a pull request's head as `candidate/*`
+first); wait with `pypy3 tools/runner/wait_for.py NNN-name`; results land
+in `runner/results/`. A job runs once per file name, so a changed job
+takes a new number.
+
+While a job that times runs (`benchmark`, `b3sum`, `example`, `check`),
+nothing else should run on the Mac, the VM included, and Activity
+Monitor stays closed (it keeps `sysmond` near a whole CPU busy: with it
+open, 170 of 219 load windows of a run read busy, closed 5 of 214). The
+Mac stays on mains power: on battery it runs more calls after a pause on
+its efficiency cores (233 of 400 against 32), and every job's
+`verdict.json` records the power state at its start and end; read it
+before trusting a job. A `test` job (the fork's suites, natively) needs
+no quiet machine.
+
+A direct A/B is four `benchmark` jobs, old new new old, back to back,
+read with `bench-hashes compare`; a calibration is one job with
+`"repeat": N`. Mac-only measurements (cycles by core kind, QoS) go in a
+`probe/<topic>` branch with its own `examples/host_lab.rs`; the branch
+becomes a tag of the same name once its finding is written down.
 
 ## Tested
 

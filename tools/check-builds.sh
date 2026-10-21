@@ -1,6 +1,6 @@
 #!/bin/sh
 # The builds the Mac's and the VM's suites leave out, checked in minutes
-# on this machine (part of a promotion's gate, PROCEDURES.md): the library
+# on this machine (part of a candidate's gate, CONTRIBUTING.md): the library
 # without std, tested; the library on one CPU without SME2, tested;
 # warnings as errors for the default and pure builds and b3sum;
 # the C API, tested from Rust and from C;

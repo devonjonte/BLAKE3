@@ -916,7 +916,7 @@ code is formally verified (the progress meter: issue #24).
 `supercop.html`) and SUPERCOP's tree (its `crypto_*` examples, `do-part`,
 `OPERATIONS`) win over these notes and over the fork's habits. Its reader is Dan
 Bernstein, the maintainer, who adds what he is sent in one action
-(PROCEDURES.md, "eBASH, after each release").
+(supercop/README.md, "After each release").
 
 **The rule for changes made with eBASH in mind** (Zooko, October 12, 2026): eBASH
 should predict what our users see. A change that also speeds the fork up for

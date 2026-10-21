@@ -3,7 +3,7 @@
 # tag: statically linked on Linux (the recommended build, b3sum/README.md),
 # as the platform links elsewhere (macOS). Writes dist/b3sum-VERSION-TARGET
 # and its SHA-256 and BLAKE3 digests beside it, for a GitHub release
-# (PROCEDURES.md, "Releases").
+# (CONTRIBUTING.md, "Releases").
 #
 #     sh tools/b3sum-release.sh
 set -eu
