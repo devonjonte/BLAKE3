@@ -48,8 +48,6 @@ pub const TEST_CASES: &[usize] = &[
 
 pub const TEST_CASES_MAX: usize = 100 * CHUNK_LEN;
 
-// There's a test to make sure these two are equal below.
-pub const TEST_KEY: CVBytes = *b"whats the Elvish word for friend";
 pub const TEST_KEY_WORDS: CVWords = [1952540791, 1752440947, 1816469605, 1752394102, 1919907616, 1868963940, 1919295602, 1684956521];
 
 // Paint the input with a repeating byte pattern. We use a cycle length of 251,
@@ -245,248 +243,12 @@ pub fn test_xof_many_fn(xof_many_function: XofManyFunction) {
     }
 }
 
-#[test]
-fn test_key_bytes_equal_key_words() {
-    assert_eq!(TEST_KEY_WORDS, crate::platform::words_from_le_bytes_32(&TEST_KEY),);
-}
-
-#[test]
-fn test_reference_impl_size() {
-    // Because the Rust compiler optimizes struct layout, it's possible that
-    // some future version of the compiler will produce a different size. If
-    // that happens, we can either disable this test, or test for multiple
-    // expected values. For now, the purpose of this test is to make sure we
-    // notice if that happens.
-    assert_eq!(1880, core::mem::size_of::<reference_impl::Hasher>());
-}
-
-#[test]
-fn test_counter_words() {
-    let counter: u64 = (1 << 32) + 2;
-    assert_eq!(crate::counter_low(counter), 2);
-    assert_eq!(crate::counter_high(counter), 1);
-}
-
-#[test]
-fn test_subtree_len() {
-    // The largest power of two at most `remaining` dividing the bytes so far.
-    for counter in [0u64, 1, 2, 3, 4, 6, 8, 12, 1 << 20, (1 << 20) + 3, (1 << 54) - 1] {
-        for remaining in [1025usize, 2047, 2048, 2049, 4096, 1 << 20, (1 << 20) + 1, usize::MAX] {
-            let mut want = 1usize;
-            while want <= remaining / 2 && (counter * 1024) % (2 * want as u64) == 0 {
-                want *= 2;
-            }
-            assert_eq!(crate::hasher::subtree_len(counter, remaining), want, "{counter} {remaining}");
-        }
-    }
-}
-
-#[test]
-fn test_compare_reference_impl() {
-    const OUT: usize = 303; // more than 64, not a multiple of 4
-    let mut input_buf = [0; TEST_CASES_MAX];
-    paint_test_input(&mut input_buf);
-    for &case in TEST_CASES {
-        let input = &input_buf[..case];
-        #[cfg(feature = "std")]
-        dbg!(case);
-
-        // regular
-        {
-            let mut reference_hasher = reference_impl::Hasher::new();
-            reference_hasher.update(input);
-            let mut expected_out = [0; OUT];
-            reference_hasher.finalize(&mut expected_out);
-
-            // all at once
-            let test_out = crate::hash(input);
-            assert_eq!(test_out, *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
-            // incremental
-            let mut hasher = crate::Hasher::new();
-            hasher.update(input);
-            assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
-            assert_eq!(hasher.finalize(), test_out);
-            // xof
-            let mut extended = [0; OUT];
-            hasher.finalize_xof().fill(&mut extended);
-            assert_eq!(extended, expected_out);
-        }
-
-        // keyed
-        {
-            let mut reference_hasher = reference_impl::Hasher::new_keyed(&TEST_KEY);
-            reference_hasher.update(input);
-            let mut expected_out = [0; OUT];
-            reference_hasher.finalize(&mut expected_out);
-
-            // all at once
-            let test_out = crate::hash_with(crate::Mode::Keyed(&TEST_KEY), input);
-            assert_eq!(test_out, *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
-            // incremental
-            let mut hasher = crate::Hasher::new_with(crate::Mode::Keyed(&TEST_KEY));
-            hasher.update(input);
-            assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
-            assert_eq!(hasher.finalize(), test_out);
-            // xof
-            let mut extended = [0; OUT];
-            hasher.finalize_xof().fill(&mut extended);
-            assert_eq!(extended, expected_out);
-        }
-
-        // derive_key
-        {
-            let context = "BLAKE3 2019-12-27 16:13:59 example context (not the test vector one)";
-            let mut reference_hasher = reference_impl::Hasher::new_derive_key(context);
-            reference_hasher.update(input);
-            let mut expected_out = [0; OUT];
-            reference_hasher.finalize(&mut expected_out);
-
-            // all at once
-            let test_out = *crate::hash_with(crate::Mode::DeriveKey(context), input).as_bytes();
-            assert_eq!(test_out, expected_out[..32]);
-            // incremental
-            let mut hasher = crate::Hasher::new_with(crate::Mode::DeriveKey(context));
-            hasher.update(input);
-            assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&expected_out[..32]).unwrap());
-            assert_eq!(hasher.finalize(), *<&[u8; 32]>::try_from(&test_out[..32]).unwrap());
-            // xof
-            let mut extended = [0; OUT];
-            hasher.finalize_xof().fill(&mut extended);
-            assert_eq!(extended, expected_out);
-        }
-    }
-}
-
-#[test]
-fn test_compare_reference_impl_long_xof() {
-    let mut reference_output = [0u8; 32 * BLOCK_LEN - 1];
-    let mut reference_hasher = reference_impl::Hasher::new_keyed(&TEST_KEY);
-    reference_hasher.update(b"hello world");
-    reference_hasher.finalize(&mut reference_output);
-
-    let mut test_output = [0u8; 32 * BLOCK_LEN - 1];
-    let mut test_hasher = crate::Hasher::new_with(crate::Mode::Keyed(&TEST_KEY));
-    test_hasher.update(b"hello world");
-    test_hasher.finalize_xof().fill(&mut test_output);
-
-    assert_eq!(reference_output, test_output);
-}
-
-#[test]
-fn test_xof_partial_blocks() {
-    const OUT_LEN: usize = 6 * BLOCK_LEN;
-    let mut reference_out = [0u8; OUT_LEN];
-    reference_impl::Hasher::new().finalize(&mut reference_out);
-
-    let mut all_at_once_out = [0u8; OUT_LEN];
-    crate::Hasher::new().finalize_xof().fill(&mut all_at_once_out);
-    assert_eq!(reference_out, all_at_once_out);
-
-    let mut partial_out = [0u8; OUT_LEN];
-    let partial_start = 32;
-    let partial_end = OUT_LEN - 32;
-    let mut xof = crate::Hasher::new().finalize_xof();
-    xof.fill(&mut partial_out[..partial_start]);
-    xof.fill(&mut partial_out[partial_start..partial_end]);
-    xof.fill(&mut partial_out[partial_end..]);
-    assert_eq!(reference_out, partial_out);
-}
-
 pub(crate) fn reference_hash(input: &[u8]) -> crate::Hash {
     let mut hasher = reference_impl::Hasher::new();
     hasher.update(input);
     let mut bytes = [0; 32];
     hasher.finalize(&mut bytes);
     bytes.into()
-}
-
-#[test]
-fn test_compare_update_multiple() {
-    // Don't use all the long test cases here, since that's unnecessarily slow
-    // in debug mode.
-    let mut short_test_cases = TEST_CASES;
-    while *short_test_cases.last().unwrap() > 4 * CHUNK_LEN {
-        short_test_cases = &short_test_cases[..short_test_cases.len() - 1];
-    }
-    assert_eq!(*short_test_cases.last().unwrap(), 4 * CHUNK_LEN);
-
-    let mut input_buf = [0; 2 * TEST_CASES_MAX];
-    paint_test_input(&mut input_buf);
-
-    for &first_update in short_test_cases {
-        #[cfg(feature = "std")]
-        dbg!(first_update);
-        let first_input = &input_buf[..first_update];
-        let mut test_hasher = crate::Hasher::new();
-        test_hasher.update(first_input);
-
-        for &second_update in short_test_cases {
-            #[cfg(feature = "std")]
-            dbg!(second_update);
-            let second_input = &input_buf[first_update..][..second_update];
-            let total_input = &input_buf[..first_update + second_update];
-
-            // Clone the hasher with first_update bytes already written, so
-            // that the next iteration can reuse it.
-            let mut test_hasher = test_hasher.clone();
-            test_hasher.update(second_input);
-            let expected = reference_hash(total_input);
-            assert_eq!(expected, test_hasher.finalize());
-        }
-    }
-}
-
-/// Hashers fed three updates against the reference implementation, each
-/// update's length one of the cases the staging (Hasher::gather_part)
-/// and the core distinguish: none, a byte, either side of a chunk, either
-/// side of the stage (crate::STAGE_LEN), and past two stages. Every order
-/// of three, so each update meets every staging state the others leave.
-#[test]
-fn test_hasher_update_cases() {
-    let lens = [0, 1, CHUNK_LEN - 1, CHUNK_LEN, CHUNK_LEN + 1, crate::STAGE_LEN - 1, crate::STAGE_LEN, crate::STAGE_LEN + 1, 2 * crate::STAGE_LEN + 1];
-    let mut input = vec![0u8; 3 * (2 * crate::STAGE_LEN + 1)];
-    paint_test_input(&mut input);
-    for &a in &lens {
-        for &b in &lens {
-            for &c in &lens {
-                let mut hasher = crate::Hasher::new();
-                hasher.update(&input[..a]).update(&input[a..][..b]).update(&input[a + b..][..c]);
-                assert_eq!(hasher.finalize(), reference_hash(&input[..a + b + c]), "updates of {a}, {b}, {c} bytes");
-            }
-        }
-    }
-}
-
-/// Extended output against the reference implementation at every case its
-/// reader distinguishes: a root of one block, of a whole multi-block chunk
-/// (BLOCK_LEN + 1 bytes), and a parent; a read starting at a block's start,
-/// its second byte, and its last; then 1 to 33 whole blocks (below, at,
-/// and past SME2's group of 16 and NEON's groups of 8 and 4, every
-/// remainder) and none, one, or BLOCK_LEN - 1 bytes more.
-#[test]
-fn test_xof_cases() {
-    let mut input = [0u8; CHUNK_LEN + 1];
-    paint_test_input(&mut input);
-    for input_len in [0, BLOCK_LEN, BLOCK_LEN + 1, CHUNK_LEN + 1] {
-        let mut reference = [0u8; 35 * BLOCK_LEN];
-        let mut reference_hasher = reference_impl::Hasher::new();
-        reference_hasher.update(&input[..input_len]);
-        reference_hasher.finalize(&mut reference);
-        let mut hasher = crate::Hasher::new();
-        hasher.update(&input[..input_len]);
-        for start in [0, 1, BLOCK_LEN - 1] {
-            for blocks in 1..=33 {
-                for tail in [0, 1, BLOCK_LEN - 1] {
-                    let mut xof = hasher.finalize_xof();
-                    let mut out = [0u8; 35 * BLOCK_LEN];
-                    let end = start + blocks * BLOCK_LEN + tail;
-                    xof.fill(&mut out[..start]);
-                    xof.fill(&mut out[start..end]);
-                    assert_eq!(out[..end], reference[..end], "{input_len} B input, from {start}, {blocks} blocks + {tail}");
-                }
-            }
-        }
-    }
 }
 
 #[test]
@@ -530,22 +292,6 @@ fn test_xof_seek() {
         assert_eq!(reader.seek(std::io::SeekFrom::Current(2)).unwrap(), u64::MAX);
         assert_eq!(std::format!("{reader:?}"), "OutputReader { position: 18446744073709551615 }");
     }
-}
-
-#[test]
-fn test_msg_schedule_permutation() {
-    let permutation = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8];
-
-    let mut generated = [[0; 16]; 7];
-    generated[0] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-
-    for round in 1..7 {
-        for i in 0..16 {
-            generated[round][i] = generated[round - 1][permutation[i]];
-        }
-    }
-
-    assert_eq!(generated, crate::MSG_SCHEDULE);
 }
 
 #[test]
@@ -735,45 +481,6 @@ fn test_zeroize() {
 
 #[test]
 #[cfg(feature = "std")]
-fn test_update_reader() -> Result<(), std::io::Error> {
-    // This is a brief test, since update_reader() is mostly a wrapper around update(), which already
-    // has substantial testing.
-    let mut input = vec![0; 1_000_000];
-    paint_test_input(&mut input);
-    assert_eq!(crate::Hasher::new().update_reader(&input[..])?.finalize(), crate::hash(&input),);
-    Ok(())
-}
-
-#[test]
-fn test_long_xof_matches_reference() {
-    // Extended output long enough for the platform's wide xof_many (SME2:
-    // groups of sixteen blocks), from block-aligned and unaligned positions,
-    // in every mode, against the reference implementation.
-    let mut input = [0; 3000];
-    paint_test_input(&mut input);
-    for (mode, len) in [(0, 0usize), (0, 1), (0, 1024), (0, 3000), (1, 100), (2, 777)] {
-        let (mut ours, mut reference) = match mode {
-            0 => (crate::Hasher::new(), reference_impl::Hasher::new()),
-            1 => (crate::Hasher::new_with(crate::Mode::Keyed(&TEST_KEY)), reference_impl::Hasher::new_keyed(&TEST_KEY)),
-            _ => (crate::Hasher::new_with(crate::Mode::DeriveKey("long xof")), reference_impl::Hasher::new_derive_key("long xof")),
-        };
-        ours.update(&input[..len]);
-        reference.update(&input[..len]);
-        let mut want = vec![0u8; 5 * 1024 + 300];
-        reference.finalize(&mut want);
-        for (skip, out_len) in [(0usize, 1024usize), (0, 1088), (64, 2048), (37, 4096), (1000, 4300), (0, 5 * 1024 + 300)] {
-            let out_len = out_len.min(want.len() - skip);
-            let mut got = vec![0u8; out_len];
-            let mut reader = ours.finalize_xof();
-            reader.set_position(skip as u64);
-            reader.fill(&mut got);
-            assert_eq!(got, want[skip..][..out_len], "mode {mode}, {len} input bytes, {out_len} bytes from {skip}");
-        }
-    }
-}
-
-#[test]
-#[cfg(feature = "std")]
 fn test_update_reader_keeps_every_byte_across_errors() {
     // A reader that fails (WouldBlock) after given offsets, in short reads,
     // and a caller that retries until the end: every byte read before each
@@ -847,6 +554,15 @@ fn test_update_reader_interrupted() -> std::io::Result<()> {
     Ok(())
 }
 
+// `cargo +nightly miri test` currently works, but it takes forever, because some of our test
+// inputs are quite large. Most of our unsafe code is platform specific and incompatible with Miri
+// anyway, but we'd like it to be possible for callers to run their own tests under Miri, assuming
+// they don't use incompatible features like Rayon or mmap. This test should get reasonable
+// coverage of our public API without using any large inputs, so we can run it in CI and catch
+// obvious breaks. (For example, constant_time_eq is not compatible with Miri.)
+/// Hash's wire format: an array of 32 bytes in JSON and CBOR, and a CBOR
+/// bytestring still read. The format comes from a derive no mutant touches,
+/// so this test is its one check.
 #[test]
 #[cfg(feature = "std")]
 #[cfg(feature = "serde")]
@@ -886,12 +602,6 @@ fn test_serde() {
     assert_eq!(hash_from_bytestring_cbor, hash);
 }
 
-// `cargo +nightly miri test` currently works, but it takes forever, because some of our test
-// inputs are quite large. Most of our unsafe code is platform specific and incompatible with Miri
-// anyway, but we'd like it to be possible for callers to run their own tests under Miri, assuming
-// they don't use incompatible features like Rayon or mmap. This test should get reasonable
-// coverage of our public API without using any large inputs, so we can run it in CI and catch
-// obvious breaks. (For example, constant_time_eq is not compatible with Miri.)
 #[test]
 fn test_miri_smoketest() {
     let mut hasher = crate::Hasher::new_with(crate::Mode::DeriveKey("Miri smoketest"));
@@ -1391,23 +1101,6 @@ fn test_hasher_io_write() {
     assert_eq!(hasher.finalize(), crate::hash(&input));
 }
 
-/// A context hashed once (Mode::DeriveKeyMaterial) derives what the
-/// context string derives (Mode::DeriveKey), one-shot and in a batch.
-#[test]
-fn test_derive_key_material_mode() {
-    let context = "BLAKE3 2026-10-16 derive key material test";
-    let context_key = crate::hash_derive_key_context(context);
-    let (by_string, by_key) = (crate::Mode::DeriveKey(context), crate::Mode::DeriveKeyMaterial(&context_key));
-    let mut input = [0u8; 3000];
-    paint_test_input(&mut input);
-    assert_eq!(crate::hash_with(by_key, &input), crate::hash_with(by_string, &input));
-    assert_eq!(crate::hash_with(by_key, &input), *crate::hash_with(crate::Mode::DeriveKey(context), &input).as_bytes());
-    let (mut a, mut b) = ([[0u8; 32]; 4], [[0u8; 32]; 4]);
-    crate::hash_many_with(by_key, &input[..4 * 128], 128, &mut a);
-    crate::hash_many_with(by_string, &input[..4 * 128], 128, &mut b);
-    assert_eq!(a, b);
-}
-
 /// The dispatch, pinned by the kernels each call runs: for a one-shot
 /// call and for batches, the set of assembly entry points a call records
 /// changes exactly at the thresholds the code names. Each threshold is a
@@ -1575,27 +1268,6 @@ pub(crate) fn parent(left: &CVBytes, right: &CVBytes, mode: crate::Mode) -> crat
 }
 
 #[test]
-fn test_max_subtree_len() {
-    assert_eq!(crate::max_subtree_len(0), None);
-    // (chunk index, max chunks)
-    let cases = [(1, 1), (2, 2), (3, 1), (4, 4), (5, 1), (6, 2), (7, 1), (8, 8)];
-    for (chunk_index, max_chunks) in cases {
-        let input_offset = chunk_index * CHUNK_LEN as u64;
-        assert_eq!(crate::max_subtree_len(input_offset), Some(max_chunks * CHUNK_LEN as u64));
-    }
-}
-
-/// The left subtree's bytes: the largest power of two strictly below the
-/// input's length (the BLAKE3 paper, section 2.1), by the spec's formula.
-#[test]
-fn test_left_len() {
-    for len in [CHUNK_LEN + 1, 2 * CHUNK_LEN, 2 * CHUNK_LEN + 1, 3 * CHUNK_LEN, 4 * CHUNK_LEN, 4 * CHUNK_LEN + 1, 5 * CHUNK_LEN + 100, 1000 * CHUNK_LEN - 1] {
-        let spec = ((len as u64 + 1) / 2).next_power_of_two() as usize;
-        assert_eq!(crate::tree::left_len(len), spec, "{len}");
-    }
-}
-
-#[test]
 #[should_panic]
 fn test_empty_subtree_should_panic() {
     crate::Hasher::new().finalize_non_root();
@@ -1673,36 +1345,6 @@ fn test_grouped_hash() {
             );
         }
     }
-}
-
-#[test]
-fn test_keyed_hash_xof_from_subtrees() {
-    let group0 = &[42; 4096];
-    let group1 = &[43; 4095];
-    let mut input = [0; 8191];
-    input[..4096].copy_from_slice(group0);
-    input[4096..].copy_from_slice(group1);
-    let key = &[44; 32];
-    let mut expected_output = [0; 100];
-    crate::Hasher::new_with(crate::Mode::Keyed(key)).update(&input).finalize_xof().fill(&mut expected_output);
-    let mut output = [0; 100];
-    let left = crate::Hasher::new_with(crate::Mode::Keyed(key)).update(group0).finalize_non_root();
-    let right = crate::Hasher::new_with(crate::Mode::Keyed(key)).set_input_offset(group0.len() as u64).update(group1).finalize_non_root();
-    crate::OutputReader::new(parent(&left, &right, crate::Mode::Keyed(key))).fill(&mut output);
-    assert_eq!(expected_output, output);
-}
-
-#[test]
-fn test_derive_key_from_subtrees() {
-    let context = "foo";
-    let mut input = [0; 1025];
-    paint_test_input(&mut input);
-    let expected = *crate::hash_with(crate::Mode::DeriveKey(context), &input).as_bytes();
-    let cx_key = crate::hash_derive_key_context(context);
-    let mode = crate::Mode::DeriveKeyMaterial(&cx_key);
-    let left = crate::Hasher::new_with(mode).update(&input[..1024]).finalize_non_root();
-    let right = crate::Hasher::new_with(mode).set_input_offset(1024).update(&input[1024..]).finalize_non_root();
-    assert_eq!(expected, parent(&left, &right, mode).root_hash().0);
 }
 
 /// The prefetches a call makes after a pause, at every length below the

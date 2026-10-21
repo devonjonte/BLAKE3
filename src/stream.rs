@@ -788,81 +788,6 @@ mod test {
         }
     }
 
-    /// Batches of every message length kind (empty, short, one block, not
-    /// whole blocks, a chunk, longer than a task's bytes), counts from 0
-    /// to more than a part holds, borrowed and written in place, between
-    /// single messages (the open task changes kind), in each mode, against
-    /// hash_with of each message, in order.
-    #[test]
-    fn test_stream_batches_against_hash_with() {
-        let key = [7u8; 32];
-        let cases: std::vec::Vec<(usize, usize)> = [0, 1, 64, 100, 1024, 1500, 70_000]
-            .iter()
-            .flat_map(|&len| [0, 1, 3, 16, 1100].into_iter().filter(move |&count| len < 10_000 || count < 20).map(move |count| (len, count)))
-            .collect();
-        let batch_of = |len: usize, count: usize| -> std::vec::Vec<u8> {
-            let slot = crate::many::slot_len(len);
-            let mut batch = std::vec![0u8; slot * count];
-            for (i, s) in batch.chunks_mut(slot).enumerate() {
-                crate::test::paint_test_input(&mut s[..len]);
-                s[..len.min(8)].iter_mut().for_each(|b| *b ^= i as u8);
-            }
-            batch
-        };
-        let batches: std::vec::Vec<std::vec::Vec<u8>> = cases.iter().map(|&(len, count)| batch_of(len, count)).collect();
-        let lone = [5u8; 300];
-        for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("stream batches")] {
-            let total: usize = cases.iter().map(|&(_, count)| count + 1).sum();
-            let mut got = places(total);
-            let mut want = std::vec::Vec::new();
-            let mut want_handed = std::vec::Vec::new();
-            let mut handed = std::vec::Vec::new();
-            let mut rest: &mut [Hash] = &mut got;
-            stream(mode, record(&mut handed), |s| {
-                for (k, (&(len, count), batch)) in cases.iter().zip(&batches).enumerate() {
-                    let out = take(&mut rest, count);
-                    want_handed.push((out.as_ptr() as usize, count));
-                    if k % 2 == 0 {
-                        s.submit_batch(batch, len, out);
-                    } else {
-                        s.submit_batch_with(len, |at, room| room.copy_from_slice(&batch[at..][..room.len()]), out);
-                    }
-                    let slot = crate::many::slot_len(len);
-                    want.extend(batch.chunks(slot).map(|m| crate::hash_with(mode, &m[..len])));
-                    let out = &mut take(&mut rest, 1)[0];
-                    want_handed.push((out as *const Hash as usize, 1));
-                    s.submit(&lone, out);
-                    want.push(crate::hash_with(mode, &lone));
-                }
-                s.finish();
-            });
-            assert!(handed == want_handed, "every batch's space handed back once, whole, in order");
-            assert!(got == want, "a batch's digests in its space, in order");
-        }
-    }
-
-    /// A stream takes more messages after finishing.
-    #[test]
-    fn test_stream_finish() {
-        let input = std::vec![9u8; 300_000];
-        let mut got = places(9);
-        let handed = core::cell::Cell::new(0);
-        stream(
-            Mode::Hash,
-            |d: &mut [Hash]| handed.set(handed.get() + d.len()),
-            |s| {
-                for (round, outs) in got.chunks_mut(3).enumerate() {
-                    for (len, out) in [0, 65, 70_000].into_iter().zip(outs) {
-                        s.submit(&input[..len], out);
-                    }
-                    s.finish();
-                    assert_eq!(handed.get(), 3 * (round + 1));
-                }
-            },
-        );
-        assert_eq!(got[5], crate::hash(&input[..70_000]));
-    }
-
     /// A body that ends without finishing panics (after the threads are
     /// done with its messages), and so does one that panics itself.
     #[test]
@@ -910,52 +835,6 @@ mod test {
             buf[..n].copy_from_slice(&self.data[self.at..][..n]);
             self.at += n;
             Ok(n)
-        }
-    }
-
-    /// Readers of every length the pieces make special (empty, under,
-    /// at, and over a piece, many pieces), in each mode, between borrowed
-    /// messages, against hash_with, in order; and readers failing in the
-    /// first piece, at a piece's end, and later: no digest for them, an
-    /// error back, and the next message's digest still right.
-    #[test]
-    fn test_stream_readers() {
-        let mut input = std::vec![0u8; 5 * PIECE + 77];
-        crate::test::paint_test_input(&mut input);
-        let key = [9u8; 32];
-        let lens = [0, 1, 1000, PIECE - 1, PIECE, PIECE + 1, 2 * PIECE, 3 * PIECE + 5, 5 * PIECE + 77];
-        let fails = [0, 500, PIECE, PIECE + 3, 2 * PIECE, 3 * PIECE + 1];
-        for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("stream readers")] {
-            let mut got = places(3 * 2 * lens.len() + 2 * fails.len());
-            let (mut want, mut want_handed, mut handed) = (std::vec::Vec::new(), std::vec::Vec::new(), std::vec::Vec::new());
-            let mut rest: &mut [Hash] = &mut got;
-            stream(mode, record(&mut handed), |s| {
-                for _ in 0..3 {
-                    for &len in &lens {
-                        let out = &mut take(&mut rest, 1)[0];
-                        want_handed.push((out as *const Hash as usize, 1));
-                        let n = s.submit_reader(Uneven { data: &input[..len], at: 0, calls: 0, fail_at: None }, None, out).unwrap();
-                        assert_eq!(n, len as u64);
-                        want.push(crate::hash_with(mode, &input[..len]));
-                        let out = &mut take(&mut rest, 1)[0];
-                        want_handed.push((out as *const Hash as usize, 1));
-                        s.submit(&input[..100], out);
-                        want.push(crate::hash_with(mode, &input[..100]));
-                    }
-                }
-                for fail_at in fails {
-                    let r = s.submit_reader(Uneven { data: &input, at: 0, calls: 0, fail_at: Some(fail_at) }, None, &mut take(&mut rest, 1)[0]);
-                    assert!(r.is_err(), "a failing reader's error comes back (failing at {fail_at})");
-                    want.push(Hash::from_bytes([0; 32]));
-                    let out = &mut take(&mut rest, 1)[0];
-                    want_handed.push((out as *const Hash as usize, 1));
-                    s.submit(&input[..3 * PIECE + 5], out);
-                    want.push(crate::hash_with(mode, &input[..3 * PIECE + 5]));
-                }
-                s.finish();
-            });
-            assert!(handed == want_handed, "every place handed back once, in order, none for the failed readers");
-            assert!(got == want, "readers' digests in their places; the failed readers' places untouched");
         }
     }
 

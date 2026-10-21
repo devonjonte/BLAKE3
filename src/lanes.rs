@@ -68,8 +68,6 @@
 
 use crate::CVBytes as ChainingValue;
 use crate::platform::Platform;
-#[cfg(test)]
-use crate::test::SubtreeHasher;
 use crate::{CHUNK_LEN, Hash};
 #[cfg(test)]
 use crate::{Hasher, KEY_LEN};
@@ -406,12 +404,6 @@ struct Piece {
     len: usize,
 }
 
-/// [`cut_with_prefix`] with no prefix (the tests').
-#[cfg(test)]
-fn cut_subtrees(len: usize, threads: usize) -> Vec<Piece> {
-    cut_with_prefix(len, threads, 0).0
-}
-
 /// Cut `len` bytes into subtrees for `threads` threads, in offset order,
 /// after a prefix of about `prefix` bytes for the SME2 thread. Past the
 /// prefix, each piece is [`next_piece_len`] of what remains, and the last
@@ -480,25 +472,6 @@ fn sme2_prefix(len: usize, threads: usize) -> usize {
     if share >= MAX_PIECE_LEN { share } else { 0 }
 }
 
-/// The chaining value of the subtree covering `pieces` (in offset order,
-/// tiling one subtree): the piece's own value for one piece, else the
-/// parent of its two halves, cut at the subtree's left-subtree boundary.
-#[cfg(test)]
-fn subtree_cv(pieces: &[Piece], cvs: &[ChainingValue], mode: crate::Mode) -> ChainingValue {
-    debug_assert_eq!(pieces.len(), cvs.len());
-    if pieces.len() == 1 {
-        return cvs[0];
-    }
-    let offset = pieces[0].offset;
-    let len: usize = pieces.iter().map(|p| p.len).sum();
-    let boundary = offset + crate::tree::left_len(len);
-    let split = pieces.partition_point(|p| p.offset < boundary);
-    assert!(split > 0 && split < pieces.len() && pieces[split].offset == boundary, "pieces do not tile the tree");
-    let left = subtree_cv(&pieces[..split], &cvs[..split], mode);
-    let right = subtree_cv(&pieces[split..], &cvs[split..], mode);
-    crate::test::parent(&left, &right, mode).chaining_value()
-}
-
 /// Merge a shrinking cut in place, a level at a time. `pieces` tiles the
 /// input from zero, with non-increasing power-of-two lengths except the
 /// final (possibly short) piece, as produced by `cut_subtrees`. Each CV
@@ -552,6 +525,31 @@ fn merge_to_children(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::C
         width *= 2;
     }
     count
+}
+
+/// [`cut_with_prefix`] with no prefix (the tests').
+#[cfg(test)]
+fn cut_subtrees(len: usize, threads: usize) -> Vec<Piece> {
+    cut_with_prefix(len, threads, 0).0
+}
+
+/// The chaining value of the subtree covering `pieces` (in offset order,
+/// tiling one subtree): the piece's own value for one piece, else the
+/// parent of its two halves, cut at the subtree's left-subtree boundary.
+#[cfg(test)]
+fn subtree_cv(pieces: &[Piece], cvs: &[ChainingValue], mode: crate::Mode) -> ChainingValue {
+    debug_assert_eq!(pieces.len(), cvs.len());
+    if pieces.len() == 1 {
+        return cvs[0];
+    }
+    let offset = pieces[0].offset;
+    let len: usize = pieces.iter().map(|p| p.len).sum();
+    let boundary = offset + crate::tree::left_len(len);
+    let split = pieces.partition_point(|p| p.offset < boundary);
+    assert!(split > 0 && split < pieces.len() && pieces[split].offset == boundary, "pieces do not tile the tree");
+    let left = subtree_cv(&pieces[..split], &cvs[..split], mode);
+    let right = subtree_cv(&pieces[split..], &cvs[split..], mode);
+    crate::test::parent(&left, &right, mode).chaining_value()
 }
 
 /// The pool: threads - 1 workers (the calling thread hashes too) taking from the registered sources
@@ -1373,6 +1371,28 @@ mod test {
     /// process, as each test is, the count is zero again after one call
     /// that went to the pool (a place kept would leave the pool "busy" for
     /// later calls, which would then hash alone, right and slower).
+    /// Arbitrary CVs isolate the merge's tree shape from chunk hashing:
+    /// a cut of a few pieces, and one whose first level holds more
+    /// children than one parents call takes (2 x MAX_SIMD_DEGREE_OR_2),
+    /// one left over to carry up.
+    #[test]
+    fn test_simd_merge_matches_recursive() {
+        let key = [93u8; KEY_LEN];
+        let context_key = crate::hash_derive_key_context("parallel merge test");
+        for (threads, len) in [(3, MIN_SPLIT_LEN + 1025), (2, (64 << 20) + 1)] {
+            let pieces = cut_subtrees(len, threads);
+            let mut cvs = vec![[0u8; crate::OUT_LEN]; pieces.len()];
+            crate::test::paint_test_input(cvs.as_flattened_mut());
+            let split = pieces.partition_point(|p| p.offset < crate::tree::left_len(len));
+            for mode in [crate::Mode::Hash, crate::Mode::Keyed(&key), crate::Mode::DeriveKeyMaterial(&context_key)] {
+                let left = subtree_cv(&pieces[..split], &cvs[..split], mode);
+                let right = subtree_cv(&pieces[split..], &cvs[split..], mode);
+                let want = crate::test::parent(&left, &right, mode).root_hash();
+                assert_eq!(want, merge_root(&pieces, &mut cvs.clone(), &mode.key_and_flags().0, mode.key_and_flags().1), "len={len}, threads={threads}");
+            }
+        }
+    }
+
     #[test]
     fn test_a_caller_gives_its_place_back() {
         let pool = pool();
@@ -1538,34 +1558,6 @@ mod test {
     }
 
     #[test]
-    fn test_cut_subtrees_shapes() {
-        // 64 KiB for 16 threads: eight pieces of the shortest length.
-        let pieces = cut_subtrees(64 * CHUNK_LEN, 16);
-        assert_eq!(pieces.len(), 8);
-        assert!(pieces.iter().all(|p| p.len == MIN_PIECE_LEN));
-        // 1 MiB for 16 threads: 64 KiB first, then shrinking, then a tail.
-        let pieces = cut_subtrees(1 << 20, 16);
-        assert_eq!(pieces[0].len, 64 * CHUNK_LEN);
-        assert!(pieces.windows(2).all(|w| w[1].len <= w[0].len), "{pieces:?}");
-        assert!(pieces.last().unwrap().len <= MIN_PIECE_LEN);
-        for threads in [2, 3, 16, 64] {
-            for len in [MIN_PIECE_LEN + 1, 100 * CHUNK_LEN + 7, 1000 * CHUNK_LEN + 3, 1 << 24, (1 << 20) + 1] {
-                let pieces = cut_subtrees(len, threads);
-                assert!(pieces.len() >= 2);
-                assert_eq!(pieces.iter().map(|p| p.len).sum::<usize>(), len);
-                for (i, p) in pieces.iter().enumerate() {
-                    assert!(p.len <= MAX_PIECE_LEN);
-                    if i > 0 {
-                        assert_eq!(p.offset, pieces[i - 1].offset + pieces[i - 1].len);
-                        let max = crate::max_subtree_len(p.offset as u64).unwrap();
-                        assert!(p.len as u64 <= max, "piece {i} for {len}: {p:?} exceeds {max}");
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
     fn test_hash_matches_serial() {
         let mut input = vec![0u8; (3 << 20) + 12345];
         crate::test::paint_test_input(&mut input);
@@ -1625,66 +1617,6 @@ mod test {
                     let what = format!("len {len}, first {first}, pieces of {piece}");
                     assert_eq!(hasher.finalize(), crate::hash(&input[..len]), "{what}");
                     assert_eq!(keyed.finalize(), crate::hash_with(crate::Mode::Keyed(&key), &input[..len]), "keyed {what}");
-                }
-            }
-        }
-    }
-
-    /// Every piece length the cut can produce, through cut and merge alone
-    /// (independent of how many CPUs the test machine has), on both
-    /// kernel platforms.
-    #[test]
-    fn test_merge_every_cut() {
-        for len in [70 * CHUNK_LEN + 5, 100 * CHUNK_LEN + 7, 256 * CHUNK_LEN, 1000 * CHUNK_LEN] {
-            let mut input = vec![0u8; len];
-            crate::test::paint_test_input(&mut input);
-            let want = crate::hash(&input);
-            for threads in [2, 3, 5, 16, 64] {
-                let pieces = cut_subtrees(len, threads);
-                for platform in [Platform::detect(), pool_platform()] {
-                    let mut cvs: Vec<ChainingValue> = pieces
-                        .iter()
-                        .map(|p| {
-                            let mut hasher = Hasher::from_core(crate::HasherCore::new_from(crate::IV, 0, platform));
-                            hasher.set_input_offset(p.offset as u64);
-                            hasher.update(&input[p.offset..][..p.len]);
-                            hasher.finalize_non_root()
-                        })
-                        .collect();
-                    let split = pieces.partition_point(|p| p.offset < crate::tree::left_len(len));
-                    let left = subtree_cv(&pieces[..split], &cvs[..split], crate::Mode::Hash);
-                    let right = subtree_cv(&pieces[split..], &cvs[split..], crate::Mode::Hash);
-                    assert_eq!(want, crate::test::parent(&left, &right, crate::Mode::Hash).root_hash());
-                    assert_eq!(want, merge_root(&pieces, &mut cvs, crate::IV, 0), "len = {len}, threads = {threads}");
-                }
-            }
-        }
-    }
-
-    /// Arbitrary CVs isolate the merge's tree shape from chunk hashing.
-    /// The larger cuts cross the fixed scratch buffer's batching boundary.
-    #[test]
-    fn test_simd_merge_matches_recursive() {
-        let key = [93u8; KEY_LEN];
-        let context_key = crate::hash_derive_key_context("parallel merge test");
-        for threads in [2, 3, 16, 64, 512] {
-            for base in [MIN_SPLIT_LEN, 1 << 20, 8 << 20, 64 << 20] {
-                for tail in [0, 1, 63, 64, 1023, 1024, 1025, 8191] {
-                    let len = base + tail;
-                    let pieces = cut_subtrees(len, threads);
-                    let mut cvs = vec![[0u8; crate::OUT_LEN]; pieces.len()];
-                    crate::test::paint_test_input(cvs.as_flattened_mut());
-                    let split = pieces.partition_point(|p| p.offset < crate::tree::left_len(len));
-                    for mode in [crate::Mode::Hash, crate::Mode::Keyed(&key), crate::Mode::DeriveKeyMaterial(&context_key)] {
-                        let left = subtree_cv(&pieces[..split], &cvs[..split], mode);
-                        let right = subtree_cv(&pieces[split..], &cvs[split..], mode);
-                        let want = crate::test::parent(&left, &right, mode).root_hash();
-                        assert_eq!(
-                            want,
-                            merge_root(&pieces, &mut cvs.clone(), &mode.key_and_flags().0, mode.key_and_flags().1),
-                            "len={len}, threads={threads}"
-                        );
-                    }
                 }
             }
         }

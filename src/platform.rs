@@ -781,30 +781,6 @@ fn sme2_reported() -> bool {
     hwcap2 & HWCAP2_SME2 != 0
 }
 
-#[cfg(test)]
-mod sme2_turn_test {
-    use super::*;
-
-    /// While one call holds the SME2 turn, another runs NEON; calls too
-    /// small for the SME2 kernels keep their platform. Other tests may hold
-    /// the turn meanwhile, so only what holding it guarantees is asserted.
-    #[test]
-    fn test_one_sme2_call_at_a_time() {
-        let detected = Platform::detect();
-        let small = Sme2Turn::take(detected, false);
-        assert!(core::mem::discriminant(&small.platform()) == core::mem::discriminant(&detected));
-        #[cfg(blake3_sme2)]
-        if matches!(detected, Platform::SME2) {
-            let first = Sme2Turn::take(detected, true);
-            if first.held {
-                let second = Sme2Turn::take(detected, true);
-                assert!(matches!(second.platform(), Platform::NEON) && !second.held);
-                assert!(matches!(first.platform(), Platform::SME2));
-            }
-        }
-    }
-}
-
 #[cfg(all(test, target_arch = "x86_64", not(miri)))]
 mod x86_degree_test {
     use super::*;

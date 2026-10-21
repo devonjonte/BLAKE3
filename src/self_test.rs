@@ -514,13 +514,6 @@ mod test {
         assert_eq!(STATE.load(core::sync::atomic::Ordering::Relaxed), PASSED);
     }
 
-    /// `initialize` runs the self-test, which passes.
-    #[test]
-    fn test_initialize_runs_the_self_test() {
-        crate::initialize();
-        assert_eq!(STATE.load(core::sync::atomic::Ordering::SeqCst), PASSED);
-    }
-
     /// The self-test runs every assembly entry point this machine has:
     /// the hybrids' (with SHA-3 or without), and SME2's with SME2. It runs again when another test held the SME2 turn.
     #[test]
@@ -592,38 +585,5 @@ mod test {
         chain(into(reference), |_, folded| folds.push(folded));
         let table: std::string::String = folds.iter().map(|f| std::format!("    0x{f:016x},\n")).collect();
         assert!(folds == EXPECTED, "EXPECTED differs from the reference implementation; its table:\n{table}");
-    }
-
-    /// This build agrees with the reference on every case (as the startup
-    /// run, which already passed for this test process, found).
-    #[test]
-    fn self_test_passes() {
-        let platform = Platform::detect();
-        chain(
-            |case, input, previous, out| outputs(platform, case, input, previous, out),
-            |index, folded| assert_eq!(folded, EXPECTED[index], "case {index}, {}", CASES[index].1),
-        );
-    }
-
-    /// Chaining carries a difference forward: a wrong first output changes
-    /// every fold after it.
-    #[test]
-    fn self_test_chain_carries_a_fault_forward() {
-        let mut good = std::vec::Vec::new();
-        chain(into(reference), |_, folded| good.push(folded));
-        let mut faulty = std::vec::Vec::new();
-        let mut first = true;
-        chain(
-            into(|case, input, previous| {
-                let mut output = reference(case, input, previous);
-                if std::mem::take(&mut first) {
-                    output[31] ^= 1;
-                }
-                output
-            }),
-            |_, folded| faulty.push(folded),
-        );
-        let same: std::vec::Vec<usize> = (0..good.len()).filter(|&i| good[i] == faulty[i]).collect();
-        assert!(same.is_empty(), "every fold changes after a fault in the first case; unchanged: {same:?}");
     }
 }

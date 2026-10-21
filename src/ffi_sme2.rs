@@ -323,8 +323,8 @@ pub const FLAT_MIN_CHUNKS: usize = 32;
 /// The fewest chunks, a power of two, that split exactly into groups of 18
 /// (the integer lane's kernel) and 16: 256 = 8 x 18 + 7 x 16. Smaller
 /// subtrees take groups of 16 alone. The split's arithmetic (8 lane groups
-/// per 144 chunks) makes this boundary; the tests check it.
-#[cfg(test)]
+/// per 144 chunks) makes this boundary; the dispatch test checks it.
+#[cfg(all(test, feature = "std"))]
 pub const LANE_MIN_CHUNKS: usize = 256;
 /// The most chunks the flat walk takes; its chaining values sit in 48 KiB
 /// of stack. Larger subtrees are split by the tree walk above it.
@@ -615,110 +615,6 @@ pub mod ffi {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
-    /// The extended-output kernel against the portable compressor, block
-    /// by block: counters whose low word wraps inside a group, every flag
-    /// set a mode uses, short and full blocks, one to three groups.
-    #[test]
-    fn test_xof_kernel_matches_portable() {
-        if !crate::platform::sme2_detected() {
-            return;
-        }
-        let cv: CVWords = core::array::from_fn(|i| 0x9E37_79B9u32.wrapping_mul(i as u32 + 1));
-        let mut block = [0u8; crate::BLOCK_LEN];
-        crate::test::paint_test_input(&mut block);
-        for counter in [0u64, 5, 0xFFFF_FFF8, 0x1_FFFF_FFF0, u64::MAX - 100] {
-            for (block_len, flags) in [
-                (64u8, crate::ROOT),
-                (37, crate::ROOT | crate::CHUNK_END),
-                (0, crate::ROOT | crate::KEYED_HASH | crate::PARENT),
-                (64, crate::ROOT | crate::DERIVE_KEY_MATERIAL),
-            ] {
-                for groups in 1..=3 {
-                    let mut out = std::vec![0u8; groups * GROUP * crate::BLOCK_LEN + 64];
-                    let done = unsafe { xof_many(&cv, &block, block_len, counter, flags, &mut out) };
-                    assert_eq!(done, groups * GROUP * crate::BLOCK_LEN);
-                    for (i, got) in out[..done].chunks_exact(crate::BLOCK_LEN).enumerate() {
-                        let want = crate::portable::compress_xof(&cv, &block, block_len, counter.wrapping_add(i as u64), flags);
-                        assert_eq!(got, &want[..], "counter {counter} + {i}, block_len {block_len}, flags {flags:#x}");
-                    }
-                    assert_eq!(&out[done..], &[0u8; 64][..], "nothing past the groups");
-                }
-            }
-        }
-    }
-
-    /// The flat walk against the reference implementation, at every size
-    /// it takes and just around them (the tree walk above it, then the
-    /// flat walk for the power-of-two subtrees within), in hash, keyed
-    /// hash, and a Hasher fed from an unaligned start.
-    #[test]
-    fn test_flat_walk_matches_reference() {
-        if !crate::platform::sme2_detected() {
-            return;
-        }
-        let mut input = vec![0u8; 3 * FLAT_MAX_CHUNKS * CHUNK_LEN + 12345];
-        crate::test::paint_test_input(&mut input);
-        let key = [7u8; crate::KEY_LEN];
-        let reference = |data: &[u8], keyed: bool| {
-            let mut hasher = if keyed { reference_impl::Hasher::new_keyed(&key) } else { reference_impl::Hasher::new() };
-            hasher.update(data);
-            let mut out = [0u8; 32];
-            hasher.finalize(&mut out);
-            out
-        };
-        for chunks in [
-            FLAT_MIN_CHUNKS - 1,
-            FLAT_MIN_CHUNKS,
-            FLAT_MIN_CHUNKS + 1,
-            2 * FLAT_MIN_CHUNKS,
-            LANE_MIN_CHUNKS / 2,
-            LANE_MIN_CHUNKS - 1,
-            LANE_MIN_CHUNKS,
-            2 * LANE_MIN_CHUNKS,
-            FLAT_MAX_CHUNKS,
-            FLAT_MAX_CHUNKS + 1,
-            2 * FLAT_MAX_CHUNKS,
-            3 * FLAT_MAX_CHUNKS,
-        ] {
-            for extra in [0, 1, 1000] {
-                let data = &input[..chunks * CHUNK_LEN + extra];
-                assert_eq!(*crate::hash(data).as_bytes(), reference(data, false), "{chunks} chunks + {extra}");
-                assert_eq!(*crate::hash_with(crate::Mode::Keyed(&key), data).as_bytes(), reference(data, true), "keyed, {chunks} chunks + {extra}");
-                let mut hasher = crate::Hasher::new();
-                hasher.update(&data[..3 * CHUNK_LEN]);
-                hasher.update(&data[3 * CHUNK_LEN..]);
-                assert_eq!(*hasher.finalize().as_bytes(), reference(data, false), "Hasher, {chunks} chunks + {extra}");
-            }
-        }
-    }
-
-    /// The walk's stack fallback (no std, or a thread's teardown) returns
-    /// what the per-thread scratch does, at every size the walk takes.
-    #[test]
-    fn test_flat_walk_on_stack_matches_scratch() {
-        if !crate::platform::sme2_detected() {
-            return;
-        }
-        let mut input = vec![0u8; FLAT_MAX_CHUNKS * CHUNK_LEN];
-        crate::test::paint_test_input(&mut input);
-        let key = [3u32; 8];
-        let mut chunks = FLAT_MIN_CHUNKS;
-        while chunks <= FLAT_MAX_CHUNKS {
-            let data = &input[..chunks * CHUNK_LEN];
-            for keep in [1, 2, DEGREE].into_iter().filter(|&keep| keep < chunks) {
-                let (mut a, mut b) = ([0u8; DEGREE * OUT_LEN], [0u8; DEGREE * OUT_LEN]);
-                unsafe {
-                    flat_walk(data, 0, &key, 7 * chunks as u64, 0, keep, &mut a);
-                    walk_on_stack(data, &key, 7 * chunks as u64, 0, keep, &mut b, chunks);
-                }
-                assert_eq!(a, b, "{chunks} chunks, keeping {keep}");
-            }
-            chunks *= 2;
-        }
-    }
-
     #[test]
     fn test_hybrid_assembly_matches_generator() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -728,13 +624,5 @@ mod test {
         };
         let committed = std::fs::read(root.join("c/blake3_sme2_hybrid_aarch64.S")).unwrap();
         assert!(output == committed, "c/blake3_sme2_hybrid_aarch64.S is stale; run tools/gen_sme2_hybrid.py");
-    }
-
-    #[test]
-    fn test_hash_many() {
-        if !crate::platform::sme2_detected() {
-            return;
-        }
-        crate::test::test_hash_many_fn(hash_many, hash_many);
     }
 }

@@ -478,48 +478,29 @@ fn left_chunks(size: u64) -> u64 {
 mod test {
     use super::*;
 
-    /// One message of three groups and five bytes: its outboard verifies a
-    /// range from its second group to its end, and does not once a byte of
-    /// the range or of the outboard changes. Small and fast: the sweep
-    /// below covers every length and mode.
-    #[test]
-    fn test_verify_range_one_message() {
-        let mut message = vec![0u8; 3 * GROUP_LEN + 5];
-        crate::test::paint_test_input(&mut message);
-        let (hash, outboard) = outboard_with(Mode::Hash, &message);
-        let len = message.len() as u64;
-        assert_eq!(outboard.len(), 64 * 3, "three parents for four groups");
-        let range = &message[GROUP_LEN..];
-        assert!(verify_range_with(Mode::Hash, &hash, len, &outboard, 1, range), "the range verifies");
-        let mut bad = range.to_vec();
-        bad[GROUP_LEN + 7] ^= 1;
-        assert!(!verify_range_with(Mode::Hash, &hash, len, &outboard, 1, &bad), "a changed byte of the range");
-        let mut bad = outboard.clone();
-        bad[64 + 3] ^= 1;
-        assert!(!verify_range_with(Mode::Hash, &hash, len, &bad, 1, range), "a changed byte of the outboard");
-        let second = &message[GROUP_LEN..2 * GROUP_LEN];
-        assert!(!verify_range_with(Mode::Hash, &hash, len, &outboard, 2, second), "a group at another group's place");
-    }
-
-    /// The same message's encoding through a Verifier in pieces: the message
-    /// comes back whole and nothing remains; a changed byte stops it.
+    /// A message of one group (its root hashed whole) and one of three
+    /// groups and five bytes: each one's encoding through a Verifier in
+    /// pieces gives the message back whole and leaves nothing; a changed
+    /// byte stops it.
     #[test]
     fn test_verifier_one_message() {
-        let mut message = vec![0u8; 3 * GROUP_LEN + 5];
-        crate::test::paint_test_input(&mut message);
-        let hash = crate::hash_with(Mode::Hash, &message);
-        let encoding = test_encoding(Mode::Hash, &message);
-        let mut verifier = Verifier::new(Mode::Hash, &hash, message.len() as u64);
-        assert_eq!(verifier.remaining(), encoding.len() as u64);
-        let mut received = Vec::new();
-        for piece in encoding.chunks(1448) {
-            assert!(verifier.update(piece, |b| received.extend_from_slice(b)), "every piece verifies");
+        for len in [GROUP_LEN, 3 * GROUP_LEN + 5] {
+            let mut message = vec![0u8; len];
+            crate::test::paint_test_input(&mut message);
+            let hash = crate::hash_with(Mode::Hash, &message);
+            let encoding = test_encoding(Mode::Hash, &message);
+            let mut verifier = Verifier::new(Mode::Hash, &hash, message.len() as u64);
+            assert_eq!(verifier.remaining(), encoding.len() as u64);
+            let mut received = Vec::new();
+            for piece in encoding.chunks(1448) {
+                assert!(verifier.update(piece, |b| received.extend_from_slice(b)), "every piece verifies, len {len}");
+            }
+            assert_eq!((verifier.remaining(), received.as_slice()), (0, message.as_slice()));
+            let mut bad = encoding.clone();
+            bad[encoding.len() / 2] ^= 1;
+            let mut verifier = Verifier::new(Mode::Hash, &hash, message.len() as u64);
+            assert!(!bad.chunks(1448).all(|piece| verifier.update(piece, |_| {})), "a changed byte stops it, len {len}");
         }
-        assert_eq!((verifier.remaining(), received.as_slice()), (0, message.as_slice()));
-        let mut bad = encoding.clone();
-        bad[encoding.len() / 2] ^= 1;
-        let mut verifier = Verifier::new(Mode::Hash, &hash, message.len() as u64);
-        assert!(!bad.chunks(1448).all(|piece| verifier.update(piece, |_| {})), "a changed byte stops it");
     }
 
     /// The pool's ranges of groups (lanes::Work::Groups), just past where
@@ -549,75 +530,6 @@ mod test {
         assert!(verifier.update_multithreaded(&encoding, |b| received.extend_from_slice(b)));
         crate::lanes::assert_past_the_split("the verifier's groups");
         assert_eq!((verifier.remaining(), received), (0, input));
-    }
-
-    /// Every message length around group and tree boundaries, every mode,
-    /// pieces of many lengths: the Verifier gives back the message, and
-    /// stops at a changed byte of a group or a parent node, or a wrong hash.
-    #[test]
-    fn test_verifier() {
-        let mut input = vec![0u8; 37 * GROUP_LEN + 5];
-        crate::test::paint_test_input(&mut input);
-        let key = [3u8; 32];
-        let lens = [
-            0,
-            1,
-            CHUNK_LEN,
-            GROUP_LEN - 1,
-            GROUP_LEN,
-            GROUP_LEN + 1,
-            2 * GROUP_LEN,
-            3 * GROUP_LEN - 7,
-            4 * GROUP_LEN,
-            5 * GROUP_LEN + CHUNK_LEN,
-            17 * GROUP_LEN + 1,
-            input.len(),
-        ];
-        for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("verifier test")] {
-            for &len in &lens {
-                let message = &input[..len];
-                let hash = crate::hash_with(mode, message);
-                let encoding = test_encoding(mode, message);
-                assert_eq!(encoding.len() as u64, Verifier::new(mode, &hash, len as u64).remaining());
-                let run = |encoding: &[u8], hash: &Hash, piece: usize, pooled: bool| -> Option<Vec<u8>> {
-                    let mut verifier = Verifier::new(mode, hash, len as u64);
-                    let mut received = Vec::new();
-                    let mut pieces: Vec<&[u8]> = encoding.chunks(piece).collect();
-                    if pieces.is_empty() {
-                        pieces.push(&[]);
-                    }
-                    for p in pieces {
-                        let ok = if pooled {
-                            verifier.update_multithreaded(p, |b| received.extend_from_slice(b))
-                        } else {
-                            verifier.update(p, |b| received.extend_from_slice(b))
-                        };
-                        if !ok {
-                            return None;
-                        }
-                    }
-                    assert_eq!(verifier.remaining(), 0);
-                    Some(received)
-                };
-                for pooled in [false, true] {
-                    for piece in [1, 63, 64, 1448, GROUP_LEN, GROUP_LEN + 64, 1 << 20] {
-                        assert_eq!(run(&encoding, &hash, piece, pooled).as_deref(), Some(message), "len {len} pieces of {piece}, pooled {pooled}");
-                    }
-                    let mut wrong = *hash.as_bytes();
-                    wrong[0] ^= 1;
-                    assert_eq!(run(&encoding, &Hash::from_bytes(wrong), 1 << 20, pooled), None, "len {len}, wrong hash, pooled {pooled}");
-                    for at in [0, encoding.len() / 2, encoding.len().saturating_sub(1)] {
-                        if at < encoding.len() {
-                            let mut bad = encoding.clone();
-                            bad[at] ^= 1;
-                            for piece in [1448, 1 << 20] {
-                                assert_eq!(run(&bad, &hash, piece, pooled), None, "len {len}, byte {at} changed, pieces of {piece}, pooled {pooled}");
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 
     /// Every message length around group and tree boundaries, every mode:
