@@ -468,6 +468,5 @@ src/tree.rs	replace <= with > in root_children	1	equivalent: the SMALL and MAX a
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::children -> Option<[Cv; 2]> with None	1	equivalent on x86: PlatformKernels::children returns None already (its SME2 block is compiled out)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::degree -> usize with 1	1	speed: moves a threshold between equally correct paths (a degree of 1 hashes one chunk at a time; simd_degree itself has its test)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::subtree -> Option<usize> with None	1	speed: subtrees then hash on the walk's one-chunk path, the same digests
-src/lanes.rs	replace sources::Source::unregister with ()	1	equally correct paths: a leaked source slot; a stream that finds none free hashes on its caller
 src/platform.rs	replace Platform::sme2 -> Option<Self> with None	1	a test-only constructor: on x86 sme2_detected() is false, so it returns None already
 src/platform.rs	replace Platform::sme2 -> Option<Self> with Some(Default::default())	1	a test-only constructor: no x86 test calls it (SME2 platforms are AArch64)

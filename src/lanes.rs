@@ -1096,6 +1096,18 @@ pub(crate) mod sources {
     mod test {
         use super::*;
 
+        /// Unregistering takes a source out of the walk: its slot is
+        /// given back. (A leaked slot is a slowdown: after enough streams
+        /// every stream hashes on its caller alone.)
+        #[test]
+        fn test_unregister_gives_the_slot_back() {
+            let source: &'static Source = &*Box::leak(Box::new(Source::new(0)));
+            let slot = source.register().expect("a free slot");
+            assert!(find(|t| core::ptr::eq(t, source)), "a registered source is reached");
+            Source::unregister(slot);
+            assert!(!find(|t| core::ptr::eq(t, source)), "an unregistered source is still reached");
+        }
+
         /// `find` reaches every registered source, the last of several
         /// included: a test alone in its process registers one source at
         /// a time, so only a test of several sees the walk past the first.
