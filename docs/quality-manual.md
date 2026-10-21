@@ -534,16 +534,22 @@ among them, and however often the hash is timed.
    proof checks it; on x86-64 upstream's kernels make the same design
    choice, unproved here.
 2. **Each instruction takes the same time whatever values it computes
-   on.** That is a promise of the CPU. Arm CPUs make it, for a listed set
-   of instructions, while data-independent timing (DIT) is enabled. The
-   fork does not enable DIT; its cost is still to be measured.
+   on.** That is a promise of the CPU. BLAKE3 asks it only of additions,
+   rotations, exclusive ors, loads and stores, and no CPU we know of
+   varies their time with their values. Arm CPUs also make the promise
+   formally, for a listed set of instructions, while data-independent
+   timing (DIT) is on. The fork leaves DIT as the calling thread has it:
+   turning it on and off in each call made the shortest messages up to
+   60% slower in our measurements, and leaving it on would change the
+   timing of the caller's own code. A program that wants Arm's promise
+   turns DIT on in its threads before it hashes.
 3. **Power does not show in the timing.** A chip's power draw depends
    on the data it computes, and power can change its clock speed and so
    the time (the Hertzbleed attack, 2022). A fixed clock speed removes
    this channel; no proof about code reaches it. Apple M1 to M3 chips
    also have a prefetcher whose behaviour depends on the data in memory
    (the GoFetch attack, 2024); Apple's guidance for cryptographic code
-   is to enable DIT.
+   is to turn DIT on, as in 2.
 
 ## Not yet done
 
