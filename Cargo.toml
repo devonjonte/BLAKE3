@@ -120,10 +120,10 @@ debug = false
 debug-assertions = true
 overflow-checks = true
 
-# Mutation testing (tools/mutants/check.py): the test profile, built
-# incrementally, since cargo-mutants rebuilds the crate once per mutant.
-# Mutation testing builds what users run: a mutant that only a debug
-# assertion or an overflow check would catch is uncaught in a release.
+# Mutation testing (tools/mutants/check.py) builds what users run: a mutant
+# that only a debug assertion or an overflow check would catch is uncaught
+# in a release. Built incrementally, since cargo-mutants rebuilds the crate
+# once per mutant (opt-level 1 made a whole run no faster, October 21).
 [profile.mutants]
 inherits = "release"
 incremental = true

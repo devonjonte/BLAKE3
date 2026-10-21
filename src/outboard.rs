@@ -478,6 +478,50 @@ fn left_chunks(size: u64) -> u64 {
 mod test {
     use super::*;
 
+    /// One message of three groups and five bytes: its outboard verifies a
+    /// range from its second group to its end, and does not once a byte of
+    /// the range or of the outboard changes. Small and fast: the sweep
+    /// below covers every length and mode.
+    #[test]
+    fn test_verify_range_one_message() {
+        let mut message = vec![0u8; 3 * GROUP_LEN + 5];
+        crate::test::paint_test_input(&mut message);
+        let (hash, outboard) = outboard_with(Mode::Hash, &message);
+        let len = message.len() as u64;
+        assert_eq!(outboard.len(), 64 * 3, "three parents for four groups");
+        let range = &message[GROUP_LEN..];
+        assert!(verify_range_with(Mode::Hash, &hash, len, &outboard, 1, range), "the range verifies");
+        let mut bad = range.to_vec();
+        bad[GROUP_LEN + 7] ^= 1;
+        assert!(!verify_range_with(Mode::Hash, &hash, len, &outboard, 1, &bad), "a changed byte of the range");
+        let mut bad = outboard.clone();
+        bad[64 + 3] ^= 1;
+        assert!(!verify_range_with(Mode::Hash, &hash, len, &bad, 1, range), "a changed byte of the outboard");
+        let second = &message[GROUP_LEN..2 * GROUP_LEN];
+        assert!(!verify_range_with(Mode::Hash, &hash, len, &outboard, 2, second), "a group at another group's place");
+    }
+
+    /// The same message's encoding through a Verifier in pieces: the message
+    /// comes back whole and nothing remains; a changed byte stops it.
+    #[test]
+    fn test_verifier_one_message() {
+        let mut message = vec![0u8; 3 * GROUP_LEN + 5];
+        crate::test::paint_test_input(&mut message);
+        let hash = crate::hash_with(Mode::Hash, &message);
+        let encoding = test_encoding(Mode::Hash, &message);
+        let mut verifier = Verifier::new(Mode::Hash, &hash, message.len() as u64);
+        assert_eq!(verifier.remaining(), encoding.len() as u64);
+        let mut received = Vec::new();
+        for piece in encoding.chunks(1448) {
+            assert!(verifier.update(piece, |b| received.extend_from_slice(b)), "every piece verifies");
+        }
+        assert_eq!((verifier.remaining(), received.as_slice()), (0, message.as_slice()));
+        let mut bad = encoding.clone();
+        bad[encoding.len() / 2] ^= 1;
+        let mut verifier = Verifier::new(Mode::Hash, &hash, message.len() as u64);
+        assert!(!bad.chunks(1448).all(|piece| verifier.update(piece, |_| {})), "a changed byte stops it");
+    }
+
     /// The pool's ranges of groups (lanes::Work::Groups), just past where
     /// the pool takes them, against the calling thread's: small enough for
     /// Miri (the CI's smoketest runs it).

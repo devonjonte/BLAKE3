@@ -1,6 +1,6 @@
 """Mutation testing against a list of the mutants known to survive.
 
-    pypy3 tools/mutants/check.py [--since REV] [--write]
+    pypy3 tools/mutants/check.py [--since REV] [--write] [--map]
 
 cargo-mutants plants likely bugs in the files tools/mutants/known-<arch>.txt
 names (its `files:` line), one at a time, and runs the library's and the
@@ -15,14 +15,15 @@ in git worktrees of HEAD of its own (SHARDS at once), so the checkout is
 never mutated. With --write, the list is rewritten from this run, each
 new mutant's reason UNCLASSIFIED and the others' kept.
 
-The tests run under cargo-nextest (its `mutants` profile, .config/nextest.toml:
-each test in its own process, every test on every mutant, a test killed at
-5 s as a hang). Every run records each test's outcome and time on every
-mutant and on the unmutated tree (tmp/mutants-last/<run>/tests.tsv), and
-weighs the tests by cost: the cheapest set of tests that still catches
-every caught mutant, the tests outside it (each a big test whose catches
-cheaper ones make), and the mutants only an expensive test catches (each a
-small test worth writing).
+The tests run under cargo-nextest (.config/nextest.toml), each in its own
+process, a test killed at 5 s as a hang; a mutant's tests stop at the
+first that fails. Every run records each test's outcome and time on every
+mutant and on the unmutated tree (tmp/mutants-last/<run>/tests.tsv). With
+--map, every test runs on every mutant (the `mutants-map` profile, for when
+the tests change), and the run weighs the tests by cost: the cheapest set
+of tests that still catches every caught mutant, the tests outside it
+(each a big test whose catches cheaper ones make), and the mutants only an
+expensive test catches (each a small test worth writing).
 
 With --since REV, a change's check: only the mutants in the lines the
 change makes (git diff REV...HEAD, cargo-mutants --in-diff), and it fails
@@ -62,6 +63,7 @@ def read_known():
 
 
 HANGS = os.path.join(ROOT, "tools", "mutants", "hangs.txt")
+MAP = "--map" in sys.argv
 
 
 def read_hangs():
@@ -115,7 +117,10 @@ def run(files, extra=(), shards=SHARDS, label="run"):
         # Its own build directory, named outright (a cargo config's
         # target-dir would otherwise give the shards one, and each would
         # test the others' builds).
-        env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"), NEXTEST_PROFILE="mutants")
+        env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"), NEXTEST_PROFILE="mutants-map" if MAP else "mutants")
+        # Consecutive slices (cargo-mutants' default): a shard's mutants in one
+        # file one after another rebuild less (round-robin evened the shards
+        # and made each build 10% slower, the run no faster, October 21).
         shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
         runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=cap_memory)))
     names = collections.Counter()
@@ -158,7 +163,7 @@ def run(files, extra=(), shards=SHARDS, label="run"):
         with open(os.path.join(kept, "tests.tsv"), "w") as f:
             f.write("# mutant (file, change)\tfunction\ttest\toutcome\tms\n")
             f.writelines("\t".join(map(str, r)) + "\n" for r in rows)
-        if label == "run":  # the confirming pass reruns a few mutants: its weights would be noise
+        if MAP and label == "run":  # the confirming pass reruns a few mutants: its weights would be noise
             weigh(rows, os.path.join(kept, "tests.tsv"))
     return names, functions
 
