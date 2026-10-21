@@ -9,7 +9,6 @@ src/each.rs	replace >= with < in hash_each_on	1	speed: moves a threshold between
 src/each.rs	replace hash_held with ()	1	compiled out: the copy of hash_held without std (check-builds' no_std tests reach it)
 src/each.rs	replace | with ^ in hash_held	1	equivalent: | and ^ agree on flag bits that never overlap
 src/ffi_neon_hybrid.rs	replace % with + in prefetch_message_code	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/ffi_neon_hybrid.rs	replace % with + in prefetch_message_code	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace % with / in prefetch_message_code	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace && with || in prefetch_message_code	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace && with || in prefetch_tree_code	1	speed: whether and what to prefetch after a pause (no effect on results)

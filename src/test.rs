@@ -1704,3 +1704,22 @@ fn test_derive_key_from_subtrees() {
     let right = crate::Hasher::new_with(mode).set_input_offset(1024).update(&input[1024..]).finalize_non_root();
     assert_eq!(expected, parent(&left, &right, mode).root_hash().0);
 }
+
+/// The prefetches a call makes after a pause, at every length below the
+/// prefetch limit and every batch count, on every platform: they look up
+/// the kernels' plans by length and count, and a lookup out of range would
+/// end the program. Called directly, since a pause (100 µs since this
+/// thread's last call) is a timing the other tests leave to chance.
+#[test]
+#[cfg(all(blake3_neon, feature = "std"))]
+fn test_prefetches_after_a_pause_every_length() {
+    for platform in every_platform() {
+        for len in (0..crate::PREFETCH_BELOW).step_by(17) {
+            crate::prefetch_kernels(len, platform);
+            crate::prefetch_update_kernels(len, platform);
+        }
+    }
+    for count in 0..=4 * crate::PREFETCH_BATCH_BELOW {
+        crate::neon_hybrid::prefetch_message_code(count);
+    }
+}
