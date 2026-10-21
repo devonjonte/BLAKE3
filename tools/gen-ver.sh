@@ -27,14 +27,16 @@ if [ -n "$latest" ]; then
 fi
 full="$version+$(git rev-parse HEAD)"
 crate=$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.toml | head -1)
-sed -i.bak "0,/^version = \"[^\"]*\"/s//version = \"$full\"/" Cargo.toml && rm Cargo.toml.bak
+# A manifest's first version line (its package's) alone, in POSIX sed (GNU and BSD).
+set_version() { sed -i.bak -e '/^version = "[^"]*"/{' -e "s//version = \"$full\"/" -e ':a' -e 'n' -e 'ba' -e '}' "$1" && rm "$1.bak"; }
+set_version Cargo.toml
 files="Cargo.toml"
 if [ -f b3sum/Cargo.toml ]; then
     sed -i.bak "s/^\(blake3 = { version = \"\)[^\"]*\(\", path = \"\.\.\"\)/\1$version\2/" b3sum/Cargo.toml && rm b3sum/Cargo.toml.bak
     (cd b3sum && cargo update -q -p "$crate")
     files="$files b3sum/Cargo.toml b3sum/Cargo.lock"
     # The C library: its crate's version and the header's B3_VERSION.
-    sed -i.bak "0,/^version = \"[^\"]*\"/s//version = \"$full\"/" capi/Cargo.toml && rm capi/Cargo.toml.bak
+    set_version capi/Cargo.toml
     sed -i.bak "s/^#define B3_VERSION \"[^\"]*\"/#define B3_VERSION \"$full\"/" capi/b3.h && rm capi/b3.h.bak
     files="$files capi/Cargo.toml capi/b3.h"
 else
