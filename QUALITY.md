@@ -10,9 +10,8 @@ ways.
 
 ## Proofs of the kernels
 
-The fastest parts are small routines called kernels. Most kernels are
-written in assembly; a few, for Intel and AMD processors, are written
-in Rust.
+The fastest parts are small routines called kernels, every one of them
+written in assembly.
 
 For the assembly kernels, the project uses formal verification:
 symbolic execution compares the assembled instructions with a written
@@ -27,7 +26,9 @@ proofs cover any number of groups. In those proofs, each group's bytes
 are separate symbols. So if a kernel read the wrong group's bytes, its
 output would not match the specification, and the proof would fail.
 
-The Intel and AMD assembly kernels are checked the same way. Single
+The Intel and AMD assembly kernels are checked the same way. The
+fork's own kernels there, generated, which hash whole chunks and a
+partial one in one pass, are proved for every input. Single
 compressions and extended output at 1 to 32 blocks are proved. For
 batch hashing, an induction proof covers every input count in the
 stated range for each instruction set and calling convention, at block
@@ -42,8 +43,8 @@ mistakes in the assembly (a wrong stride, a wrong rotation, a loop
 that cannot finish, a write into the caller's stack) and require the
 proof to reject every one.
 
-The proofs cover the assembly kernels. The Rust kernels, and the Rust
-code that prepares work and combines results, are covered by tests.
+The proofs cover every kernel. The Rust code that prepares work and
+combines results is covered by tests.
 
 ## Tests, and tests of the tests
 
@@ -108,8 +109,8 @@ No human has carefully reviewed every line, and nobody outside the
 project has audited the code. The proofs trust the written
 specification, the instruction models, the automated prover (Z3),
 and each kernel's stated
-memory and calling convention. Tests cover the Rust kernels and the
-Rust code around the assembly. These checks reduce risk, but they
+memory and calling convention. Tests cover the Rust code around the
+assembly. These checks reduce risk, but they
 cannot guarantee that no bug remains.
 
 ## Run the checks
