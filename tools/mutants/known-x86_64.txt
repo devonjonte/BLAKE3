@@ -68,7 +68,6 @@ src/lanes.rs	replace prefix_for -> usize with 1	1	speed: how the work is cut amo
 src/lanes.rs	replace sme2_prefix -> usize with 0	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace sme2_prefix -> usize with 1	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with + in sme2_prefix	2	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
-src/lanes.rs	replace * with / in sme2_prefix	2	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace / with % in sme2_prefix	2	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace + with * in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace / with * in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
@@ -205,7 +204,6 @@ src/many.rs	replace | with ^ in hash_run	3	equivalent: | and ^ agree on flag bit
 src/many.rs	replace hash_run_padded with ()	1	SME2 only: hash_run_padded is cfg(blake3_sme2), compiled out on x86
 src/many.rs	replace + with - in hash_run_padded	1	SME2 only: hash_run_padded is cfg(blake3_sme2), compiled out on x86
 src/many.rs	replace + with * in hash_run_padded	1	SME2 only: hash_run_padded is cfg(blake3_sme2), compiled out on x86
-src/many.rs	replace | with & in hash_run_padded	1	SME2 only: hash_run_padded is cfg(blake3_sme2), compiled out on x86
 src/many.rs	replace | with ^ in hash_run_padded	1	equivalent: | and ^ agree on flag bits that never overlap
 src/many.rs	replace && with || in hash_run_short	1	speed: moves a threshold between equally correct paths
 src/many.rs	replace >= with < in hash_run_short	1	speed: moves a threshold between equally correct paths
@@ -313,3 +311,58 @@ src/lib.rs	replace && with || in compress_chunks_parallel	3	NEON and SME2 only: 
 src/lib.rs	delete ! in compress_chunks_parallel	1	NEON and SME2 only: the hybrid partial-chunk block in compress_chunks_parallel is compiled out on x86
 src/lib.rs	replace + with - in compress_chunks_parallel	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace + with * in compress_chunks_parallel	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/portable.rs	replace | with ^ in hash1	2	equivalent: | and ^ agree on flag bits that never overlap
+src/io.rs	replace < with <= in fill	2	equivalent: one more read into an empty buffer, which returns 0 and ends the loop
+src/pair.rs	replace takes -> bool with false	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace + with * in takes	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace * with + in takes	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace * with / in takes	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace takes_platform -> bool with false	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	delete match arm Platform::AVX2 in takes_platform	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	delete match arm Platform::AVX512 in takes_platform	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
+src/pair.rs	replace | with ^ in parent	2	equivalent: | and ^ agree on flag bits that never overlap
+src/self_test.rs	replace + with -	20	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
+src/self_test.rs	replace + with *	20	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
+src/self_test.rs	replace * with +	48	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
+src/self_test.rs	replace * with /	48	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
+src/self_test.rs	replace - with +	6	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace - with /	6	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace * with + in chain	2	equivalent: the case has one message, so its length scales only message 0's offset, 0
+src/self_test.rs	replace * with / in chain	2	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace * with + in outputs	2	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace * with / in outputs	2	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace chunk_values -> usize with 0	2	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace chunk_values -> usize with 1	2	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace * with + in chunk_values	2	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace * with / in chunk_values	2	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace == with != in chunk_values	4	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace % with / in chunk_values	2	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace % with + in chunk_values	2	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace | with & in chunk_values	4	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace | with ^ in chunk_values	4	equivalent: | and ^ agree on flag bits that never overlap
+src/self_test.rs	replace << with >> in chunk_values	4	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace / with % in chunk_values	2	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace / with * in chunk_values	2	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace compiled_features_present with ()	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace && with || in compiled_features_present	4	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace == with != in compiled_features_present	4	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace & with | in compiled_features_present	4	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace & with ^ in compiled_features_present	4	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace << with >> in compiled_features_present	4	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace ensure_slow::<impl Drop for Failed>::drop with ()	2	OPEN: the self-test's failure path (a CPU or build that computes wrong digests); no test makes the self-test fail
+src/self_test.rs	delete match arm PASSED in ensure_slow	2	the self-test state machine under interleavings the tests leave to chance (a second thread waiting, or a failure on another thread)
+src/self_test.rs	delete match arm FAILED in ensure_slow	2	OPEN: the self-test's failure path (a CPU or build that computes wrong digests); no test makes the self-test fail
+src/self_test.rs	replace * with + in test::reference	2	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace * with / in test::reference	2	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/hasher.rs	replace < with <= in fill	2	equivalent: at equality both arms take the same length
+src/hasher.rs	replace - with + in feed	2	speed: ahead is a prefetch hint (how far the SME2 walk prefetches past its input)
+src/hasher.rs	replace - with / in feed	2	speed: ahead is a prefetch hint (how far the SME2 walk prefetches past its input)
+src/hasher.rs	replace > with < in feed	2	speed: chooses between equally correct paths (the subtree through the flat walk, or through its children)
+src/hasher.rs	replace <impl Feed<ChunkState<P>> for Kernels<'_, P, H>>::subtree_cv -> Option<Cv> with None	2	speed: chooses between equally correct paths (None sends the subtree through its children, which compute the same value)
+src/hasher.rs	replace < with <= in ChunkState<P>::fill_buf	2	equivalent: at equality both arms take the same length
+src/hasher.rs	replace > with >= in ChunkState<P>::absorb	2	speed: chooses between equally correct paths (a first whole block through the empty buffer, or straight from the input)
+src/hasher.rs	replace | with ^ in ChunkState<P>::absorb	2	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
+src/hasher.rs	replace | with ^ in Output<P>::root_bytes	2	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
+src/hasher.rs	replace | with ^ in ChunkState<P>::output	4	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
+src/hasher.rs	replace | with ^ in parent_output	2	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
+src/hasher.rs	replace CvStack::array -> Option<&[Cv; DEPTH]> with Some(Box::leak(Box::new([Default::default(); DEPTH])))	2	test-only code (cfg(test)): the test's own accessor
