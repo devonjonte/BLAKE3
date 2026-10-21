@@ -228,6 +228,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - run: grep -o -w 'avx512f\|avx512vl\|avx2\|sse4_1' /proc/cpuinfo | sort -u
+    # The AVX-512 forms are checked only on a CPU that has them: a runner
+    # without AVX-512 fails here, and a rerun draws another.
+    - run: grep -o -w 'avx512f\|avx512vl\|avx2\|sse4_1' /proc/cpuinfo | sort -u && grep -q -w avx512vl /proc/cpuinfo
     - run: sudo apt-get install -y llvm lld clang && pip install z3-solver
     - run: python3 tools/verify/cross_check_x86.py

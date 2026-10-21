@@ -278,9 +278,8 @@ these cases:
 - AVX-512 `xof_many`: one to three blocks.
 
 Open: `hash_many` at every count (by induction) and the remaining
-Windows cases, `xof_many` from four blocks (the kernel agrees at random
-points; the normal form does not yet reach it), and the AVX-512
-instruction forms checked against a CPU that has them. These ran on an
+Windows cases, and `xof_many` from four blocks (the kernel agrees at
+random points; the normal form does not yet reach it). These ran on an
 i7-12700K, outside the long proofs' run below.
 
 The fork's own x86-64 kernels in Rust intrinsics, and the Rust code (the
@@ -314,8 +313,8 @@ proved equal to Arm's own specification of the architecture (Sail's
 Armv9.4, run by Isla); the rest, and the matrix unit's loads and stores,
 are checked against the CPU. The x86-64 proofs rest likewise on
 `x86.py`'s model of each x86 instruction they meet, checked against the
-CPU (116 forms on an i7-12700K, and in CI on GitHub's x86 machines; the
-AVX-512 forms wait for a CPU that has them).
+CPU in CI on every change: 228 forms, the AVX-512 ones among them, on
+GitHub's AVX-512 machines.
 
 **How the checkers are checked.**
 
