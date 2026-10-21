@@ -32,7 +32,7 @@ tune to the hardware, never to its harness.
 | Platform facts | `examples/scaling.rs`, `host-lab-reports/` (the host lab: `examples/host_lab.rs` at 9868745) | Primitives, scaling, idle waiters, SME2 callers, WFE on the machine it runs on |
 
 The generated assembly is committed. Edit the generator and run
-`python3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S`;
+`pypy3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S`;
 `test_assembly_matches_generator` fails on drift. When changing the
 generator, check that existing kernels stay byte-identical unless meant.
 

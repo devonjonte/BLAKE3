@@ -81,7 +81,7 @@ rest.
 
 The NEON hybrid assembly is generated and committed. Edit
 `tools/gen_neon_hybrid.py`, then run
-`python3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S`;
+`pypy3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S`;
 a test fails when the two drift apart.
 
 ## Performance

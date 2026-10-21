@@ -92,7 +92,7 @@ A release is a commit everyone can stand behind: every check that the main line 
 
 **Benchmark results.** A full bench-hashes run on the release commit, on the Mac (and on any other machine whose owner offers one), published to bench-hashes' GitHub Pages with the release named on the map.
 
-**Version and tag.** `python3 tools/gen-ver.py X.Y.Z` from a clean tree: one commit on top of HEAD writing X.Y.Z+<HEAD's hash> into every string the release reaches (the crate, b3sum's own version, the C library's crate, header and pkg-config file, the CHANGELOG's title; b3sum's requirement on the crate is `=X.Y.Z`), and the tag vX.Y.Z+<hash> on it. The hash in the version string names the code commit, so a holder of the string alone can check they have the right code. It prints the dependency line for the release notes: the release commit by its full hash (`rev`), the form Cargo enforces.
+**Version and tag.** `pypy3 tools/gen-ver.py X.Y.Z` from a clean tree: one commit on top of HEAD writing X.Y.Z+<HEAD's hash> into every string the release reaches (the crate, b3sum's own version, the C library's crate, header and pkg-config file, the CHANGELOG's title; b3sum's requirement on the crate is `=X.Y.Z`), and the tag vX.Y.Z+<hash> on it. The hash in the version string names the code commit, so a holder of the string alone can check they have the right code. It prints the dependency line for the release notes: the release commit by its full hash (`rev`), the form Cargo enforces.
 
 **What users download.**
 - `cargo publish` in the root, then in `b3sum/` (the library on crates.io; `cargo install` builds b3sum on the user's machine).

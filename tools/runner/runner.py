@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env pypy3
 """Benchmark runner for the servil fork, for the Mac's `benchrunner` account.
 
     sudo -u benchrunner -H pypy3 runner.py EXCHANGE
@@ -26,6 +26,13 @@ check's. Every run's samples file lands in the job's samples/.)
 
 (Any job may add "powermetrics": true: the chip's CPU, GPU, and ANE power
 every 500 ms beside it, in its results' powermetrics.txt.)
+    {"type": "b3sum", "fork_commit": "...", "bench_commit": "...", "quick": true}
+
+(A b3sum job builds the contenders, bench-hashes' tools/b3sum-contenders.py
+at the fork commit: official BLAKE3's b3sum, the fork's as b3sum and
+b3sum-1-thread, the system's sum programs; and runs bench-hashes b3sum on
+the files in ~/b3sum-bench-files, made there once. The report, samples
+and map land in the job's benchmark-results/. "quick" runs the small set.)
     {"type": "example", "example": "scaling" | "host_lab" | "energy_probe" | "job_trace",
      "fork_commit": "...", "args": ["message", "1048576"]}
     {"type": "test", "fork_commit": "..."}
@@ -180,6 +187,19 @@ def benchmark(job, run, work, out):
     return "ok"
 
 
+def b3sum(job, run, work, out):
+    fork_commit = hex_commit(job, "fork_commit")
+    fork = run.checkouts(fork_commit, hex_commit(job, "bench_commit"))
+    # One contender a line, each one argument (a command may hold flags).
+    contenders = [line for line in run.run([sys.executable, "tools/b3sum-contenders.py", str(fork), str(HOME / "b3sum-contenders"), fork_commit],
+                                           cwd=fork / "bench-hashes", capture=True).splitlines() if "=" in line]
+    exe = run.run(["cargo", "run", "--release", "--quiet", "--", "build-against", str(fork)],
+                  cwd=fork / "bench-hashes", capture=True).strip().splitlines()[-1]
+    quick = ["--quick"] if job.get("quick") else []
+    run.run([exe, "b3sum", "--files", str(HOME / "b3sum-bench-files"), *quick, *contenders], cwd=out)
+    return "ok"
+
+
 def check(job, run, work, out):
     """bench-hashes check: the fork at new_commit, with bench-hashes at
     bench_commit nested inside it, against old_commit. check builds both
@@ -237,7 +257,7 @@ def test(job, run, work, out):
     return "passed"
 
 
-HANDLERS = {"benchmark": benchmark, "check": check, "example": example, "test": test}
+HANDLERS = {"benchmark": benchmark, "b3sum": b3sum, "check": check, "example": example, "test": test}
 
 
 def power():
