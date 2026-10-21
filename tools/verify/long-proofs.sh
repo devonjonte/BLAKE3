@@ -3,8 +3,10 @@
 # the commit's status "long proofs" (beside CI's checks): the Lean
 # specification against C2SP's text and the proofs' definition from it;
 # the generated hybrid file against its generator; the helpers; every
-# hybrid kernel; every SME2 kernel at every group count; the instruction
-# models checked against the CPU; and the proofs' mutants. Hours, in a
+# hybrid kernel; every SME2 kernel at every group count; the x86-64
+# kernels' compressions and hash_many (prove_x86.py; xof_many joins once
+# it proves from four blocks); the instruction models checked against the
+# CPU; and the proofs' mutants. Hours, in a
 # worktree of the commit; nothing should measure meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
 # the status names their BLAKE3 hash.
 #
@@ -39,8 +41,9 @@ run generated sh -c 'pypy3 tools/gen_neon_hybrid.py | cmp - c/blake3_neon_hybrid
 run helpers pypy3 -m unittest discover -s tools/verify -p test_helpers.py
 run prove_hybrid pypy3 tools/verify/prove_hybrid.py
 run prove_sme2 pypy3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof chunks_x2 every parents_every xof_every messages_every x2_every
+run prove_x86 pypy3 tools/verify/prove_x86.py compress xof hash_many
 run cross_check pypy3 tools/verify/cross_check.py
 run mutants pypy3 tools/verify/mutants.py
 hash=$(cat "$logs"/*.txt | cargo run -q --release --manifest-path b3sum/Cargo.toml -- --no-names | cut -c1-16)
-status "$state" "$verdict: Lean, hybrid, SME2, cross_check, mutants; logs' BLAKE3 $hash (VM)"
+status "$state" "$verdict: Lean, hybrid, SME2, x86, cross_check, mutants; logs' BLAKE3 $hash (VM)"
 echo "long proofs $verdict for $commit; logs in $logs, BLAKE3 $hash"
