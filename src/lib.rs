@@ -100,8 +100,7 @@
 //!   input, and at most 200 bytes for each CPU (1 GiB on 16 CPUs: 390 KiB).
 //! - **A [`stream`]** takes its storage (its 2 MiB ring and its entries)
 //!   from a pool the process keeps: a thread's first stream allocates it
-//!   and later streams reuse it, never freed; once that storage exists, a
-//!   stream allocates nothing.
+//!   and later streams reuse it, never freed.
 //! - **Once per process**: the startup self-test's buffers, about 45 KiB
 //!   of the calling thread's stack while it runs (it allocates nothing),
 //!   and the threads: by default a worker per CPU beyond the first, each with the

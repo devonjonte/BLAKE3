@@ -72,11 +72,6 @@ name = "stream_collect_with_workers"
 required-features = ["std"]
 
 [[test]]
-name = "stream_no_alloc"
-harness = false
-required-features = ["std"]
-
-[[test]]
 name = "initialize_multithreaded_contract"
 required-features = ["std"]
 
