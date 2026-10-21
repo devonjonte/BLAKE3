@@ -45,6 +45,16 @@ fn allocations_after_warm_up(warm: usize, rounds: usize, mut round: impl FnMut()
 }
 
 fn main() {
+    // A runner's listing (cargo-nextest's protocol for a binary without
+    // libtest's harness): this binary's one test, never ignored. Any other
+    // arguments, the runner naming the test included, run it.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--list") {
+        if !args.iter().any(|a| a == "--ignored") {
+            println!("a_warm_stream_allocates_nothing: test");
+        }
+        return;
+    }
     blake3_servil::initialize();
     #[cfg(not(miri))]
     a_warm_stream_allocates_nothing();
