@@ -537,6 +537,14 @@ among them, and however often the hash is timed.
    on.** That is a promise of the CPU. Arm CPUs make it, for a listed set
    of instructions, while data-independent timing (DIT) is enabled. The
    fork does not enable DIT; its cost is still to be measured.
+   Intel's equivalent is DOITM (IA32_UARCH_MISC_CTL, bit 2), on Alder
+   Lake and later. Only the operating system or firmware can set that
+   MSR, for the whole machine. No call in this crate can turn it on, so a
+   caller who needs it enables it at the platform level. The integer
+   instructions these kernels use are on Intel's data-independent list.
+   What DOITM costs on the x86 kernels is unmeasured: on our i7-12700K
+   the kernel's lockdown (Secure Boot integrity mode) refuses the MSR
+   write even to root.
 3. **Power does not show in the timing.** A chip's power draw depends
    on the data it computes, and power can change its clock speed and so
    the time (the Hertzbleed attack, 2022). A fixed clock speed removes
