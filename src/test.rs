@@ -57,7 +57,8 @@ pub const TEST_KEY_WORDS: CVWords = [1952540791, 1752440947, 1816469605, 1752394
 // unlikely to swapping any two adjacent input blocks or chunks will give the
 // same answer.
 
-/// Every platform this machine runs, detect()'s first: the tests that must
+/// Every platform this machine runs, detect()'s first (SME2 where the CPU
+/// has it), then NEON: the tests that must
 /// reach each kernel family's path whichever the turn would give (the
 /// NEON path of SME2 code runs when another thread holds SME2's turn,
 /// which a test alone in its process never sees).
@@ -68,8 +69,6 @@ pub(crate) fn every_platform() -> Vec<crate::platform::Platform> {
     let mut all = vec![Platform::detect()];
     #[cfg(blake3_neon)]
     all.push(Platform::neon().unwrap());
-    #[cfg(blake3_sme2)]
-    all.extend(Platform::sme2());
     all
 }
 
@@ -1133,6 +1132,12 @@ mod guard_pages {
         #[cfg(blake3_sme2)]
         platforms.extend(platform::Platform::sme2());
         // The kernels this CPU has are the ones checked: none left out.
+        #[cfg(blake3_sme2)]
+        assert_eq!(
+            platforms.iter().any(|p| matches!(p, platform::Platform::SME2)),
+            platform::sme2_detected(),
+            "SME2 checked where the build and the CPU have it: {platforms:?}"
+        );
         #[cfg(target_arch = "x86_64")]
         {
             assert_eq!(

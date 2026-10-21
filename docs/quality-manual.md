@@ -357,12 +357,16 @@ also need nightly Rust
 (`rustup toolchain install nightly --component miri,rust-src,llvm-tools`):
 
 ```sh
-RUSTFLAGS="-Zsanitizer=address" cargo +nightly nextest run -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
+RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS=detect_leaks=0 cargo +nightly nextest run -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
 RUSTFLAGS="-Zsanitizer=thread" cargo +nightly nextest run -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
 MIRIFLAGS="-Zmiri-num-cpus=4 -Zmiri-ignore-leaks" cargo +nightly miri nextest run --features pure --lib unsafe_paths miri
 ```
 
-(On macOS, use the target `aarch64-apple-darwin`.)
+(On macOS, use the target `aarch64-apple-darwin`.) The crate is crash-only
+software: what still exists as a process ends (a pool's threads, a
+recycled source, a test's buffers) is no fault, and no code frees it for a
+checker's sake, so ASan's leak report is off, as Miri's is
+(`-Zmiri-ignore-leaks`).
 
 Timing claims are checked the same way: [bench-hashes](https://github.com/johnservil/bench-hashes)
 measures the fork against the official crate and others on your machine.
