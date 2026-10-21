@@ -23,11 +23,9 @@ const TAG_ARG: &str = "tag";
 const CHECK_ARG: &str = "check";
 
 #[derive(Parser)]
-#[command(version, max_term_width(100))]
+#[command(version, max_term_width(100), after_help = "More information: b3sum/README.md at https://github.com/johnservil/BLAKE3/blob/servil/b3sum/README.md")]
 struct Inner {
     /// Files to hash, or checkfiles to check
-    ///
-    /// When no file is given, or when - is given, read standard input.
     file: Vec<PathBuf>,
 
     /// Use the keyed mode, reading the 32-byte key from stdin
@@ -35,8 +33,6 @@ struct Inner {
     keyed: bool,
 
     /// Use the key derivation mode, with the given context string
-    ///
-    /// Cannot be used with --keyed.
     #[arg(long, value_name("CONTEXT"), conflicts_with(KEYED_ARG))]
     derive_key: Option<String>,
 
@@ -54,16 +50,6 @@ struct Inner {
     seek: u64,
 
     /// The most threads hashing at once [default: as fast as b3sum can]
-    ///
-    /// b3sum hashes on at most N threads in all: several files at once, or
-    /// one file over several threads. By default it hashes as many files
-    /// as there are CPUs at once, and a large one over every CPU besides,
-    /// more threads than CPUs, which keeps every core busy to the end. 1 runs b3sum on one thread, reading
-    /// and hashing each file in turn (for one b3sum per core, or to leave
-    /// other cores to other work). With more, a large file read from
-    /// storage, or stdin, has one more thread reading ahead, which hashes
-    /// nothing. To run b3sum on chosen CPUs, start it under
-    /// `taskset -c LIST` (Linux).
     #[arg(long, value_name("NUM"))]
     num_threads: Option<std::num::NonZeroUsize>,
 
@@ -76,8 +62,6 @@ struct Inner {
     no_names: bool,
 
     /// Write raw output bytes to stdout, rather than hex
-    ///
-    /// --no-names is implied. In this case, only a single input is allowed.
     #[arg(long)]
     raw: bool,
 
@@ -99,8 +83,6 @@ struct Inner {
     check: bool,
 
     /// Skip printing OK for each checked file
-    ///
-    /// Must be used with --check.
     #[arg(long, requires(CHECK_ARG))]
     quiet: bool,
 }
