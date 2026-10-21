@@ -65,6 +65,31 @@
 //! [`YIELD_EVERY`], so a runnable thread never waits a scheduler quantum
 //! behind a poller (two threads spinning without yielding took a 128 KiB
 //! split from 29 us to 2 ms on a two-CPU machine).
+//!
+//! # Tried and set aside
+//!
+//! - Wakes: a tree of wakes (each woken worker waking half of those owed),
+//!   level; every woken worker draining the owed wakes, the first piece at
+//!   about 120 us into a 1 MiB call; the caller waking two, 1-4 MiB 9%
+//!   slower; a woken worker prefetching its kernels' code, level (the
+//!   wake's 15-70 us dwarfs the fetch).
+//! - Waiting: `spin_loop` polls that never yield (a scheduler quantum
+//!   lost); spinning 10 ms before sleeping (fifteen spinning vCPUs starve
+//!   the callers of host time); WFE in place of spinning (it returns every
+//!   1.3 us natively too).
+//! - Sharing: a pool per caller (two halve each other); one worker per SME
+//!   unit with fair-share admission (lost to one thread from 128 KiB under
+//!   two callers); backing off a slow thread (it cannot tell another
+//!   process from an unrelated thread of its own).
+//! - Cutting: splitting from 32 KiB, smaller minimum pieces, equal pieces,
+//!   a longest piece of 64 or 256 KiB: slower or level.
+//! - SME2: permits per SME unit, pacing SME2 against NEON (both shared
+//!   copies locked into a mode slower than NEON), SME-only workers
+//!   (superseded by the NEON pool and the turn); the caller's own pieces on
+//!   SME2 and the workers on NEON (Mac 256 KiB +8-10%, shared batches
+//!   +35-46%); the first K workers on SME2, one an SME unit (the M4 Max
+//!   has three): with every core busy the chip's power sets the pace, and
+//!   more units add heat, not throughput.
 
 use crate::CVBytes as ChainingValue;
 use crate::platform::Platform;

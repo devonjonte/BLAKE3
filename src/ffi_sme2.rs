@@ -12,6 +12,14 @@
 //! work only when it is 16. `Platform::detect()` checks that once and
 //! selects NEON otherwise, so a return value other than 16 here is a
 //! contract violation and stops the program.
+//!
+//! What SME2 buys over the NEON hybrids, nonstop on an M4 Max (probe/sme2-worth):
+//! one thread 1.5-1.7x (hash of 64 KiB-64 MiB 0.25 -> 0.15-0.17 ns/B),
+//! batches 1.9x (18.2 -> 9.4 ns a message), outboards 1.5x, a Hasher fed
+//! 64 KiB pieces 1.2x; `hash_multithreaded` on every core level. Tried and
+//! set aside: a padded SME2 group for a batch's remainder (80-290% slower
+//! at 24 messages, every variant), and a lone 16 KiB group on the NEON
+//! hybrids in place of SME2 (no change).
 
 use crate::{BLOCK_LEN, CHUNK_LEN, CVWords, IncrementCounter, OUT_LEN};
 

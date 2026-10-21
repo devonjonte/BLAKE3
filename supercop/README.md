@@ -90,6 +90,11 @@ kernel by length gives every point.
 upstream's four-lane NEON C kernel for whole chunks and its own scalar kernel for single
 compressions (messages to 1 KiB, partial chunks, parents, roots).
 
+Tried and set aside: a C `crypto_core` of one 16-chunk subtree under the BLAKE3 team's C
+directories, SUPERCOP tuning it at 16 KiB. It measured a mix no user runs (upstream C below
+16 KiB and in every tail, 1.5-2x slower than the crate at 16-64 KiB); the crate, called as
+its users call it, replaced it.
+
 Open:
 - Whether the scalar kernel beats upstream's portable C on the Cortex-A72 and A76: it runs
   more instructions (`hash()` of 64 bytes 1178 against 1002, of 1 KiB 17138 against 14612,

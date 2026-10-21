@@ -39,9 +39,36 @@ C ABI, every kernel:
   block, read from there instead of the input. The entry for a single
   chunk's blocks, whose short final block arrives zero-padded elsewhere.
 
+Tried and set aside (VM unless said; E-core cycles from the Mac):
+  - Two scalar chunks in place of the pair for two chunks (k2): 2 KiB 919
+    -> 1291 ns; their d rows' spills sit on the chain.
+  - A second scalar lane elsewhere: two scalar lanes cost E-cores 14-30%
+    more cycles. Only k4/k6/k8/k10 and p4 keep two: p4 because four
+    64-byte messages run 13-14% faster on P-cores and the VM (Zooko,
+    September 27, 2026: hash_many is built for top speed).
+  - k4 as two pairs, and the other plans with no second scalar chunk:
+    E-cores 16-24% faster, P-cores up to 20% slower (4 KiB), 8 KiB slower
+    on both. A NEON quad for p4 or q4's whole chunks: 14-15% slower (the
+    quad transposes its messages through the stack every block).
+  - k4's two scalar lanes' d rows packed in the top halves of their c
+    registers (tag probe/k4-packed): k4 8.5% slower, the spill's
+    forwarded reload hides behind the step's other Gs.
+  - Rotations folded into the xors (`eor d, rd, a, ror #n`, four dependent
+    operations a half-G in place of six): 5-13% slower; an eor with a
+    rotated operand takes two cycles here.
+  - k2, k3, p2, p3, q1, q2 rolled into a loop (2-3x smaller): 2-3 KiB
+    +4-5%, batches of 2-6 one-block messages +10-18%; at these lengths the
+    kernels' code is not what a cold call waits for.
+  - Whole chunks, then the partial one alone (k4/k6/k8 + c1 for q4/q6/q8):
+    up to 8% faster at 8 KiB + 1 block, but it keeps two scalar lanes. The
+    q kernels earn their place: hash at lengths with a partial last chunk
+    12-27% faster nonstop, 8-38% after a pause (Mac).
+  - Estimated, not built: a direct small-tree path (1-2% at 4 KiB) and
+    the parents and root folded into k4 (about 3.6%).
+
 Run from the repository root:
 
-    python3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S
+    pypy3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S
 
 The generated file is committed so that building needs no Python; CI checks
 that it matches the generator's output.
