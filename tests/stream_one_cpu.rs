@@ -2,8 +2,7 @@
 //! process): the pool then has no worker, and on a CPU without SME2 no
 //! thread at all to take tasks, so the caller's thread hashes every task
 //! while it waits. Each kind of message completes with the reference
-//! implementation's digests (once, the queue's tasks waited forever: fork
-//! NOTES, "The queue on one CPU"). The test pins its process to one CPU
+//! implementation's digests. The test pins its process to one CPU
 //! before the pool starts, so it is a binary of its own, with one test
 //! (Linux, where the pool counts the process's affinity).
 #![cfg(target_os = "linux")]

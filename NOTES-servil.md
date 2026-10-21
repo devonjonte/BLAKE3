@@ -1183,74 +1183,7 @@ second crossed one CPU. With Activity Monitor closed, job 968 was quiet
 (0.25 CPUs, 0.66 at most). Keep Activity Monitor closed while the Mac
 measures.
 
-**perf_regress before it** (`check` = working tree against HEAD, `compare OLD NEW`,
-`build` = the working tree's bench-hashes for runs by hand): runs A B B
-A A B B A of sha256 (the control), servil, and servil mt at 14 points
-over the benchmark's five nonstop use cases, 24 rounds each; a cell is
-slower when all four pairs' 5th percentiles are more than its margin
-above: 3% solo, 10% shared; the control moving means no verdict. Since
-October 1, 2026 it measures no calls after a gap and has no slow-speed
-rule: both gave verdicts on identical code ("perf_regress on the Mac:
-layout luck per side"); the paragraphs below about them are history. A
-first calibration on these use cases (VM, September 28,
-night): four checks of unchanged code, no regression called (one first
-flag the confirmation dropped; one cell called faster, the continuous
-batches of 16, which run at two speeds); a planted slowdown in
-`Queue::submit` of +100-300% on the continuous messages caught and
-confirmed, one of about 1% not; about 20% planted in `hash()` for 64 B
-not confirmed, where the after-gap medians of unchanged code vary about
-twofold between VM runs at 64 B (servil st 7.5 and 14.1 ns/B). The Mac
-awaits the runner's restart (its installed perf_regress predates this). Confirmed solo
-cells hold the change (exit 1); confirmed shared cells are listed beside
-exit 0, and the commit message names them and the reason (since
-September 26, 2026). Each listed cell also shows its 90th-percentile
-ratio, which the verdict ignores (a two-speed cell's 5th percentile sees
-only the fast speed). It measures only its points; a kernel no point
-exercises can change unseen (4 KiB was added for that). `check --against
-<last release>` before a release.
-
-Since September 26, 2026 a check takes about 17 s on the VM when neither
-side's code changed (95 s before), for three reasons:
-- *Curtailment.* A pair's runs measure only the points with a cell still
-  open (every pair so far beyond its margin one way); the first pair
-  measures all 29, then typically 5-12, then 0-3. The verdict is the one
-  every pair measuring every point would give from the same pairs.
-  Confirmation (four more pairs) measures only the slower cells' points.
-- *Shorter runs.* The variance between processes exceeds a run's
-  sampling noise: a cell's 5th percentile across runs varies 1.4% at 24
-  samples, 1.5% at 12, 1.8% at 6 (VM, median cell), so rounds went 48 ->
-  24. Calibrated on unchanged code (VM, checks simulated over consecutive
-  runs): false flags before confirmation 0.07% of cells, no false
-  no-verdict in 25 checks; a solo cell 5% slower caught 81% (84% at 48
-  rounds, 61% at 12), 10% 92%, 20% 95%. The misses are the cells whose
-  speed differs between processes (servil mt at 64 KiB and 1024
-  messages, servil st at 32 KiB). The Mac (job 329: 48 runs from one
-  build, checks over consecutive runs): false flags 1 of 4756 cells, no
-  false no-verdict in 41 checks, 5% slower caught 77%, 10% 96%, 20% 99%;
-  open points after each pair 8.4, 1.7, 0.3, 0.
-- *Cargo's freshness.* Each side is a directory it owns (fork worktree,
-  bench-hashes copy with its own lock, target directory), changed only
-  where its sources differ, so an unchanged side builds nothing (1.2 s
-  of git and copying). Two bugs had made every build rebuild
-  bench-hashes: the committed lock patched and written back on every
-  check, and bench-hashes' build.rs watching `<git dir>/refs/tags`,
-  which a worktree's git directory lacks (a missing watched path is
-  always stale; tags live in the common directory).
-A synthetic slowdown (+33% at 64 B) was held on 64 B and one-message
-batches, confirmed over 6 then 4 points, in about 35 s.
-
-After idle (since September 26, 2026): bench-hashes' third scenario, calls
-after the thread slept 1 ms, judged at a 20% margin and holding a change
-like solo cells (a program hashing now and then is the recommended usage
-too). VM calibration (7 checks over consecutive runs): no false flag or
-no-verdict; 50% slower caught 88%, 70% 99%, twice as slow always; Mac
-(job 338, 41 checks): the same at 20% (50% slower caught 82%, twice as
-slow 99%), after-idle 5th percentiles varying 9% between runs there. A
-planted 50 us spin on waking the pool's sleepers was held on servil mt
-after idle at 256 KiB (+58%, then +43%) and 4096 messages (+50%, +45%),
-no solo cell moved. The after-idle cells add about 2.5 s a run.
-
-Found while calibrating (September 26, 2026), both open:
+Two open findings from calibrating the old regression check (September 26, 2026):
 - *The VM warms up.* Under sustained load the guest slows over its first
   3-4 minutes, then holds: SHA-256 +5-11%, servil mt about +6% (settled
   in about 2 minutes), servil st about +2%. Within a 9 s run there is no
@@ -1265,20 +1198,14 @@ Found while calibrating (September 26, 2026), both open:
   servil st 32 KiB +24% and 64 KiB +20% in all eight pairs: code layout,
   or a shift in when the two copies take the SME2 lock. Ours to explain.
 
-**bench-hashes depends on the fork by git** at the commit its
-`Cargo.lock` pins (what users measure). A build against a local checkout
-takes `cargo --config
-'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'`
-(bench-hashes nested in that checkout), and the patch changes the lock,
-so it happens where the lock belongs to the build: `perf_regress`'s sides
-(`tmp/perf-ab/old/`, `new/`: a fork worktree, a copy of bench-hashes
-with its own lock derived from the committed one, a target directory;
-`perf_regress.py build` for runs by hand), and the Mac runner's
-throwaway clones. Until September 26, 2026 perf_regress patched the
-committed lock and wrote it back, a change and a change back on every
-check, which made Cargo rebuild bench-hashes every time. Records of fork commit X: pin X in
-bench-hashes (`cargo update -p blake3-servil --precise X`), run
-unpatched, commit the lock with the records.
+**bench-hashes depends on the fork by git**, at the commit its
+`Cargo.toml` names by full hash (`rev`, for blake3-servil and clocks).
+A build against a local checkout (bench-hashes nested in it) takes
+`cargo --config 'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'`,
+and the patch changes the lock, so `bench-hashes build-against` and
+`check` build from a copy of bench-hashes with its own lock, leaving the
+committed one alone. Records of fork commit X: set both `rev`s to X,
+build, commit `Cargo.toml` and `Cargo.lock` with the records.
 
 Pitfalls met (keep them in mind):
 - Records made through the runner before September 25, 2026 show the fork
@@ -1832,52 +1759,6 @@ above that boundary remains two. Seven clocks tests and all 13 Python
 vectors agree. The Rust rule and measured samples are unchanged.
 
 
-## Context-reset audit (September 30, 2026): timing evidence still open
-
-Current focus: Zooko asks whether large benchmark swings occur in users'
-typical operation. That is unestablished. He rejected aggregation across
-more processes as a substitute for diagnosis. Hold hashing fixed; compare
-representative direct callers with the harness and vary work between
-calls one factor at a time. Measure wall and per-kind counts through
-clocks and use the shared speed/share rule. Cache/TLB/ASLR/code layout
-remain hypotheses. No hashing implementation source changed this session.
-
-**Clocks experiment confound found in the handover audit:**
-perf_regress.py::clocks_patch patches to ROOT/clocks for every build.
-probe/benchmark-alignment descends from 9cea065 (unwarmed helper), so
-job 788's requested 1820efb and d005716 sides both used its unwarmed
-clocks. This job did not test the d005716 warm-up. Production hashing
-provenance alone does not identify that patched helper. The code remains
-committed on the candidate; its native effect is open. Preserve the
-regression tool's intentional common-measurement basis, while building
-actual clocks variants explicitly for any timing-helper A/B.
-
-The benchmark's newest NEXT-STEPS block is the authoritative handover.
-It corrects earlier overclaims of per-process causality, bounds on
-variation, and archaeology conclusively refuting a regression. Those
-checks pass at their thresholds and sampled cells; real-caller behavior
-and smaller differences need direct evidence. Native Mac first, VM after;
-promotion and publication still await validated evidence.
-
-## Load in clocks, and one reader of samples (September 30, 2026)
-
-Zooko asked for load detection as code every measurement runs, after
-the day's Mac jobs ran beside his browser (bench-hashes NOTES, "Load moved
-into clocks", has what the old detector had flagged). `clocks::load`
-reads machine CPU time (Linux `/proc/stat` with steal; macOS
-`host_statistics`, each 32-bit counter differenced on its own) and this
-process's CPU time at most once a second, from `tick()`, which every
-`clocks::measure*` calls outside its timed intervals; `Batch.started_ns`
-places each sample in a window. VM costs: a reading 8.6 us, a tick
-between readings 18 ns (`reading_cost`, an ignored test); the Mac's is
-unmeasured. `tools/samples.py` reads samples v4 only (AGENTS.md,
-"Contracts change everywhere at once"), and perf_regress, ab.py,
-losses.py, and bench-hashes' compare-runs.py and check-report.py all use
-it. perf_regress exits 2 when a run was busy. The VM check on this tree
-passed; both of its sides share the working tree's clocks, so it
-measures no effect of the ticks themselves (outside every interval, one
-reading a second).
-
 ## Cold calls pay for servil's code size (September 30, 2026, jobs 792-798)
 
 After the benchmark's 128 MiB sweep, a call whose code has left the
@@ -2007,27 +1888,6 @@ sizes, mt, Hasher in 64 KiB pieces, and SHA-256 ring level.
 perf_regress on the Mac (job 994): no regression. Not carried yet: the
 pool's SME2 prefix (lanes, `ahead` 0) and the queue's tasks.
 
-## servil 3a8327f against b132f8c, whole (October 2, 2026, jobs 1004-1008)
-
-A full Mac record of the promoted servil (job 1004, `--all`, mains,
-quiet), compared cell by cell with job 968 (b132f8c): the one-shot gains
-above; every cell slower by more than 5% at its fast speed is a batch,
-after other work or after idling (16 messages after other work 28.6 ->
-37.3 ns/msg), or the queue's owned batches (1024 x1.11, 16384 x1.21), on
-a path no change touched. An A/B of those cells, two runs a side in
-mirrored order (jobs 1005-1008): after other work both ways, x0.63 to
-x1.28, st and mt (the same code below the split) apart, which is layout
-and process luck (NOTES above, "perf_regress on the Mac"); owned batches
-x0.96-1.06 and lent x0.99-1.00, each side against itself 5-9% apart
-(owned 1024 x1.055 old/old, x1.083 new/new). No regression.
-
-The VM, the same pair (servil b132f8c against 1d2b652, the default
-contenders' run, two a side, A B B A, quiet): batches after other work
-and after idling mostly faster (x0.55-0.90), the queue's solo batches
-x1.11-1.21 slower and its shared x0.73-0.89 faster, each side against
-itself up to 22% apart in the same cells (old/old 4096 x1.219, new/new
-x1.235): the VM's own spread, no regression shown.
-
 ## update_reader through a 1 MiB buffer (October 2, 2026, jobs 1036-1040)
 
 On SME2, 100 ns of other work before a 64 KiB call costs it 2.3 us (VM:
@@ -2061,33 +1921,6 @@ batch: 256 about 1 us, 4096 about 8.6, 16384 about 5). Cleaning the
 copied lines first (DC CVAU or CVAC) made it slower; tables of 256 or
 512 messages per kernel call (TABLE, 128) level. Left as it is.
 
-## servil ff8f203 against b132f8c, whole, and an open lean (October 2, jobs 1084-1096)
-
-The full Mac record of ff8f203 (job 1084; two busy windows of 204)
-against job 968: 75 of 138 servil cells within 5%, 32 faster, 31 slower,
-the slower ones batches after other work or after idling (layout and
-wake luck, answered by A/Bs above) and the queue's shared batches of 16
-(x2.07, a share swing: the A/B of jobs 1085-1088 reads it x1.01). Open:
-hash_many_multithreaded after other work leans slower, four runs a side
-(jobs 1089-1096): 8192 x1.03, 16384 x1.06, 32768 x1.03, 65536 level at
-its main speed, each side against itself up to x1.065 apart. No change
-of the night touches the pool's batch pieces; a layout or wake-timing
-effect is likely and unshown. Bisected, four runs a side each (jobs
-1097-1120): b132f8c -> 3a8327f level (16384 x0.96); 3a8327f -> ff8f203
-16384 x1.053; 3a8327f -> 5739af6 16384 x1.23 fast / x0.94 slow, the new
-side at one speed between the old's two. The same commit 3a8327f ran
-16384 at 6.11 (90%) | 7.74 in one session and 5.10 (29%) | 6.67 (71%) in
-the next: the cell's speeds and shares move by session as much as the
-lean, and no commit shifts it consistently. No regression shown.
-Explained (job 1121, traced, four runs): each run's 12 samples spread
-continuously, 4.8-9.0 ns/msg, at a steady caller clock (3.6-3.7 GHz, the
-streaming clock of its SME2 prefix; all on P-cores): a broad spread, not
-two speeds, so the split rule finds one or two by where 12 samples
-fall, and a cell's medians and shares move about 10% from session to
-session. The caller waits on its workers' wakes, which the spread likely
-is. Such a cell needs many more samples than 12, or comparisons within
-one session.
-
 ## Batch tails, measured again at real gaps (October 2, 2026, job 1001)
 
 Leftovers of 1-4 past whole groups run on NEON and cost far more than
@@ -2102,117 +1935,6 @@ nearly every count (256 B x 19: 184.7 ns/msg at 5, 206.8 at 3, 206.1 at
 1; 1 KiB x 19: 345 / 430 / 431; 64 B level within 5%); 1 and 3 win only
 some back-to-back cells (64 B x 20: 29.6 at 5, 16.1 at 3), which real
 programs rarely make. The thresholds stay.
-
-## The regression check, calibrated (October 2, 2026, Mac jobs 1164-1166)
-
-Zooko asked for a summary that is simpler and more reliable than the two
-speeds. Two designs, on four conditions, six repeats each, on the Mac
-(probe/plant-proportional's examples/host_lab.rs drives them;
-bench-hashes probe/summary-calibration holds the second design):
-- **fast**: `regress` as it was, each pair's fast speeds' ratio, four pairs
-  all beyond the margin, four more to confirm, a SHA-256 control;
-- **mean**: eight pairs, each run's mean per cell (total ns over total
-  units), the median of the pairs' ratios beyond the margin and an exact
-  sign test (7 of 8 pairs).
-Conditions: one executable on both sides; the same code with another
-layout (bench-hashes' feature layout-perturb, about 2 KiB of code); and
-+3% and +6% planted (B3_PLANT: P of every 100 hash() calls hash twice, in
-one executable, so servil st's lent 64 B, 64 KiB, and 1 MiB move by P%).
-Held / passed / no verdict (busy):
-
-| | fast | mean | fast, aligned | mean, aligned | fast, primed | mean, primed |
-|---|---|---|---|---|---|---|
-| one executable | 0/6/0 | 0/4/2 | 0/5/1 | 0/5/1 | 0/6/0 | 0/5/1 |
-| another layout | 0/6/0 | 1/5/0 | 0/5/1 | 3/2/1 | 0/6/0 | 0/5/1 |
-| +3% | 2/3/1 | 2/3/1 | 2/4/0 | 2/3/1 | 3/3/0 | 4/2/0 |
-| +6% | 5/0/1 | 4/0/2 | 4/0/2 | 5/0/1 | 6/0/0 | 5/0/1 |
-
-- **The fast speeds missed bulk.** At +6% the fast design held 64 B and
-  64 KiB and never 1 MiB (0 of 18); the mean held all three nearly every
-  time.
-- **The queue's cells cannot be judged at 3%.** Every false hold of the
-  mean was a queue cell (continuous messages of 64 B and 1 KiB, batches of
-  4096, lent batches of 16); on identical code their per-process means
-  move 6-60% even as medians of eight pairs. The fast speeds avoided false
-  holds there by ignoring the slow speed's share, which is a real cost to
-  callers. 25 of 34 solo cells kept their null median within 3%.
-- **The shared lent cells** kept their null medians within 8% in all 36
-  checks: at 10% none would have held.
-- **Alignment** (LLVM's -align-all-functions=6, -align-all-nofallthru-
-  blocks=5, the C kernels' -falign-functions=64): no narrower, the binary
-  6% larger. Dropped.
-- **Priming** (Devon Jonte's finding, bench-hashes#4: one untimed batch
-  before each cell's calibration): the queue's 64 B samples grow to their
-  intended length (Mac 176 us before); the queue cells' null spread
-  narrows little.
-Taken (Zooko, October 2): the mean everywhere; the gate as the mean design
-over the lent cells only (the queue's cells out of it, their stability the
-next work), solo at 3% and shared at 10%, with no control and no
-confirmation stage; priming in place of the single-call retiming. A check
-takes about 31 s in the VM (was about 60).
-
-**The gate as built** (bench-hashes 1a2d01f, Mac job 1167, eight repeats,
-probe/plant-final with bench-hashes probe/final-calibration), held /
-passed / no verdict (busy): one executable 0/5/3; another layout 1/7/0;
-+3% 5/2/1; +6% 6/0/2; 28 s a check. Two findings:
-- The layout hold: servil st's solo lent 64 B at +3.5% (pairs +4.1 +17.1
-  +1.4 -4.4 +2.8 +1.5 +5.0 +11.4%): that build ran the cell slower, which
-  no count of pairs separates from code. A 3% margin on the 64 B call
-  holds about one layout-only change in eight; PROCEDURES says how such a
-  hold lands.
-- The shared lent 64 B cells switch between states 20-30% apart per
-  process (layout checks: the other layout about 20% faster in 6 of 8; one
-  +3% check held by that cell alone at +19.5%). So the gate judges solo
-  cells alone (bench-hashes 1a2d01f's successor): from the same runs,
-  one executable 0 of 5 held, another layout 1 of 8, +3% 4 of 7, +6% 6 of
-  6.
-
-The VM (the same launcher run in the guest, bench-hashes 5b3c5cb, solo
-alone, eight repeats, quiet): one executable 0 of 8 held, another layout
-0 of 8, +3% 5 of 8 (at 64 B or 1 MiB), +6% 8 of 8; 31 s a check.
-
-## The queue's cells between processes (October 2, 2026, VM)
-
-Why the regression check cannot judge the queue's cells (the section
-below). Twenty fresh processes of servil mt's queue cells, 24 rounds
-each (bench-hashes probe/queue-sample-length, BENCH_QUEUE_SAMPLE_MS for
-the queue's sample length), the spread of the processes' means beside
-what their samples' own noise predicts (SD of the mean: within-process
-variance over 24, pooled):
-
-| cell | 1 ms samples: SD, noise, ratio | 4 ms samples: SD, noise, ratio | 4 ms against 1 ms |
-|---|---|---|---|
-| messages 64 B | 7.9%, 4.3%, 1.9 | 7.3%, 4.6%, 1.6 | 0.911 |
-| messages 1 KiB | 2.0%, 1.6%, 1.2 | 1.1%, 1.0%, 1.1 | 0.866 |
-| messages 16 KiB | 2.3%, 2.6%, 0.9 | 3.5%, 1.9%, 1.9 | 0.945 |
-| batches of 16 | 2.9%, 1.3%, 2.2 | 2.1%, 1.4%, 1.5 | 0.925 |
-| batches of 4096 | 3.6%, 2.8%, 1.3 | 2.0%, 1.7%, 1.2 | 0.927 |
-
-- Most of a queue cell's spread is its samples' own noise: a 1 ms sample
-  fills the queue, wakes its workers (15-45 us each), and drains it.
-- 4 ms samples read 5-13% faster (filling and draining weigh less): the
-  1 ms samples understate the queue's steady speed.
-- The 64 B cell (and 16 KiB, and batches of 16 at 1 ms) differ between
-  processes beyond their noise: a per-process state, for the Mac to
-  locate (where each thread ran, per core kind), since a VM's host places
-  its vCPUs.
-- None gets near what a 3% check needs: a median of eight pairs moves by
-  about 0.6 of a process's spread (64 B: about 4.4%).
-
-**The Mac** (probe/queue-processes-mac, job 1176, 20 processes, 1 ms and
-4 ms samples, traced): the queue's cells settle into a per-process state.
-Messages of 1 KiB: 13 processes near the median, 7 at 1.30-1.51x (4 ms:
-11 and 9); batches of 16: 10 at 0.75-0.80x, 10 at 1.20-1.55x (spread over
-noise 4.6; 4 ms alike); 16 KiB over noise 3.9-5.5; 64 B and batches of
-4096 near their noise. Longer samples do not merge the states. The
-producer (the calling thread) runs the same instructions per input in
-both states (1 KiB: 671-686; batches of 16: 643-667), on P-cores, at the
-same clock (3.7-3.9 GHz), yet takes about 1.3x the time per input in a
-slow process, busier (92-95% of wall against 84-88% for 1 KiB): more
-stall cycles, likely its handovers' lines crossing between the M4 Max's
-two P-clusters when macOS places the pool's or the delivery thread on
-the other. Next: which CPU each queue thread and the producer ran on
-(pthread_cpu_number_np), fast processes beside slow.
 
 ## Memory: what each call allocates (a survey, October 2, 2026)
 
@@ -2607,142 +2329,6 @@ at 256 KiB), or a call that wakes the workers without using them, which
 spends their CPU time for a call that may come (AGENTS.md, "Serve real
 programs"). As built it would help only when other work had just woken
 the workers, and make a 256 KiB cell's speed depend on the cell before it.
-
-## The queue hung without SME2; hash_multithreaded on one CPU (October 1, 2026)
-
-**The hang** (fix 7270b21). Every Linux CI run since September 30 hung
-in its quick run (x86-64 and arm64 GitHub runners) until cancelled.
-Reproduced in the VM with a NEON-only build (`no_sme2`): 15 of 15 runs
-of the nonstop cells hung, owned 256 KiB messages and batches of 4096
-most often; the SME2 build never did. gdb at the hang: four tasks queued
-and in flight, all fifteen workers asleep, none notified, `registered`
-1 (the delivery thread's hold). Cause: a worker slept when it took no
-piece and either nothing was registered or no task was queued. A
-queue's tasks are pushed (waking workers) before the delivery thread
-takes its hold, on its own thread; a worker woken in between saw nothing
-registered, slept again on the push's wake, and the hold wakes no one.
-On SME2 machines the SME2 thread's own task loop took the tasks. Now a
-worker sleeps only with no piece taken and no task queued, and polls
-while tasks are queued. After: 0 of 15 and 0 of 18 such runs hang;
-every suite passes (both builds). The fork's tests never met it: no
-test runs the queue's large tasks NEON-only under load. Wanted: such a
-test (no_sme2, many 256 KiB submissions), and CI for the fork.
-
-**One CPU** (802b6a5). With every CPU already holding a caller (or one
-CPU: a taskset, or a container's limit, which available_parallelism
-reads), hash_multithreaded hashed on the workers' platform (NEON) where
-hash() takes SME2: 0.252 against 0.166 ns/B at 512 KiB pinned to one
-CPU in the VM. It now calls hash_serial, as the batch path did; 0.165
-against 0.165 after.
-
-**The Mac's verdict on both** (job 852, 7270b21 against fa1ec7b, mains):
-held, one cell: servil st, one 64-byte message after other work, fast
-speed x1.34 and slow x1.17, shares level (4.12 (53%) | 8.14 (47%) ->
-5.53 (56%) | 9.55 (44%) ns/B). That call never enters lanes.rs (hash()
-on 64 bytes runs the one-chunk kernel), and cells under about 1 us after
-a gap move 20% with code layout alone (job 783, ring as servil; "Cold
-calls pay for servil's code size"): layout is the likely cause,
-unproven. Open: a control (the same code laid out differently) before
-any claim that these commits slow nothing.
-
-## The queue on one CPU (October 1, 2026)
-
-**The hang.** Devon Jonte's audit of bench-hashes (his branch
-`candidate/devon-benchmark-audit`, AUDIT.md; x86-64 Linux) found
-api_plan's bursts and resubmission tests hanging under `taskset -c 0`.
-Reproduced in the VM with `no_sme2` (the SME2 build passes): the pool
-spawns `available_parallelism() - 1` workers, which counts the process's
-affinity and quota, so one CPU gives none, and without SME2 no SME2
-thread either. A `Time` queue still pushed tasks, which nobody took, and
-its delivery thread waited on them forever. Every one-CPU container on
-x86 met it with the first queue entry of 16 KiB or more, or the first
-gathered short message.
-
-**The fix.** A queue hashes as tasks only when the pool has a thread
-to take them (`lanes::takes_tasks`: more than one CPU, or SME2);
-otherwise its delivery thread hashes every entry, as with `Energy`. One
-boolean, `Inner::tasks`, replaces `max_threads` (which only ever answered
-that question). `tests/one_cpu.rs` pins its process to one CPU and runs
-each queue shape against the reference implementation: hangs (60 s
-timeout) before, passes after, in the default, no_sme2, and pure builds.
-VM perf_regress: no regression on the third check; the first two gave
-no verdict, the control (sha256 lent 64 B, code unchanged) +6.4% and
-+6.1% on the new side, a finding for the layout question below.
-
-## perf_regress on the Mac: layout luck per side (October 1, 2026, jobs 852-901)
-
-**Finding.** perf_regress's verdicts on the Mac's cold cells (after a
-gap, under about 1 us) and on the nonstop two-speed cells were wrong in
-about one check in five tonight, on identical code as often as on real
-changes. The pair 7270b21 against fa1ec7b: held in 852 (64 B after other
-work, +34%) and 865 (a batch of 4, +44%), passed in 853, 855, 864, 866.
-Self-compares (one commit against itself): held in 880 (lent batches of
-16, via the slow-speed rule: fast x1.31, slow x2.26), 881 (servil st 64 B
-after other work, +54% then +47%, every pair one way, servil mt and
-sha256 the same way), and 883 (lent batches of 16, a share swing); 869
-called the new side 47-49% faster at batches of 16 after other work.
-
-**Cause, for the cold cells: each side's own layout.** The two sides of
-a self-compare are built from different source paths (`tmp/perf-ab/old`,
-`new`), which enter the crates' hashes: in the VM 559 of 2578 functions
-sit at other addresses in one side than the other (0x68-0xa8 apart).
-A cold call fetches its code from DRAM (bench-hashes NOTES, "The cause:
-where the hash's code is"), so its time depends on where that code lies,
-by up to about +-60% at 64 B on the Mac, and that luck stays with a side
-for the whole check: alternating the sides cannot cancel it. Controls:
-- each run from a fresh copy of its executable (probe
-  `perf-regress-fresh-copy`): 881 and 883 still held. Not the file's
-  pages.
-- both sides running one executable (probe `perf-regress-same-exe`,
-  jobs 892-901, 8 valid checks): no cold-cell series one way through
-  all pairs, no hold; with two executables 6 of 16 checks had one.
-- 64-byte function alignment (bench probe `align-functions`): nonstop
-  lent 64 B in the VM level again (sha256 x1.083 -> x0.996), but the
-  Mac's cold cells unchanged (865 held with it).
-
-**A second effect, run order.** In the short later pairs the second
-process of a pair runs 64 B after other work about 1.5x slower than the
-first (one executable, ratios 1.35/0.66, 1.21/0.65, 1.53/0.69 by pair):
-alternation cancels it in the median, but it pushes single pairs past
-the 20% margin, and with layout luck the pairs line up.
-
-**The slow-speed rule fires on identical code.** `slow_speed_moved`
-compares two-speed nonstop cells' slow medians at the solo margin (3%);
-with one executable on both sides it called lent batches of 16 or shared
-64 B messages faster in 5 of 8 checks (slow x0.70-0.94).
-
-**Decided (Zooko, October 1, 2026; AGENTS.md, "Every piece earns its
-place"):** the slow-speed rule is deleted, and perf_regress measures the
-nonstop use cases alone: telling a 20% change from layout luck of about
-+-60% would take a dozen layouts per side or more, a dozen builds, for a
-number that predicts little about a user's own layout. What that gives
-up: perf_regress no longer sees a cold call slow down; a cold-path
-regression shows in the benchmark's cells after a gap (with the same
-luck) and in review (the code a call fetches). A check on the VM: 27 s
-with builds, pair 1 8.2 s (21 s before). Open: the run-order effect's
-cause.
-
-**The nonstop-only check on identical code** (October 1, 2026): servil
-6afda66 against itself, 8 checks on the Mac (jobs 916-923, mains) and 8
-in the VM: no verdict of any kind, no cell listed slower or faster, no
-control move, in all 16. (One "faster" on servil's lent batches of 16, a
-two-speed cell, came in a VM check of a real change the same day: watch
-for it.)
-
-**Function alignment, measured and left out** (Zooko, October 1, 2026:
-not worth its complexity). Every function on a 64-byte boundary
-(`-C llvm-args=-align-all-functions=6`), five pairs of consecutive
-code-changing commits, each built both ways, judged by the control
-(sha256, whose code never changes): on the VM, unaligned, the control
-moved one way through every pair in 1 of 5 (fa1ec7b -> 2cc0c00, +-5%, a
-no-verdict that repeats on every rerun), aligned in none; on the Mac
-(jobs 902-911, bench probe `align-functions-2`, on battery), no control
-cell moved past 3% either way. The Mac's nonstop cells meet no layout
-luck to remove, so the only benefit is fewer stuck checks on the VM.
-
-**The Mac's held 64 B cell (job 852) is layout luck**: the A/Bs of
-7270b21 against fa1ec7b read servil st 64 B after other work x0.93
-(unaligned, jobs 856-859) and x0.88 (aligned, 860-863). No regression.
 
 ## Verification work (October 8, 2026)
 

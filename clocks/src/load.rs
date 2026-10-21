@@ -44,7 +44,7 @@ pub const WINDOW_NS: u64 = 1_000_000_000;
 /// window busy: a core taken from the shared scenario and from the
 /// multithreaded contenders, which use every CPU. An M4 Max running a
 /// Linux VM beside the benchmark keeps 0.40-0.56 CPUs busy, with results
-/// level with a quieter run's (bench-hashes NOTES).
+/// level with a quieter run's.
 pub const BUSY_MILLI_CPUS: u64 = 1000;
 
 /// One stretch of wall time and the load other programs put on the

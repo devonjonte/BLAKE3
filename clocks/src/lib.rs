@@ -245,7 +245,7 @@ impl Gap<'_> {
 /// timed call then follows the same call (Zooko, September 30, 2026). A
 /// gap leaves some of what ran before it in the caches, so a first call
 /// would otherwise carry whatever the caller ran earlier (another
-/// function, another size): bench-hashes NOTES, "Shared after a gap". The
+/// function, another size). The
 /// gap belongs to neither interval: after it, this helper warms its own
 /// timing path (a counts read, a clock read), so the interval measures the
 /// call, whose code stays as the gap left it. The

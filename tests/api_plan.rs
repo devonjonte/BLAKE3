@@ -276,8 +276,7 @@ fn a_streams_batches_fill_the_callers_places() {
 }
 
 /// Bursts of large batches with pauses between them, long enough for the
-/// pool's workers to park: every batch completes (a queue once hung here:
-/// fork NOTES, "The queue hung without SME2").
+/// pool's workers to park: every batch completes.
 #[test]
 fn bursts_of_large_batches_after_pauses_complete() {
     blake3_servil::initialize_multithreaded(None);
