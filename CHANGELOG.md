@@ -53,7 +53,5 @@ are tested ([QUALITY.md](QUALITY.md)).
   side by side, so a message arriving in small pieces hashes as fast as
   one in a buffer.
 - The AVX2 and AVX-512 batch kernels read nothing past an input's end.
-  Official BLAKE3's do (BLAKE3-team/BLAKE3#598), reachable only through
-  its hidden `platform` module.
 - Building the Arm kernels needs an assembler that knows armv8.2-a+sha3,
   GNU as 2.30 or LLVM 7. Without one, the build warns and leaves them out.
