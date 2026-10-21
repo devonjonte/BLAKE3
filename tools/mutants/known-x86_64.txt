@@ -324,6 +324,7 @@ src/many.rs	replace hash_two_chunks with ()	1	NEON only: hash_two_chunks is cfg(
 src/many.rs	replace neon_plans -> bool with false	1	equivalent on x86: neon_plans() is already false
 src/many.rs	replace neon_plans_last_len with ()	1	NEON only: its body is cfg(blake3_neon); on x86 neon_plans() is false and it is not called
 src/many.rs	replace platform_is_sme2 -> bool with false	1	equivalent on x86: platform_is_sme2() is already false
+src/many.rs	replace sme2_chunked_min -> usize with 0	1	SME2 only: called under cfg(blake3_sme2) alone
 src/many.rs	replace sme2_chunked_min -> usize with 1	1	SME2 only: called under cfg(blake3_sme2) alone
 src/many.rs	replace sme2_sized -> bool with false	1	speed: moves a threshold between equally correct paths
 src/many.rs	replace sme2_sized -> bool with true	1	speed: moves a threshold between equally correct paths

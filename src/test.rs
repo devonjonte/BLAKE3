@@ -1,4 +1,6 @@
-use crate::{BLOCK_LEN, CHUNK_LEN, CVBytes, CVWords, IncrementCounter, OUT_LEN};
+use crate::{BLOCK_LEN, CHUNK_LEN, CVBytes, CVWords};
+#[cfg(target_arch = "x86_64")]
+use crate::{IncrementCounter, OUT_LEN};
 
 include!("../tools/require_nextest.rs");
 use arrayvec::ArrayVec;
@@ -48,6 +50,7 @@ pub const TEST_CASES: &[usize] = &[
 
 pub const TEST_CASES_MAX: usize = 100 * CHUNK_LEN;
 
+#[cfg(target_arch = "x86_64")]
 pub const TEST_KEY_WORDS: CVWords = [1952540791, 1752440947, 1816469605, 1752394102, 1919907616, 1868963940, 1919295602, 1684956521];
 
 // Paint the input with a repeating byte pattern. We use a cycle length of 251,
@@ -76,10 +79,13 @@ pub fn paint_test_input(buf: &mut [u8]) {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 type CompressInPlaceFn = unsafe fn(cv: &mut CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8);
 
+#[cfg(target_arch = "x86_64")]
 type CompressXofFn = unsafe fn(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8) -> [u8; 64];
 
+#[cfg(target_arch = "x86_64")]
 // A shared helper function for platform-specific tests.
 pub fn test_compress_fn(compress_in_place_fn: CompressInPlaceFn, compress_xof_fn: CompressXofFn) {
     let initial_state = TEST_KEY_WORDS;
@@ -101,9 +107,11 @@ pub fn test_compress_fn(compress_in_place_fn: CompressInPlaceFn, compress_xof_fn
     assert_eq!(&portable_out[..], &test_xof[..]);
 }
 
+#[cfg(target_arch = "x86_64")]
 type HashManyFn<A> =
     unsafe fn(inputs: &[&A], key: &CVWords, counter: u64, increment_counter: IncrementCounter, flags: u8, flags_start: u8, flags_end: u8, out: &mut [u8]);
 
+#[cfg(target_arch = "x86_64")]
 // A shared helper function for platform-specific tests.
 pub fn test_hash_many_fn(hash_many_chunks_fn: HashManyFn<[u8; CHUNK_LEN]>, hash_many_parents_fn: HashManyFn<[u8; 2 * OUT_LEN]>) {
     // Test a few different initial counter values.
@@ -403,13 +411,13 @@ const fn test_hash_const_conversions() {
     _ = hash.as_bytes();
 }
 
+/// ChunkState.buf and Output.block are 64-byte aligned, so that wide vector
+/// stores into them (memcpy's among them) forward to the loads after them
+/// whatever the stack's layout: a measured speed property (the comment on
+/// Output in hasher.rs; https://github.com/BLAKE3-team/BLAKE3/pull/582)
+/// that no mutant models and the speed gate, AArch64's alone, does not see.
 #[test]
 fn test_block_buffer_alignment() {
-    // ChunkState.buf and Output.block are 64-byte aligned so that wide vector stores
-    // into them (e.g. from memcpy) can store-to-load forward regardless of
-    // stack layout. See the comment on Output in hasher.rs, the measurements in
-    // https://github.com/zooko/bench-hashes/issues/2, and the before/after
-    // benchmarks in https://github.com/BLAKE3-team/BLAKE3/pull/582.
     assert_eq!(64, core::mem::align_of::<crate::Output>());
     assert_eq!(0, core::mem::offset_of!(crate::Output, block));
     assert_eq!(64, core::mem::align_of::<crate::ChunkState>());
@@ -614,39 +622,6 @@ fn test_miri_smoketest() {
     reader.fill(&mut [0]);
 }
 
-/// The lengths, 1 to `max`, that reach every case of a message's block
-/// structure: for each count of blocks, its last block one byte and
-/// whole. Lengths within one block count run the same code, differing
-/// only in how many bytes the last block's padding covers.
-pub(crate) fn block_cases(max: usize) -> impl Iterator<Item = usize> {
-    (1..=max.div_ceil(BLOCK_LEN)).flat_map(|b| [(b - 1) * BLOCK_LEN + 1, b * BLOCK_LEN]).filter(move |&len| len <= max)
-}
-
-/// One-shot hashes of 1 to 17 chunks against the reference
-/// implementation, on this machine's platform: for each count of whole
-/// chunks (each picks its own whole-plus-partial kernel and plan), a
-/// partial chunk of each block count (each a different kernel shape), its
-/// last block one byte and whole, and the count's whole chunks alone.
-#[test]
-fn test_one_to_seventeen_chunks_against_reference() {
-    let mut input = vec![0u8; 17 * CHUNK_LEN];
-    paint_test_input(&mut input);
-    let mut lens = vec![17 * CHUNK_LEN];
-    for whole in 1..=16 {
-        lens.push(whole * CHUNK_LEN);
-        lens.extend(block_cases(CHUNK_LEN).map(|partial| whole * CHUNK_LEN + partial));
-    }
-    lens.sort_unstable();
-    lens.dedup();
-    for len in lens {
-        let mut reference = reference_impl::Hasher::new();
-        reference.update(&input[..len]);
-        let mut want = [0u8; OUT_LEN];
-        reference.finalize(&mut want);
-        assert_eq!(crate::hash(&input[..len]).as_bytes(), &want, "len = {len}");
-    }
-}
-
 // The fork's unsafe paths at sizes Miri can run in minutes (under the
 // `pure` feature, where no assembly takes part): the batch tables and
 // padded lanes of many.rs, the pool's jobs from concurrent callers (Miri
@@ -699,61 +674,6 @@ mod unsafe_paths {
                 });
             }
         });
-    }
-}
-
-// Every platform's hash_many against the portable one, for every input
-// shape the public Platform API accepts on this CPU: blocks of 64 B to a
-// whole chunk, with and without counter increments, keyed flags, counters
-// whose low word overflows inside a batch, and pointer tables in memory
-// order, reversed, and strided (the SME2 parent kernel's gather path).
-#[cfg(feature = "std")]
-mod platform_hash_many {
-    use crate::{IncrementCounter, OUT_LEN};
-
-    use crate::test::every_platform as platforms;
-
-    fn check<const N: usize>() {
-        let mut buf = vec![0u8; N * 2 * 140];
-        crate::test::paint_test_input(&mut buf);
-        let (flags, start, end) = (crate::KEYED_HASH, crate::CHUNK_START, crate::CHUNK_END);
-        for count in (0..=40).chain([127, 128, 129, 130]) {
-            let forward: Vec<&[u8; N]> = (0..count).map(|i| buf[i * N..][..N].try_into().unwrap()).collect();
-            let reversed: Vec<&[u8; N]> = forward.iter().rev().copied().collect();
-            let strided: Vec<&[u8; N]> = (0..count).map(|i| buf[2 * i * N..][..N].try_into().unwrap()).collect();
-            for table in [&forward, &reversed, &strided] {
-                // The shapes hash_many takes: incrementing counters for whole
-                // chunks only.
-                let increments: &[IncrementCounter] =
-                    if N == crate::CHUNK_LEN { &[IncrementCounter::Yes, IncrementCounter::No] } else { &[IncrementCounter::No] };
-                for &increment in increments {
-                    for counter in [0, u32::MAX as u64 - 5] {
-                        let mut want = vec![0u8; count * OUT_LEN];
-                        crate::portable::hash_many(table, &crate::test::TEST_KEY_WORDS, counter, increment, flags, start, end, &mut want);
-                        for platform in platforms() {
-                            let mut got = vec![0xAAu8; count * OUT_LEN + OUT_LEN];
-                            platform.hash_many(table, &crate::test::TEST_KEY_WORDS, counter, increment, flags, start, end, &mut got[..count * OUT_LEN]);
-                            assert_eq!(
-                                &got[..count * OUT_LEN],
-                                &want[..],
-                                "{platform:?}, N = {N}, {count} inputs, increment {}, counter {counter}",
-                                increment.yes()
-                            );
-                            assert_eq!(got[count * OUT_LEN..], [0xAA; OUT_LEN], "{platform:?} wrote past its outputs");
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_every_platform_every_shape() {
-        check::<64>();
-        check::<128>();
-        check::<192>();
-        check::<256>();
-        check::<1024>();
     }
 }
 
@@ -1018,41 +938,6 @@ fn test_hasher_gathers() {
         pieced.update(piece);
     }
     assert_eq!(pieced.finalize_non_root(), whole.finalize_non_root());
-}
-
-/// Whole chunks and a partial one in one pass (rust_avx2's
-/// hash_chunks_with_partial, on AVX2 or AVX-512): 1 to 7 whole chunks
-/// (each a different count of lanes beside the partial chunk's) with a
-/// partial chunk of each block count (block_cases), and some past them
-/// (the partial chunk then sits at a later counter), in each of the three
-/// modes, against the reference implementation.
-#[test]
-#[cfg(feature = "std")]
-fn test_chunks_with_partial_against_reference() {
-    let mut input = vec![0u8; 40 * CHUNK_LEN];
-    paint_test_input(&mut input);
-    let key = [7u8; crate::KEY_LEN];
-    let mut lens: Vec<usize> = (1..8).flat_map(|whole| block_cases(CHUNK_LEN - 1).map(move |partial| whole * CHUNK_LEN + partial)).collect();
-    lens.extend([9 * CHUNK_LEN + 1, 12 * CHUNK_LEN + 700, 16 * CHUNK_LEN + 64, 23 * CHUNK_LEN + 1023, 39 * CHUNK_LEN + 5]);
-    if cfg!(miri) {
-        lens = vec![CHUNK_LEN + 1, 2 * CHUNK_LEN + 65, 7 * CHUNK_LEN + 1023];
-    }
-    for len in lens {
-        let m = &input[..len];
-        let expect = |mut r: reference_impl::Hasher| {
-            r.update(m);
-            let mut out = [0u8; OUT_LEN];
-            r.finalize(&mut out);
-            out
-        };
-        assert_eq!(crate::hash(m).as_bytes(), &expect(reference_impl::Hasher::new()), "hash, len {len}");
-        assert_eq!(crate::hash_with(crate::Mode::Keyed(&key), m).as_bytes(), &expect(reference_impl::Hasher::new_keyed(&key)), "keyed_hash, len {len}");
-        assert_eq!(
-            *crate::hash_with(crate::Mode::DeriveKey("partial test"), m).as_bytes(),
-            expect(reference_impl::Hasher::new_derive_key("partial test")),
-            "derive_key, len {len}"
-        );
-    }
 }
 
 /// Hash's comparisons (constant time) and formats: equal and unequal

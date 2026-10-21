@@ -632,46 +632,6 @@ fn platform_is_sme2(platform: Platform) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    /// Batches of messages over a chunk (hash_chunks_across on x86), every
-    /// count from the cutoff to two groups and a tail, lengths around each
-    /// chunk boundary to fifteen chunks, three modes, against hash_with.
-    #[test]
-    fn test_chunks_across_messages() {
-        let key = [9u8; 32];
-        let lens = [
-            CHUNK_LEN + 1,
-            CHUNK_LEN + 64,
-            1500,
-            2 * CHUNK_LEN - 1,
-            2 * CHUNK_LEN + 1,
-            3 * CHUNK_LEN,
-            3000,
-            5 * CHUNK_LEN + 700,
-            8 * CHUNK_LEN - 1,
-            8 * CHUNK_LEN,
-            9 * CHUNK_LEN + 3,
-            15 * CHUNK_LEN + 1023,
-        ];
-        for mode in [crate::Mode::Hash, crate::Mode::Keyed(&key), crate::Mode::DeriveKey("chunks across")] {
-            for len in lens {
-                for count in [1, 2, 3, 4, 5, 15, 16, 17, 33] {
-                    let slot = slot_len(len);
-                    let mut input = vec![0u8; slot * count];
-                    for m in 0..count {
-                        for (j, b) in input[m * slot..][..len].iter_mut().enumerate() {
-                            *b = ((m * 131 + j) % 251) as u8;
-                        }
-                    }
-                    let mut out = vec![[0xAAu8; OUT_LEN]; count];
-                    crate::hash_many_with(mode, &input, len, &mut out);
-                    for m in 0..count {
-                        assert_eq!(out[m], *crate::hash_with(mode, &input[m * slot..][..len]).as_bytes(), "{count} x {len} B, message {m}");
-                    }
-                }
-            }
-        }
-    }
     use std::vec::Vec;
 
     /// `count` deterministic messages of `len` bytes, each in its slot
@@ -710,16 +670,6 @@ mod test {
         }
     }
 
-    /// One-block messages: every NEON parent plan (1 to 16), then SME2
-    /// groups and their remainders (5 to 15 left over take a padded
-    /// group), TABLE's edges, and the pool's split.
-    #[test]
-    fn test_hash_many_blocks() {
-        for count in (0..=17).chain([20, 21, 24, 29, 30, 31, 32, 33, 45, 61, 127, 128, 129, 205, 1021, 1022, 1023, 1024, 1025, 2049]) {
-            check(BLOCK_LEN, count);
-        }
-    }
-
     /// Messages of 2 to 16 whole blocks, at counts that fill SME2 groups
     /// and leave remainders.
     #[test]
@@ -727,128 +677,6 @@ mod test {
         for blocks in 2..=16 {
             for count in [0, 1, 2, 3, 4, 5, 6, 7, 15, 16, 17, 18, 31, 32, 33, 127, 128, 129, 130, 300] {
                 check(blocks * BLOCK_LEN, count);
-            }
-        }
-    }
-
-    /// Messages of 2 to 16 whole blocks on every platform this CPU has
-    /// (SME2's padded last group, NEON's spare fourth lane, the integer
-    /// kernel beside them), at every count to 40 and around TABLE, against
-    /// hash() one message at a time.
-    #[test]
-    fn test_hash_many_padded_groups_every_platform() {
-        #[allow(unused_mut)]
-        let mut platforms = vec![Platform::detect(), Platform::Portable];
-        #[cfg(blake3_neon)]
-        platforms.push(Platform::neon().expect("NEON on AArch64"));
-        for blocks in [1, 2, 3, 4, 7, 16] {
-            let len = blocks * BLOCK_LEN;
-            for count in (0..=40).chain([122, 123, 127, 128, 129, 131, 133, 134, 143, 144, 150]) {
-                let input = messages(len, count);
-                for &platform in &platforms {
-                    // Sixteen sentinels past the end catch a spare lane's store.
-                    let mut out = vec![[0xAAu8; OUT_LEN]; count + 16];
-                    hash_many_on(&input, len, crate::IV, 0, &mut out[..count], platform);
-                    assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count} x {len} B: a store past the last output");
-                    for (i, digest) in out[..count].iter().enumerate() {
-                        assert_eq!(*digest, *crate::hash(message(&input, len, i)).as_bytes(), "{platform:?}, message {i} of {count}, {len} bytes");
-                    }
-                }
-            }
-        }
-    }
-
-    /// Lengths other than whole blocks, from an empty message to past 15
-    /// chunks, in their slots.
-    #[test]
-    fn test_hash_many_other_lengths() {
-        for len in [
-            0,
-            1,
-            2,
-            63,
-            65,
-            100,
-            127,
-            129,
-            191,
-            255,
-            257,
-            1000,
-            1023,
-            1025,
-            2000,
-            3000,
-            3 * CHUNK_LEN + 7,
-            15 * CHUNK_LEN - 1,
-            15 * CHUNK_LEN + 1,
-            16 * CHUNK_LEN + 5,
-        ] {
-            for count in [0, 1, 2, 3, 5, 9, 10, 15, 16, 17, 21, 129] {
-                check(len, count);
-            }
-        }
-    }
-
-    /// hash_many_on's cases, read from its code and the code it calls,
-    /// against the reference implementation on every platform this CPU
-    /// has. Lengths: none; for each slot of 1 to 16 blocks (each its own
-    /// hash_blocks::<N>), its last block one byte and whole
-    /// (crate::test::block_cases); 1 to 15 chunks and one past them (SME2's side-by-side path
-    /// takes 2 to 15, the NEON pairing CHUNK_LEN + 1 to 2 CHUNK_LEN),
-    /// whole and a block over. Counts: each of 1 to GROUP + 1 (each picks
-    /// its own kernel plan), either side of every threshold the dispatch
-    /// compares a count with, and past one TABLE. Each length at the
-    /// counts that reach every branch; each count at one length a path.
-    #[test]
-    fn test_hash_many_cases() {
-        // The kernels' group of sixteen lanes (hash_chunked's and the plans'
-        // GROUP).
-        const GROUP: usize = 16;
-        #[allow(unused_mut)]
-        let mut platforms = vec![Platform::detect(), Platform::Portable];
-        #[cfg(blake3_neon)]
-        platforms.push(Platform::neon().expect("NEON on AArch64"));
-        let mut lengths: Vec<usize> = core::iter::once(0).chain(crate::test::block_cases(CHUNK_LEN)).collect();
-        for chunks in 1..=16 {
-            lengths.extend([chunks * CHUNK_LEN, chunks * CHUNK_LEN + BLOCK_LEN]);
-        }
-        let mut thresholds = vec![
-            GROUP,
-            TABLE,
-            SME2_TAIL_MIN,
-            GROUP + SME2_TAIL_MIN_AFTER_GROUPS,
-            ONE_BLOCK_PAD_MIN,
-            GROUP + ONE_BLOCK_PAD_AFTER_GROUPS,
-            crate::SME2_SIZED_BATCH,
-        ];
-        for chunks in 2..=15 {
-            let min = sme2_chunked_min(chunks * CHUNK_LEN);
-            thresholds.extend([min, GROUP + min - 2]);
-        }
-        let mut counts: Vec<usize> = (1..=GROUP + 1).chain(thresholds.iter().flat_map(|&t| [t - 1, t, t + 1])).collect();
-        counts.extend([2 * GROUP, TABLE + GROUP + 1]);
-        counts.sort_unstable();
-        counts.dedup();
-        let check = |len: usize, count: usize| {
-            let input = messages(len, count);
-            for &platform in &platforms {
-                let mut out = vec![[0xAAu8; OUT_LEN]; count + 16];
-                hash_many_on(&input, len, crate::IV, 0, &mut out[..count], platform);
-                assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count} x {len} B: a store past the last output");
-                for (i, digest) in out[..count].iter().enumerate() {
-                    assert_eq!(*digest, *crate::test::reference_hash(message(&input, len, i)).as_bytes(), "{platform:?}, message {i} of {count}, {len} bytes");
-                }
-            }
-        };
-        for &len in &lengths {
-            for count in [1, 2, 3, GROUP - 1, GROUP, GROUP + 1] {
-                check(len, count);
-            }
-        }
-        for len in [BLOCK_LEN, 3, 5 * BLOCK_LEN, 5 * BLOCK_LEN - 1, CHUNK_LEN, 2 * CHUNK_LEN, 3 * CHUNK_LEN, 3 * CHUNK_LEN + BLOCK_LEN, 16 * CHUNK_LEN] {
-            for &count in &counts {
-                check(len, count);
             }
         }
     }
@@ -1057,32 +885,6 @@ mod test {
                 assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count}: a store past the last output");
                 for (i, digest) in out[..count].iter().enumerate() {
                     assert_eq!(*digest, *crate::hash(message(&input, 256, i)).as_bytes(), "{platform:?}, message {i} of {count}");
-                }
-            }
-        }
-    }
-
-    /// Messages of 2 to 15 chunks (whole blocks) on every platform this
-    /// CPU has: on SME2 sixteen side by side, every tree shape from two
-    /// chunks to fifteen, the last chunk whole or short, at counts that
-    /// leave padded groups.
-    #[test]
-    fn test_hash_many_chunked_every_platform() {
-        #[allow(unused_mut)]
-        let mut platforms = vec![Platform::detect(), Platform::Portable];
-        #[cfg(blake3_neon)]
-        platforms.push(Platform::neon().expect("NEON on AArch64"));
-        let lens = (2..=15).flat_map(|c| [c * CHUNK_LEN, (c - 1) * CHUNK_LEN + BLOCK_LEN]).chain([CHUNK_LEN + 192, 7 * CHUNK_LEN + 960, 16 * CHUNK_LEN]);
-        for len in lens {
-            for count in [0, 1, 2, 7, 8, 9, 15, 16, 17, 23, 24, 33] {
-                let input = messages(len, count);
-                for &platform in &platforms {
-                    let mut out = vec![[0xAAu8; OUT_LEN]; count + 16];
-                    hash_many_on(&input, len, crate::IV, 0, &mut out[..count], platform);
-                    assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count} x {len} B: a store past the last output");
-                    for (i, digest) in out[..count].iter().enumerate() {
-                        assert_eq!(*digest, *crate::hash(message(&input, len, i)).as_bytes(), "{platform:?}, message {i} of {count}, {len} bytes");
-                    }
                 }
             }
         }

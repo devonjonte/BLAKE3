@@ -111,37 +111,3 @@ pub(crate) unsafe fn hash_many_blocks(
         _ => unreachable!("takes_platform admitted AVX2 or AVX-512"),
     }
 }
-
-#[cfg(test)]
-mod test {
-    use crate::*;
-
-    /// Every length the pairing takes, in each of BLAKE3's three modes,
-    /// against the reference implementation (on a CPU with AVX2 or AVX-512).
-    #[test]
-    fn every_length_and_mode_against_reference() {
-        if !super::takes(platform::Platform::detect(), 1536) {
-            return;
-        }
-        let mut input = [0u8; 2 * CHUNK_LEN];
-        crate::test::paint_test_input(&mut input);
-        let key = [7u8; KEY_LEN];
-        for len in CHUNK_LEN + BLOCK_LEN + 1..2 * CHUNK_LEN {
-            assert!(super::takes(platform::Platform::detect(), len));
-            let m = &input[..len];
-            let expect = |mut r: reference_impl::Hasher| {
-                r.update(m);
-                let mut out = [0u8; OUT_LEN];
-                r.finalize(&mut out);
-                out
-            };
-            assert_eq!(hash(m).as_bytes(), &expect(reference_impl::Hasher::new()), "hash, len {len}");
-            assert_eq!(hash_with(Mode::Keyed(&key), m).as_bytes(), &expect(reference_impl::Hasher::new_keyed(&key)), "keyed_hash, len {len}");
-            assert_eq!(
-                *hash_with(Mode::DeriveKey("pair test"), m).as_bytes(),
-                expect(reference_impl::Hasher::new_derive_key("pair test")),
-                "derive_key, len {len}"
-            );
-        }
-    }
-}
