@@ -1,4 +1,6 @@
 use crate::{BLOCK_LEN, CHUNK_LEN, CVBytes, CVWords, IncrementCounter, OUT_LEN};
+
+include!("../tools/require_nextest.rs");
 use arrayvec::ArrayVec;
 
 // Interesting input lengths to run tests on.
@@ -54,6 +56,23 @@ pub const TEST_KEY_WORDS: CVWords = [1952540791, 1752440947, 1816469605, 1752394
 // because that's the largest prime number less than 256. This makes it
 // unlikely to swapping any two adjacent input blocks or chunks will give the
 // same answer.
+
+/// Every platform this machine runs, detect()'s first: the tests that must
+/// reach each kernel family's path whichever the turn would give (the
+/// NEON path of SME2 code runs when another thread holds SME2's turn,
+/// which a test alone in its process never sees).
+#[cfg(feature = "std")]
+pub(crate) fn every_platform() -> Vec<crate::platform::Platform> {
+    use crate::platform::Platform;
+    #[allow(unused_mut)]
+    let mut all = vec![Platform::detect()];
+    #[cfg(blake3_neon)]
+    all.push(Platform::neon().unwrap());
+    #[cfg(blake3_sme2)]
+    all.extend(Platform::sme2());
+    all
+}
+
 pub fn paint_test_input(buf: &mut [u8]) {
     for (i, b) in buf.iter_mut().enumerate() {
         *b = (i % 251) as u8;
@@ -981,18 +1000,9 @@ mod unsafe_paths {
 // order, reversed, and strided (the SME2 parent kernel's gather path).
 #[cfg(feature = "std")]
 mod platform_hash_many {
-    use crate::platform::Platform;
     use crate::{IncrementCounter, OUT_LEN};
 
-    fn platforms() -> Vec<Platform> {
-        #[allow(unused_mut)]
-        let mut all = vec![Platform::detect()];
-        #[cfg(blake3_neon)]
-        all.push(Platform::neon().unwrap());
-        #[cfg(blake3_sme2)]
-        all.extend(Platform::sme2());
-        all
-    }
+    use crate::test::every_platform as platforms;
 
     fn check<const N: usize>() {
         let mut buf = vec![0u8; N * 2 * 140];
@@ -1424,6 +1434,24 @@ mod dispatch {
                 return names.iter().filter(|(_, e)| ran.contains(e)).map(|(n, _)| n.clone()).collect();
             }
         }
+    }
+
+    /// A call on NEON runs no SME2 kernel, however long its input: the
+    /// turn hands SME2 out only to a call made on SME2 (on a CPU without
+    /// SME2, handing it out would be an illegal instruction).
+    #[test]
+    fn test_neon_runs_no_sme2() {
+        if !crate::platform::sme2_detected() {
+            return;
+        }
+        let sme2: BTreeSet<usize> = crate::sme2::entries().into_iter().map(|(_, e)| e as usize).collect();
+        let neon = crate::platform::Platform::neon().expect("NEON on AArch64");
+        crate::initialize();
+        RAN_ENTRIES.with(|r| r.borrow_mut().clear());
+        let mut out = vec![0u8; 64 * crate::BLOCK_LEN];
+        neon.xof_many(&[0; 8], &[0; crate::BLOCK_LEN], 64, 0, 0, &mut out);
+        let ran = RAN_ENTRIES.with(|r| r.borrow().clone());
+        assert!(ran.is_disjoint(&sme2), "NEON's extended output ran an SME2 kernel");
     }
 
     fn names(list: &[&str]) -> BTreeSet<String> {

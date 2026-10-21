@@ -45,12 +45,16 @@ kernel and warns (`CC=clang-19 cargo build` adds it on Debian 12, for
 example). On a
 CPU with SME2, the check stops when the build lacks the kernel.
 
+The tests run under [cargo-nextest](https://nexte.st), each in its own
+process (`cargo test` stops at once and says so); the doc examples run
+under `cargo test --doc`.
+
 ```sh
-cargo test --release --lib --tests
-cargo test --release --lib --tests --features pure
+cargo nextest run --release --lib --tests
+cargo nextest run --release --lib --tests --features pure
 cargo test --release --doc
-cargo test --release --manifest-path test_vectors/Cargo.toml
-cargo test --release --manifest-path capi/Cargo.toml   # the C API
+cargo nextest run --release --manifest-path test_vectors/Cargo.toml
+cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API
 sh tools/check-builds.sh            # the builds the suites leave out
 pypy3 tools/mutants/check.py        # about an hour: every surviving mutant known
 ```

@@ -294,3 +294,8 @@ pub unsafe extern "C" fn b3_stream_finish(stream: *mut B3Stream) {
     // Sound: made by Box::into_raw in b3_stream_begin, finished once.
     drop(unsafe { Box::from_raw(stream) });
 }
+
+#[cfg(test)]
+mod test {
+    include!("../../tools/require_nextest.rs");
+}

@@ -15,6 +15,15 @@ in git worktrees of HEAD of its own (SHARDS at once), so the checkout is
 never mutated. With --write, the list is rewritten from this run, each
 new mutant's reason UNCLASSIFIED and the others' kept.
 
+The tests run under cargo-nextest (its `mutants` profile, .config/nextest.toml:
+each test in its own process, every test on every mutant, a test killed at
+5 s as a hang). Every run records each test's outcome and time on every
+mutant and on the unmutated tree (tmp/mutants-last/<run>/tests.tsv), and
+weighs the tests by cost: the cheapest set of tests that still catches
+every caught mutant, the tests outside it (each a big test whose catches
+cheaper ones make), and the mutants only an expensive test catches (each a
+small test worth writing).
+
 With --since REV, a change's check: only the mutants in the lines the
 change makes (git diff REV...HEAD, cargo-mutants --in-diff), and it fails
 on a new survivor among them; a listed one now caught waits for a whole
@@ -56,17 +65,19 @@ HANGS = os.path.join(ROOT, "tools", "mutants", "hangs.txt")
 
 
 def read_hangs():
-    """The mutants skipped because they hang the tests (tools/mutants/hangs.txt), as cargo-mutants exclude patterns."""
-    patterns = []
+    """The mutants skipped because they hang the tests (tools/mutants/hangs.txt), by name."""
+    names = set()
     for line in open(HANGS):
         line = line.rstrip("\n")
         if line and not line.startswith("#"):
-            _file, mutant, _test, _why = line.split("\t")
-            patterns += ["--exclude-re", re.escape(mutant)]
-    return patterns
+            file, mutant, _test, _why = line.split("\t")
+            names.add(f"{file}\t{mutant}")
+    return names
 
 
-SHARDS = 3  # runs at once, each in its own worktree and build
+# Runs at once, each in its own worktree and build: on the VM (16 CPUs),
+# a whole run took 47 minutes at 6 and about 60 at 3 (October 20).
+SHARDS = 6
 # The seconds a mutant's tests may take: the unmutated tests take 1.5 s on
 # the VM and 2 s on an i7-12700K (October 20), a caught mutant's at most
 # 2.5 s on the VM, so a mutant still running at 30 s hangs (Zooko: a
@@ -92,7 +103,7 @@ def run(files, extra=(), shards=SHARDS, label="run"):
     # A mutant whose tests outlast TIMEOUT is a hang, which the check counts
     # as caught.
     args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "serde,zeroize", "--timeout", str(TIMEOUT),
-            *read_hangs(), *extra]
+            "--test-tool", "nextest", *[arg for name in sorted(read_hangs()) for arg in ("--exclude-re", re.escape(name.split("\t", 1)[1]))], *extra]
     for f in files:
         args += ["--file", f]
     runs = []
@@ -104,14 +115,12 @@ def run(files, extra=(), shards=SHARDS, label="run"):
         # Its own build directory, named outright (a cargo config's
         # target-dir would otherwise give the shards one, and each would
         # test the others' builds).
-        env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"))
-        # --no-fail-fast: every test binary runs even after one fails, so
-        # a mutant's log names every test that catches it (catchers).
-        shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests", "--no-fail-fast"]
+        env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"), NEXTEST_PROFILE="mutants")
+        shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
         runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=cap_memory)))
     names = collections.Counter()
     functions = collections.defaultdict(list)  # (file, function) -> [(outcome, name)]
-    catchers = {}  # mutant name -> the tests that failed on it (binary::test), or hung
+    rows = []  # (mutant name, function, test, outcome, ms); the unmutated tree's mutant name is UNMUTATED
     kept = os.path.join(ROOT, "tmp", "mutants-last", label)
     shutil.rmtree(kept, ignore_errors=True)
     for k, (tree, process) in enumerate(runs):
@@ -129,80 +138,87 @@ def run(files, extra=(), shards=SHARDS, label="run"):
         outcomes = os.path.join(out, "outcomes.json")
         for outcome in (json.load(open(outcomes))["outcomes"] if os.path.exists(outcomes) else []):
             mutant = outcome["scenario"]
+            log = os.path.join(out, outcome["log_path"]) if outcome.get("log_path") else None
             if not isinstance(mutant, dict):
-                continue  # the unmutated baseline
+                rows += [(UNMUTATED, "", *t) for t in read_tests(log)]  # the unmutated baseline
+                continue
             mutant = mutant["Mutant"]
             function = (mutant.get("function") or {}).get("function_name", "")
             m = NAME.match(mutant["name"])
-            functions[(mutant["file"], function)].append((outcome["summary"], f"{m.group(1)}\t{m.group(2)}"))
-            if outcome["summary"] in ("CaughtMutant", "Timeout"):
-                catchers[f"{m.group(1)}\t{m.group(2)}"] = read_catchers(os.path.join(out, outcome["log_path"]))
+            name = f"{m.group(1)}\t{m.group(2)}"
+            functions[(mutant["file"], function)].append((outcome["summary"], name))
+            if outcome["summary"] in ("CaughtMutant", "MissedMutant", "Timeout"):
+                rows += [(name, f"{mutant['file']} {function}", *t) for t in read_tests(log)]
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
         subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
         shutil.rmtree(tree, ignore_errors=True)
-    if catchers:
+    if rows:
         os.makedirs(kept, exist_ok=True)
-        with open(os.path.join(kept, "catchers.tsv"), "w") as f:
-            for name, tests in sorted(catchers.items()):
-                f.write(f"{name}\t{' '.join(sorted(tests))}\n")
-        tests_by_catch = collections.defaultdict(set)
-        for name, tests in catchers.items():
-            for t in tests:
-                tests_by_catch[t].add(name)
-        cover = smallest_cover(tests_by_catch)
-        spare = sorted(set(tests_by_catch) - cover)
-        print(f"catchers: {len(catchers)} mutants caught or hung, by {len(tests_by_catch)} tests; "
-              f"{len(cover)} of them catch every one of those mutants ({kept}/catchers.tsv)")
-        for t in spare:
-            print(f"  outside the smallest cover: {t} ({len(tests_by_catch[t])} catches, all made by the cover)")
+        with open(os.path.join(kept, "tests.tsv"), "w") as f:
+            f.write("# mutant (file, change)\tfunction\ttest\toutcome\tms\n")
+            f.writelines("\t".join(map(str, r)) + "\n" for r in rows)
+        if label == "run":  # the confirming pass reruns a few mutants: its weights would be noise
+            weigh(rows, os.path.join(kept, "tests.tsv"))
     return names, functions
 
 
-def smallest_cover(tests_by_catch):
-    """A smallest set of tests that still catches every mutant any test
-    catches: the greedy cover (each step the test catching the most
-    mutants still uncovered), within a few tests of the true minimum at
-    this size. Tests outside it are candidates for removal; the decision
-    is a reading, since a test's worth goes beyond the mutants it catches
-    (a contract's should_panic, a hang, a shape no mutant models)."""
-    uncovered = set().union(*tests_by_catch.values())
-    cover = set()
-    while uncovered:
-        best = max(tests_by_catch, key=lambda t: (len(tests_by_catch[t] & uncovered), -len(tests_by_catch[t]), t))
-        gain = tests_by_catch[best] & uncovered
-        if not gain:
-            break
-        cover.add(best)
-        uncovered -= gain
-    return cover
+UNMUTATED = "(unmutated)\t"
+SELF_TEST = "(the startup self-test)"
+STATUS = re.compile(r"^\s+(PASS|FAIL|TIMEOUT|SIG[A-Z]+|ABORT)\s+\[\s*([\d.]+)s\]\s+(?:\(\s*\d+/\d+\)\s+)?(\S+)\s+(\S+)")
 
 
-TEST_LINE = re.compile(r"^test (\S+) \.\.\. (ok|FAILED|ignored)")
-BINARY = re.compile(r"Running `.*/deps/([A-Za-z0-9_]+)-[0-9a-f]+`")
-
-
-def read_catchers(log):
-    """The tests that caught a mutant, from its cargo test log: each
-    `test NAME ... FAILED`, as binary::NAME; for a hang, the tests that
-    started and never finished (the hanging ones, within its binary)."""
-    tests, binary, started = set(), "", set()
+def read_tests(log):
+    """Each test a cargo-nextest log ran: (test, outcome, ms). A failure
+    whose output names the startup self-test is the self-test's catch,
+    whichever test it ran in (a broken build fails it in every test)."""
+    tests, last = [], None
     for line in open(log, errors="replace"):
-        b = BINARY.search(line)
-        if b:
-            binary = b.group(1)
-            started.clear()
-            continue
-        m = TEST_LINE.match(line)
+        m = STATUS.match(line)
         if m:
-            started.discard(m.group(1))
-            if m.group(2) == "FAILED":
-                tests.add(f"{binary}::{m.group(1)}")
-        elif line.startswith("test ") and line.rstrip().endswith("..."):
-            started.add(line.split()[1])
-    # A hung binary's output ends mid-run: the tests announced and unfinished.
-    tests.update(f"{binary}::{t}" for t in started)
-    return tests
+            last = [f"{m.group(3)} {m.group(4)}", m.group(1), round(float(m.group(2)) * 1000)]
+            tests.append(last)
+        elif last and last[1] != "PASS" and "startup self-test failed" in line:
+            last[0] = SELF_TEST
+    return [tuple(t) for t in tests]
+
+
+def weigh(rows, path):
+    """The tests weighed by cost, from a run's record: the cheapest set of
+    tests that catches every caught mutant (greedy, each step the test
+    with the most uncaught mutants per millisecond), the tests outside it,
+    and the mutants only an expensive test catches. Small tests are cheap,
+    so they come first; a test outside the set is a reading (a test's
+    worth goes beyond the mutants it catches: a contract, a shape no
+    mutant models), and so is a mutant to give a small test."""
+    cost = {}
+    for name, _, test, outcome, ms in rows:
+        if name == UNMUTATED and outcome == "PASS":
+            cost[test] = min(cost.get(test, ms), ms)
+    floor = max(1, min(cost.values(), default=1))
+    cost[SELF_TEST] = floor  # it runs as every test process starts
+    catches, function_of = collections.defaultdict(set), {}
+    for name, function, test, outcome, _ in rows:
+        if name != UNMUTATED and outcome != "PASS":
+            catches[test].add(name)
+            function_of[name] = function
+    price = lambda t: max(floor, cost.get(t, 5000))
+    uncovered, cover = set().union(*catches.values()) if catches else set(), []
+    while uncovered:
+        best = max(catches, key=lambda t: (len(catches[t] & uncovered) / price(t), -price(t), t))
+        if not catches[best] & uncovered:
+            break
+        cover.append(best)
+        uncovered -= catches[best]
+    print(f"tests: {len(cost) - 1} take {sum(v for t, v in cost.items() if t != SELF_TEST)} ms unmutated; "
+          f"{len(cover)} of them, {sum(price(t) for t in cover)} ms, catch every caught mutant "
+          f"({len(function_of)}; the startup self-test {len(catches[SELF_TEST])}) ({path})")
+    for t in sorted(set(catches) - set(cover), key=lambda t: -price(t))[:10]:
+        print(f"  outside the cheapest set: {price(t)} ms {t} ({len(catches[t])} catches, each made by cheaper tests)")
+    cheapest = {n: min(price(t) for t in catches if n in catches[t]) for n in function_of}
+    dear = collections.Counter(function_of[n] for n, ms in cheapest.items() if ms >= 100)
+    for function, n in dear.most_common(10):
+        print(f"  caught only by tests of 100 ms or more: {n} mutants in {function}")
 
 
 def confirm(found, known, differ=None):
@@ -256,6 +272,13 @@ def figure(functions, known):
 
 def main():
     files, known = read_known()
+    # A skipped mutant cannot be seen to survive: a name on both lists would
+    # read as caught, run after run.
+    both = sorted(set(known) & read_hangs())
+    for k in both:
+        print(f"ON BOTH LISTS: {k}")
+    if both:
+        sys.exit(f"mutants: {len(both)} names are both skipped (hangs.txt) and listed as surviving ({os.path.basename(KNOWN)}); keep each on one")
     # A test known to be missing is work to do now, not a survivor to keep:
     # the check fails while one is listed, whichever run this is.
     missing = sorted(k for k, (_, reason) in known.items() if reason.startswith("OPEN: a missing test"))

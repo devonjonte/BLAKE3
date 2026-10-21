@@ -149,7 +149,6 @@ pub(crate) fn hash_with_key(input: &[u8], key: &crate::CVWords, flags: u8) -> Ha
 #[inline(never)]
 fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
     let Some((pool, _caller)) = spare_pool() else {
-        pool_busy();
         return crate::hash_serial(input, key, flags);
     };
     let (pieces, mut cvs) = tree_cvs(pool, input, key, 0, flags);
@@ -165,14 +164,6 @@ fn spare_pool() -> Option<(&'static Pool, Caller<'static>)> {
     let callers = pool.callers.fetch_add(1, Ordering::SeqCst) + 1;
     let caller = Caller(&pool.callers);
     (callers < pool.threads).then_some((pool, caller))
-}
-
-/// A call's note that other callers took the pool (with one CPU, it has no
-/// threads): for the kernel reports' test (crate::ran).
-fn pool_busy() {
-    if pool().threads > 1 {
-        crate::ran(crate::Ran::PoolBusy);
-    }
 }
 
 /// The subtree pieces of `input` at chunk `counter` and their chaining
@@ -225,7 +216,6 @@ fn hash_many_over_pool(input: &[u8], message_len: usize, key: &crate::CVWords, f
     let slot = crate::many::slot_len(message_len);
     assert_eq!(Some(input.len()), slot.checked_mul(outputs.len()), "input holds one slot of whole blocks per output");
     let Some((pool, _caller)) = spare_pool() else {
-        pool_busy();
         return crate::hash_many_serial(input, message_len, key, flags, outputs);
     };
     let pieces = cut_messages(outputs.len(), slot, pool.threads);
@@ -270,7 +260,6 @@ pub(crate) fn group_cvs(groups: &[&[u8]], first_group: u64, key: &crate::CVWords
         return crate::outboard::groups_cvs_into(groups, first_group, key, flags, Platform::detect(), cvs);
     }
     let Some((pool, _caller)) = spare_pool() else {
-        pool_busy();
         return crate::outboard::groups_cvs_into(groups, first_group, key, flags, Platform::detect(), cvs);
     };
     let pieces = cut_messages(groups.len(), crate::outboard::GROUP_LEN, pool.threads);
@@ -1104,6 +1093,26 @@ pub(crate) mod sources {
     pub(crate) fn visible(streams: bool) -> bool {
         find(|source| (!streams || !source.ring.is_empty()) && source.waiting() > 0)
     }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        /// `find` reaches every registered source, the last of several
+        /// included: a test alone in its process registers one source at
+        /// a time, so only a test of several sees the walk past the first.
+        #[test]
+        fn test_find_reaches_every_registered_source() {
+            let sources: Vec<&'static Source> = (0..3).map(|_| &*Box::leak(Box::new(Source::new(0)))).collect();
+            // Registered for the rest of the process, which is this test's.
+            for s in &sources {
+                s.register().expect("a free slot");
+            }
+            for (i, s) in sources.iter().enumerate() {
+                assert!(find(|t| core::ptr::eq(t, *s)), "find reaches registered source {i} of 3");
+            }
+        }
+    }
 }
 
 /// The longest part of a stream's input planned as tasks
@@ -1330,12 +1339,13 @@ fn wake_sme2() {
 }
 
 /// For tests that must reach the pool: the call this thread made since
-/// `RAN` was cleared went past the split (to the pool, or found every CPU
-/// with a caller), or the process has one CPU and no pool.
+/// `RAN` was cleared went to the pool, or the process has one CPU and no
+/// pool. (Each test runs alone in its process, so no other caller holds
+/// the pool's CPUs.)
 #[cfg(test)]
 pub(crate) fn assert_past_the_split(what: &str) {
     let kinds = crate::RAN.with(|r| r.get());
-    assert!(pool().threads == 1 || kinds & (crate::Ran::Pool as u32 | crate::Ran::PoolBusy as u32) != 0, "{what} went past the split");
+    assert!(pool().threads == 1 || kinds & crate::Ran::Pool as u32 != 0, "{what} went to the pool");
 }
 
 /// Run `task` on this thread, as a worker would.

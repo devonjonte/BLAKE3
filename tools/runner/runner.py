@@ -30,9 +30,10 @@ every 500 ms beside it, in its results' powermetrics.txt.)
      "fork_commit": "...", "args": ["message", "1048576"]}
     {"type": "test", "fork_commit": "..."}
 
-(A test job runs the fork's suites natively: the library tests in the
-default and pure builds, the doc tests, the integration tests in
-tests/ (the planned API's contract), and the official vectors.)
+(A test job runs the fork's suites natively, under cargo-nextest: the
+library tests in the default and pure builds, the doc tests, the
+integration tests in tests/ (the planned API's contract), and the
+official vectors.)
 
 (A benchmark job with "repeat": N runs the benchmark N times back to
 back, run i's files in run-i/, for calibrations.)
@@ -226,12 +227,13 @@ def example(job, run, work, out):
 
 def test(job, run, work, out):
     fork = run.checkouts(hex_commit(job, "fork_commit"), None)
+    # Under cargo-nextest, each test in its own process; the doc examples
+    # under cargo test --doc.
     for features in [[], ["--features", "pure"]]:
-        run.run(["cargo", "test", "--release", "--lib", *features], cwd=fork)
+        run.run(["cargo", "nextest", "run", "--release", "--lib", *features], cwd=fork)
     run.run(["cargo", "test", "--release", "--doc"], cwd=fork)
-    if (fork / "tests").is_dir():
-        run.run(["cargo", "test", "--release", "--test", "*"], cwd=fork)
-    run.run(["cargo", "test", "--release", "--manifest-path", "test_vectors/Cargo.toml"], cwd=fork)
+    run.run(["cargo", "nextest", "run", "--release", "--tests"], cwd=fork)
+    run.run(["cargo", "nextest", "run", "--release", "--manifest-path", "test_vectors/Cargo.toml"], cwd=fork)
     return "passed"
 
 

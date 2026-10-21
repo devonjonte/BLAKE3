@@ -39,6 +39,7 @@ import collections
 import glob
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -94,17 +95,19 @@ def inventory():
     return {f: code_lines(f) for f in files + asm}
 
 
-def coverage(name, args, env_extra=None):
-    """The lines a cargo test run executes: {file: set(lines)}."""
+def coverage(name, args, filters=(), env_extra=None):
+    """The lines a test run executes (cargo-nextest, each test in its own
+    process, each writing its own profile): {file: set(lines)}. `args` are
+    cargo's, `filters` the tests' names to run."""
     target = os.path.join(OUT, "target-" + name)
     profiles = os.path.join(OUT, "profiles-" + name)
     os.makedirs(profiles, exist_ok=True)
     for old in glob.glob(os.path.join(profiles, "*.profraw")):
         os.remove(old)
     env = dict(os.environ, RUSTFLAGS="-C instrument-coverage", CARGO_TARGET_DIR=target, LLVM_PROFILE_FILE=os.path.join(profiles, "%p-%m.profraw"), **(env_extra or {}))
-    run = subprocess.run(["cargo", "+" + NIGHTLY, "test", "--release"] + args, cwd=ROOT, env=env, capture_output=True, text=True)
+    run = subprocess.run(["cargo", "+" + NIGHTLY, "nextest", "run", "--release"] + args + list(filters), cwd=ROOT, env=env, capture_output=True, text=True)
     if run.returncode != 0:
-        sys.exit(f"qa_coverage: {name}: cargo test failed\n{run.stderr[-3000:]}")
+        sys.exit(f"qa_coverage: {name}: the tests failed\n{run.stderr[-3000:]}")
     sysroot = subprocess.run(["rustc", "+" + NIGHTLY, "--print", "sysroot"], capture_output=True, text=True, check=True).stdout.strip()
     tools = glob.glob(os.path.join(sysroot, "lib", "rustlib", "*", "bin"))[0]
     merged = os.path.join(OUT, name + ".profdata")
@@ -169,8 +172,8 @@ def main():
 
     print("qa_coverage: running the suites with coverage (a few minutes)", file=sys.stderr)
     tests, compiled = coverage("tests", ["--lib", "--tests"])
-    guard, _ = coverage("guard", ["--lib", "--", "guard"])
-    miri, _ = coverage("miri-paths", ["--lib", "--features", "pure", "--", "unsafe_paths", "miri"])
+    guard, _ = coverage("guard", ["--lib"], ["guard"])
+    miri, _ = coverage("miri-paths", ["--lib", "--features", "pure"], ["unsafe_paths", "miri"])
     vectors, _ = coverage("vectors", ["--manifest-path", "test_vectors/Cargo.toml"])
     # Everything compiled on this machine: a line the tests' binaries hold.
     mutants, mutant_count, survivors = mutated()
@@ -178,7 +181,7 @@ def main():
 
     here = tally(compiled)
     rows = [
-        ("Test suites (x86-64 here)", tally(tests), "every line run once or more by the library's and integration tests"),
+        (f"Test suites ({platform.machine()} here)", tally(tests), "every line run once or more by the library's and integration tests"),
         ("Official test vectors", tally(vectors), "lines run while checking the published vectors"),
         ("Guard pages", tally(guard), "lines run with inputs and outputs against unmapped pages; assembly reached, not counted"),
         ("Miri's paths (pure build)", tally(miri), "the lines the tests Miri runs execute natively; Miri checks Rust only"),

@@ -130,6 +130,7 @@ pub fn parse_test_cases() -> Cases {
 
 #[cfg(test)]
 mod tests {
+    include!("../../tools/require_nextest.rs");
     use super::*;
 
     fn test_reference_impl_all_at_once(

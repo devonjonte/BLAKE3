@@ -481,7 +481,7 @@ impl Platform {
     }
 
     #[cfg(blake3_sme2)]
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub fn sme2() -> Option<Self> {
         if sme2_detected() { Some(Self::SME2) } else { None }
     }

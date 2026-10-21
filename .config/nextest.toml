@@ -1,0 +1,12 @@
+# cargo-nextest's profiles for this repository (tools/mutants/check.py).
+
+[profile.mutants]
+# Every test runs on every mutant, so the record names every test that
+# catches it (with its time); each test in its own process.
+fail-fast = false
+# A test still running at 5 s hangs (the slowest takes under 1 s): killed
+# and named, where a hang used to cost the whole suite's timeout.
+slow-timeout = { period = "5s", terminate-after = 1 }
+# Each test's line once, as it ends, with its outcome and time.
+status-level = "all"
+final-status-level = "none"

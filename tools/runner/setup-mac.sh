@@ -55,6 +55,11 @@ if [ "$($br_rustc -vV 2>/dev/null | sed -n 's/^commit-hash: //p')" != "$want_has
     $br_rustup toolchain list | grep -v "^$found" | cut -d' ' -f1 | while read -r other; do $br_rustup toolchain uninstall "$other"; done
 fi
 echo "benchrunner's: $($br_rustc --version)"
+# cargo-nextest, which every test job runs (AGENTS: tests run under nextest).
+if ! sudo -u benchrunner -H test -x /Users/benchrunner/.cargo/bin/cargo-nextest; then
+    sudo -u benchrunner -H sh -c "curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C /Users/benchrunner/.cargo/bin"
+fi
+echo "benchrunner's: $(sudo -u benchrunner -H /Users/benchrunner/.cargo/bin/cargo-nextest nextest --version | head -1)"
 
 step "the exchange folder: jobs/ yours, results/ the runner's"
 chmod 600 "$checkout/ghtokenclassic.txt"

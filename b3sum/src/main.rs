@@ -841,6 +841,7 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod test {
+    include!("../../tools/require_nextest.rs");
     use clap::CommandFactory;
 
     #[test]

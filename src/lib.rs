@@ -239,8 +239,6 @@ pub(crate) enum Ran {
     Pool = 1,
     /// The call wanted SME2 and another thread held the turn.
     TurnTaken = 2,
-    /// The pool's CPUs each had a caller, so the call stayed on its thread.
-    PoolBusy = 4,
 }
 
 #[cfg(all(test, feature = "std"))]

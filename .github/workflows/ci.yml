@@ -52,6 +52,7 @@ jobs:
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ format('{0}-{1}', matrix.channel, matrix.target.toolchain) }}
+    - uses: taiki-e/install-action@nextest
     # Print the compiler version, for debugging.
     - name: print compiler version
       run: cargo run --quiet
@@ -60,12 +61,14 @@ jobs:
     - name: print instruction set support
       run: cargo run --quiet
       working-directory: ./tools/instruction_set_support
-    # Default tests plus the optional trait implementations.
-    - run: cargo test --features=serde,zeroize
-    # All public features put together.
-    - run: cargo test --features=serde,zeroize
+    # The tests run under cargo-nextest, each in its own process (AGENTS:
+    # "Tests run under nextest"); the doc examples under cargo test --doc.
+    # Default tests plus the optional trait implementations (every public
+    # feature).
+    - run: cargo nextest run --features=serde,zeroize
+    - run: cargo test --doc --features=serde,zeroize
     # no_std tests.
-    - run: cargo test --no-default-features
+    - run: cargo nextest run --no-default-features
     - name: Make sure enabling LTO via CFLAGS doesn't break the build.
       run: cargo build --tests
       if: matrix.target.toolchain != 'x86_64-pc-windows-msvc'
@@ -78,27 +81,27 @@ jobs:
     # support, for the optimizer's own behavior.
     #
     # Full SIMD support.
-    - run: cargo test --features=
-    - run: cargo test --features=pure
-    - run: cargo test --features= --release
-    - run: cargo test --features=pure --release
+    - run: cargo nextest run --features=
+    - run: cargo nextest run --features=pure
+    - run: cargo nextest run --features= --release
+    - run: cargo nextest run --features=pure --release
     # No AVX-512.
     # No AVX2.
 
     # Test vectors.
     - name: test vectors
-      run: cargo test
+      run: cargo nextest run
       working-directory: ./test_vectors
     - name: test vectors pure
-      run: cargo test --features=pure
+      run: cargo nextest run --features=pure
       working-directory: ./test_vectors
     # The C API (capi/: b3.h over the crate).
     - name: C API
-      run: cargo test --release
+      run: cargo nextest run --release
       working-directory: ./capi
     # Reference impl doc test.
     - name: reference impl doc test
-      run: cargo test
+      run: cargo test --doc
       working-directory: ./reference_impl
 
   b3sum_tests:
@@ -123,12 +126,13 @@ jobs:
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ format('{0}-{1}', matrix.channel, matrix.target.toolchain) }}
+    - uses: taiki-e/install-action@nextest
     # Test b3sum.
     - name: test b3sum
-      run: cargo test
+      run: cargo nextest run
       working-directory: ./b3sum
     - name: test b3sum --no-default-features
-      run: cargo test --no-default-features
+      run: cargo nextest run --no-default-features
       working-directory: ./b3sum
     - name: Make sure enabling LTO via CFLAGS doesn't break the build.
       run: cargo build
@@ -153,13 +157,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
-    - run: cargo test --lib --tests --features=serde,zeroize
+    - uses: taiki-e/install-action@nextest
+    - run: cargo nextest run --lib --tests --features=serde,zeroize
     - run: sudo apt-get update && sudo apt-get install -y qemu-user
-    - run: cargo test --lib --tests --features=serde,zeroize
+    - run: cargo nextest run --lib --tests --features=serde,zeroize
       env:
         CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
     - name: C API
-      run: cargo test --release
+      run: cargo nextest run --release
       working-directory: ./capi
 
   # The oldest GCC supported (CONTRIBUTING.md): Debian 12's, the oldest in a
@@ -182,8 +187,10 @@ jobs:
         run: |
           cat /proc/cpuinfo
           curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+          curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ~/.cargo/bin
           cd /work
-          ~/.cargo/bin/cargo test
+          ~/.cargo/bin/cargo nextest run
+          ~/.cargo/bin/cargo test --doc
 
   miri_smoketest:
     # A pull request from a branch of this repository: its push runs CI already.
@@ -195,12 +202,13 @@ jobs:
     - uses: dtolnay/rust-toolchain@nightly
       with:
         components: miri
+    - uses: taiki-e/install-action@nextest
     # Currently the test search "miri" only matches "test_miri_smoketest", but
     # we might add more. If this accidentally picks up anything incompatible or
     # slow, we can narrow it.
     # The pool's and the queue's threads live for the whole process, and
     # the queue's test uses several of them.
-    - run: cargo miri test miri
+    - run: cargo miri nextest run miri
       env:
         MIRIFLAGS: "-Zmiri-num-cpus=4 -Zmiri-ignore-leaks"
 

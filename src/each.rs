@@ -413,10 +413,20 @@ mod test {
     /// lands in its own hasher.
     #[test]
     fn test_update_each_holds_groups_together() {
+        for platform in crate::test::every_platform() {
+            holds_groups_together(platform);
+        }
+    }
+
+    fn holds_groups_together(platform: crate::platform::Platform) {
         let mut input = vec![0u8; 3 * crate::STAGE_LEN];
         crate::test::paint_test_input(&mut input);
         let keys = [[1u8; 32], [2u8; 32]];
-        let mut hashers: Vec<Hasher> = (0..6).map(|i| Hasher::new_with(crate::Mode::Keyed(&keys[i % 2]))).collect();
+        let on = |mut h: Hasher| {
+            h.core.chunk_state.platform = platform;
+            h
+        };
+        let mut hashers: Vec<Hasher> = (0..6).map(|i| on(Hasher::new_with(crate::Mode::Keyed(&keys[i % 2])))).collect();
         // Each hasher a group in, its message at a different offset into the
         // input; then one turn of two pieces each, which stage its second
         // group from its start and fill it (held), and 7 bytes more.
@@ -431,17 +441,21 @@ mod test {
         Hasher::update_each(&mut hashers, &turn);
         for (i, h) in hashers.iter().enumerate() {
             let message = &input[start(i)..start(i) + 2 * crate::STAGE_LEN + 7];
-            assert_eq!(h.finalize(), crate::hash_with(crate::Mode::Keyed(&keys[i % 2]), message), "hasher {i}");
+            assert_eq!(h.finalize(), crate::hash_with(crate::Mode::Keyed(&keys[i % 2]), message), "hasher {i}, {platform:?}");
         }
         // And each hasher's first group (chunk counter zero, which hands
         // its core the group's two halves), six at once: a first piece
         // longer than a chunk, so it is staged from offset zero.
-        let mut fresh: Vec<Hasher> = (0..6).map(|i| Hasher::new_with(crate::Mode::Keyed(&keys[i % 2]))).collect();
+        let mut fresh: Vec<Hasher> = (0..6).map(|i| on(Hasher::new_with(crate::Mode::Keyed(&keys[i % 2])))).collect();
         let turn: Vec<(usize, &[u8])> =
             (0..6).flat_map(|i| [(i, &input[start(i)..start(i) + 1100]), (i, &input[start(i) + 1100..start(i) + group + 7])]).collect();
         Hasher::update_each(&mut fresh, &turn);
         for (i, h) in fresh.iter().enumerate() {
-            assert_eq!(h.finalize(), crate::hash_with(crate::Mode::Keyed(&keys[i % 2]), &input[start(i)..start(i) + group + 7]), "fresh hasher {i}");
+            assert_eq!(
+                h.finalize(),
+                crate::hash_with(crate::Mode::Keyed(&keys[i % 2]), &input[start(i)..start(i) + group + 7]),
+                "fresh hasher {i}, {platform:?}"
+            );
         }
     }
 
@@ -452,11 +466,23 @@ mod test {
     /// the second half's counter shows in the merges that follow.
     #[test]
     fn test_update_each_held_group_after_and_before_groups() {
+        for platform in crate::test::every_platform() {
+            held_group_after_and_before_groups(platform);
+        }
+    }
+
+    fn held_group_after_and_before_groups(platform: crate::platform::Platform) {
         let group = crate::STAGE_LEN;
         let mut input = vec![0u8; 12 * group];
         crate::test::paint_test_input(&mut input);
         for before in 0..5 {
-            let mut hashers: Vec<Hasher> = (0..4).map(|_| Hasher::new()).collect();
+            let mut hashers: Vec<Hasher> = (0..4)
+                .map(|_| {
+                    let mut h = Hasher::new();
+                    h.core.chunk_state.platform = platform;
+                    h
+                })
+                .collect();
             for h in &mut hashers {
                 h.update(&input[..before * group]);
             }
@@ -470,7 +496,7 @@ mod test {
             for (i, h) in hashers.iter_mut().enumerate() {
                 let end = at + group + (i + 1) * 3 * group / 2 + 7;
                 h.update(&input[at + group..end]);
-                assert_eq!(h.finalize(), crate::hash(&input[..end]), "{before} groups before, hasher {i}");
+                assert_eq!(h.finalize(), crate::hash(&input[..end]), "{before} groups before, hasher {i}, {platform:?}");
             }
         }
     }

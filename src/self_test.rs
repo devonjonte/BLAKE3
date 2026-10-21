@@ -496,6 +496,24 @@ mod test {
         assert_eq!(run(), CASES.len());
     }
 
+    /// Threads that start up at once all return: one runs the self-test,
+    /// the rest wait for its verdict (each test runs in a fresh process,
+    /// so the self-test has not run yet). A waiting thread that missed
+    /// the verdict would spin, and the runner's time limit would end it.
+    #[test]
+    fn test_initialize_from_threads_at_once() {
+        let barrier = std::sync::Barrier::new(8);
+        std::thread::scope(|s| {
+            for _ in 0..8 {
+                s.spawn(|| {
+                    barrier.wait();
+                    crate::initialize();
+                });
+            }
+        });
+        assert_eq!(STATE.load(core::sync::atomic::Ordering::Relaxed), PASSED);
+    }
+
     /// `initialize` runs the self-test, which passes.
     #[test]
     fn test_initialize_runs_the_self_test() {

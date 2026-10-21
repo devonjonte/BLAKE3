@@ -13,17 +13,17 @@ cd "$(git rev-parse --show-toplevel)"
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-/tmp/target/check-builds}
 rustup target add x86_64-unknown-linux-gnu 2>/dev/null
 step() { echo "== $*"; "$@"; }
-step cargo test -q --release --no-default-features
+step cargo nextest run --cargo-quiet --release --no-default-features
 # One CPU, as in a one-CPU container: the pool has no worker thread, and
 # the caller hashes everything (the suites run on many CPUs and never
 # reach that path).
-step taskset -c 0 cargo test -q --release --lib 
+step taskset -c 0 cargo nextest run --cargo-quiet --release --lib
 for features in "" "--features pure"; do
 	# shellcheck disable=SC2086
 	RUSTFLAGS="-D warnings" step cargo check -q --release --tests --examples $features
 done
 RUSTFLAGS="-D warnings" step cargo check -q --release --manifest-path b3sum/Cargo.toml
 # The C API (capi/): its Rust tests, and b3.h compiled as C11 and run.
-RUSTFLAGS="-D warnings" step cargo test -q --release --manifest-path capi/Cargo.toml
+RUSTFLAGS="-D warnings" step cargo nextest run --cargo-quiet --release --manifest-path capi/Cargo.toml
 RUSTFLAGS="-D warnings" step cargo check -q --tests --examples --target x86_64-unknown-linux-gnu
 echo "check-builds: every build passes"

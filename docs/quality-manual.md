@@ -113,13 +113,19 @@ The mutants profile uses the release configuration. A mutant caught only
 by a debug assertion or an overflow check counts as uncaught. Release
 users get no such check.
 
-**Which tests do the catching.** Each mutant's log names every test
-that failed on it (`cargo test --no-fail-fast`, so every test binary
-runs), and `check.py` writes the matrix (`catchers.tsv`) and the smallest
-set of tests that still catches every mutant any test catches (a greedy
-set cover). Tests outside that set are candidates for removal, read one
-by one: a test's worth goes beyond the mutants it catches (a contract's
-`should_panic`, a hang, a shape no mutant models).
+**Which tests do the catching, at what cost.** The tests run under
+cargo-nextest, each in its own process, every test on every mutant, a
+test still running at 5 s killed as a hang. Every run records each test's
+outcome and time on every mutant and on the unmutated tree (`tests.tsv`),
+and weighs the tests by cost: the cheapest set of tests that still
+catches every caught mutant (each step the test with the most uncaught
+mutants per millisecond, so small tests come first), the tests outside it
+(each a big test whose catches cheaper ones make), and the mutants only
+an expensive test catches (each a small test worth writing). A failure
+that names the startup self-test is the self-test's catch, whichever test
+it ran in. Each of these is a reading: a test's worth goes beyond the
+mutants it catches (a contract's `should_panic`, a hang, a shape no
+mutant models).
 
 **What mutation testing finds**, over the whole library on the VM
 (October 17, with the stream): of 2511 mutants, 1678 fail a test or
@@ -340,19 +346,20 @@ SME2 (clang 17 or later; set `CC=clang-19` or similar):
 
 ```sh
 git clone -b servil https://github.com/johnservil/BLAKE3 && cd BLAKE3
-cargo test --release --lib                        # 115 tests
-cargo test --release --lib --features pure        # 95
-cargo test --release --doc                        # 30
-cargo test --release --manifest-path test_vectors/Cargo.toml
+cargo nextest run --release --lib                 # 124 tests, each in its own process
+cargo nextest run --release --lib --features pure # 104
+cargo test --release --doc                        # 22 doc examples
+cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 ```
 
-The sanitizers and Miri need nightly Rust
+The tests need [cargo-nextest](https://nexte.st); the sanitizers and Miri
+also need nightly Rust
 (`rustup toolchain install nightly --component miri,rust-src,llvm-tools`):
 
 ```sh
-RUSTFLAGS="-Zsanitizer=address" cargo +nightly test -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
-RUSTFLAGS="-Zsanitizer=thread" cargo +nightly test -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
-MIRIFLAGS="-Zmiri-num-cpus=4 -Zmiri-ignore-leaks" cargo +nightly miri test --features pure --lib -- unsafe_paths miri
+RUSTFLAGS="-Zsanitizer=address" cargo +nightly nextest run -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
+RUSTFLAGS="-Zsanitizer=thread" cargo +nightly nextest run -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
+MIRIFLAGS="-Zmiri-num-cpus=4 -Zmiri-ignore-leaks" cargo +nightly miri nextest run --features pure --lib unsafe_paths miri
 ```
 
 (On macOS, use the target `aarch64-apple-darwin`.)

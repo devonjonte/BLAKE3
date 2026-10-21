@@ -96,7 +96,7 @@ These checks reduce risk, but they cannot guarantee that no bug remains.
 ```sh
 git clone -b servil https://github.com/johnservil/BLAKE3
 cd BLAKE3
-cargo test --release --lib --tests
+cargo nextest run --release --lib --tests   # with cargo-nextest (https://nexte.st)
 ```
 
 The [quality manual](docs/quality-manual.md) gives details for experts
