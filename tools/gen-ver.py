@@ -8,14 +8,14 @@ hold the hash of the commit it sits in, so it holds its parent's; the
 release commit changes version strings alone). Zooko's scheme, shared
 with his other projects.
 
-Every string the release reaches carries the full version, so that each
-is self-authenticating: the crate (crates.io, its docs), the tag, and,
-where the repository has them, the CHANGELOG's title, b3sum's own version
-(`b3sum --version`), the C library's crate (`b3_version()`), header
-(`B3_VERSION`) and pkg-config file. Two places take X.Y.Z alone, since
-their formats hold no more: the soname, and b3sum's requirement on the
-crate, which is exact (`=X.Y.Z`: Cargo ignores a requirement's +metadata,
-and crates.io holds one upload per X.Y.Z, so `=X.Y.Z` names one crate).
+Every copy of the version carries it in full, hash included, whether or
+not today's tools check it, since future tools may (Zooko, October 20):
+the crate (crates.io, its docs), the tag, and, where the repository has
+them, the CHANGELOG's title, b3sum's own version (`b3sum --version`) and
+its exact requirement on the crate (`=X.Y.Z+<hash>`: Cargo reads it up to
+the `+` today, and warns), the C library's crate (`b3_version()`), header
+(`B3_VERSION`) and pkg-config file. The soname alone takes X.Y: its
+format holds digits and dots.
 """
 import os
 import re
@@ -57,7 +57,7 @@ if os.path.exists("CHANGELOG.md"):
     files.append("CHANGELOG.md")
 if os.path.exists("b3sum/Cargo.toml"):
     edit("b3sum/Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
-    edit("b3sum/Cargo.toml", r'^(blake3 = \{ version = ")[^"]*', rf"\g<1>={version}")
+    edit("b3sum/Cargo.toml", r'^(blake3 = \{ version = ")[^"]*', rf"\g<1>={full}")
     subprocess.run(["cargo", "update", "-q", "-p", crate, "-p", "b3sum"], cwd="b3sum", check=True)
     edit("capi/Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
     edit("capi/b3.h", r'^#define B3_VERSION ".*"$', f'#define B3_VERSION "{full}"')
@@ -72,5 +72,5 @@ git("commit", "-q", "--no-verify", "-m", f"Version {full}", "--", *files)
 git("tag", f"v{full}")
 print(f"v{full}")
 # The dependency line for the release notes: the release commit by its full
-# hash, which Cargo fetches exactly (a requirement's +metadata it ignores).
-print(f'{crate} = {{ git = "{git("remote", "get-url", "origin")}", rev = "{git("rev-parse", "HEAD")}" }}')
+# hash, which Cargo fetches exactly, and the full version.
+print(f'{crate} = {{ git = "{git("remote", "get-url", "origin")}", rev = "{git("rev-parse", "HEAD")}", version = "={full}" }}')

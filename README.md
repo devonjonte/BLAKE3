@@ -35,14 +35,17 @@ Details: [`QUALITY.md`](QUALITY.md).
 
 ```toml
 [dependencies]
-# A release's commit by its full hash: Cargo fetches exactly that code.
-blake3-servil = { git = "https://github.com/johnservil/BLAKE3", rev = "<the release's commit>" }
+# A release by its full version and its commit's full hash: Cargo fetches
+# exactly that commit (and reads the version up to the "+" today).
+blake3-servil = { git = "https://github.com/johnservil/BLAKE3", rev = "<the release's commit>", version = "=<X.Y.Z+hash>" }
 ```
 
 `git ls-remote --tags https://github.com/johnservil/BLAKE3` lists each
-release with its commit. A release's version, `X.Y.Z+<hash>`, names the
-commit of its code, so the version alone identifies what you have
-(`b3sum --version` and the C library's `b3_version()` print it).
+release, `vX.Y.Z+<hash>`, with its commit. The hash in a release's
+version names the commit of its code, so the version alone identifies
+what you have (`b3sum --version` and the C library's `b3_version()`
+print it). Write it whole wherever you write it: tools that check it may
+come.
 
 ```rust
 blake3_servil::initialize(); // once, before any other call

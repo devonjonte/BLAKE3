@@ -33,7 +33,7 @@ hash_many`, after the `size == 0` case:
 and in `Cargo.toml`:
 
 ```toml
-blake3-servil = { git = "https://github.com/johnservil/BLAKE3", rev = "<the release's commit>" }
+blake3-servil = { git = "https://github.com/johnservil/BLAKE3", rev = "<the release's commit>", version = "=<X.Y.Z+hash>" }
 ```
 
 (a release's commit by its full hash, as the fork's README shows).
