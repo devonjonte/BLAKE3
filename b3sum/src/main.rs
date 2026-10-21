@@ -1,3 +1,35 @@
+//! b3sum: BLAKE3's command-line hasher. It hashes its inputs on
+//! `available_parallelism` threads, an atomic index handing each the next,
+//! printing lines in order; a cached file of 512 KiB or more is mapped and
+//! hashed in place over the pool and held mapped (`hold`); any other input
+//! is read into two buffers, the next read overlapping the hashing
+//! (`update_from`); on Linux, small files that miss the page cache are read
+//! ahead by the kernel, many at once (`readahead`).
+//!
+//! The costs it is designed around (i7-12700K, Linux 7.0, cached files, a
+//! P core): open 0.65 us, fstat 0.19 us, reading 16 KiB 1.1 us, close
+//! 0.19 us; a thread's start 15-30 us; a hand-off to an awake thread about
+//! 30 ns, a sleeping one's wake 15-45 us before it runs; a whole b3sum
+//! process 650-800 us. A file handed to the pool pays a wake to save less
+//! than it costs below a few MiB.
+//!
+//! Tried and set aside (`bench-hashes b3sum`, against the design above;
+//! the evidence in Devon's bench-hashes-validation, b3sum-*):
+//! - One stream for every file (`Stream::submit_reader` among them):
+//!   slower for whole files, cached x1.18-2.2, 1000 x 16 KiB up to x5.3
+//!   from storage: opening and reading a file costs the kernel about 8 us
+//!   and hashing 16 KiB 1.6 us, so a few threads cannot open fast enough,
+//!   and with many, handing a file over costs more than hashing it.
+//! - io_uring: as fast as the readahead hints with a ring per thread; one
+//!   ring for the run 2.8x slower cached (io-wq does every statx).
+//! - O_DIRECT for files that miss (x1.27-1.85), madvise WILLNEED or
+//!   MADV_POPULATE_READ on mappings (level to 42% slower), huge pages
+//!   (level), parallel pread of aligned subtrees without mapping (slower,
+//!   more CPU), buffered output (within noise).
+//! - Planning ahead (stat every file, big files first): x1.03-1.20 slower;
+//!   fixed files a thread, or each thread starting the next: 17-47% slower
+//!   on large runs.
+
 use anyhow::{bail, ensure};
 use clap::Parser;
 use std::cmp;
@@ -188,8 +220,10 @@ const HOLD_PAGES: u64 = 1 << 18;
 /// the file's page-table entries, about 65 ns a page with cross-core TLB
 /// flushes (i7-12700K: 23-25 ms of a 56 ms run for a cached 1 GiB file),
 /// while entries that merely exist cost
-/// nothing measured beside their memory (NOTES-servil.md, "Mappings and
-/// page tables"); exit reclaims them (crash-only). The cap bounds what a
+/// nothing measured beside their memory: a process holding 6 GiB of
+/// touched mappings slowed another's reads of 10 GiB not at all (2.32
+/// GiB/s either way), at 2 MiB of page tables a GiB, its files kept cached
+/// in preference; exit reclaims them (crash-only). The cap bounds what a
 /// run over many large files holds (John, #56: holding every file of a
 /// 10 TB run would hold 20 GB of page tables). Measured against unmapping
 /// every file (servil), at a 1 GiB cap: 16 files of 64 MiB x0.82-0.93, the
@@ -324,7 +358,7 @@ fn fill(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<usize> {
 /// hashing: the first piece is read on this thread, and an input longer
 /// than a piece has the rest read on a second thread into the other
 /// buffer while this one hashes the last piece over the pool
-/// (`bench-hashes b3sum`; NOTES-servil.md, "b3sum, measured").
+/// (`bench-hashes b3sum`).
 fn update_from(hasher: &mut blake3::Hasher, mut reader: impl Read + Send) -> io::Result<()> {
     BUFFERS.with_borrow_mut(|[first, second]| {
         let mut len = fill(&mut reader, first)?;
