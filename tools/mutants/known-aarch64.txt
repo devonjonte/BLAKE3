@@ -103,7 +103,6 @@ src/lanes.rs	replace < with <= in Pool::wake_for	1	OPEN: the pool's scheduling u
 src/lanes.rs	replace < with <= in group_cvs	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace < with <= in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace < with <= in hash_many	2	speed: MIN_SPLIT_LEN, the threshold from which a call leaves its thread (equally correct either way)
-src/lanes.rs	replace < with <= in hash_with_key	1	speed: MIN_SPLIT_LEN, the threshold from which a call leaves its thread (equally correct either way)
 src/lanes.rs	replace < with == in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace < with == in group_cvs	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace < with == in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)

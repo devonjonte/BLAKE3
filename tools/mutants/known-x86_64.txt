@@ -5,7 +5,6 @@
 files: src/each.rs src/ffi_avx2.rs src/ffi_sse41.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/rust_avx2.rs src/rust_sse41.rs src/self_test.rs src/tree.rs
 src/lib.rs	replace | with ^ in ran	1	test-only record of which kernels ran; on x86 nothing reads it (AArch64's kernel-coverage test does)
 src/outboard.rs	replace | with ^ in groups_cvs_into	1	equivalent: | and ^ agree on flag bits that never overlap (the mode flags and PARENT)
-src/lanes.rs	replace < with <= in hash_with_key	1	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
 src/lanes.rs	replace || with && in hash_many	1	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
 src/lanes.rs	replace < with == in hash_many	2	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
 src/lanes.rs	replace < with > in hash_many	2	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
