@@ -75,11 +75,10 @@ pub mod ffi {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod test {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn test_xof_many() {
         if !crate::platform::avx512_detected() {
