@@ -25,14 +25,16 @@ of tests that still catches every caught mutant, the tests outside it
 (each a big test whose catches cheaper ones make), and the mutants only an
 expensive test catches (each a small test worth writing).
 
-With --since REV, a change's check: only the mutants in the lines the
-change makes (git diff REV...HEAD, cargo-mutants --in-diff), and it fails
-on a new survivor among them; a listed one now caught waits for a whole
-run. Either way it fails while the list names a missing test ("OPEN: a
-missing test"): that is work to do, not a survivor to keep. A change that removes or alters test code (a line of src/test.rs or
-tests/, or one with an assertion or a test's name) can weaken the tests of
-code it leaves alone, which only a whole run sees: then the whole run
-happens instead, by itself.
+With --since REV, a change's check: the mutants in the lines the change
+makes (git diff REV...HEAD, cargo-mutants --in-diff), and it fails on a new
+survivor among them; a listed one now caught waits for a whole run. Either
+way it fails while the list names a missing test ("OPEN: a missing test"):
+that is work to do, not a survivor to keep. A change that alters a test (a
+line taken away inside a #[test] function, comments aside) can lose the
+catches of code it leaves alone: the mutants the latest map (a --map run of
+an ancestor) records that test catching, the startup self-test's aside, run
+again too. A change to other test code (a helper, a test module's or
+tests/'s own items), or one with no such map, runs the whole check.
 """
 
 import collections
@@ -126,7 +128,7 @@ def run(files, extra=(), shards=SHARDS, label="run"):
     names = collections.Counter()
     functions = collections.defaultdict(list)  # (file, function) -> [(outcome, name)]
     rows = []  # (mutant name, function, test, outcome, ms); the unmutated tree's mutant name is UNMUTATED
-    kept = os.path.join(ROOT, "tmp", "mutants-last", label)
+    kept = os.path.join(ROOT, "tmp", "mutants-last", "map" if MAP and label == "run" else label)
     shutil.rmtree(kept, ignore_errors=True)
     for k, (tree, process) in enumerate(runs):
         # 0: every mutant caught; 2: some missed; 3: some timed out. Any
@@ -165,6 +167,8 @@ def run(files, extra=(), shards=SHARDS, label="run"):
             f.writelines("\t".join(map(str, r)) + "\n" for r in rows)
         if MAP and label == "run":  # the confirming pass reruns a few mutants: its weights would be noise
             weigh(rows, os.path.join(kept, "tests.tsv"))
+            head = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout
+            open(os.path.join(kept, "commit"), "w").write(head)
     return names, functions
 
 
@@ -243,18 +247,89 @@ def confirm(found, known, differ=None):
     return +confirmed
 
 
-def weakens_tests(diff):
-    """Whether a diff removes or alters test code: a line it takes away (a
-    changed line is one taken away and one added) in src/test.rs or
-    tests/, or one holding an assertion or a test."""
-    file = ""
+def changed_tests(since, head="HEAD"):
+    """The tests a change alters, from the code before it: (names, sure).
+    A line the change takes away (a changed line is one taken away and one
+    added) inside a #[test] function names that test; one in other test code
+    (a helper, a test module's or tests/'s own items) can weaken any test,
+    so `sure` is False. Lines of the library's code are the change's own
+    mutants' business."""
+    diff = subprocess.run(["git", "-C", ROOT, "diff", "-U0", f"{since}...{head}", "--", "src", "tests"], capture_output=True, text=True, check=True).stdout
+    names, sure, file, old = set(), True, None, []
     for line in diff.splitlines():
         if line.startswith("--- "):
-            file = line[6:] if line.startswith("--- a/") else ""
-        elif line.startswith("-") and not line.startswith("---"):
-            if file == "src/test.rs" or file.startswith("tests/") or re.search(r"assert|#\[test\]|fn test_", line):
-                return True
-    return False
+            file = line[6:] if line.startswith("--- a/") else None
+            old = subprocess.run(["git", "-C", ROOT, "show", f"{since}:{file}"], capture_output=True, text=True).stdout.splitlines() if file else []
+        elif line.startswith("@@") and file:
+            start, count = re.match(r"@@ -(\d+)(?:,(\d+))?", line).groups()
+            for n in range(int(start), int(start) + int(count if count is not None else 1)):
+                if not old[n - 1].strip() or old[n - 1].lstrip().startswith("//"):
+                    continue  # a comment or a blank line weakens no test
+                # src/test.rs is the library's test module (lib.rs: #[cfg(test)] mod test).
+                kind, name = enclosing(old, n - 1, file.startswith("tests/") or file == "src/test.rs")
+                if kind == "test":
+                    names.add(name)
+                elif kind == "helper":
+                    sure = False
+    return names, sure
+
+
+def enclosing(lines, i, test_file):
+    """What line `i` of a source file (rustfmt's layout) belongs to: ("test",
+    its name) inside a #[test] function, ("helper", None) inside other test
+    code (a #[cfg(test)] module, or anywhere in tests/), ("code", None)
+    elsewhere."""
+    depth = len(lines[i]) - len(lines[i].lstrip())
+    fn = None
+    for k in range(i, -1, -1):
+        line = lines[k]
+        indent = len(line) - len(line.lstrip())
+        if not line.strip() or indent > depth or (indent == depth and k != i and not line.lstrip().startswith(("fn ", "pub fn ", "mod ", "pub(crate) mod ", "#["))):
+            continue
+        m = re.match(r"\s*(?:pub(?:\([a-z]+\))? )?(?:async )?fn (\w+)", line)
+        if m and fn is None:
+            attrs = []
+            for a in range(k - 1, -1, -1):
+                if lines[a].lstrip().startswith(("#[", "///", "//")):
+                    attrs.append(lines[a])
+                else:
+                    break
+            if any(re.search(r"#\[test\]", a) for a in attrs):
+                return "test", m.group(1)
+            fn = m.group(1)
+        if re.match(r"\s*(?:pub(?:\([a-z]+\))? )?mod \w+ \{", line):
+            above = lines[k - 1] if k else ""
+            if "cfg(test" in above or "cfg(all(test" in above:
+                return "helper", None
+        depth = min(depth, indent)
+    return ("helper" if test_file else "code"), None
+
+
+MAP_DIR = os.path.join(ROOT, "tmp", "mutants-last", "map")
+
+
+def caught_by(tests):
+    """The mutants the latest map (a --map run of an ancestor of HEAD) records
+    as caught by any of `tests` (by function name) and not by the startup
+    self-test, by name; None when there is no such map."""
+    record, commit = os.path.join(MAP_DIR, "tests.tsv"), os.path.join(MAP_DIR, "commit")
+    if not (os.path.exists(record) and os.path.exists(commit)):
+        return None
+    if subprocess.run(["git", "-C", ROOT, "merge-base", "--is-ancestor", open(commit).read().strip(), "HEAD"]).returncode != 0:
+        return None
+    by, self_test = collections.defaultdict(set), set()
+    for line in open(record):
+        if line.startswith("#"):
+            continue
+        file, mutant, _function, test, outcome, _ms = line.rstrip("\n").split("\t")
+        if file == "(unmutated)" or outcome == "PASS":
+            continue
+        name = f"{file}\t{mutant}"
+        if test == SELF_TEST:
+            self_test.add(name)
+        elif re.split(r"[ :]", test)[-1] in tests:
+            by[name].add(test)
+    return sorted(set(by) - self_test)
 
 
 def figure(functions, known):
@@ -292,20 +367,35 @@ def main():
     if missing:
         sys.exit("mutants: the list names missing tests; write them first")
     since = sys.argv[sys.argv.index("--since") + 1] if "--since" in sys.argv else None
+    extra = []  # the mutants the change's altered tests caught (the map's)
     if since is not None:
         diff = subprocess.run(["git", "-C", ROOT, "diff", f"{since}...HEAD", "--", *files], capture_output=True, text=True, check=True).stdout
-        if weakens_tests(diff):
-            print(f"mutants: the change since {since} removes or alters test code; the whole run")
+        tests, sure = changed_tests(since)
+        caught = caught_by(tests) if tests and sure else []
+        if not sure:
+            print(f"mutants: the change since {since} alters test code outside a test (a helper); the whole run")
             since = None
+        elif caught is None:
+            print(f"mutants: the change since {since} alters {len(tests)} test{'s' if len(tests) > 1 else ''} and no map of an ancestor holds their catches (check.py --map); the whole run")
+            since = None
+        else:
+            extra = caught
+            if tests:
+                print(f"mutants: the change alters {len(tests)} test{'s' if len(tests) > 1 else ''}; the map's {len(extra)} mutant names they catch run again")
     if since is not None:
-        if not diff:
-            print(f"mutants: the change since {since} touches no mutated file")
+        if not diff and not extra:
+            print(f"mutants: the change since {since} touches no mutated file and alters no test")
             return
         path = os.path.join(tempfile.mkdtemp(prefix="mutants-diff-", dir="/tmp"), "change.diff")
         with open(path, "w") as f:
             f.write(diff)
         # One shard: a change's mutants are few, and each shard builds anew.
-        found, functions = run(files, ["--in-diff", path], shards=1)
+        found, functions = run(files, ["--in-diff", path], shards=1) if diff else (collections.Counter(), {})
+        if extra:
+            # The altered tests' catches, wherever they are: by name.
+            again, more = run(sorted({k.split("\t", 1)[0] for k in extra}), [arg for k in extra for arg in ("--re", ": " + re.escape(k.split("\t", 1)[1]) + "$")], label="tests")
+            found = found + again
+            functions = {**more, **functions}
         # Only the names with more survivors than the list: the run holds
         # the change's lines alone, so a listed name's other places are
         # missing from it (a whole run sees those, and stale entries).

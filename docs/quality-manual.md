@@ -123,7 +123,10 @@ mutants per millisecond, so small tests come first), the tests outside it
 (each a big test whose catches cheaper ones make), and the mutants only
 an expensive test catches (each a small test worth writing). A failure
 that names the startup self-test is the self-test's catch, whichever test
-it ran in. Each of these is a reading: a test's worth goes beyond the
+it ran in. A daily run stops a mutant's tests at the first that fails;
+`--map` runs every test and keeps the record (`tmp/mutants-last/map/`),
+from which a change's check (`--since`) that alters a test reruns the
+mutants that test caught, instead of the whole run. Each of these is a reading: a test's worth goes beyond the
 mutants it catches (a contract's `should_panic`, a hang, a shape no
 mutant models).
 
