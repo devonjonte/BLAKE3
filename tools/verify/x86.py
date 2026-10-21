@@ -74,6 +74,10 @@ def disassemble(so, start, stop):
             t = re.match(r"\s*0x([0-9a-f]+)", comment)
             target = int(t.group(1), 16) if t else None
         rows.append((addr, mnem, split(rest.strip()), target))
+    # A PE image's absolute operands print as the address's low 32 bits,
+    # signed (llvm-objdump on COFF): the full address is the image base
+    # plus those bits. An ELF's are already whole.
+    base = sections(so)[".text"][0] & ~0xFFFFFFFF
     code = {}
     for i, (addr, mnem, ops, target) in enumerate(rows):
         nxt = rows[i + 1][0] if i + 1 < len(rows) else stop
@@ -84,6 +88,8 @@ def disassemble(so, start, stop):
             disp = int(mt.group(2), 16) if mt.group(2) else 0
             return f"[abs {nxt + (-disp if mt.group(1) == '-' else disp):#x}]"
         ops = [re.sub(r"\[rip(?: ([+-]) (0x[0-9a-f]+))?\]", absolute, o) for o in ops]
+        if base:
+            ops = [re.sub(r"\[(-?0x[0-9a-f]+)\]", lambda mt: f"[abs {base + (int(mt.group(1), 16) & 0xFFFFFFFF):#x}]", o) for o in ops]
         code[addr] = (mnem, ops, nxt)
     return code
 
