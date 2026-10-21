@@ -8,9 +8,14 @@ hold the hash of the commit it sits in, so it holds its parent's; the
 release commit changes version strings alone). Zooko's scheme, shared
 with his other projects.
 
-Where a b3sum/ crate depends on the library, b3sum's requirement (X.Y.Z:
-requirements take no build metadata) and its lock carry the version, and
-the C library's crate and header (capi/) take the full string.
+Every string the release reaches carries the full version, so that each
+is self-authenticating: the crate (crates.io, its docs), the tag, and,
+where the repository has them, the CHANGELOG's title, b3sum's own version
+(`b3sum --version`), the C library's crate (`b3_version()`), header
+(`B3_VERSION`) and pkg-config file. Two places take X.Y.Z alone, since
+their formats hold no more: the soname, and b3sum's requirement on the
+crate, which is exact (`=X.Y.Z`: Cargo ignores a requirement's +metadata,
+and crates.io holds one upload per X.Y.Z, so `=X.Y.Z` names one crate).
 """
 import os
 import re
@@ -47,12 +52,17 @@ full = f"{version}+{git('rev-parse', 'HEAD')}"
 crate = re.search(r'^name = "(.*)"$', open("Cargo.toml").read(), re.M).group(1)
 edit("Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
 files = ["Cargo.toml"]
+if os.path.exists("CHANGELOG.md"):
+    edit("CHANGELOG.md", rf"^# {crate} [^ ,]+", f"# {crate} {full}")
+    files.append("CHANGELOG.md")
 if os.path.exists("b3sum/Cargo.toml"):
-    edit("b3sum/Cargo.toml", r'^(blake3 = \{ version = ")[^"]*', rf"\g<1>{version}")
-    subprocess.run(["cargo", "update", "-q", "-p", crate], cwd="b3sum", check=True)
+    edit("b3sum/Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
+    edit("b3sum/Cargo.toml", r'^(blake3 = \{ version = ")[^"]*', rf"\g<1>={version}")
+    subprocess.run(["cargo", "update", "-q", "-p", crate, "-p", "b3sum"], cwd="b3sum", check=True)
     edit("capi/Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
     edit("capi/b3.h", r'^#define B3_VERSION ".*"$', f'#define B3_VERSION "{full}"')
-    files += ["b3sum/Cargo.toml", "b3sum/Cargo.lock", "capi/Cargo.toml", "capi/b3.h"]
+    edit("capi/b3_servil.pc.in", r"^Version: .*$", f"Version: {full}")
+    files += ["b3sum/Cargo.toml", "b3sum/Cargo.lock", "capi/Cargo.toml", "capi/b3.h", "capi/b3_servil.pc.in"]
 else:
     subprocess.run(["cargo", "update", "-q", "-p", crate], check=True)
     files.append("Cargo.lock")
