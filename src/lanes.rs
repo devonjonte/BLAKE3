@@ -34,7 +34,11 @@
 //! hashing at once each get about half the workers' time, and a slow
 //! thread takes fewer pieces than a fast one; there is nothing to tune for
 //! fairness or balance. A call arriving when callers already fill the CPUs
-//! hashes its input whole on its own thread.
+//! hashes its input whole on its own thread. Against one locked task list
+//! and one condition variable for every worker (i7-12700K, 19 workers:
+//! the producer's hand-over 434 ns), every stream cell ran level or faster
+//! (messages 5-49%, batches 3-15%), context switches per run 28.5k ->
+//! 10k: a pool built for this job beat the general-purpose one.
 //!
 //! # Kernels
 //!
@@ -89,7 +93,8 @@
 //!   SME2 and the workers on NEON (Mac 256 KiB +8-10%, shared batches
 //!   +35-46%); the first K workers on SME2, one an SME unit (the M4 Max
 //!   has three): with every core busy the chip's power sets the pace, and
-//!   more units add heat, not throughput.
+//!   more units add heat, not throughput (4 MiB 2% less time and 7% less
+//!   energy at best).
 
 use crate::CVBytes as ChainingValue;
 use crate::platform::Platform;
@@ -109,7 +114,13 @@ use std::sync::{Mutex, OnceLock};
 /// 130). Zooko chose 512 KiB, where it pays on the Mac (September 28,
 /// 2026; native first): after the gap 512 KiB 0.35 -> 0.19-0.24 ns/B and
 /// 8192 64-byte messages 22.5 -> 13.3 ns/msg (jobs 538-541), the VM's
-/// 512 KiB 20-30% slower than on the caller's thread.
+/// 512 KiB 20-30% slower than on the caller's thread. Measured again
+/// (October 1, 2026, Mac, splits of 32-256 KiB): after other work the
+/// length at the split ran slower than on the caller's thread (32 KiB
+/// x2.34, 128 KiB x1.25-1.29, 256 KiB x1.08), and gained only nonstop
+/// with the workers awake (256 KiB x0.81); a rule splitting from 256 KiB
+/// when workers are awake never triggered (calls that do not split wake
+/// none), so it went.
 // Under Miri, which interprets every instruction about a million times
 // slower, 16 KiB, so its tests reach the same pool code on inputs 32 times
 // smaller (512 KiB: about 40 minutes a test in CI).

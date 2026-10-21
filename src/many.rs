@@ -116,7 +116,10 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
 /// against the extra group: VM 256 B, 9 messages 60 / 69, 10 68 / 62, 12
 /// 65 / 52; 128 B and 1 KiB cross at the same counts. Mac P-core (jobs
 /// 261-264), 21 x 256 B 67.5 / 58.3, 53 x 256 B 51.1 / 45.5, 37 x 1 KiB
-/// 201 / 193; the VM level at 21.
+/// 201 / 193; the VM level at 21. With the program's work between calls,
+/// 5 after the groups is best or level against 3 and 1 at nearly every
+/// count (Mac, 64 B to 1 KiB, 16-129 messages: 1 KiB x 19 345 ns/msg
+/// against 430 and 431); 3 and 1 win only back to back.
 pub(crate) const SME2_TAIL_MIN: usize = 10;
 pub(crate) const SME2_TAIL_MIN_AFTER_GROUPS: usize = 5;
 

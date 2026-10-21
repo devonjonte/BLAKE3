@@ -1151,6 +1151,15 @@ fn hash_serial_from(platform: Platform, input: &[u8], key: &CVWords, flags: u8) 
 /// x0.61, 8 KiB x0.51, 16 KiB x0.66; 32 KiB and up level, the hashing's
 /// own time dwarfing it; jobs 971-975). The streaming paths (Hasher,
 /// batches, the streams' tasks) run back to back with their code near.
+/// A cold call of 2-8 KiB spends about a third of its time on its code
+/// (10-24 KB of kernels and glue); from 3 KiB what remains is the kernels
+/// starting before their lines arrive. Tried and set aside: prefetching
+/// for a chunk or less (2-10% gained, less than the pause check costs);
+/// prefetching the 16 KiB of Rust around the kernels too (every call
+/// 400-500 ns slower: prefetches beyond some number in flight are
+/// dropped); a rolled four-lane NEON path for calls after a pause (1.3 KB,
+/// 1.2-1.5x slower: a four-lane NEON BLAKE3 is bound by its chains'
+/// latency, where the hybrids' integer lanes fill the idle issue slots).
 #[cfg(all(blake3_neon, feature = "std"))]
 const PREFETCH_BELOW: usize = 64 * 1024;
 

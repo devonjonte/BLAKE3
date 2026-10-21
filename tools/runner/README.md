@@ -69,6 +69,13 @@ ratio 1.001).
 
 ## The chip's power (`"powermetrics": true`)
 
+Energy is a lab instrument (Zooko): measured in experiments here, and kept
+out of the benchmark and the gate, where a number would become a goal.
+Heat confounds it: back-to-back full-load runs throttle within minutes, so
+each run starts after a minute's rest, in an order that cancels drift (0,
+1, 2, 3, 3, 2, 1, 0). macOS's per-process estimate (`ri_energy_nj`) is a
+model, -16% to +30% against the chip's power, unfit to compare builds.
+
 A job may record the chip's power beside it. The runner's user runs one
 fixed command line as root, which only prints and stops by itself after
 two hours. Allow it once, with `sudo visudo -f

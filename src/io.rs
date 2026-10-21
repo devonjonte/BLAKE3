@@ -7,7 +7,7 @@ pub(crate) fn copy_wide(mut reader: impl io::Read, hasher: &mut crate::Hasher) -
     // buffer, filled before each update. On SME2, 1 MiB pieces hash at the
     // one-shot rate, where 64 KiB pieces each meet the SME unit's slow
     // state after the reads between them (M4 Max, files of 8-64 MiB 23-33%
-    // less time; NOTES-servil.md, "update_reader through a 1 MiB buffer").
+    // less time).
     // The first 64 KiB lead the 1 MiB buffer, so its updates stay whole
     // 1 MiB subtrees (a Hasher's subtrees align to their own size). Every
     // byte read is hashed before an error returns: a caller that retries

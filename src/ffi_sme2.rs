@@ -16,7 +16,12 @@
 //! What SME2 buys over the NEON hybrids, nonstop on an M4 Max (probe/sme2-worth):
 //! one thread 1.5-1.7x (hash of 64 KiB-64 MiB 0.25 -> 0.15-0.17 ns/B),
 //! batches 1.9x (18.2 -> 9.4 ns a message), outboards 1.5x, a Hasher fed
-//! 64 KiB pieces 1.2x; `hash_multithreaded` on every core level. Tried and
+//! 64 KiB pieces 1.2x; `hash_multithreaded` on every core level. One
+//! thread's energy, the chip's power measured: about 690 pJ a byte at 6.2
+//! GB/s against NEON's 1990 at 3.9. Batches lent after other work run about
+//! a quarter slower than back to back (the SME unit's slow state, whatever
+//! the work); cleaning the copied lines first, or larger tables a call,
+//! did not help. Tried and
 //! set aside: a padded SME2 group for a batch's remainder (80-290% slower
 //! at 24 messages, every variant), and a lone 16 KiB group on the NEON
 //! hybrids in place of SME2 (no change).
