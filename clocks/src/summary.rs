@@ -19,8 +19,9 @@
 //! a margin. Callers print the ratio each [`Judgment`] carries: the figure
 //! judged.
 //!
-//! **Before changing these rules**, read bench-hashes' `COMPARISONS.md`:
-//! each choice's evidence and what it gives up.
+//! **Before changing these rules**, read bench-hashes' `METHODOLOGY.md`,
+//! "Each part of the rule, and its evidence": each choice's evidence and
+//! what it gives up.
 //!
 //! **Values** are nanoseconds per unit in fixed point, 64 integer and 64
 //! fractional bits (Q64.64, as bench-hashes' `Fixed`); ratios in permille;

@@ -1,6 +1,6 @@
 # Procedures and environment
 
-For the servil team: how things are done in this repository and its guest. The principles they serve are in `AGENTS.md`; bench-hashes' own procedures are in its `PROCEDURES.md`.
+For the servil team: how things are done in this repository and its guest. The principles they serve are in `AGENTS.md`; bench-hashes' own are in its `CONTRIBUTING.md`.
 
 # The performance-regression check: every code commit
 
@@ -48,7 +48,7 @@ The email and the tarball are all Dan reads: the submission succeeds when he add
 
 **Commits that skipped the check** (`--no-verify`, or made where the hook was absent) must be checked before they are pushed: check out each in turn and run `check --against <its parent>`; for a run of them, also the last against the first, which sees slowdowns each step kept under the margin.
 
-The check's Mac calibration (its false holds and sensitivity on the M4 Max) is in bench-hashes' `COMPARISONS.md`; the earlier rule's, which judged five fixed cells, is history in `NOTES-servil.md` ("The regression check, calibrated").
+The check's calibration on both machines (its false holds and sensitivity on the i7-12700K and the M4 Max) is in bench-hashes' `METHODOLOGY.md`, "Comparing runs"; the earlier rule's, which judged five fixed cells, is history in `NOTES-servil.md` ("The regression check, calibrated").
 
 # Branches: candidates, then servil
 

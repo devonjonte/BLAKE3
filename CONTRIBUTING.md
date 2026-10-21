@@ -114,8 +114,9 @@ against `servil`; say in yours which machines you measured on.
 
 ## Maintainers' notes
 
-`AGENTS.md`, `PROCEDURES.md`, and `NOTES-servil.md` here, and `AGENTS.md`,
-`PROCEDURES.md`, `NEXT-STEPS.md`, and `NOTES.md` in bench-hashes, are the maintainers' working notes: their environment,
-current work, and the reasoning behind past decisions. Contributing
+`AGENTS.md`, `PROCEDURES.md`, and `NOTES-servil.md` here, and `AGENTS.md`
+and `FROZEN.md` in bench-hashes, are the maintainers' working notes: their
+environment and the reasoning behind past decisions; the current work is
+in the issues. Contributing
 needs none of them; `NOTES-servil.md` is worth reading before you
 change a kernel or the thread pool.

@@ -1,6 +1,5 @@
 """The SME2 message kernel's block loop, one pass proved for every pass and
-every message length (bench-hashes NEXT-STEPS, "Long proofs in an hour or
-two"): from any hash state, with block K of every lane in ZA, a pass
+every message length, so the long proofs need not unroll it: from any hash state, with block K of every lane in ZA, a pass
 leaves the standard's compression of that state with block K, and block
 K + 1 in ZA.
 

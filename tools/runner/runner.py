@@ -13,7 +13,7 @@ at most 7200):
 
     {"type": "benchmark", "fork_commit": "...", "bench_commit": "...",
      "flags": ["--all", "--quick"], "contenders": [...], "points": [...],
-     "rounds": N, "trace_clocks": true, "repeat": N}
+     "rounds": N, "repeat": N}
 
 (bench-hashes before its git dependency on the fork took `--thorough` for
 a full run; later ones run in full by default and take `--quick`.)
@@ -39,7 +39,7 @@ back, run i's files in run-i/, for calibrations.)
 
 Each result folder holds runner.log (every command and its output),
 verdict.json, and the job's own files: the benchmark's report, graph,
-samples, and trace; host_lab's report.
+and samples; host_lab's report.
 
 The checkouts persist between jobs (CHECKOUTS: the fork, bench-hashes
 inside it), moved to each job's commits with a forced checkout that
@@ -175,8 +175,7 @@ def benchmark(job, run, work, out):
     # benchmark-results/ relative to its working directory.
     for folder in [out] if repeat == 1 else [out / f"run-{i}" for i in range(1, repeat + 1)]:
         folder.mkdir(exist_ok=True)
-        trace = ["--trace-clocks", str(folder / "trace.csv")] if job.get("trace_clocks") else []
-        run.run([exe, *args, *trace], cwd=folder)
+        run.run([exe, *args], cwd=folder)
     return "ok"
 
 
