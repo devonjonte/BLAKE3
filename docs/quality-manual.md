@@ -116,7 +116,8 @@ users get no such check.
 **Which tests do the catching, at what cost.** The tests run under
 cargo-nextest, each in its own process, every test on every mutant, a
 test still running at 5 s killed as a hang. Every run records each test's
-outcome and time on every mutant and on the unmutated tree (`tests.tsv`),
+outcome and time on every mutant, at each of its places, and on the
+unmutated tree (`tests.tsv`),
 and weighs the tests by cost: the cheapest set of tests that still
 catches every caught mutant (each step the test with the most uncaught
 mutants per millisecond, so small tests come first), the tests outside it

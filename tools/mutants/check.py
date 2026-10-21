@@ -18,7 +18,8 @@ new mutant's reason UNCLASSIFIED and the others' kept.
 The tests run under cargo-nextest (.config/nextest.toml), each in its own
 process, a test killed at 5 s as a hang; a mutant's tests stop at the
 first that fails. Every run records each test's outcome and time on every
-mutant and on the unmutated tree (tmp/mutants-last/<run>/tests.tsv). With
+mutant, by its place (one change at several places is a mutant at each),
+and on the unmutated tree (tmp/mutants-last/<run>/tests.tsv). With
 --map, every test runs on every mutant (the `mutants-map` profile, for when
 the tests change), and the run weighs the tests by cost: the cheapest set
 of tests that still catches every caught mutant, the tests outside it
@@ -155,7 +156,10 @@ def run(files, extra=(), shards=SHARDS, label="run"):
             name = f"{m.group(1)}\t{m.group(2)}"
             functions[(mutant["file"], function)].append((outcome["summary"], name))
             if outcome["summary"] in ("CaughtMutant", "MissedMutant", "Timeout"):
-                rows += [(name, f"{mutant['file']} {function}", *t) for t in read_tests(log)]
+                # The mutant's place too: one name can be several places,
+                # each caught (or not) by tests of its own.
+                place = mutant["name"].split(": ", 1)[0].split(":", 1)[1]
+                rows += [(f"{name}\t{place}", f"{mutant['file']} {function}", *t) for t in read_tests(log)]
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
         subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
@@ -163,7 +167,7 @@ def run(files, extra=(), shards=SHARDS, label="run"):
     if rows:
         os.makedirs(kept, exist_ok=True)
         with open(os.path.join(kept, "tests.tsv"), "w") as f:
-            f.write("# mutant (file, change)\tfunction\ttest\toutcome\tms\n")
+            f.write(HEADER)
             f.writelines("\t".join(map(str, r)) + "\n" for r in rows)
         if MAP and label == "run":  # the confirming pass reruns a few mutants: its weights would be noise
             weigh(rows, os.path.join(kept, "tests.tsv"))
@@ -172,7 +176,8 @@ def run(files, extra=(), shards=SHARDS, label="run"):
     return names, functions
 
 
-UNMUTATED = "(unmutated)\t"
+UNMUTATED = "(unmutated)\t\t"
+HEADER = "# mutant (file, change, line:column)\tfunction\ttest\toutcome\tms\n"  # the record's format
 SELF_TEST = "(the startup self-test)"
 STATUS = re.compile(r"^\s+(PASS|FAIL|TIMEOUT|SIG[A-Z]+|ABORT)\s+\[\s*([\d.]+)s\]\s+(?:\(\s*\d+/\d+\)\s+)?(\S+)\s+(\S+)")
 
@@ -221,7 +226,7 @@ def weigh(rows, path):
         uncovered -= catches[best]
     print(f"tests: {len(cost) - 1} take {sum(v for t, v in cost.items() if t != SELF_TEST)} ms unmutated; "
           f"{len(cover)} of them, {sum(price(t) for t in cover)} ms, catch every caught mutant "
-          f"({len(function_of)}; the startup self-test {len(catches[SELF_TEST])}) ({path})")
+          f"({len(function_of)} places; the startup self-test {len(catches[SELF_TEST])}) ({path})")
     for t in sorted(set(catches) - set(cover), key=lambda t: -price(t))[:10]:
         print(f"  outside the cheapest set: {price(t)} ms {t} ({len(catches[t])} catches, each made by cheaper tests)")
     cheapest = {n: min(price(t) for t in catches if n in catches[t]) for n in function_of}
@@ -310,26 +315,27 @@ MAP_DIR = os.path.join(ROOT, "tmp", "mutants-last", "map")
 
 def caught_by(tests):
     """The mutants the latest map (a --map run of an ancestor of HEAD) records
-    as caught by any of `tests` (by function name) and not by the startup
-    self-test, by name; None when there is no such map."""
+    as caught by any of `tests` (by function name) at a place the startup
+    self-test does not catch, by name (rerun at all its places); None when
+    there is no such map."""
     record, commit = os.path.join(MAP_DIR, "tests.tsv"), os.path.join(MAP_DIR, "commit")
     if not (os.path.exists(record) and os.path.exists(commit)):
         return None
     if subprocess.run(["git", "-C", ROOT, "merge-base", "--is-ancestor", open(commit).read().strip(), "HEAD"]).returncode != 0:
         return None
     by, self_test = collections.defaultdict(set), set()
-    for line in open(record):
-        if line.startswith("#"):
-            continue
-        file, mutant, _function, test, outcome, _ms = line.rstrip("\n").split("\t")
+    lines = open(record)
+    assert next(lines) == HEADER, f"{record} is in an older format: make a new map with --map"
+    for line in lines:
+        file, mutant, place, _function, test, outcome, _ms = line.rstrip("\n").split("\t")
         if file == "(unmutated)" or outcome == "PASS":
             continue
-        name = f"{file}\t{mutant}"
+        name = (f"{file}\t{mutant}", place)
         if test == SELF_TEST:
             self_test.add(name)
         elif re.split(r"[ :]", test)[-1] in tests:
             by[name].add(test)
-    return sorted(set(by) - self_test)
+    return sorted({name for name, _ in set(by) - self_test})
 
 
 def figure(functions, known):
