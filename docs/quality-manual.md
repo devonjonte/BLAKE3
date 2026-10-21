@@ -313,8 +313,9 @@ proved equal to Arm's own specification of the architecture (Sail's
 Armv9.4, run by Isla); the rest, and the matrix unit's loads and stores,
 are checked against the CPU. The x86-64 proofs rest likewise on
 `x86.py`'s model of each x86 instruction they meet, checked against the
-CPU in CI on every change: 228 forms, the AVX-512 ones among them, on
-GitHub's AVX-512 machines.
+CPU in CI on every change: 228 forms on GitHub's machines that have
+AVX-512, the 116 without AVX-512 on those that have not (GitHub's
+runners vary; the job's log names the CPU's features).
 
 **How the checkers are checked.**
 
