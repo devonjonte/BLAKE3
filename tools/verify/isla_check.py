@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from z3 import BitVec, BitVecSort, BitVecVal, BoolSort, BoolVal, Const, Extract, Not, Or, Solver, is_true, parse_smt2_string, sat, \
     simplify, substitute, unsat
 import aarch64
+import workers
 
 FOOTPRINT = os.environ.get("ISLA_FOOTPRINT", "/tmp/target/release/isla-footprint")
 ORIGINAL_SNAPSHOT = os.environ.get("ISLA_SNAPSHOT", "/root/isla/armv9p4.ir")
@@ -539,26 +540,23 @@ def main():
     write_snapshot()
     forms = all_forms()
     bad = 0
-    with SPAWN.Pool(min(6, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
-        for instruction, verdict in pool.imap_unordered(check_form, forms):
-            print(f"{instruction}: {verdict}", flush=True)
-            bad += not verdict.startswith("equal")
+    for instruction, verdict in workers.each(check_form, forms, 6, SPAWN):
+        print(f"{instruction}: {verdict}", flush=True)
+        bad += not verdict.startswith("equal")
     print(f"{len(forms) - bad} of {len(forms)} instruction forms proved equal to Arm's specification")
     write_streaming_config()
     streaming = streaming_forms()
     sbad = 0
-    with SPAWN.Pool(min(6, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
-        for instruction, verdict in pool.imap_unordered(check_streaming_form, streaming):
-            print(f"{instruction}: {verdict}", flush=True)
-            sbad += not verdict.startswith("equal")
+    for instruction, verdict in workers.each(check_streaming_form, streaming, 6, SPAWN):
+        print(f"{instruction}: {verdict}", flush=True)
+        sbad += not verdict.startswith("equal")
     print(f"{len(streaming) - sbad} of {len(streaming)} streaming forms proved equal to Arm's specification")
     bad += sbad
     # The check rejects wrong models.
     accepted = 0
-    with SPAWN.Pool(min(6, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
-        for what, rejected in pool.imap_unordered(mutant, range(len(MUTANTS))):
-            print(f"wrong model, {what}: {'rejected' if rejected else 'ACCEPTED'}", flush=True)
-            accepted += not rejected
+    for what, rejected in workers.each(mutant, range(len(MUTANTS)), 6, SPAWN):
+        print(f"wrong model, {what}: {'rejected' if rejected else 'ACCEPTED'}", flush=True)
+        accepted += not rejected
     print(f"{len(MUTANTS) - accepted} of {len(MUTANTS)} wrong models rejected")
     sys.exit(1 if bad or accepted else 0)
 

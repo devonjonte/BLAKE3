@@ -522,7 +522,7 @@ WORKERS = 5
 
 
 def main():
-    import multiprocessing
+    import workers
     # The longest cases first, so none is left to run alone at the end: the
     # inductions of the kernel with an integer lane (about 50 minutes) and
     # of the chunk kernel (15).
@@ -530,14 +530,11 @@ def main():
     todo = sorted(cases(set(sys.argv[1:])),
                   key=lambda c: first.index(c[0]) if c[0] in first else len(first))
     failed = 0
-    # A fresh process per case: the normal forms' caches keep their terms
-    # alive (canon.py), so a worker that kept them would only grow. WORKERS
-    # at once: the largest case holds about 17 GB (every, October 17), so
-    # five fit the VM's 98 GB.
-    with multiprocessing.Pool(min(WORKERS, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
-        for (name, _, _), verdict in pool.imap_unordered(prove_case, todo):
-            print(f"{name}: {verdict}", flush=True)
-            failed += verdict.startswith("NOT")
+    # WORKERS at once: the largest case holds about 17 GB (every, October
+    # 17), so five fit the VM's 98 GB.
+    for (name, _, _), verdict in workers.each(prove_case, todo, WORKERS):
+        print(f"{name}: {verdict}", flush=True)
+        failed += verdict.startswith("NOT")
     print(f"{len(todo) - failed} of {len(todo)} cases proved")
     sys.exit(1 if failed else 0)
 

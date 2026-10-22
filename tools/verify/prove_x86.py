@@ -241,13 +241,12 @@ def prove_case(case):
 
 
 def main():
-    import multiprocessing
+    import workers
     todo = cases(set(sys.argv[1:]))
     failed = 0
-    with multiprocessing.Pool(min(16, multiprocessing.cpu_count()), maxtasksperchild=1) as pool:
-        for (isa, windows, kind, arg), verdict in pool.imap_unordered(prove_case, todo):
-            print(f"{isa} {'windows' if windows else 'unix'} {kind} {arg or ''}: {verdict}", flush=True)
-            failed += verdict.startswith("NOT")
+    for (isa, windows, kind, arg), verdict in workers.each(prove_case, todo, 16):
+        print(f"{isa} {'windows' if windows else 'unix'} {kind} {arg or ''}: {verdict}", flush=True)
+        failed += verdict.startswith("NOT")
     print(f"{len(todo) - failed} of {len(todo)} cases proved")
     sys.exit(1 if failed else 0)
 
