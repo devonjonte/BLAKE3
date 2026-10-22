@@ -43,6 +43,24 @@ class ContextTests(unittest.TestCase):
 
 
 class GeneralizationTests(unittest.TestCase):
+    def test_backedge_requires_successor_domain_and_no_wrap(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from z3 import ULT, UGE
+        from aarch64 import Unproved
+        k, groups = BitVecs("len_k len_groups", 64)
+        state = SimpleNamespace(x={}, v={}, regions={}, lengths={"len_k", "len_groups"}, assumptions=[])
+        g = induction.Generalized(state, state, k)
+        for assumptions in ([UGE(groups, 1), ULT(k, groups)], []):
+            with self.subTest(assumptions=assumptions):
+                with patch.object(induction, "paths", side_effect=lambda m, *_: [(m, "head")]):
+                    with self.assertRaisesRegex(Unproved, "domain or wraps"):
+                        induction.loop_step(g, state, k, assumptions, 0, lambda *_: None)
+
+    def test_iteration_rank_is_a_symbolic_variable(self):
+        with self.assertRaisesRegex(AssertionError, "symbolic 64-bit"):
+            induction.loop_step(None, None, BitVec("len_k", 64) + 1, [], 0, None)
+
     def test_constant_difference_through_byte_shuffles(self):
         # A word loaded byte by byte: its bytes' Concat hides the difference
         # from Z3's simplifier.
