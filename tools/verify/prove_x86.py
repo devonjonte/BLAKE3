@@ -68,6 +68,8 @@ class Setup:
             m.x[r] = BitVec(f"{r}_in", 64)
         for i in range(32):
             m.v[i] = [BitVec(f"v{i}_{l}_in", 32) for l in range(16)]
+        for i in m.k:
+            m.k[i] = BitVec(f"k{i}_in", 16)
         m.x["rsp"] = Ptr("stack", STACK)
         m.store(m.x["rsp"], Ptr("return", 0), 8)
         regs = WIN_ARGS if windows else SYSV_ARGS
@@ -211,6 +213,9 @@ def cases(only):
                 for blocks in (1, 2, 16):
                     out.append((isa, windows, "hash_many", (n, blocks, True)))
             out.append((isa, windows, "hash_many", (WIDTH[isa], 1, False)))
+            # Shape (a): whole blocks at one counter, every block count.
+            for blocks in range(2, 17):
+                out.append((isa, windows, "hash_many", (WIDTH[isa], blocks, False)))
     for n in range(1, 33):
         out.append(("avx512", False, "xof_many", n))
     return [c for c in out if not only or c[0] in only or c[2] in only or ("windows" if c[1] else "unix") in only]

@@ -15,7 +15,7 @@ import copy
 
 import canon
 
-from z3 import BitVec, BitVecVal, ZeroExt, Extract, Not, ULE, UGE, simplify, is_bv_value, eq
+from z3 import BitVec, BitVecVal, ZeroExt, Extract, Not, ULE, UGE, ULT, And, simplify, is_bv_value, is_bv, is_const, substitute, eq
 import aarch64
 from aarch64 import Ptr, Unproved, Undecided
 
@@ -32,6 +32,8 @@ def snapshot(m):
         c.regions[name] = r2
     c.assumptions = list(m.assumptions)
     c.lengths = set(m.lengths)
+    if hasattr(m, "k"):
+        c.k = dict(m.k)
     if getattr(m, "za", None) is not None:
         c.za = [[list(row) for row in tile] for tile in m.za]
     if hasattr(m, "p"):
@@ -59,10 +61,12 @@ def paths(m, pc, heads):
                 continue
             if pc not in m.code:
                 raise Unproved(f"execution reached {pc:#x}, outside the code under proof")
-            mnem, ops = m.code[pc]
+            mnem, ops = m.code[pc][:2]
             aarch64.EXECUTED.add((mnem, tuple(ops)))
             try:
-                nxt = aarch64.step(m, pc, mnem, ops)
+                # A machine with its own stepper (x86.py's) steps itself;
+                # the AArch64 machines take the path they always have.
+                nxt = m.step_at(pc) if hasattr(m, "step_at") else aarch64.step(m, pc, mnem, ops)
             except Undecided as e:
                 for answer in (e.cond, Not(e.cond)):
                     b = snapshot(m)
@@ -71,6 +75,9 @@ def paths(m, pc, heads):
                 break
             m.steps += 1
             if nxt == "ret":
+                if hasattr(m, "step_at"):
+                    done.append((m, "return"))
+                    break
                 to = m.x[30]
                 if isinstance(to, Ptr) and to.region == "return":
                     done.append((m, "return"))
@@ -103,6 +110,8 @@ class Generalized:
         self.wild = 0
         self.x = {r: self.unify(s0.x[r], s1.x[r]) for r in s0.x}
         self.v = {r: [self.unify(a, b) for a, b in zip(s0.v[r], s1.v[r])] for r in s0.v}
+        self.masks = ({r: self.unify(s0.k[r], s1.k[r]) for r in s0.k}
+                      if hasattr(s0, "k") else None)
         # SME2's state: the ZA tiles and the predicates.
         self.za = None
         if getattr(s0, "za", None) is not None and getattr(s1, "za", None) is not None:
@@ -127,8 +136,11 @@ class Generalized:
         for name, mem in self.mem.items():
             r0, r1 = s0.regions[name], s1.regions[name]
             for off in [o for o, b in mem.items() if b is None and isinstance(o, int) and o % 8 == 0]:
-                w0, w1 = word(r0, off), word(r1, off)
-                if w0 is None or w1 is None:
+                w0 = word(r0, off)
+                if w0 is None:
+                    continue
+                w1 = word(r1, off)
+                if w1 is None:
                     continue
                 g = self.unify(w0, w1, wildcard=False)
                 if g is not None:
@@ -142,6 +154,8 @@ class Generalized:
             self.x[pos[1]] = ("unknown", 64)
         elif kind == "v":
             self.v[pos[1]][pos[2]] = ("unknown", 32)
+        elif kind == "mask":
+            self.masks[pos[1]] = ("unknown", 16)
         elif kind == "za":
             self.za[pos[1]][pos[2]][pos[3]] = ("unknown", 32)
         elif kind == "p":
@@ -192,7 +206,9 @@ class Generalized:
                     return simplify(a + kk * d, som=True, bv_sort_ac=True)
                 if g[0] == "unknown":
                     return None
-            return g
+            # A caller can state a counter's halves directly in terms of
+            # K, then prove the initial state and the step against them.
+            return substitute(g, (self.k, kval)) if is_bv(g) else g
         return inst
 
     def machine(self, template, kval):
@@ -204,6 +220,8 @@ class Generalized:
             m.x[r] = v if v is not None else self.fresh(64)
         for r, lanes in self.v.items():
             m.v[r] = [(inst(g) if inst(g) is not None else self.fresh(32)) for g in lanes]
+        if self.masks is not None:
+            m.k = {r: (inst(g) if inst(g) is not None else self.fresh(16)) for r, g in self.masks.items()}
         for name, mem in self.mem.items():
             region = m.regions[name]
             region.bytes = {}
@@ -216,6 +234,8 @@ class Generalized:
                     region.bytes[off] = b
                 # unknown bytes stay unwritten: a read of one fails the proof
         m.nzcv = None
+        if hasattr(m, "flags"):
+            m.flags = None
         if self.za is not None:
             m.za = [[[(inst(g) if inst(g) is not None else self.fresh(32)) for g in row] for row in tile] for tile in self.za]
         if self.p is not None:
@@ -327,9 +347,13 @@ def mismatches(m, g, kval):
         if isinstance(b, Ptr) or isinstance(a, Ptr):
             return (isinstance(a, Ptr) and isinstance(b, Ptr) and a.region == b.region
                     and aarch64.holds(m, aarch64.as_bv(a.offset) == aarch64.as_bv(b.offset)))
-        if same(a, b):
+        if eq(a, b):
             return True
-        return aarch64.lengths_only(m, a - b) and aarch64.holds(m, a == b)
+        # Public arithmetic needs one equality proof, rather than hash
+        # normalization's search among other leaves with similar samples.
+        if aarch64.lengths_only(m, a - b):
+            return aarch64.holds(m, a == b)
+        return same(a, b)
     bad = []
     for r, gv in g.x.items():
         if not agree(m.x[r], inst(gv)):
@@ -338,6 +362,10 @@ def mismatches(m, g, kval):
         for l, gv in enumerate(lanes):
             if not agree(m.v[r][l], inst(gv)):
                 bad.append(("v", r, l))
+    if g.masks is not None:
+        for r, gv in g.masks.items():
+            if not agree(m.k[r], inst(gv)):
+                bad.append(("mask", r))
     if g.za is not None:
         for t, tile in enumerate(g.za):
             for row, cells in enumerate(tile):
@@ -367,10 +395,13 @@ def mismatches(m, g, kval):
 def loop_step(g, start, kval, assumptions, head, check):
     """Every path of one iteration from `g` at `kval` (induction.py): `check`
     each path's end (`check(end, how)`); a path back at the head must be in the
-    state for kval + 1. Positions where it differs become unknown in `g`, and
+    state for kval + 1, within the next iteration's assumptions and with
+    its unsigned iteration count advancing without wrap. Positions where
+    it differs become unknown in `g`, and
     the step is proved again: the invariant needs only what the iterations
     rely on (a weaker invariant still holds at the start). Returns the
     counts of paths."""
+    assert is_bv(kval) and is_const(kval) and not is_bv_value(kval) and kval.size() == 64, "a symbolic 64-bit iteration variable"
     passes = 0
     while True:
         passes += 1
@@ -392,6 +423,10 @@ def loop_step(g, start, kval, assumptions, head, check):
     kinds = {"head": 0, "return": 0}
     for end, how in ends:
         kinds[how] += 1
+        if how == "head":
+            successor = [substitute(a, (kval, kval + 1)) for a in assumptions]
+            if not aarch64.holds(end, And(ULT(kval, kval + 1), *successor)):
+                raise Unproved("back edge leaves the next iteration's domain or wraps its count")
         canon.set_context(end.assumptions, end.lengths)
         check(end, how)
     canon.set_context([], set())

@@ -149,7 +149,10 @@ def sample(n, v, r):
     if is_array(v):
         i = BV("sample_index", v.domain().size())
         a, b = (_values.setdefault((n, r, j), random.getrandbits(v.domain().size())) for j in (0, 1))
-        return Lambda([i], Extract(v.range().size() - 1, 0, i * a + b))
+        # High bits mix every index bit into a byte fingerprint. Taking
+        # the low byte made offsets 256 bytes apart collide at every
+        # point, forcing needless solver calls between unrelated chunks.
+        return Lambda([i], Extract(v.domain().size() - 1, v.domain().size() - v.range().size(), i * a + b))
     return BitVecVal(_values.setdefault((n, r), random.getrandbits(v.size())) % (1 << v.size()), v.size())
 
 

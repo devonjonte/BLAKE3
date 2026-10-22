@@ -162,8 +162,45 @@ and AVX-512, under the Unix and Windows conventions, and `hash_many` at
 the counts run so far, and AVX-512 `xof_many` at 1 to 32 blocks. From
 four blocks its output masks are selects whose condition the path's
 lengths settle; the normal form takes such a select as the arm it
-selects. Open: `hash_many` at the larger counts, and every count by
-induction, as the AArch64 group loops are proved.
+selects.
+
+**X86 input-count candidate.** Devon's fixed-source matrix completed 88 of
+102 cases at `14a716f`; the remaining cases and source-matched validation
+of this integrated candidate are pending. This candidate combines that
+work and its CLI with the current proof-tool optimizations and the
+symbolic-rank precondition from PR #126. Hashing machine code is unchanged.
+
+`prove_x86_loop.py` uses the same executor and induction helper for
+`hash_many`. Its declared 102 cases cover fixed
+counters at block lengths 1–16 and incrementing counters at 16 blocks,
+each on SSE4.1, AVX2 and AVX-512, Unix and Windows. These are the caller's
+message/parent shapes and whole-chunk shape. Each case covers zero inputs,
+every full-width pass and every remainder. Every input has its own exact
+read-only region and independent array words; equal physical input bytes
+are allowed. Counts obey the conservative bound `(2^64 - 1) // 32`, so
+the output and pointer table fit 64-bit regions. Keys, counters and flags
+stay arbitrary; counters retain their carries, incoming masks are symbolic,
+outputs are exact, and successor assumptions and unsigned progress close
+the induction. Windows cases assemble the actual MSVC source.
+
+On a Linux host with Z3 and the LLVM assembler/linker tools, select a small
+batch under a bounded process-group supervisor, for example GNU timeout:
+
+```sh
+ulimit -v 6291456
+# Tuple: (ISA, Windows, full blocks per input, increment counter).
+timeout --signal=KILL 850s python3 tools/verify/prove_x86_loop.py "[('avx2', False, 1, False)]"
+```
+
+`--help` describes the command. With no case list it runs the full matrix;
+`cases()` enumerates that matrix in one place, tested against its declared
+shapes. Two fresh workers keep proof caches bounded; set the caller's
+memory limit before launching. AVX-512 whole-chunk cases on an i7-12700K
+have needed a 1800-second batch deadline. The full matrix takes hours on
+that host, so bounded batches preserve completed evidence. The proof's
+model and scope stay separate from hardware-speed evidence. Source-matched
+[results and current progress](https://github.com/devonjonte/bench-hashes/tree/data/2026-10-22/x86-universal-counts)
+record the completed cases and remaining work.
 
 **Code changed for the proofs.** The SME2 message kernel took the last
 block's length with a branch (0 for 64), so a proof had to fix the
