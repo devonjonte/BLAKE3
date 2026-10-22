@@ -107,6 +107,8 @@ can read, asks less of him than either.
 - **Arm's BSD-licensed edition** (AARCHMRS_BSD) carries the encodings and
   none of the semantics: every one of its 2,262 operations reads
   `// Not specified`.
+- **Bob's conversion of the files to byte values** is his own one-line
+  tool, as the kernel measurements below explain.
 - **ASL's standard library** (`UInt`, `ZeroExtend`, `LSL`, `ROR`, ...) is not
   in the XML. It is ASLRef's `asllib/libdir/stdlib.asl` in
   github.com/herd/herdtools7 (903 lines; Arm's copyright under
@@ -117,6 +119,26 @@ can read, asks less of him than either.
   The interpreter needs only the language features of the code a proof
   executes; a feature off that path fails the proof loudly. Measured once
   the parser runs.
+
+## What Lean's kernel computes, and how fast
+
+Without `native_decide`, every step Bob relies on is reduced by Lean's
+kernel (`decide +kernel`). Measured on the VM, Lean 4.34.1 (October 22):
+
+| work | size | time |
+|---|---|---|
+| count a 7-byte tag in a file, read as a Lean string (`include_str`) | 10.8 KB | 173 s |
+| the same, the string's characters converted to numbers in the kernel | 10.8 KB | over 163 s (timed out) |
+| the same, the file given as a list of byte values | 10.8 KB | 0.74 s |
+| a loop of multiply, remainder and add on numbers | 100,000 steps | 2.6 s |
+
+The kernel computes on number literals with GMP, but it handles each
+character of a string by checking that character's validity proof, about
+1.6 ms apiece. So Arm's files reach the proofs as lists of byte values,
+which Bob makes from his own download with his own tool (for instance
+`od -An -v -tu1`): one line of shell, the same for every file. Everything
+after that (the XML's ASL sections, the parser, the interpreter, the
+checker) computes on numbers and trees, at roughly 10 to 70 µs a step.
 
 ## Where the statement cuts Arm's machine
 
