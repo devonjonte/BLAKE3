@@ -59,8 +59,11 @@ impl CvStack {
     /// While the stack holds more than `target` values, its top two become
     /// their parent (merge_cv_stack). Two are there to merge whenever
     /// `target` is at least 1, as the Hasher's are.
+    /// A loop of a count fixed at its start (no condition a change could
+    /// keep true forever: a mutation test's endless loop, which only a clock
+    /// stops, becomes a wrong value a test catches).
     pub fn merge<P: Parent>(&mut self, p: &P, target: usize) {
-        while self.len > target {
+        for _ in target..self.len {
             assert!(self.len >= 2, "two values to merge");
             if let Some(cvs) = &mut self.cvs {
                 let parent = p.parent(&cvs[self.len - 2], &cvs[self.len - 1]);
@@ -109,27 +112,29 @@ pub trait Nodes<C: Chunk, N> {
     fn node_cv(&self, node: &N) -> Cv;
 }
 
-/// The number of 1-bits of `x` (the compiler emits its popcount).
-pub fn ones(mut x: u64) -> usize {
-    let mut n = 0;
-    while x != 0 {
-        x &= x - 1;
-        n += 1;
-    }
-    n
+/// The number of 1-bits of `x` (its popcount, which the loop this replaced
+/// compiled to anyway; with no loop, no change to it can run forever).
+pub fn ones(x: u64) -> usize {
+    x.count_ones() as usize
 }
 
 /// A whole subtree's length to hash next, from chunk `counter` with
 /// `remaining` (more than CHUNK_LEN) bytes to go: the largest power of two
 /// at most `remaining` that divides the bytes so far, CHUNK_LEN times a
 /// power of two dividing `counter`.
+/// A power of two divides `so_far` exactly when it is at most its lowest
+/// 1-bit, so the length is the smaller of the two, with no loop (one that
+/// halved until it divided could, changed, run forever).
 pub fn subtree_len(counter: u64, remaining: usize) -> usize {
-    let mut len = 1usize << (usize::BITS - 1 - remaining.leading_zeros());
+    let len = 1usize << (usize::BITS - 1 - remaining.leading_zeros());
     let so_far = counter * CHUNK_LEN as u64;
-    while (len - 1) as u64 & so_far != 0 {
-        len /= 2;
+    if so_far == 0 {
+        len
+    } else {
+        // The lowest 1-bit as a mask, compared in u64: no shift to bound,
+        // and the result is at most `len`, so it fits a usize.
+        (len as u64).min(so_far & so_far.wrapping_neg()) as usize
     }
-    len
 }
 
 /// `cv`, the subtree from chunk `counter`, onto the stack: the stack's
@@ -377,15 +382,11 @@ pub struct Output<P> {
 
 /// The bytes of `words`, least significant first.
 pub fn le_bytes(words: &[u32; 8]) -> [u8; 32] {
+    // Each word into its four bytes' slot: no index or count to get wrong
+    // (a counted loop, changed, could run forever).
     let mut out = [0u8; 32];
-    let mut i = 0;
-    while i < 8 {
-        let b = words[i].to_le_bytes();
-        out[4 * i] = b[0];
-        out[4 * i + 1] = b[1];
-        out[4 * i + 2] = b[2];
-        out[4 * i + 3] = b[3];
-        i += 1;
+    for (bytes, word) in out.chunks_exact_mut(4).zip(words) {
+        bytes.copy_from_slice(&word.to_le_bytes());
     }
     out
 }

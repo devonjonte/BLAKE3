@@ -1,14 +1,6 @@
 # The mutants that time out on x86-64 (an EPYC 9255, AVX-512, October 22): no test fails,
 # nextest's clock stops one (tools/mutants/check.py, TIMEOUTS). Their own outcome: neither caught nor survived.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason. Not yet run on the i7.
-src/hasher.rs	replace != with == in ones	1	an endless loop: ones() clears its lowest 1-bit until none is left, and the change never reaches 0 (or loops at 0)
-src/hasher.rs	replace &= with |= in ones	1	an endless loop: ones() clears its lowest 1-bit until none is left, and the change never reaches 0 (or loops at 0)
-src/hasher.rs	replace += with *= in le_bytes	1	an endless loop: le_bytes' index never reaches 8 (i *= 1 stays 0)
-src/hasher.rs	replace - with + in ones	1	an endless loop: ones() clears its lowest 1-bit until none is left, and the change never reaches 0 (or loops at 0)
-src/hasher.rs	replace - with / in ones	1	an endless loop: ones() clears its lowest 1-bit until none is left, and the change never reaches 0 (or loops at 0)
-src/hasher.rs	replace -= with /= in CvStack::merge	1	an endless loop: merge's stack length never falls to its target (len /= 1)
-src/hasher.rs	replace /= with %= in subtree_len	1	an endless loop: subtree_len halves len until it divides the bytes so far, and the change never gets there
-src/hasher.rs	replace /= with *= in subtree_len	1	an endless loop: subtree_len halves len until it divides the bytes so far, and the change never gets there
 src/lanes.rs	delete ! in Pool::wake_one	1	OPEN: the pool's scheduling: a caller or worker waits for a piece or a wake that never comes, a hang (Loom would show which interleavings)
 src/lanes.rs	replace != with == in Pool::serve	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace != with == in all_workers_parked	1	a test-only hook (__all_workers_parked): a no that never turns yes, so the stream tests wait for every worker parked, forever
@@ -43,4 +35,3 @@ src/lib.rs	replace Hasher::update -> &mut Self with Box::leak(Box::new(Default::
 src/lib.rs	replace __all_workers_parked -> bool with false	1	a test-only hook (__all_workers_parked): a no that never turns yes, so the stream tests wait for every worker parked, forever
 src/self_test.rs	delete match arm FAILED in ensure_slow	1	an endless wait: a thread waiting for the self-test's verdict spins on, its arm for that verdict gone
 src/self_test.rs	delete match arm PASSED in ensure_slow	1	an endless wait: a thread waiting for the self-test's verdict spins on, its arm for that verdict gone
-src/tree.rs	replace *= with /= in left_len	1	an endless loop: left_len's power of two falls to 0 and stays below its bound (p /= 2)
