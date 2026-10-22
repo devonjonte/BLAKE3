@@ -89,6 +89,49 @@ instruction models (the Python provers' `aarch64.py`, `vector.py`,
 have to trust our transcription. Arm's text, run by a small interpreter Bob
 can read, asks less of him than either.
 
+## Arm's text: where it comes from, and what may ship
+
+- **The instructions' ASL** is in Arm's A64 ISA XML release, downloaded
+  from `https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-A64-ISA/ISA_A64/ISA_A64_xml_A_profile-2026-03_96.tar.gz`
+  (SHA-256 `9d138aa4dd6db8b04bd6ad3a378205537bf67172a5f99180729517d1445f1906`,
+  fetched October 22, 2026; Arm's other download pages answer bots with
+  403). The archive holds the 2025-09 release in ASL1, the version of the
+  language that Arm's reference manual and ASLRef define:
+  `ISA_A64_xml_A_profile_2025-09_96-2025-09_ASL1/`, one XML file per
+  instruction (decode and execute sections) and `shared_pseudocode.xml`
+  (1,738 blocks, about 45,600 lines).
+- **Its notice forbids reproducing any part without Arm's written
+  permission.** So the repository holds none of it, not even excerpts in
+  tests: the proofs read Bob's own download, named by path and checked by
+  SHA-256, which is what item 4 above asks for anyway.
+- **Arm's BSD-licensed edition** (AARCHMRS_BSD) carries the encodings and
+  none of the semantics: every one of its 2,262 operations reads
+  `// Not specified`.
+- **ASL's standard library** (`UInt`, `ZeroExtend`, `LSL`, `ROR`, ...) is not
+  in the XML. It is ASLRef's `asllib/libdir/stdlib.asl` in
+  github.com/herd/herdtools7 (903 lines; Arm's copyright under
+  BSD-3-Clause, so it may ship), pinned by commit.
+- **How much of Arm's text a proof reaches.** By name alone, `add`, `eor`,
+  and `extr` reach 537 shared blocks (11,420 lines of code), through
+  exception, debug and system-register paths a normal run never takes.
+  The interpreter needs only the language features of the code a proof
+  executes; a feature off that path fails the proof loudly. Measured once
+  the parser runs.
+
+## Where the statement cuts Arm's machine
+
+Arm's ASL describes the whole machine: memory accesses go through address
+translation, alignment checks and faults; system registers and the
+implemented features reach every instruction. The statement cuts it at
+named places, each an assumption Bob reads:
+
+- **Memory** at the accessor that maps a virtual address to bytes: a flat
+  memory in which the accesses inside the given regions succeed.
+- **System state** fixed to what a user program runs under (exception
+  level 0, the settings an operating system gives it).
+- **Features**: those the kernel needs are assumed implemented; the
+  theorem holds for every choice of the others.
+
 ## How the proofs stay fast
 
 Turning every proof step into Lean terms would be enormous (a kernel's
