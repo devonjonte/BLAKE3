@@ -14,10 +14,9 @@ The fastest parts are small routines called kernels, some of them
 written in assembly.
 
 For every Arm kernel, the project uses formal
-verification. Instead of testing selected inputs, a computer-checked
-proof compares the actual machine instructions with a written
-specification of BLAKE3 and shows that the result is correct for every
-input. The proof also shows that a kernel stays within the memory it is
+verification: a computer-checked proof compares the actual machine
+instructions with a written specification of BLAKE3 and shows that the
+result is correct for every input. The proof also shows that a kernel stays within the memory it is
 given and that the instructions it chooses depend on the input's length,
 not on its contents.
 
@@ -40,9 +39,8 @@ They run these checks on the operating systems and processor types the
 project supports.
 
 The project also uses mutation testing to check the tests themselves.
-It deliberately introduces one small mistake at a time — for example,
-changing a comparison or skipping a step — and requires at least one
-test to fail. If no test notices, the developers add a test or record why
+It introduces one small mistake at a time (changing a comparison, say,
+or skipping a step) and requires at least one test to fail. If no test notices, the developers add a test or record why
 that mistake is harmless.
 
 Each program also runs a startup self-test. Before doing real work, it
@@ -51,9 +49,8 @@ a processor that does not execute the code as expected.
 
 ## Memory and thread safety
 
-Some performance-critical Rust code uses `unsafe`, which means the
-programmer, rather than the compiler, takes responsibility for following
-Rust's memory rules. Assembly code needs separate checks.
+Some performance-critical Rust code is `unsafe`: there the programmer
+keeps Rust's memory rules, which the compiler checks everywhere else. Assembly code needs separate checks.
 
 - **AddressSanitizer** rebuilds the Rust and C code with extra memory
   checks. It catches reads and writes outside allocated memory and use
@@ -77,7 +74,7 @@ assembly, which is why guard pages matter.
 The checks found eight bugs. All are fixed, and none is known to have
 reached a user. Examples:
 
-- an Arm kernel produced the wrong digest for very short messages;
+- an Arm kernel produced the wrong digest for the shortest messages;
 - a function silently ignored a partial final block of input;
 - a reading helper could lose bytes it had already read when a later
   operation failed;

@@ -99,11 +99,16 @@ cd bench-hashes && cargo run --release -- check --against OLD   # a checkout at 
 ```
 
 It builds the benchmark against both versions of the fork and runs them
-alternately on the same machine, so it needs no stored numbers. Exit 0:
-no cell slower; 1: a regression, its cells listed; 2: no verdict,
-because other programs kept the machine busy during the check (run it
-again on a quiet machine). `sh tools/install-git-hooks.sh` installs a pre-commit hook
-that runs it for every commit that touches code. To run the full
+alternately on the same machine, so it needs no stored numbers. Its
+exit status:
+
+- 0: no cell slower;
+- 1: a regression, its cells listed;
+- 2: no verdict, because other programs kept the machine busy during the
+  check (run it again on a quiet machine).
+
+`sh tools/install-git-hooks.sh` installs a pre-commit hook that runs it
+for every commit that touches code. To run the full
 benchmark against your working tree, see bench-hashes' `CONTRIBUTING.md`.
 
 A regression holds the commit: find its cause and fix it. When the
@@ -170,13 +175,15 @@ lists what it takes and ticks each step:
    b3sum, the C library's crate, header and pkg-config file, the
    CHANGELOG's title) and the tag on it; it prints the dependency line
    for the release notes.
-8. `cargo publish` in the root, then in `b3sum/` (the package `b3sums`,
-   which installs `b3sum`: crates.io's `b3sum` is official BLAKE3's); b3sum's binaries from a
-   clean tree at the tag on each machine (`sh tools/b3sum-release.sh`,
-   statically linked on Linux), each with its `.sha256` and `.b3`; the C
-   library (`cargo build --release` in `capi/`: the static and shared
-   libraries and `b3.h`); the GitHub release, its text the CHANGELOG
-   entry.
+8. Publish:
+   - the crates: `cargo publish` in the root, then in `b3sum/`, whose
+     package is `b3sums` (crates.io's `b3sum` is official BLAKE3's);
+   - b3sum's binaries, built from a clean tree at the tag on each machine
+     by `sh tools/b3sum-release.sh` (statically linked on Linux), each
+     with its `.sha256` and `.b3`;
+   - the C library, built by `cargo build --release` in `capi/`: the
+     static and shared libraries, and `b3.h`;
+   - the GitHub release, its text the CHANGELOG entry.
 9. The eBASH submission, pinned to the tag (`supercop/README.md`).
 
 ## Maintainers' notes

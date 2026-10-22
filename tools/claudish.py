@@ -24,8 +24,9 @@ LONG_WORDS, CHAIN_MARKS = 50, 4
 
 
 def prose(path, text):
-    """The text's prose lines as (line number, text): a Markdown file's
-    outside code blocks and tables, any other file's comment lines."""
+    """The text's prose lines as (line number, text), an empty one
+    between paragraphs: a Markdown file's outside code blocks and tables,
+    any other file's comment lines."""
     markdown = path == "-" or path.endswith(".md")
     fenced = False
     for n, line in enumerate(text.split("\n"), 1):
@@ -34,6 +35,8 @@ def prose(path, text):
             if s.startswith("```"):
                 fenced = not fenced
             elif not fenced and not s.startswith("|") and not line.startswith("    "):
+                if re.match(r"(?:[-*+]|\d+\.)\s|#", s):
+                    yield n, ""  # a list item or heading starts a paragraph of its own
                 yield n, s
         else:
             m = re.match(r"(?://[/!]?|#|\*|/\*)\s?(.*)", s)

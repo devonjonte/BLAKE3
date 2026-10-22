@@ -115,22 +115,21 @@ by a debug assertion or an overflow check counts as uncaught. Release
 users get no such check.
 
 **Which tests do the catching, at what cost.** The tests run under
-cargo-nextest, each in its own process, every test on every mutant, a
-test still running at 5 s killed as a hang. Every run records each test's
-outcome and time on every mutant, at each of its places, and on the
-unmutated tree (`tests.tsv`),
-and weighs the tests by cost: the cheapest set of tests that still
-catches every caught mutant (each step the test with the most uncaught
-mutants per millisecond, so small tests come first), the tests outside it
-(each a big test whose catches cheaper ones make), and the mutants only
-an expensive test catches (each a small test worth writing). A failure
-that names the startup self-test is the self-test's catch, whichever test
-it ran in. A daily run stops a mutant's tests at the first that fails;
-`--map` runs every test and keeps the record (`tmp/mutants-last/map/`),
-from which a change's check (`--since`) that alters a test reruns the
-mutants that test caught, instead of the whole run. Each of these is a reading: a test's worth goes beyond the
-mutants it catches (a contract's `should_panic`, a hang, a shape no
-mutant models).
+cargo-nextest, each in its own process; a test still running at 5 s is
+killed as a hang. A daily run stops a mutant's tests at the first that
+fails. A map run (`--map`) runs every test on every mutant and records
+each test's outcome and time at each mutant's place, and on the
+unmutated tree (`tmp/mutants-last/map/tests.tsv`). From the map it
+weighs the tests by cost: the cheapest set that still catches every
+caught mutant (each step takes the test with the most uncaught mutants
+per millisecond, so small tests come first), the tests outside it (each
+a big test whose catches cheaper ones make), and the mutants only an
+expensive test catches (each a small test worth writing). A failure
+that names the startup self-test is the self-test's catch, whichever
+test it ran in. A change's check (`--since`) that alters a test reruns
+the mutants the map records that test catching. The weighing guides
+judgment: a test's worth can go beyond the mutants it catches (a
+contract's `should_panic`, a hang, a shape no mutant models).
 
 **What mutation testing finds**, over the whole library on the VM
 (October 17, with the stream): of 2511 mutants, 1678 fail a test or
