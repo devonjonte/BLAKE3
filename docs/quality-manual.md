@@ -352,8 +352,8 @@ llvm-objdump 17 or later; details in [`tools/verify/README.md`](../tools/verify/
 
 ```sh
 python3 tools/verify/prove_hybrid.py   # ends "414 of 414 cases proved"
-python3 tools/verify/prove_sme2.py     # ends "38 of 38 cases proved" (the longest, the chunk kernel at every group count, 15 minutes)
-python3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # ends "3 of 3 cases proved": the other kernels at every group count (x2_every about 50 minutes)
+python3 tools/verify/prove_sme2.py     # ends "38 of 38 cases proved" (the longest, the chunk kernel at every group count, 2 minutes)
+python3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # ends "3 of 3 cases proved": the other kernels at every group count (x2_every about 12 minutes)
 python3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
 
@@ -365,7 +365,8 @@ LLVM's `llvm-ml`; their instruction model is checked against the CPU by
 python3 tools/verify/prove_x86.py      # every case of its list, or name some
 ```
 
-All of them, 455 cases, run on the fork's VM after every change to a
+All of them, 837 cases (414 hybrid, 41 SME2, 382 x86-64), run in about an
+hour on the fork's VM after every change to a
 kernel or the proof tools lands (`tools/verify/long-proofs.sh`), reported
 on GitHub as the commit's status "long proofs"; a failure is fixed
 before the next such change. Each case is proved when Z3

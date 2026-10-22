@@ -4,7 +4,7 @@ vector length of Apple M4 (`cntw` = 16; the kernels return at once on any
 other).
 
     python3 tools/verify/prove_sme2.py [KERNEL...]
-    python3 tools/verify/prove_sme2.py every   # the chunk kernel at every group count (3.5 hours)
+    python3 tools/verify/prove_sme2.py every   # the chunk kernel at every group count (2 minutes)
 """
 
 import os
@@ -448,9 +448,8 @@ def cases(only):
     out.append(("messages", 2, (3, 7)))
     out += [("parents", 1, None), ("parents", 2, None), ("xof", 1, None), ("xof", 2, None)]
     out += [("chunks_x2", 1, None), ("chunks_x2", 2, None)]
-    # Hours long: run when named.
     # The inductions: every and parents_every always (the contracts rest on
-    # them; the chunk kernel's takes hours); the rest when named.
+    # them); the rest when named.
     out += [("every", None, None), ("parents_every", None, None), ("xof_every", None, None)]
     # The message kernel at every group count and every length, in one
     # induction with its block loop by its own proof (prove_block_loop).
@@ -523,8 +522,8 @@ def prove_case(case):
 def main():
     import workers
     # The longest cases first, so none is left to run alone at the end: the
-    # inductions of the kernel with an integer lane (about 50 minutes) and
-    # of the chunk kernel (15).
+    # inductions of the kernel with an integer lane (about 12 minutes) and
+    # of the chunk kernel (2).
     first = ("x2_every", "every")
     todo = sorted(cases(set(sys.argv[1:])),
                   key=lambda c: first.index(c[0]) if c[0] in first else len(first))

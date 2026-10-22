@@ -328,8 +328,7 @@ def main():
     import workers
     todo = cases(set(sys.argv[1:]))
     failed = 0
-    # Every CPU: a case holds about 1 GB (October 17), so the VM's sixteen
-    # fit its memory many times over; four took 90 minutes for 3.1 CPU-hours.
+    # Every CPU: a case holds under 400 MB (CPython, October 22).
     for (name, _, _), verdict in workers.each(prove_case, todo, len(todo)):
         print(f"{name}: {verdict}", flush=True)
         failed += verdict.startswith("NOT")

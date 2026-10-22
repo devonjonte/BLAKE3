@@ -6,7 +6,8 @@
 # hybrid kernel; every SME2 kernel at every group count; the x86-64
 # kernels' compressions, hash_many and xof_many (prove_x86.py); the
 # instruction models checked against the CPU; and the proofs' mutants.
-# Hours, in a worktree of the commit; nothing should measure meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
+# About an hour, in a worktree of the commit; nothing should measure
+# meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
 # the status names their BLAKE3 hash.
 #
 #     sh tools/verify/long-proofs.sh [COMMIT]     (default HEAD)

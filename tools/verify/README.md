@@ -4,9 +4,9 @@ These tools prove every assembly kernel on AArch64 equal to
 the compression function of the Lean specification of BLAKE3
 (`c2sp/BLAKE3/`), for every input, key, counter, and flags value:
 
-    python3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9, kn, pn, x4, x8 (414 cases, about 15 minutes on 16 CPUs)
-    python3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof, and the chunk and parent kernels at every group count (36 cases, minutes); c/blake3_sme2_hybrid_aarch64.S: chunks_x2 (2 cases, 7 min)
-    python3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # the other kernels at every group count (x2_every about 50 minutes)
+    python3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9, kn, pn, x4, x8 (414 cases, about 6 minutes on 16 CPUs)
+    python3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof, and the chunk and parent kernels at every group count (36 cases, minutes); c/blake3_sme2_hybrid_aarch64.S: chunks_x2 (2 cases, 2 min)
+    python3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # the other kernels at every group count (x2_every about 12 minutes)
     python3 tools/verify/lean/emit.py                   # the definition, from the Lean specification (needs Lean)
     python3 tools/verify/cross_check.py                 # the NEON and integer models against the CPU
     python3 tools/verify/cross_check_sme.py             # the streaming SVE and SME2 models against the CPU (needs SME2)
@@ -30,7 +30,7 @@ all 16 values; the SME2 kernel with an integer lane
 group) for one and two groups, and the message kernel at every message length of 2 to 16
 blocks with the last block of any length. The chunk kernel at every group
 count up to 2^40 groups, its last group storing all 16 values, by
-induction over its group loop (`prove_sme2.py every`, 15 minutes), its
+induction over its group loop (`prove_sme2.py every`, 2 minutes), its
 block loop by its own proof as the message kernel's (below): each
 lane's bytes are an array, so a group that read another group's chunk
 would compute other terms. The
@@ -39,14 +39,14 @@ the next group's pairs, so each group's words differ instead (word w of
 group G is pair_w + G): hashing another group's pairs gives other terms.
 The extended-output kernel (`xof_every`, under a minute), and the message
 kernel at every group count and every length of 2 to 16 blocks in one
-induction (`messages_every`, about 3 minutes, `prove_block_loop.py`): its
+induction (`messages_every`, about 2 minutes, `prove_block_loop.py`): its
 block loop is proved once, a pass for every pass K and every length (from
 any hash state, with block K in ZA, the standard's compression of block K,
 block K + 1 then in ZA), and the group loop's proof takes the loop by that
 proof, its entry checked (the key; each lane's block 0 in ZA). Messages
 are arrays read at any offset there, so a group that read another
 group's bytes would compute other terms. The kernel with an integer lane
-the same way (`x2_every`, about 50 minutes, `prove_hybrid_loop.py`): its
+the same way (`x2_every`, about 12 minutes, `prove_hybrid_loop.py`): its
 integer units hash chunk 16 in the block loop's passes 0 to 7 and chunk
 17 in passes 8 to 15, two blocks a pass, so its block loop is proved in
 two halves, each one pass for every pass of the half; the group loop's
