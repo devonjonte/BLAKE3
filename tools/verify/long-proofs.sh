@@ -4,10 +4,9 @@
 # specification against C2SP's text and the proofs' definition from it;
 # the generated hybrid file against its generator; the helpers; every
 # hybrid kernel; every SME2 kernel at every group count; the x86-64
-# kernels' compressions and hash_many (prove_x86.py; xof_many joins once
-# it proves from four blocks); the instruction models checked against the
-# CPU; and the proofs' mutants. Hours, in a
-# worktree of the commit; nothing should measure meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
+# kernels' compressions, hash_many and xof_many (prove_x86.py); the
+# instruction models checked against the CPU; and the proofs' mutants.
+# Hours, in a worktree of the commit; nothing should measure meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
 # the status names their BLAKE3 hash.
 #
 #     sh tools/verify/long-proofs.sh [COMMIT]     (default HEAD)
@@ -41,7 +40,7 @@ run generated sh -c 'pypy3 tools/gen_neon_hybrid.py | cmp - c/blake3_neon_hybrid
 run helpers python3 -m unittest discover -s tools/verify -p test_helpers.py
 run prove_hybrid python3 tools/verify/prove_hybrid.py
 run prove_sme2 python3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof chunks_x2 every parents_every xof_every messages_every x2_every
-run prove_x86 python3 tools/verify/prove_x86.py compress xof hash_many
+run prove_x86 python3 tools/verify/prove_x86.py compress xof hash_many xof_many
 run cross_check python3 tools/verify/cross_check.py
 run mutants python3 tools/verify/mutants.py
 hash=$(cat "$logs"/*.txt | cargo run -q --release --manifest-path b3sum/Cargo.toml -- --no-names | cut -c1-16)
