@@ -575,6 +575,14 @@ among them, and however often the hash is timed.
    60% slower in our measurements, and leaving it on would change the
    timing of the caller's own code. A program that wants Arm's promise
    turns DIT on in its threads before it hashes.
+   Intel's equivalent is DOITM (IA32_UARCH_MISC_CTL, bit 2), on Alder
+   Lake and later. Only the operating system or firmware can set that
+   MSR, for the whole machine. No call in this crate can turn it on, so a
+   caller who needs it enables it at the platform level. The integer
+   instructions these kernels use are on Intel's data-independent list.
+   What DOITM costs on the x86 kernels is unmeasured: on our i7-12700K
+   the kernel's lockdown (Secure Boot integrity mode) refuses the MSR
+   write even to root.
 3. **Power does not show in the timing.** A chip's power draw depends
    on the data it computes, and power can change its clock speed and so
    the time (the Hertzbleed attack, 2022). A fixed clock speed removes
