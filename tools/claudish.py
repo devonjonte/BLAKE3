@@ -1,0 +1,73 @@
+"""Warns on a few patterns of prose that sound like a language model
+(Claudish) or that work against AGENTS.md's "Communication": contrasts
+built on a negation, stock vocabulary, filler and metadiscourse, mid-
+sentence dashes, and sentences too long or too chained to hold in mind.
+
+    pypy3 tools/claudish.py FILE...     # Markdown whole; other files' comment lines
+    pypy3 tools/claudish.py - < draft   # a commit message or comment, before it goes
+
+Each warning names a line, a rule and the words. A warning is a reason to
+reread the sentence, and judgment decides what changes: often nothing,
+sometimes a rewrite of the paragraph around it. The script always exits 0.
+"""
+import re
+import sys
+
+RULES = [
+    ("contrast", r"\bnot\b[^.;:]{1,60}?,\s*but\b|,\s+not\s+(?:a |an |the )?[\w-]+[,.;]|\brather than\b|\binstead of\b|\bnot (?:only|just|merely)\b"),
+    ("vocabulary", r"\bload-bearing\b|\bspine\b|\bseams?\b|\bcrisp\w*|\bgenuine(?:ly)?\b|\bhonest\b|\bthe shape of\b|\bdelve\w*|\bthe real (?:question|issue|work|cost|win)\b|\btapestry\b|\bnuanced?\b|\brobust(?:ly)?\b|\bseamless(?:ly)?\b"),
+    ("filler", r"\b(?:simply|just|really|actually|quite|very|basically|essentially|truly)\b"),
+    ("metadiscourse", r"\b(?:note that|it is worth|it's worth|worth noting|in other words|to be clear|importantly|here's the thing|that said)\b"),
+    ("dash", r"\w\s?—\s?\w"),
+]
+LONG_WORDS, CHAIN_MARKS = 50, 4
+
+
+def prose(path, text):
+    """The text's prose lines as (line number, text): a Markdown file's
+    outside code blocks and tables, any other file's comment lines."""
+    markdown = path == "-" or path.endswith(".md")
+    fenced = False
+    for n, line in enumerate(text.split("\n"), 1):
+        s = line.strip()
+        if markdown:
+            if s.startswith("```"):
+                fenced = not fenced
+            elif not fenced and not s.startswith("|") and not line.startswith("    "):
+                yield n, s
+        else:
+            m = re.match(r"(?://[/!]?|#|\*|/\*)\s?(.*)", s)
+            yield n, (m.group(1) if m else "")
+
+
+def sentences(lines):
+    """Sentences as (first line, text), joined across a paragraph's lines."""
+    words, start = [], None
+    for n, s in list(lines) + [(0, "")]:
+        if not s:
+            text, words, start, first = " ".join(words), [], None, start
+            for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z(`*\"])", text):
+                if sentence:
+                    yield first, sentence
+            continue
+        start = start or n
+        words.append(s)
+
+
+def lint(path, text):
+    count = 0
+    for line, s in sentences(prose(path, text)):
+        found = [(name, m.group(0)) for name, rule in RULES for m in re.finditer(rule, s, re.I)]
+        if len(s.split()) > LONG_WORDS:
+            found.append(("long", f"{len(s.split())} words"))
+        marks = len(re.findall(r"[:;]\s", s))
+        if marks >= CHAIN_MARKS:
+            found.append(("chained", f"{marks} colons and semicolons"))
+        for name, words in found:
+            print(f"{path}:{line}: {name}: {words!r} in: {s[:100]}{'...' if len(s) > 100 else ''}")
+        count += len(found)
+    return count
+
+
+total = sum(lint(p, sys.stdin.read() if p == "-" else open(p).read()) for p in sys.argv[1:])
+print(f"{total} warnings: each a reason to reread, none an error", file=sys.stderr)

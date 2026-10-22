@@ -50,6 +50,8 @@ Sixteen actions that improve writing:
 15. Name responsibility
 16. Trim metadiscourse
 
+The fork's `tools/claudish.py` warns on a few patterns that sound like a language model or work against these rules: contrasts built on a negation, stock vocabulary, filler, mid-sentence dashes, and sentences too long or too chained to hold in mind. Run it on what you write, a page or a draft commit message or comment (`pypy3 tools/claudish.py FILE...`, or `-` to read a draft from stdin). Each warning marks a sentence to reread; your judgment, guided by the aims above, decides what changes. Often the sentence stands, and sometimes the whole paragraph wants rewriting.
+
 ## Presentation: every item costs the reader
 
 Every piece of information in a UI, a report, or a document costs its reader attention and risks fatigue and overflow. Review each one with two questions: who is this designed for, and which information pays that reader much more than it costs them? Keep what passes; cut the rest. Information for maintainers (diagnostics, spreads, provenance details, internal names) stays out of what users read; it belongs in maintainer notes, logs, and diagnostic flags.
