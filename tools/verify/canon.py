@@ -86,6 +86,15 @@ def _has_arith(n):
 _leaves = {}       # fingerprint -> [(simplified leaf, id)]
 _values = {}       # symbol name -> random values, one per fingerprint round
 ROUNDS = 3
+# Rounds whose free symbols (those the assumptions leave alone: data,
+# counters, flags) have their low 32-bit word at 2**32 - j for each j in
+# EDGES, so a word plus a count c carries exactly when c >= j. At random
+# points a carry almost never happens, so leaves that differ only in where
+# one happens (the counter's halves, `If(lo <= lo + c, hi, hi + 1)` for
+# different c) shared a fingerprint: the solver's work on such pairs, each
+# found different, was most of the induction proofs' time (October 22,
+# 2026).
+EDGES = range(1, 17)
 
 
 def symbols_of(t, out, seen):
@@ -114,6 +123,8 @@ def set_context(assumptions, lengths):
     """Compare under `assumptions` on the symbols named `lengths`; the
     normal forms and their caches start afresh."""
     _ids.clear(); _nodes.clear(); _memo.clear(); _arith.clear(); _data.clear(); _leaves.clear(); _leaf_terms.clear()
+    free = {x for a in assumptions for x in terms.symbols(a)} - set(lengths)
+    assert not free, f"assumptions on symbols other than the lengths: {sorted(free)}"
     points = []
     if assumptions:
         s = Solver()
@@ -142,6 +153,16 @@ def sample(n, v, r):
     return BitVecVal(_values.setdefault((n, r), random.getrandbits(v.size())) % (1 << v.size()), v.size())
 
 
+def edge_sample(n, v, j):
+    """Symbol `v` (named `n`) in edge round `j`: a random value whose low 32
+    bits are 2**32 - j; an array, or a narrower value, as `sample`."""
+    from z3 import is_array
+    if is_array(v) or v.size() < 32:
+        return sample(n, v, ("edge", j))
+    x = _values.setdefault((n, "edge", j), random.getrandbits(v.size()) & ~0xffffffff | (1 << 32) - j)
+    return BitVecVal(x, v.size())
+
+
 def leaf(t):
     """A term with no rounds in it: equal leaves get one id. Leaves whose
     values agree at sample points are proved equal by the solver, under the
@@ -155,9 +176,16 @@ def leaf(t):
     syms = {}
     symbols_of(t, syms, set())
     print_ = []
+    points = _context["points"]
     for r in range(ROUNDS):
-        point = _context["points"][r] if r < len(_context["points"]) else {}
+        point = points[r] if r < len(points) else {}
         sub = [(v, point[n] if n in point else sample(n, v, r)) for n, v in syms.items()]
+        print_.append(simplify(substitute(t, *sub)).as_long() if sub else simplify(t).as_long())
+    # The edge rounds take the lengths at a point that satisfies the
+    # assumptions, so leaves equal under them still share a fingerprint.
+    point = points[0] if points else {}
+    for j in EDGES:
+        sub = [(v, point[n] if n in point else edge_sample(n, v, j)) for n, v in syms.items()]
         print_.append(simplify(substitute(t, *sub)).as_long() if sub else simplify(t).as_long())
     key = (t.size(), tuple(print_))
     for other, n in _leaves.get(key, []):
