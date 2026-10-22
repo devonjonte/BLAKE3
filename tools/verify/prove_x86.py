@@ -68,6 +68,8 @@ class Setup:
             m.x[r] = BitVec(f"{r}_in", 64)
         for i in range(32):
             m.v[i] = [BitVec(f"v{i}_{l}_in", 32) for l in range(16)]
+        for i in m.k:
+            m.k[i] = BitVec(f"k{i}_in", 16)
         m.x["rsp"] = Ptr("stack", STACK)
         m.store(m.x["rsp"], Ptr("return", 0), 8)
         regs = WIN_ARGS if windows else SYSV_ARGS

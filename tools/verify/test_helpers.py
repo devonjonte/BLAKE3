@@ -69,6 +69,24 @@ class ModelFactsTests(unittest.TestCase):
         self.assertEqual(solver.call_count, 1)
 
 
+class X86EntryTests(unittest.TestCase):
+    def test_incoming_masks_are_arbitrary(self):
+        from unittest.mock import patch
+        from z3 import is_bv_value, is_const
+        import prove_x86 as p
+        with patch.object(p.x86, "symbols", return_value={"entry": 0}), \
+             patch.object(p.x86, "disassemble", return_value={}), \
+             patch.object(p.x86, "text_end", return_value=1), \
+             patch.object(p.x86, "image", return_value={0: 0}):
+            setup = p.Setup("unused", "entry", {}, [], False)
+        self.assertEqual(set(setup.m.k), set(range(8)))
+        self.assertEqual(len({value.get_id() for value in setup.m.k.values()}), 8)
+        for value in setup.m.k.values():
+            self.assertTrue(is_const(value))
+            self.assertFalse(is_bv_value(value))
+            self.assertEqual(value.size(), 16)
+
+
 class GeneralizationTests(unittest.TestCase):
     def test_constant_difference_through_byte_shuffles(self):
         # A word loaded byte by byte: its bytes' Concat hides the difference
