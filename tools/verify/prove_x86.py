@@ -211,6 +211,9 @@ def cases(only):
                 for blocks in (1, 2, 16):
                     out.append((isa, windows, "hash_many", (n, blocks, True)))
             out.append((isa, windows, "hash_many", (WIDTH[isa], 1, False)))
+            # Shape (a): whole blocks at one counter, every block count.
+            for blocks in range(2, 16):
+                out.append((isa, windows, "hash_many", (WIDTH[isa], blocks, False)))
     for n in range(1, 33):
         out.append(("avx512", False, "xof_many", n))
     return [c for c in out if not only or c[0] in only or c[2] in only or ("windows" if c[1] else "unix") in only]
