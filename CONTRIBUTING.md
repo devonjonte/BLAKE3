@@ -170,7 +170,8 @@ lists what it takes and ticks each step:
    b3sum, the C library's crate, header and pkg-config file, the
    CHANGELOG's title) and the tag on it; it prints the dependency line
    for the release notes.
-8. `cargo publish` in the root, then `b3sum/`; b3sum's binaries from a
+8. `cargo publish` in the root, then in `b3sum/` (the package `b3sums`,
+   which installs `b3sum`: crates.io's `b3sum` is official BLAKE3's); b3sum's binaries from a
    clean tree at the tag on each machine (`sh tools/b3sum-release.sh`,
    statically linked on Linux), each with its `.sha256` and `.b3`; the C
    library (`cargo build --release` in `capi/`: the static and shared

@@ -58,7 +58,7 @@ if os.path.exists("CHANGELOG.md"):
 if os.path.exists("b3sum/Cargo.toml"):
     edit("b3sum/Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
     edit("b3sum/Cargo.toml", r'^(blake3 = \{ version = ")[^"]*', rf"\g<1>={full}")
-    subprocess.run(["cargo", "update", "-q", "-p", crate, "-p", "b3sum"], cwd="b3sum", check=True)
+    subprocess.run(["cargo", "update", "-q", "-p", crate, "-p", "b3sums"], cwd="b3sum", check=True)
     edit("capi/Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
     edit("capi/b3.h", r'^#define B3_VERSION ".*"$', f'#define B3_VERSION "{full}"')
     edit("capi/b3_servil.pc.in", r"^Version: .*$", f"Version: {full}")
