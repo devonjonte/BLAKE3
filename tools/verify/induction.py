@@ -15,7 +15,7 @@ import copy
 
 import canon
 
-from z3 import BitVec, BitVecVal, ZeroExt, Extract, Not, ULE, UGE, simplify, is_bv_value, eq
+from z3 import BitVec, BitVecVal, ZeroExt, Extract, Not, ULE, UGE, ULT, And, simplify, is_bv_value, is_bv, is_const, substitute, eq
 import aarch64
 from aarch64 import Ptr, Unproved, Undecided
 
@@ -367,10 +367,13 @@ def mismatches(m, g, kval):
 def loop_step(g, start, kval, assumptions, head, check):
     """Every path of one iteration from `g` at `kval` (induction.py): `check`
     each path's end (`check(end, how)`); a path back at the head must be in the
-    state for kval + 1. Positions where it differs become unknown in `g`, and
+    state for kval + 1, within the next iteration's assumptions and with
+    its unsigned iteration count advancing without wrap. Positions where
+    it differs become unknown in `g`, and
     the step is proved again: the invariant needs only what the iterations
     rely on (a weaker invariant still holds at the start). Returns the
     counts of paths."""
+    assert is_bv(kval) and is_const(kval) and not is_bv_value(kval) and kval.size() == 64, "a symbolic 64-bit iteration variable"
     passes = 0
     while True:
         passes += 1
@@ -392,6 +395,10 @@ def loop_step(g, start, kval, assumptions, head, check):
     kinds = {"head": 0, "return": 0}
     for end, how in ends:
         kinds[how] += 1
+        if how == "head":
+            successor = [substitute(a, (kval, kval + 1)) for a in assumptions]
+            if not aarch64.holds(end, And(ULT(kval, kval + 1), *successor)):
+                raise Unproved("back edge leaves the next iteration's domain or wraps its count")
         canon.set_context(end.assumptions, end.lengths)
         check(end, how)
     canon.set_context([], set())

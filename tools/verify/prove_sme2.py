@@ -310,7 +310,7 @@ def prove_parents_every(obj):
             if aarch64.concrete(endm.x[0]) != 16:
                 raise Unproved(f"returned {endm.x[0]}, not 16")
             prove_hybrid.check_abi(endm)
-    kinds = induction.loop_step(gen, s0, k, list(s0.assumptions) + [ULT(k, g), ULE(k, 1 << 39)], head, check)
+    kinds = induction.loop_step(gen, s0, k, list(s0.assumptions) + [ULT(k, g)], head, check)
     return f"{kinds['head']} paths back to the group loop's head, {kinds['return']} out of it"
 
 
@@ -365,7 +365,7 @@ def prove_xof_every(obj):
             if aarch64.concrete(endm.x[0]) != 16:
                 raise Unproved(f"returned {endm.x[0]}, not 16")
             prove_hybrid.check_abi(endm)
-    kinds = induction.loop_step(gen, s0, k, list(s0.assumptions) + [ULT(k, g), ULE(k, 1 << 39)], head, check)
+    kinds = induction.loop_step(gen, s0, k, list(s0.assumptions) + [ULT(k, g)], head, check)
     return f"{kinds['head']} paths back to the group loop's head, {kinds['return']} out of it"
 
 
