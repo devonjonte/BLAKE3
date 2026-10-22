@@ -182,6 +182,19 @@ class GeneralizationTests(unittest.TestCase):
             self.assertEqual(got.as_long(), expected)
 
 
+class EveryCountCasesTests(unittest.TestCase):
+    def test_declared_matrix_has_every_caller_shape_once(self):
+        import prove_x86_loop
+        expected = {(isa, windows, blocks, False)
+                    for isa in ('sse41', 'avx2', 'avx512')
+                    for windows in (False, True) for blocks in range(1, 17)}
+        expected |= {(isa, windows, 16, True)
+                     for isa in ('sse41', 'avx2', 'avx512') for windows in (False, True)}
+        got = prove_x86_loop.cases()
+        self.assertEqual(len(got), 102)
+        self.assertEqual(set(got), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
 

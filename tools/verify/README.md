@@ -4,15 +4,15 @@ These tools prove every assembly kernel on AArch64 equal to
 the compression function of the Lean specification of BLAKE3
 (`c2sp/BLAKE3/`), for every input, key, counter, and flags value:
 
-    pypy3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9, kn, pn, x4, x8 (414 cases, about 15 minutes on 16 CPUs)
-    pypy3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof, and the chunk and parent kernels at every group count (36 cases, minutes); c/blake3_sme2_hybrid_aarch64.S: chunks_x2 (2 cases, 7 min)
-    pypy3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # the other kernels at every group count (x2_every about 50 minutes)
-    pypy3 tools/verify/lean/emit.py                   # the definition, from the Lean specification (needs Lean)
-    pypy3 tools/verify/cross_check.py                 # the NEON and integer models against the CPU
-    pypy3 tools/verify/cross_check_sme.py             # the streaming SVE and SME2 models against the CPU (needs SME2)
-    pypy3 tools/verify/mutants.py                     # wrong kernels are rejected
-    pypy3 -m unittest discover -s tools/verify -p test_helpers.py  # the normalizer, the induction's generalization, the leak detector
-    pypy3 tools/verify/isla_check.py                  # the NEON and integer models against Arm's specification (needs Isla)
+    python3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9, kn, pn, x4, x8 (414 cases, about 15 minutes on 16 CPUs)
+    python3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof, and the chunk and parent kernels at every group count (36 cases, minutes); c/blake3_sme2_hybrid_aarch64.S: chunks_x2 (2 cases, 7 min)
+    python3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # the other kernels at every group count (x2_every about 50 minutes)
+    python3 tools/verify/lean/emit.py                   # the definition, from the Lean specification (needs Lean)
+    python3 tools/verify/cross_check.py                 # the NEON and integer models against the CPU
+    python3 tools/verify/cross_check_sme.py             # the streaming SVE and SME2 models against the CPU (needs SME2)
+    python3 tools/verify/mutants.py                     # wrong kernels are rejected
+    python3 -m unittest discover -s tools/verify -p test_helpers.py  # the normalizer, induction, leak detector and x86 case matrix
+    python3 tools/verify/isla_check.py                  # the NEON and integer models against Arm's specification (needs Isla)
 
 They need Python 3 with Z3 (`python3-z3`), an AArch64 machine with the
 SHA-3 extension, and Clang and llvm-objdump 17 or later (for SME2). The
@@ -162,8 +162,45 @@ and AVX-512, under the Unix and Windows conventions, and `hash_many` at
 the counts run so far, and AVX-512 `xof_many` at 1 to 32 blocks. From
 four blocks its output masks are selects whose condition the path's
 lengths settle; the normal form takes such a select as the arm it
-selects. Open: `hash_many` at the larger counts, and every count by
-induction, as the AArch64 group loops are proved.
+selects.
+
+**Archived x86 input-count experiment (October 22, 2026).** Zooko paused
+this work in favor of [John's new proving approach](https://github.com/johnservil/BLAKE3/issues/130).
+The fixed-source matrix completed 88 of 102 cases. The standalone CLI has
+17 passing helper tests; its actual proof smoke test remains pending. This
+branch preserves unfinished work for reference, with no merge recommendation.
+
+`prove_x86_loop.py` uses the same executor and induction helper for
+`hash_many`. Its declared 102 cases cover fixed
+counters at block lengths 1–16 and incrementing counters at 16 blocks,
+each on SSE4.1, AVX2 and AVX-512, Unix and Windows. These are the caller's
+message/parent shapes and whole-chunk shape. Each case covers zero inputs,
+every full-width pass and every remainder. Every input has its own exact
+read-only region and independent array words; equal physical input bytes
+are allowed. Counts obey the conservative bound `(2^64 - 1) // 32`, so
+the output and pointer table fit 64-bit regions. Keys, counters and flags
+stay arbitrary; counters retain their carries, incoming masks are symbolic,
+outputs are exact, and successor assumptions and unsigned progress close
+the induction. Windows cases assemble the actual MSVC source.
+
+On a Linux host with Z3 and the LLVM assembler/linker tools, select a small
+batch under a bounded process-group supervisor, for example GNU timeout:
+
+```sh
+ulimit -v 6291456
+# Tuple: (ISA, Windows, full blocks per input, increment counter).
+timeout --signal=KILL 850s python3 tools/verify/prove_x86_loop.py "[('avx2', False, 1, False)]"
+```
+
+`--help` describes the command. With no case list it runs the full matrix;
+`cases()` enumerates that matrix in one place, tested against its declared
+shapes. Two fresh workers keep proof caches bounded; set the caller's
+memory limit before launching. AVX-512 whole-chunk cases on an i7-12700K
+have needed a 1800-second batch deadline. The full matrix takes hours on
+that host, so bounded batches preserve completed evidence. The proof's
+model and scope stay separate from hardware-speed evidence. Source-matched
+[results and current progress](https://github.com/devonjonte/bench-hashes/tree/data/2026-10-22/x86-universal-counts)
+record the completed cases and remaining work.
 
 **Code changed for the proofs.** The SME2 message kernel took the last
 block's length with a branch (0 for 64), so a proof had to fix the

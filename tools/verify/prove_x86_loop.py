@@ -246,3 +246,51 @@ def prove(so, isa, windows, blocks, increment):
     kinds = ind.loop_step(general, first, k,
                           list(first.assumptions) + [ULT(k, group), ULE(k, bound - 1)], head, check)
     return kinds
+
+
+def cases():
+    """The caller's fixed-counter messages/parents and incrementing chunks."""
+    import prove_x86 as p
+    return ([(isa, windows, blocks, False)
+             for isa in p.WIDTH for windows in (False, True) for blocks in range(1, 17)]
+            + [(isa, windows, 16, True) for isa in p.WIDTH for windows in (False, True)])
+
+
+def prove_case(case):
+    import prove_x86 as p
+    isa, windows, blocks, increment = case
+    try:
+        result = prove(p.assemble(isa, windows), isa, windows, blocks, increment)
+    except Unproved as error:
+        return case, False, str(error)
+    return case, True, repr(result)
+
+
+def main():
+    """Default: all 102 cases. One optional Python literal selects a batch.
+
+    Each tuple is (ISA, Windows, blocks, increment), for example:
+      python3 tools/verify/prove_x86_loop.py "[('avx2', False, 1, False)]"
+    Run under a bounded process-group supervisor. Two fresh workers keep
+    memory flat; set the caller's virtual-memory limit before launching.
+    """
+    import argparse
+    import ast
+    import sys
+    import workers
+    parser = argparse.ArgumentParser(description=main.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('cases', nargs='?', help='Python literal list of selected cases; default: the complete matrix')
+    arguments = parser.parse_args()
+    declared = cases()
+    todo = ast.literal_eval(arguments.cases) if arguments.cases is not None else declared
+    assert todo and all(case in declared for case in todo), 'select nonempty cases from the declared 102-case matrix'
+    failures = 0
+    for case, passed, details in workers.each(prove_case, todo, 2):
+        print('PROVED' if passed else 'NOT PROVED', repr(case), details, flush=True)
+        failures += not passed
+    print(len(todo) - failures, 'of', len(todo), 'all-count cases proved', flush=True)
+    sys.exit(bool(failures))
+
+
+if __name__ == '__main__':
+    main()
