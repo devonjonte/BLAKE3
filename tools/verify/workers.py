@@ -3,8 +3,10 @@
 A fresh process per item keeps the provers' memory flat (the normal forms'
 caches in canon.py keep their terms alive). A worker that ends without a
 result (the kernel's out-of-memory killer, a crash, an exception, whose
-traceback it prints) stops the whole run with its item named:
-multiprocessing.Pool would wait forever for the result it never sends.
+traceback it prints) stops the whole run with its item named. Pending
+siblings are killed and reaped on that failure: Python otherwise joins them
+at interpreter exit. Descendants still require the caller's process-group
+supervisor. multiprocessing.Pool would wait forever for the missing result.
 """
 import multiprocessing
 from multiprocessing.connection import wait
@@ -34,6 +36,12 @@ def each(fn, items, workers, context=multiprocessing):
                 result = conn.recv()
             except EOFError:
                 p.join()
+                # Fail-stop: no result from another worker can rescue this run.
+                # Reap owned siblings so Python's exit hook cannot wait on them.
+                for sibling, _ in running.values():
+                    sibling.kill()
+                for sibling, _ in running.values():
+                    sibling.join()
                 raise SystemExit(f"the worker for {item!r} ended without a result, exit status {p.exitcode} "
                                  "(-9 is a kill, most often the kernel's out-of-memory killer: run fewer at once)")
             p.join()

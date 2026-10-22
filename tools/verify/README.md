@@ -11,7 +11,7 @@ the compression function of the Lean specification of BLAKE3
     python3 tools/verify/cross_check.py                 # the NEON and integer models against the CPU
     python3 tools/verify/cross_check_sme.py             # the streaming SVE and SME2 models against the CPU (needs SME2)
     python3 tools/verify/mutants.py                     # wrong kernels are rejected
-    python3 -m unittest discover -s tools/verify -p test_helpers.py  # the normalizer, the induction's generalization, the leak detector
+    python3 -m unittest discover -s tools/verify -p 'test_*.py'  # proof helpers and fail-stop worker controls
     python3 tools/verify/isla_check.py                  # the NEON and integer models against Arm's specification (needs Isla)
 
 They need Python 3 with Z3 (`python3-z3`), an AArch64 machine with the
@@ -34,9 +34,10 @@ induction over its group loop (`prove_sme2.py every`, 2 minutes), its
 block loop by its own proof as the message kernel's (below): each
 lane's bytes are an array, so a group that read another group's chunk
 would compute other terms. The
-parent kernel the same way (`parents_every`, under a minute); it preloads
-the next group's pairs, so each group's words differ instead (word w of
-group G is pair_w + G): hashing another group's pairs gives other terms.
+parent kernel the same way (`parents_every`, under a minute), with every
+input byte independent across groups. It preloads the next group's pairs
+into ZA; the invariant states those bytes at group K's addresses and checks
+its initial state and successor.
 The extended-output kernel (`xof_every`, under a minute), and the message
 kernel at every group count and every length of 2 to 16 blocks in one
 induction (`messages_every`, about 2 minutes, `prove_block_loop.py`): its
@@ -167,8 +168,12 @@ selects.
 **X86 input-count candidate.** Devon's fixed-source matrix completed 88 of
 102 cases at `14a716f`; the remaining cases and source-matched validation
 of this integrated candidate are pending. This candidate combines that
-work and its CLI with the current proof-tool optimizations and the
-symbolic-rank precondition from PR #126. Hashing machine code is unchanged.
+work and its CLI with the current proof-tool optimizations, the
+symbolic-rank precondition from PR #126, and the independent parent inputs
+from PR #129. All SME2 group-loop callers now use the natural `K < groups`
+bound: the former `K <= 2^39` caps did not close a domain allowing
+`groups <= 2^40`. Twenty helper/worker tests pass; the full source-matched
+run remains pending. Hashing machine code is unchanged.
 
 `prove_x86_loop.py` uses the same executor and induction helper for
 `hash_many`. Its declared 102 cases cover fixed
@@ -219,7 +224,10 @@ Lessons the tools were built on:
 - Cache Z3 terms by id only while holding them: ids are reused, and a
   stale entry could equate different terms.
 - Give each proof case a fresh process: the caches grow, and 16 workers
-  in one ran the VM out of memory.
+  in one ran the VM out of memory. A worker that exits without a result
+  makes the runner kill and reap its pending workers before reporting the
+  failed case; Python would otherwise wait for them at interpreter exit.
+  Keep whole-job process-group supervision for subprocess descendants.
 - A harness that hands every group the same symbols can prove a kernel
   that never advances its pointer: give each group's data its own
   offset, and check that every read lies in the current group's region
