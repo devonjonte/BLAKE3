@@ -216,7 +216,7 @@ jobs:
     # slow, we can narrow it.
     # The pool's and the queue's threads live for the whole process, and
     # the queue's test uses several of them.
-    - run: cargo miri nextest run miri
+    - run: cargo miri nextest run --profile miri miri
       env:
         MIRIFLAGS: "-Zmiri-num-cpus=4 -Zmiri-ignore-leaks"
 

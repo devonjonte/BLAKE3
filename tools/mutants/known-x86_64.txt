@@ -24,7 +24,7 @@ src/hasher.rs	replace | with ^ in ChunkState<P>::output	2	equivalent: | made ^ o
 src/hasher.rs	replace | with ^ in Output<P>::root_bytes	1	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
 src/hasher.rs	replace | with ^ in parent_output	1	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
 src/io.rs	replace < with <= in fill	1	equivalent: one more read into an empty buffer, which returns 0 and ends the loop
-src/lanes.rs	delete ! in Pool::serve	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
+src/lanes.rs	delete ! in Pool::serve	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	delete ! in Pool::wake_one	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	delete ! in initialize	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	delete ! in sources::visible	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
@@ -34,6 +34,7 @@ src/lanes.rs	delete match arm 256 in Task::run_members	1	speed: chooses between 
 src/lanes.rs	delete match arm 512 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	delete match arm CHUNK_LEN in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	delete match arm crate::BLOCK_LEN in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
+src/lanes.rs	replace != with == in Pool::serve	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace % with + in Pool::serve	1	equivalent below 64 threads: a shift by me + 64 wraps to a shift by me
 src/lanes.rs	replace && with || in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace && with || in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
@@ -77,7 +78,6 @@ src/lanes.rs	replace < with <= in Pool::wake_for	1	OPEN: the pool's scheduling u
 src/lanes.rs	replace < with <= in group_cvs	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace < with <= in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace < with <= in hash_many	2	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
-src/lanes.rs	replace < with <= in hash_with_key	1	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
 src/lanes.rs	replace < with == in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace < with == in group_cvs	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace < with == in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
@@ -97,21 +97,18 @@ src/lanes.rs	replace > with < in Pool::run_job	1	OPEN: the pool's scheduling und
 src/lanes.rs	replace > with < in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with < in cut_with_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace > with < in initialize	1	speed: whether the pool starts its SME2 thread (without it the NEON workers do its share; the same results)
-src/lanes.rs	replace > with < in pool_busy	1	test-only record: PoolBusy marks a pool other callers held; the past-the-split assertion accepts Pool as well
 src/lanes.rs	replace > with < in sme2_serve	1	SME2 only: sme2_serve never runs on x86 (no SME2 thread starts); whether a gathered task takes the SME2 turn
 src/lanes.rs	replace > with < in sources::open	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with < in sources::visible	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with == in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with == in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with == in initialize	1	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
-src/lanes.rs	replace > with == in pool_busy	1	test-only record: PoolBusy marks a pool other callers held; the past-the-split assertion accepts Pool as well
 src/lanes.rs	replace > with == in sme2_serve	1	SME2 only: sme2_serve never runs on x86 (no SME2 thread starts); whether a gathered task takes the SME2 turn
 src/lanes.rs	replace > with == in sources::open	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with >= in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with >= in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with >= in cut_with_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace > with >= in initialize	1	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
-src/lanes.rs	replace > with >= in pool_busy	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with >= in sme2_serve	1	SME2 only: sme2_serve never runs on x86 (no SME2 thread starts); whether a gathered task takes the SME2 turn
 src/lanes.rs	replace > with >= in sources::Source::wake_for_waiting	1	the pool's scheduling: whether a waiting task wakes a parked worker; the caller takes what waits meanwhile
 src/lanes.rs	replace > with >= in sources::open	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
@@ -124,7 +121,6 @@ src/lanes.rs	replace >= with < in spin_for_work	1	speed: how long an idle worker
 src/lanes.rs	replace Pool::any_parked -> bool with true	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace Pool::wake_for with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace poll_pause with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
-src/lanes.rs	replace pool_busy with ()	1	test-only record: PoolBusy marks a pool other callers held; the past-the-split assertion accepts Pool as well
 src/lanes.rs	replace prefix_for -> usize with 0	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace prefix_for -> usize with 1	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace sme2_main with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
@@ -361,14 +357,17 @@ src/platform.rs	delete match arm 1 in sme2_detected	1	detection, on a machine wi
 src/platform.rs	delete match arm 2 in sme2_detected	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	delete match arm Platform::AVX512 in Platform::xof_many	1	this CPU has no AVX-512: the AVX512 arm is never taken; the generic path hashes the same blocks
 src/platform.rs	replace != with == in sme2_reported	2	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
-src/platform.rs	replace != with == in sse41_detected	1	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace != with == in ticks_in_100_us	1	AArch64 only: ticks_in_100_us is cfg(blake3_neon), compiled out on x86
 src/platform.rs	replace & with ^ in avx2_detected	1	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
-src/platform.rs	replace & with ^ in read_x86_features	4	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
+src/platform.rs	replace & with ^ in avx512_detected	1	[cpu has avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1, AVX2 and AVX-512 present: an EPYC 9255, October 22)
+src/platform.rs	replace & with ^ in read_x86_features	2	[cpu has avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1, AVX2 and AVX-512 present: an EPYC 9255, October 22)
+src/platform.rs	replace & with ^ in read_x86_features	4	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace & with ^ in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace & with ^ in sse41_detected	1	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace & with | in avx2_detected	1	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
-src/platform.rs	replace & with | in read_x86_features	4	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
+src/platform.rs	replace & with | in avx512_detected	1	[cpu has avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1, AVX2 and AVX-512 present: an EPYC 9255, October 22)
+src/platform.rs	replace & with | in read_x86_features	2	[cpu has avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1, AVX2 and AVX-512 present: an EPYC 9255, October 22)
+src/platform.rs	replace & with | in read_x86_features	4	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace & with | in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace & with | in sse41_detected	1	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace && with || in Sme2Turn::take	1	SME2 only: on x86 no SME2 turn is held; take returns the platform unchanged and drop releases nothing
@@ -393,7 +392,7 @@ src/platform.rs	replace < with > in prefetch_code	1	speed: whether and what to p
 src/platform.rs	replace << with >> in read_x86_features	5	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace << with >> in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace <impl Drop for Sme2Turn>::drop with ()	1	SME2 only: on x86 no SME2 turn is held; take returns the platform unchanged and drop releases nothing
-src/platform.rs	replace == with != in read_x86_features	2	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
+src/platform.rs	replace == with != in read_x86_features	2	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace == with != in sme2_detect_uncached	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace == with != in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace >= with < in Platform::xof_many	1	speed: moves a threshold between equally correct paths
@@ -403,8 +402,9 @@ src/platform.rs	replace Platform::hash_many_name -> &'static str with ""	1	a nam
 src/platform.rs	replace Platform::hash_many_name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
 src/platform.rs	replace Platform::name -> &'static str with ""	1	a name for reports and legends, with no reader since the kernel reports went
 src/platform.rs	replace Platform::name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
-src/platform.rs	replace avx2_detected -> bool with true	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
-src/platform.rs	replace avx512_detected -> bool with false	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
+src/platform.rs	replace avx2_detected -> bool with true	1	[cpu has avx2] equivalent: this CPU has AVX2, so the forced yes is its own answer
+src/platform.rs	replace avx512_detected -> bool with false	1	[cpu lacks avx512f avx512vl] equivalent: this CPU lacks AVX-512, so the forced no is its own answer (a CPU with it catches it: test_detected_degree_is_the_widest_kernel)
+src/platform.rs	replace avx512_detected -> bool with true	1	[cpu has avx512f avx512vl] equivalent: this CPU has AVX-512, so the forced yes is its own answer
 src/platform.rs	replace counter -> u64 with 0	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/platform.rs	replace counter -> u64 with 1	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/platform.rs	replace prefetch_code with ()	1	speed: whether and what to prefetch after a pause (no effect on results)
@@ -414,14 +414,13 @@ src/platform.rs	replace sme2_detected -> bool with false	1	detection, on a machi
 src/platform.rs	replace sme2_detected -> bool with true	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace sme2_reported -> bool with false	2	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace sme2_reported -> bool with true	2	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
-src/platform.rs	replace sse41_detected -> bool with false	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
-src/platform.rs	replace sse41_detected -> bool with true	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
+src/platform.rs	replace sse41_detected -> bool with true	1	[cpu has sse4_1] equivalent: this CPU has SSE4.1, so the forced yes is its own answer
 src/platform.rs	replace ticks_in_100_us -> u64 with 0	1	AArch64 only: ticks_in_100_us is cfg(blake3_neon), compiled out on x86
 src/platform.rs	replace ticks_in_100_us -> u64 with 1	1	AArch64 only: ticks_in_100_us is cfg(blake3_neon), compiled out on x86
 src/platform.rs	replace | with & in read_x86_features	3	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace | with ^ in Platform::compress_blocks	1	equivalent: | and ^ agree on flag bits that never overlap
 src/platform.rs	replace | with ^ in read_x86_features	3	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
-src/platform.rs	replace |= with &= in read_x86_features	1	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
+src/platform.rs	replace |= with &= in read_x86_features	1	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/portable.rs	replace | with ^ in hash1	1	equivalent: | and ^ agree on flag bits that never overlap
 src/self_test.rs	replace % with + in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace % with / in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
@@ -457,7 +456,7 @@ src/self_test.rs	replace | with ^ in chunk_values	2	equivalent: | and ^ agree on
 src/tree.rs	replace && with || in <impl Kernels for PlatformKernels<'_>>::children	1	SME2 only: the block is cfg(blake3_sme2), compiled out on x86
 src/tree.rs	replace && with || in <impl Kernels for PlatformKernels<'_>>::subtree	1	SME2 only: the block is cfg(blake3_sme2), compiled out on x86
 src/tree.rs	replace * with + in root_children	1	speed: the arrays' size (each choice holds the values; only the stack frame changes)
-src/tree.rs	replace * with + in wide	1	array capacity: 2 + MAX holds the two halves' values on AVX2 (16 of 18); an AVX-512 machine (32) would overflow and catch it there
+src/tree.rs	replace * with + in wide	1	[cpu lacks avx512f avx512vl] array capacity: 2 + MAX holds the two halves' values on AVX2 (16 of 18); an AVX-512 machine (32) would overflow and catch it there
 src/tree.rs	replace * with / in root_children	1	speed: the arrays' size (each choice holds the values; only the stack frame changes)
 src/tree.rs	replace + with * in wide	1	SME2 only: the argument is `ahead`, consumed by the SME2 subtree path; on x86 subtree() returns None and serial calls pass 0
 src/tree.rs	replace + with - in wide	1	SME2 only: the argument is `ahead`, consumed by the SME2 subtree path; on x86 subtree() returns None and serial calls pass 0

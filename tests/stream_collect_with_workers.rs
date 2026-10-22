@@ -4,8 +4,8 @@
 //! waiting, the caller expected to take the first), and `collect()` takes
 //! none, so the loop must wake one or it waits forever (the C API's stream
 //! test hung so on an i7-12700K, BLAKE3 candidate/minimalism-0.8). A binary
-//! of its own, since the pool is the process's; a watchdog fails the test
-//! where it would hang.
+//! of its own, since the pool is the process's; where it would hang,
+//! nextest's one clock kills and names it (.config/nextest.toml).
 
 use blake3_servil::{Hash, Mode};
 
@@ -58,5 +58,5 @@ fn a_caller_looping_on_collect_makes_progress_with_sleeping_workers() {
         }
         done.send(()).unwrap();
     });
-    finished.recv_timeout(std::time::Duration::from_secs(20)).expect("a caller looping on collect() made no progress in 20 s");
+    finished.recv().expect("a caller looping on collect() made progress");
 }

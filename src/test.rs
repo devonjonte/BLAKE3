@@ -73,6 +73,87 @@ pub(crate) fn every_platform() -> Vec<crate::platform::Platform> {
     all
 }
 
+/// Every platform this CPU can run, portable first, not only detect()'s:
+/// the code paths of a platform narrower than detect()'s (SSE4.1's and
+/// AVX2's on an AVX-512 machine) run on the machines that lack the wider
+/// one, and a test on detect()'s alone never reaches them (an EPYC 9255,
+/// October 22: spare_lane's partial chunk and xof_many's per-block loop
+/// went untested there).
+#[cfg(feature = "std")]
+pub(crate) fn every_cpu_platform() -> Vec<crate::platform::Platform> {
+    use crate::platform::Platform;
+    #[allow(unused_mut)]
+    let mut all = vec![Platform::Portable];
+    #[cfg(target_arch = "x86_64")]
+    all.extend([Platform::sse41(), Platform::avx2()].into_iter().flatten());
+    #[cfg(blake3_avx512_ffi)]
+    all.extend(Platform::avx512());
+    #[cfg(blake3_neon)]
+    all.extend(Platform::neon());
+    #[cfg(blake3_sme2)]
+    all.extend(Platform::sme2());
+    all
+}
+
+/// compress_chunks_parallel on every platform the CPU runs, against the
+/// portable platform's (hash_many, then the partial chunk on its own): every
+/// count of whole chunks it takes, with no partial chunk and with partial
+/// ones on each side of the thresholds spare_lane and pair choose by.
+#[test]
+#[cfg(feature = "std")]
+fn test_compress_chunks_parallel_every_cpu_platform() {
+    use crate::platform::{Platform, MAX_SIMD_DEGREE};
+    let mut input = vec![0u8; MAX_SIMD_DEGREE * CHUNK_LEN];
+    paint_test_input(&mut input);
+    for whole in 0..=MAX_SIMD_DEGREE {
+        for partial in [0, 1, BLOCK_LEN, BLOCK_LEN + 1, 5 * BLOCK_LEN, 5 * BLOCK_LEN + 1, CHUNK_LEN - 1] {
+            let len = whole * CHUNK_LEN + partial;
+            if len == 0 || len > input.len() {
+                continue;
+            }
+            for counter in [0, u32::MAX as u64] {
+                let mut want = vec![0u8; (MAX_SIMD_DEGREE + 1) * crate::OUT_LEN];
+                let n_want = crate::compress_chunks_parallel(&input[..len], crate::IV, counter, 0, Platform::Portable, &mut want);
+                for platform in every_cpu_platform() {
+                    let mut got = vec![0u8; want.len()];
+                    let n = crate::compress_chunks_parallel(&input[..len], crate::IV, counter, 0, platform, &mut got);
+                    assert_eq!(
+                        (n, &got[..n * crate::OUT_LEN]),
+                        (n_want, &want[..n_want * crate::OUT_LEN]),
+                        "{platform:?}: {whole} whole chunks and {partial} bytes, counter {counter}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Platform::xof_many on every platform the CPU runs, against portable
+/// compress_xof block by block: the platforms without a kernel of their
+/// own take its loop over compress_xof (SSE4.1 and AVX2 on x86), which a
+/// test of detect()'s platform alone leaves out on an AVX-512 machine.
+#[test]
+#[cfg(feature = "std")]
+fn test_xof_many_every_cpu_platform() {
+    let mut block = [0; BLOCK_LEN];
+    let block_len = 42;
+    paint_test_input(&mut block[..block_len]);
+    let cv = [40, 41, 42, 43, 44, 45, 46, 47];
+    let flags = crate::KEYED_HASH;
+    for counter in [0, u32::MAX as u64, i32::MAX as u64] {
+        for blocks in [1, 2, 3, 16, 17, 31] {
+            let want: Vec<u8> = (0..blocks)
+                .flat_map(|i| crate::portable::compress_xof(&cv, &block, block_len as u8, counter + i as u64, flags))
+                .collect();
+            for platform in every_cpu_platform() {
+                let mut got = vec![0u8; blocks * BLOCK_LEN];
+                platform.xof_many(&cv, &block, block_len as u8, counter, flags, &mut got);
+                assert!(got == want, "{platform:?}: {blocks} blocks from counter {counter}");
+            }
+        }
+    }
+}
+
 pub fn paint_test_input(buf: &mut [u8]) {
     for (i, b) in buf.iter_mut().enumerate() {
         *b = (i % 251) as u8;
@@ -773,13 +854,16 @@ mod guard_pages {
         {
             assert_eq!(
                 platforms.iter().any(|p| matches!(p, platform::Platform::AVX2)),
-                platform::avx2_detected(),
+                // The standard library's detection, not avx2_detected(): the
+                // list comes from Platform::avx2(), that is avx2_detected(),
+                // so comparing with it again would hold whatever it answered.
+                std::is_x86_feature_detected!("avx2"),
                 "AVX2 checked where the build and the CPU have it: {platforms:?}"
             );
             #[cfg(blake3_avx512_ffi)]
             assert_eq!(
                 platforms.iter().any(|p| matches!(p, platform::Platform::AVX512)),
-                platform::avx512_detected(),
+                std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl"),
                 "AVX-512 checked where the build and the CPU have it: {platforms:?}"
             );
             assert!(cfg!(blake3_avx2_ffi) || cfg!(blake3_avx2_rust), "an AVX2 kernel built");

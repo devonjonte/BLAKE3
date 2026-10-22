@@ -16,7 +16,7 @@ never mutated. With --write, the list is rewritten from this run, each
 new mutant's reason UNCLASSIFIED and the others' kept.
 
 The tests run under cargo-nextest (.config/nextest.toml), each in its own
-process, a test killed at 5 s as a hang; a mutant's tests stop at the
+process, a test killed at 30 s as a hang; a mutant's tests stop at the
 first that fails. Every run records each test's outcome and time on every
 mutant, by its place (one change at several places is a mutant at each),
 and on the unmutated tree (tmp/mutants-last/<run>/tests.tsv). With
@@ -53,7 +53,38 @@ KNOWN = os.path.join(ROOT, "tools", "mutants", f"known-{platform.machine()}.txt"
 NAME = re.compile(r"^(\S+?):\d+:\d+: (.*)$")
 
 
+def cpu_flags():
+    """The CPU's feature flags as the OS names them (Linux: /proc/cpuinfo's
+    flags or Features line; macOS: sysctl's hw.optional names set to 1)."""
+    try:
+        for line in open("/proc/cpuinfo"):
+            if line.startswith(("flags", "Features")):
+                return set(line.split(":", 1)[1].split())
+    except OSError:
+        pass
+    if sys.platform == "darwin":
+        out = subprocess.run(["sysctl", "hw.optional"], capture_output=True, text=True).stdout
+        return {k.rsplit(".", 1)[-1] for k, _, v in (l.partition(": ") for l in out.splitlines()) if v.strip() == "1"}
+    return set()
+
+
+# A row whose survival depends on the CPU, not only the architecture: its
+# reason begins "[cpu has FLAG ...] " or "[cpu lacks FLAG ...] " (flags as
+# cpu_flags() names them), and the row applies only where that holds (an
+# EPYC 9255, October 22: AVX-512's detection mutants survive where the CPU
+# has it, and are caught on the i7, where it is absent, and the reverse).
+CONDITION = re.compile(r"^\[cpu (has|lacks) ([^\]]+)\] ")
+FLAGS = cpu_flags()
+
+
+def applies(reason):
+    m = CONDITION.match(reason)
+    return m is None or all(f in FLAGS for f in m.group(2).split()) == (m.group(1) == "has")
+
+
 def read_known():
+    """The list's files and the rows that apply on this CPU; the rest are
+    kept in INACTIVE, for --write."""
     files, known = [], {}
     for line in open(KNOWN):
         line = line.rstrip("\n")
@@ -61,8 +92,17 @@ def read_known():
             files = line.split()[1:]
         elif line and not line.startswith("#"):
             file, mutant, count, reason = line.split("\t")
-            known[f"{file}\t{mutant}"] = (int(count), reason)
+            if applies(reason):
+                name = f"{file}\t{mutant}"
+                assert name not in known, f"{name}: two rows apply on this CPU"
+                known[name] = (int(count), reason)
+            else:
+                INACTIVE.append(line)
     return files, known
+
+
+# The rows for other CPUs, as written (a name may have one row a CPU).
+INACTIVE = []
 
 
 HANGS = os.path.join(ROOT, "tools", "mutants", "hangs.txt")
@@ -83,11 +123,13 @@ def read_hangs():
 # Runs at once, each in its own worktree and build: on the VM (16 CPUs),
 # a whole run took 47 minutes at 6 and about 60 at 3 (October 20).
 SHARDS = 6
-# The seconds a mutant's tests may take: the unmutated tests take 1.5 s on
-# the VM and 2 s on an i7-12700K (October 20), a caught mutant's at most
-# 2.5 s on the VM, so a mutant still running at 30 s hangs (Zooko: a
-# hang's cost is paid on every hang, a slow test's misclassification once).
-TIMEOUT = 30
+# cargo-mutants needs a limit on a mutant's tests (with --in-place it would
+# otherwise take 300 s). The run's one clock is nextest's, a test's 30 s
+# (.config/nextest.toml, profile mutants), which ends a hanging test first;
+# this is a backstop far beyond it, and its firing stops the check as an
+# error, never a verdict (it overlapped the 5 s clock, so a mutant's
+# outcome hung on which ran out first: an EPYC 9255, October 22).
+BACKSTOP = 3600
 # Each process's address space, builds' and tests' alike: a mutant that
 # allocates without end fails its test here, and leaves the machine's
 # memory to the rest (one of 57 GB took the long proofs' memory).
@@ -105,9 +147,8 @@ def run(files, extra=(), shards=SHARDS, label="run"):
     tmp/mutants-last/<label>/ for a look afterwards."""
     # The public features on, so the code behind them is tested too (the
     # build variants, pure and the like, are their own builds).
-    # A mutant whose tests outlast TIMEOUT is a hang, which the check counts
-    # as caught.
-    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "serde,zeroize", "--timeout", str(TIMEOUT),
+    # A hang is nextest's to end (a test's 30 s); BACKSTOP only guards the run.
+    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "serde,zeroize", "--timeout", str(BACKSTOP),
             "--test-tool", "nextest", *[arg for name in sorted(read_hangs()) for arg in ("--exclude-re", re.escape(name.split("\t", 1)[1]))], *extra]
     for f in files:
         args += ["--file", f]
@@ -154,12 +195,17 @@ def run(files, extra=(), shards=SHARDS, label="run"):
             function = (mutant.get("function") or {}).get("function_name", "")
             m = NAME.match(mutant["name"])
             name = f"{m.group(1)}\t{m.group(2)}"
+            assert outcome["summary"] != "Timeout", f"the {BACKSTOP} s backstop ended {mutant['name']}'s tests: nextest's clock should have (.config/nextest.toml)"
             functions[(mutant["file"], function)].append((outcome["summary"], name))
-            if outcome["summary"] in ("CaughtMutant", "MissedMutant", "Timeout"):
+            if outcome["summary"] in ("CaughtMutant", "MissedMutant"):
                 # The mutant's place too: one name can be several places,
                 # each caught (or not) by tests of its own.
                 place = mutant["name"].split(": ", 1)[0].split(":", 1)[1]
-                rows += [(f"{name}\t{place}", f"{mutant['file']} {function}", *t) for t in read_tests(log)]
+                tests = read_tests(log)
+                rows += [(f"{name}\t{place}", f"{mutant['file']} {function}", *t) for t in tests]
+                failed = [o for _, o, _ in tests if o != "PASS"]
+                if outcome["summary"] == "CaughtMutant" and failed and all(o == "TIMEOUT" for o in failed):
+                    CLOCK_ONLY.add(f"{name}\t{place}")
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
         subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
@@ -175,6 +221,12 @@ def run(files, extra=(), shards=SHARDS, label="run"):
             open(os.path.join(kept, "commit"), "w").write(head)
     return names, functions
 
+
+# The mutants (by place) that no test failed, but the clock stopped: a hang,
+# or a test made slow (by the mutant, or by the machine's load: a mutant
+# compiled out of the build was stopped so once). Not a test's catch;
+# reported for each to get a test of its own, or a place on a list.
+CLOCK_ONLY = set()
 
 UNMUTATED = "(unmutated)\t\t"
 HEADER = "# mutant (file, change, line:column)\tfunction\ttest\toutcome\tms\n"  # the record's format
@@ -417,7 +469,8 @@ def main():
     figure(functions, {k: known.get(k, (n, "UNCLASSIFIED")) for k, n in found.items()})
     if "--write" in sys.argv:
         header = [l.rstrip("\n") for l in open(KNOWN) if l.startswith("#") or l.startswith("files:")]
-        rows = [f"{k}\t{n}\t{known.get(k, (0, 'UNCLASSIFIED'))[1]}" for k, n in sorted(found.items())]
+        # The rows for other CPUs stay as they were: this run cannot see them.
+        rows = sorted([f"{k}\t{n}\t{known.get(k, (0, 'UNCLASSIFIED'))[1]}" for k, n in found.items()] + INACTIVE)
         open(KNOWN, "w").write("\n".join(header + rows) + "\n")
         print(f"{KNOWN}: {sum(found.values())} survivors, {sum(1 for k in found if k not in known)} names new")
         return
@@ -433,6 +486,10 @@ def main():
         print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
     for k, c in sorted(stale.items()):
         print(f"NOW CAUGHT ({c - found.get(k, 0)}): {k}")
+    for k in sorted(CLOCK_ONLY):
+        print(f"CLOCK ONLY: {k}")
+    if CLOCK_ONLY:
+        print(f"mutants: {len(CLOCK_ONLY)} places caught by the clock alone, no test failing (counted as caught for now)")
     ok = not new and not stale and not unexplained
     print(f"mutants: {sum(found.values())} survive, each known and explained" if ok else "mutants: the list and this run differ, or a listed mutant has no reason")
     sys.exit(0 if ok else 1)

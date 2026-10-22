@@ -4,7 +4,7 @@
 //! worker on publish only for two waiting tasks, and a caller in
 //! `collect` hashes nothing itself). A pool of three workers, parked
 //! first; a binary of its own, since the pool is the process's; a
-//! watchdog fails the test where it would hang. On a CPU with SME2 the
+//! hang is killed and named by nextest's one clock (.config/nextest.toml). On a CPU with SME2 the
 //! SME2 thread, woken on every publish, takes the task, so the condition
 //! shows on CPUs without it (CI's x86-64 runners).
 
@@ -37,6 +37,6 @@ fn a_caller_looping_on_collect_wakes_a_parked_worker() {
         done.send(()).unwrap();
     });
     finished
-        .recv_timeout(std::time::Duration::from_secs(60))
+        .recv()
         .expect("the stream completes: a caller looping on collect waited on a task no worker was awake to take");
 }
