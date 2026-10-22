@@ -38,7 +38,7 @@ run() {  # name, command...: its log in $logs/name.txt; a failure ends the run
 run lean_spec python3 c2sp/BLAKE3/check.py
 run lean_emit sh -c 'python3 tools/verify/lean/emit.py && git diff --exit-code tools/verify/lean/compress.json tools/verify/lean/Generic.lean'
 run generated sh -c 'python3 tools/gen_neon_hybrid.py | cmp - c/blake3_neon_hybrid_aarch64.S'
-run helpers python3 -m unittest discover -s tools/verify -p test_helpers.py
+run helpers python3 -m unittest discover -s tools/verify -p 'test_*.py'
 run prove_hybrid python3 tools/verify/prove_hybrid.py
 run prove_sme2 python3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof chunks_x2 every parents_every xof_every messages_every x2_every
 run prove_x86 python3 tools/verify/prove_x86.py compress xof hash_many xof_many

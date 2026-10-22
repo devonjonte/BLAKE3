@@ -11,7 +11,7 @@ the compression function of the Lean specification of BLAKE3
     python3 tools/verify/cross_check.py                 # the NEON and integer models against the CPU
     python3 tools/verify/cross_check_sme.py             # the streaming SVE and SME2 models against the CPU (needs SME2)
     python3 tools/verify/mutants.py                     # wrong kernels are rejected
-    python3 -m unittest discover -s tools/verify -p test_helpers.py  # the normalizer, the induction's generalization, the leak detector
+    python3 -m unittest discover -s tools/verify -p 'test_*.py'  # proof helpers and fail-stop worker controls
     python3 tools/verify/isla_check.py                  # the NEON and integer models against Arm's specification (needs Isla)
 
 They need Python 3 with Z3 (`python3-z3`), an AArch64 machine with the
@@ -182,7 +182,10 @@ Lessons the tools were built on:
 - Cache Z3 terms by id only while holding them: ids are reused, and a
   stale entry could equate different terms.
 - Give each proof case a fresh process: the caches grow, and 16 workers
-  in one ran the VM out of memory.
+  in one ran the VM out of memory. A worker that exits without a result
+  makes the runner kill and reap its pending workers before reporting the
+  failed case; Python would otherwise wait for them at interpreter exit.
+  Keep whole-job process-group supervision for subprocess descendants.
 - A harness that hands every group the same symbols can prove a kernel
   that never advances its pointer: give each group's data its own
   offset, and check that every read lies in the current group's region
