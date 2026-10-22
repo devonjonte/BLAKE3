@@ -36,15 +36,24 @@
 /// Requires some samples, some units among those kept, and a total under
 /// 2^64 ns.
 pub fn mean(samples: impl IntoIterator<Item = (u64, u64)>) -> u128 {
+    let (ns, units) = mean_totals(samples);
+    ((ns << 64) + units / 2) / units
+}
+
+/// The exact nanoseconds and units retained by [`mean`], after setting
+/// aside its slowest samples. Exact decimal displays use these totals;
+/// fixed-point comparisons use [`mean`]. Both share this selection rule
+/// and its preconditions.
+pub fn mean_totals(samples: impl IntoIterator<Item = (u64, u64)>) -> (u128, u128) {
     let mut samples: Vec<(u64, u64)> = samples.into_iter().collect();
     assert!(!samples.is_empty(), "a mean needs samples");
-    // Slowest first: a before b when a's ns per unit is the greater.
+    // Fastest first: retain the prefix after setting aside the slowest.
     samples.sort_by(|&(an, au), &(bn, bu)| (u128::from(an) * u128::from(bu)).cmp(&(u128::from(bn) * u128::from(au))));
     let kept = samples.len() - samples.len().div_ceil(100).min(samples.len() - 1);
     let (ns, units) = samples[..kept].iter().fold((0u128, 0u128), |(ns, units), &(n, u)| (ns + u128::from(n), units + u128::from(u)));
     assert!(units > 0, "a mean needs some work done");
     assert!(ns < 1 << 64, "a run's samples total under 2^64 ns");
-    ((ns << 64) + units / 2) / units
+    (ns, units)
 }
 
 /// `new / old` in permille, rounded. Requires `old > 0`.
@@ -226,6 +235,15 @@ fn ln_gamma(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_mean_totals_use_the_same_retained_samples() {
+        let mut samples = vec![(1000, 1); 99];
+        samples.push((1_000_000, 1));
+        assert_eq!(mean_totals(samples.clone()), (99_000, 99));
+        assert_eq!(mean(samples), 1000 << 64);
+        assert_eq!(mean_totals([(200, 100), (1000, 1)]), (200, 100));
+    }
 
     #[test]
     fn a_mean_is_total_time_over_total_work() {
