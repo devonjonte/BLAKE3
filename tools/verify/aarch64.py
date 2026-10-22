@@ -15,6 +15,7 @@ reference manual, and cross-checked on the CPU (cross_check.py).
 
 import re
 import subprocess
+import terms
 from z3 import (BitVec, BitVecVal, Concat, Extract, LShR, RotateRight, ZeroExt,
                 SignExt, ULT, simplify, is_bv_value, BoolRef, Not, And, Or, If, UGE, ULE, Solver, unsat,
                 is_true, is_false, Z3_OP_UNINTERPRETED)
@@ -32,18 +33,9 @@ class Undecided(Exception):
         self.cond = cond
 
 
-def term_symbols(term, out=None, seen=None):
-    """The names of the uninterpreted constants in `term`."""
-    out = set() if out is None else out
-    seen = set() if seen is None else seen
-    if term.get_id() in seen:
-        return out
-    seen.add(term.get_id())
-    if term.num_args() == 0 and term.decl().kind() == Z3_OP_UNINTERPRETED:
-        out.add(term.decl().name())
-    for c in term.children():
-        term_symbols(c, out, seen)
-    return out
+def term_symbols(term):
+    """The names of the uninterpreted constants in `term` (a frozenset)."""
+    return terms.symbols(term)
 
 
 def lengths_only(m, term):
