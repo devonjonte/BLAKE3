@@ -138,11 +138,16 @@ impl Counts {
 
 /// One batch of [`measure`]: `calls` calls in `wall_ns`, with the counts
 /// the thread accumulated around it, started at `started_ns` ([`load::now_ns`],
-/// the scale of the load windows).
+/// the scale of the load windows). Nonstop batches also record the whole
+/// process's CPU time. A caller sharing its process with another measured
+/// program leaves that CPU figure out of its report.
 #[derive(Clone, Copy, Debug)]
 pub struct Batch {
     pub calls: u64,
     pub wall_ns: u64,
+    /// All threads' CPU time around a nonstop batch; unavailable clocks
+    /// and after-gap measurements give None.
+    pub cpu_ns: Option<u64>,
     pub counts: Option<Counts>,
     pub started_ns: u64,
 }
@@ -168,27 +173,33 @@ impl Batch {
 
 /// `batches` batches of `f`, each about `batch_ns` long (sized by a first,
 /// untimed run of that length), in the order taken; wall time inside each
-/// batch, the counts around it.
+/// batch, the process CPU time and thread counts around it. Calibration
+/// completes at least one call, even when the requested budget is tiny.
 pub fn measure(batches: usize, batch_ns: u64, mut f: impl FnMut()) -> Vec<Batch> {
     assert!(batches > 0 && batch_ns > 0, "a measurement takes at least one batch of some length");
     let started = now();
     let mut calls = 0u64;
-    while since_ns(started) < batch_ns {
+    loop {
         f();
         calls += 1;
+        if since_ns(started) >= batch_ns {
+            break;
+        }
     }
     (0..batches)
         .map(|_| {
             load::tick();
             let started_ns = load::now_ns();
             let before = Counts::read();
+            let cpu = process_cpu_ns();
             let t = now();
             for _ in 0..calls {
                 f();
             }
             let wall_ns = since_ns(t);
+            let cpu_ns = cpu.zip(process_cpu_ns()).map(|(before, after)| after - before);
             let counts = before.zip(Counts::read()).map(|(before, after)| after.since(before));
-            Batch { calls, wall_ns, counts, started_ns }
+            Batch { calls, wall_ns, cpu_ns, counts, started_ns }
         })
         .collect()
 }
@@ -266,7 +277,7 @@ pub fn measure_after_gaps_prepared<T: ?Sized>(
         assert!(!work.is_empty(), "a busy gap needs a nonempty work buffer");
     }
     let started_ns = load::now_ns();
-    let empty = || Batch { calls, wall_ns: 0, counts: Some(Counts::default()), started_ns };
+    let empty = || Batch { calls, wall_ns: 0, cpu_ns: None, counts: Some(Counts::default()), started_ns };
     let mut measured = PreparedBatch { calls: empty(), preparation: empty() };
     for call in 0..=calls {
         load::tick();
@@ -445,14 +456,32 @@ mod tests {
 
     #[test]
     fn a_measurement_counts_its_calls_and_time() {
+        let before = process_cpu_ns();
+        let mut completed = 0;
         let batches = measure(3, 100_000, || {
             std::hint::black_box((0..100u64).sum::<u64>());
+            completed += 1;
         });
+        let total_cpu = before.zip(process_cpu_ns()).map(|(before, after)| after - before);
         assert_eq!(batches.len(), 3);
+        assert_eq!(completed, 4 * batches[0].calls, "calibration and three measured batches");
         for b in &batches {
             assert!(b.calls > 0 && b.wall_ns > 0, "{b:?}");
+            assert_eq!(b.calls, batches[0].calls);
+            assert_eq!(b.cpu_ns.is_some(), total_cpu.is_some());
             assert!(b.show().contains("ns/call"));
         }
+        if let Some(total) = total_cpu {
+            assert!(batches.iter().map(|b| b.cpu_ns.unwrap()).sum::<u64>() <= total);
+        }
+    }
+
+    #[test]
+    fn tiny_budgets_still_complete_calls() {
+        let mut completed = 0;
+        let batches = measure(3, 1, || completed += 1);
+        assert!(batches.iter().all(|b| b.calls > 0));
+        assert_eq!(completed, 4 * batches[0].calls);
     }
 
     #[test]
@@ -483,6 +512,8 @@ mod tests {
         assert_eq!(observed, [1, 2, 3, 4], "one untimed call, then the three timed");
         assert_eq!(measured.calls.calls, 3);
         assert_eq!(measured.preparation.calls, 3);
+        assert_eq!(measured.calls.cpu_ns, None);
+        assert_eq!(measured.preparation.cpu_ns, None);
         assert!(measured.calls.wall_ns >= 150_000);
         assert!(measured.preparation.wall_ns >= 300_000);
         assert!(since_ns(started) >= 4_000_000 + measured.calls.wall_ns + measured.preparation.wall_ns);
