@@ -107,50 +107,53 @@ def sme_mutants(code):
     return out
 
 
-def main():
+def run(job):
+    """One mutant's proof, in its own process (workers.py): the line saying
+    whether the proof rejected it, and whether that is a failure."""
+    label, code, prove = job
+    aarch64.disassemble = lambda *a, **k: code
+    try:
+        prove()
+        return f"{label}: PROVED (the proof is vacuous here)", True
+    except (Unproved, KeyError) as e:
+        return f"{label}: rejected ({e})", False
+
+
+def both_stored(sobj):
+    """The SME2 chunk kernel's proof on the path that stores every value
+    and on the one that stores a few: rejected if either fails."""
+    import prove_sme2
+    reasons = []
+    for stored in (0, 3):
+        try:
+            prove_sme2.prove_chunks(sobj, 1, stored, False)
+        except (Unproved, KeyError) as e:
+            reasons.append(f"storing {stored or 16}: {e}")
+    if reasons:
+        raise Unproved(reasons[0])
+
+
+def jobs():
+    """Every mutant, as (label, mutated code, the proof that must reject it)."""
+    out = []
     obj = prove_hybrid.assemble()
     real = aarch64.disassemble
     base = real(obj, *[aarch64.symbols(obj)[n] for n in ("blake3_hybrid_c1", "blake3_hybrid_k1_end")])
-    failures = 0
     for what, code in mutants(base):
-        aarch64.disassemble = lambda *a, code=code, **k: code
-        try:
-            prove_hybrid.prove_c1(obj, 3, False)
-            print(f"c1 mutant, {what}: PROVED (the proof is vacuous here)")
-            failures += 1
-        except (Unproved, KeyError) as e:
-            print(f"c1 mutant, {what}: rejected ({e})")
+        out.append((f"c1 mutant, {what}", code, lambda: prove_hybrid.prove_c1(obj, 3, False)))
     syms = aarch64.symbols(obj)
     for name, prove in (("k2", lambda: prove_hybrid.prove_table(obj, "blake3_hybrid_k2", 2, 2, True)),
                         ("k7", lambda: prove_hybrid.prove_table(obj, "blake3_hybrid_k7", 7, 2, True)),
                         ("q3", lambda: prove_hybrid.prove_partial(obj, 3, 3))):
         base = real(obj, syms[f"blake3_hybrid_{name}"], syms[f"blake3_hybrid_{name}_end"])
         for what, code in vector_mutants(base):
-            aarch64.disassemble = lambda *a, code=code, **k: code
-            try:
-                prove()
-                print(f"{name} mutant, {what}: PROVED (the proof is vacuous here)")
-                failures += 1
-            except (Unproved, KeyError) as e:
-                print(f"{name} mutant, {what}: rejected ({e})")
+            out.append((f"{name} mutant, {what}", code, prove))
     import prove_sme2
     sobj = prove_sme2.assemble()
     ssyms = aarch64.symbols(sobj)
     sbase = real(sobj, ssyms["blake3_sme2_hash16_chunks_512"], ssyms["blake3_sme2_text_end"], llvm=True)
     for what, code in sme_mutants(sbase):
-        aarch64.disassemble = lambda *a, code=code, **k: code
-        # Both the path that stores every value and the one that stores a few.
-        reasons = []
-        for stored in (0, 3):
-            try:
-                prove_sme2.prove_chunks(sobj, 1, stored, False)
-            except (Unproved, KeyError) as e:
-                reasons.append(f"storing {stored or 16}: {e}")
-        if reasons:
-            print(f"SME2 chunks mutant, {what}: rejected ({reasons[0]})")
-        else:
-            print(f"SME2 chunks mutant, {what}: PROVED (the proof is vacuous here)")
-            failures += 1
+        out.append((f"SME2 chunks mutant, {what}", code, lambda: both_stored(sobj)))
     # The induction over the SME2 extended-output kernel's group loop
     # (prove_sme2.prove_xof_every): its counter and pointer steps, which only
     # the step from one group to the next sees.
@@ -161,14 +164,7 @@ def main():
                  if xof[0] <= a < xof[1] and m == "add" and o == [reg, reg, imm])
         code = dict(sbase)
         code[a] = ("add", [reg, reg, new])
-        aarch64.disassemble = lambda *a, code=code, **k: code
-        try:
-            prove_sme2.prove_xof_every(sobj)
-            print(f"induction mutant, {what} at {a:#x}: PROVED (the proof is vacuous here)")
-            failures += 1
-        except (Unproved, KeyError) as e:
-            print(f"induction mutant, {what} at {a:#x}: rejected ({e})")
-    aarch64.disassemble = real
+        out.append((f"induction mutant, {what} at {a:#x}", code, lambda: prove_sme2.prove_xof_every(sobj)))
     # The message kernel's block loop (prove_block_loop): its next block's
     # offset off by 8, which only the step from one pass to the next sees,
     # and a rotation after the loop, which only the composed proof sees.
@@ -182,18 +178,12 @@ def main():
                                 ("a rotation after the block loop", after[len(after) // 2], (m_, o_[:-1] + [f"#{int(o_[-1].lstrip('#'), 0) % 31 + 1}"]), prove_block_loop.prove_one_group)):
         code = dict(sbase)
         code[a] = ins
-        aarch64.disassemble = lambda *x, code=code, **k: code
-        try:
-            prove(sobj)
-            print(f"block-loop mutant, {what} at {a:#x}: PROVED (the proof is vacuous here)")
-            failures += 1
-        except (Unproved, KeyError) as e:
-            print(f"block-loop mutant, {what} at {a:#x}: rejected ({e})")
-    aarch64.disassemble = real
+        out.append((f"block-loop mutant, {what} at {a:#x}", code, lambda prove=prove: prove(sobj)))
     # The kernel with an integer lane (prove_hybrid_loop): the integer
     # chunk's pointer step in the loop and its table index, which the
     # loop's halves see; and the group loop's counter step, which only the
-    # induction over groups sees.
+    # induction over groups sees (from the unmutated kernel's halves, proved
+    # here before any mutant runs).
     import prove_hybrid_loop as hl
     hobj = prove_sme2.assemble_hybrid()
     hsyms = aarch64.symbols(hobj)
@@ -209,14 +199,18 @@ def main():
                                 ("the group loop's counter step", next(a for a in sorted(hbase) if hbase[a] == ("add", ["x2", "x2", "#0x12"])), ("add", ["x2", "x2", "#0x11"]), lambda: hl.prove_every(hobj, *good))):
         code = dict(hbase)
         code[a] = ins
-        aarch64.disassemble = lambda *x, code=code, **k: code
-        try:
-            prove()
-            print(f"integer-lane mutant, {what} at {a:#x}: PROVED (the proof is vacuous here)")
-            failures += 1
-        except (Unproved, KeyError) as e:
-            print(f"integer-lane mutant, {what} at {a:#x}: rejected ({e})")
-    aarch64.disassemble = real
+        out.append((f"integer-lane mutant, {what} at {a:#x}", code, prove))
+    return out
+
+
+def main():
+    import workers
+    failures = 0
+    # Forked workers inherit each job (its code and its proof's closure);
+    # only the line comes back.
+    for line, failed in workers.each(run, jobs(), 16):
+        print(line, flush=True)
+        failures += failed
     sys.exit(1 if failures else 0)
 
 

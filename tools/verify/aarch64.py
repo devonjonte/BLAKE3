@@ -58,18 +58,34 @@ def decide(m, cond):
     if not lengths_only(m, c):
         raise Unproved("a branch depends on data")
     for answer, test in ((True, Not(c)), (False, c)):
-        s = Solver()
-        s.add(*m.assumptions, test)
-        if s.check() == unsat:
+        if unsatisfiable(m.assumptions, test):
             return answer
     raise Undecided(c)
 
 
 def holds(m, cond):
     """Whether `cond` (on lengths) follows from the run's assumptions."""
-    s = Solver()
-    s.add(*m.assumptions, Not(cond))
-    return s.check() == unsat
+    return unsatisfiable(m.assumptions, Not(cond))
+
+
+_unsat = {}          # (the assumptions' ids, the test's id) -> whether unsatisfiable
+
+
+def unsatisfiable(assumptions, test):
+    """Whether `assumptions` and `test` together are unsatisfiable, asked of
+    the solver once for each: the loops' passes ask the same questions
+    again (two in three, on SME2's 'every'). terms.py keeps every term of
+    the key, so their ids stay their own and the memo is exact."""
+    k = (tuple(a.get_id() for a in assumptions), test.get_id())
+    r = _unsat.get(k)
+    if r is None:
+        for a in assumptions:
+            terms.keep(a)
+        terms.keep(test)
+        s = Solver()
+        s.add(*assumptions, test)
+        r = _unsat[k] = s.check() == unsat
+    return r
 
 
 def key(offset):
