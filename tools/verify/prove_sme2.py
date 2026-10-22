@@ -235,32 +235,16 @@ def loop_head(obj, run, taken):
 
 
 def prove_parents_every(obj):
-    """hash16_parents_512 at every number of groups from 2 to 2^40 (1 and 2
-    are the concrete cases), by induction over its group loop: group K's
-    parent i compresses pairs[1024 K + 64 i..] under key at counter
-    (unchanged), into out[32 (16 K + i)..]. Each group's pairs are arbitrary:
-    word w of group G's pairs is pair_w + G, so each group's words range
-    over every value while the groups differ: a kernel that hashed another
-    group's pairs (it preloads the next group's) would compute other terms.
-    Between groups the words differ by 1, a constant, so the loop invariant
-    holds the next group's words as pair_w + K + 1."""
-    from z3 import ULE, UGE, ULT
-    words = [BitVec(f"pair{w}", 32) for w in range(256)]
+    """hash16_parents_512 for 2..2^40 groups (1 and 2 also have concrete
+    proofs), by induction over its group loop. Every byte of every group's
+    pairs is independent: parent i of group K compresses pairs[1024 K +
+    64 i..] under the key and unchanged counter into out[32 (16 K + i)..]."""
+    from z3 import ULE, UGE, ULT, Array, BitVecSort, Select, Lambda, substitute
+    pairs = Array("pairs", BitVecSort(64), BitVecSort(8))
     key = byte_symbols("key", 32)
     g, k = BitVec("len_groups", 64), BitVec("len_k", 64)
     def pair_byte(offset):
-        m = aarch64._machine[0]
-        if isinstance(offset, int):
-            group, within = BitVecVal(offset // 1024, 32), offset % 1024
-        else:
-            within = induction.forced(m, aarch64.as_bv(offset) & 1023)
-            if within is None:
-                raise Unproved("a read of pairs whose place in its group the lengths leave open")
-            # From the word's first byte, so its four bytes are one word's.
-            first = simplify(aarch64.as_bv(offset) - within % 4, som=True, bv_sort_ac=True)
-            group = simplify(Extract(31, 0, LShR(first, 10)), som=True, bv_sort_ac=True)
-        word = simplify(words[within // 4] + group, som=True, bv_sort_ac=True)
-        return Extract(8 * (within % 4) + 7, 8 * (within % 4), word)
+        return Select(pairs, aarch64.as_bv(offset))
     regions = {"pairs": Region("pairs", g * 1024, False, pair_byte),
                "key": Region("key", 32, False, lambda o: key[o]),
                "out": Region("out", g * 512, True, None)}
@@ -275,10 +259,9 @@ def prove_parents_every(obj):
     m.x[4], m.x[5] = Ptr("out", 0), g
     head = loop_head(obj, lambda: prove_parents(obj, 3, check=False), 2)
     def group_cvs(kval):
-        group = BitVecVal(kval, 32) if isinstance(kval, int) else Extract(31, 0, kval)
-        block = [simplify(w + group, som=True, bv_sort_ac=True) for w in words]
-        return [spec.compress(spec.words(key), block[16 * i:16 * i + 16], counter, BitVecVal(64, 32), flags)[:8]
-                for i in range(16)]
+        group = aarch64.as_bv(kval)
+        return [spec.compress(spec.words(key), spec.words([pair_byte(1024 * group + 64 * i + j) for j in range(64)]),
+                              counter, BitVecVal(64, 32), flags)[:8] for i in range(16)]
     def check_group(mach, kval):
         out = mach.regions["out"]
         keys = set()
@@ -302,6 +285,18 @@ def prove_parents_every(obj):
     s1 = induction.run_to(induction.snapshot(s0), head, head)
     check_group(s1, 0)
     gen = induction.Generalized(s0, s1, k)
+    # The kernel preloads the next group's words into ZA. State their
+    # addresses at K explicitly; arbitrary bytes have no constant step.
+    index = BitVec("pair_index", 64)
+    shifted = Lambda([index], Select(pairs, index + 1024 * k))
+    for tile, rows in enumerate(s0.za):
+        for row, values in enumerate(rows):
+            for lane, value in enumerate(values):
+                if pairs.decl().name() in aarch64.term_symbols(value):
+                    gen.za[tile][row][lane] = simplify(substitute(value, (pairs, shifted)))
+    bad = induction.mismatches(s0, gen, BitVecVal(0, 64))
+    if bad:
+        raise Unproved(f"the initial state differs from the group invariant at {bad}")
     def check(endm, how):
         check_group(endm, k)
         if how == "return":

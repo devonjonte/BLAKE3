@@ -34,9 +34,10 @@ induction over its group loop (`prove_sme2.py every`, 15 minutes), its
 block loop by its own proof as the message kernel's (below): each
 lane's bytes are an array, so a group that read another group's chunk
 would compute other terms. The
-parent kernel the same way (`parents_every`, under a minute); it preloads
-the next group's pairs, so each group's words differ instead (word w of
-group G is pair_w + G): hashing another group's pairs gives other terms.
+parent kernel the same way (`parents_every`, under a minute), with every
+input byte independent across groups. It preloads the next group's pairs
+into ZA; the invariant states those bytes at group K's addresses and checks
+its initial state and successor.
 The extended-output kernel (`xof_every`, under a minute), and the message
 kernel at every group count and every length of 2 to 16 blocks in one
 induction (`messages_every`, about 3 minutes, `prove_block_loop.py`): its
