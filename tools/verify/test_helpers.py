@@ -52,6 +52,22 @@ class GeneralizationTests(unittest.TestCase):
         self.assertEqual(induction.constant_difference(loaded(x), loaded(x + 1)), 1)
         self.assertIsNone(induction.constant_difference(x, x * x))
 
+    def test_explicit_counter_halves_at_the_next_iteration(self):
+        from types import SimpleNamespace
+        from z3 import BitVecVal, simplify, substitute
+        state = SimpleNamespace(x={}, v={}, regions={})
+        counter, k = BitVecs("counter len_k", 64)
+        g = induction.Generalized(state, state, k)
+        values = [counter + 8 * k + lane for lane in range(2)]
+        inst = g.at(BitVecVal(1, 64))
+        # The low word carries while each packed 32-bit lane advances
+        # independently. An affine 64-bit packed-word step gets this wrong.
+        for high, expected in [(False, 1 << 32), (True, (1 << 32) + 1)]:
+            lo = 32 if high else 0
+            packed = Concat(Extract(lo + 31, lo, values[1]), Extract(lo + 31, lo, values[0]))
+            got = simplify(substitute(inst(packed), (counter, BitVecVal((1 << 32) - 8, 64))))
+            self.assertEqual(got.as_long(), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

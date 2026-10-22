@@ -15,7 +15,7 @@ import copy
 
 import canon
 
-from z3 import BitVec, BitVecVal, ZeroExt, Extract, Not, ULE, UGE, simplify, is_bv_value, eq
+from z3 import BitVec, BitVecVal, ZeroExt, Extract, Not, ULE, UGE, simplify, is_bv_value, is_bv, substitute, eq
 import aarch64
 from aarch64 import Ptr, Unproved, Undecided
 
@@ -197,7 +197,9 @@ class Generalized:
                     return simplify(a + kk * d, som=True, bv_sort_ac=True)
                 if g[0] == "unknown":
                     return None
-            return g
+            # A caller can state a counter's halves directly in terms of
+            # K, then prove the initial state and the step against them.
+            return substitute(g, (self.k, kval)) if is_bv(g) else g
         return inst
 
     def machine(self, template, kval):
