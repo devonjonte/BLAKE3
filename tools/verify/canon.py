@@ -142,14 +142,15 @@ def set_context(assumptions, lengths):
 
 def sample(n, v, r):
     """Symbol `v` (named `n`) at sample point `r`: a random value; an array
-    (a message read at any offset) a random function of its index, so
-    bytes at different offsets differ. Only a fingerprint: equal leaves are
-    proved equal by the solver."""
+    (a message read at any offset) a hash of its index, helping separate
+    offsets. Only a fingerprint: equal leaves are proved equal by the solver."""
     from z3 import is_array, Lambda, Extract, BitVec as BV
     if is_array(v):
         i = BV("sample_index", v.domain().size())
         a, b = (_values.setdefault((n, r, j), random.getrandbits(v.domain().size())) for j in (0, 1))
-        return Lambda([i], Extract(v.range().size() - 1, 0, i * a + b))
+        # High bits mix every index bit into the fingerprint. Low bytes
+        # made offsets 256 bytes apart collide at every sample point.
+        return Lambda([i], Extract(v.domain().size() - 1, v.domain().size() - v.range().size(), i * a + b))
     return BitVecVal(_values.setdefault((n, r), random.getrandbits(v.size())) % (1 << v.size()), v.size())
 
 
