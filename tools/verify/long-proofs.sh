@@ -8,7 +8,7 @@
 # instruction models checked against the CPU; and the proofs' mutants.
 # About an hour, in a worktree of the commit; nothing should measure
 # meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
-# the status names their BLAKE3 hash.
+# the status names their SHA-256 and BLAKE3 hashes.
 #
 #     sh tools/verify/long-proofs.sh [COMMIT]     (default HEAD)
 set -eu
@@ -44,6 +44,7 @@ run prove_sme2 python3 tools/verify/prove_sme2.py chunks chunks_at messages pare
 run prove_x86 python3 tools/verify/prove_x86.py compress xof hash_many xof_many
 run cross_check python3 tools/verify/cross_check.py
 run mutants python3 tools/verify/mutants.py
-hash=$(cat "$logs"/*.txt | cargo run -q --release --manifest-path b3sum/Cargo.toml -- --no-names | cut -c1-16)
-status "$state" "$verdict: Lean, hybrid, SME2, x86, cross_check, mutants; logs' BLAKE3 $hash (VM)"
-echo "long proofs $verdict for $commit; logs in $logs, BLAKE3 $hash"
+b3=$(cat "$logs"/*.txt | cargo run -q --release --manifest-path b3sum/Cargo.toml -- --no-names)
+sha=$(cat "$logs"/*.txt | sha256sum | cut -d' ' -f1)
+status "$state" "$verdict: Lean, hybrid, SME2, x86, cross_check, mutants; logs' SHA-256 $(echo $sha | cut -c1-16), BLAKE3 $(echo $b3 | cut -c1-16)"
+echo "long proofs $verdict for $commit; logs in $logs, SHA-256 $sha, BLAKE3 $b3"

@@ -94,6 +94,7 @@ can read, asks less of him than either.
 - **The instructions' ASL** is in Arm's A64 ISA XML release, downloaded
   from `https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-A64-ISA/ISA_A64/ISA_A64_xml_A_profile-2026-03_96.tar.gz`
   (SHA-256 `9d138aa4dd6db8b04bd6ad3a378205537bf67172a5f99180729517d1445f1906`,
+  BLAKE3 `cc29573c01df924dce36a89389f49ab1e9ff747530ab008c6ba87f8915a95109`,
   fetched October 22, 2026; Arm's other download pages answer bots with
   403). The archive holds the 2025-09 release in ASL1, the version of the
   language that Arm's reference manual and ASLRef define:
