@@ -663,6 +663,12 @@ pub(crate) fn splits() -> bool {
 /// The pool, once [`initialize`] has created it.
 static POOL: OnceLock<Pool> = OnceLock::new();
 
+/// Whether every worker is parked: false before the pool exists
+/// ([`crate::__all_workers_parked`], for tests).
+pub(crate) fn all_workers_parked() -> bool {
+    POOL.get().is_some_and(|pool| (0..pool.threads - 1).all(|w| pool.parked[w / 64].load(Ordering::SeqCst) & (1 << (w % 64)) != 0))
+}
+
 /// The pool. The caller must have called
 /// [`crate::initialize_multithreaded`] before; a call before it panics. The
 /// check is the load of the pool, which every call makes anyway.

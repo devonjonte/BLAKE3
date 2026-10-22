@@ -500,7 +500,16 @@ mod tests {
         let started = now();
         let measured = measure_after_gaps_prepared(5, Gap::Idle, 1_000_000, &mut calls, |c| *c += 1, |_| busy_work(10_000));
         assert_eq!((calls, measured.calls.calls), (6, 5), "one untimed call, then the five timed");
-        assert!(since_ns(started) >= 6_000_000, "each gap sleeps its length");
-        assert!(measured.calls.wall_ns < 5_000_000, "the sleeps stay out of the sum: {measured:?}");
+        let elapsed = since_ns(started);
+        assert!(elapsed >= 6_000_000, "each gap sleeps its length");
+        // The intervals and the six gaps are disjoint, and a sleep never ends
+        // early, so the whole run holds both: elapsed >= intervals + 6 ms.
+        // Gaps inside the intervals would count about 5 ms twice and break it.
+        // No upper bound on time: a slow or loaded machine only adds to
+        // `elapsed` (an earlier form, wall_ns < 5 ms, failed on one preemption).
+        assert!(
+            elapsed >= measured.calls.wall_ns + measured.preparation.wall_ns + 6_000_000,
+            "the sleeps stay out of the sum: {elapsed} ns in all, {measured:?}"
+        );
     }
 }

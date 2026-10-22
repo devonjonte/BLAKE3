@@ -34,8 +34,11 @@ fn a_caller_looping_on_collect_makes_progress_with_sleeping_workers() {
             },
             |s| {
                 for message in &messages {
-                    // Long enough for every worker to go back to sleep.
-                    std::thread::sleep(std::time::Duration::from_millis(2));
+                    // Every worker back asleep: waited for, not slept for (2 ms
+                    // was the guess, which a loaded machine could outlast).
+                    while !blake3_servil::__all_workers_parked() {
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
                     let place = loop {
                         if let Some(place) = free.borrow_mut().pop() {
                             break place;

@@ -17,8 +17,11 @@ fn a_caller_looping_on_collect_wakes_a_parked_worker() {
     std::thread::spawn(move || {
         let message = vec![7u8; 3000];
         for round in 0..20 {
-            // Every worker parked before the stream opens.
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            // Every worker parked before the stream opens: waited for, not
+            // slept for (a loaded machine could outlast any sleep).
+            while !blake3_servil::__all_workers_parked() {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
             let mut place = Hash::from([0; 32]);
             let got = std::cell::Cell::new(false);
             blake3_servil::stream(

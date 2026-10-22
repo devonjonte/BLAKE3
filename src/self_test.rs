@@ -445,6 +445,12 @@ const PASSED: u8 = 2;
 const FAILED: u8 = 3;
 static STATE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(UNTESTED);
 
+/// The threads that have reached the wait for another's verdict (test
+/// builds only): the test of that wait waits for one to arrive, not for a
+/// time, before it gives the verdict.
+#[cfg(all(test, feature = "std"))]
+static WAITING: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
 /// Run the self-test unless it has passed: once per process, the first
 /// caller running it and any other waiting. It publishes no data, so a
 /// relaxed load suffices on the fast path.
@@ -476,6 +482,8 @@ fn ensure_slow() {
         STATE.store(PASSED, Relaxed);
         return;
     }
+    #[cfg(all(test, feature = "std"))]
+    WAITING.fetch_add(1, Relaxed);
     loop {
         match STATE.load(Relaxed) {
             PASSED => return,
@@ -501,9 +509,11 @@ mod test {
     /// while another runs the self-test waits for its verdict: it returns
     /// once the self-test has passed, and stops once it has failed. The
     /// test stands in for the running thread by setting the state itself,
-    /// so the arrival always finds the self-test running. A waiting thread
-    /// that missed the verdict would spin, and the runner's time limit
-    /// would end it.
+    /// so the arrival always finds the self-test running, and gives the
+    /// verdict once the thread is waiting (WAITING), not after a sleep that a
+    /// loaded machine could outlast. A waiting thread that missed the
+    /// verdict would spin, and nextest's one clock would end it: a time-out
+    /// (tools/mutants/timeouts-<arch>.txt), not a failure.
     #[test]
     #[cfg(not(miri))]
     fn test_a_waiting_thread_takes_the_verdict() {
@@ -512,8 +522,11 @@ mod test {
         assert_eq!(STATE.load(Relaxed), PASSED, "initialize runs the self-test");
         for (verdict, returns) in [(PASSED, true), (FAILED, false)] {
             STATE.store(RUNNING, Relaxed);
+            let arrived = WAITING.load(Relaxed);
             let waiter = std::thread::spawn(ensure_slow);
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            while WAITING.load(Relaxed) == arrived {
+                std::thread::yield_now();
+            }
             STATE.store(verdict, Relaxed);
             assert_eq!(waiter.join().is_ok(), returns, "the waiting thread, after the verdict {verdict}");
         }

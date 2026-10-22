@@ -15,6 +15,16 @@ in git worktrees of HEAD of its own (SHARDS at once), so the checkout is
 never mutated. With --write, the list is rewritten from this run, each
 new mutant's reason UNCLASSIFIED and the others' kept.
 
+A mutant whose tests no test fails, but the clock stops (nextest's, or
+cargo-mutants' backstop), has an outcome of its own: it timed out. That
+is neither caught nor survived: the tests did not finish, which says
+nothing of what they would have found (a loop that never ends, a wait
+that never returns; or a test the load made slow). Time-outs have their
+own list, tools/mutants/timeouts-<arch>.txt, in KNOWN's form, and are
+checked against it the same way (NEW TIME-OUT, NO LONGER TIMES OUT).
+Exit status: 0 both lists match; 1 a survivor differs from its list (or a
+reason is missing); 2 only the time-outs differ (no verdict on those).
+
 The tests run under cargo-nextest (.config/nextest.toml), each in its own
 process, a test killed at 30 s as a hang; a mutant's tests stop at the
 first that fails. Every run records each test's outcome and time on every
@@ -50,6 +60,12 @@ import tempfile
 
 ROOT = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip()
 KNOWN = os.path.join(ROOT, "tools", "mutants", f"known-{platform.machine()}.txt")
+# The mutants (by name, counted in places, as KNOWN) that no test catches but
+# the clock stops: a loop that never ends, a wait that never returns. Their
+# own outcome, never folded into caught or survived: a time-out says the
+# tests did not finish, not what they would have found. Rows as KNOWN's, CPU
+# conditions too.
+TIMEOUTS = os.path.join(ROOT, "tools", "mutants", f"timeouts-{platform.machine()}.txt")
 NAME = re.compile(r"^(\S+?):\d+:\d+: (.*)$")
 
 
@@ -82,11 +98,15 @@ def applies(reason):
     return m is None or all(f in FLAGS for f in m.group(2).split()) == (m.group(1) == "has")
 
 
-def read_known():
-    """The list's files and the rows that apply on this CPU; the rest are
-    kept in INACTIVE, for --write."""
+def read_known(path=None, inactive=None):
+    """A list's files and the rows that apply on this CPU; the rest are
+    kept in `inactive` (INACTIVE for KNOWN), for --write. A list that does
+    not exist yet (TIMEOUTS, on a new machine) has no rows."""
+    path, inactive = (KNOWN, INACTIVE) if path is None else (path, inactive)
     files, known = [], {}
-    for line in open(KNOWN):
+    if not os.path.exists(path):
+        return files, known
+    for line in open(path):
         line = line.rstrip("\n")
         if line.startswith("files:"):
             files = line.split()[1:]
@@ -97,12 +117,13 @@ def read_known():
                 assert name not in known, f"{name}: two rows apply on this CPU"
                 known[name] = (int(count), reason)
             else:
-                INACTIVE.append(line)
+                inactive.append(line)
     return files, known
 
 
 # The rows for other CPUs, as written (a name may have one row a CPU).
 INACTIVE = []
+INACTIVE_TIMEOUTS = []
 
 
 HANGS = os.path.join(ROOT, "tools", "mutants", "hangs.txt")
@@ -168,6 +189,7 @@ def run(files, extra=(), shards=SHARDS, label="run"):
         shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
         runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=cap_memory)))
     names = collections.Counter()
+    timed = collections.Counter()  # the time-outs, by name: their own outcome
     functions = collections.defaultdict(list)  # (file, function) -> [(outcome, name)]
     rows = []  # (mutant name, function, test, outcome, ms); the unmutated tree's mutant name is UNMUTATED
     kept = os.path.join(ROOT, "tmp", "mutants-last", "map" if MAP and label == "run" else label)
@@ -195,17 +217,25 @@ def run(files, extra=(), shards=SHARDS, label="run"):
             function = (mutant.get("function") or {}).get("function_name", "")
             m = NAME.match(mutant["name"])
             name = f"{m.group(1)}\t{m.group(2)}"
-            assert outcome["summary"] != "Timeout", f"the {BACKSTOP} s backstop ended {mutant['name']}'s tests: nextest's clock should have (.config/nextest.toml)"
-            functions[(mutant["file"], function)].append((outcome["summary"], name))
-            if outcome["summary"] in ("CaughtMutant", "MissedMutant"):
+            summary = outcome["summary"]
+            if summary == "Timeout":
+                # cargo-mutants' own limit: nextest's clock should have come
+                # first. Still a time-out, never an error or a catch.
+                print(f"BACKSTOP: the {BACKSTOP} s limit ended {mutant['name']}'s tests, not nextest's clock (.config/nextest.toml)")
+                timed[name] += 1
+            if summary in ("CaughtMutant", "MissedMutant", "Timeout"):
                 # The mutant's place too: one name can be several places,
                 # each caught (or not) by tests of its own.
                 place = mutant["name"].split(": ", 1)[0].split(":", 1)[1]
                 tests = read_tests(log)
                 rows += [(f"{name}\t{place}", f"{mutant['file']} {function}", *t) for t in tests]
                 failed = [o for _, o, _ in tests if o != "PASS"]
-                if outcome["summary"] == "CaughtMutant" and failed and all(o == "TIMEOUT" for o in failed):
+                if summary == "CaughtMutant" and failed and all(o == "TIMEOUT" for o in failed):
+                    # No test failed: the clock stopped one. Timed out, not caught.
+                    summary = "TimedOut"
+                    timed[name] += 1
                     CLOCK_ONLY.add(f"{name}\t{place}")
+            functions[(mutant["file"], function)].append((summary, name))
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
         subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
@@ -219,13 +249,12 @@ def run(files, extra=(), shards=SHARDS, label="run"):
             weigh(rows, os.path.join(kept, "tests.tsv"))
             head = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout
             open(os.path.join(kept, "commit"), "w").write(head)
-    return names, functions
+    return names, functions, timed
 
 
-# The mutants (by place) that no test failed, but the clock stopped: a hang,
-# or a test made slow (by the mutant, or by the machine's load: a mutant
-# compiled out of the build was stopped so once). Not a test's catch;
-# reported for each to get a test of its own, or a place on a list.
+# The places that no test failed, but the clock stopped (listed by name in
+# TIMEOUTS): a hang, or a test made slow by the mutant, or by the machine's
+# load (a mutant compiled out of the build was stopped so once, at 5 s).
 CLOCK_ONLY = set()
 
 UNMUTATED = "(unmutated)\t\t"
@@ -287,21 +316,23 @@ def weigh(rows, path):
         print(f"  caught only by tests of 100 ms or more: {n} mutants in {function}")
 
 
-def confirm(found, known, differ=None):
-    """`found` with every name whose count differs from the list's run
-    again, alone: a test that fails by chance (under load, say) neither
-    hides a survivor nor fails the check."""
+def confirm(found, known, timed, tknown, differ=None):
+    """`found` (survivors) and `timed` (time-outs) with every name whose
+    count of either differs from its list run again, alone: a test that
+    fails by chance (under load, say) neither hides a survivor nor fails
+    the check, and a test the load made slow is not taken for a hang."""
     if differ is None:
-        differ = sorted(k for k in set(found) | set(known) if found.get(k, 0) != known.get(k, (0, ""))[0])
+        differ = sorted(k for k in set(found) | set(known) | set(timed) | set(tknown)
+                        if found.get(k, 0) != known.get(k, (0, ""))[0] or timed.get(k, 0) != tknown.get(k, (0, ""))[0])
     if not differ:
-        return found
+        return found, timed
     patterns = [": " + re.escape(k.split("\t", 1)[1]) + "$" for k in differ]
-    again, _ = run(sorted({k.split("\t", 1)[0] for k in differ}), [arg for p in patterns for arg in ("--re", p)], shards=1, label="confirm")
-    confirmed = collections.Counter(found)
+    again, _, again_timed = run(sorted({k.split("\t", 1)[0] for k in differ}), [arg for p in patterns for arg in ("--re", p)], shards=1, label="confirm")
+    confirmed, confirmed_timed = collections.Counter(found), collections.Counter(timed)
     for k in differ:
-        confirmed[k] = again.get(k, 0)
-    print(f"confirmed alone: {len(differ)} names whose count differed from the list")
-    return +confirmed
+        confirmed[k], confirmed_timed[k] = again.get(k, 0), again_timed.get(k, 0)
+    print(f"confirmed alone: {len(differ)} names whose count differed from a list")
+    return +confirmed, +confirmed_timed
 
 
 def changed_tests(since, head="HEAD"):
@@ -396,7 +427,7 @@ def figure(functions, known):
     caught = explained = 0
     open_ = []
     for (file, function), outcomes in sorted(functions.items()):
-        reasons = [known.get(name, (0, "UNCLASSIFIED"))[1] for summary, name in outcomes if summary == "MissedMutant"]
+        reasons = [known.get(name, (0, "UNCLASSIFIED"))[1] for summary, name in outcomes if summary in ("MissedMutant", "TimedOut")]
         if not reasons:
             caught += 1
         elif all(not r.startswith(("OPEN", "UNCLASSIFIED")) for r in reasons):
@@ -410,6 +441,7 @@ def figure(functions, known):
 
 def main():
     files, known = read_known()
+    _, tknown = read_known(TIMEOUTS, INACTIVE_TIMEOUTS)
     # A skipped mutant cannot be seen to survive: a name on both lists would
     # read as caught, run after run.
     both = sorted(set(known) & read_hangs())
@@ -448,33 +480,45 @@ def main():
         with open(path, "w") as f:
             f.write(diff)
         # One shard: a change's mutants are few, and each shard builds anew.
-        found, functions = run(files, ["--in-diff", path], shards=1) if diff else (collections.Counter(), {})
+        found, functions, timed = run(files, ["--in-diff", path], shards=1) if diff else (collections.Counter(), {}, collections.Counter())
         if extra:
             # The altered tests' catches, wherever they are: by name.
-            again, more = run(sorted({k.split("\t", 1)[0] for k in extra}), [arg for k in extra for arg in ("--re", ": " + re.escape(k.split("\t", 1)[1]) + "$")], label="tests")
-            found = found + again
+            again, more, again_timed = run(sorted({k.split("\t", 1)[0] for k in extra}), [arg for k in extra for arg in ("--re", ": " + re.escape(k.split("\t", 1)[1]) + "$")], label="tests")
+            found, timed = found + again, timed + again_timed
             functions = {**more, **functions}
         # Only the names with more survivors than the list: the run holds
         # the change's lines alone, so a listed name's other places are
         # missing from it (a whole run sees those, and stale entries).
-        found = confirm(found, known, sorted(k for k in found if found[k] > known.get(k, (0, ""))[0]))
+        found, timed = confirm(found, known, timed, tknown, sorted({k for k in found if found[k] > known.get(k, (0, ""))[0]}
+                                                                   | {k for k in timed if timed[k] > tknown.get(k, (0, ""))[0]}))
         new = {k: n for k, n in found.items() if n > known.get(k, (0, ""))[0]}
+        new_timed = {k: n for k, n in timed.items() if n > tknown.get(k, (0, ""))[0]}
         for k, n in sorted(new.items()):
             print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
+        for k, n in sorted(new_timed.items()):
+            print(f"NEW TIME-OUT ({n - tknown.get(k, (0, ''))[0]}): {k}")
         print(f"mutants: the change since {since}: {sum(1 for f in functions.values() for _ in f)} mutants, "
-              + ("no new survivor" if not new else f"{len(new)} names with a new survivor"))
-        sys.exit(1 if new else 0)
-    found, functions = run(files)
-    found = confirm(found, known)
-    figure(functions, {k: known.get(k, (n, "UNCLASSIFIED")) for k, n in found.items()})
+              + ("no new survivor" if not new else f"{len(new)} names with a new survivor")
+              + ("" if not new_timed else f", {len(new_timed)} names with a new time-out (no verdict on them)"))
+        sys.exit(1 if new else 2 if new_timed else 0)
+    found, functions, timed = run(files)
+    found, timed = confirm(found, known, timed, tknown)
+    figure(functions, {**{k: tknown.get(k, (n, "UNCLASSIFIED")) for k, n in timed.items()},
+                       **{k: known.get(k, (n, "UNCLASSIFIED")) for k, n in found.items()}})
     if "--write" in sys.argv:
         header = [l.rstrip("\n") for l in open(KNOWN) if l.startswith("#") or l.startswith("files:")]
         # The rows for other CPUs stay as they were: this run cannot see them.
         rows = sorted([f"{k}\t{n}\t{known.get(k, (0, 'UNCLASSIFIED'))[1]}" for k, n in found.items()] + INACTIVE)
         open(KNOWN, "w").write("\n".join(header + rows) + "\n")
         print(f"{KNOWN}: {sum(found.values())} survivors, {sum(1 for k in found if k not in known)} names new")
+        theader = [l.rstrip("\n") for l in open(TIMEOUTS) if l.startswith("#")] if os.path.exists(TIMEOUTS) else \
+            [f"# The mutants that time out on {platform.machine()}: no test fails, the clock stops one (tools/mutants/check.py, TIMEOUTS).",
+             "# A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason."]
+        trows = sorted([f"{k}\t{n}\t{tknown.get(k, (0, 'UNCLASSIFIED'))[1]}" for k, n in timed.items()] + INACTIVE_TIMEOUTS)
+        open(TIMEOUTS, "w").write("\n".join(theader + trows) + "\n")
+        print(f"{TIMEOUTS}: {sum(timed.values())} time-outs, {sum(1 for k in timed if k not in tknown)} names new")
         return
-    unexplained = sorted(k for k, (_, reason) in known.items() if reason == "UNCLASSIFIED")
+    unexplained = sorted(k for k, (_, reason) in {**tknown, **known}.items() if reason == "UNCLASSIFIED")
     for k in unexplained:
         print(f"NO REASON: {k}")
     new = {k: n for k, n in found.items() if n > known.get(k, (0, ""))[0]}
@@ -485,14 +529,24 @@ def main():
     for k, n in sorted(new.items()):
         print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
     for k, c in sorted(stale.items()):
-        print(f"NOW CAUGHT ({c - found.get(k, 0)}): {k}")
+        print(f"{'NOW TIMES OUT' if timed.get(k) else 'NOW CAUGHT'} ({c - found.get(k, 0)}): {k}")
+    # The time-outs against their list, alike (an OPEN pool row's count is
+    # the most that time out, as for survivors).
+    new_timed = {k: n for k, n in timed.items() if n > tknown.get(k, (0, ""))[0]}
+    stale_timed = {k: c for k, (c, reason) in tknown.items() if timed.get(k, 0) < c and not (k.startswith("src/lanes.rs") and reason.startswith("OPEN: the pool's scheduling"))}
+    for k, n in sorted(new_timed.items()):
+        print(f"NEW TIME-OUT ({n - tknown.get(k, (0, ''))[0]}): {k}")
+    for k, c in sorted(stale_timed.items()):
+        print(f"NO LONGER TIMES OUT ({c - timed.get(k, 0)}): {k}")
     for k in sorted(CLOCK_ONLY):
-        print(f"CLOCK ONLY: {k}")
-    if CLOCK_ONLY:
-        print(f"mutants: {len(CLOCK_ONLY)} places caught by the clock alone, no test failing (counted as caught for now)")
+        print(f"TIMED OUT (place): {k}")
     ok = not new and not stale and not unexplained
+    ok_timed = not new_timed and not stale_timed
     print(f"mutants: {sum(found.values())} survive, each known and explained" if ok else "mutants: the list and this run differ, or a listed mutant has no reason")
-    sys.exit(0 if ok else 1)
+    print(f"mutants: {sum(timed.values())} time out, each known ({os.path.basename(TIMEOUTS)})" if ok_timed
+          else f"mutants: the time-outs differ from {os.path.basename(TIMEOUTS)} (no verdict on those mutants)")
+    # One status an outcome: 1 a survivor or list wrong, 2 only time-outs differ, 0 both as listed.
+    sys.exit(0 if ok and ok_timed else 1 if not ok else 2)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,9 @@ jobs:
   # Every crate in the tree formatted by rustfmt.toml at the root.
   rustfmt:
     runs-on: ubuntu-latest
+    # The job's one clock, explicit: about 4x its slowest run (Miri's, 7 min, October 2026), far
+    # below GitHub's implicit 360. GitHub reports a job past it as timed out, not failed.
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
@@ -35,6 +38,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: ${{ matrix.target.name }} ${{ matrix.channel }}
     runs-on: ${{ matrix.target.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -109,6 +113,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: b3sum ${{ matrix.target.name }} ${{ matrix.channel }}
     runs-on: ${{ matrix.target.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -150,6 +155,7 @@ jobs:
     # or a Graviton 2), whose detection then picks the plain NEON kernels.
     name: "AArch64 without SME2, and without SHA-3 (QEMU Cortex-A72)"
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     # Clang assembles the SME2 kernel, which this build carries as users'
     # do (GCC 13 here cannot); detection then leaves it out.
     env:
@@ -186,6 +192,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: "compile and test with GCC 12, the oldest supported"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
     - uses: addnab/docker-run-action@v3
@@ -205,6 +212,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: Miri smoketest
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@nightly
@@ -226,6 +234,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: "the x86-64 proofs' model against the CPU"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
     # GitHub's runners vary: the AVX-512 forms are checked on those that

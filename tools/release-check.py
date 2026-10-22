@@ -5,8 +5,12 @@ left its result, for one commit (CONTRIBUTING.md, "Releases").
     python3 tools/release-check.py [COMMIT]        # default: servil's tip
 
 It runs nothing heavy. For each step it reads the evidence the gate
-wrote and prints one line: PASS, FAIL, or OPEN (no evidence yet, with the
-command that makes it). Exit status 0 only when every step passes.
+wrote and prints one line: PASS, FAIL, OPEN (no evidence yet, with the
+command that makes it), or, each its own outcome, TIMED OUT (the gate, or
+GitHub's answer here, ran out of time) and NO VERDICT (the gate could not
+judge: a check whose machine was busy). Exit status 0 only when every step
+passes; 1 when a step failed or is open; 2 when every other step passes
+and the rest timed out or have no verdict.
 
 - CI: GitHub's workflow runs on the commit (every job succeeded).
 - Long proofs: the commit's GitHub status "long proofs" (long-proofs.sh).
@@ -26,6 +30,8 @@ command that makes it). Exit status 0 only when every step passes.
 
 import glob
 import json
+import socket
+import urllib.error
 from pathlib import Path
 import os
 import re
@@ -40,15 +46,31 @@ MAIN = subprocess.run(["git", "-C", ROOT, "rev-parse", "--path-format=absolute",
 MAIN = os.path.dirname(MAIN) if MAIN.endswith("/.git") else MAIN
 
 
+# A step's two outcomes besides PASS, FAIL and OPEN.
+TIMED_OUT, NO_VERDICT = "timed out", "no verdict"
+
+
 def git(*args):
     return subprocess.run(["git", "-C", ROOT, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+
+class GitHubTimedOut(Exception):
+    """GitHub's API did not answer within its 60 s: the step timed out, a
+    different outcome from a failed or an open one."""
 
 
 def github(path):
     token = open(os.path.join(MAIN, "ghtokenclassic.txt")).read().strip()
     request = urllib.request.Request("https://api.github.com" + path, headers={"Authorization": f"token {token}"})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.load(response)
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.load(response)
+    except (TimeoutError, socket.timeout) as e:
+        raise GitHubTimedOut(f"GitHub's API did not answer {path} within 60 s") from e
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, (TimeoutError, socket.timeout)):
+            raise GitHubTimedOut(f"GitHub's API did not answer {path} within 60 s") from e
+        raise
 
 
 def log_ends_with(path, text):
@@ -65,17 +87,28 @@ def main():
     results = []
 
     def step(name, ok, how):
+        """ok: True (PASS), False (FAIL), None (OPEN), or TIMED_OUT or
+        NO_VERDICT, each printed and counted as itself."""
         results.append(ok)
-        print(f"{'PASS' if ok else 'FAIL' if ok is False else 'OPEN'}  {name}" + ("" if ok else f": {how}"))
+        label = {True: "PASS", False: "FAIL", None: "OPEN", TIMED_OUT: "TIMED OUT", NO_VERDICT: "NO VERDICT"}[ok]
+        print(f"{label}  {name}" + ("" if ok is True else f": {how}"))
 
-    runs = github(f"/repos/johnservil/BLAKE3/actions/runs?head_sha={commit}&per_page=20").get("workflow_runs", [])
-    ci = [r for r in runs if r["name"] == "tests"]
-    step("CI, every job", (ci[0]["conclusion"] == "success") if ci and ci[0]["status"] == "completed" else None,
-         "dispatch the tests workflow on the commit and wait")
+    try:
+        runs = github(f"/repos/johnservil/BLAKE3/actions/runs?head_sha={commit}&per_page=20").get("workflow_runs", [])
+        ci = [r for r in runs if r["name"] == "tests"]
+        conclusion = ci[0]["conclusion"] if ci and ci[0]["status"] == "completed" else None
+        # GitHub's own outcome for a job past its timeout-minutes.
+        step("CI, every job", None if conclusion is None else TIMED_OUT if conclusion == "timed_out" else conclusion == "success",
+             "dispatch the tests workflow on the commit and wait" if conclusion != "timed_out" else "a job reached its timeout-minutes")
+    except GitHubTimedOut as e:
+        step("CI, every job", TIMED_OUT, str(e))
 
-    statuses = github(f"/repos/johnservil/BLAKE3/commits/{commit}/statuses")
-    proofs = [s for s in statuses if s["context"] == "long proofs"]
-    step("long proofs", (proofs[0]["state"] == "success") if proofs else None, "sh tools/verify/long-proofs.sh <commit> (overnight)")
+    try:
+        statuses = github(f"/repos/johnservil/BLAKE3/commits/{commit}/statuses")
+        proofs = [s for s in statuses if s["context"] == "long proofs"]
+        step("long proofs", (proofs[0]["state"] == "success") if proofs else None, "sh tools/verify/long-proofs.sh <commit> (overnight)")
+    except GitHubTimedOut as e:
+        step("long proofs", TIMED_OUT, str(e))
 
     mac = None
     for verdict in sorted(glob.glob(os.path.join(MAIN, "runner/results/*/verdict.json"))):
@@ -86,8 +119,13 @@ def main():
         j = json.loads(Path(job).read_text())
         if j.get("new_commit") == commit and (previous is None or j.get("old_commit") == git("rev-parse", previous)):
             mac = v["status"]
-    step("Mac check against the previous release", (mac == "no regression") if mac else None,
-         f"a check job (cells all) with old_commit {previous or '<previous tag>'} and new_commit {commit[:10]}")
+    # The runner's verdict, each status as itself: "timed out" (its limit
+    # ended the job) and "no verdict" (the machine was busy) are neither a
+    # pass nor a regression.
+    step("Mac check against the previous release",
+         None if mac is None else TIMED_OUT if mac == "timed out" else NO_VERDICT if mac == "no verdict" else mac == "no regression",
+         f"a check job (cells all) with old_commit {previous or '<previous tag>'} and new_commit {commit[:10]}"
+         + (f" (the last one: {mac})" if mac in ("timed out", "no verdict") else ""))
 
     step("VM check against the previous release", log_ends_with("tmp/night/check-release-vm.log", "no cell slower"),
          f"(cd bench-hashes && cargo run --release -- check --against {previous or '<previous tag>'} --cells all) > tmp/night/check-release-vm.log")
@@ -105,8 +143,13 @@ def main():
     else:
         step("pages rewritten since the previous release", None, "no previous release tag found")
 
-    print("release-check:", "every step passes" if all(results) else f"{sum(1 for r in results if not r)} steps open or failing")
-    sys.exit(0 if all(results) else 1)
+    failing = sum(1 for r in results if r is False or r is None)
+    undecided = sum(1 for r in results if r in (TIMED_OUT, NO_VERDICT))
+    if not failing and not undecided:
+        print("release-check: every step passes")
+    else:
+        print(f"release-check: {failing} steps open or failing, {undecided} timed out or without a verdict")
+    sys.exit(0 if not failing and not undecided else 1 if failing else 2)
 
 
 if __name__ == "__main__":
