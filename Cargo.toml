@@ -9,6 +9,9 @@ repository = "https://github.com/johnservil/BLAKE3"
 license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
 readme = "README.md"
 edition = "2024"
+# What a build from crates.io needs: the library, its assembly and build
+# script, the pages users read, the licences, and the file the tests include.
+include = ["/src", "/c", "/build.rs", "/README.md", "/CHANGELOG.md", "/QUALITY.md", "/LICENSE_*", "/tools/require_nextest.rs"]
 
 [features]
 default = ["std"]
