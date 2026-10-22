@@ -46,5 +46,11 @@ run cross_check python3 tools/verify/cross_check.py
 run mutants python3 tools/verify/mutants.py
 b3=$(cat "$logs"/*.txt | cargo run -q --release --manifest-path b3sum/Cargo.toml -- --no-names)
 sha=$(cat "$logs"/*.txt | sha256sum | cut -d' ' -f1)
-status "$state" "$verdict: Lean, hybrid, SME2, x86, cross_check, mutants; logs' SHA-256 $(echo $sha | cut -c1-16), BLAKE3 $(echo $b3 | cut -c1-16)"
-echo "long proofs $verdict for $commit; logs in $logs, SHA-256 $sha, BLAKE3 $b3"
+# The status's description holds 140 characters: the logs' two hashes,
+# each whole in base64url (RFC 4648, 43 characters for 256 bits), fit
+# beside the verdict.
+b64() { printf %s "$1" | tr a-f A-F | basenc --base16 -d | basenc --base64url | tr -d '='; }
+description="$verdict; base64url SHA-256 $(b64 $sha) BLAKE3 $(b64 $b3)"
+[ ${#description} -le 140 ] || { echo "long-proofs: the status description is ${#description} characters, over GitHub's 140: $description" >&2; exit 1; }
+status "$state" "$description"
+echo "long proofs $verdict for $commit; logs in $logs, SHA-256 $sha, BLAKE3 $b3 (hex)"
