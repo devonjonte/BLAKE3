@@ -22,9 +22,12 @@ import re
 import subprocess
 
 from z3 import (BitVec, BitVecVal, Concat, Extract, LShR, RotateRight, ZeroExt, If, ULT, UGT, ULE,
-                UGE, Not, Solver, simplify, is_bv_value, unsat)
+                UGE, Not, Solver, simplify, substitute, is_bv_value, unsat)
 
 import aarch64
+import canon
+import random
+import terms
 from aarch64 import Ptr, Region, Unproved, decide, as_bv, concrete
 
 def tool(name):
@@ -161,26 +164,14 @@ def image(so):
     return data
 
 
-def term_size(t, limit):
-    seen, todo = set(), [t]
-    while todo:
-        x = todo.pop()
-        if x.get_id() in seen:
-            continue
-        seen.add(x.get_id())
-        if len(seen) > limit:
-            return limit + 1
-        todo.extend(x.children())
-    return len(seen)
-
-
 class Machine(aarch64.Machine):
     def __init__(self, code, regions):
         super().__init__(code, regions)
         self.k = {i: BitVecVal(0, 16) for i in range(8)}
         self.flags = None
-        self.facts = []          # the standard's small terms (counter words): see the module's doc
+        self.facts = ()          # the standard's small terms (counter words): see the module's doc
         self.fact_symbols = set()
+        self.normals_for = None  # the facts that normal's memo and sample points were made for
 
     # Memory: aarch64's, the stack bounded below by rsp (less the red
     # zone, 128 bytes under SysV).
@@ -236,15 +227,45 @@ class Machine(aarch64.Machine):
 
     def normal(self, t):
         """The standard's form of a small term proved equal to one of
-        `facts` (the module's doc), else `t`."""
+        `facts` (the module's doc), else `t`: the first fact, in order,
+        that the solver proves equal. Each term is decided once for each
+        `facts` (a tuple, so adding facts makes a new one and starts the
+        memo afresh); terms.py keeps the term, so its id stays its own."""
         if not self.facts or is_bv_value(t):
             return t
+        if self.normals_for is not self.facts:
+            self.normals, self.normals_for, self.fact_values = {}, self.facts, None
+        k = t.get_id()
+        r = self.normals.get(k)
+        if r is None:
+            terms.keep(t)
+            r = self.normals[k] = self._normal(t)
+        return r
+
+    def _normal(self, t):
         for f in self.facts:
             if t.eq(f):
                 return t
-        if term_size(t, 120) > 120 or not aarch64.term_symbols(t) <= self.fact_symbols:
+        if not terms.small(t) or not terms.symbols(t) <= self.fact_symbols:
             return t
-        for f in self.facts:
+        # Only facts that agree with t at two random points can equal it
+        # (equal terms agree at every point), so the solver tries those
+        # alone; a t whose value there is not a constant (a symbol no fact
+        # has) goes to the solver against every fact.
+        if self.fact_values is None:
+            syms = {}
+            for f in self.facts:
+                canon.symbols_of(f, syms, set())
+            rng = random.Random(0)
+            self.points = [[(v, BitVecVal(rng.getrandbits(v.size()), v.size())) for v in syms.values()]
+                           for _ in range(2)]
+            self.fact_values = [[simplify(substitute(f, *p)) for p in self.points] for f in self.facts]
+            assert all(is_bv_value(v) for fv in self.fact_values for v in fv), "a fact's symbol without a point"
+        values = [simplify(substitute(t, *p)) for p in self.points]
+        sampled = all(is_bv_value(v) for v in values)
+        for f, fv in zip(self.facts, self.fact_values):
+            if sampled and not all(x.eq(y) for x, y in zip(values, fv)):
+                continue
             s = Solver()
             s.add(t != f)
             if s.check() == unsat:

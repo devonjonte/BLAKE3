@@ -111,8 +111,8 @@ def d_row_facts(m, counter, n, words):
     (32-bit terms of the 8-bit symbols)."""
     for i in range(n):
         c = counter + i if i else counter
-        m.facts += [Extract(31, 0, c), Extract(63, 32, c)]
-    m.facts += list(words)
+        m.facts += (Extract(31, 0, c), Extract(63, 32, c))
+    m.facts += tuple(words)
     m.fact_symbols |= {"counter"} | {s for w in words for s in aarch64.term_symbols(w)}
 
 
