@@ -212,7 +212,7 @@ def cases(only):
                     out.append((isa, windows, "hash_many", (n, blocks, True)))
             out.append((isa, windows, "hash_many", (WIDTH[isa], 1, False)))
             # Shape (a): whole blocks at one counter, every block count.
-            for blocks in range(2, 16):
+            for blocks in range(2, 17):
                 out.append((isa, windows, "hash_many", (WIDTH[isa], blocks, False)))
     for n in range(1, 33):
         out.append(("avx512", False, "xof_many", n))

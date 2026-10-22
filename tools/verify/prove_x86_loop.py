@@ -1,12 +1,13 @@
 """hash_many for every input count, by induction over full-width passes.
 
-Array bytes are independent at every input offset. The remainder is a
-symbolic count below the SIMD width; the executor explores each tail path.
-Base runs cover counts below one pass. The group invariant then proves
-all larger counts whose input-region size fits in a 64-bit address.
+Independent array words encode every input's bytes. Each input pointer
+has its own bounded region. The remainder is a symbolic count below the
+SIMD width; the executor explores each tail path. Base runs cover counts
+below one pass. The group invariant proves all larger counts whose output
+and pointer-table sizes fit in a 64-bit address.
 """
 from z3 import (Array, BitVecSort, BitVec, BitVecVal, Select, ZeroExt, ULT, ULE, UGE,
-                simplify, substitute, is_bv, Solver, unsat)
+                simplify, substitute, is_bv, Solver, unsat, Concat, Extract)
 import aarch64 as arm
 import induction as ind
 import x86
@@ -45,11 +46,14 @@ The pair of arrivals must establish f(counter+W), including both halves'
 carry, before the formula enters the invariant. The caller also checks
 the complete invariant at K=0 and the executor checks its successor.
 """
+    def counter_only(t):
+        if not is_bv(t):
+            return False
+        symbols = arm.term_symbols(t)
+        return bool(symbols) and symbols <= {'counter'}
+
     def advance(a, b):
-        if not is_bv(a) or not is_bv(b):
-            return None
-        symbols = arm.term_symbols(a)
-        if not symbols or not symbols <= {'counter'} or not arm.term_symbols(b) <= {'counter'}:
+        if not counter_only(a) or not counter_only(b):
             return None
         next_value = substitute(a, (counter, counter + width))
         # This is a lemma for every counter, independent of any group or
@@ -73,8 +77,10 @@ the complete invariant at K=0 and the executor checks its successor.
             continue
         r0, r1 = first.regions[name], second.regions[name]
         for off in sorted(o for o in mem if isinstance(o, int) and o % 8 == 0):
-            a, b = ind.word(r0, off), ind.word(r1, off)
-            value = advance(a, b)
+            a = ind.word(r0, off)
+            if not counter_only(a):
+                continue
+            value = advance(a, ind.word(r1, off))
             if value is not None:
                 for j in range(8):
                     mem[off + j] = ('word', value, j)
@@ -86,31 +92,43 @@ def prove(so, isa, windows, blocks, increment):
     width = p.WIDTH[isa]
     group, rem, k = (BitVec(n, 64) for n in ('len_groups', 'len_rem', 'len_k'))
     count = group * width + rem
-    # 64*blocks*count is the size of one abstract input region. No region
-    # length or loop pointer wraps. The width and block count are powers
-    # of two only where the assembly requires it; this bound uses division.
-    bound = ((((1 << 64) - 1) // (64 * blocks)) - (width - 1)) // width
-    data = Array('inputs', BitVecSort(64), BitVecSort(8))
+    # The output is larger than the pointer table. Each input has its own
+    # region, and may share physical bytes with another read-only input.
+    max_count = ((1 << 64) - 1) // 32
+    bound = max_count // width
+    # (table-entry byte offset, input word byte offset), both 64 bits.
+    # Distinct words remain independent even for enormous input counts.
+    data = Array('inputs', BitVecSort(128), BitVecSort(32))
     key = byte_symbols('key', 32)
     counter = BitVec('counter', 64)
     flags, start, end = p.u8('flags'), p.u8('start'), p.u8('end')
 
+    def input_byte(index, offset):
+        j = offset % 4 if isinstance(offset, int) else ind.forced(arm._machine[0], arm.as_bv(offset) & 3)
+        if j is None:
+            raise Unproved('input word byte is unconstrained')
+        word = Select(data, Concat(arm.as_bv(index), arm.as_bv(offset) - j))
+        return Extract(8 * j + 7, 8 * j, word)
+
     def table_byte(offset):
-        if isinstance(offset, int):
-            return (Ptr('inputs', offset // 8 * 64 * blocks), offset % 8)
-        j = ind.forced(arm._machine[0], arm.as_bv(offset) & 7)
+        m = arm._machine[0]
+        j = offset % 8 if isinstance(offset, int) else ind.forced(m, arm.as_bv(offset) & 7)
         if j is None:
             raise Unproved('table read byte is unconstrained')
-        entry = simplify((arm.as_bv(offset) - j) * (8 * blocks), som=True, bv_sort_ac=True)
-        return (Ptr('inputs', entry), j)
+        entry = simplify(arm.as_bv(offset) - j, som=True, bv_sort_ac=True)
+        name = f'input@{arm.key(entry)}'
+        if name not in m.regions:
+            region = Region(name, 64 * blocks, False, lambda o: input_byte(entry, o))
+            region.symbolic_initial = True
+            m.regions[name] = region
+        return (Ptr(name, 0), j)
+
     regions = {
-        'inputs': Region('inputs', count * (64 * blocks), False, lambda o: Select(data, arm.as_bv(o))),
         'table': Region('table', count * 8, False, table_byte),
         'key': Region('key', 32, False, lambda o: key[o]),
         'out': Region('out', count * 32, True, None),
     }
-    for name in ('inputs', 'table'):
-        regions[name].symbolic_initial = True
+    regions['table'].symbolic_initial = True
     args = [Ptr('table', 0), count, BitVecVal(blocks, 64), Ptr('key', 0), counter,
             BitVecVal(int(increment), 64), ZeroExt(56, flags), ZeroExt(56, start), ZeroExt(56, end), Ptr('out', 0)]
     setup = p.Setup(so, f'blake3_hash_many_{isa}', regions, args, windows)
@@ -118,13 +136,14 @@ def prove(so, isa, windows, blocks, increment):
     flag_words = [ZeroExt(24, f) for f in (flags | start | end, flags | start, flags | end, flags)] + [BitVecVal(64, 32)]
     p.d_row_facts(machine, counter, 2 * width if increment else 1, flag_words)
     machine.lengths = {'len_groups', 'len_rem', 'len_k', 'counter'}
-    bounds = [ULT(rem, width), ULE(group, bound)]
+    bounds = [ULT(rem, width), ULE(group, bound), ULE(count, max_count)]
     machine.assumptions = bounds
     head = pass_head(setup, so, width)
 
     def check_range(m, first, n):
         first = arm.as_bv(first)
-        inputs = [[Select(data, simplify((first + lane) * (64 * blocks) + j, som=True, bv_sort_ac=True))
+        inputs = [[Extract(8 * (j % 4) + 7, 8 * (j % 4),
+                           Select(data, Concat((first + lane) * 8, BitVecVal(4 * (j // 4), 64))))
                    for j in range(64 * blocks)] for lane in range(n)]
         counters = [counter + first + lane if increment else counter for lane in range(n)]
         cvs = table_cvs(inputs, key, counters, flags, start, end, BitVecVal(64, 8), blocks)
@@ -188,11 +207,41 @@ def prove(so, isa, windows, blocks, increment):
             expected |= check_range(m, (k + 1) * width, tail_count(m))
             p.check_abi(m, windows)
         exactly(m, expected)
-    # Reuse the model's proved small-term facts for this symbolic pass
-    # and its tail, as the bounded x86 proofs do for concrete passes.
+    # Fix the checked pass at A, with independent current counter C.
+    # Replacing the original counter by C-W*A is a bijection for each A.
+    # The invariant's binder K stays distinct: at A its counters simplify
+    # to C+j, and at A+1 to C+W+j. This keeps large iteration arithmetic
+    # out of the counter-carry lemmas, without restricting any counter.
     if increment:
-        p.d_row_facts(first, counter + width * k, 2 * width, flag_words)
-        first.fact_symbols.add('len_k')
+        original_counter = counter
+        current_counter = BitVec('counter_pass', 64)
+        k = BitVec('len_at', 64)
+        counter = current_counter - width * k
+        def rebase(value):
+            if is_bv(value):
+                return substitute(value, (original_counter, counter))
+            if isinstance(value, tuple):
+                return tuple(rebase(v) for v in value)
+            if isinstance(value, list):
+                return [rebase(v) for v in value]
+            if isinstance(value, dict):
+                return {name: rebase(v) for name, v in value.items()}
+            return value
+        for attr in ('x', 'v', 'mem', 'masks'):
+            setattr(general, attr, rebase(getattr(general, attr)))
+        first.assumptions = rebase(first.assumptions)
+        at = general.at
+        def at_current(index):
+            inst = at(index)
+            def value(form, size=64):
+                t = inst(form, size)
+                return simplify(t, som=True, bv_sort_ac=True) if is_bv(t) else t
+            return value
+        general.at = at_current
+        first.lengths |= {'len_at', 'counter_pass'}
+        first.facts, first.fact_symbols = (), set()
+        p.d_row_facts(first, current_counter, 2 * width, flag_words)
+        first.fact_symbols.add('counter_pass')
     print('  initial invariant checked; proving its step and tails', flush=True)
     kinds = ind.loop_step(general, first, k,
                           list(first.assumptions) + [ULT(k, group), ULE(k, bound - 1)], head, check)
