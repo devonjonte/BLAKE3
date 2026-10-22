@@ -194,6 +194,25 @@ class Machine(aarch64.Machine):
         finally:
             del self.x["sp"]
 
+    def step_at(self, pc):
+        """One instruction at `pc` (induction.py's hook): the next pc, or
+        "ret" when the return address is the caller's."""
+        mnem, ops, nxt = self.code[pc]
+        aarch64.EXECUTED.add((mnem, tuple(ops)))
+        try:
+            out = step(self, pc, mnem, ops, nxt)
+        except Unproved as e:
+            raise Unproved(f"{e} (at {pc:#x}: {mnem} {', '.join(ops)})") from None
+        if out == "ret":
+            to = self.load(self.x["rsp"], 8)
+            self.x["rsp"] = self.x["rsp"] + 8
+            if isinstance(to, Ptr) and to.region == "return":
+                return "ret"
+            if isinstance(to, Ptr) and to.region == "code":
+                return to.offset
+            raise Unproved(f"return to {to}")
+        return out
+
     # General registers.
     def gread(self, name):
         base, bits = SUB[name]
