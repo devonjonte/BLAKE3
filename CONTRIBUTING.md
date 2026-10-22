@@ -57,7 +57,7 @@ cargo test --release --doc
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API
 sh tools/check-builds.sh            # the builds the suites leave out
-pypy3 tools/mutants/check.py        # about 25 minutes: every surviving mutant known
+python3 tools/mutants/check.py        # about 25 minutes: every surviving mutant known
 ```
 
 A change that makes a mutant survive, or lets a listed one be caught,
@@ -82,7 +82,7 @@ rest.
 
 The NEON hybrid assembly is generated and committed. Edit
 `tools/gen_neon_hybrid.py`, then run
-`pypy3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S`;
+`python3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S`;
 a test fails when the two drift apart.
 
 ## Performance
@@ -134,7 +134,7 @@ what was checked is what lands) once:
   code for targets the VM and Mac do not run (x86-64, Windows, AArch64
   without SME2);
 - mutation testing passes on a change to the Rust
-  (`pypy3 tools/mutants/check.py --since servil`: the mutants in the
+  (`python3 tools/mutants/check.py --since servil`: the mutants in the
   changed lines, and the ones the last map says a changed test catches);
 - the regression check finds no slowdown on AArch64 Linux in a VM and
   natively on an Apple M4 Max. A candidate that changes no compiled code
@@ -153,7 +153,7 @@ which machines you measured on.
 
 A release is a commit everyone can stand behind: every check the main
 line runs once per change, run once more on that commit, and the pages
-users read rewritten for it. `pypy3 tools/release-check.py [COMMIT]`
+users read rewritten for it. `python3 tools/release-check.py [COMMIT]`
 reads where each step left its result and prints PASS, FAIL, or OPEN
 with the command that makes the evidence. The release's tracking issue
 lists what it takes and ticks each step:
@@ -170,7 +170,7 @@ lists what it takes and ticks each step:
    (exactly what CI runs).
 6. A full bench-hashes run on the release commit on the Mac, published to
    bench-hashes' pages with the release named on the map.
-7. `pypy3 tools/gen-ver.py X.Y.Z` from a clean tree: one commit writing
+7. `python3 tools/gen-ver.py X.Y.Z` from a clean tree: one commit writing
    `X.Y.Z+<its parent's hash>` into every version string (the crate,
    b3sum, the C library's crate, header and pkg-config file, the
    CHANGELOG's title) and the tag on it; it prints the dependency line

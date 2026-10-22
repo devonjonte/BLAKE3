@@ -1,7 +1,7 @@
-#!/usr/bin/env pypy3
+#!/usr/bin/env python3
 """Benchmark runner for the servil fork, for the Mac's `benchrunner` account.
 
-    sudo -u benchrunner -H pypy3 runner.py EXCHANGE
+    sudo -u benchrunner -H python3 runner.py EXCHANGE
 
 EXCHANGE holds `jobs/` (JSON job files, read here) and `results/` (written
 here, one folder per job). Code comes from GitHub alone, at the commits a

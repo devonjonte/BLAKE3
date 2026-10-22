@@ -1,6 +1,6 @@
 """Mutation testing against a list of the mutants known to survive.
 
-    pypy3 tools/mutants/check.py [--since REV] [--write] [--map]
+    python3 tools/mutants/check.py [--since REV] [--write] [--map]
 
 cargo-mutants plants likely bugs in the files tools/mutants/known-<arch>.txt
 names (its `files:` line), one at a time, and runs the library's and the

@@ -3,8 +3,8 @@
 built on a negation, stock vocabulary, filler and metadiscourse, mid-
 sentence dashes, and sentences too long or too chained to hold in mind.
 
-    pypy3 tools/claudish.py FILE...     # Markdown whole; other files' comment lines
-    pypy3 tools/claudish.py - < draft   # a commit message or comment, before it goes
+    python3 tools/claudish.py FILE...     # Markdown whole; other files' comment lines
+    python3 tools/claudish.py - < draft   # a commit message or comment, before it goes
 
 Each warning names a line, a rule and the words. A warning is a reason to
 reread the sentence, and judgment decides what changes: often nothing,

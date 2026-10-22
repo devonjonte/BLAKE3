@@ -1,6 +1,6 @@
 """How much of the code each assurance technique reaches, approximately.
 
-    pypy3 tools/qa_coverage.py [--out DIR]
+    python3 tools/qa_coverage.py [--out DIR]
 
 A mechanical inventory, for weighing the techniques against each other,
 not a verdict on any of them. It counts lines of code (blank and comment

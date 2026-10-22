@@ -531,7 +531,8 @@ MUTANTS = [
 
 # Workers start as fresh interpreters: forked from main, after the proofs
 # that list the forms, each would inherit their tens of gigabytes, which
-# pypy's collector then copies page by page.
+# the interpreter's writes (reference counts, the collector) then copy page
+# by page.
 SPAWN = multiprocessing.get_context("spawn")
 
 

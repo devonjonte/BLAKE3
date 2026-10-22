@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Wait for a runner job to finish, then print its verdict.
 
-    pypy3 tools/runner/wait_for.py JOB [LIMIT_SECONDS]
+    python3 tools/runner/wait_for.py JOB [LIMIT_SECONDS]
 
 JOB is the job file's name in runner/jobs/ (with or without `.json`).
 Checks every 30 s for runner/results/<JOB>.*/verdict.json and prints it;

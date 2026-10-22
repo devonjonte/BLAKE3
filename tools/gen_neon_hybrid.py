@@ -85,7 +85,7 @@ Tried and set aside (VM unless said; E-core cycles from the Mac):
 
 Run from the repository root:
 
-    pypy3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S
+    python3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S
 
 The generated file is committed so that building needs no Python; CI checks
 that it matches the generator's output.

@@ -28,7 +28,7 @@ Nobody can log in to it; `sudo -u benchrunner` runs commands as it.
     sh ~/piplayground/blake3-servil/blake3-servil/tools/runner/setup-mac.sh
 
 Run it as yourself; it asks for sudo when it needs it. It makes the
-account's home private, installs PyPy when absent, and gives the account
+account's home private, installs Python 3 when absent, and gives the account
 the same rustc as yours (matched by commit hash). It then makes the
 exchange folders (`jobs/` yours and readable, `results/` the runner's and
 readable) and lets the account pass through the folders above them. Last,
@@ -41,7 +41,7 @@ command starts the runner every time, including after a change to
 
 Write `runner/jobs/NNN-name.json` naming pushed commits (the runner
 fetches branches alone: push a pull request's head as `candidate/*`
-first); wait with `pypy3 tools/runner/wait_for.py NNN-name`; results land
+first); wait with `python3 tools/runner/wait_for.py NNN-name`; results land
 in `runner/results/`. A job runs once per file name, so a changed job
 takes a new number.
 

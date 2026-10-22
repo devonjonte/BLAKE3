@@ -9,7 +9,7 @@ already calls an `initialize` is left as it is, so the script can run again
 after a merge (take either side's version of a conflicting file, then run
 this); a function's multithreaded calls are checked by its test run.
 
-    pypy3 tools/call_initialize.py
+    python3 tools/call_initialize.py
 """
 import glob, os, re
 

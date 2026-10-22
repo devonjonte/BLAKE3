@@ -2,7 +2,7 @@
 """The release checklist's mechanical steps, read from where each gate
 left its result, for one commit (CONTRIBUTING.md, "Releases").
 
-    pypy3 tools/release-check.py [COMMIT]        # default: servil's tip
+    python3 tools/release-check.py [COMMIT]        # default: servil's tip
 
 It runs nothing heavy. For each step it reads the evidence the gate
 wrote and prints one line: PASS, FAIL, or OPEN (no evidence yet, with the
@@ -16,7 +16,7 @@ command that makes it). Exit status 0 only when every step passes.
 - VM check: tmp/night/check-release-vm.log, written by
   `cd bench-hashes && cargo run --release -- check --against <previous tag> --cells all`.
 - Full mutation run: tmp/night/mutants-release.log ending "each known and
-  explained", from `pypy3 tools/mutants/check.py` on the commit.
+  explained", from `python3 tools/mutants/check.py` on the commit.
 - check-builds: tmp/night/check-builds-release.log ending "every build passes".
 - Publish dry run: tmp/night/publish-dry-run.log, from
   `cargo publish --dry-run` in the root and in b3sum/.
@@ -92,7 +92,7 @@ def main():
     step("VM check against the previous release", log_ends_with("tmp/night/check-release-vm.log", "no cell slower"),
          f"(cd bench-hashes && cargo run --release -- check --against {previous or '<previous tag>'} --cells all) > tmp/night/check-release-vm.log")
     step("full mutation run", log_ends_with("tmp/night/mutants-release.log", "each known and explained"),
-         "pypy3 tools/mutants/check.py > tmp/night/mutants-release.log (overnight)")
+         "python3 tools/mutants/check.py > tmp/night/mutants-release.log (overnight)")
     step("check-builds", log_ends_with("tmp/night/check-builds-release.log", "every build passes"),
          "sh tools/check-builds.sh > tmp/night/check-builds-release.log")
     step("cargo publish --dry-run", log_ends_with("tmp/night/publish-dry-run.log", "publish-dry-run: ok"),

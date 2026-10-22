@@ -21,10 +21,10 @@ step() { printf '\n== %s\n' "$*"; }
 step "the benchrunner account exists"
 dscl . -read /Users/benchrunner UserShell
 
-step "PyPy"
-command -v pypy3 >/dev/null || brew install pypy3
-pypy=$(command -v pypy3)
-"$pypy" --version
+step "Python 3"
+command -v python3 >/dev/null || brew install python3
+python=$(command -v python3)
+"$python" --version
 
 step "benchrunner's home is private"
 sudo chmod 700 /Users/benchrunner
@@ -82,8 +82,8 @@ cp "$code/runner.py" "$installed/runner.py"
 chmod 755 "$installed"
 chmod 644 "$installed/runner.py"
 
-step "benchrunner can run PyPy"
-sudo -u benchrunner -H "$pypy" --version
+step "benchrunner can run Python 3"
+sudo -u benchrunner -H "$python" --version
 
 step "starting the runner (Ctrl-C stops it after the current job)"
-exec sudo -u benchrunner -H "$pypy" "$installed/runner.py" "$runner"
+exec sudo -u benchrunner -H "$python" "$installed/runner.py" "$runner"
