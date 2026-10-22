@@ -29,6 +29,10 @@ pub struct Params<const W: usize> {
 unsafe extern "C" {
     fn blake3_partial_sse41(params: *mut Params<4>);
     fn blake3_partial_avx2(params: *mut Params<8>);
+    // Experimental: exercised on AVX-512 CPUs or under Intel SDE. Dispatch
+    // keeps the measured kernels until hardware timings support this one.
+    #[cfg(test)]
+    fn blake3_partial_avx512(params: *mut Params<16>);
 }
 
 /// The byte shuffle (pshufb) that rotates each 32-bit word right by `r`
@@ -149,6 +153,7 @@ mod test {
         }
         check::<4>();
         check::<8>();
+        check::<16>();
     }
 
     /// Every count of whole chunks each kernel takes, with partial chunks
@@ -156,10 +161,16 @@ mod test {
     /// word carries, against the portable chunk values.
     #[test]
     fn test_partial_kernels_against_portable() {
-        let mut input = [0u8; 8 * CHUNK_LEN];
+        unsafe fn avx512(whole: &[&[u8; CHUNK_LEN]], partial: &[u8], key: &CVWords, counter: u64, flags: u8, out: &mut [u8]) {
+            hash_chunks_with_partial::<16>(blake3_partial_avx512, whole, partial, key, counter, flags, out)
+        }
+        let mut input = [0u8; 16 * CHUNK_LEN];
         crate::test::paint_test_input(&mut input);
-        let kernels: [(usize, unsafe fn(&[&[u8; CHUNK_LEN]], &[u8], &CVWords, u64, u8, &mut [u8]), bool); 2] =
-            [(4, hash_chunks_with_partial_sse41, crate::platform::sse41_detected()), (8, hash_chunks_with_partial_avx2, crate::platform::avx2_detected())];
+        let kernels: [(usize, unsafe fn(&[&[u8; CHUNK_LEN]], &[u8], &CVWords, u64, u8, &mut [u8]), bool); 3] = [
+            (4, hash_chunks_with_partial_sse41, crate::platform::sse41_detected()),
+            (8, hash_chunks_with_partial_avx2, crate::platform::avx2_detected()),
+            (16, avx512, std::is_x86_feature_detected!("avx512f")),
+        ];
         for (w, kernel, present) in kernels {
             if !present {
                 continue;
@@ -173,7 +184,7 @@ mod test {
                         for counter in [0, (1 << 32) - 2] {
                             let chunks: std::vec::Vec<&[u8; CHUNK_LEN]> = input.chunks_exact(CHUNK_LEN).take(whole).map(|c| c.try_into().unwrap()).collect();
                             let rest = &input[whole * CHUNK_LEN..][..partial];
-                            let mut out = [0u8; 8 * OUT_LEN];
+                            let mut out = [0u8; 16 * OUT_LEN];
                             // Sound: the CPU has the kernel's instructions.
                             unsafe { kernel(&chunks, rest, crate::IV, counter, crate::KEYED_HASH, &mut out) };
                             for (i, chunk) in input[..whole * CHUNK_LEN + partial].chunks(CHUNK_LEN).enumerate() {

@@ -206,7 +206,7 @@ def prove_hash_many(so, isa, windows, n, blocks, increment):
 
 
 def prove_partial(so, kisa, windows, last):
-    """blake3_partial_{sse41,avx2}(params): for every lane j, from the
+    """blake3_partial_{sse41,avx2,avx512}(params): for every lane j, from the
     lane's chaining value and counter, the 16 blocks at its pointer, block
     b with the lane's length and flags for b; H the lane's chaining value
     after block 15, SNAP after block `last` (tools/gen_x86.py's layout)."""
@@ -284,7 +284,7 @@ def cases(only):
     for n in range(1, 33):
         out.append(("avx512", False, "xof_many", n))
     for windows in (False, True):
-        for kisa in ("sse41", "avx2"):
+        for kisa in ("sse41", "avx2", "avx512"):
             for last in range(16):
                 out.append(("partial", windows, "partial", (kisa, last)))
     return [c for c in out if not only or c[0] in only or c[2] in only or ("windows" if c[1] else "unix") in only]

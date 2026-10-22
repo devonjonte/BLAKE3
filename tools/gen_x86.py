@@ -6,9 +6,13 @@ and c/blake3_partial_x86-64_windows_msvc.asm, the same code in both forms).
     pypy3 tools/gen_x86.py unix > c/blake3_partial_x86-64_unix.S
     pypy3 tools/gen_x86.py msvc > c/blake3_partial_x86-64_windows_msvc.asm
 
-Two kernels, one per width W: blake3_partial_sse41 (W = 4, xmm, legacy SSE
-encodings, for any CPU with SSE4.1) and blake3_partial_avx2 (W = 8, ymm,
-VEX). Each takes one argument, a pointer to a parameter block that the
+Three kernels, one per width W: blake3_partial_sse41 (W = 4, xmm, legacy
+SSE), blake3_partial_avx2 (W = 8, ymm, VEX), and the experimental
+blake3_partial_avx512 (W = 16, zmm, EVEX; AVX-512F). AVX-512 keeps the
+sixteen state vectors in zmm0-zmm15 and the sixteen message vectors in
+zmm16-zmm31, and uses native word rotates. Its rounds use registers alone.
+Dispatch stays on the measured SSE4.1/AVX2 kernels pending hardware timings.
+Each takes one argument, a pointer to a parameter block that the
 caller fills (src/ffi_partial.rs), in the first argument register of the
 calling convention (rdi on Unix, rcx on Windows); nothing else differs
 between the two forms but the registers each convention has the callee
@@ -34,15 +38,16 @@ so a partial chunk takes a lane beside whole ones, its last block's length
 and CHUNK_END in its own lane at its own block, its value in SNAP; the
 lane's later blocks compute words nobody reads (its pointer must reach 16
 blocks: the caller zero-pads it). The registers follow upstream BLAKE3's
-x86 kernels: the state's four rows in registers 0-15, row c's first word
-kept in a stack slot but while row c is added to, so register 8 is the
-temporary the rotations need; the block's sixteen message words
-transposed onto the stack first.
+SSE4.1/AVX2 kernels: the state's four rows in registers 0-15, row c's
+first word kept in a stack slot but while row c is added to, so register
+8 is the temporary the rotations need; the block's sixteen message
+words transposed onto the stack first. AVX-512 instead transposes into
+registers 16-31, keeps row c in registers, and needs no rotation temporary.
 """
 
 import sys
 
-W_OF = {"sse41": 4, "avx2": 8}
+W_OF = {"sse41": 4, "avx2": 8, "avx512": 16}
 MSG_PERMUTATION = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
 COLS = [(0, 4, 8, 12), (1, 5, 9, 13), (2, 6, 10, 14), (3, 7, 11, 15)]
 DIAGS = [(0, 5, 10, 15), (1, 6, 11, 12), (2, 7, 8, 13), (3, 4, 9, 14)]
@@ -72,17 +77,19 @@ class Kernel:
         self.isa, self.windows = isa, windows
         self.w = W_OF[isa]
         self.v = 4 * self.w
-        self.avx = isa == "avx2"
-        self.reg = "ymm" if self.avx else "xmm"
-        self.word = "ymmword" if self.avx else "xmmword"
+        self.avx512 = isa == "avx512"
+        self.avx = isa != "sse41"
+        self.reg = "zmm" if self.avx512 else "ymm" if self.avx else "xmm"
+        self.word = self.reg + "word"
         self.p = "rcx" if windows else "rdi"
         self.off = layout(self.w)
         self.lines = []
-        # Stack frame: the sixteen message vectors, the spill slot, and on
-        # Windows the callee's xmm6-xmm15.
+        # SSE4.1/AVX2: sixteen message vectors and the spill slot.
+        # AVX-512: messages and state stay in registers.
+        # Windows also keeps the callee's xmm6-xmm15 on the stack.
         self.msg = 0
         self.spill = 16 * self.v
-        self.xsave = self.spill + max(self.v, 16)
+        self.xsave = 0 if self.avx512 else self.spill + max(self.v, 16)
         self.frame = self.xsave + (160 if windows else 0)
 
     def e(self, s):
@@ -95,7 +102,7 @@ class Kernel:
         return f"{self.word} ptr [{base}+{disp}]" if disp else f"{self.word} ptr [{base}]"
 
     def m(self, i):
-        return self.mem("rsp", self.msg + self.v * i)
+        return self.r(16 + i) if self.avx512 else self.mem("rsp", self.msg + self.v * i)
 
     def pm(self, name, extra=0):
         return self.mem(self.p, self.off[name] + extra)
@@ -114,7 +121,7 @@ class Kernel:
         self.op("vpaddd", "paddd", d, a, b)
 
     def xor(self, d, a, b):
-        self.op("vpxor", "pxor", d, a, b)
+        self.op("vpxord" if self.avx512 else "vpxor", "pxor", d, a, b)
 
     def orr(self, d, a, b):
         self.op("vpor", "por", d, a, b)
@@ -131,10 +138,10 @@ class Kernel:
             self.e(f"{legacy} {d}, {n}")
 
     def load(self, d, src):
-        self.e(f"{'vmovdqu' if self.avx else 'movdqu'} {d}, {src}")
+        self.e(f"{'vmovdqu32' if self.avx512 else 'vmovdqu' if self.avx else 'movdqu'} {d}, {src}")
 
     def store(self, dst, s):
-        self.e(f"{'vmovdqu' if self.avx else 'movdqu'} {dst}, {s}")
+        self.e(f"{'vmovdqu32' if self.avx512 else 'vmovdqu' if self.avx else 'movdqu'} {dst}, {s}")
 
     def store_aligned(self, dst, s):
         self.e(f"{'vmovdqa' if self.avx else 'movdqa'} {dst}, {s}")
@@ -144,6 +151,17 @@ class Kernel:
         c += d; b = (b ^ c) >>> rb. Row c's register 8 is in the spill
         slot outside its addition, register 8 the temporary."""
         r, t = self.r, self.r(8)
+        if self.avx512:
+            for (a, b, c, d), m in zip(quads, words):
+                self.add(r(a), r(a), self.m(m))
+            for a, b, c, d in quads:
+                self.add(r(a), r(a), r(b))
+                self.xor(r(d), r(d), r(a))
+                self.e(f"vprord {r(d)}, {r(d)}, {rd}")
+                self.add(r(c), r(c), r(d))
+                self.xor(r(b), r(b), r(c))
+                self.e(f"vprord {r(b)}, {r(b)}, {rb}")
+            return
         for (a, b, c, d), m in zip(quads, words):
             self.add(r(a), r(a), self.m(m))
         for a, b, c, d in quads:
@@ -173,7 +191,20 @@ class Kernel:
         lanes = [f"r{8 + j}" for j in range(self.w)]
         for q in range(4):
             d = f"+{16 * q}" if q else ""
-            if self.avx:
+            if self.avx512:
+                for k in range(4):
+                    for group in range(4):
+                        self.e(f"mov r8, qword ptr [{self.p}+{self.off['MSG'] + 8 * (4 * group + k)}]")
+                        if group == 0:
+                            self.e(f"vmovdqu xmm{8 + k}, xmmword ptr [r8+rdx{d}]")
+                        else:
+                            self.e(f"vinserti32x4 zmm{8 + k}, zmm{8 + k}, xmmword ptr [r8+rdx{d}], {group}")
+                for dst, a, b, op in [(12, 8, 9, 'vunpcklpd'), (13, 8, 9, 'vunpckhpd'),
+                                       (14, 10, 11, 'vunpcklpd'), (15, 10, 11, 'vunpckhpd')]:
+                    self.e(f"{op} zmm{dst}, zmm{a}, zmm{b}")
+                for k, (lo, hi, imm) in enumerate([(12, 14, 136), (12, 14, 221), (13, 15, 136), (13, 15, 221)]):
+                    self.e(f"vshufps {self.m(4 * q + k)}, zmm{lo}, zmm{hi}, {imm}")
+            elif self.avx:
                 for k in range(4):
                     self.e(f"vmovdqu xmm{8 + k}, xmmword ptr [{lanes[k]}+rdx{d}]")
                     self.e(f"vinsertf128 ymm{8 + k}, ymm{8 + k}, xmmword ptr [{lanes[k + 4]}+rdx{d}], 1")
@@ -207,8 +238,9 @@ class Kernel:
         if self.windows:
             for i in range(6, 16):
                 self.e(f"{'vmovdqu' if self.avx else 'movdqu'} xmmword ptr [rsp+{self.xsave + 16 * (i - 6)}], xmm{i}")
-        for j in range(w):
-            self.e(f"mov r{8 + j}, qword ptr [{self.p}+{self.off['MSG'] + 8 * j}]")
+        if not self.avx512:
+            for j in range(w):
+                self.e(f"mov r{8 + j}, qword ptr [{self.p}+{self.off['MSG'] + 8 * j}]")
         for i in range(8):
             self.load(r(i), self.pm("KEY", v * i))
         self.e("xor edx, edx")
@@ -216,7 +248,8 @@ class Kernel:
         L.append(f"{name}_block:")
         self.transpose()
         self.load(r(8), self.pm("IV"))
-        self.store_aligned(self.mem("rsp", self.spill), r(8))
+        if not self.avx512:
+            self.store_aligned(self.mem("rsp", self.spill), r(8))
         for i in range(1, 4):
             self.load(r(8 + i), self.pm("IV", v * i))
         self.load(r(12), self.pm("CTR"))
@@ -227,7 +260,7 @@ class Kernel:
             for quads, base in ((COLS, 0), (DIAGS, 8)):
                 self.half(quads, [s[base + 2 * k] for k in range(4)], 16, 12)
                 self.half(quads, [s[base + 2 * k + 1] for k in range(4)], 8, 7)
-        self.xor(r(0), r(0), self.mem("rsp", self.spill))
+        self.xor(r(0), r(0), r(8) if self.avx512 else self.mem("rsp", self.spill))
         for i in range(1, 8):
             self.xor(r(i), r(i), r(i + 8))
         self.e(f"cmp edx, dword ptr [{self.p}+{self.off['LAST']}]")
@@ -266,11 +299,11 @@ def unix():
            "#define _CET_ENDBR",
            "#endif",
            ".intel_syntax noprefix"]
-    for isa in ("sse41", "avx2"):
+    for isa in W_OF:
         name = f"blake3_partial_{isa}"
         out += [f".global _{name}", f".global {name}"]
     out += ["#ifdef __APPLE__", ".text", "#else", ".section .text", "#endif"]
-    for isa in ("sse41", "avx2"):
+    for isa in W_OF:
         name = f"blake3_partial_{isa}"
         k = Kernel(isa, windows=False)
         k.body(name)
@@ -280,11 +313,11 @@ def unix():
 
 def msvc():
     out = ["; Generated by tools/gen_x86.py; do not edit."]
-    for isa in ("sse41", "avx2"):
+    for isa in W_OF:
         name = f"blake3_partial_{isa}"
         out += [f"public _{name}", f"public {name}"]
     out += ["", "_TEXT   SEGMENT ALIGN(16) 'CODE'"]
-    for isa in ("sse41", "avx2"):
+    for isa in W_OF:
         name = f"blake3_partial_{isa}"
         k = Kernel(isa, windows=True)
         k.body(name)
