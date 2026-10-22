@@ -52,6 +52,23 @@ class ContextTests(unittest.TestCase):
         self.assertTrue(canon.has_data(iteration))
 
 
+class ModelFactsTests(unittest.TestCase):
+    def test_counter_high_facts_separate_at_carry_boundaries(self):
+        from unittest.mock import patch
+        import x86
+        counter, k = BitVecs("counter len_k", 64)
+        m = x86.Machine({}, {})
+        m.facts = tuple(Extract(63, 32, counter + 8 * k + i) for i in range(5))
+        m.fact_symbols = {"counter", "len_k"}
+        wanted = m.facts[2]
+        loaded = Concat(*(Extract(8 * i + 7, 8 * i, wanted) for i in reversed(range(4))))
+        # The high halves agree at the random points; each declared
+        # offset's carry boundary separates all the wrong candidates.
+        with patch.object(x86, "Solver", wraps=x86.Solver) as solver:
+            self.assertTrue(m.normal(loaded).eq(wanted))
+        self.assertEqual(solver.call_count, 1)
+
+
 class GeneralizationTests(unittest.TestCase):
     def test_constant_difference_through_byte_shuffles(self):
         # A word loaded byte by byte: its bytes' Concat hides the difference
@@ -61,6 +78,52 @@ class GeneralizationTests(unittest.TestCase):
             return Concat(Extract(31, 24, t), Extract(23, 16, t), Extract(15, 8, t), Extract(7, 0, t))
         self.assertEqual(induction.constant_difference(loaded(x), loaded(x + 1)), 1)
         self.assertIsNone(induction.constant_difference(x, x * x))
+
+    def test_backedge_requires_successor_domain_and_no_wrap(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from z3 import ULT, UGE
+        from aarch64 import Unproved
+        k, groups = BitVecs("len_k len_groups", 64)
+        state = SimpleNamespace(x={}, v={}, regions={}, lengths={"len_k", "len_groups"}, assumptions=[])
+        g = induction.Generalized(state, state, k)
+        # A back edge at the last legal iteration must exit instead.
+        # Even an unrestricted domain must keep the unsigned rank growing.
+        for assumptions in ([UGE(groups, 1), ULT(k, groups)], []):
+            with self.subTest(assumptions=assumptions):
+                with patch.object(induction, "paths", side_effect=lambda m, *_: [(m, "head")]):
+                    with self.assertRaisesRegex(Unproved, "domain or wraps"):
+                        induction.loop_step(g, state, k, assumptions, 0, lambda *_: None)
+
+    def test_public_successor_uses_direct_equality(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        counter, k = BitVecs("counter len_k", 64)
+        state = SimpleNamespace(x={"r": counter}, v={}, regions={})
+        g = induction.Generalized(state, state, k)
+        g.x["r"] = counter + 8 * k
+        end = SimpleNamespace(x={"r": counter + 8 * k + 8}, v={}, regions={},
+                              lengths={"counter", "len_k"}, assumptions=[])
+        with patch("prove_hybrid.same", side_effect=AssertionError("public arithmetic uses the solver")):
+            self.assertEqual(induction.mismatches(end, g, k + 1), [])
+            end.x["r"] += 1
+            self.assertEqual(induction.mismatches(end, g, k + 1), [("x", "r")])
+
+    def test_unwritten_first_word_skips_second_reconstruction(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from aarch64 import Region
+        first = Region("out", 8, True, None)
+        second = Region("out", 8, True, None)
+        second.bytes = {i: BitVec(f"result{i}", 8) for i in range(8)}
+        states = [SimpleNamespace(x={}, v={}, regions={"out": r}) for r in (first, second)]
+        word = induction.word
+        def reconstruct(region, offset):
+            self.assertIs(region, first, "an absent first word cannot yield an invariant")
+            return word(region, offset)
+        with patch.object(induction, "word", side_effect=reconstruct):
+            g = induction.Generalized(*states, BitVec("len_k", 64))
+        self.assertEqual(g.mem["out"], {i: None for i in range(8)})
 
     def test_x86_snapshot_keeps_masks_independent(self):
         from z3 import BitVecVal

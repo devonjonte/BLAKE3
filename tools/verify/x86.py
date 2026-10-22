@@ -22,7 +22,7 @@ import re
 import subprocess
 
 from z3 import (BitVec, BitVecVal, Concat, Extract, LShR, RotateRight, ZeroExt, If, ULT, UGT, ULE,
-                UGE, Not, Solver, simplify, substitute, is_bv_value, unsat)
+                UGE, Not, Solver, simplify, substitute, is_bv_value, unsat, Z3_OP_EXTRACT)
 
 import aarch64
 import canon
@@ -268,7 +268,7 @@ class Machine(aarch64.Machine):
                 return t
         if not terms.small(t) or not terms.symbols(t) <= self.fact_symbols:
             return t
-        # Only facts that agree with t at two random points can equal it
+        # Only facts that agree with t at the sample points can equal it
         # (equal terms agree at every point), so the solver tries those
         # alone; a t whose value there is not a constant (a symbol no fact
         # has) goes to the solver against every fact.
@@ -279,6 +279,17 @@ class Machine(aarch64.Machine):
             rng = random.Random(0)
             self.points = [[(v, BitVecVal(rng.getrandbits(v.size()), v.size())) for v in syms.values()]
                            for _ in range(2)]
+            # Adjacent counter high halves almost always agree randomly.
+            # Probe each declared offset's carry boundary with the other
+            # parameters zero, so false candidates reach the solver rarely.
+            zero = [(v, BitVecVal(0, v.size())) for v in syms.values()]
+            boundaries = {(f.size(), simplify(substitute(f.arg(0), *zero)).as_long())
+                          for f in self.facts if f.decl().kind() == Z3_OP_EXTRACT and f.arg(0).size() == 64}
+            for bits, offset in sorted(boundaries):
+                for v in syms.values():
+                    if v.size() == 64:
+                        self.points.append([(u, BitVecVal((1 << bits) - offset if u.eq(v) else 0, u.size()))
+                                            for u in syms.values()])
             self.fact_values = [[simplify(substitute(f, *p)) for p in self.points] for f in self.facts]
             assert all(is_bv_value(v) for fv in self.fact_values for v in fv), "a fact's symbol without a point"
         values = [simplify(substitute(t, *p)) for p in self.points]

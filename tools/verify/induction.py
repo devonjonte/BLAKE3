@@ -15,7 +15,7 @@ import copy
 
 import canon
 
-from z3 import BitVec, BitVecVal, ZeroExt, Extract, Not, ULE, UGE, simplify, is_bv_value, is_bv, substitute, eq
+from z3 import BitVec, BitVecVal, ZeroExt, Extract, Not, ULE, UGE, ULT, And, simplify, is_bv_value, is_bv, substitute, eq
 import aarch64
 from aarch64 import Ptr, Unproved, Undecided
 
@@ -136,8 +136,11 @@ class Generalized:
         for name, mem in self.mem.items():
             r0, r1 = s0.regions[name], s1.regions[name]
             for off in [o for o, b in mem.items() if b is None and isinstance(o, int) and o % 8 == 0]:
-                w0, w1 = word(r0, off), word(r1, off)
-                if w0 is None or w1 is None:
+                w0 = word(r0, off)
+                if w0 is None:
+                    continue
+                w1 = word(r1, off)
+                if w1 is None:
                     continue
                 g = self.unify(w0, w1, wildcard=False)
                 if g is not None:
@@ -344,9 +347,13 @@ def mismatches(m, g, kval):
         if isinstance(b, Ptr) or isinstance(a, Ptr):
             return (isinstance(a, Ptr) and isinstance(b, Ptr) and a.region == b.region
                     and aarch64.holds(m, aarch64.as_bv(a.offset) == aarch64.as_bv(b.offset)))
-        if same(a, b):
+        if eq(a, b):
             return True
-        return aarch64.lengths_only(m, a - b) and aarch64.holds(m, a == b)
+        # Public arithmetic needs one equality proof, rather than hash
+        # normalization's search among other leaves with similar samples.
+        if aarch64.lengths_only(m, a - b):
+            return aarch64.holds(m, a == b)
+        return same(a, b)
     bad = []
     for r, gv in g.x.items():
         if not agree(m.x[r], inst(gv)):
@@ -388,7 +395,9 @@ def mismatches(m, g, kval):
 def loop_step(g, start, kval, assumptions, head, check):
     """Every path of one iteration from `g` at `kval` (induction.py): `check`
     each path's end (`check(end, how)`); a path back at the head must be in the
-    state for kval + 1. Positions where it differs become unknown in `g`, and
+    state for kval + 1, within the next iteration's assumptions and with
+    its unsigned iteration count advancing without wrap. Positions where
+    it differs become unknown in `g`, and
     the step is proved again: the invariant needs only what the iterations
     rely on (a weaker invariant still holds at the start). Returns the
     counts of paths."""
@@ -413,6 +422,10 @@ def loop_step(g, start, kval, assumptions, head, check):
     kinds = {"head": 0, "return": 0}
     for end, how in ends:
         kinds[how] += 1
+        if how == "head":
+            successor = [substitute(a, (kval, kval + 1)) for a in assumptions]
+            if not aarch64.holds(end, And(ULT(kval, kval + 1), *successor)):
+                raise Unproved("back edge leaves the next iteration's domain or wraps its count")
         canon.set_context(end.assumptions, end.lengths)
         check(end, how)
     canon.set_context([], set())
