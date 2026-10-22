@@ -192,7 +192,9 @@ class Generalized:
                     return simplify(a + kk * d, som=True, bv_sort_ac=True)
                 if g[0] == "unknown":
                     return None
-            return g
+            # A caller can state a counter's halves directly in terms of
+            # K, then prove the initial state and the step against them.
+            return substitute(g, (self.k, kval)) if is_bv(g) else g
         return inst
 
     def machine(self, template, kval):
