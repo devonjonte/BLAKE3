@@ -15,6 +15,16 @@ class ContextTests(unittest.TestCase):
     def tearDown(self):
         canon.set_context([], set())
 
+    def test_array_fingerprint_distinguishes_chunk_offsets(self):
+        from z3 import Array, BitVecSort, BitVecVal, Select, simplify
+        name = "stride_test_input"
+        array = Array(name, BitVecSort(64), BitVecSort(8))
+        canon._values[(name, 0, 0)] = 0x0123456789ABCDEF
+        canon._values[(name, 0, 1)] = 0
+        sampled = canon.sample(name, array, 0)
+        self.assertEqual(simplify(Select(sampled, BitVecVal(0, 64))).as_long(), 0)
+        self.assertEqual(simplify(Select(sampled, BitVecVal(256, 64))).as_long(), 0x23)
+
     def test_iteration_counter_is_a_parameter(self):
         counter, iteration = BitVecs("counter len_k", 64)
         canon.set_context([], {"len_k"})
@@ -51,6 +61,28 @@ class GeneralizationTests(unittest.TestCase):
             return Concat(Extract(31, 24, t), Extract(23, 16, t), Extract(15, 8, t), Extract(7, 0, t))
         self.assertEqual(induction.constant_difference(loaded(x), loaded(x + 1)), 1)
         self.assertIsNone(induction.constant_difference(x, x * x))
+
+    def test_x86_snapshot_keeps_masks_independent(self):
+        from z3 import BitVecVal
+        import x86
+        original = x86.Machine({}, {})
+        fork = induction.snapshot(original)
+        fork.k[1] = BitVecVal(7, 16)
+        self.assertEqual(original.k[1].as_long(), 0)
+
+    def test_x86_masks_participate_in_the_invariant(self):
+        from z3 import BitVecVal, simplify
+        import x86
+        first = x86.Machine({}, {})
+        second = induction.snapshot(first)
+        second.k[1] = BitVecVal(1, 16)
+        k = BitVec("len_k", 64)
+        g = induction.Generalized(first, second, k)
+        current = g.machine(first, BitVecVal(2, 64))
+        self.assertEqual(simplify(current.k[1]).as_long(), 2)
+        self.assertEqual(induction.mismatches(current, g, BitVecVal(1, 64)), [("mask", 1)])
+        g.forget(("mask", 1))
+        self.assertIsNone(g.at(k)(g.masks[1]))
 
     def test_explicit_counter_halves_at_the_next_iteration(self):
         from types import SimpleNamespace

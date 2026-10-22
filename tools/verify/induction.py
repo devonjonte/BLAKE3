@@ -32,6 +32,8 @@ def snapshot(m):
         c.regions[name] = r2
     c.assumptions = list(m.assumptions)
     c.lengths = set(m.lengths)
+    if hasattr(m, "k"):
+        c.k = dict(m.k)
     if getattr(m, "za", None) is not None:
         c.za = [[list(row) for row in tile] for tile in m.za]
     if hasattr(m, "p"):
@@ -108,6 +110,8 @@ class Generalized:
         self.wild = 0
         self.x = {r: self.unify(s0.x[r], s1.x[r]) for r in s0.x}
         self.v = {r: [self.unify(a, b) for a, b in zip(s0.v[r], s1.v[r])] for r in s0.v}
+        self.masks = ({r: self.unify(s0.k[r], s1.k[r]) for r in s0.k}
+                      if hasattr(s0, "k") else None)
         # SME2's state: the ZA tiles and the predicates.
         self.za = None
         if getattr(s0, "za", None) is not None and getattr(s1, "za", None) is not None:
@@ -147,6 +151,8 @@ class Generalized:
             self.x[pos[1]] = ("unknown", 64)
         elif kind == "v":
             self.v[pos[1]][pos[2]] = ("unknown", 32)
+        elif kind == "mask":
+            self.masks[pos[1]] = ("unknown", 16)
         elif kind == "za":
             self.za[pos[1]][pos[2]][pos[3]] = ("unknown", 32)
         elif kind == "p":
@@ -211,6 +217,8 @@ class Generalized:
             m.x[r] = v if v is not None else self.fresh(64)
         for r, lanes in self.v.items():
             m.v[r] = [(inst(g) if inst(g) is not None else self.fresh(32)) for g in lanes]
+        if self.masks is not None:
+            m.k = {r: (inst(g) if inst(g) is not None else self.fresh(16)) for r, g in self.masks.items()}
         for name, mem in self.mem.items():
             region = m.regions[name]
             region.bytes = {}
@@ -223,6 +231,8 @@ class Generalized:
                     region.bytes[off] = b
                 # unknown bytes stay unwritten: a read of one fails the proof
         m.nzcv = None
+        if hasattr(m, "flags"):
+            m.flags = None
         if self.za is not None:
             m.za = [[[(inst(g) if inst(g) is not None else self.fresh(32)) for g in row] for row in tile] for tile in self.za]
         if self.p is not None:
@@ -345,6 +355,10 @@ def mismatches(m, g, kval):
         for l, gv in enumerate(lanes):
             if not agree(m.v[r][l], inst(gv)):
                 bad.append(("v", r, l))
+    if g.masks is not None:
+        for r, gv in g.masks.items():
+            if not agree(m.k[r], inst(gv)):
+                bad.append(("mask", r))
     if g.za is not None:
         for t, tile in enumerate(g.za):
             for row, cells in enumerate(tile):
