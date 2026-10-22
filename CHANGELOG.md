@@ -25,7 +25,9 @@ are tested ([QUALITY.md](QUALITY.md)).
    yourself, or use `update_reader`). Gone: the `traits-preview` feature.
    Gone: the `guts`, `hazmat` and `platform` modules. Gone: the `no_avx2`,
    `no_avx512`, `no_neon` and `no_sme2` features. `pure` stays.
-6. `b3sum --num-threads N` means at most N threads in all, and 1 means one
+6. b3sum installs from the package `b3sums` (`cargo install b3sums`);
+   crates.io's `b3sum` is official BLAKE3's. The program is still `b3sum`.
+   `--num-threads N` means at most N threads in all, and 1 means one
    thread. `--no-mmap` does nothing. Every file is read to its end. A
    broken pipe ends b3sum quietly.
 
@@ -53,5 +55,8 @@ are tested ([QUALITY.md](QUALITY.md)).
   side by side, so a message arriving in small pieces hashes as fast as
   one in a buffer.
 - The AVX2 and AVX-512 batch kernels read nothing past an input's end.
+- The crate leaves Arm's data-independent timing (DIT) as the calling
+  thread has it. A program that wants Arm's promise turns DIT on in its
+  own threads before it hashes ([QUALITY.md](QUALITY.md)).
 - Building the Arm kernels needs an assembler that knows armv8.2-a+sha3,
   GNU as 2.30 or LLVM 7. Without one, the build warns and leaves them out.
