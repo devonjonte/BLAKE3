@@ -423,8 +423,6 @@ src/platform.rs	replace | with ^ in Platform::compress_blocks	1	equivalent: | an
 src/platform.rs	replace | with ^ in read_x86_features	3	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace |= with &= in read_x86_features	1	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/portable.rs	replace | with ^ in hash1	1	equivalent: | and ^ agree on flag bits that never overlap
-src/self_test.rs	delete match arm FAILED in ensure_slow	1	OPEN: the self-test's failure path (a CPU or build that computes wrong digests); no test makes the self-test fail
-src/self_test.rs	delete match arm PASSED in ensure_slow	1	the self-test state machine under interleavings the tests leave to chance (a second thread waiting, or a failure on another thread)
 src/self_test.rs	replace % with + in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace % with / in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace & with ^ in compiled_features_present	2	this CPU has LZCNT and BMI1: every form of the check reads them present; the case it guards is a CPU without them

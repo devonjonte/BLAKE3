@@ -440,7 +440,6 @@ src/platform.rs	replace | with ^ in Platform::compress_blocks	1	equivalent: | an
 src/platform.rs	replace | with ^ in read_x86_features	3	x86 only: never called on AArch64 (CI's x86 tests reach it)
 src/platform.rs	replace |= with &= in read_x86_features	3	x86 only: never called on AArch64 (CI's x86 tests reach it)
 src/portable.rs	replace | with ^ in hash1	1	equivalent: | and ^ agree on flag bits that never overlap
-src/self_test.rs	delete match arm FAILED in ensure_slow	1	OPEN: the self-test's failure path (a CPU or build that computes wrong digests); no test makes the self-test fail
 src/self_test.rs	replace & with ^ in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace & with | in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace && with || in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)

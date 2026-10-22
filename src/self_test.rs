@@ -496,22 +496,27 @@ mod test {
         assert_eq!(run(), CASES.len());
     }
 
-    /// Threads that start up at once all return: one runs the self-test,
-    /// the rest wait for its verdict (each test runs in a fresh process,
-    /// so the self-test has not run yet). A waiting thread that missed
-    /// the verdict would spin, and the runner's time limit would end it.
+    /// The first call runs the self-test, which passes (each test runs in
+    /// a fresh process, so it has not run yet). Then a thread that arrives
+    /// while another runs the self-test waits for its verdict: it returns
+    /// once the self-test has passed, and stops once it has failed. The
+    /// test stands in for the running thread by setting the state itself,
+    /// so the arrival always finds the self-test running. A waiting thread
+    /// that missed the verdict would spin, and the runner's time limit
+    /// would end it.
     #[test]
-    fn test_initialize_from_threads_at_once() {
-        let barrier = std::sync::Barrier::new(8);
-        std::thread::scope(|s| {
-            for _ in 0..8 {
-                s.spawn(|| {
-                    barrier.wait();
-                    crate::initialize();
-                });
-            }
-        });
-        assert_eq!(STATE.load(core::sync::atomic::Ordering::Relaxed), PASSED);
+    #[cfg(not(miri))]
+    fn test_a_waiting_thread_takes_the_verdict() {
+        use core::sync::atomic::Ordering::Relaxed;
+        crate::initialize();
+        assert_eq!(STATE.load(Relaxed), PASSED, "initialize runs the self-test");
+        for (verdict, returns) in [(PASSED, true), (FAILED, false)] {
+            STATE.store(RUNNING, Relaxed);
+            let waiter = std::thread::spawn(ensure_slow);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            STATE.store(verdict, Relaxed);
+            assert_eq!(waiter.join().is_ok(), returns, "the waiting thread, after the verdict {verdict}");
+        }
     }
 
     /// The self-test runs every assembly entry point this machine has:
