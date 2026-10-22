@@ -275,11 +275,10 @@ these cases:
   width, block counts 1, 2 and 16, and the one-counter case;
 - `hash_many`, Windows convention: SSE4.1 25 of 25 cases, AVX2 49 of 49,
   AVX-512 71 of 97 (none has failed);
-- AVX-512 `xof_many`: one to three blocks.
+- AVX-512 `xof_many`: 1 to 32 blocks.
 
 Open: `hash_many` at every count (by induction) and the remaining
-Windows cases, and `xof_many` from four blocks (the kernel agrees at
-random points; the normal form does not yet reach it). These ran on an
+Windows cases. These ran on an
 i7-12700K, outside the long proofs' run below.
 
 The fork's own x86-64 kernels in Rust intrinsics, and the Rust code (the

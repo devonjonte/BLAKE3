@@ -159,11 +159,11 @@ i7-12700K; the AVX-512 forms need an AVX-512 CPU and are skipped without
 one (CI's `x86_model` job). `prove_x86.py` proves cases against the same
 Lean specification: `compress_in_place` and `compress_xof` for SSE4.1
 and AVX-512, under the Unix and Windows conventions, and `hash_many` at
-the counts run so far, and AVX-512 `xof_many` at one to three blocks.
-Open: `hash_many` at the larger counts, `xof_many` at four blocks and
-more (the kernel agrees with the specification at random points there,
-`x86_xof_point.py`; the model's normal form gives out), and every count
-by induction, as the AArch64 group loops are proved.
+the counts run so far, and AVX-512 `xof_many` at 1 to 32 blocks. From
+four blocks its output masks are selects whose condition the path's
+lengths settle; the normal form takes such a select as the arm it
+selects. Open: `hash_many` at the larger counts, and every count by
+induction, as the AArch64 group loops are proved.
 
 **Code changed for the proofs.** The SME2 message kernel took the last
 block's length with a branch (0 for 64), so a proof had to fix the

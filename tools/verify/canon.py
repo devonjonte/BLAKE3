@@ -15,7 +15,8 @@ hold, so a mismatch is a failed proof, never a false one.
 import sys
 from z3 import (If, is_bool, Z3_OP_BADD, Z3_OP_BXOR, Z3_OP_ROTATE_RIGHT, Z3_OP_ROTATE_LEFT, Z3_OP_EXTRACT,
                 Z3_OP_CONCAT, Z3_OP_ZERO_EXT, Z3_OP_EXT_ROTATE_RIGHT, Z3_OP_EXT_ROTATE_LEFT,
-                Z3_OP_UNINTERPRETED, BitVecVal, BitVec, Solver, unsat, sat, Or, substitute, simplify, is_bv_value)
+                Z3_OP_UNINTERPRETED, Z3_OP_ITE, BitVecVal, BitVec, Solver, unsat, sat, Or, substitute, simplify,
+                is_bv_value, is_true, is_false)
 import random
 import re
 
@@ -249,6 +250,15 @@ def _canon(t):
     if not has_arith(t) or not has_data(t):
         return leaf(t)
     kind = t.decl().kind()
+    if kind == Z3_OP_ITE:
+        # A select whose condition is constant on this path (the AVX-512
+        # XOF's mask lanes at four blocks and more, whose compare the
+        # path's lengths settle) is the arm it selects.
+        c = simplify(t.arg(0))
+        if is_true(c):
+            return canon(t.arg(1))
+        if is_false(c):
+            return canon(t.arg(2))
     if kind in (Z3_OP_CONCAT, Z3_OP_EXTRACT, Z3_OP_ZERO_EXT):
         ps = merged(pieces(t))
         if len(ps) == 1:
