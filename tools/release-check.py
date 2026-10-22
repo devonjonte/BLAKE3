@@ -26,6 +26,7 @@ command that makes it). Exit status 0 only when every step passes.
 
 import glob
 import json
+from pathlib import Path
 import os
 import re
 import subprocess
@@ -78,11 +79,11 @@ def main():
 
     mac = None
     for verdict in sorted(glob.glob(os.path.join(MAIN, "runner/results/*/verdict.json"))):
-        v = json.load(open(verdict))
+        v = json.loads(Path(verdict).read_text())
         job = os.path.join(MAIN, "runner/jobs", v["job"])
         if not os.path.exists(job):
             continue
-        j = json.load(open(job))
+        j = json.loads(Path(job).read_text())
         if j.get("new_commit") == commit and (previous is None or j.get("old_commit") == git("rev-parse", previous)):
             mac = v["status"]
     step("Mac check against the previous release", (mac == "no regression") if mac else None,
