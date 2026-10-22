@@ -57,6 +57,7 @@ are tested ([QUALITY.md](QUALITY.md)).
 - The AVX2 and AVX-512 batch kernels read nothing past an input's end.
 - The crate leaves Arm's data-independent timing (DIT) as the calling
   thread has it. A program that wants Arm's promise turns DIT on in its
-  own threads before it hashes ([QUALITY.md](QUALITY.md)).
+  own threads before it hashes (the quality manual, "Timing and secrets":
+  [docs/quality-manual.md](docs/quality-manual.md)).
 - Building the Arm kernels needs an assembler that knows armv8.2-a+sha3,
   GNU as 2.30 or LLVM 7. Without one, the build warns and leaves them out.
