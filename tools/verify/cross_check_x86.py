@@ -6,15 +6,24 @@ and by the model (x86.py), must agree bit for bit. Needs an x86-64 CPU
 
     python3 tools/verify/cross_check_x86.py
 
+For Intel SDE, assemble the test functions natively first, then execute
+only the prepared functions under emulation (SDE need not follow the
+compiler and disassembler subprocesses):
+
+    python3 tools/verify/cross_check_x86.py --prepare DIR
+    sde64 -skx -- python3 tools/verify/cross_check_x86.py --prepared DIR
+
 Loads, stores, branches, and the general registers' few instructions are
 not checked here: the proofs check every address against its region, and
 their models are a few lines each.
 """
 
 import ctypes
+import json
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,7 +33,7 @@ from z3 import BitVecVal
 import x86
 import aarch64
 
-FILES = ("sse41", "avx2", "avx512")
+FILES = ("sse41", "avx2", "avx512", "partial")
 
 
 def forms(code):
@@ -108,25 +117,68 @@ def model(mnem, text, xs, vs, avx512):
             [aarch64.concrete(m.v[i][l]) if l < lanes else vs[16 * i + l] for i in range(4) for l in range(16)])
 
 
+def build_features(d):
+    # CPUID and XGETBV describe the executing CPU, including under Intel
+    # SDE; /proc/cpuinfo describes the host even when instructions emulate.
+    src, so = os.path.join(d, "features.c"), os.path.join(d, "features.so")
+    with open(src, "w") as f:
+        f.write('int has_avx512(void) { __builtin_cpu_init(); return '
+                '__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512vl"); }\n')
+    subprocess.run(["cc", "-shared", "-fPIC", src, "-o", so], check=True)
+    return so
+
+
 def has_avx512():
-    try:
-        return " avx512f " in open("/proc/cpuinfo").read() and " avx512vl " in open("/proc/cpuinfo").read()
-    except OSError:
-        return False
+    with tempfile.TemporaryDirectory() as d:
+        return bool(ctypes.CDLL(build_features(d)).has_avx512())
+
+
+def kernel_forms(isa):
+    import prove_x86
+    so = prove_x86.assemble(isa, False)
+    return forms(x86.disassemble(so, x86.sections(so)[".text"][0], x86.text_end(so)))
+
+
+def prepare(d):
+    os.makedirs(d, exist_ok=True)
+    manifest = {}
+    for isa in FILES:
+        fl = kernel_forms(isa)
+        lib = build(fl, True)
+        shutil.copyfile(lib._name, os.path.join(d, isa + ".so"))
+        manifest[isa] = fl
+    build_features(d)
+    with open(os.path.join(d, "forms.json"), "w") as f:
+        json.dump(manifest, f)
+    print(f"Prepared {sum(map(len, manifest.values()))} instruction forms in {d}; execution requires AVX-512F and AVX-512VL.")
 
 
 def main():
+    args = sys.argv[1:]
+    assert not args or (len(args) == 2 and args[0] in ("--prepare", "--prepared")), "usage: cross_check_x86.py [--prepare DIR | --prepared DIR]"
+    if args and args[0] == "--prepare":
+        prepare(os.path.abspath(args[1]))
+        return
+    prepared = os.path.abspath(args[1]) if args else None
+    if prepared:
+        avx512 = bool(ctypes.CDLL(os.path.join(prepared, "features.so")).has_avx512())
+        assert avx512, "prepared instruction forms require AVX-512F and AVX-512VL (use Intel SDE or a capable CPU)"
+        with open(os.path.join(prepared, "forms.json")) as f:
+            manifest = json.load(f)
+        assert set(manifest) == set(FILES), "prepare the current kernel forms again"
+    else:
+        avx512 = has_avx512()
     rounds = 200
-    avx512 = has_avx512()
+    random.seed(0)
     total, skipped, bad = 0, 0, 0
     for isa in FILES:
-        import prove_x86
-        so = prove_x86.assemble(isa, False)
-        fl = forms(x86.disassemble(so, x86.sections(so)[".text"][0], x86.text_end(so)))
+        fl = manifest[isa] if prepared else kernel_forms(isa)
         if any(wide(t) for _, t in fl) and not avx512:
+            # AVX-512VL forms can use xmm/ymm without a mask. Keep each
+            # file together: its narrow forms may also require AVX-512.
             skipped += len(fl)
             continue
-        lib = build(fl, avx512)
+        lib = ctypes.CDLL(os.path.join(prepared, isa + ".so")) if prepared else build(fl, avx512)
         for i, (mnem, text) in enumerate(fl):
             f = getattr(lib, f"f{i}")
             for _ in range(rounds):
@@ -145,7 +197,7 @@ def main():
                     break
             total += 1
     print(f"{total} instruction forms, {rounds} random states each: {'all agree' if not bad else f'{bad} disagree'}"
-          + (f"; {skipped} AVX-512 forms skipped (no AVX-512 here)" if skipped else ""))
+          + (f"; {skipped} forms skipped (no AVX-512 here)" if skipped else ""))
     sys.exit(1 if bad else 0)
 
 
