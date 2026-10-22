@@ -59,10 +59,12 @@ def paths(m, pc, heads):
                 continue
             if pc not in m.code:
                 raise Unproved(f"execution reached {pc:#x}, outside the code under proof")
-            mnem, ops = m.code[pc]
+            mnem, ops = m.code[pc][:2]
             aarch64.EXECUTED.add((mnem, tuple(ops)))
             try:
-                nxt = aarch64.step(m, pc, mnem, ops)
+                # A machine with its own stepper (x86.py's) steps itself;
+                # the AArch64 machines take the path they always have.
+                nxt = m.step_at(pc) if hasattr(m, "step_at") else aarch64.step(m, pc, mnem, ops)
             except Undecided as e:
                 for answer in (e.cond, Not(e.cond)):
                     b = snapshot(m)
@@ -71,6 +73,9 @@ def paths(m, pc, heads):
                 break
             m.steps += 1
             if nxt == "ret":
+                if hasattr(m, "step_at"):
+                    done.append((m, "return"))
+                    break
                 to = m.x[30]
                 if isinstance(to, Ptr) and to.region == "return":
                     done.append((m, "return"))
