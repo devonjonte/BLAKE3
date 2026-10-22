@@ -13,18 +13,21 @@ different ways.
 The fastest parts are small routines called kernels, some of them
 written in assembly.
 
-For every Arm kernel, the project uses formal
-verification: a computer-checked proof compares the actual machine
-instructions with a written specification of BLAKE3 and shows that the
-result is correct for every input. The proof also shows that a kernel stays within the memory it is
-given and that the instructions it chooses depend on the input's length,
-not on its contents.
+For Arm kernels, the project uses formal verification: symbolic execution
+compares assembled instructions with a written specification of BLAKE3.
+Each completed proof covers every input value within its stated contract.
+The checks also examine memory accesses, the calling convention, and
+whether input bytes or keys affect branches or addresses.
 
-On Intel and AMD processors, the assembly kernels (upstream BLAKE3's,
-unchanged) are being proved the same way. Their single compressions are
-proved. Their batch kernels are proved for the input sizes and counts
-checked so far, but not yet for every count, and one form of extended
-output is still open.
+The integer and NEON kernels' supported block counts are covered. For
+SME2, the proofs covering every batch count are being strengthened: they
+must establish loop progress and allow independent input data across
+batches. Full batch-count assurance remains open while those repairs and
+their deliberate-error tests are validated.
+
+On Intel and AMD processors, upstream's assembly kernels are checked the
+same way. Single compressions and the enumerated batch and extended-output
+cases are proved. Coverage of arbitrary counts remains open.
 
 The proofs do not cover the fork's own Intel and AMD kernels, written in
 Rust, or the Rust code that prepares work and combines results.
@@ -89,9 +92,9 @@ mistakes in some of the tools and models used to construct the proofs.
 ## What remains uncertain
 
 No human has carefully reviewed every line, and nobody outside the
-project has audited the code. Where the Intel and AMD proofs are not yet
-complete, and in the fork's own Intel and AMD kernels and the Rust code
-around the proved kernels, tests carry the checking alone.
+project has audited the code. Full batch-count proof assurance remains
+open on Arm and x86-64. Tests also cover those cases, the fork's own Intel
+and AMD kernels, and the Rust code around the assembly.
 These checks reduce risk, but they cannot guarantee that no bug remains.
 
 ## Run the checks

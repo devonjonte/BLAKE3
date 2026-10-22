@@ -21,7 +21,8 @@ reviewed it line by line or audited it. You would be among its first users.
 
 Its checks go further than most:
 
-- The Arm assembly kernels are **proved correct** for all inputs, as the CPU runs them.
+- Assembly kernels are checked against BLAKE3's specification with **symbolic proofs**.
+  Coverage of every batch count is under review; [QUALITY.md](QUALITY.md) explains its scope.
 - **The tests are tested:** about 2,500 likely bugs are planted in the Rust code, one at a
   time, and a test must catch each one.
 - Digests are checked against the official test vectors and an independent
