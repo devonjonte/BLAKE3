@@ -4,15 +4,15 @@ These tools prove every assembly kernel on AArch64 equal to
 the compression function of the Lean specification of BLAKE3
 (`c2sp/BLAKE3/`), for every input, key, counter, and flags value:
 
-    pypy3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9, kn, pn, x4, x8 (414 cases, about 15 minutes on 16 CPUs)
-    pypy3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof, and the chunk and parent kernels at every group count (36 cases, minutes); c/blake3_sme2_hybrid_aarch64.S: chunks_x2 (2 cases, 7 min)
-    pypy3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # the other kernels at every group count (x2_every about 50 minutes)
-    pypy3 tools/verify/lean/emit.py                   # the definition, from the Lean specification (needs Lean)
-    pypy3 tools/verify/cross_check.py                 # the NEON and integer models against the CPU
-    pypy3 tools/verify/cross_check_sme.py             # the streaming SVE and SME2 models against the CPU (needs SME2)
-    pypy3 tools/verify/mutants.py                     # wrong kernels are rejected
-    pypy3 -m unittest discover -s tools/verify -p test_helpers.py  # the normalizer, the induction's generalization, the leak detector
-    pypy3 tools/verify/isla_check.py                  # the NEON and integer models against Arm's specification (needs Isla)
+    python3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9, kn, pn, x4, x8 (414 cases, about 15 minutes on 16 CPUs)
+    python3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof, and the chunk and parent kernels at every group count (36 cases, minutes); c/blake3_sme2_hybrid_aarch64.S: chunks_x2 (2 cases, 7 min)
+    python3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # the other kernels at every group count (x2_every about 50 minutes)
+    python3 tools/verify/lean/emit.py                   # the definition, from the Lean specification (needs Lean)
+    python3 tools/verify/cross_check.py                 # the NEON and integer models against the CPU
+    python3 tools/verify/cross_check_sme.py             # the streaming SVE and SME2 models against the CPU (needs SME2)
+    python3 tools/verify/mutants.py                     # wrong kernels are rejected
+    python3 -m unittest discover -s tools/verify -p test_helpers.py  # the normalizer, the induction's generalization, the leak detector
+    python3 tools/verify/isla_check.py                  # the NEON and integer models against Arm's specification (needs Isla)
 
 They need Python 3 with Z3 (`python3-z3`), an AArch64 machine with the
 SHA-3 extension, and Clang and llvm-objdump 17 or later (for SME2). The

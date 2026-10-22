@@ -2,7 +2,7 @@
 BLAKE3's compression function, for every input, key, counter, and flags,
 at every block count they take (tools/verify/README.md).
 
-    pypy3 tools/verify/prove_hybrid.py [KERNEL...]
+    python3 tools/verify/prove_hybrid.py [KERNEL...]
 
 Assembles the file, disassembles each kernel, and runs it symbolically
 (aarch64.py). For each block count it checks that the output equals the

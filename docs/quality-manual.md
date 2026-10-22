@@ -340,29 +340,29 @@ directory's `lean-toolchain` names the version):
 
 ```sh
 python3 c2sp/BLAKE3/check.py        # the definition: C2SP's text, its appendix, the test vectors
-pypy3 tools/verify/lean/emit.py   # the proofs' compression is the standard's (needs python3-z3)
+python3 tools/verify/lean/emit.py   # the proofs' compression is the standard's (needs python3-z3)
 ```
 
 Each prints, for every theorem, the axioms it depends on, and fails on
 any beyond Lean's standard three, so exit status 0 means Lean has checked
 every proof it builds, completely.
 
-Z3 (an AArch64 Linux machine with PyPy and `python3-z3`, Clang and
+Z3 (an AArch64 Linux machine with Python 3 and `python3-z3`, Clang and
 llvm-objdump 17 or later; details in [`tools/verify/README.md`](../tools/verify/README.md)):
 
 ```sh
-pypy3 tools/verify/prove_hybrid.py   # ends "414 of 414 cases proved"
-pypy3 tools/verify/prove_sme2.py     # ends "38 of 38 cases proved" (the longest, the chunk kernel at every group count, 15 minutes)
-pypy3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # ends "3 of 3 cases proved": the other kernels at every group count (x2_every about 50 minutes)
-pypy3 tools/verify/mutants.py        # wrong kernels, each rejected
+python3 tools/verify/prove_hybrid.py   # ends "414 of 414 cases proved"
+python3 tools/verify/prove_sme2.py     # ends "38 of 38 cases proved" (the longest, the chunk kernel at every group count, 15 minutes)
+python3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # ends "3 of 3 cases proved": the other kernels at every group count (x2_every about 50 minutes)
+python3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
 
-The x86-64 proofs run on any machine with PyPy, `python3-z3`, Clang and
+The x86-64 proofs run on any machine with Python 3, `python3-z3`, Clang and
 LLVM's `llvm-ml`; their instruction model is checked against the CPU by
 `tools/verify/cross_check_x86.py`, in CI on every change:
 
 ```sh
-pypy3 tools/verify/prove_x86.py      # every case of its list, or name some
+python3 tools/verify/prove_x86.py      # every case of its list, or name some
 ```
 
 All of them, 455 cases, run on the fork's VM after every change to a

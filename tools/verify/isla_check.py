@@ -16,7 +16,7 @@ bits, the V register the NEON instructions write; a flag in PSTATE's
 1-bit field, and a condition the inputs leave open (csel, ccmp, cset) on
 each of its two sides.
 
-    pypy3 tools/verify/isla_check.py
+    python3 tools/verify/isla_check.py
 
 Needs Isla (github.com/rems-project/isla, `isla-footprint`), the Armv9.4
 snapshot (isla-snapshots, `armv9p4.ir`), and Isla's source (its

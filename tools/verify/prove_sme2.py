@@ -3,8 +3,8 @@ compression function (tools/verify/README.md), at the 512-bit streaming
 vector length of Apple M4 (`cntw` = 16; the kernels return at once on any
 other).
 
-    pypy3 tools/verify/prove_sme2.py [KERNEL...]
-    pypy3 tools/verify/prove_sme2.py every   # the chunk kernel at every group count (3.5 hours)
+    python3 tools/verify/prove_sme2.py [KERNEL...]
+    python3 tools/verify/prove_sme2.py every   # the chunk kernel at every group count (3.5 hours)
 """
 
 import os
@@ -518,7 +518,6 @@ def prove_case(case):
     return case, f"proved ({what}, {steps} instructions, {time.time() - t:.1f} s)"
 
 
-WORKERS = 5
 
 
 def main():
@@ -530,9 +529,9 @@ def main():
     todo = sorted(cases(set(sys.argv[1:])),
                   key=lambda c: first.index(c[0]) if c[0] in first else len(first))
     failed = 0
-    # WORKERS at once: the largest case holds about 17 GB (every, October
-    # 17), so five fit the VM's 98 GB.
-    for (name, _, _), verdict in workers.each(prove_case, todo, WORKERS):
+    # Every CPU: the largest case holds about 600 MB (x2_every under
+    # CPython, October 22).
+    for (name, _, _), verdict in workers.each(prove_case, todo, len(todo)):
         print(f"{name}: {verdict}", flush=True)
         failed += verdict.startswith("NOT")
     print(f"{len(todo) - failed} of {len(todo)} cases proved")

@@ -6,7 +6,7 @@ value, by the x86-64 model (x86.py): one compression (compress_in_place,
 compress_xof), and hash_many at every input count up to two passes of its
 width and every block count from 1 to 16.
 
-    pypy3 tools/verify/prove_x86.py [CASE...]
+    python3 tools/verify/prove_x86.py [CASE...]
 """
 
 import os

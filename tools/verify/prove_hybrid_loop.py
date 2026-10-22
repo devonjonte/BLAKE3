@@ -5,7 +5,7 @@ kernel's. Each pass hashes one block of each SME2 chunk and two blocks of
 one integer chunk: chunk 16 in passes 0 to 7, chunk 17 in passes 8 to 15,
 so the loop is proved in two halves, each an induction over its passes.
 
-    pypy3 tools/verify/prove_hybrid_loop.py
+    python3 tools/verify/prove_hybrid_loop.py
 """
 
 import os

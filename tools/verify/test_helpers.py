@@ -2,7 +2,7 @@
 context (canon.py), the induction's generalization (induction.py), and the
 timing proof's leak detector (aarch64.py).
 
-    pypy3 -m unittest discover -s tools/verify -p test_helpers.py
+    python3 -m unittest discover -s tools/verify -p test_helpers.py
 """
 
 import unittest

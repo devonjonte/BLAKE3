@@ -3,7 +3,7 @@ instruction form the proved kernels use (its mnemonic, arrangement, and
 immediates as they occur), executed natively on random register states
 and by the model, must agree bit for bit.
 
-    pypy3 tools/verify/cross_check.py
+    python3 tools/verify/cross_check.py
 
 The forms are the hybrid kernels' file's (cross_check_sme.py checks the
 SME2 kernels' file).

@@ -3,7 +3,7 @@ every message length, so the long proofs need not unroll it: from any hash state
 leaves the standard's compression of that state with block K, and block
 K + 1 in ZA.
 
-    pypy3 tools/verify/prove_block_loop.py
+    python3 tools/verify/prove_block_loop.py
 """
 
 import os

@@ -1,6 +1,6 @@
 """Write the proofs' definition of BLAKE3's compression from the Lean specification.
 
-    pypy3 tools/verify/lean/emit.py
+    python3 tools/verify/lean/emit.py
 
 1. Inserts the generated section of c2sp/BLAKE3/Blake3.lean (generate.py's
    translation of BLAKE3.md) into Generic.lean, verbatim, and checks it is

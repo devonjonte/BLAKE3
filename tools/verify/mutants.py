@@ -2,7 +2,7 @@
 proved kernel, and its proof must fail. A proof that passed a mutant would
 be vacuous.
 
-    pypy3 tools/verify/mutants.py
+    python3 tools/verify/mutants.py
 """
 
 import os
