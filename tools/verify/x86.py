@@ -197,6 +197,7 @@ class Machine(aarch64.Machine):
     def step_at(self, pc):
         """One instruction at `pc` (induction.py's hook): the next pc, or
         "ret" when the return address is the caller's."""
+        aarch64._machine[0] = self
         mnem, ops, nxt = self.code[pc]
         aarch64.EXECUTED.add((mnem, tuple(ops)))
         try:
