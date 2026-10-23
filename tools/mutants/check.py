@@ -76,16 +76,21 @@ NAME = re.compile(r"^(\S+?):\d+:\d+: (.*)$")
 def cpu_flags():
     """The CPU's feature flags as the OS names them (Linux: /proc/cpuinfo's
     flags or Features line; macOS: sysctl's hw.optional names set to 1)."""
-    try:
-        for line in open("/proc/cpuinfo"):
-            if line.startswith(("flags", "Features")):
-                return set(line.split(":", 1)[1].split())
-    except OSError:
-        pass
+    if sys.platform == "linux":
+        with open("/proc/cpuinfo") as info:
+            for line in info:
+                key, sep, value = line.partition(":")
+                if sep and key.strip() in ("flags", "Features"):
+                    return set(value.split())
+        raise ValueError("/proc/cpuinfo has no flags or Features line")
     if sys.platform == "darwin":
-        out = subprocess.run(["sysctl", "hw.optional"], capture_output=True, text=True).stdout
-        return {k.rsplit(".", 1)[-1] for k, _, v in (l.partition(": ") for l in out.splitlines()) if v.strip() == "1"}
-    return set()
+        out = subprocess.run(["sysctl", "hw.optional"], capture_output=True, text=True, check=True).stdout
+        rows = [line.partition(":") for line in out.splitlines()]
+        if not rows or any(not sep or not key.startswith("hw.optional.") or not value.strip()
+                           for key, sep, value in rows):
+            raise ValueError("sysctl hw.optional returned missing or malformed feature data")
+        return {key.rsplit(".", 1)[-1] for key, _, value in rows if value.strip() == "1"}
+    raise RuntimeError(f"CPU feature reader unavailable on {sys.platform}")
 
 
 # A row whose survival depends on the CPU, not only the architecture: its
@@ -93,12 +98,14 @@ def cpu_flags():
 # cpu_flags() names them), and the row applies only where that holds (an
 # EPYC 9255, October 22: AVX-512's detection mutants survive where the CPU
 # has it, and are caught on the i7, where it is absent, and the reverse).
-CONDITION = re.compile(r"^\[cpu (has|lacks) ([^\]]+)\] ")
+CONDITION = re.compile(r"^\[cpu (has|lacks) ([A-Za-z0-9_.]+(?: [A-Za-z0-9_.]+)*)\] \S")
 FLAGS = cpu_flags()
 
 
 def applies(reason):
     m = CONDITION.match(reason)
+    if reason.lstrip().startswith("[") and m is None:
+        raise ValueError(f"malformed CPU condition: {reason!r}")
     return m is None or all(f in FLAGS for f in m.group(2).split()) == (m.group(1) == "has")
 
 
