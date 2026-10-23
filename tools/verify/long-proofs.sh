@@ -54,3 +54,4 @@ description="$verdict; base64url SHA-256 $(b64 $sha) BLAKE3 $(b64 $b3)"
 [ ${#description} -le 140 ] || { echo "long-proofs: the status description is ${#description} characters, over GitHub's 140: $description" >&2; exit 1; }
 status "$state" "$description"
 echo "long proofs $verdict for $commit; logs in $logs, SHA-256 $sha, BLAKE3 $b3 (hex)"
+[ "$state" = success ]
