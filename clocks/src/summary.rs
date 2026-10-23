@@ -2,10 +2,11 @@
 //! the fork, bench-hashes, and every probe.
 //!
 //! **A run's cost** for a cell is its mean: the total timed nanoseconds of
-//! its samples over the total work they did, the slowest samples set aside
+//! its samples over the total work they did, every sample counted
 //! ([`mean`]). That is what a caller pays on average, and it moves
 //! continuously when a cell spends more or less of its time at a slower
-//! speed.
+//! speed; a slow sample among few moves it in full, which is what the
+//! caller met.
 //!
 //! **Comparing two programs** takes pairs of runs, one of each, back to back
 //! and in alternating order, so that drift between the runs falls on both
@@ -28,29 +29,31 @@
 //! integers throughout, rounded once where a person reads them.
 
 /// The mean of samples given as (timed ns, units of work): total ns over
-/// total units, in Q64.64 ns per unit, rounded to the nearest, the slowest
-/// samples set aside first: the slowest `ceil(n / 100)` of them, slowest by
-/// ns per unit, compared exactly (Zooko's rule, chosen on bench-hashes #41,
-/// October 19, 2026). A rare stall then moves the figure a little rather
-/// than in full, while a slow way a cell spends real time still shows.
-/// Requires some samples, some units among those kept, and a total under
-/// 2^64 ns.
+/// total units, in Q64.64 ns per unit, rounded to the nearest, every
+/// sample counted (Zooko, October 23, 2026, on bench-hashes #60; it
+/// replaces the slowest-hundredth rule of October 19). At the budgets the
+/// benchmark runs on, 6 to 24 samples a cell, setting one sample aside
+/// erased a slow state that came once in ten samples (10% of the raw cost,
+/// read as level: the data branch, 2026-10-22/mean-trim-controls); the
+/// mean of every sample shows it, at the price of moving in full for a
+/// stall, which the pairs of runs and their load readings are there to
+/// catch. Requires some samples, some units, and a total under 2^64 ns.
 pub fn mean(samples: impl IntoIterator<Item = (u64, u64)>) -> u128 {
     let (ns, units) = mean_totals(samples);
     ((ns << 64) + units / 2) / units
 }
 
-/// The exact nanoseconds and units retained by [`mean`], after setting
-/// aside its slowest samples. Exact decimal displays use these totals;
-/// fixed-point comparisons use [`mean`]. Both share this selection rule
-/// and its preconditions.
+/// The exact nanoseconds and units [`mean`] is the ratio of: every
+/// sample's, summed. Exact decimal displays use these totals; fixed-point
+/// comparisons use [`mean`]. Both share this one rule and its
+/// preconditions.
 pub fn mean_totals(samples: impl IntoIterator<Item = (u64, u64)>) -> (u128, u128) {
-    let mut samples: Vec<(u64, u64)> = samples.into_iter().collect();
-    assert!(!samples.is_empty(), "a mean needs samples");
-    // Fastest first: retain the prefix after setting aside the slowest.
-    samples.sort_by(|&(an, au), &(bn, bu)| (u128::from(an) * u128::from(bu)).cmp(&(u128::from(bn) * u128::from(au))));
-    let kept = samples.len() - samples.len().div_ceil(100).min(samples.len() - 1);
-    let (ns, units) = samples[..kept].iter().fold((0u128, 0u128), |(ns, units), &(n, u)| (ns + u128::from(n), units + u128::from(u)));
+    let mut count = 0usize;
+    let (ns, units) = samples.into_iter().fold((0u128, 0u128), |(ns, units), (n, u)| {
+        count += 1;
+        (ns + u128::from(n), units + u128::from(u))
+    });
+    assert!(count > 0, "a mean needs samples");
     assert!(units > 0, "a mean needs some work done");
     assert!(ns < 1 << 64, "a run's samples total under 2^64 ns");
     (ns, units)
@@ -237,48 +240,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exact_mean_totals_use_the_same_retained_samples() {
+    fn exact_mean_totals_are_every_sample_summed() {
         let mut samples = vec![(1000, 1); 99];
         samples.push((1_000_000, 1));
-        assert_eq!(mean_totals(samples.clone()), (99_000, 99));
-        assert_eq!(mean(samples), 1000 << 64);
-        assert_eq!(mean_totals([(200, 100), (1000, 1)]), (200, 100));
+        assert_eq!(mean_totals(samples.clone()), (99_000 + 1_000_000, 100));
+        assert_eq!(mean(samples), 10_990 << 64);
+        assert_eq!(mean_totals([(200, 100), (1000, 1)]), (1200, 101));
     }
 
     #[test]
     fn a_mean_is_total_time_over_total_work() {
-        // 99 samples of 5 ns over 2 units and one of 7 ns over 2 units: the
-        // slowest one of the hundred is set aside, leaving 2.5 ns a unit.
+        // 99 samples of 5 ns over 2 units and one of 7 ns over 2 units:
+        // 502 ns over 200 units, 2.51 ns a unit.
         let mut samples = vec![(5, 2); 99];
         samples.push((7, 2));
-        assert_eq!(mean(samples), 5 << 63);
+        assert_eq!(mean(samples), ((502u128 << 64) + 100) / 200);
         assert_eq!(ratio_permille(mean([(110, 100)]), mean([(100, 100)])), 1100);
     }
 
-    /// The slowest ceil(n / 100) samples go, by ns per unit: of 100, one;
-    /// of 101, two; of 2, one, however slow the other is. A stall among
-    /// steady samples moves the mean a little; a slower half stays.
+    /// Every sample counts, the slowest included: the reason is a slow
+    /// state that comes once in ten samples, which a rule setting one
+    /// sample aside erased entirely at six samples (bench-hashes' data
+    /// branch, 2026-10-22/mean-trim-controls: ten phases, each read as
+    /// level, 10% of the raw cost gone). This test is that fixture in
+    /// small: a rule that drops the slowest sample reads 1000 here and
+    /// fails it.
     #[test]
-    fn a_mean_sets_the_slowest_hundredth_aside() {
-        // One sample ten times slower than the other 99: set aside.
-        let mut samples = vec![(100, 1); 99];
-        samples.push((1000, 1));
-        assert_eq!(mean(samples), 100 << 64);
-        // 200 samples, three slow: two go, the third still counts.
-        let mut samples = vec![(100, 1); 197];
-        samples.extend([(1000, 1); 3]);
-        assert_eq!(mean(samples), ((19_700u128 + 1000) << 64) / 198 + 1);
-        // Slowness is per unit: 200 ns over 100 units is fast, not slow.
+    fn a_slow_sample_among_few_counts_in_full() {
+        // Six samples, one of them twice as slow: 7000 ns over 6 units.
+        let samples = [(1000, 1), (1000, 1), (2000, 1), (1000, 1), (1000, 1), (1000, 1)];
+        assert_eq!(mean_totals(samples), (7000, 6));
+        assert_eq!(mean(samples), ((7000u128 << 64) + 3) / 6);
+        // Two samples: the slow one is half the figure.
+        assert_eq!(mean([(100, 1), (1000, 1)]), 550 << 64);
+        // Slowness is per unit, and so is the mean: 200 ns over 100 units
+        // weighs as 100 units.
         let mut samples = vec![(100, 1); 98];
         samples.extend([(200, 100), (1000, 1)]);
-        assert_eq!(mean(samples), ((98 * 100 + 200) << 64) / (98 + 100));
-        // Few samples: the slowest one goes.
-        assert_eq!(mean([(100, 1), (1000, 1)]), 100 << 64);
-        // A slower half is real time, and stays: one of its samples is the
-        // one set aside, the other 49 count in full.
-        let mut samples = vec![(100, 1); 50];
-        samples.extend([(200, 1); 50]);
-        assert_eq!(mean(samples), ((50 * 100 + 49 * 200) << 64) / 99 + 1);
+        assert_eq!(mean(samples), ((((98 * 100 + 200 + 1000) as u128) << 64) + 99) / 199);
     }
 
     /// The geometric mean of the ratios: 1.21 and 1 give 1.1; 1.1 and 1/1.1
