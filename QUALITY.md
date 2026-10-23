@@ -43,8 +43,15 @@ project supports.
 
 The project also uses mutation testing to check the tests themselves.
 It introduces one small mistake at a time (changing a comparison, say,
-or skipping a step) and requires at least one test to fail. If no test notices, the developers add a test or record why
-that mistake is harmless.
+or skipping a step) and requires at least one test to fail. If no test
+notices, the developers add a test or record why that mistake is
+harmless. A mistake that makes a test wait forever is a third outcome:
+the clock stops the test, which is recorded too, and where the code can
+be made to fail instead of waiting (a loop that counts, a wait that
+checks its end) it is, so the tests see the mistake. On the x86-64
+machine that runs the check, every one of about 1,070 such mistakes is
+caught, explained, or listed as a wait, and the list of each is in the
+repository.
 
 Each program also runs a startup self-test. Before doing real work, it
 hashes a few inputs with known answers. This can catch a broken build or
