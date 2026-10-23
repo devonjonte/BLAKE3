@@ -54,8 +54,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 MAPS = os.environ.get("TESTS_MAP_DIR") or os.path.join(ROOT, "tmp", "tests-map")
 TARGET = os.path.join(ROOT, "target", "tests-coverage")
 # The cargo arguments the suite runs with (CONTRIBUTING: the library's and
-# the integration tests, release).
-SUITE = ["--release", "--lib", "--tests"]
+# the integration tests, release), with the public features on, as the
+# mutation check builds (tools/mutants/check.py): the tests behind them
+# are in the map too, so a map serves the mutation check's narrowing.
+SUITE = ["--release", "--lib", "--tests", "--features", "serde,zeroize"]
 # Changes here reach code coverage cannot see: every test runs.
 EVERYTHING = re.compile(r"^(c/|build\.rs$|Cargo\.toml$|Cargo\.lock$|\.cargo/|\.config/|src/.*\.(S|c|h)$)")
 # Crates and suites of their own, which the library's tests never run:
