@@ -8,14 +8,31 @@ publish = false
 
 [lib]
 name = "b3_servil"
-# The static and shared C libraries, and the Rust library its tests call.
-crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 blake3-servil = { path = ".." }
 
-# build.rs gives the shared library a soname carrying the version.
-[build-dependencies]
+[features]
+capi = []
+
+[package.metadata.capi]
+min_version = "0.10.26"
+
+[package.metadata.capi.header]
+name = "b3"
+subdirectory = ""
+generation = false
+
+[package.metadata.capi.install.include]
+asset = [{ from = "b3.h", to = "" }]
+
+[package.metadata.capi.library]
+name = "b3_servil"
+version_suffix_components = 2
+
+[package.metadata.capi.pkg_config]
+name = "b3_servil"
+filename = "b3_servil"
 
 [dev-dependencies]
 serde_json = "1"

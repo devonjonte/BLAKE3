@@ -1,6 +1,6 @@
 # Working on BLAKE3 servil
 
-This fork of BLAKE3 1.8.7, published as the crate `blake3-servil`, aims
+This fork of BLAKE3 1.8.7, whose crate is `blake3-servil`, aims
 at the fastest BLAKE3 in every situation a program meets: alone, beside
 other work, beside other hashing threads, natively and in virtual
 machines. This file holds what you need to change it and to cooperate
@@ -25,7 +25,7 @@ The README lists what the fork adds for callers; the code is laid out so:
   stack, loop, and chunk state), and `tree.rs` (the tree walk).
 - `capi/`: the C API, `b3.h`, a thin layer over the crate
   (`capi/src/lib.rs`), tested from Rust against the official test vectors
-  and from C (`capi/tests/`).
+  and from C and C++ on Unix (`capi/tests/`).
 - `tools/verify/`: the proofs (docs/quality-manual.md, "Proofs"); `tools/mutants/`:
   mutation testing and the list of mutants known to survive.
 
@@ -48,7 +48,9 @@ CPU with SME2, the check stops when the build lacks the kernel.
 
 The tests run under [cargo-nextest](https://nexte.st), each in its own
 process (`cargo test` stops at once and says so); the doc examples run
-under `cargo test --doc`.
+under `cargo test --doc`. The C API tests also need cargo-c
+0.10.26+cargo-0.100.0 and `pkg-config` on `PATH`; see
+[`capi/README.md`](capi/README.md) for installation.
 
 ```sh
 cargo nextest run --release --lib --tests
@@ -68,15 +70,15 @@ machine's code; `--write` rewrites the list, each new row's reason
 `UNCLASSIFIED` until you write one).
 
 CI (`.github/workflows/ci.yml`) runs the suites on Linux x86-64 and arm64
-(without SME2, and without SHA-3 under QEMU), macOS, Windows with MSVC,
+(without SME2, and without SHA-3 under QEMU), and Windows with MSVC,
 for every pull request from a fork, and by hand for a
-candidate that changes code for those targets. `sh tools/check-builds.sh`
+candidate that changes code for those targets. The Mac runner
+(`tools/runner/`) runs the Rust suites natively. `sh tools/check-builds.sh`
 runs, in minutes, the builds the suites above leave out: without std, on
-one CPU without SME2, warnings as errors, and compile checks for x86-64
-.
+one CPU without SME2, warnings as errors, and compile checks for x86-64.
 
 The supported targets are 64-bit Arm (Linux, macOS), x86-64 (Linux,
-macOS, Windows with MSVC), with the latest stable Rust (and
+Windows with MSVC), with the latest stable Rust (and
 any nightly feature the fork chooses to use). Official BLAKE3 serves the
 rest.
 
@@ -170,19 +172,20 @@ lists what it takes and ticks each step:
    (exactly what CI runs).
 6. A full bench-hashes run on the release commit on the Mac, published to
    bench-hashes' pages with the release named on the map.
-7. `python3 tools/gen-ver.py X.Y.Z` from a clean tree: one commit writing
-   `X.Y.Z+<its parent's hash>` into every version string (the crate,
-   b3sum, the C library's crate, header and pkg-config file, the
-   CHANGELOG's title) and the tag on it; it prints the dependency line
-   for the release notes.
+7. Run `python3 tools/gen-ver.py X.Y.Z` from a clean tree. It commits
+   `X.Y.Z+<its parent's hash>` into the crate, b3sum, the C library's crate
+   and header, and the CHANGELOG's title. It tags that commit and prints
+   the dependency line for the release notes. cargo-c derives the
+   pkg-config version from the C library's crate.
 8. Publish:
    - the crates: `cargo publish` in the root, then in `b3sum/`, whose
      package is `b3sums` (crates.io's `b3sum` is official BLAKE3's);
    - b3sum's binaries, built from a clean tree at the tag on each machine
      by `sh tools/b3sum-release.sh` (statically linked on Linux), each
      with its `.sha256` and `.b3`;
-   - the C library, built by `cargo build --release` in `capi/`: the
-     static and shared libraries, and `b3.h`;
+   - the C library, staged by `cargo cinstall --release --destdir=STAGE`
+     in `capi/`: the static and shared libraries, `b3.h`, and the
+     pkg-config file (`capi/README.md`);
    - the GitHub release, its text the CHANGELOG entry.
 9. The eBASH submission, pinned to the tag (`supercop/README.md`).
 
