@@ -109,24 +109,41 @@ def environment():
     return env
 
 
+class TimedOut(Exception):
+    """The job's time limit ended it: its own verdict, "timed out", never
+    "error" (a crash) or a handler's answer. A limit reached says nothing
+    about what the job would have found."""
+
+
 class Job:
-    """One job's log and deadline; every command runs through `run`."""
+    """One job's log and deadline; every command runs through `run`. The
+    deadline is the job's one clock (wait_for.py keeps none over it)."""
 
     def __init__(self, log, limit):
         self.log = log
+        self.limit = limit
         self.deadline = time.monotonic() + limit
 
     def run(self, cmd, cwd, capture=False):
         remaining = self.deadline - time.monotonic()
-        assert remaining > 0, "time limit reached"
+        if remaining <= 0:
+            raise TimedOut(f"the job's {self.limit} s limit passed before: {' '.join(cmd)}")
         print(f"$ (cd {cwd} && {' '.join(cmd)})", file=self.log, flush=True)
         # A new session, so Ctrl-C in the runner's terminal reaches the
         # runner alone and the current job finishes.
-        proc = subprocess.run(cmd, cwd=cwd, env=environment(), timeout=remaining, start_new_session=True,
-                              stdout=subprocess.PIPE if capture else self.log, stderr=self.log, text=True)
+        proc = subprocess.Popen(cmd, cwd=cwd, env=environment(), start_new_session=True,
+                                stdout=subprocess.PIPE if capture else self.log, stderr=self.log, text=True)
+        try:
+            stdout, _ = proc.communicate(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            # The whole session, not the command alone: cargo's children (a
+            # benchmark it runs) would otherwise go on into the next job.
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.communicate()
+            raise TimedOut(f"the job's {self.limit} s limit ended: {' '.join(cmd)}")
         if proc.returncode != 0:
             raise subprocess.CalledProcessError(proc.returncode, cmd)
-        return proc.stdout
+        return stdout
 
     def sync(self, url, dest, commit):
         """`dest`, a clone of `url` kept between jobs, at `commit`."""
@@ -304,9 +321,21 @@ def process(path, results):
             finally:
                 if meter is not None:
                     # sudo passes the signal on to powermetrics, which ends its
-                    # last sample and exits.
+                    # last sample and exits. A meter that outlasts 10 s is
+                    # killed and noted beside the verdict: it is no reason to
+                    # replace the job's own status (it once could, with
+                    # "error", from wait's TimeoutExpired).
                     meter.send_signal(signal.SIGINT)
-                    meter.wait(timeout=10)
+                    try:
+                        meter.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        meter.kill()
+                        meter.wait()
+                        verdict["powermetrics"] = "did not exit within 10 s of SIGINT; killed (its last samples may be missing)"
+        except TimedOut as e:
+            verdict["status"] = "timed out"
+            verdict["timed out"] = str(e)
+            print(f"runner: timed out: {e}", file=log, flush=True)
         except Exception as e:
             verdict["status"] = "error"
             verdict["error"] = f"{type(e).__name__}: {e}"

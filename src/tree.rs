@@ -38,11 +38,10 @@ pub trait Kernels {
 /// the largest power of two chunks below its chunk count.
 pub fn left_len(len: usize) -> usize {
     let chunks = (len - 1) / CHUNK_LEN;
-    let mut p: usize = 1;
-    while p <= chunks / 2 {
-        p *= 2;
-    }
-    p * CHUNK_LEN
+    // The largest power of two at most `chunks` (1 or more), from its top
+    // 1-bit, as each.rs's left_len: no doubling loop that a change could
+    // keep from ending.
+    (1usize << (usize::BITS - 1 - chunks.leading_zeros())) * CHUNK_LEN
 }
 
 /// The chaining values of a cut through the subtree over `input` (at least

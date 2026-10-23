@@ -26,8 +26,11 @@ fn a_caller_looping_on_collect_makes_progress_without_workers() {
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let messages: Vec<Vec<u8>> = (0..1000usize).map(|i| (0..1 + i * 7 % 3000).map(|j| (j % 251) as u8).collect()).collect();
-        // Every worker parked before the stream opens.
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        // Every worker parked before the stream opens: waited for, not
+        // slept for (a loaded machine could outlast any sleep).
+        while !blake3_servil::__all_workers_parked() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         let mut places = vec![Hash::from([0; 32]); 4];
         let free = std::cell::RefCell::new(places.iter_mut().collect::<Vec<_>>());
         let got = std::cell::RefCell::new(Vec::new());

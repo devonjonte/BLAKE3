@@ -20,6 +20,9 @@ concurrency:
 jobs:
   docs:
     runs-on: ubuntu-latest
+    # The job's one clock, explicit: about 4x its slowest run (Miri's, 7 min, October 2026), far
+    # below GitHub's implicit 360. GitHub reports a job past it as timed out, not failed.
+    timeout-minutes: 30
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

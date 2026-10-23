@@ -1020,6 +1020,16 @@ pub fn initialize_multithreaded(threads: Option<core::num::NonZeroUsize>) {
     }
 }
 
+/// Whether every worker of the multithreaded calls' pool is parked (false
+/// before [`initialize_multithreaded`]). Undocumented and unstable, for
+/// tests only: a test that needs the pool idle waits for this, not for a
+/// sleep that a loaded machine could outlast.
+#[cfg(feature = "std")]
+#[doc(hidden)]
+pub fn __all_workers_parked() -> bool {
+    lanes::all_workers_parked()
+}
+
 /// An alias to distinguish [`hash_derive_key_context`] outputs from other keys.
 pub type ContextKey = [u8; KEY_LEN];
 
