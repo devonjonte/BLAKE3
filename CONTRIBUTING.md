@@ -125,6 +125,20 @@ margin.
 
 ## Branches and changes
 
+**This is Devon Jonte's line of the fork** (Zooko, October 23, 2026).
+Its `servil` is John Servil's `servil` plus the changes that have passed
+the gate below here: Devon's, and other contributors' (Sam Shackleton's
+mutation testing, for one), each landed as a merge that names its source
+and pull request. John's `servil` is taken in whenever it moves, as the
+first step of each landing. Everything that lands here is also offered
+to John as a pull request, so the two lines converge; his review is
+welcome and is never what a landing waits for. The gate is run on the
+i7-12700K (x86-64, Linux; no AVX-512): the suites, the builds, the proof
+helpers, the mutation check on a change to the Rust or the tests, and
+bench-hashes' speed check on a change to compiled code (this machine's
+map and the overview show what it measures). bench-hashes pins its
+contender to this line's tip; the published results are its.
+
 `servil` is the main line. Work happens on `candidate/<topic>`
 branches; a candidate joins `servil` as a fast-forward of its tip (so
 what was checked is what lands) once:
