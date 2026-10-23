@@ -1,12 +1,13 @@
-//! The thread's counts per core kind on Linux x86-64 hybrid CPUs (Intel's
-//! P and E cores), through `perf_event_open`: one counter group (cycles,
-//! instructions) on each core kind's PMU, `cpu_core` and `cpu_atom`, which
-//! count only while the thread runs on a core of their kind, so the split
-//! says which kind ran it. Cycles and instructions are user space's; time
-//! is the group's running time, which includes the thread's kernel time on
-//! that kind, so the MHz they give reads low across system calls. Where the
-//! CPU has no hybrid PMUs or the kernel refuses (perf_event_paranoid above
-//! 2, a container), there are no counts.
+//! The thread's counts on Linux x86-64 through `perf_event_open`. Hybrid
+//! CPUs use one counter group (cycles, instructions) on each core kind's
+//! PMU, `cpu_core` and `cpu_atom`. Homogeneous CPUs use the generic hardware
+//! PMU, recorded in `p`, with `e` zero. Cycles and instructions are user
+//! space's; time is the group's running time, including kernel time, so
+//! MHz reads low across system calls. The generic path requires both
+//! hybrid PMU names to be absent. A sole `cpu_core` or `cpu_atom` gives no
+//! counts, even on a homogeneous CPU: one missing PMU alone does not
+//! establish the CPU's topology. A kernel that refuses perf access also
+//! gives no counts.
 use super::{Counts, Level};
 use std::ffi::{c_int, c_long, c_void};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -92,24 +93,45 @@ impl Group {
     }
 }
 
-/// The two kinds' PMU types, where the CPU is hybrid.
-fn pmus() -> Option<[u32; 2]> {
-    static PMUS: OnceLock<Option<[u32; 2]>> = OnceLock::new();
-    *PMUS.get_or_init(|| {
-        let kind = |name: &str| std::fs::read_to_string(format!("/sys/bus/event_source/devices/{name}/type")).ok()?.trim().parse::<u32>().ok();
-        Some([kind("cpu_core")?, kind("cpu_atom")?])
-    })
+/// Both hybrid PMU types, or generic hardware events when neither name
+/// is present. A single named PMU deliberately remains unsupported.
+/// Zero in config's upper word asks perf for its generic hardware event.
+fn pmus() -> Option<(u32, Option<u32>)> {
+    static PMUS: OnceLock<Option<(u32, Option<u32>)>> = OnceLock::new();
+    *PMUS.get_or_init(|| pmus_at(std::path::Path::new("/sys/bus/event_source/devices")))
+}
+
+fn pmus_at(root: &std::path::Path) -> Option<(u32, Option<u32>)> {
+    // Missing/unreadable sysfs is unavailable evidence about CPU kinds.
+    if !root.try_exists().ok()? {
+        return None;
+    }
+    let p = root.join("cpu_core").try_exists().ok()?;
+    let e = root.join("cpu_atom").try_exists().ok()?;
+    if !p && !e {
+        return Some((0, None));
+    }
+    let kind = |name: &str| std::fs::read_to_string(root.join(name).join("type")).ok()?.trim().parse::<u32>().ok();
+    Some((kind("cpu_core")?, Some(kind("cpu_atom")?)))
 }
 
 pub fn read() -> Option<Counts> {
     // Opened on the thread's first read; they count that thread alone and
     // close when it exits.
     std::thread_local! {
-        static GROUPS: Option<[Group; 2]> = pmus().and_then(|[p, e]| Some([Group::new(p)?, Group::new(e)?]));
+        static GROUPS: Option<(Group, Option<Group>)> = pmus().and_then(|(p, e)| {
+            Some((Group::new(p)?, match e { Some(e) => Some(Group::new(e)?), None => None }))
+        });
     }
     GROUPS.with(|groups| {
-        let [p, e] = groups.as_ref()?;
-        Some(Counts { p: p.read()?, e: e.read()? })
+        let (p, e) = groups.as_ref()?;
+        Some(Counts {
+            p: p.read()?,
+            e: match e {
+                Some(e) => e.read()?,
+                None => Level::default(),
+            },
+        })
     })
 }
 
@@ -122,9 +144,49 @@ mod tests {
         assert_eq!(std::mem::size_of::<Attr>(), 64);
         let a = attr(8, 1, false);
         assert_eq!(a.config, (8u64 << 32) | 1);
+        assert_eq!(attr(0, 0, true).config, 0);
+        assert_eq!(attr(0, 1, false).config, 1);
         assert_eq!(a.read_format, 11);
         assert_eq!(a.flags, (1 << 5) | (1 << 6));
         assert_eq!(attr(8, 0, true).flags & (1 << 2), 1 << 2);
+    }
+
+    #[test]
+    fn pmu_selection_requires_a_complete_readable_hybrid_pair() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
+        std::fs::create_dir_all(&base).unwrap();
+        let root = base.join(format!("pmu-test-{}", std::process::id()));
+        assert_eq!(pmus_at(&root), None, "missing sysfs");
+        std::fs::create_dir(&root).unwrap();
+        assert_eq!(pmus_at(&root), Some((0, None)), "homogeneous PMU");
+        for (first, second) in [("cpu_core", "cpu_atom"), ("cpu_atom", "cpu_core")] {
+            std::fs::create_dir(root.join(first)).unwrap();
+            std::fs::write(root.join(first).join("type"), "8\n").unwrap();
+            assert_eq!(pmus_at(&root), None, "one hybrid PMU is insufficient");
+            std::fs::create_dir(root.join(second)).unwrap();
+            let path = root.join(second).join("type");
+            assert_eq!(pmus_at(&root), None, "missing type");
+            std::fs::write(&path, "invalid\n").unwrap();
+            assert_eq!(pmus_at(&root), None, "malformed type");
+            std::fs::write(&path, "9\n").unwrap();
+            let expected = if first == "cpu_core" { (8, Some(9)) } else { (9, Some(8)) };
+            assert_eq!(pmus_at(&root), Some(expected));
+            std::fs::remove_dir_all(root.join(first)).unwrap();
+            std::fs::remove_dir_all(root.join(second)).unwrap();
+        }
+        std::fs::remove_dir(&root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs a homogeneous x86 CPU with perf access"]
+    fn homogeneous_counts_cover_work() {
+        assert_eq!(pmus(), Some((0, None)));
+        for b in crate::measure(4, 2_000_000, || crate::busy_work(10_000)) {
+            let c = b.counts.expect("generic hardware PMU readable here");
+            assert!(c.p.cycles > 0 && c.p.instructions > 0 && c.p.time_ns > 0);
+            assert_eq!(c.e, Level::default());
+            println!("{}; {c:?}", b.show());
+        }
     }
 
     /// On a hybrid CPU with perf allowed: run with the thread pinned to one

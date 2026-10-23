@@ -7,16 +7,16 @@ compress_xof), and hash_many at every input count up to two passes of its
 width and every block count from 1 to 16.
 
     python3 tools/verify/prove_x86.py [CASE...]
+    python3 tools/verify/prove_x86.py --representative
 """
 
 import os
 import subprocess
 import sys
 import tempfile
-import time
 
 sys.path.insert(0, os.path.dirname(__file__))
-from z3 import BitVec, BitVecVal, Concat, Extract, ZeroExt, simplify
+from z3 import And, BitVec, BitVecVal, Concat, Extract, UGE, ULE, ZeroExt, simplify
 
 import aarch64
 import x86
@@ -28,6 +28,8 @@ ROOT_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
 CLANG = x86.tool("clang")
 LLVM_ML = x86.tool("llvm-ml")
 STACK = 1 << 16
+# A 64-byte-aligned region origin; both ABIs enter with rsp == 8 mod 16.
+ENTRY_STACKS = tuple(STACK + residue for residue in (8, 24, 40, 56))
 WIDTH = {"sse41": 4, "avx2": 8, "avx512": 16}
 SYSV_ARGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
 WIN_ARGS = ["rcx", "rdx", "r8", "r9"]
@@ -52,35 +54,53 @@ def assemble(isa, windows):
 
 class Setup:
     """A machine at a kernel's entry: junk in every register, the return
-    address on the stack, the arguments placed by the convention."""
-    def __init__(self, so, entry, regions, args, windows):
+    address on the stack, the arguments placed by the convention.
+    The block/output counter is public; each harness adds its count symbols."""
+    def __init__(self, so, entry, regions, args, windows, stack=None):
+        # The default proves every legal entry alignment at once: the
+        # region origin is 64-byte aligned and rsp == 8 (mod 16) at entry.
+        # A concrete stack remains available to the boundary unit tests.
+        if stack is None:
+            residue = BitVec("len_stack", 64)
+            entry_stack = BitVecVal(STACK, 64) + residue
+            entry_assumptions = [UGE(residue, 8), ULE(residue, 56), residue & 15 == 8]
+        else:
+            assert stack in ENTRY_STACKS, "a legal ABI entry-stack residue modulo 64"
+            entry_stack = BitVecVal(stack, 64)
+            entry_assumptions = []
         syms = x86.symbols(so)
         self.entry = syms[entry]
         code = x86.disassemble(so, self.entry, x86.text_end(so))
         img = x86.image(so)
         regions = dict(regions)
-        regions["image"] = Region("image", max(img) + 1, False, lambda o: BitVecVal(img[o], 8))
-        regions["stack"] = Region("stack", STACK + 8 * 16, True, None)
+        regions["image"] = Region("image", max(img) + 1, False, lambda o: BitVecVal(img[o], 8), alignment=4096)
+        regs = WIN_ARGS if windows else SYSV_ARGS
+        first_stack = 8 + (32 if windows else 0)
+        end = entry_stack + first_stack + 8 * max(0, len(args) - len(regs))
+        regions["stack"] = Region("stack", end, True, None, alignment=64)
         self.m = m = x86.Machine(code, regions)
+        m.lengths = {"counter", "len_stack"}
+        m.assumptions = entry_assumptions
         m.red_zone = 0 if windows else 128
         self.windows = windows
         for r in x86.GPR:
             m.x[r] = BitVec(f"{r}_in", 64)
         for i in range(32):
             m.v[i] = [BitVec(f"v{i}_{l}_in", 32) for l in range(16)]
-        m.x["rsp"] = Ptr("stack", STACK)
+        for i in m.k:
+            m.k[i] = BitVec(f"k{i}_in", 16)
+        m.entry_stack = entry_stack
+        m.entry_residue = residue if stack is None else None
+        m.x["rsp"] = Ptr("stack", entry_stack)
         m.store(m.x["rsp"], Ptr("return", 0), 8)
-        regs = WIN_ARGS if windows else SYSV_ARGS
         # Stack arguments above the return address (and Windows's 32-byte
         # shadow space).
-        first_stack = 8 + (32 if windows else 0)
         for i, a in enumerate(args):
             if i < len(regs):
                 m.x[regs[i]] = a
             else:
                 at = m.x["rsp"] + first_stack + 8 * (i - len(regs))
                 m.store(at, a, 8)
-        m.stack_args_end = STACK + first_stack + 8 * max(0, len(args) - len(regs))
 
     def run(self):
         m = x86.run(self.m, self.entry)
@@ -89,7 +109,7 @@ class Setup:
 
 
 def check_abi(m, windows):
-    if not (isinstance(m.x["rsp"], Ptr) and m.x["rsp"].region == "stack" and aarch64.concrete(aarch64.as_bv(m.x["rsp"].offset)) == STACK + 8):
+    if not (isinstance(m.x["rsp"], Ptr) and m.x["rsp"].region == "stack" and aarch64.holds(m, aarch64.as_bv(m.x["rsp"].offset) == m.entry_stack + 8)):
         raise Unproved(f"rsp not restored: {m.x['rsp']}")
     saved = ["rbx", "rbp", "r12", "r13", "r14", "r15"] + (["rdi", "rsi"] if windows else [])
     for r in saved:
@@ -211,9 +231,34 @@ def cases(only):
                 for blocks in (1, 2, 16):
                     out.append((isa, windows, "hash_many", (n, blocks, True)))
             out.append((isa, windows, "hash_many", (WIDTH[isa], 1, False)))
+            # Shape (a): whole blocks at one counter, every block count.
+            for blocks in range(2, 17):
+                out.append((isa, windows, "hash_many", (WIDTH[isa], blocks, False)))
     for n in range(1, 33):
         out.append(("avx512", False, "xof_many", n))
     return [c for c in out if not only or c[0] in only or c[2] in only or ("windows" if c[1] else "unix") in only]
+
+
+def representative_cases():
+    """The promotion gate's direct (non-induction) cases.
+
+    The all-count proof covers hash_many for every count. These direct
+    cases independently exercise the finite harness at every block length
+    for one full-width fixed-counter pass, and at the first/full/two-pass
+    counts for 16-block incrementing counters, for every ISA and ABI.
+    Compression, XOF and every xof_many count have no all-count substitute
+    and are all included.
+    """
+    out = []
+    for windows in (False, True):
+        for isa in ("sse41", "avx512"):
+            out += [(isa, windows, "compress", None), (isa, windows, "xof", None)]
+        for isa in ("sse41", "avx2", "avx512"):
+            width = WIDTH[isa]
+            out += [(isa, windows, "hash_many", (width, blocks, False)) for blocks in range(1, 17)]
+            out += [(isa, windows, "hash_many", (n, 16, True)) for n in (1, width, 2 * width)]
+    out += [("avx512", False, "xof_many", n) for n in range(1, 33)]
+    return out
 
 
 OBJS = {}
@@ -224,25 +269,23 @@ def prove_case(case):
     if (isa, windows) not in OBJS:
         OBJS[(isa, windows)] = assemble(isa, windows)
     so = OBJS[(isa, windows)]
-    t = time.time()
     try:
         if kind == "xof_many":
             steps, what = prove_xof_many(so, arg), f"xof_many, {arg} blocks"
         elif kind in ("compress", "xof"):
-            steps = prove_compress(so, isa, windows, kind == "xof")
-            what = kind
+            steps, what = prove_compress(so, isa, windows, kind == "xof"), kind
         else:
             n, blocks, inc = arg
             steps = prove_hash_many(so, isa, windows, n, blocks, inc)
             what = f"hash_many, {n} inputs of {blocks} blocks{'' if inc else ', one counter'}"
     except Unproved as e:
         return case, f"NOT PROVED: {e}"
-    return case, f"proved ({what}, {steps} instructions, {time.time() - t:.1f} s)"
+    return case, f"proved ({what}, every entry-stack alignment, {steps} instructions)"
 
 
 def main():
     import workers
-    todo = cases(set(sys.argv[1:]))
+    todo = representative_cases() if sys.argv[1:] == ["--representative"] else cases(set(sys.argv[1:]))
     failed = 0
     for (isa, windows, kind, arg), verdict in workers.each(prove_case, todo, 16):
         print(f"{isa} {'windows' if windows else 'unix'} {kind} {arg or ''}: {verdict}", flush=True)

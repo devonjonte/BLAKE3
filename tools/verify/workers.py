@@ -3,9 +3,10 @@
 A fresh process per item keeps the provers' memory flat (the normal forms'
 caches in canon.py keep their terms alive). A worker that ends without a
 result (the kernel's out-of-memory killer, a crash, an exception, whose
-traceback it prints) stops the whole run with its item named. Pending
-siblings are killed and reaped on that failure: Python otherwise joins them
-at interpreter exit. Descendants still require the caller's process-group
+traceback it prints) stops the whole run with its item named. Whenever
+the run stops—on that failure, or when its caller stops taking results—
+pending siblings are killed and reaped: Python otherwise joins them at
+interpreter exit. Descendants still require the caller's process-group
 supervisor. multiprocessing.Pool would wait forever for the missing result.
 """
 import multiprocessing
@@ -21,28 +22,29 @@ def each(fn, items, workers, context=multiprocessing):
     most `workers` (and at most one per CPU) running at once. fn and its
     items are picklable when `context` spawns."""
     todo, running = list(items), {}
-    workers = min(workers, multiprocessing.cpu_count())
-    while todo or running:
-        while todo and len(running) < workers:
-            item = todo.pop(0)
-            here, there = context.Pipe(duplex=False)
-            p = context.Process(target=_run, args=(fn, item, there))
-            p.start()
-            there.close()
-            running[here] = (p, item)
-        for conn in wait(list(running)):
-            p, item = running.pop(conn)
-            try:
-                result = conn.recv()
-            except EOFError:
+    try:
+        workers = min(workers, multiprocessing.cpu_count())
+        while todo or running:
+            while todo and len(running) < workers:
+                item = todo.pop(0)
+                here, there = context.Pipe(duplex=False)
+                p = context.Process(target=_run, args=(fn, item, there))
+                p.start()
+                there.close()
+                running[here] = (p, item)
+            for conn in wait(list(running)):
+                p, item = running.pop(conn)
+                try:
+                    result = conn.recv()
+                except EOFError:
+                    p.join()
+                    raise SystemExit(f"the worker for {item!r} ended without a result, exit status {p.exitcode} "
+                                     "(-9 is a kill, most often the kernel's out-of-memory killer: run fewer at once)")
                 p.join()
-                # Fail-stop: no result from another worker can rescue this run.
-                # Reap owned siblings so Python's exit hook cannot wait on them.
-                for sibling, _ in running.values():
-                    sibling.kill()
-                for sibling, _ in running.values():
-                    sibling.join()
-                raise SystemExit(f"the worker for {item!r} ended without a result, exit status {p.exitcode} "
-                                 "(-9 is a kill, most often the kernel's out-of-memory killer: run fewer at once)")
-            p.join()
-            yield result
+                yield result
+    finally:
+        # One stop path for a worker failure and an early-closing caller.
+        for sibling, _ in running.values():
+            sibling.kill()
+        for sibling, _ in running.values():
+            sibling.join()

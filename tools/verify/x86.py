@@ -22,7 +22,7 @@ import re
 import subprocess
 
 from z3 import (BitVec, BitVecVal, Concat, Extract, LShR, RotateRight, ZeroExt, If, ULT, UGT, ULE,
-                UGE, Not, Solver, simplify, substitute, is_bv_value, unsat)
+                UGE, Not, Solver, simplify, substitute, is_bv_value, unsat, Z3_OP_EXTRACT)
 
 import aarch64
 import canon
@@ -185,6 +185,26 @@ class Machine(aarch64.Machine):
         finally:
             del self.x["sp"]
 
+    def step_at(self, pc):
+        """One instruction at `pc` (induction.py's hook): the next pc, or
+        "ret" when the return address is the caller's."""
+        aarch64._machine[0] = self
+        mnem, ops, nxt = self.code[pc]
+        aarch64.EXECUTED.add((mnem, tuple(ops)))
+        try:
+            out = step(self, pc, mnem, ops, nxt)
+        except Unproved as e:
+            raise Unproved(f"{e} (at {pc:#x}: {mnem} {', '.join(ops)})") from None
+        if out == "ret":
+            to = self.load(self.x["rsp"], 8)
+            self.x["rsp"] = self.x["rsp"] + 8
+            if isinstance(to, Ptr) and to.region == "return":
+                return "ret"
+            if isinstance(to, Ptr) and to.region == "code":
+                return to.offset
+            raise Unproved(f"return to {to}")
+        return out
+
     # General registers.
     def gread(self, name):
         base, bits = SUB[name]
@@ -248,7 +268,7 @@ class Machine(aarch64.Machine):
                 return t
         if not terms.small(t) or not terms.symbols(t) <= self.fact_symbols:
             return t
-        # Only facts that agree with t at two random points can equal it
+        # Only facts that agree with t at the sample points can equal it
         # (equal terms agree at every point), so the solver tries those
         # alone; a t whose value there is not a constant (a symbol no fact
         # has) goes to the solver against every fact.
@@ -259,6 +279,17 @@ class Machine(aarch64.Machine):
             rng = random.Random(0)
             self.points = [[(v, BitVecVal(rng.getrandbits(v.size()), v.size())) for v in syms.values()]
                            for _ in range(2)]
+            # Adjacent counter high halves almost always agree randomly.
+            # Probe each declared offset's carry boundary with the other
+            # parameters zero, so false candidates reach the solver rarely.
+            zero = [(v, BitVecVal(0, v.size())) for v in syms.values()]
+            boundaries = {(f.size(), simplify(substitute(f.arg(0), *zero)).as_long())
+                          for f in self.facts if f.decl().kind() == Z3_OP_EXTRACT and f.arg(0).size() == 64}
+            for bits, offset in sorted(boundaries):
+                for v in syms.values():
+                    if v.size() == 64:
+                        self.points.append([(u, BitVecVal((1 << bits) - offset if u.eq(v) else 0, u.size()))
+                                            for u in syms.values()])
             self.fact_values = [[simplify(substitute(f, *p)) for p in self.points] for f in self.facts]
             assert all(is_bv_value(v) for fv in self.fact_values for v in fv), "a fact's symbol without a point"
         values = [simplify(substitute(t, *p)) for p in self.points]
@@ -329,7 +360,10 @@ def address(m, op):
         raise Unproved(f"an absolute address {op}")
     if not isinstance(base, Ptr):
         raise Unproved(f"an address that is no pointer: {op}")
-    return size, base + disp, mt.group(3)
+    addr = base + disp
+    if not isinstance(addr.offset, int) and not aarch64.lengths_only(m, as_bv(addr.offset)):
+        raise Unproved(f"data-dependent memory address: {op}")
+    return size, addr, mt.group(3)
 
 
 def load_lanes(m, op, w):
@@ -495,7 +529,12 @@ def step(m, pc, mnem, ops, nxt):
         return int(ops[0].split()[0], 16) if decide(m, cond(m, mnem[1:])) else nxt
     if mnem == "ret":
         return "ret"
-    if mnem in ("nop", "prefetcht0", "endbr64"):
+    if mnem == "prefetcht0":
+        # Prefetch may address bytes beyond a buffer, but its address must
+        # still be independent of secrets. It supplies no loaded value.
+        address(m, ops[0])
+        return nxt
+    if mnem in ("nop", "endbr64"):
         return nxt
     if mnem == "vzeroupper":
         for i in range(16):
@@ -541,12 +580,29 @@ def step(m, pc, mnem, ops, nxt):
             if mnem != "cmp":
                 m.gwrite(ops[0], r)
             return nxt
-        if mnem == "and" and isinstance(a, Ptr) and a.region == "stack" and isinstance(a.offset, int) and concrete(b) is not None:
+        if mnem == "and" and isinstance(a, Ptr) and a.region == "stack" and concrete(b) is not None:
             # Aligning the stack pointer: the stack region starts 64-byte
             # aligned (Setup), so its offsets align as its addresses do.
             mask = concrete(b)
             assert (1 << 64) - mask <= 64, "an alignment of at most 64 bytes"
-            m.gwrite(ops[0], Ptr("stack", a.offset & mask & 0xFFFFFFFFFFFFFFFF))
+            aligned = simplify(as_bv(a.offset) & mask)
+            residue = getattr(m, "entry_residue", None)
+            if residue is not None:
+                # At the common entry alignment, the bounded residue makes
+                # the aligned pointer a single concrete stack offset.
+                candidate = simplify(substitute(aligned, (residue, BitVecVal(8, 64))))
+                if aarch64.holds(m, aligned == candidate):
+                    aligned = candidate
+                else:
+                    # Name the aligned frame base. Later frame offsets are
+                    # then ordinary sums of a length symbol, whose byte keys
+                    # canonicalize; the equality keeps its bounds/alignment.
+                    frame = BitVec(f"len_stack_frame{getattr(m, 'frame_count', 0)}", 64)
+                    m.frame_count = getattr(m, "frame_count", 0) + 1
+                    m.assumptions.append(frame == aligned)
+                    m.lengths.add(frame.decl().name())
+                    aligned = frame
+            m.gwrite(ops[0], Ptr("stack", aligned))
             m.flags = None
             return nxt
         if isinstance(a, Ptr) or isinstance(b, Ptr):
@@ -591,10 +647,38 @@ def step(m, pc, mnem, ops, nxt):
     return vector(m, mnem, base, vex, ops, nxt)
 
 
+VECTOR_MOVES = ("movups", "movaps", "movdqu", "movdqa", "movdqu32", "movdqa32")
+
+
+def memory_alignment(base, vex, size):
+    """Required alignment for the vector memory forms this model supports."""
+    if base in ("movaps", "movdqa", "movdqa32") or (
+            not vex and size == 16 and base not in ("movups", "movdqu")):
+        assert size is not None, "an aligned vector memory operand has a width"
+        return size
+    return 1
+
+
 def vector(m, mnem, base, vex, ops, nxt):
     dst, mask, zeroing = strip_mask(ops[0])
+    for operand in ops:
+        if "[" not in operand:
+            continue
+        size, addr, _ = address(m, operand)
+        if mask is not None and not aarch64.lengths_only(m, m.k[mask]):
+            raise Unproved(f"data-dependent memory mask in {mnem}")
+        # Legacy SSE's full-width memory operands require alignment,
+        # except its explicitly unaligned moves. VEX/EVEX arithmetic
+        # permits unaligned memory; the aligned moves retain their rule.
+        alignment = memory_alignment(base, vex, size)
+        if alignment > 1:
+            region = m.regions[addr.region]
+            if region.alignment < alignment or not aarch64.holds(m, as_bv(addr.offset) & (alignment - 1) == 0):
+                raise Unproved(f"{mnem} needs {alignment}-byte alignment at {addr}")
     # Stores.
     if not is_vreg(dst) and not dst.startswith("k") and dst not in SUB:
+        if base not in VECTOR_MOVES + ("movd", "movq", "extracti128", "extracti32x4"):
+            raise Unproved(f"unmodelled vector store: {mnem}")
         size, addr, _ = address(m, dst)
         src = ops[-1]
         if base in ("extracti128", "extracti32x4"):
@@ -643,7 +727,7 @@ def vector(m, mnem, base, vex, ops, nxt):
     def B(i=0):
         return src_lanes(m, rest[i], w)
 
-    if base in ("movups", "movaps", "movdqu", "movdqa", "movdqu32", "movdqa32"):
+    if base in VECTOR_MOVES:
         new = src_lanes(m, ops[1], w)
     elif base in ("movd", "movq"):
         s = ops[1]

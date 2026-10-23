@@ -10,7 +10,7 @@ overview, read [QUALITY.md](../QUALITY.md) first.
 
 | Platform | Its kernels | Checked |
 |---|---|---|
-| 64-bit Arm: Apple Silicon, Linux and macOS | the fork's assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved in part**; full SME2 group-count assurance under review (below), and tested |
+| 64-bit Arm: Apple Silicon, Linux and macOS | the fork's assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved in part**, and tested |
 | x86-64: Linux, Windows (MSVC) | upstream's assembly, unchanged | **proved in part** (below), and tested |
 | | the fork's own kernels in Rust intrinsics | tested |
 
@@ -256,15 +256,15 @@ The SME2 kernels in `c/blake3_sme2_aarch64.S` and
 compression step, including message lengths from 2 to 16 blocks and the
 mixed kernel's two integer-lane halves.
 
-**Full group-count assurance is under review.** The shared induction
-checker needs successor-domain closure and a nonwrapping progress rank
-([#126](https://github.com/johnservil/BLAKE3/pull/126)); its SME2 callers
-must use bounds closed under that successor. The parent harness also
-needs independent bytes across groups, replacing its correlated
+**Full group-count assurance.** The shared induction checker requires
+successor-domain closure and a nonwrapping symbolic progress rank
+([#126](https://github.com/johnservil/BLAKE3/pull/126)); every SME2 caller
+uses bounds closed under that successor. The parent harness uses
+independent bytes across groups, replacing its correlated
 `pair_word + group` family
-([#129](https://github.com/johnservil/BLAKE3/pull/129)). The repaired
-candidate and its deliberate-error controls are being validated. A green
-run of the older harness does not discharge these obligations.
+([#129](https://github.com/johnservil/BLAKE3/pull/129)). Deliberate-error
+controls include wrong parent-group strides and a nonterminating loop
+that the older checker accepted.
 
 The checks also examine accesses within the declared buffers, ABI
 preservation, and branches and addresses independent of input bytes and
@@ -278,17 +278,23 @@ these cases:
 
 - one compression (`compress_in_place`, `compress_xof`): SSE4.1 and
   AVX-512 (AVX2 has none of its own), both conventions;
-- `hash_many`, Unix convention: every case of the tool's list, for all
-  three instruction sets: input counts up to two passes of the vector
-  width, block counts 1, 2 and 16, and the one-counter case;
-- `hash_many`, Windows convention: SSE4.1 25 of 25 cases, AVX2 49 of 49,
-  AVX-512 97 of 97;
+- `hash_many` at arbitrary counts (`prove_x86_loop.py`): 102 cases: each
+  instruction set under both conventions, at block lengths 1 to 16 with
+  a fixed counter and at 16 blocks with an incrementing counter. Counts
+  range from zero to the largest whose output and pointer table fit in
+  64-bit regions. Every proof uses one symbolic entry-stack residue
+  covering the four legal ABI alignments;
+- direct `hash_many` cases (`prove_x86.py --representative`): every block
+  length at one full-width fixed-counter pass, and the first, full-width
+  and two-pass counts at 16 blocks with an incrementing counter, for each
+  instruction set and convention;
 - AVX-512 `xof_many`: 1 to 32 blocks.
 
-These are the 382 cases in the long-proof suite, including both ABIs.
-Open: `hash_many` at arbitrary counts and additional fixed-counter block
-lengths, and extended output beyond the enumerated counts. The x86
-induction candidate also requires the shared successor-domain repair.
+The promotion validation therefore runs 154 direct x86 cases beside the
+102 arbitrary-count cases. `prove_x86.py` without `--representative`
+keeps the exhaustive 472-case finite matrix as a longer regression set.
+Open: extended output beyond 32 blocks, and counts or shapes outside the
+harnesses' stated contracts.
 
 The fork's own x86-64 kernels in Rust intrinsics, and the Rust code (the
 dispatch, the tree walk, the `Hasher`, the pool, the batch APIs), are
@@ -321,9 +327,9 @@ proved equal to Arm's own specification of the architecture (Sail's
 Armv9.4, run by Isla); the rest, and the matrix unit's loads and stores,
 are checked against the CPU. The x86-64 proofs rest likewise on
 `x86.py`'s model of each x86 instruction they meet, checked against the
-CPU in CI on every change: 228 forms on GitHub's machines that have
-AVX-512, the 116 without AVX-512 on those that have not (GitHub's
-runners vary; the job's log names the CPU's features).
+CPU in CI on every change: 312 vector forms across the instruction-set
+groups (81 of them memory forms) and 24 alignment-fault controls on a
+GitHub machine with AVX-512 (the job's log names the CPU's features).
 
 **How the checkers are checked.**
 
@@ -362,8 +368,8 @@ llvm-objdump 17 or later; details in [`tools/verify/README.md`](../tools/verify/
 
 ```sh
 python3 tools/verify/prove_hybrid.py   # ends "414 of 414 cases proved"
-python3 tools/verify/prove_sme2.py     # ends "38 of 38 cases proved" (the longest, the chunk kernel at every group count, 2 minutes)
-python3 tools/verify/prove_sme2.py xof_every messages_every x2_every  # ends "3 of 3 cases proved": the other kernels at every group count (x2_every about 12 minutes)
+python3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof chunks_x2 every parents_every xof_every messages_every x2_every
+                                      # ends "41 of 41 cases proved"
 python3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
 
@@ -372,19 +378,19 @@ LLVM's `llvm-ml`; their instruction model is checked against the CPU by
 `tools/verify/cross_check_x86.py`, in CI on every change:
 
 ```sh
-python3 tools/verify/prove_x86.py      # every case of its list, or name some
+python3 tools/verify/prove_x86_loop.py --workers 4
+                                      # ends "102 of 102 all-count cases proved"
+python3 tools/verify/prove_x86.py --representative
+                                      # ends "154 of 154 cases proved"
 ```
 
-All of them, 837 cases (414 hybrid, 41 SME2, 382 x86-64), run in about an
-hour on the fork's VM after every change to a
-kernel or the proof tools lands (`tools/verify/long-proofs.sh`), reported
-on GitHub as the commit's status "long proofs"; a failure is fixed
-before the next such change. Each case is proved when Z3
-finds no input on which the code and the definition differ; one that
-fails prints `NOT PROVED` with what it could not prove, and the run ends
-with exit status 1. A status records the named harness's result; the
-assurance gaps listed above remain open until the repaired harness and
-its negative controls pass.
+The promotion validation runs 711 proof cases (414 hybrid, 41 SME2, 102
+arbitrary-count x86 and 154 representative direct x86), the integrated
+mutants and the Arm CPU cross-check after a change to a kernel or the
+proof tools; the exhaustive finite x86 matrix remains a longer
+regression set. Each case is proved when Z3 finds no input on which the
+code and the definition differ; one that fails prints `NOT PROVED` with
+what it could not prove, and the run ends with exit status 1.
 
 ## Check it yourself
 
@@ -551,8 +557,8 @@ names the commit that introduced the code and the one that fixed it, in
 - **Symbolic execution of the hybrid assembly**: done (above), with our
   own instruction models, proved equal to Arm's specification through
   Isla.
-- **The SME2 assembly**: concrete-count proofs and block-loop lemmas
-  completed; full group-count assurance under review above. Its models of
+- **The SME2 assembly**: concrete-count proofs, block-loop lemmas and
+  group-count inductions completed. Its models of
   streaming and ZA instructions agree with Arm's specification where Isla
   can check them and are tested against the CPU elsewhere.
 - **Constant-time behaviour**: see "Timing and secrets", below.
@@ -574,8 +580,7 @@ among them, and however often the hash is timed.
    message bytes.** Completed assembly cases check this under each
    harness's declared public parameters: lengths, and in several induction
    harnesses counters and counter steps. A branch, address, or table index
-   depending on other symbols stops the proof. Full group-count assurance
-   remains under the review described above. The Rust callers are written
+   depending on other symbols stops the proof. The Rust callers are written
    to branch on lengths alone and are tested; their trace independence is
    outside these proofs.
 2. **Each instruction takes the same time whatever values it computes
@@ -613,6 +618,5 @@ CI's hosted machines; the sanitizers on both, Miri in the VM.
 
 Not yet proved: that the Rust around the kernels (the dispatch, the tree,
 the `Hasher`) keeps secrets from steering a whole call, which is
-tested; full SME2 group-count assurance under the repaired checker and
-independent-input model; upstream's x86-64 assembly beyond the cases above;
-and the fork's x86-64 kernels in Rust intrinsics.
+tested; upstream's x86-64 assembly beyond the cases above; and the fork's
+x86-64 kernels in Rust intrinsics.

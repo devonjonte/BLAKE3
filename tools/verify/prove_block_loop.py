@@ -396,7 +396,7 @@ def prove_every(obj, chunks=False):
             raise Unproved(f"returned {endm.x[0]}, not 16")
         check_group(endm, k)
         prove_sme2.prove_hybrid.check_abi(endm)
-    kinds = induction.loop_step(gen, s0, k, list(s0.assumptions) + [ULT(k, g), ULE(k, 1 << 39)], head, check)
+    kinds = induction.loop_step(gen, s0, k, list(s0.assumptions) + [ULT(k, g)], head, check)
     what = "the chunk kernel at every group count" if chunks else "every group count and every length from 2 to 16 blocks"
     return f"{what}: {kinds['head']} paths back to the group loop's head, {kinds['return']} out of it"
 

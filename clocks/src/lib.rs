@@ -9,9 +9,11 @@
 //! - **The thread's counts per core kind** ([`Counts`]): cycles,
 //!   instructions, and time on performance and efficiency cores, from
 //!   Apple's `thread_selfcounts(THSC_TIME_CPI_PER_PERF_LEVEL)`, and on
-//!   Linux x86-64 hybrid CPUs from the `cpu_core` and `cpu_atom` PMUs
-//!   through `perf_event_open` (user-space cycles over running time:
-//!   `linux_counts`). Cycles over time is the clock the thread ran at,
+//!   Linux x86-64 CPUs through `perf_event_open`: hybrid CPUs use the
+//!   `cpu_core` and `cpu_atom` PMUs; homogeneous CPUs use generic hardware
+//!   events (recorded in `p`, with `e` zero). Linux counts user-space
+//!   cycles over running time (see `linux_counts`). Cycles over time is
+//!   the clock the thread ran at,
 //!   lower where the core waited on the SME unit; the split says which
 //!   kind of core ran it. Other platforms give none ([`Counts::read`]
 //!   returns `None`), and results say so.
@@ -89,7 +91,8 @@ pub struct Level {
 }
 
 /// A thread's counts so far, on performance cores (`p`) and efficiency
-/// cores (`e`); the difference of two reads covers what ran between them.
+/// cores (`e`); homogeneous Linux x86 CPUs use `p`, with `e` zero.
+/// The difference of two reads covers what ran between them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Counts {
     pub p: Level,
