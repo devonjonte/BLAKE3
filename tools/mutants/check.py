@@ -130,15 +130,32 @@ SHARDS = 6
 # error, never a verdict (it overlapped the 5 s clock, so a mutant's
 # outcome hung on which ran out first: an EPYC 9255, October 22).
 BACKSTOP = 3600
-# Each process's address space, builds' and tests' alike: a mutant that
-# allocates without end fails its test here, and leaves the machine's
-# memory to the rest (one of 57 GB took the long proofs' memory).
-MEMORY = 8 << 30
+# Each process's memory, builds' and tests' alike: a mutant that allocates
+# without end fails its test here, and leaves the machine's memory to the
+# rest (one of 57 GB took the long proofs' memory). The limit is on data
+# (heap and anonymous mappings, RLIMIT_DATA), which is what a runaway test
+# takes; address space would count the linker's reservations too, and a
+# 2.2 GiB address-space cap crashed rust-lld (i7, October 23). At most
+# 8 GiB, and at most the machine's memory less 4 GiB shared among the
+# shards, since SHARDS such mutants at once must fit: six at 8 GiB killed
+# a 14 GiB machine twice (October 23), once the 30 s clock let a runaway
+# test grow that far. A fresh build and the suite pass under 2.25 GB.
+def memory_cap(shards):
+    total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    return min(8 << 30, (total - (4 << 30)) // shards)
 
 
-def cap_memory():
+def cap_memory(shards=SHARDS):
     import resource
-    resource.setrlimit(resource.RLIMIT_AS, (MEMORY, MEMORY))
+    cap = memory_cap(shards)
+    resource.setrlimit(resource.RLIMIT_DATA, (cap, cap))
+
+
+def scratch_dir():
+    """tmp/ in the repository (git ignores it), made if absent."""
+    path = os.path.join(ROOT, "tmp")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def run(files, extra=(), shards=SHARDS, label="run"):
@@ -152,9 +169,12 @@ def run(files, extra=(), shards=SHARDS, label="run"):
             "--test-tool", "nextest", *[arg for name in sorted(read_hangs()) for arg in ("--exclude-re", re.escape(name.split("\t", 1)[1]))], *extra]
     for f in files:
         args += ["--file", f]
-    runs = []
+    runs, scratch = [], scratch_dir()
     for k in range(shards):
-        tree = tempfile.mkdtemp(prefix="mutants-", dir="/tmp")
+        # Under the repository's tmp/, on disk: /tmp is memory (tmpfs) on
+        # some machines, and six worktrees' release builds there filled a
+        # 14 GiB machine (i7, three times, October 22-23).
+        tree = tempfile.mkdtemp(prefix="mutants-", dir=scratch)
         subprocess.run(["git", "-C", ROOT, "worktree", "add", "-q", "--detach", tree, "HEAD"], check=True)
         # The library's and the integration tests; the doc tests stay out
         # (each compiles a program of its own: minutes per mutant).
@@ -166,7 +186,7 @@ def run(files, extra=(), shards=SHARDS, label="run"):
         # file one after another rebuild less (round-robin evened the shards
         # and made each build 10% slower, the run no faster, October 21).
         shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
-        runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=cap_memory)))
+        runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=lambda: cap_memory(shards))))
     names = collections.Counter()
     functions = collections.defaultdict(list)  # (file, function) -> [(outcome, name)]
     rows = []  # (mutant name, function, test, outcome, ms); the unmutated tree's mutant name is UNMUTATED
@@ -444,7 +464,7 @@ def main():
         if not diff and not extra:
             print(f"mutants: the change since {since} touches no mutated file and alters no test")
             return
-        path = os.path.join(tempfile.mkdtemp(prefix="mutants-diff-", dir="/tmp"), "change.diff")
+        path = os.path.join(tempfile.mkdtemp(prefix="mutants-diff-", dir=scratch_dir()), "change.diff")
         with open(path, "w") as f:
             f.write(diff)
         # One shard: a change's mutants are few, and each shard builds anew.
