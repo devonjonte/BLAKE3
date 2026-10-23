@@ -13,7 +13,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 
 sys.path.insert(0, os.path.dirname(__file__))
 from z3 import BitVec, BitVecVal, Concat, Extract, ZeroExt, simplify
@@ -28,6 +27,8 @@ ROOT_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
 CLANG = x86.tool("clang")
 LLVM_ML = x86.tool("llvm-ml")
 STACK = 1 << 16
+# A 64-byte-aligned region origin; both ABIs enter with rsp == 8 mod 16.
+ENTRY_STACKS = tuple(STACK + residue for residue in (8, 24, 40, 56))
 WIDTH = {"sse41": 4, "avx2": 8, "avx512": 16}
 SYSV_ARGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
 WIN_ARGS = ["rcx", "rdx", "r8", "r9"]
@@ -52,16 +53,22 @@ def assemble(isa, windows):
 
 class Setup:
     """A machine at a kernel's entry: junk in every register, the return
-    address on the stack, the arguments placed by the convention."""
-    def __init__(self, so, entry, regions, args, windows):
+    address on the stack, the arguments placed by the convention.
+    The block/output counter is public; each harness adds its count symbols."""
+    def __init__(self, so, entry, regions, args, windows, stack):
+        assert stack in ENTRY_STACKS, "a legal ABI entry-stack residue modulo 64"
         syms = x86.symbols(so)
         self.entry = syms[entry]
         code = x86.disassemble(so, self.entry, x86.text_end(so))
         img = x86.image(so)
         regions = dict(regions)
-        regions["image"] = Region("image", max(img) + 1, False, lambda o: BitVecVal(img[o], 8))
-        regions["stack"] = Region("stack", STACK + 8 * 16, True, None)
+        regions["image"] = Region("image", max(img) + 1, False, lambda o: BitVecVal(img[o], 8), alignment=4096)
+        regs = WIN_ARGS if windows else SYSV_ARGS
+        first_stack = 8 + (32 if windows else 0)
+        end = stack + first_stack + 8 * max(0, len(args) - len(regs))
+        regions["stack"] = Region("stack", end, True, None, alignment=64)
         self.m = m = x86.Machine(code, regions)
+        m.lengths = {"counter"}
         m.red_zone = 0 if windows else 128
         self.windows = windows
         for r in x86.GPR:
@@ -70,19 +77,17 @@ class Setup:
             m.v[i] = [BitVec(f"v{i}_{l}_in", 32) for l in range(16)]
         for i in m.k:
             m.k[i] = BitVec(f"k{i}_in", 16)
-        m.x["rsp"] = Ptr("stack", STACK)
+        m.entry_stack = stack
+        m.x["rsp"] = Ptr("stack", stack)
         m.store(m.x["rsp"], Ptr("return", 0), 8)
-        regs = WIN_ARGS if windows else SYSV_ARGS
         # Stack arguments above the return address (and Windows's 32-byte
         # shadow space).
-        first_stack = 8 + (32 if windows else 0)
         for i, a in enumerate(args):
             if i < len(regs):
                 m.x[regs[i]] = a
             else:
                 at = m.x["rsp"] + first_stack + 8 * (i - len(regs))
                 m.store(at, a, 8)
-        m.stack_args_end = STACK + first_stack + 8 * max(0, len(args) - len(regs))
 
     def run(self):
         m = x86.run(self.m, self.entry)
@@ -91,7 +96,7 @@ class Setup:
 
 
 def check_abi(m, windows):
-    if not (isinstance(m.x["rsp"], Ptr) and m.x["rsp"].region == "stack" and aarch64.concrete(aarch64.as_bv(m.x["rsp"].offset)) == STACK + 8):
+    if not (isinstance(m.x["rsp"], Ptr) and m.x["rsp"].region == "stack" and aarch64.concrete(aarch64.as_bv(m.x["rsp"].offset)) == m.entry_stack + 8):
         raise Unproved(f"rsp not restored: {m.x['rsp']}")
     saved = ["rbx", "rbp", "r12", "r13", "r14", "r15"] + (["rdi", "rsi"] if windows else [])
     for r in saved:
@@ -118,7 +123,7 @@ def d_row_facts(m, counter, n, words):
     m.fact_symbols |= {"counter"} | {s for w in words for s in aarch64.term_symbols(w)}
 
 
-def prove_compress(so, isa, windows, xof):
+def prove_compress(so, isa, windows, xof, stack):
     """compress_in_place(cv, block, block_len, counter, flags): cv becomes
     the chaining value; compress_xof(cv, block, block_len, counter, flags,
     out): out the whole 64-byte output, cv left as it was."""
@@ -129,7 +134,7 @@ def prove_compress(so, isa, windows, xof):
         regions["out"] = Region("out", 64, True, None)
     args = [Ptr("cv", 0), Ptr("block", 0), ZeroExt(56, block_len), counter, ZeroExt(56, flags)] + ([Ptr("out", 0)] if xof else [])
     name = f"blake3_compress_{'xof' if xof else 'in_place'}_{isa}"
-    s = Setup(so, name, regions, args, windows)
+    s = Setup(so, name, regions, args, windows, stack)
     d_row_facts(s.m, counter, 1, [ZeroExt(24, block_len), ZeroExt(24, flags)])
     m = s.run()
     want = spec.compress(spec.words(cv), spec.words(block), counter, ZeroExt(24, block_len), ZeroExt(24, flags))
@@ -143,7 +148,7 @@ def prove_compress(so, isa, windows, xof):
     return m.steps
 
 
-def prove_xof_many(so, n):
+def prove_xof_many(so, n, stack):
     """xof_many(cv, block, block_len, counter, flags, out, n) (AVX-512,
     Unix): block i of out the whole output of block at counter + i."""
     cv, block = byte_symbols("cv", 32), byte_symbols("block", 64)
@@ -151,7 +156,7 @@ def prove_xof_many(so, n):
     regions = {"cv": Region("cv", 32, False, lambda o: cv[o]), "block": Region("block", 64, False, lambda o: block[o]),
                "out": Region("out", 64 * n, True, None)}
     args = [Ptr("cv", 0), Ptr("block", 0), ZeroExt(56, block_len), counter, ZeroExt(56, flags), Ptr("out", 0), BitVecVal(n, 64)]
-    s = Setup(so, "blake3_xof_many_avx512", regions, args, False)
+    s = Setup(so, "blake3_xof_many_avx512", regions, args, False, stack)
     d_row_facts(s.m, counter, n, [ZeroExt(24, block_len), ZeroExt(24, flags)])
     m = s.run()
     out = m.regions["out"]
@@ -167,7 +172,7 @@ def prove_xof_many(so, n):
     return m.steps
 
 
-def prove_hash_many(so, isa, windows, n, blocks, increment):
+def prove_hash_many(so, isa, windows, n, blocks, increment, stack):
     """hash_many(inputs, n, blocks, key, counter, increment, flags,
     flags_start, flags_end, out): input i hashed from key over `blocks`
     blocks at counter + i (increment) or counter, the first block with
@@ -187,7 +192,7 @@ def prove_hash_many(so, isa, windows, n, blocks, increment):
     flags, start, end = u8("flags"), u8("start"), u8("end")
     args = [Ptr("table", 0), BitVecVal(n, 64), BitVecVal(blocks, 64), Ptr("key", 0), counter,
             BitVecVal(1 if increment else 0, 64), ZeroExt(56, flags), ZeroExt(56, start), ZeroExt(56, end), Ptr("out", 0)]
-    s = Setup(so, f"blake3_hash_many_{isa}", regions, args, windows)
+    s = Setup(so, f"blake3_hash_many_{isa}", regions, args, windows, stack)
     d_row_facts(s.m, counter, n if increment else 1, [ZeroExt(24, flags | start | end), ZeroExt(24, flags | start), ZeroExt(24, flags | end), ZeroExt(24, flags), BitVecVal(64, 32)])
     m = s.run()
     out = m.regions["out"]
@@ -229,20 +234,22 @@ def prove_case(case):
     if (isa, windows) not in OBJS:
         OBJS[(isa, windows)] = assemble(isa, windows)
     so = OBJS[(isa, windows)]
-    t = time.time()
+    steps = 0
     try:
-        if kind == "xof_many":
-            steps, what = prove_xof_many(so, arg), f"xof_many, {arg} blocks"
-        elif kind in ("compress", "xof"):
-            steps = prove_compress(so, isa, windows, kind == "xof")
-            what = kind
-        else:
-            n, blocks, inc = arg
-            steps = prove_hash_many(so, isa, windows, n, blocks, inc)
-            what = f"hash_many, {n} inputs of {blocks} blocks{'' if inc else ', one counter'}"
+        for stack in ENTRY_STACKS:
+            if kind == "xof_many":
+                steps += prove_xof_many(so, arg, stack)
+                what = f"xof_many, {arg} blocks"
+            elif kind in ("compress", "xof"):
+                steps += prove_compress(so, isa, windows, kind == "xof", stack)
+                what = kind
+            else:
+                n, blocks, inc = arg
+                steps += prove_hash_many(so, isa, windows, n, blocks, inc, stack)
+                what = f"hash_many, {n} inputs of {blocks} blocks{'' if inc else ', one counter'}"
     except Unproved as e:
-        return case, f"NOT PROVED: {e}"
-    return case, f"proved ({what}, {steps} instructions, {time.time() - t:.1f} s)"
+        return case, f"NOT PROVED at entry rsp % 64 = {stack % 64}: {e}"
+    return case, f"proved ({what}, all four entry-stack alignments, {steps} instructions total)"
 
 
 def main():

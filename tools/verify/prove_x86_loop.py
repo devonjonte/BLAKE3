@@ -86,7 +86,7 @@ the complete invariant at K=0 and the executor checks its successor.
                     mem[off + j] = ('word', value, j)
 
 
-def prove(so, isa, windows, blocks, increment):
+def prove(so, isa, windows, blocks, increment, stack):
     import prove_x86 as p
     assert 1 <= blocks <= 16, 'hash_many takes 1..16 full blocks per input'
     width = p.WIDTH[isa]
@@ -131,7 +131,7 @@ def prove(so, isa, windows, blocks, increment):
     regions['table'].symbolic_initial = True
     args = [Ptr('table', 0), count, BitVecVal(blocks, 64), Ptr('key', 0), counter,
             BitVecVal(int(increment), 64), ZeroExt(56, flags), ZeroExt(56, start), ZeroExt(56, end), Ptr('out', 0)]
-    setup = p.Setup(so, f'blake3_hash_many_{isa}', regions, args, windows)
+    setup = p.Setup(so, f'blake3_hash_many_{isa}', regions, args, windows, stack)
     machine = setup.m
     flag_words = [ZeroExt(24, f) for f in (flags | start | end, flags | start, flags | end, flags)] + [BitVecVal(64, 32)]
     p.d_row_facts(machine, counter, 2 * width if increment else 1, flag_words)
@@ -260,9 +260,13 @@ def prove_case(case):
     import prove_x86 as p
     isa, windows, blocks, increment = case
     try:
-        result = prove(p.assemble(isa, windows), isa, windows, blocks, increment)
+        so = p.assemble(isa, windows)
+        result = {}
+        for stack in p.ENTRY_STACKS:
+            print(f"START {case} entry rsp % 64 = {stack % 64}", flush=True)
+            result[stack % 64] = prove(so, isa, windows, blocks, increment, stack)
     except Unproved as error:
-        return case, False, str(error)
+        return case, False, f"entry rsp % 64 = {stack % 64}: {error}"
     return case, True, repr(result)
 
 

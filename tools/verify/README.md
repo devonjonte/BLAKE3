@@ -164,10 +164,17 @@ Hasher, the threads), which the tests cover.
 **The x86-64 kernels, in progress.** `x86.py` models the instructions
 the x86-64 kernels use, on the same executor as the AArch64 model (a
 fault on an access outside a region, the calling convention checked).
-`cross_check_x86.py` runs every register-only form the kernels use on
-the CPU and by the model, on random states: 116 forms agree on an
-i7-12700K; the AVX-512 forms need an AVX-512 CPU and are skipped without
-one (CI's `x86_model` job). `prove_x86.py` proves cases against the same
+The writable stack ends at the return slot, Windows shadow space and
+actual stack arguments. Every concrete proof runs at all four legal
+entry-stack residues modulo 64. Vector memory forms enforce the alignment
+their encoding requires; buffer bases carry the alignment their contract
+promises. Addresses and memory masks use declared public parameters,
+prefetch addresses included. `cross_check_x86.py` runs every vector form
+from the Unix and Windows kernels on the CPU and by the model, on random
+states; memory forms also compare the whole buffer, and aligned forms get
+a bounded unaligned-address fault control. AVX-512 forms need an AVX-512
+CPU and are reported skipped without one (CI's `x86_model` job).
+`prove_x86.py` proves cases against the same
 Lean specification: `compress_in_place` and `compress_xof` for SSE4.1
 and AVX-512, under the Unix and Windows conventions, and `hash_many` at
 the counts run so far, and AVX-512 `xof_many` at 1 to 32 blocks. From
@@ -248,5 +255,8 @@ Lessons the tools were built on:
   the independent-parent stride controls and six assembled AVX2 controls,
   with an unmodified positive control at the same block/counter settings.
   The nonterminating loop must fail its successor-domain obligation.
+  Four assembled x86 memory controls cover a caller-stack write, an aligned
+  load of an unaligned buffer, a secret-derived prefetch address and a
+  masked store, each beside unmodified positive controls.
   An internal checker exception stops the run; only `Unproved` counts as
   a mutation rejection.

@@ -224,7 +224,7 @@ def x86_positive(_):
     """The precise domain used by the mutants, in a fresh worker."""
     import prove_x86 as p
     import prove_x86_loop as loop
-    return loop.prove(p.assemble("avx2", False), "avx2", False, 1, True)
+    return loop.prove(p.assemble("avx2", False), "avx2", False, 1, True, p.ENTRY_STACKS[0])
 
 
 def x86_mutant_jobs():
@@ -252,12 +252,61 @@ def x86_mutant_jobs():
         so = p.x86.link(str(obj))
         def prove(so=so, label=label):
             try:
-                return loop.prove(so, "avx2", False, 1, True)
+                return loop.prove(so, "avx2", False, 1, True, p.ENTRY_STACKS[0])
             except Unproved as error:
                 if label == "nonterminating":
                     assert str(error).startswith("back edge leaves the next iteration"), str(error)
                 raise
         out.append((f"assembled AVX2 mutant, {label}", None, prove))
+    return out
+
+
+def x86_memory_positive(_):
+    """The unmodified kernels at the memory mutants' entry alignment."""
+    import prove_x86 as p
+    return (p.prove_compress(p.assemble("sse41", False), "sse41", False, False, p.ENTRY_STACKS[0]),
+            p.prove_hash_many(p.assemble("avx2", False), "avx2", False, 8, 1, True, p.ENTRY_STACKS[0]))
+
+
+def x86_memory_mutant_jobs():
+    """Assembled x86 mutants for the ABI/alignment/trace memory contract."""
+    import prove_x86 as p
+    edits = [
+        ("caller-stack write", "sse41", "compress",
+         "_blake3_compress_in_place_sse41:\n",
+         "_blake3_compress_in_place_sse41:\n        mov     qword ptr [rsp+120], 0\n",
+         "outside"),
+        ("aligned load of an unaligned buffer", "sse41", "compress",
+         "_blake3_compress_in_place_sse41:\n        _CET_ENDBR\n        movups  xmm0, xmmword ptr [rdi]\n",
+         "_blake3_compress_in_place_sse41:\n        _CET_ENDBR\n        movaps  xmm0, xmmword ptr [rdi]\n",
+         "alignment"),
+        ("secret-derived prefetch address", "sse41", "compress",
+         "_blake3_compress_in_place_sse41:\n",
+         "_blake3_compress_in_place_sse41:\n        mov     eax, dword ptr [rdi]\n        prefetcht0 [rax]\n",
+         "no pointer"),
+        ("masked store", "avx2", "hash_many",
+         "        vmovups ymmword ptr [rbx], ymm12\n",
+         "        vpxor ymm15, ymm15, ymm15\n        vpmaskmovd ymmword ptr [rbx], ymm15, ymm12\n",
+         "unmodelled vector store"),
+    ]
+    root = Path(tempfile.mkdtemp(prefix="x86-memory-mutants-"))
+    out = []
+    for label, isa, kind, before, after, reason in edits:
+        source = Path(p.ROOT_DIR, f"c/blake3_{isa}_x86-64_unix.S").read_text()
+        assert source.count(before) == 1, (label, source.count(before))
+        src, obj = root / (label.replace(" ", "-") + ".S"), root / (label.replace(" ", "-") + ".o")
+        src.write_text(source.replace(before, after))
+        subprocess.run([p.CLANG, "-c", "--target=x86_64-linux-gnu", str(src), "-o", str(obj)], check=True)
+        so = p.x86.link(str(obj))
+        def prove(so=so, isa=isa, kind=kind, reason=reason):
+            try:
+                if kind == "compress":
+                    return p.prove_compress(so, isa, False, False, p.ENTRY_STACKS[0])
+                return p.prove_hash_many(so, isa, False, 8, 1, True, p.ENTRY_STACKS[0])
+            except Unproved as error:
+                assert reason in str(error), str(error)
+                raise
+        out.append((f"x86 memory mutant, {label}", None, prove))
     return out
 
 
@@ -274,6 +323,11 @@ def main():
     for result in workers.each(x86_positive, [None], 1):
         print(f"AVX2 mutant-domain positive control: proved {result}", flush=True)
     for line, failed in workers.each(run, x86_mutant_jobs(), 2):
+        print(line, flush=True)
+        failures += failed
+    for result in workers.each(x86_memory_positive, [None], 1):
+        print(f"x86 memory-mutant positive controls: proved {result}", flush=True)
+    for line, failed in workers.each(run, x86_memory_mutant_jobs(), 2):
         print(line, flush=True)
         failures += failed
     sys.exit(1 if failures else 0)

@@ -78,7 +78,7 @@ class X86EntryTests(unittest.TestCase):
              patch.object(p.x86, "disassemble", return_value={}), \
              patch.object(p.x86, "text_end", return_value=1), \
              patch.object(p.x86, "image", return_value={0: 0}):
-            setup = p.Setup("unused", "entry", {}, [], False)
+            setup = p.Setup("unused", "entry", {}, [], False, p.ENTRY_STACKS[0])
         self.assertEqual(set(setup.m.k), set(range(8)))
         self.assertEqual(len({value.get_id() for value in setup.m.k.values()}), 8)
         for value in setup.m.k.values():

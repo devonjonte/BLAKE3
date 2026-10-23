@@ -360,7 +360,10 @@ def address(m, op):
         raise Unproved(f"an absolute address {op}")
     if not isinstance(base, Ptr):
         raise Unproved(f"an address that is no pointer: {op}")
-    return size, base + disp, mt.group(3)
+    addr = base + disp
+    if not isinstance(addr.offset, int) and not aarch64.lengths_only(m, as_bv(addr.offset)):
+        raise Unproved(f"data-dependent memory address: {op}")
+    return size, addr, mt.group(3)
 
 
 def load_lanes(m, op, w):
@@ -526,7 +529,12 @@ def step(m, pc, mnem, ops, nxt):
         return int(ops[0].split()[0], 16) if decide(m, cond(m, mnem[1:])) else nxt
     if mnem == "ret":
         return "ret"
-    if mnem in ("nop", "prefetcht0", "endbr64"):
+    if mnem == "prefetcht0":
+        # Prefetch may address bytes beyond a buffer, but its address must
+        # still be independent of secrets. It supplies no loaded value.
+        address(m, ops[0])
+        return nxt
+    if mnem in ("nop", "endbr64"):
         return nxt
     if mnem == "vzeroupper":
         for i in range(16):
@@ -622,10 +630,38 @@ def step(m, pc, mnem, ops, nxt):
     return vector(m, mnem, base, vex, ops, nxt)
 
 
+VECTOR_MOVES = ("movups", "movaps", "movdqu", "movdqa", "movdqu32", "movdqa32")
+
+
+def memory_alignment(base, vex, size):
+    """Required alignment for the vector memory forms this model supports."""
+    if base in ("movaps", "movdqa", "movdqa32") or (
+            not vex and size == 16 and base not in ("movups", "movdqu")):
+        assert size is not None, "an aligned vector memory operand has a width"
+        return size
+    return 1
+
+
 def vector(m, mnem, base, vex, ops, nxt):
     dst, mask, zeroing = strip_mask(ops[0])
+    for operand in ops:
+        if "[" not in operand:
+            continue
+        size, addr, _ = address(m, operand)
+        if mask is not None and not aarch64.lengths_only(m, m.k[mask]):
+            raise Unproved(f"data-dependent memory mask in {mnem}")
+        # Legacy SSE's full-width memory operands require alignment,
+        # except its explicitly unaligned moves. VEX/EVEX arithmetic
+        # permits unaligned memory; the aligned moves retain their rule.
+        alignment = memory_alignment(base, vex, size)
+        if alignment > 1:
+            region = m.regions[addr.region]
+            if region.alignment < alignment or not aarch64.holds(m, as_bv(addr.offset) & (alignment - 1) == 0):
+                raise Unproved(f"{mnem} needs {alignment}-byte alignment at {addr}")
     # Stores.
     if not is_vreg(dst) and not dst.startswith("k") and dst not in SUB:
+        if base not in VECTOR_MOVES + ("movd", "movq", "extracti128", "extracti32x4"):
+            raise Unproved(f"unmodelled vector store: {mnem}")
         size, addr, _ = address(m, dst)
         src = ops[-1]
         if base in ("extracti128", "extracti32x4"):
@@ -674,7 +710,7 @@ def vector(m, mnem, base, vex, ops, nxt):
     def B(i=0):
         return src_lanes(m, rest[i], w)
 
-    if base in ("movups", "movaps", "movdqu", "movdqa", "movdqu32", "movdqa32"):
+    if base in VECTOR_MOVES:
         new = src_lanes(m, ops[1], w)
     elif base in ("movd", "movq"):
         s = ops[1]
