@@ -3,9 +3,12 @@
 A faster [BLAKE3](https://blake3.io) for 64-bit Arm and x86-64. It computes the same
 digests as official BLAKE3.
 
-> Devon Jonte's line of the fork: John Servil's
-> [`servil`](https://github.com/johnservil/BLAKE3) plus changes offered there as pull
-> requests.
+> Devon Jonte's line of the fork, maintained: John Servil's
+> [`servil`](https://github.com/johnservil/BLAKE3) plus the changes that have passed
+> this line's gate (CONTRIBUTING, "Branches and changes"), Sam Shackleton's and
+> Devon's among them, each also offered to John as a pull request. The measurements at
+> [devonjonte.github.io/bench-hashes](https://devonjonte.github.io/bench-hashes/) are
+> of this line.
 
 ## How fast
 
