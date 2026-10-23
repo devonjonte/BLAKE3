@@ -152,27 +152,23 @@ class Generalized:
             # keys by the constant differences of their offset terms.
             terms = {o: r0.offset_terms[o] for o, b in mem.items()
                      if b is None and not isinstance(o, int) and o in r0.offset_terms and o in r1.offset_terms}
-            grouped = set()
-            for off, term in terms.items():
-                if off in grouped:
-                    continue
-                group = []
-                for other, other_term in terms.items():
-                    difference = constant_difference(term, other_term)
-                    if difference is not None and 0 <= difference < 8:
-                        group.append((difference, other))
-                if sorted(d for d, _ in group) != list(range(8)):
-                    continue
-                base = term
+            # Round each differing byte down to its aligned word. A word
+            # whose first bytes agree is not itself among the differing
+            # keys, so grouping differing keys alone would start mid-word.
+            bases = {}
+            for term in terms.values():
+                residue = forced(s0, aarch64.as_bv(term) & 7)
+                if residue is not None:
+                    base = simplify(aarch64.as_bv(term) - residue, som=True, bv_sort_ac=True)
+                    bases[aarch64.key(base)] = base
+            for base_key, base in bases.items():
                 w0, w1 = symbolic_word(r0, base), symbolic_word(r1, base)
                 if w0 is None or w1 is None:
                     continue
                 g = self.unify(w0, w1, wildcard=False)
                 if g is not None:
-                    base_key = aarch64.key(base)
-                    for difference, other in group:
-                        mem[other] = ("word", g, difference, base_key)
-                        grouped.add(other)
+                    for i in range(8):
+                        mem[aarch64.key(base + i)] = ("word", g, i, base_key)
 
     def forget(self, pos):
         """Make a position unknown in the invariant."""

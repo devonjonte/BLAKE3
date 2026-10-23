@@ -84,6 +84,16 @@ the complete invariant at K=0 and the executor checks its successor.
             if value is not None:
                 for j in range(8):
                     mem[off + j] = ('word', value, j)
+        # The same explicit counter formula at symbolic offsets.
+        for base_key in {b[3] for b in mem.values() if isinstance(b, tuple) and b[0] == 'word' and len(b) > 3}:
+            a = ind.symbolic_word(r0, r0.offset_terms[base_key])
+            if not counter_only(a):
+                continue
+            value = advance(a, ind.symbolic_word(r1, r1.offset_terms[base_key]))
+            if value is not None:
+                base = r0.offset_terms[base_key]
+                for j in range(8):
+                    mem[arm.key(base + j)] = ('word', value, j, base_key)
 
 
 def prove(so, isa, windows, blocks, increment):
