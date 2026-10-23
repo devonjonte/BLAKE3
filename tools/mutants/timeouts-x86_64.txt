@@ -1,8 +1,6 @@
 # The mutants that time out on x86-64 (an EPYC 9255, AVX-512, October 22): no test fails,
 # nextest's clock stops one (tools/mutants/check.py, TIMEOUTS). Their own outcome: neither caught nor survived.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason. Not yet run on the i7.
-src/finish.rs	delete ! in Finish::wait	1	the suite hangs, Loom passes: with the sense inverted the waiter polls on once its polls say to sleep (200 us), spinning until the count completes or the clock stops it; Loom's polls end and its count completes, so no interleaving deadlocks. A speed-only change in effect (spinning in place of parking) that the suite sees as a hang
-src/finish.rs	replace & with | in Finish::finished	1	the suite hangs, Loom passes: `before | SLEEPING` is always set, so every completing finisher takes the owner lock and unparks; Loom sees every interleaving complete. In the suite the stream tests wait on parked workers while callers are unparked for no reason, and the clock stops one
 src/lanes.rs	delete ! in Pool::wake_one	1	OPEN: the pool's scheduling: a caller or worker waits for a piece or a wake that never comes, a hang (Loom would show which interleavings)
 src/lanes.rs	replace != with == in Pool::any_parked	1	a hang the test tests/stream_collect_one_worker.rs showed: parked workers read as none; a waiting task wakes nobody
 src/lanes.rs	replace != with == in Pool::serve	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
@@ -45,7 +43,7 @@ src/lanes.rs	replace sources::Source::finished with ()	1	a hang the test each::t
 src/lanes.rs	replace sources::Source::publish with ()	1	a hang the test stream::test::test_stream_against_hash_with showed: tasks are never published; the stream waits for their results
 src/lanes.rs	replace sources::Source::publish_job -> usize with 1	1	a hang the test lanes::test::test_hash_many_pool_agrees showed: the job's pieces are miscounted; the caller waits for pieces that do not exist
 src/lanes.rs	replace sources::Source::take -> Option<Item> with None	1	a hang the test lanes::test::test_hash_many_pool_agrees showed: no thread takes a piece; the caller waits for it
-src/lanes.rs	replace sources::Source::take_task -> Option<Task> with None	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs"). It survives or times out as the run's scheduling falls: no worker takes a stream's tasks, and whether a test's caller then waits for one depends on timing (EPYC 9255, October 23: one run of each).
+src/lanes.rs	replace sources::Source::take_task -> Option<Task> with None	1	OPEN: the pool's scheduling: a stream's task never taken by a worker; the run has gone both ways, timing out (the EPYC, Sam; the i7 unnarrowed) and surviving (the i7 with each mutant's own tests), so the row stands on both lists (#140)
 src/lanes.rs	replace sources::Source::waiting -> usize with 0	1	a hang the test tests/stream_collect_one_worker.rs showed: no task ever reads as waiting; nobody is woken for it
 src/lanes.rs	replace sources::Source::waiting -> usize with 1	1	OPEN: the pool's scheduling: a caller or worker waits for a piece or a wake that never comes, a hang (Loom would show which interleavings)
 src/lanes.rs	replace sources::Source::wake_for_waiting with ()	1	a hang the test tests/stream_collect_one_worker.rs showed: a waiting task wakes nobody (the #86 and #101 hang)

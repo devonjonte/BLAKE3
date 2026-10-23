@@ -1,6 +1,6 @@
 """Mutation testing against a list of the mutants known to survive.
 
-    python3 tools/mutants/check.py [--since REV] [--write] [--map]
+    python3 tools/mutants/check.py [--since REV] [--write] [--map] [--whole-suite]
 
 cargo-mutants plants likely bugs in the files tools/mutants/known-<arch>.txt
 names (its `files:` line), one at a time, and runs the library's and the
@@ -145,11 +145,15 @@ INACTIVE_TIMEOUTS = []
 
 
 MAP = "--map" in sys.argv
-# --reach: each mutant's tests chosen by the lines it changes (the map of
-# tools/tests/reach.py for HEAD's tree, made by `reach.py check` or `map`
-# at HEAD); the whole suite where no test ran them or the rule says so.
-# The verdicts are the suite's; the time is the chosen tests'.
-REACH = "--reach" in sys.argv
+# Each mutant's tests are chosen by the lines it changes (the map of
+# tools/tests/reach.py for HEAD's tree, made by `reach.py map` at HEAD, as
+# the pre-commit hook keeps it); the whole suite where no test ran them,
+# the rule says so, or there is no map. The verdicts are the suite's (one
+# run of 1,070 mutants agreed on every row but the two whose whole-suite
+# outcome is a hang that narrowing avoids, October 23); the shards run
+# in two thirds of the time. --whole-suite runs every test on every
+# mutant, as before.
+REACH = "--whole-suite" not in sys.argv
 
 
 # Runs at once, each in its own worktree and build: on the VM (16 CPUs),
