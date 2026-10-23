@@ -866,21 +866,16 @@ pub(crate) mod sources {
     #[repr(align(128))]
     pub(crate) struct Source {
         claimed: OwnLine<AtomicUsize>,
-        published: OwnLine<AtomicUsize>,
         /// A stream's tasks; empty for a caller's jobs.
         ring: Box<[UnsafeCell<MaybeUninit<Task>>]>,
-        /// A caller's current job, its first number, and the pieces
-        /// finished (all its jobs'); the job stays the claimed numbers'
-        /// until `finished` passes them.
+        /// A caller's current job and its first number; the job stays the
+        /// claimed numbers' until `finish.finished` passes them.
         job: AtomicPtr<Job<'static>>,
         base: AtomicUsize,
-        finished: OwnLine<AtomicUsize>,
-        /// Whether the caller parked waiting for its job's last piece, and
-        /// its thread: behind a lock, since the worker finishing the last
-        /// piece may read it as the source passes to another thread (an
-        /// unpark that reaches the new owner is a harmless spurious wake).
-        sleeping: core::sync::atomic::AtomicBool,
-        owner: Mutex<Option<std::thread::Thread>>,
+        /// What is published and what is finished, and the handshake
+        /// between the waiting caller and the worker finishing its last
+        /// piece (crate::finish, which Loom checks).
+        finish: crate::finish::Finish,
     }
 
     // Sound: a ring slot is written by its stream only above `published`
@@ -903,13 +898,10 @@ pub(crate) mod sources {
         pub(crate) fn new(len: usize) -> Source {
             Source {
                 claimed: OwnLine(AtomicUsize::new(0)),
-                published: OwnLine(AtomicUsize::new(0)),
                 ring: (0..len).map(|_| UnsafeCell::new(MaybeUninit::uninit())).collect(),
                 job: AtomicPtr::new(core::ptr::null_mut()),
                 base: AtomicUsize::new(0),
-                finished: OwnLine(AtomicUsize::new(0)),
-                sleeping: core::sync::atomic::AtomicBool::new(false),
-                owner: Mutex::new(None),
+                finish: crate::finish::Finish::new(),
             }
         }
 
@@ -930,12 +922,12 @@ pub(crate) mod sources {
         /// then the SME2 thread first, and with two or more waiting and a
         /// worker parked, a worker.
         pub(crate) fn publish(&self, task: Task) {
-            let p = self.published.load(Ordering::Relaxed);
+            let p = self.finish.published.load(Ordering::Relaxed);
             debug_assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
             // Sound: slot p % len is free (its last task was taken), and
             // only this stream writes it.
             unsafe { (*self.ring[p % self.ring.len()].get()).write(task) };
-            self.published.store(p + 1, Ordering::Release);
+            self.finish.published.store(p + 1, Ordering::Release);
             core::sync::atomic::fence(Ordering::SeqCst);
             let pool = pool();
             if pool.sme2 {
@@ -949,14 +941,14 @@ pub(crate) mod sources {
         /// Make `job` the caller's current job, its pieces `0..own` the
         /// caller's own: the number `finished` must reach when it is done.
         pub(crate) fn publish_job(&self, job: *mut Job<'static>, pieces: usize, own: usize) -> usize {
-            let base = self.published.load(Ordering::Relaxed);
-            debug_assert_eq!(self.finished.load(Ordering::Relaxed), base, "the last job is finished");
+            let base = self.finish.published.load(Ordering::Relaxed);
+            debug_assert_eq!(self.finish.finished_count(), base, "the last job is finished");
             self.job.store(job, Ordering::Relaxed);
             self.base.store(base, Ordering::Relaxed);
             // No worker can claim a number yet (claimed == published), so
             // this store alone moves `claimed` past the caller's own pieces.
             self.claimed.store(base + own, Ordering::Relaxed);
-            self.published.store(base + pieces, Ordering::Release);
+            self.finish.published.store(base + pieces, Ordering::Release);
             core::sync::atomic::fence(Ordering::SeqCst);
             base + pieces
         }
@@ -965,7 +957,7 @@ pub(crate) mod sources {
         pub(crate) fn take(&self) -> Option<Item> {
             let mut c = self.claimed.load(Ordering::Acquire);
             loop {
-                let p = self.published.load(Ordering::Acquire);
+                let p = self.finish.published.load(Ordering::Acquire);
                 if c >= p {
                     return None;
                 }
@@ -996,7 +988,7 @@ pub(crate) mod sources {
         }
 
         fn waiting(&self) -> usize {
-            self.published.load(Ordering::Acquire).saturating_sub(self.claimed.load(Ordering::Acquire))
+            self.finish.published.load(Ordering::Acquire).saturating_sub(self.claimed.load(Ordering::Acquire))
         }
 
         /// Wake a parked worker for a task this stream has published that no
@@ -1015,31 +1007,19 @@ pub(crate) mod sources {
         /// Count `n` of the caller's job's pieces finished (their outputs
         /// written before); the last one wakes a caller parked for it.
         pub(crate) fn finished(&self, n: usize) {
-            let now = self.finished.fetch_add(n, Ordering::SeqCst) + n;
-            if now == self.published.load(Ordering::SeqCst) && self.sleeping.load(Ordering::SeqCst) {
-                if let Some(owner) = &*self.owner.lock().unwrap() {
-                    owner.unpark();
-                }
-            }
+            self.finish.finished(n);
         }
 
-        /// Wait until `finished` reaches `target`: polling a while, then
-        /// parked until the worker finishing the last piece unparks this
-        /// thread.
+        /// Wait until `finished` reaches `target`: polling for
+        /// SPIN_BEFORE_SLEEP, then parked until the worker finishing the
+        /// last piece unparks this thread.
         pub(crate) fn wait(&self, target: usize) {
             let started = std::time::Instant::now();
             let mut yielded = started;
-            while started.elapsed() < SPIN_BEFORE_SLEEP {
-                if self.finished.load(Ordering::Acquire) >= target {
-                    return;
-                }
+            self.finish.wait(target, || {
                 poll_pause(&mut yielded);
-            }
-            self.sleeping.store(true, Ordering::SeqCst);
-            while self.finished.load(Ordering::SeqCst) < target {
-                std::thread::park();
-            }
-            self.sleeping.store(false, Ordering::SeqCst);
+                started.elapsed() < SPIN_BEFORE_SLEEP
+            });
         }
     }
 
@@ -1064,7 +1044,7 @@ pub(crate) mod sources {
         MINE.with(|mine| {
             mine.get_or_init(|| {
                 let source = FREE_JOBS.lock().unwrap().pop().unwrap_or_else(|| Box::leak(Box::new(Source::new(0))));
-                *source.owner.lock().unwrap() = Some(std::thread::current());
+                source.finish.own();
                 Held(source)
             })
             .0

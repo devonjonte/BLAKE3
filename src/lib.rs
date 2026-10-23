@@ -216,6 +216,17 @@ mod sse41;
 
 #[cfg(feature = "std")]
 mod io;
+/// The primitives src/finish.rs runs on: the standard library's here, and
+/// Loom's in tests/loom_finish.rs, which compiles that file beside its own
+/// `finish_sync`.
+#[cfg(feature = "std")]
+mod finish_sync {
+    pub use std::sync::Mutex;
+    pub use std::sync::atomic::{AtomicUsize, Ordering};
+    pub use std::thread;
+}
+#[cfg(feature = "std")]
+mod finish;
 #[cfg(feature = "std")]
 mod lanes;
 mod many;
