@@ -3,7 +3,8 @@
 //! the stream hashes each task on the caller as it hands it over, so the
 //! loop makes progress (it spun forever once, waiting for takers that did
 //! not exist: BLAKE3 #86). A binary of its own, since the pool is the
-//! process's; a watchdog fails the test where it would hang. (Devon Jonte,
+//! process's; where it would hang, nextest's one clock kills and names it
+//! (.config/nextest.toml). (Devon Jonte,
 //! PR #88's test.)
 //!
 //! Keep: it detects, by hanging, mutants the mutation check skips
@@ -54,5 +55,5 @@ fn a_caller_looping_on_collect_makes_progress_without_workers() {
         }
         done.send(()).unwrap();
     });
-    finished.recv_timeout(std::time::Duration::from_secs(60)).expect("the stream completes: collect() made no progress without workers");
+    finished.recv().expect("the stream completes: collect() made no progress without workers");
 }

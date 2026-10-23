@@ -827,4 +827,21 @@ mod x86_features_test {
         assert_eq!(features & AVX2 != 0, std::is_x86_feature_detected!("avx2"));
         assert_eq!(features & AVX512 != 0, std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl"));
     }
+
+    /// The detection functions answer as the standard library does, each
+    /// one on its own: detect() asks for the widest kernel first, so it
+    /// never consults the narrower ones' answers on a CPU that has a wider
+    /// one (AVX2's on an AVX-512 machine, SSE4.1's on an AVX2 one), and the
+    /// guard-page tests' platform lists come from these same functions.
+    #[test]
+    fn test_x86_detection_matches_std() {
+        assert_eq!(super::sse41_detected(), std::is_x86_feature_detected!("sse4.1"), "sse41_detected");
+        assert_eq!(super::avx2_detected(), std::is_x86_feature_detected!("avx2"), "avx2_detected");
+        #[cfg(blake3_avx512_ffi)]
+        assert_eq!(
+            super::avx512_detected(),
+            std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl"),
+            "avx512_detected"
+        );
+    }
 }

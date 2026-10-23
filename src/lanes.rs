@@ -1773,9 +1773,10 @@ mod test {
 
     /// Idle workers park while a stream is open: each one that finds no
     /// work spins at most SPIN, then parks, so an open stream between
-    /// submissions costs no CPU. The other tests beside this one wake
-    /// workers now and then, so it waits for a moment when every worker
-    /// is parked, up to ten seconds; a worker that never parks fails it.
+    /// submissions costs no CPU. It waits for the moment every worker is
+    /// parked; a worker that never parks hangs it, and nextest's one clock
+    /// (.config/nextest.toml) kills and names it. (It once waited at most
+    /// ten seconds itself, when other tests ran beside it in one process.)
     #[test]
     fn test_idle_workers_park_while_a_stream_is_open() {
         let pool = pool();
@@ -1785,9 +1786,7 @@ mod test {
             crate::Mode::Hash,
             |_: &mut [Hash]| {},
             |s| {
-                let started = std::time::Instant::now();
                 while !all_parked() {
-                    assert!(started.elapsed() < std::time::Duration::from_secs(10), "a worker stayed awake while the stream was open and idle");
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
                 s.finish();
