@@ -58,21 +58,6 @@ pub const TEST_KEY_WORDS: CVWords = [1952540791, 1752440947, 1816469605, 1752394
 // unlikely to swapping any two adjacent input blocks or chunks will give the
 // same answer.
 
-/// Every platform this machine runs, detect()'s first (SME2 where the CPU
-/// has it), then NEON: the tests that must
-/// reach each kernel family's path whichever the turn would give (the
-/// NEON path of SME2 code runs when another thread holds SME2's turn,
-/// which a test alone in its process never sees).
-#[cfg(feature = "std")]
-pub(crate) fn every_platform() -> Vec<crate::platform::Platform> {
-    use crate::platform::Platform;
-    #[allow(unused_mut)]
-    let mut all = vec![Platform::detect()];
-    #[cfg(blake3_neon)]
-    all.push(Platform::neon().unwrap());
-    all
-}
-
 /// Every platform this CPU can run, portable first, not only detect()'s:
 /// the code paths of a platform narrower than detect()'s (SSE4.1's and
 /// AVX2's on an AVX-512 machine) run on the machines that lack the wider
@@ -80,7 +65,7 @@ pub(crate) fn every_platform() -> Vec<crate::platform::Platform> {
 /// October 22: spare_lane's partial chunk and xof_many's per-block loop
 /// went untested there).
 #[cfg(feature = "std")]
-pub(crate) fn every_cpu_platform() -> Vec<crate::platform::Platform> {
+pub(crate) fn every_platform() -> Vec<crate::platform::Platform> {
     use crate::platform::Platform;
     #[allow(unused_mut)]
     let mut all = vec![Platform::Portable];
@@ -114,7 +99,7 @@ fn test_compress_chunks_parallel_every_cpu_platform() {
             for counter in [0, u32::MAX as u64] {
                 let mut want = vec![0u8; (MAX_SIMD_DEGREE + 1) * crate::OUT_LEN];
                 let n_want = crate::compress_chunks_parallel(&input[..len], crate::IV, counter, 0, Platform::Portable, &mut want);
-                for platform in every_cpu_platform() {
+                for platform in every_platform() {
                     let mut got = vec![0u8; want.len()];
                     let n = crate::compress_chunks_parallel(&input[..len], crate::IV, counter, 0, platform, &mut got);
                     assert_eq!(
@@ -145,7 +130,7 @@ fn test_xof_many_every_cpu_platform() {
             let want: Vec<u8> = (0..blocks)
                 .flat_map(|i| crate::portable::compress_xof(&cv, &block, block_len as u8, counter + i as u64, flags))
                 .collect();
-            for platform in every_cpu_platform() {
+            for platform in every_platform() {
                 let mut got = vec![0u8; blocks * BLOCK_LEN];
                 platform.xof_many(&cv, &block, block_len as u8, counter, flags, &mut got);
                 assert!(got == want, "{platform:?}: {blocks} blocks from counter {counter}");
