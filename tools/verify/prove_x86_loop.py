@@ -86,7 +86,7 @@ the complete invariant at K=0 and the executor checks its successor.
                     mem[off + j] = ('word', value, j)
 
 
-def prove(so, isa, windows, blocks, increment, stack):
+def prove(so, isa, windows, blocks, increment):
     import prove_x86 as p
     assert 1 <= blocks <= 16, 'hash_many takes 1..16 full blocks per input'
     width = p.WIDTH[isa]
@@ -131,13 +131,13 @@ def prove(so, isa, windows, blocks, increment, stack):
     regions['table'].symbolic_initial = True
     args = [Ptr('table', 0), count, BitVecVal(blocks, 64), Ptr('key', 0), counter,
             BitVecVal(int(increment), 64), ZeroExt(56, flags), ZeroExt(56, start), ZeroExt(56, end), Ptr('out', 0)]
-    setup = p.Setup(so, f'blake3_hash_many_{isa}', regions, args, windows, stack)
+    setup = p.Setup(so, f'blake3_hash_many_{isa}', regions, args, windows)
     machine = setup.m
     flag_words = [ZeroExt(24, f) for f in (flags | start | end, flags | start, flags | end, flags)] + [BitVecVal(64, 32)]
     p.d_row_facts(machine, counter, 2 * width if increment else 1, flag_words)
-    machine.lengths = {'len_groups', 'len_rem', 'len_k', 'counter'}
+    machine.lengths = {'len_groups', 'len_rem', 'len_k', 'counter', 'len_stack'}
     bounds = [ULT(rem, width), ULE(group, bound), ULE(count, max_count)]
-    machine.assumptions = bounds
+    machine.assumptions = list(machine.assumptions) + bounds
     head = pass_head(setup, so, width)
 
     def check_range(m, first, n):
@@ -260,13 +260,9 @@ def prove_case(case):
     import prove_x86 as p
     isa, windows, blocks, increment = case
     try:
-        so = p.assemble(isa, windows)
-        result = {}
-        for stack in p.ENTRY_STACKS:
-            print(f"START {case} entry rsp % 64 = {stack % 64}", flush=True)
-            result[stack % 64] = prove(so, isa, windows, blocks, increment, stack)
+        result = prove(p.assemble(isa, windows), isa, windows, blocks, increment)
     except Unproved as error:
-        return case, False, f"entry rsp % 64 = {stack % 64}: {error}"
+        return case, False, str(error)
     return case, True, repr(result)
 
 
@@ -275,8 +271,10 @@ def main():
 
     Each tuple is (ISA, Windows, blocks, increment), for example:
       python3 tools/verify/prove_x86_loop.py "[('avx2', False, 1, False)]"
-    Run under a bounded process-group supervisor. Two fresh workers keep
+    Run under a bounded process-group supervisor. Fresh workers keep
     memory flat; set the caller's virtual-memory limit before launching.
+    Choose --workers from the host's memory: each worker is a separate
+    prover process under that same per-process limit.
     """
     import argparse
     import ast
@@ -284,12 +282,14 @@ def main():
     import workers
     parser = argparse.ArgumentParser(description=main.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('cases', nargs='?', help='Python literal list of selected cases; default: the complete matrix')
+    parser.add_argument('--workers', type=int, default=2, help='fresh prover processes at once (default: 2)')
     arguments = parser.parse_args()
     declared = cases()
     todo = ast.literal_eval(arguments.cases) if arguments.cases is not None else declared
     assert todo and all(case in declared for case in todo), 'select nonempty cases from the declared 102-case matrix'
+    assert arguments.workers >= 1, 'at least one worker'
     failures = 0
-    for case, passed, details in workers.each(prove_case, todo, 2):
+    for case, passed, details in workers.each(prove_case, todo, arguments.workers):
         print('PROVED' if passed else 'NOT PROVED', repr(case), details, flush=True)
         failures += not passed
     print(len(todo) - failures, 'of', len(todo), 'all-count cases proved', flush=True)

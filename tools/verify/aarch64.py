@@ -133,6 +133,7 @@ class Region:
         self.alignment = alignment
         self.name, self.size, self.writable, self.initial, self.lo = name, size, writable, initial, lo
         self.bytes = {}
+        self.offset_terms = {}   # byte key -> its offset term, for symbolic offsets
 
 
 ZERO64 = BitVecVal(0, 64)
@@ -201,6 +202,7 @@ class Machine:
         parts = []
         for i in range(n):
             k = key((addr + i).offset)
+            r.offset_terms[k] = as_bv((addr + i).offset)
             b = r.bytes.get(k)
             if b is None:
                 if r.initial is None:
@@ -225,6 +227,7 @@ class Machine:
         """The byte at `addr` as memory holds it: data, or a stored pointer's piece."""
         r = self.access(addr, 1, False)
         k = key(addr.offset)
+        r.offset_terms[k] = as_bv(addr.offset)
         b = r.bytes.get(k)
         if b is None:
             if r.initial is None or not isinstance(k, int):
@@ -237,10 +240,14 @@ class Machine:
         if isinstance(val, Ptr):
             assert n == 8, "a pointer stored in 8 bytes"
             for i in range(8):
-                r.bytes[key((addr + i).offset)] = (val, i)
+                k = key((addr + i).offset)
+                r.offset_terms[k] = as_bv((addr + i).offset)
+                r.bytes[k] = (val, i)
             return
         for i in range(n):
-            r.bytes[key((addr + i).offset)] = Extract(8 * i + 7, 8 * i, val)
+            k = key((addr + i).offset)
+            r.offset_terms[k] = as_bv((addr + i).offset)
+            r.bytes[k] = Extract(8 * i + 7, 8 * i, val)
 
 
 import shutil

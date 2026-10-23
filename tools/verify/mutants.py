@@ -224,7 +224,7 @@ def x86_positive(_):
     """The precise domain used by the mutants, in a fresh worker."""
     import prove_x86 as p
     import prove_x86_loop as loop
-    return loop.prove(p.assemble("avx2", False), "avx2", False, 1, True, p.ENTRY_STACKS[0])
+    return loop.prove(p.assemble("avx2", False), "avx2", False, 1, True)
 
 
 def x86_mutant_jobs():
@@ -252,7 +252,7 @@ def x86_mutant_jobs():
         so = p.x86.link(str(obj))
         def prove(so=so, label=label):
             try:
-                return loop.prove(so, "avx2", False, 1, True, p.ENTRY_STACKS[0])
+                return loop.prove(so, "avx2", False, 1, True)
             except Unproved as error:
                 if label == "nonterminating":
                     assert str(error).startswith("back edge leaves the next iteration"), str(error)
@@ -264,8 +264,8 @@ def x86_mutant_jobs():
 def x86_memory_positive(_):
     """The unmodified kernels at the memory mutants' entry alignment."""
     import prove_x86 as p
-    return (p.prove_compress(p.assemble("sse41", False), "sse41", False, False, p.ENTRY_STACKS[0]),
-            p.prove_hash_many(p.assemble("avx2", False), "avx2", False, 8, 1, True, p.ENTRY_STACKS[0]))
+    return (p.prove_compress(p.assemble("sse41", False), "sse41", False, False),
+            p.prove_hash_many(p.assemble("avx2", False), "avx2", False, 8, 1, True))
 
 
 def x86_memory_mutant_jobs():
@@ -301,8 +301,8 @@ def x86_memory_mutant_jobs():
         def prove(so=so, isa=isa, kind=kind, reason=reason):
             try:
                 if kind == "compress":
-                    return p.prove_compress(so, isa, False, False, p.ENTRY_STACKS[0])
-                return p.prove_hash_many(so, isa, False, 8, 1, True, p.ENTRY_STACKS[0])
+                    return p.prove_compress(so, isa, False, False)
+                return p.prove_hash_many(so, isa, False, 8, 1, True)
             except Unproved as error:
                 assert reason in str(error), str(error)
                 raise

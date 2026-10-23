@@ -580,12 +580,29 @@ def step(m, pc, mnem, ops, nxt):
             if mnem != "cmp":
                 m.gwrite(ops[0], r)
             return nxt
-        if mnem == "and" and isinstance(a, Ptr) and a.region == "stack" and isinstance(a.offset, int) and concrete(b) is not None:
+        if mnem == "and" and isinstance(a, Ptr) and a.region == "stack" and concrete(b) is not None:
             # Aligning the stack pointer: the stack region starts 64-byte
             # aligned (Setup), so its offsets align as its addresses do.
             mask = concrete(b)
             assert (1 << 64) - mask <= 64, "an alignment of at most 64 bytes"
-            m.gwrite(ops[0], Ptr("stack", a.offset & mask & 0xFFFFFFFFFFFFFFFF))
+            aligned = simplify(as_bv(a.offset) & mask)
+            residue = getattr(m, "entry_residue", None)
+            if residue is not None:
+                # At the common entry alignment, the bounded residue makes
+                # the aligned pointer a single concrete stack offset.
+                candidate = simplify(substitute(aligned, (residue, BitVecVal(8, 64))))
+                if aarch64.holds(m, aligned == candidate):
+                    aligned = candidate
+                else:
+                    # Name the aligned frame base. Later frame offsets are
+                    # then ordinary sums of a length symbol, whose byte keys
+                    # canonicalize; the equality keeps its bounds/alignment.
+                    frame = BitVec(f"len_stack_frame{getattr(m, 'frame_count', 0)}", 64)
+                    m.frame_count = getattr(m, "frame_count", 0) + 1
+                    m.assumptions.append(frame == aligned)
+                    m.lengths.add(frame.decl().name())
+                    aligned = frame
+            m.gwrite(ops[0], Ptr("stack", aligned))
             m.flags = None
             return nxt
         if isinstance(a, Ptr) or isinstance(b, Ptr):

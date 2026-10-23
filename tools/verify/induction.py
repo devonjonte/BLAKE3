@@ -29,6 +29,7 @@ def snapshot(m):
     for name, r in m.regions.items():
         r2 = copy.copy(r)
         r2.bytes = dict(r.bytes)
+        r2.offset_terms = dict(getattr(r, "offset_terms", {}))
         c.regions[name] = r2
     c.assumptions = list(m.assumptions)
     c.lengths = set(m.lengths)
@@ -146,6 +147,32 @@ class Generalized:
                 if g is not None:
                     for i in range(8):
                         mem[off + i] = ("word", g, i)
+            # The same reconstruction at symbolic offsets (an entry stack
+            # whose residue is a length symbol): group the differing byte
+            # keys by the constant differences of their offset terms.
+            terms = {o: r0.offset_terms[o] for o, b in mem.items()
+                     if b is None and not isinstance(o, int) and o in r0.offset_terms and o in r1.offset_terms}
+            grouped = set()
+            for off, term in terms.items():
+                if off in grouped:
+                    continue
+                group = []
+                for other, other_term in terms.items():
+                    difference = constant_difference(term, other_term)
+                    if difference is not None and 0 <= difference < 8:
+                        group.append((difference, other))
+                if sorted(d for d, _ in group) != list(range(8)):
+                    continue
+                base = term
+                w0, w1 = symbolic_word(r0, base), symbolic_word(r1, base)
+                if w0 is None or w1 is None:
+                    continue
+                g = self.unify(w0, w1, wildcard=False)
+                if g is not None:
+                    base_key = aarch64.key(base)
+                    for difference, other in group:
+                        mem[other] = ("word", g, difference, base_key)
+                        grouped.add(other)
 
     def forget(self, pos):
         """Make a position unknown in the invariant."""
@@ -163,8 +190,14 @@ class Generalized:
         elif kind == "mem":
             self.mem[pos[1]][pos[2]] = None
         elif kind == "word":
-            for i in range(8):
-                self.mem[pos[1]][pos[2] + i] = None
+            mem = self.mem[pos[1]]
+            for off, b in list(mem.items()):
+                if isinstance(b, tuple) and b[0] == "word" and (b[3] if len(b) > 3 else off - b[2]) == pos[2]:
+                    mem[off] = None
+            if isinstance(pos[2], int):
+                for i in range(8):
+                    if pos[2] + i in mem:
+                        mem[pos[2] + i] = None
 
     def fresh(self, size):
         self.wild += 1
@@ -173,8 +206,13 @@ class Generalized:
     def unify(self, a, b, wildcard=True):
         """The general form of a pair: kept, a + K x d, or an unknown."""
         if isinstance(a, Ptr) and isinstance(b, Ptr) and a.region == b.region:
+            if same_ptr(a, b):
+                return a
             if isinstance(a.offset, int) and isinstance(b.offset, int):
-                return a if a.offset == b.offset else ("ptr", a.region, a.offset, b.offset - a.offset)
+                return ("ptr", a.region, a.offset, b.offset - a.offset)
+            difference = constant_difference(aarch64.as_bv(a.offset), aarch64.as_bv(b.offset))
+            if difference is not None:
+                return ("ptr", a.region, a.offset, difference)
             return None if not wildcard else ("unknown", 64)
         if isinstance(a, Ptr) or isinstance(b, Ptr):
             return ("unknown", 64) if wildcard else None
@@ -199,7 +237,7 @@ class Generalized:
         def inst(g, size=64):
             if isinstance(g, tuple):
                 if g[0] == "ptr":
-                    return Ptr(g[1], simplify(BitVecVal(g[2], 64) + kval * g[3], som=True, bv_sort_ac=True))
+                    return Ptr(g[1], simplify(aarch64.as_bv(g[2]) + kval * g[3], som=True, bv_sort_ac=True))
                 if g[0] == "step":
                     a, d = g[1], g[2]
                     kk = kval if a.size() == 64 else Extract(a.size() - 1, 0, kval)
@@ -228,7 +266,7 @@ class Generalized:
             words = {}
             for off, b in mem.items():
                 if isinstance(b, tuple) and b[0] == "word":
-                    w = words.setdefault(off - b[2], inst(b[1]))
+                    w = words.setdefault(b[3] if len(b) > 3 else off - b[2], inst(b[1]))
                     region.bytes[off] = Extract(8 * b[2] + 7, 8 * b[2], w) if not isinstance(w, Ptr) else (w, b[2])
                 elif b is not None:
                     region.bytes[off] = b
@@ -295,6 +333,19 @@ def aarch64_snapshot_blank(template):
 
 def word(r, off):
     parts = [r.bytes.get(off + i) for i in range(8)]
+    if any(p is None for p in parts):
+        return None
+    if all(isinstance(p, tuple) for p in parts):
+        return parts[0][0] if all(p[1] == i and p[0] is parts[0][0] for i, p in enumerate(parts)) else None
+    if any(isinstance(p, tuple) for p in parts):
+        return None
+    from z3 import Concat
+    return simplify(Concat(*reversed(parts)))
+
+
+def symbolic_word(r, base):
+    """The 8-byte word at a symbolic offset term, as word() at an int."""
+    parts = [r.bytes.get(aarch64.key(base + i)) for i in range(8)]
     if any(p is None for p in parts):
         return None
     if all(isinstance(p, tuple) for p in parts):
@@ -385,8 +436,8 @@ def mismatches(m, g, kval):
                 continue
             if off not in region.bytes or not agree(region.bytes[off], b):
                 bad.append(("mem", name, off))
-        for off in {o - b[2] for o, b in mem.items() if isinstance(b, tuple) and b[0] == "word"}:
-            w = word(region, off)
+        for off in {b[3] if len(b) > 3 else o - b[2] for o, b in mem.items() if isinstance(b, tuple) and b[0] == "word"}:
+            w = symbolic_word(region, region.offset_terms[off]) if isinstance(off, str) else word(region, off)
             if w is None or not agree(w, inst(mem[off][1])):
                 bad.append(("word", name, off))
     return bad

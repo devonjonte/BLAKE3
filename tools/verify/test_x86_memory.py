@@ -19,6 +19,20 @@ def machine(offset=0, alignment=64):
 
 
 class X86Memory(unittest.TestCase):
+    def test_symbolic_entry_stack_covers_only_legal_residues(self):
+        from z3 import BitVecVal, Solver, sat, unsat
+        with patch.multiple(p.x86, symbols=lambda _: {"entry": 0}, disassemble=lambda *args: {},
+                            text_end=lambda _: 1, image=lambda _: {0: 0}):
+            setup = p.Setup("unused", "entry", {}, [], False)
+        residue = setup.m.entry_stack - p.STACK
+        for value, expected in [(8, sat), (24, sat), (40, sat), (56, sat),
+                                (0, unsat), (16, unsat), (32, unsat), (48, unsat), (64, unsat)]:
+            with self.subTest(residue=value):
+                solver = Solver()
+                solver.add(*setup.m.assumptions, residue == BitVecVal(value, 64))
+                self.assertEqual(solver.check(), expected)
+        self.assertIn("len_stack", setup.m.lengths)
+
     def test_stack_boundary_and_entry_residues(self):
         self.assertEqual({s % 64 for s in p.ENTRY_STACKS}, {8, 24, 40, 56})
         with patch.multiple(p.x86, symbols=lambda _: {"entry": 0}, disassemble=lambda *args: {},
@@ -29,7 +43,7 @@ class X86Memory(unittest.TestCase):
                         with self.subTest(windows=windows, nargs=nargs, stack=stack):
                             setup = p.Setup("unused", "entry", {}, [BitVecVal(0, 64)] * nargs, windows, stack)
                             end = stack + (40 if windows else 8) + 8 * max(0, nargs - (4 if windows else 6))
-                            self.assertEqual(setup.m.regions["stack"].size, end)
+                            self.assertEqual(arm.concrete(setup.m.regions["stack"].size), end)
                             self.assertEqual(setup.m.regions["stack"].alignment, 64)
                             setup.m.access(Ptr("stack", end - 8), 8, True)
                             with self.assertRaises(Unproved):

@@ -165,8 +165,8 @@ Hasher, the threads), which the tests cover.
 the x86-64 kernels use, on the same executor as the AArch64 model (a
 fault on an access outside a region, the calling convention checked).
 The writable stack ends at the return slot, Windows shadow space and
-actual stack arguments. Every concrete proof runs at all four legal
-entry-stack residues modulo 64. Vector memory forms enforce the alignment
+actual stack arguments. Each proof uses one symbolic entry-stack residue:
+8, 24, 40 or 56 modulo 64, the four legal ABI alignments. Vector memory forms enforce the alignment
 their encoding requires; buffer bases carry the alignment their contract
 promises. Addresses and memory masks use declared public parameters,
 prefetch addresses included. `cross_check_x86.py` runs every vector form
@@ -216,7 +216,7 @@ timeout --signal=KILL 850s python3 tools/verify/prove_x86_loop.py "[('avx2', Fal
 
 `--help` describes the command. With no case list it runs the full matrix;
 `cases()` enumerates that matrix in one place, tested against its declared
-shapes. Two fresh workers keep proof caches bounded; set the caller's
+shapes. Fresh workers keep proof caches bounded; set the caller's
 memory limit before launching. AVX-512 whole-chunk cases on an i7-12700K
 have needed a 1800-second batch deadline. The full matrix takes hours on
 that host, so bounded batches preserve completed evidence. The proof's
