@@ -57,15 +57,35 @@ cargo test --release --doc
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API
 sh tools/check-builds.sh            # the builds the suites leave out
-python3 tools/mutants/check.py        # about 25 minutes: every surviving mutant known
+python3 tools/mutants/check.py        # about an hour: every surviving mutant known, every time-out known
 ```
+
+**While working, run the tests a change reaches:** `python3
+tools/tests/reach.py check` compares the working tree with the last tree
+it mapped and runs, through nextest, every test that ran a line the
+change removes or rewrites, a test beside an insertion, a new test, and
+every test when the change touches what line coverage cannot see (the
+assembly, the build, the manifests, the nextest configuration, a
+constant or a type or a `cfg`). It prints each test's reason. A change to
+a comment runs nothing; a change inside one function runs its tests, a
+few seconds. `python3 tools/tests/reach.py map` records every test's
+lines once (a minute); `check` keeps the map current from its own runs.
+It replaces no suite above: the suites run before a landing; `reach`
+makes the cycle between landings fast.
 
 A change that makes a mutant survive, or lets a listed one be caught,
 fails `tools/mutants/check.py`: add a test for the new survivor, or list
-it in `tools/mutants/known-aarch64.txt` with the reason it survives (an
+it in `tools/mutants/known-<arch>.txt` with the reason it survives (an
 equivalent change, a choice between equally correct paths, another
 machine's code; `--write` rewrites the list, each new row's reason
-`UNCLASSIFIED` until you write one).
+`UNCLASSIFIED` until you write one). A mutant whose tests the clock stops
+(no test fails: a hang, or a wait that never ends) times out, an outcome
+of its own, on `tools/mutants/timeouts-<arch>.txt` with its reason; the
+check runs them every time, so one that a new test catches, or a change
+in the code sets loose, is seen. A time-out is a bug the tests see only
+by hanging: where a loop's variant or a wait's end can be asserted, make
+it a failure instead (`CvStack::merge`, `update_turn`, `ensure_slow`
+were made so), and the row goes.
 
 CI (`.github/workflows/ci.yml`) runs the suites on Linux x86-64 and arm64
 (without SME2, and without SHA-3 under QEMU), macOS, Windows with MSVC,
