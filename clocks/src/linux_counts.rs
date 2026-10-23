@@ -3,8 +3,11 @@
 //! PMU, `cpu_core` and `cpu_atom`. Homogeneous CPUs use the generic hardware
 //! PMU, recorded in `p`, with `e` zero. Cycles and instructions are user
 //! space's; time is the group's running time, including kernel time, so
-//! MHz reads low across system calls. An incomplete hybrid PMU pair or a
-//! kernel that refuses perf access gives no counts.
+//! MHz reads low across system calls. The generic path requires both
+//! hybrid PMU names to be absent. A sole `cpu_core` or `cpu_atom` gives no
+//! counts, even on a homogeneous CPU: one missing PMU alone does not
+//! establish the CPU's topology. A kernel that refuses perf access also
+//! gives no counts.
 use super::{Counts, Level};
 use std::ffi::{c_int, c_long, c_void};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -90,7 +93,8 @@ impl Group {
     }
 }
 
-/// Hybrid PMU types, or the generic hardware PMU on a homogeneous CPU.
+/// Both hybrid PMU types, or generic hardware events when neither name
+/// is present. A single named PMU deliberately remains unsupported.
 /// Zero in config's upper word asks perf for its generic hardware event.
 fn pmus() -> Option<(u32, Option<u32>)> {
     static PMUS: OnceLock<Option<(u32, Option<u32>)>> = OnceLock::new();
