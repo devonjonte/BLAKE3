@@ -740,8 +740,8 @@ mod test {
     /// and a partial one), borrowed and written in place, in each mode,
     /// against hash_with, in order; far more entries and bytes than a
     /// stream holds at once, so it fills, wraps its ring, and waits.
-    /// Keep: it detects, by hanging, mutants the mutation check skips
-    /// (tools/mutants/hangs.txt: publish, take).
+    /// Keep: it detects, by hanging, mutants the clock then stops
+    /// (tools/mutants/timeouts-x86_64.txt: publish, take).
     #[test]
     fn test_stream_against_hash_with() {
         let mut input = std::vec![0u8; (1 << 20) + 200];
@@ -840,8 +840,8 @@ mod test {
 
     /// A few messages through a stream, small enough for Miri: the handover
     /// of entries to the pool's threads and back, checked for data races.
-    /// Keep: it detects, by hanging, mutants the mutation check skips
-    /// (tools/mutants/hangs.txt: Task::run, run_task).
+    /// Keep: it detects, by hanging, mutants the clock then stops
+    /// (tools/mutants/timeouts-x86_64.txt: Task::run, run_task).
     #[test]
     fn test_miri_stream() {
         let input = std::vec![3u8; 3 * PIECE + 5];

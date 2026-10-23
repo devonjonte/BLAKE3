@@ -121,8 +121,17 @@ fn update_turn(hashers: &mut [Hasher], pieces: &[(usize, &[u8])], pooled: bool) 
         }
         hash_held(hashers, &held);
         // The loop's variant: every held group was hashed, so each waiting
-        // piece gathers on the next pass and the bytes in play shrink.
+        // piece gathers on the next pass, and the bytes in play shrink on
+        // every pass (a change that kept them would spin here forever;
+        // the assert makes it a failure a test sees).
         assert!(held.iter().all(|&i| hashers[i].held_group().is_none()), "a held group outlived its turn");
+        let (before, after): (usize, usize) = (turn.iter().map(|p| p.1.len()).sum(), waiting.iter().map(|p| p.1.len()).sum());
+        assert!(
+            after < before || (after == before && waiting.len() < turn.len()),
+            "a turn's pass gathered nothing ({} pieces of {before} bytes before, {} of {after} after)",
+            turn.len(),
+            waiting.len()
+        );
         held.clear();
         core::mem::swap(&mut turn, &mut waiting);
         waiting.clear();
@@ -329,8 +338,8 @@ mod test {
     /// A collection past the split (items around chunk, lane, and the
     /// split's own length, a few of 512 KiB and more), every mode: the
     /// multithreaded form gives hash_each_with's digests.
-    /// Keep: it detects, by hanging, mutants the mutation check skips
-    /// (tools/mutants/hangs.txt: hash_each, initialize, Source::take, Source::finished, Source::wait, slot_len, hash_many_on, hash_run).
+    /// Keep: it detects, by hanging, mutants the clock then stops
+    /// (tools/mutants/timeouts-x86_64.txt: hash_each, initialize, Source::take, Source::finished, Source::wait, slot_len, hash_many_on, hash_run).
     #[test]
     fn test_hash_each_multithreaded() {
         let mut input = vec![0u8; 3 << 20];
@@ -499,8 +508,8 @@ mod test {
 
     /// Every length around chunk and lane boundaries, in every mode, mixed in
     /// one call, against `hash_with` on each.
-    /// Keep: it detects, by hanging, mutants the mutation check skips
-    /// (tools/mutants/hangs.txt: Hasher::from_core, Hasher::gather).
+    /// Keep: it detects, by hanging, mutants the clock then stops
+    /// (tools/mutants/timeouts-x86_64.txt: Hasher::from_core, Hasher::gather).
     #[test]
     fn test_hash_each_matches_hash_with() {
         let mut input = vec![0u8; 40 * CHUNK_LEN];

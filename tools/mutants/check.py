@@ -126,19 +126,7 @@ INACTIVE = []
 INACTIVE_TIMEOUTS = []
 
 
-HANGS = os.path.join(ROOT, "tools", "mutants", "hangs.txt")
 MAP = "--map" in sys.argv
-
-
-def read_hangs():
-    """The mutants skipped because they hang the tests (tools/mutants/hangs.txt), by name."""
-    names = set()
-    for line in open(HANGS):
-        line = line.rstrip("\n")
-        if line and not line.startswith("#"):
-            file, mutant, _test, _why = line.split("\t")
-            names.add(f"{file}\t{mutant}")
-    return names
 
 
 # Runs at once, each in its own worktree and build: on the VM (16 CPUs),
@@ -187,7 +175,7 @@ def run(files, extra=(), shards=SHARDS, label="run"):
     # build variants, pure and the like, are their own builds).
     # A hang is nextest's to end (a test's 30 s); BACKSTOP only guards the run.
     args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "serde,zeroize", "--timeout", str(BACKSTOP),
-            "--test-tool", "nextest", *[arg for name in sorted(read_hangs()) for arg in ("--exclude-re", re.escape(name.split("\t", 1)[1]))], *extra]
+            "--test-tool", "nextest", *extra]
     for f in files:
         args += ["--file", f]
     runs, scratch = [], scratch_dir()
@@ -462,13 +450,6 @@ def figure(functions, known):
 def main():
     files, known = read_known()
     _, tknown = read_known(TIMEOUTS, INACTIVE_TIMEOUTS)
-    # A skipped mutant cannot be seen to survive: a name on both lists would
-    # read as caught, run after run.
-    both = sorted(set(known) & read_hangs())
-    for k in both:
-        print(f"ON BOTH LISTS: {k}")
-    if both:
-        sys.exit(f"mutants: {len(both)} names are both skipped (hangs.txt) and listed as surviving ({os.path.basename(KNOWN)}); keep each on one")
     # A test known to be missing is work to do now, not a survivor to keep:
     # the check fails while one is listed, whichever run this is.
     missing = sorted(k for k, (_, reason) in known.items() if reason.startswith("OPEN: a missing test"))

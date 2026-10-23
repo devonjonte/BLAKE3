@@ -1153,6 +1153,23 @@ pub(crate) mod sources {
             assert!(!find(|t| core::ptr::eq(t, source)), "an unregistered source is still reached");
         }
 
+        /// Unregistering one source leaves the others registered: its bit
+        /// alone leaves ACTIVE (a change that cleared every other bit
+        /// would strand the rest, unseen by a test of one source).
+        #[test]
+        fn test_unregister_leaves_the_other_sources_registered() {
+            let sources: Vec<&'static Source> = (0..3).map(|_| &*Box::leak(Box::new(Source::new(0)))).collect();
+            let slots: Vec<usize> = sources.iter().map(|s| s.register().expect("a free slot")).collect();
+            Source::unregister(slots[1]);
+            assert!(!find(|t| core::ptr::eq(t, sources[1])), "the unregistered source is still reached");
+            for &i in &[0, 2] {
+                assert!(find(|t| core::ptr::eq(t, sources[i])), "source {i} lost its registration with another's");
+            }
+            for &i in &[0, 2] {
+                Source::unregister(slots[i]);
+            }
+        }
+
         /// `find` reaches every registered source, the last of several
         /// included: a test alone in its process registers one source at
         /// a time, so only a test of several sees the walk past the first.
@@ -1463,8 +1480,8 @@ mod test {
     /// A caller whose last piece outlasts its polling parks, and the
     /// worker finishing that piece wakes it (the pool's pieces shrink
     /// toward the end, so a job's own wait rarely parks; this one must).
-    /// Keep: it detects, by hanging, mutants the mutation check skips
-    /// (tools/mutants/hangs.txt: Source::finished).
+    /// Keep: it detects, by hanging, mutants the clock then stops
+    /// (tools/mutants/timeouts-x86_64.txt: Source::finished).
     #[test]
     fn test_a_parked_caller_is_woken_by_the_last_piece() {
         // The pool, and with it the startup self-test, on this thread
@@ -1495,8 +1512,8 @@ mod test {
     /// implementation: every platform this machine runs, the three modes,
     /// equal and mixed lengths, unaligned inputs; the slots beside the
     /// outputs untouched.
-    /// Keep: it detects, by hanging, mutants the mutation check skips
-    /// (tools/mutants/hangs.txt: Task::run).
+    /// Keep: it detects, by hanging, mutants the clock then stops
+    /// (tools/mutants/timeouts-x86_64.txt: Task::run).
     #[test]
     fn equal_members_match_the_reference() {
         #[allow(unused_mut)]
@@ -1652,8 +1669,8 @@ mod test {
     /// `Hasher::update_multithreaded` against `hash`, fed in pieces of
     /// several sizes after a first piece that leaves the counter unaligned
     /// (so `update` shrinks the subtrees it hands the pool), keyed too.
-    /// Keep: it detects, by hanging, mutants the mutation check skips
-    /// (tools/mutants/hangs.txt: wake_one).
+    /// Keep: it detects, by hanging, mutants the clock then stops
+    /// (tools/mutants/timeouts-x86_64.txt: wake_one).
     #[test]
     fn test_update_multithreaded_matches_hash() {
         let mut input = vec![0u8; (5 * MIN_SPLIT_LEN + 1025).max(3 << 20) + 12345];
@@ -1722,8 +1739,8 @@ mod test {
 
     /// The pool gives the single-threaded digests, for one-block
     /// messages, whole-block messages, and messages longer than a chunk.
-    /// Keep: it detects, by hanging, mutants the mutation check skips
-    /// (tools/mutants/hangs.txt: publish_job, take, wake_one).
+    /// Keep: it detects, by hanging, mutants the clock then stops
+    /// (tools/mutants/timeouts-x86_64.txt: publish_job, take, wake_one).
     #[test]
     fn test_hash_many_pool_agrees() {
         let mut buffer = vec![0u8; 4 * MIN_SPLIT_LEN];

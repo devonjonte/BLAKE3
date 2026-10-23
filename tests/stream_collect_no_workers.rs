@@ -7,8 +7,8 @@
 //! (.config/nextest.toml). (Devon Jonte,
 //! PR #88's test.)
 //!
-//! Keep: it detects, by hanging, mutants the mutation check skips
-//! (tools/mutants/hangs.txt: splits).
+//! Keep: it detects, by hanging, mutants the clock then stops
+//! (tools/mutants/timeouts-x86_64.txt: splits).
 
 use blake3_servil::{Hash, Mode};
 

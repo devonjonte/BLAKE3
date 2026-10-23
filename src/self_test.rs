@@ -484,12 +484,17 @@ fn ensure_slow() {
     }
     #[cfg(all(test, feature = "std"))]
     WAITING.fetch_add(1, Relaxed);
-    loop {
-        match STATE.load(Relaxed) {
-            PASSED => return,
-            FAILED => panic!("blake3-servil startup self-test failed on another thread: this build or this CPU computes wrong BLAKE3 digests"),
-            _ => core::hint::spin_loop(),
-        }
+    // Wait for the verdict, then act on it: a loop that spins while the
+    // test runs and leaves on any other state, so no change to the arms
+    // below can make a thread spin forever (the mutation check's clock
+    // was the only thing stopping two such changes).
+    while STATE.load(Relaxed) == RUNNING {
+        core::hint::spin_loop();
+    }
+    match STATE.load(Relaxed) {
+        PASSED => {}
+        FAILED => panic!("blake3-servil startup self-test failed on another thread: this build or this CPU computes wrong BLAKE3 digests"),
+        state => unreachable!("the self-test's state is {state} after it ran"),
     }
 }
 
