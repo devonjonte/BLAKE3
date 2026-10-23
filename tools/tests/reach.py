@@ -352,6 +352,12 @@ def select(base_tests, instrumented, listed, diff):
             # Documents and tools, and crates apart: no test here reads them
             # (the files tests read are in EVERYTHING).
             continue
+        if path in base_paths() and path not in instrumented:
+            # A Rust file coverage instrumented no line of: not compiled into
+            # the tests on this machine (another architecture's kernel), so
+            # no change to it reaches them here.
+            print(f"not compiled here: {path} (no instrumented line; another machine's code)", flush=True)
+            continue
         covered_by = {}
         for test, files in base_tests.items():
             for n in files.get(path, ()):
