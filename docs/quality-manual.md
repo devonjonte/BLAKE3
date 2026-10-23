@@ -10,7 +10,7 @@ overview, read [QUALITY.md](../QUALITY.md) first.
 
 | Platform | Its kernels | Checked |
 |---|---|---|
-| 64-bit Arm: Apple Silicon, Linux and macOS | the fork's assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved**, and tested |
+| 64-bit Arm: Apple Silicon, Linux and macOS | the fork's assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved in part**; full SME2 group-count assurance under review (below), and tested |
 | x86-64: Linux, Windows (MSVC) | upstream's assembly, unchanged | **proved in part** (below), and tested |
 | | the fork's own kernels in Rust intrinsics | tested |
 
@@ -64,8 +64,8 @@ the dispatch's thresholds), so a list moves with the code it covers; a
 change to the code's cases changes its tests in the same commit.
 Inputs within one case run the same code on different data, so they add
 time and no evidence: no test enumerates every length or draws random
-inputs. (Every input of the assembly kernels is covered by proof, not by
-tests; the tests check the calls into them, and every other platform.)
+inputs. Assembly proofs quantify input values within their stated
+coverage; the tests also check calls into them and the other platforms.
 
 **How the choice is checked**, mechanically:
 
@@ -244,23 +244,32 @@ unrolled kernel code.
 
 ### What is proved
 
-On AArch64 (Apple Silicon, and other 64-bit Arm CPUs), every assembly
-kernel (the NEON and integer kernels in
-`c/blake3_neon_hybrid_aarch64.S`, the SME2 kernels in
-`c/blake3_sme2_aarch64.S`, and the SME2 kernel with an integer lane in
-`c/blake3_sme2_hybrid_aarch64.S`) is proved to compute what
-[C2SP's BLAKE3 standard](https://c2sp.org/BLAKE3) specifies, for every
-input, key, counter, and flags value: each output word equals the
-standard's. The SME2 kernels are proved at the 512-bit vector length of
-Apple's M4, and every one of them at every group count, by induction over their group loops; the message
-kernel at every message length from 2 to 16 blocks too, in the same
-induction. Its block loop, which the chunk kernel shares, is proved
-once, a pass for every pass and length: from any hash state, the
-standard's compression of the block in hand, the next block then in
-place. The kernel with an integer lane's block loop is proved the same
-way, in two halves: its integer units hash chunk 16 in passes 0 to 7 and
-chunk 17 in passes 8 to 15. Each kernel also reads and writes only its own buffers, keeps
-the calling convention, and takes a path that depends only on lengths.
+On AArch64 (Apple Silicon, and other 64-bit Arm CPUs), the integer and
+NEON kernels in `c/blake3_neon_hybrid_aarch64.S` are proved at every
+supported block count against [C2SP's BLAKE3 standard](https://c2sp.org/BLAKE3).
+Each case covers every input, key, counter, and flags value under the
+harness's memory and calling-convention contract.
+
+The SME2 kernels in `c/blake3_sme2_aarch64.S` and
+`c/blake3_sme2_hybrid_aarch64.S` have completed concrete-count proofs at
+512-bit streaming vector length. Their block-loop lemmas cover each
+compression step, including message lengths from 2 to 16 blocks and the
+mixed kernel's two integer-lane halves.
+
+**Full group-count assurance is under review.** The shared induction
+checker needs successor-domain closure and a nonwrapping progress rank
+([#126](https://github.com/johnservil/BLAKE3/pull/126)); its SME2 callers
+must use bounds closed under that successor. The parent harness also
+needs independent bytes across groups, replacing its correlated
+`pair_word + group` family
+([#129](https://github.com/johnservil/BLAKE3/pull/129)). The repaired
+candidate and its deliberate-error controls are being validated. A green
+run of the older harness does not discharge these obligations.
+
+The checks also examine accesses within the declared buffers, ABI
+preservation, and branches and addresses independent of input bytes and
+keys. Several induction harnesses classify counters and counter steps as
+public parameters; a trace claim must follow that declared scope.
 
 On x86-64, upstream's assembly kernels (SSE4.1, AVX2, AVX-512, each under
 the Unix and the Windows calling convention) are proved the same way,
@@ -273,12 +282,13 @@ these cases:
   three instruction sets: input counts up to two passes of the vector
   width, block counts 1, 2 and 16, and the one-counter case;
 - `hash_many`, Windows convention: SSE4.1 25 of 25 cases, AVX2 49 of 49,
-  AVX-512 71 of 97 (none has failed);
+  AVX-512 97 of 97;
 - AVX-512 `xof_many`: 1 to 32 blocks.
 
-Open: `hash_many` at every count (by induction) and the remaining
-Windows cases. These ran on an
-i7-12700K, outside the long proofs' run below.
+These are the 382 cases in the long-proof suite, including both ABIs.
+Open: `hash_many` at arbitrary counts and additional fixed-counter block
+lengths, and extended output beyond the enumerated counts. The x86
+induction candidate also requires the shared successor-domain repair.
 
 The fork's own x86-64 kernels in Rust intrinsics, and the Rust code (the
 dispatch, the tree walk, the `Hasher`, the pool, the batch APIs), are
@@ -298,7 +308,7 @@ standard's appendix and the official test vectors.
 | Part | Statement | Checked by |
 |---|---|---|
 | The proofs' definition of the compression is the standard's | `tools/verify/lean/Sound.lean`: `symbolic_is_the_specifications` | Lean |
-| Each kernel computes that definition | `tools/verify/prove_hybrid.py`, `prove_sme2.py` (with `prove_block_loop.py` and `prove_hybrid_loop.py` for the SME2 block loops), and on x86-64 `prove_x86.py`: every output word equal to the definition's, which `lean_spec.py` reads from Lean's `compress.json` | Z3 |
+| Each completed kernel case computes that definition under its harness's contract | `tools/verify/prove_hybrid.py`, `prove_sme2.py` (with `prove_block_loop.py` and `prove_hybrid_loop.py` for the SME2 block loops), and on x86-64 `prove_x86.py`: every output word equal to the definition's, which `lean_spec.py` reads from Lean's `compress.json` | Z3 |
 
 **What the proofs take on trust.** Lean rests on its kernel and three
 standard axioms (`propext`, `Classical.choice`, `Quot.sound`). The kernel
@@ -372,7 +382,9 @@ on GitHub as the commit's status "long proofs"; a failure is fixed
 before the next such change. Each case is proved when Z3
 finds no input on which the code and the definition differ; one that
 fails prints `NOT PROVED` with what it could not prove, and the run ends
-with exit status 1.
+with exit status 1. A status records the named harness's result; the
+assurance gaps listed above remain open until the repaired harness and
+its negative controls pass.
 
 ## Check it yourself
 
@@ -508,7 +520,7 @@ names the commit that introduced the code and the one that fixed it, in
 
 | Check | Catches | Evidence | Cannot see |
 |---|---|---|---|
-| Machine-code proofs of the kernels | any wrong result for any input; a read or write outside the kernel's buffers; a broken calling convention; a path that depends on data | planted errors (a rotation off by one, an add made an xor, a read past a buffer, a loop's wrong step) are each rejected (`mutants.py`) | a fault in the instruction models (the CPU and Arm checks below cover it), or in the CPU itself (the self-test covers it) |
+| Machine-code proofs of the kernels | within completed cases: a wrong result, an access outside the declared buffers, a broken calling convention, or a path depending on secret data | planted errors (a rotation off by one, an add made an xor, a read past a buffer, a loop's wrong step) are rejected (`mutants.py`); the group-induction repairs need their own controls | faults in the proof checker or instruction models; unproved cases; CPU faults |
 | Instruction models against the CPU and Arm's specification | a wrong model of an instruction the proofs rely on | the CPU check found the carry-flag error; Isla rejects planted model errors | loads, branches, and calls by contract, which the executor's run of the official vectors checks |
 | Mutation testing | a test suite that misses a likely bug: an operator, a bound, or a condition changed, a call or a result dropped | it found missing cases in `Hash`, the `Hasher`, `OutputReader`, `update_each`, and the self-test, and dead code, each fixed or removed; a mutant every test survives is either caught by a new test or listed with its reason | bugs unlike its changes; thread interleavings the tests leave to chance |
 | Test vectors and the reference implementation | any wrong digest at the lengths and shapes tested, on any platform | found bugs 1 and 2 below | untested lengths and shapes |
@@ -539,9 +551,10 @@ names the commit that introduced the code and the one that fixed it, in
 - **Symbolic execution of the hybrid assembly**: done (above), with our
   own instruction models, proved equal to Arm's specification through
   Isla.
-- **The SME2 assembly**: done (above), with our own models of the
-  streaming and ZA instructions, proved equal to Arm's specification
-  where Isla can run them and checked against the CPU elsewhere.
+- **The SME2 assembly**: concrete-count proofs and block-loop lemmas
+  completed; full group-count assurance under review above. Its models of
+  streaming and ZA instructions agree with Arm's specification where Isla
+  can check them and are tested against the CPU elsewhere.
 - **Constant-time behaviour**: see "Timing and secrets", below.
 - **Fuzzing (cargo-fuzz)**: not used. The tests enumerate every kernel
   at every input shape, count, and boundary against fixed answers, the
@@ -557,13 +570,14 @@ decide that. When all three hold, nothing about the secret shows in the
 time: whoever chooses the other bytes, wherever the secret's bits sit
 among them, and however often the hash is timed.
 
-1. **The instructions run, and the memory addresses they touch, depend
-   only on the length.** Proved for every AArch64 assembly kernel, as
-   assembled: each proof stops at any branch, memory address, or table
-   index that depends on the key or the message. The Rust code around
-   the kernels is written to branch on lengths alone, and tested, but no
-   proof checks it. On x86-64 the same checks hold wherever the x86
-   proofs above have run.
+1. **Instructions and memory addresses are independent of the key and
+   message bytes.** Completed assembly cases check this under each
+   harness's declared public parameters: lengths, and in several induction
+   harnesses counters and counter steps. A branch, address, or table index
+   depending on other symbols stops the proof. Full group-count assurance
+   remains under the review described above. The Rust callers are written
+   to branch on lengths alone and are tested; their trace independence is
+   outside these proofs.
 2. **Each instruction takes the same time whatever values it computes
    on.** That is a promise of the CPU. BLAKE3 asks it only of additions,
    rotations, exclusive ors, loads and stores, and no CPU we know of
@@ -599,5 +613,6 @@ CI's hosted machines; the sanitizers on both, Miri in the VM.
 
 Not yet proved: that the Rust around the kernels (the dispatch, the tree,
 the `Hasher`) keeps secrets from steering a whole call, which is
-tested; upstream's x86-64 assembly beyond the cases above; and the
-fork's x86-64 kernels in Rust intrinsics.
+tested; full SME2 group-count assurance under the repaired checker and
+independent-input model; upstream's x86-64 assembly beyond the cases above;
+and the fork's x86-64 kernels in Rust intrinsics.

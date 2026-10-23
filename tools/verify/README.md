@@ -1,8 +1,17 @@
 # Proofs of the compression code
 
-These tools prove every assembly kernel on AArch64 equal to
-the compression function of the Lean specification of BLAKE3
-(`c2sp/BLAKE3/`), for every input, key, counter, and flags value:
+These tools compare assembled kernels with the compression function of the
+Lean specification of BLAKE3 (`c2sp/BLAKE3/`). A completed case covers every
+input, key, counter, and flags value under its harness's contract.
+
+**Group-count assurance is under review:** the shared induction checker
+needs successor-domain/rank closure (#126), and the SME2 parent harness
+needs independent input bytes across groups (#129). Those repairs and
+their deliberate-error controls are being validated. The coverage section
+below describes the harness targets; a passing run of the older harness
+leaves those two assurance obligations open.
+
+Commands:
 
     python3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9, kn, pn, x4, x8 (414 cases, about 6 minutes on 16 CPUs)
     python3 tools/verify/prove_sme2.py [KERNEL...]     # c/blake3_sme2_aarch64.S: chunks, chunks_at, messages, parents, xof, and the chunk and parent kernels at every group count (36 cases, minutes); c/blake3_sme2_hybrid_aarch64.S: chunks_x2 (2 cases, 2 min)
@@ -74,10 +83,11 @@ inputs, pointers are (region, offset) pairs. The run checks:
   gives it (inputs, key, out, the pointer table) or inside the stack frame
   it allocated; nothing is read from the stack before it is written; read-
   only buffers are never written.
-- **Control flow depends only on the block count**: a branch, a select,
-  an address, or a table index that depends on data stops the proof. A
-  proved kernel is therefore also free of data-dependent branches and
-  addresses (constant time, in that sense).
+- **Control flow and addresses**: a branch, a select, an address, or a
+  table index that depends on symbols outside the harness's declared
+  public parameters stops the proof. Input bytes and keys stay secret in
+  these checks. Some induction harnesses also declare counters and counter
+  steps public, so their trace claim includes that assumption.
 - **The calling convention**: callee-saved registers (x19-x29, d8-d15)
   and sp come back unchanged, and the kernel returns through x30.
 
