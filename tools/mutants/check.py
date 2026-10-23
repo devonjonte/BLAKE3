@@ -178,6 +178,21 @@ def cap_memory(shards=SHARDS):
     resource.setrlimit(resource.RLIMIT_DATA, (cap, cap))
 
 
+def with_loom(found, timed, functions, loom_found, loom_functions, loom_timed):
+    """The suite's outcomes with Loom's for the loom files' mutants: a
+    mutant is caught when either catches it (Loom sees every interleaving
+    of the handshake; the suite has the standard library's tests of it,
+    such as a spurious wake), so a name survives, or times out, only as
+    far as both left it."""
+    for k in {k for k in list(found) + list(timed) if k.split("\t", 1)[0] in LOOM_FILES}:
+        left = loom_found.get(k, 0) + loom_timed.get(k, 0)
+        found[k] = min(found.get(k, 0), left)
+        timed[k] = min(timed.get(k, 0), left)
+    found, timed = +found, +timed
+    functions = {**functions, **{k: v for k, v in loom_functions.items()}}
+    return found, timed, functions
+
+
 def scratch_dir():
     """tmp/ in the repository (git ignores it), made if absent."""
     path = os.path.join(ROOT, "tmp")
@@ -507,8 +522,7 @@ def main():
         # One shard: a change's mutants are few, and each shard builds anew.
         found, functions, timed = run(files, ["--in-diff", path], shards=1) if diff else (collections.Counter(), {}, collections.Counter())
         if any(f in diff for f in LOOM_FILES):
-            more, more_functions, more_timed = run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True)
-            found, timed, functions = found + more, timed + more_timed, {**functions, **more_functions}
+            found, timed, functions = with_loom(found, timed, functions, *run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True))
         if extra:
             # The altered tests' catches, wherever they are: by name.
             again, more, again_timed = run(sorted({k.split("\t", 1)[0] for k in extra}), [arg for k in extra for arg in ("--re", ": " + re.escape(k.split("\t", 1)[1]) + "$")], label="tests")
@@ -531,8 +545,7 @@ def main():
         sys.exit(1 if new else 2 if new_timed else 0)
     found, functions, timed = run(files)
     if LOOM_FILES:
-        more, more_functions, more_timed = run(LOOM_FILES, shards=1, label="loom", loom=True)
-        found, timed, functions = found + more, timed + more_timed, {**functions, **more_functions}
+        found, timed, functions = with_loom(found, timed, functions, *run(LOOM_FILES, shards=1, label="loom", loom=True))
     found, timed = confirm(found, known, timed, tknown)
     figure(functions, {**{k: tknown.get(k, (n, "UNCLASSIFIED")) for k, n in timed.items()},
                        **{k: known.get(k, (n, "UNCLASSIFIED")) for k, n in found.items()}})

@@ -2,7 +2,7 @@
 # AVX2 without AVX-512), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/each.rs src/ffi_avx2.rs src/ffi_sse41.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/rust_avx2.rs src/rust_sse41.rs src/self_test.rs src/tree.rs
+files: src/each.rs src/finish.rs src/ffi_avx2.rs src/ffi_sse41.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/rust_avx2.rs src/rust_sse41.rs src/self_test.rs src/tree.rs
 loom files: src/finish.rs
 src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace < with <= in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
@@ -10,6 +10,8 @@ src/each.rs	replace < with == in hash_each_multithreaded_with	1	speed: moves a t
 src/each.rs	replace >= with < in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace hash_held with ()	1	compiled out: the copy of hash_held without std (check-builds' no_std tests reach it)
 src/each.rs	replace | with ^ in hash_held	1	equivalent: | and ^ agree on flag bits that never overlap
+src/finish.rs	delete ! in Finish::wait	1	a scheduling choice: `if poll()` breaks when the poll says to go on, so the waiter spins through its polls in place of parking; the count is still what it returns on (Loom and the suite both pass it)
+src/finish.rs	replace & with | in Finish::finished	1	equivalent under a race alone: `before | SLEEPING` is always set, so a finisher completing the count unparks the owner whether or not it sleeps; an unpark to a thread not parked is a token its next park consumes at once (Loom and the suite both pass it)
 src/hasher.rs	replace - with + in feed	1	speed: ahead is a prefetch hint (how far the SME2 walk prefetches past its input)
 src/hasher.rs	replace - with / in feed	1	speed: ahead is a prefetch hint (how far the SME2 walk prefetches past its input)
 src/hasher.rs	replace < with <= in ChunkState<P>::fill_buf	1	equivalent: at equality both arms take the same length
@@ -43,7 +45,6 @@ src/lanes.rs	replace & with | in all_workers_parked	1	a test-only hook (__all_wo
 src/lanes.rs	replace && with || in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace && with || in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace && with || in initialize	2	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
-src/lanes.rs	replace && with || in sources::Source::finished	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace && with || in sources::Source::publish	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace && with || in sources::Source::wake_for_waiting	1	the pool's scheduling: whether a waiting task wakes a parked worker; the caller takes what waits meanwhile
 src/lanes.rs	replace && with || in sources::run_one	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
