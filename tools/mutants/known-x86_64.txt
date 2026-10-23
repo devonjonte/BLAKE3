@@ -10,8 +10,6 @@ src/each.rs	replace < with == in hash_each_multithreaded_with	1	speed: moves a t
 src/each.rs	replace >= with < in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace hash_held with ()	1	compiled out: the copy of hash_held without std (check-builds' no_std tests reach it)
 src/each.rs	replace | with ^ in hash_held	1	equivalent: | and ^ agree on flag bits that never overlap
-src/finish.rs	delete ! in Finish::wait	1	a scheduling choice: `if poll()` breaks when the poll says to go on, so the waiter spins through its polls in place of parking; the count is still what it returns on (Loom and the suite both pass it)
-src/finish.rs	replace & with | in Finish::finished	1	equivalent under a race alone: `before | SLEEPING` is always set, so a finisher completing the count unparks the owner whether or not it sleeps; an unpark to a thread not parked is a token its next park consumes at once (Loom and the suite both pass it)
 src/hasher.rs	replace - with + in feed	1	speed: ahead is a prefetch hint (how far the SME2 walk prefetches past its input)
 src/hasher.rs	replace - with / in feed	1	speed: ahead is a prefetch hint (how far the SME2 walk prefetches past its input)
 src/hasher.rs	replace < with <= in ChunkState<P>::fill_buf	1	equivalent: at equality both arms take the same length
