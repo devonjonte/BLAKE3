@@ -1,12 +1,16 @@
 """The proofs reject wrong code: each mutant changes one instruction of a
-proved kernel, and its proof must fail. A proof that passed a mutant would
-be vacuous.
+proved kernel, and its proof must reject it. Internal checker errors stop
+the run. The Arm mutations change decoded instructions; the x86 mutations
+change source instructions and are assembled before proof.
 
     python3 tools/verify/mutants.py
 """
 
 import os
+from pathlib import Path
+import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(__file__))
 import aarch64
@@ -111,11 +115,12 @@ def run(job):
     """One mutant's proof, in its own process (workers.py): the line saying
     whether the proof rejected it, and whether that is a failure."""
     label, code, prove = job
-    aarch64.disassemble = lambda *a, **k: code
+    if code is not None:
+        aarch64.disassemble = lambda *a, **k: code
     try:
         prove()
         return f"{label}: PROVED (the proof is vacuous here)", True
-    except (Unproved, KeyError) as e:
+    except Unproved as e:
         return f"{label}: rejected ({e})", False
 
 
@@ -127,7 +132,7 @@ def both_stored(sobj):
     for stored in (0, 3):
         try:
             prove_sme2.prove_chunks(sobj, 1, stored, False)
-        except (Unproved, KeyError) as e:
+        except Unproved as e:
             reasons.append(f"storing {stored or 16}: {e}")
     if reasons:
         raise Unproved(reasons[0])
@@ -165,6 +170,17 @@ def jobs():
         code = dict(sbase)
         code[a] = ("add", [reg, reg, new])
         out.append((f"induction mutant, {what} at {a:#x}", code, lambda: prove_sme2.prove_xof_every(sobj)))
+    # Independent input bytes make a wrong parent-group stride observable.
+    parents = ssyms["blake3_sme2_hash16_parents_512"]
+    parents_end = min(v for v in ssyms.values() if v > parents)
+    for what, reg, before, after in (("input stride", "x9", 1024, 512), ("output stride", "x4", 512, 256)):
+        found = [a for a, (m, o) in sbase.items() if parents <= a < parents_end
+                 and m == "add" and o[:2] == [reg, reg] and aarch64.imm(o[2]) == before]
+        assert len(found) == 1, (what, found)
+        a = found[0]
+        code = dict(sbase)
+        code[a] = ("add", [reg, reg, f"#{after}"])
+        out.append((f"parent-group mutant, {what} at {a:#x}", code, lambda: prove_sme2.prove_parents_every(sobj)))
     # The message kernel's block loop (prove_block_loop): its next block's
     # offset off by 8, which only the step from one pass to the next sees,
     # and a rotation after the loop, which only the composed proof sees.
@@ -203,12 +219,61 @@ def jobs():
     return out
 
 
+
+def x86_positive(_):
+    """The precise domain used by the mutants, in a fresh worker."""
+    import prove_x86 as p
+    import prove_x86_loop as loop
+    return loop.prove(p.assemble("avx2", False), "avx2", False, 1, True)
+
+
+def x86_mutant_jobs():
+    """Assembled AVX2 mutants; reuse the existing rejection runner."""
+    import prove_x86 as p
+    import prove_x86_loop as loop
+    source = Path(p.ROOT_DIR, "c/blake3_avx2_x86-64_unix.S").read_text()
+    edits = [
+        ("input-stride", "        add     rdi, 64\n", "        add     rdi, 56\n"),
+        ("output-stride", "        add     rbx, 256\n", "        add     rbx, 224\n"),
+        ("counter-direction", "        vpaddd  ymm1, ymm0, ymmword ptr [rsp+0x240]\n",
+         "        vpsubd  ymm1, ymm0, ymmword ptr [rsp+0x240]\n"),
+        ("tail-output-stride", "        add     rbx, 128\n", "        add     rbx, 96\n"),
+        ("nonterminating", "        sub     rsi, 8\n", "        add     rsi, 8\n        sub     rsi, 8\n"),
+        ("input-overread", "        vpbroadcastd ymm7, dword ptr [rcx+0x1C]\n        mov     r8, qword ptr [rdi]\n",
+         "        vpbroadcastd ymm7, dword ptr [rcx+0x1C]\n        mov     r8, qword ptr [rdi]\n        vmovdqu xmm15, xmmword ptr [r8+64]\n"),
+    ]
+    root = Path(tempfile.mkdtemp(prefix="x86-proof-mutants-"))
+    out = []
+    for label, before, after in edits:
+        assert source.count(before) == 1, (label, source.count(before))
+        src, obj = root / (label + ".S"), root / (label + ".o")
+        src.write_text(source.replace(before, after))
+        subprocess.run([p.CLANG, "-c", "--target=x86_64-linux-gnu", str(src), "-o", str(obj)], check=True)
+        so = p.x86.link(str(obj))
+        def prove(so=so, label=label):
+            try:
+                return loop.prove(so, "avx2", False, 1, True)
+            except Unproved as error:
+                if label == "nonterminating":
+                    assert str(error).startswith("back edge leaves the next iteration"), str(error)
+                raise
+        out.append((f"assembled AVX2 mutant, {label}", None, prove))
+    return out
+
+
 def main():
     import workers
     failures = 0
     # Forked workers inherit each job (its code and its proof's closure);
     # only the line comes back.
     for line, failed in workers.each(run, jobs(), 16):
+        print(line, flush=True)
+        failures += failed
+    # Fresh workers release each proof's memo tables. Keep the x86 pool
+    # at two processes, as in the all-count matrix.
+    for result in workers.each(x86_positive, [None], 1):
+        print(f"AVX2 mutant-domain positive control: proved {result}", flush=True)
+    for line, failed in workers.each(run, x86_mutant_jobs(), 2):
         print(line, flush=True)
         failures += failed
     sys.exit(1 if failures else 0)

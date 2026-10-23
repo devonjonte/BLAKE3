@@ -4,9 +4,10 @@
 # specification against C2SP's text and the proofs' definition from it;
 # the generated hybrid file against its generator; the helpers; every
 # hybrid kernel; every SME2 kernel at every group count; the x86-64
-# kernels' compressions, hash_many and xof_many (prove_x86.py); the
+# kernels' compressions, hash_many and xof_many (prove_x86.py), plus the
+# 102-case arbitrary-count hash_many matrix (prove_x86_loop.py); the
 # instruction models checked against the CPU; and the proofs' mutants.
-# About an hour, in a worktree of the commit; nothing should measure
+# Run under a bounded process-group supervisor; nothing should measure
 # meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
 # the status names their SHA-256 and BLAKE3 hashes.
 #
@@ -42,6 +43,7 @@ run helpers python3 -m unittest discover -s tools/verify -p 'test_*.py'
 run prove_hybrid python3 tools/verify/prove_hybrid.py
 run prove_sme2 python3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof chunks_x2 every parents_every xof_every messages_every x2_every
 run prove_x86 python3 tools/verify/prove_x86.py compress xof hash_many xof_many
+run prove_x86_loop sh -c 'ulimit -v 6291456; exec python3 tools/verify/prove_x86_loop.py'
 run cross_check python3 tools/verify/cross_check.py
 run mutants python3 tools/verify/mutants.py
 b3=$(cat "$logs"/*.txt | cargo run -q --release --manifest-path b3sum/Cargo.toml -- --no-names)

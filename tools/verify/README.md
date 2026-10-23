@@ -234,4 +234,9 @@ Lessons the tools were built on:
   (a kernel that preloads the next group then fails the check: the
   proof may be incomplete, never unsound).
 - Plant a mutant in each step of a loop the induction proves (its
-  pointers, its counter) and see the proof reject it.
+  pointers, its counter) and see the proof reject it. `mutants.py` includes
+  the independent-parent stride controls and six assembled AVX2 controls,
+  with an unmodified positive control at the same block/counter settings.
+  The nonterminating loop must fail its successor-domain obligation.
+  An internal checker exception stops the run; only `Unproved` counts as
+  a mutation rejection.
