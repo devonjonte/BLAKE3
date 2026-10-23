@@ -7,6 +7,7 @@ compress_xof), and hash_many at every input count up to two passes of its
 width and every block count from 1 to 16.
 
     python3 tools/verify/prove_x86.py [CASE...]
+    python3 tools/verify/prove_x86.py --representative
 """
 
 import os
@@ -238,6 +239,28 @@ def cases(only):
     return [c for c in out if not only or c[0] in only or c[2] in only or ("windows" if c[1] else "unix") in only]
 
 
+def representative_cases():
+    """The promotion gate's direct (non-induction) cases.
+
+    The all-count proof covers hash_many for every count. These direct
+    cases independently exercise the finite harness at every block length
+    for one full-width fixed-counter pass, and at the first/full/two-pass
+    counts for 16-block incrementing counters, for every ISA and ABI.
+    Compression, XOF and every xof_many count have no all-count substitute
+    and are all included.
+    """
+    out = []
+    for windows in (False, True):
+        for isa in ("sse41", "avx512"):
+            out += [(isa, windows, "compress", None), (isa, windows, "xof", None)]
+        for isa in ("sse41", "avx2", "avx512"):
+            width = WIDTH[isa]
+            out += [(isa, windows, "hash_many", (width, blocks, False)) for blocks in range(1, 17)]
+            out += [(isa, windows, "hash_many", (n, 16, True)) for n in (1, width, 2 * width)]
+    out += [("avx512", False, "xof_many", n) for n in range(1, 33)]
+    return out
+
+
 OBJS = {}
 
 
@@ -262,7 +285,7 @@ def prove_case(case):
 
 def main():
     import workers
-    todo = cases(set(sys.argv[1:]))
+    todo = representative_cases() if sys.argv[1:] == ["--representative"] else cases(set(sys.argv[1:]))
     failed = 0
     for (isa, windows, kind, arg), verdict in workers.each(prove_case, todo, 16):
         print(f"{isa} {'windows' if windows else 'unix'} {kind} {arg or ''}: {verdict}", flush=True)

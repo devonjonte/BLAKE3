@@ -186,6 +186,15 @@ class GeneralizationTests(unittest.TestCase):
             self.assertEqual(got.as_long(), expected)
 
 
+class ConcreteCasesTests(unittest.TestCase):
+    def test_representative_cases_are_the_declared_promotion_set(self):
+        import prove_x86
+        got = prove_x86.representative_cases()
+        self.assertEqual(len(got), 154)
+        self.assertEqual(len(set(got)), 154)
+        self.assertTrue(all(case in prove_x86.cases(set()) for case in got))
+
+
 class EveryCountCasesTests(unittest.TestCase):
     def test_declared_matrix_has_every_caller_shape_once(self):
         import prove_x86_loop
