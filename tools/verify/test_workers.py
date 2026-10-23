@@ -19,6 +19,8 @@ import workers
 
 
 def task(item):
+    if item == "quick":
+        return 1
     if item == "blocked":
         time.sleep(60)
     elif item == "exception":
@@ -59,6 +61,13 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(code, 0, stderr)
                 self.assertEqual(json.loads(stdout), [2, 4, 6])
 
+    def test_early_close_stops_the_blocked_sibling(self):
+        for method in ("fork", "spawn"):
+            with self.subTest(method=method):
+                code, stdout, stderr = self.child("early", method)
+                self.assertEqual(code, 0, stderr)
+                self.assertEqual(json.loads(stdout), [1])
+
     def test_failure_stops_the_blocked_sibling(self):
         for method in ("fork", "spawn"):
             for mode, status in (("exception", 1), ("empty", 0), ("killed", -9)):
@@ -72,9 +81,19 @@ if __name__ == "__main__":
     if len(sys.argv) == 4 and sys.argv[1] == "--child":
         from unittest.mock import patch
         mode, method = sys.argv[2:]
-        items = [1, 2, 3] if mode == "success" else ["blocked", mode]
+        if mode == "success":
+            items = [1, 2, 3]
+        elif mode == "early":
+            items = ["quick", "blocked"]
+        else:
+            items = ["blocked", mode]
         # Exercise two concurrent workers even when the test host has one CPU.
         with patch.object(workers.multiprocessing, "cpu_count", return_value=2):
-            print(json.dumps(sorted(workers.each(task, items, 2, multiprocessing.get_context(method)))))
+            if mode == "early":
+                results = workers.each(task, items, 2, multiprocessing.get_context(method))
+                print(json.dumps([next(results)]))
+                results.close()
+            else:
+                print(json.dumps(sorted(workers.each(task, items, 2, multiprocessing.get_context(method)))))
     else:
         unittest.main()
