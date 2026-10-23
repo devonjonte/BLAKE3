@@ -15,9 +15,12 @@ test that could see the change:
 - every test, when the change touches what line coverage cannot see: the
   assembly and C under c/, the build script, the manifests and lock, the
   cargo and nextest configuration, or a line of Rust outside any function
-  that coverage instruments (a constant, a type, an attribute, a `use`),
-  since any test may depend on it. A comment or a blank line is no
-  change.
+  (a constant, a type, a `use`, a module's attribute), since any test may
+  depend on it through the compiler, which no reading of the text can
+  bound (a constant feeding a constant; a type inferred). An attribute
+  on a function selects the function's tests. A comment or a blank line
+  is no change. Precision is bought only where it is sound: inside
+  function bodies, from the lines tests ran.
 
 A changed line that coverage instruments and no test ran is reported: no
 test can catch a mistake there, which is a finding, and running every
@@ -224,46 +227,6 @@ def fn_lines_from(in_fn, start):
     return body
 
 
-def names_of(text):
-    """The names a line of code outside any function brings in or defines:
-    a `use`'s imported names (the last segment of each path, the braces'
-    members), a const, static, type, struct, enum, trait, fn or macro's
-    name. Empty where the line defines no name the tool can see."""
-    stripped = text.strip().rstrip(";")
-    m = re.match(r"(?:pub(?:\([^)]*\))?\s+)?use\s+(.*)", stripped)
-    if m:
-        body = m.group(1)
-        names = set()
-        for part in re.split(r"[{},]", body):
-            part = part.strip()
-            if part and part != "*" and part != "self":
-                name = part.split("::")[-1].split(" as ")[-1].strip()
-                if re.match(r"\w+$", name):
-                    names.add(name)
-        return names
-    m = re.match(r"(?:pub(?:\([^)]*\))?\s+)?(?:const|static|type|struct|enum|trait|union|fn|macro_rules!)\s+(\w+)", stripped)
-    return {m.group(1)} if m else set()
-
-
-def tests_naming(names, scope, base_tests, texts):
-    """The tests that ran a line mentioning one of `names`, in the files
-    `scope` admits (a function of the path): {test: the line}."""
-    found = {}
-    pattern = re.compile(r"\b(" + "|".join(re.escape(n) for n in sorted(names)) + r")\b")
-    for test, files in base_tests.items():
-        for path, lines in files.items():
-            if not scope(path):
-                continue
-            text = texts(path)
-            for n in lines:
-                if n - 1 < len(text) and pattern.search(text[n - 1]):
-                    found.setdefault(test, f"{path}:{n}")
-                    break
-            if test in found:
-                break
-    return found
-
-
 def fn_body_lines(text):
     """The line numbers inside function bodies (from a `fn` item's opening
     brace to its close), by brace depth over the text with strings and
@@ -352,12 +315,6 @@ def select(base_tests, instrumented, listed, diff):
             # Documents and tools, and crates apart: no test here reads them
             # (the files tests read are in EVERYTHING).
             continue
-        if path in base_paths() and path not in instrumented:
-            # A Rust file coverage instrumented no line of: not compiled into
-            # the tests on this machine (another architecture's kernel), so
-            # no change to it reaches them here.
-            print(f"not compiled here: {path} (no instrumented line; another machine's code)", flush=True)
-            continue
         covered_by = {}
         for test, files in base_tests.items():
             for n in files.get(path, ()):
@@ -394,18 +351,12 @@ def select(base_tests, instrumented, listed, diff):
                     if not near:
                         print(f"unprotected: {path}:{n} changes inside a function no test ran", flush=True)
                 elif code_only(text):
-                    # Outside any function: a use, a constant, a type. The
-                    # tests that ran a line naming what it brings in or
-                    # defines (a use's names within its file; a definition's
-                    # anywhere); where the line names nothing the tool can
-                    # see, or no test ran such a line, every test.
-                    names = names_of(text)
-                    is_use = text.strip().startswith(("use ", "pub use ", "pub(crate) use "))
-                    users = tests_naming(names, (lambda p, here=path: p == here) if is_use else (lambda p: True), base_tests, old_text_of) if names else {}
-                    if users:
-                        for t, where in users.items():
-                            chosen.setdefault(t, f"ran {where}, which names one of {sorted(names)} from the changed {path}:{n}")
-                    else:
+                    # Outside any function: a use, a constant, a type, a
+                    # trait. Which tests depend on it is a question of the
+                    # compiler's (a constant feeds a constant feeds a test,
+                    # a type is inferred), and line coverage cannot answer
+                    # it; names in the text are no closure (Sam Shackleton's
+                    # controls, October 23). Every test runs.
                         everything = f"{path}:{n} is code outside any function ({text.strip()[:60]})"
             if any(attribute(t) for t in new_lines) and old_count == 0:
                 # An attribute inserted: on the function that follows it (in

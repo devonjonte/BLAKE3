@@ -67,9 +67,12 @@ it mapped and runs, through nextest, every test that ran a line the
 change removes or rewrites, a test beside an insertion, a new test, and
 every test when the change touches what line coverage cannot see (the
 assembly, the build, the manifests, the nextest configuration, a
-constant or a type or a `cfg`). It prints each test's reason. A change to
-a comment runs nothing; a change inside one function runs its tests, a
-few seconds. `python3 tools/tests/reach.py map` records every test's
+constant or a type or a `cfg`: anything the compiler, and no reading of
+the text, decides the reach of). It prints each test's reason. A change
+to a comment runs nothing; a change inside one function runs its tests,
+a few seconds. `python3 tools/tests/test_reach.py` holds the rule's
+controls, two of them Sam Shackleton's cases where a narrower rule hid a
+failing test. `python3 tools/tests/reach.py map` records every test's
 lines once (a minute); `check` keeps the map current from its own runs.
 It replaces no suite above: the suites run before a landing; `reach`
 makes the cycle between landings fast.
