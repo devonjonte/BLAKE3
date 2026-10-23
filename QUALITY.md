@@ -71,6 +71,14 @@ keeps Rust's memory rules, which the compiler checks everywhere else. Assembly c
 - **Miri** runs Rust code in an interpreter that enforces Rust's memory
   rules. It is slow, but it can catch mistakes in `unsafe` code that a
   normal test run may not expose.
+- **Loom** runs a small piece of threaded code under every order its
+  threads could take, instead of the one order a test run happens to
+  take. The place a thread waits for another's work to finish (the
+  "finish handshake") is written as one word that both sides read and
+  change in single steps, and Loom checks every interleaving of them:
+  a wait that could never end shows up as a deadlock, at once, rather
+  than as a test that hangs until a clock stops it. The mutation check
+  uses the same Loom test to judge mistakes planted in that code.
 - **Guard pages** cover assembly. A test places an inaccessible page of
   memory immediately beside an input or output buffer. If a kernel reads
   or writes even one byte outside that buffer, the processor faults and

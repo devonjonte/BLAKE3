@@ -96,3 +96,43 @@ impl Finish {
         self.state.fetch_and(!SLEEPING, Ordering::AcqRel);
     }
 }
+
+// The standard library's test alone: under Loom (tests/loom_finish.rs) the
+// file compiles beside Loom's primitives, which have no sleep.
+#[cfg(all(test, not(loom)))]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// A wake with no piece behind it, as the operating system may give
+    /// (std::thread::park allows spurious wakeups), sends the waiter back
+    /// to sleep: it returns only once the count is complete. Loom's park
+    /// has no spurious wakes, so this is the standard library's test.
+    #[test]
+    fn a_spurious_wake_is_slept_through() {
+        let finish = Arc::new(Finish::new());
+        finish.published.store(2, Ordering::SeqCst);
+        let returned = Arc::new(AtomicUsize::new(0));
+        let waiter = {
+            let (finish, returned) = (finish.clone(), returned.clone());
+            thread::spawn(move || {
+                finish.own();
+                finish.wait(2, || false);
+                returned.store(1, Ordering::SeqCst);
+            })
+        };
+        let handle = waiter.thread().clone();
+        // Spurious wakes while one piece is still to come: the waiter
+        // must not return.
+        finish.finished(1);
+        for _ in 0..20 {
+            handle.unpark();
+            thread::sleep(std::time::Duration::from_millis(1));
+            assert_eq!(returned.load(Ordering::SeqCst), 0, "the waiter returned before its count was complete");
+        }
+        finish.finished(1);
+        waiter.join().unwrap();
+        assert_eq!(returned.load(Ordering::SeqCst), 1);
+        assert_eq!(finish.finished_count(), 2);
+    }
+}

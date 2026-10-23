@@ -57,6 +57,7 @@ cargo test --release --doc
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API
 sh tools/check-builds.sh            # the builds the suites leave out
+RUSTFLAGS="--cfg loom" cargo test --release --test loom_finish   # every interleaving of the finish handshake
 python3 tools/mutants/check.py        # about an hour: every surviving mutant known, every time-out known
 ```
 

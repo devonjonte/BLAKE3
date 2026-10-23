@@ -12,7 +12,11 @@ stale), and on a listed one whose reason is still UNCLASSIFIED. A mutant
 is named by its file, function, and change, without its line: the same
 change at several places in one function counts once per place. It runs
 in git worktrees of HEAD of its own (SHARDS at once), so the checkout is
-never mutated. With --write, the list is rewritten from this run, each
+never mutated. A `loom files:` line names the files whose mutants Loom
+judges (tests/loom_finish.rs, every interleaving of the finish handshake,
+deterministic, in a tenth of a second) in place of the suite's schedule
+and its clock: a wait that never ends is a deadlock Loom reports, not a
+time-out. With --write, the list is rewritten from this run, each
 new mutant's reason UNCLASSIFIED and the others' kept.
 
 A mutant whose tests no test fails, but the clock stops (nextest's, or
@@ -104,12 +108,18 @@ def read_known(path=None, inactive=None):
     not exist yet (TIMEOUTS, on a new machine) has no rows."""
     path, inactive = (KNOWN, INACTIVE) if path is None else (path, inactive)
     files, known = [], {}
+    if path == KNOWN:
+        LOOM_FILES.clear()
     if not os.path.exists(path):
         return files, known
     for line in open(path):
         line = line.rstrip("\n")
         if line.startswith("files:"):
             files = line.split()[1:]
+        elif line.startswith("loom files: "):
+            # The files whose mutants Loom judges (tests/loom_finish.rs, every
+            # interleaving, deterministic) in place of the suite and its clock.
+            LOOM_FILES.extend(line.split()[2:])
         elif line and not line.startswith("#"):
             file, mutant, count, reason = line.split("\t")
             if applies(reason):
@@ -123,6 +133,7 @@ def read_known(path=None, inactive=None):
 
 # The rows for other CPUs, as written (a name may have one row a CPU).
 INACTIVE = []
+LOOM_FILES = []
 INACTIVE_TIMEOUTS = []
 
 
@@ -167,7 +178,7 @@ def scratch_dir():
     return path
 
 
-def run(files, extra=(), shards=SHARDS, label="run"):
+def run(files, extra=(), shards=SHARDS, label="run", loom=False):
     """The mutants that survive the library's tests, by name, counted, and
     every mutant's outcome by function. Each shard's results are kept in
     tmp/mutants-last/<label>/ for a look afterwards."""
@@ -191,10 +202,16 @@ def run(files, extra=(), shards=SHARDS, label="run"):
         # target-dir would otherwise give the shards one, and each would
         # test the others' builds).
         env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"), NEXTEST_PROFILE="mutants-map" if MAP else "mutants")
+        if loom:
+            # Loom's build of the same files (tests/loom_finish.rs compiles
+            # them beside Loom's primitives): every interleaving, in place
+            # of the suite's schedule and its clock.
+            env["RUSTFLAGS"] = os.environ.get("RUSTFLAGS", "") + " --cfg loom"
         # Consecutive slices (cargo-mutants' default): a shard's mutants in one
         # file one after another rebuild less (round-robin evened the shards
         # and made each build 10% slower, the run no faster, October 21).
-        shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", "--lib", "--tests"]
+        tests = ["--test", "loom_finish"] if loom else ["--lib", "--tests"]
+        shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", *tests]
         runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=lambda: cap_memory(shards))))
     names = collections.Counter()
     timed = collections.Counter()  # the time-outs, by name: their own outcome
@@ -460,7 +477,7 @@ def main():
     since = sys.argv[sys.argv.index("--since") + 1] if "--since" in sys.argv else None
     extra = []  # the mutants the change's altered tests caught (the map's)
     if since is not None:
-        diff = subprocess.run(["git", "-C", ROOT, "diff", f"{since}...HEAD", "--", *files], capture_output=True, text=True, check=True).stdout
+        diff = subprocess.run(["git", "-C", ROOT, "diff", f"{since}...HEAD", "--", *files, *LOOM_FILES], capture_output=True, text=True, check=True).stdout
         tests, sure = changed_tests(since)
         caught = caught_by(tests) if tests and sure else []
         if not sure:
@@ -482,6 +499,9 @@ def main():
             f.write(diff)
         # One shard: a change's mutants are few, and each shard builds anew.
         found, functions, timed = run(files, ["--in-diff", path], shards=1) if diff else (collections.Counter(), {}, collections.Counter())
+        if any(f in diff for f in LOOM_FILES):
+            more, more_functions, more_timed = run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True)
+            found, timed, functions = found + more, timed + more_timed, {**functions, **more_functions}
         if extra:
             # The altered tests' catches, wherever they are: by name.
             again, more, again_timed = run(sorted({k.split("\t", 1)[0] for k in extra}), [arg for k in extra for arg in ("--re", ": " + re.escape(k.split("\t", 1)[1]) + "$")], label="tests")
@@ -503,11 +523,14 @@ def main():
               + ("" if not new_timed else f", {len(new_timed)} names with a new time-out (no verdict on them)"))
         sys.exit(1 if new else 2 if new_timed else 0)
     found, functions, timed = run(files)
+    if LOOM_FILES:
+        more, more_functions, more_timed = run(LOOM_FILES, shards=1, label="loom", loom=True)
+        found, timed, functions = found + more, timed + more_timed, {**functions, **more_functions}
     found, timed = confirm(found, known, timed, tknown)
     figure(functions, {**{k: tknown.get(k, (n, "UNCLASSIFIED")) for k, n in timed.items()},
                        **{k: known.get(k, (n, "UNCLASSIFIED")) for k, n in found.items()}})
     if "--write" in sys.argv:
-        header = [l.rstrip("\n") for l in open(KNOWN) if l.startswith("#") or l.startswith("files:")]
+        header = [l.rstrip("\n") for l in open(KNOWN) if l.startswith("#") or l.startswith(("files:", "loom files:"))]
         # The rows for other CPUs stay as they were: this run cannot see them.
         rows = sorted([f"{k}\t{n}\t{known.get(k, (0, 'UNCLASSIFIED'))[1]}" for k, n in found.items()] + INACTIVE)
         open(KNOWN, "w").write("\n".join(header + rows) + "\n")

@@ -33,7 +33,9 @@ use loom::sync::atomic::Ordering;
 use loom::thread;
 
 /// The caller publishes `pieces`, each worker finishes one, the caller
-/// waits for all; with `poll` polls before it sleeps.
+/// waits for all; with `poll` polls before it sleeps. (A spurious wake,
+/// which the operating system may give and Loom's park does not model,
+/// is src/finish.rs's own test's.)
 fn run(pieces: usize, polls: usize) {
     loom::model(move || {
         let finish = Arc::new(Finish::new());
