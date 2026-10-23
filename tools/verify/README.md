@@ -4,12 +4,10 @@ These tools compare assembled kernels with the compression function of the
 Lean specification of BLAKE3 (`c2sp/BLAKE3/`). A completed case covers every
 input, key, counter, and flags value under its harness's contract.
 
-**Group-count assurance is under review:** the shared induction checker
-needs successor-domain/rank closure (#126), and the SME2 parent harness
-needs independent input bytes across groups (#129). Those repairs and
-their deliberate-error controls are being validated. The coverage section
-below describes the harness targets; a passing run of the older harness
-leaves those two assurance obligations open.
+**Group-count assurance:** the shared induction checker requires
+successor-domain/rank closure (#126), and the SME2 parent harness uses
+independent input bytes across groups (#129). Their deliberate-error
+controls are in `mutants.py`.
 
 Commands:
 
@@ -182,15 +180,16 @@ four blocks its output masks are selects whose condition the path's
 lengths settle; the normal form takes such a select as the arm it
 selects.
 
-**X86 input-count candidate.** Devon's fixed-source matrix completed 88 of
-102 cases at `14a716f`; the remaining cases and source-matched validation
-of this integrated candidate are pending. This candidate combines that
-work and its CLI with the current proof-tool optimizations, the
-symbolic-rank precondition from PR #126, and the independent parent inputs
-from PR #129. All SME2 group-loop callers now use the natural `K < groups`
-bound: the former `K <= 2^39` caps did not close a domain allowing
-`groups <= 2^40`. Twenty helper/worker tests pass; the full source-matched
-run remains pending. Hashing machine code is unchanged.
+**X86 input-count proofs.** The integrated matrix combines Devon's
+all-count work and CLI with the proof-tool optimizations, the
+symbolic-rank precondition from PR #126, and the independent parent
+inputs from PR #129. All SME2 group-loop callers use the natural
+`K < groups` bound: the former `K <= 2^39` caps did not close a domain
+allowing `groups <= 2^40`. The source-matched promotion validation at
+the candidate recorded in the maintainers' notes proved all 102
+all-count cases and 154 representative direct cases, with every entry
+alignment handled by one symbolic stack residue. Hashing machine code
+is unchanged.
 
 `prove_x86_loop.py` uses the same executor and induction helper for
 `hash_many`. Its declared 102 cases cover fixed
@@ -222,7 +221,7 @@ have needed a 1800-second batch deadline. The full matrix takes hours on
 that host, so bounded batches preserve completed evidence. The proof's
 model and scope stay separate from hardware-speed evidence. Source-matched
 [results and current progress](https://github.com/devonjonte/bench-hashes/tree/data/2026-10-22/x86-universal-counts)
-record the completed cases and remaining work.
+record the completed cases and remaining work; the promotion result above is the current result for this fork.
 
 **Code changed for the proofs.** The SME2 message kernel took the last
 block's length with a branch (0 for 64), so a proof had to fix the
