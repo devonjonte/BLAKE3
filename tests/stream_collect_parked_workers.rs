@@ -39,7 +39,5 @@ fn a_caller_looping_on_collect_wakes_a_parked_worker() {
         }
         done.send(()).unwrap();
     });
-    finished
-        .recv()
-        .expect("the stream completes: a caller looping on collect waited on a task no worker was awake to take");
+    finished.recv().expect("the stream completes: a caller looping on collect waited on a task no worker was awake to take");
 }
