@@ -64,6 +64,17 @@ class Rule(unittest.TestCase):
         chosen, everything = reach.select(self.TESTS, self.INSTRUMENTED, ["two", "three"], diff)
         self.assertIsNotNone(everything)
 
+    def test_a_const_fn_body_runs_every_test(self):
+        # Sam Shackleton's third control: a const fn's body may be evaluated
+        # at compile time into a constant another test reads, so coverage of
+        # its lines names only part of its reach.
+        lib = "const fn base() -> u16 {\n    3\n}\nconst B: u16 = base();\npub fn direct() -> u8 {\n    base() as u8\n}\npub fn indirect() -> u16 {\n    B\n}\n"
+        base({"src/lib.rs": lib})
+        tests = {"direct": {"src/lib.rs": {1, 2, 3, 5, 6, 7}}, "indirect": {"src/lib.rs": {8, 9, 10}}}
+        diff = {"src/lib.rs": [hunk(2, 1, 2, 1, ["    259"])]}
+        chosen, everything = reach.select(tests, {"src/lib.rs": set(range(1, 11))}, ["direct", "indirect"], diff)
+        self.assertIsNotNone(everything)
+
     def test_what_coverage_cannot_see_runs_every_test(self):
         for path in ["c/blake3_avx2_x86-64_unix.S", "build.rs", "Cargo.toml", ".config/nextest.toml"]:
             diff = {path: [hunk(1, 1, 1, 1, ["x"])]}

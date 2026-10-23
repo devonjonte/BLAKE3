@@ -229,32 +229,37 @@ def fn_lines_from(in_fn, start):
     return body
 
 
-def fn_body_lines(text):
+def fn_body_lines(text, const_too=False):
     """The line numbers inside function bodies (from a `fn` item's opening
     brace to its close), by brace depth over the text with strings and
     comments blanked: a change there is a change to one function's code,
     which the tests that ran its instrumented lines beside it can see; a
-    change outside (a constant, a type, a trait) may reach any test."""
+    change outside (a constant, a type, a trait) may reach any test. A
+    `const fn`'s body is left out: the compiler may evaluate it into a
+    constant some other test reads without running a line of it (Sam
+    Shackleton's control, October 23), so a change there is a change
+    outside any function for this rule. With `const_too`, those lines
+    come back as a second set."""
     blank = re.sub(r"//[^\n]*|/\*.*?\*/|\"(\\.|[^\"\\])*\"|'(\\.|[^'\\])'", lambda m: re.sub(r"[^\n]", " ", m.group(0)), text, flags=re.S)
-    inside, depth, pending_fn, body_depths = set(), 0, False, []
+    inside, in_const, depth, pending, body_depths = set(), set(), 0, None, []
     for number, line in enumerate(blank.splitlines(), 1):
         if re.search(r"\bfn\b", line):
-            pending_fn = True
+            pending = "const" if re.search(r"\bconst\s+(unsafe\s+)?(extern\s+\"[^\"]*\"\s+)?fn\b", line) else "fn"
         for ch in line:
             if ch == "{":
                 depth += 1
-                if pending_fn:
-                    body_depths.append(depth)
-                    pending_fn = False
+                if pending:
+                    body_depths.append((depth, pending))
+                    pending = None
             elif ch == "}":
-                if body_depths and depth == body_depths[-1]:
+                if body_depths and depth == body_depths[-1][0]:
                     body_depths.pop()
                 depth -= 1
-        if ";" in line and pending_fn and "{" not in line:
-            pending_fn = False  # a trait's method without a body
+        if ";" in line and pending and "{" not in line:
+            pending = None  # a trait's method without a body
         if body_depths:
-            inside.add(number)
-    return inside
+            (in_const if any(kind == "const" for _, kind in body_depths) else inside).add(number)
+    return (inside, in_const) if const_too else inside
 
 
 def hunks(base):
@@ -322,10 +327,13 @@ def select(base_tests, instrumented, listed, diff):
             for n in files.get(path, ()):
                 covered_by.setdefault(n, []).append(test)
         old_text = old_text_of(path)
-        in_fn = fn_body_lines("\n".join(old_text))
+        in_fn, in_const = fn_body_lines("\n".join(old_text), const_too=True)
         for old_start, old_count, new_start, new_count, new_lines in file_hunks:
             for n in range(old_start, min(old_start + old_count, len(old_text) + 1)):
                 text = old_text[n - 1]
+                if n in in_const and code_only(text):
+                    everything = f"{path}:{n} is in a const fn, which the compiler may evaluate for a test that runs none of its lines ({text.strip()[:50]})"
+                    break
                 if n in covered_by:
                     for t in covered_by[n]:
                         chosen.setdefault(t, f"ran {path}:{n}, which the change removes or rewrites")
@@ -353,8 +361,8 @@ def select(base_tests, instrumented, listed, diff):
                     if not near:
                         print(f"unprotected: {path}:{n} changes inside a function no test ran", flush=True)
                 elif code_only(text):
-                    # Outside any function: a use, a constant, a type, a
-                    # trait. Which tests depend on it is a question of the
+                    # Outside any function, or in a const fn's body: a use, a
+                    # constant, a type, a trait. Which tests depend on it is a question of the
                     # compiler's (a constant feeds a constant feeds a test,
                     # a type is inferred), and line coverage cannot answer
                     # it; names in the text are no closure (Sam Shackleton's
