@@ -145,6 +145,11 @@ INACTIVE_TIMEOUTS = []
 
 
 MAP = "--map" in sys.argv
+# --reach: each mutant's tests chosen by the lines it changes (the map of
+# tools/tests/reach.py for HEAD's tree, made by `reach.py check` or `map`
+# at HEAD); the whole suite where no test ran them or the rule says so.
+# The verdicts are the suite's; the time is the chosen tests'.
+REACH = "--reach" in sys.argv
 
 
 # Runs at once, each in its own worktree and build: on the VM (16 CPUs),
@@ -229,6 +234,14 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
             # them beside Loom's primitives): every interleaving, in place
             # of the suite's schedule and its clock.
             env["RUSTFLAGS"] = os.environ.get("RUSTFLAGS", "") + " --cfg loom"
+        elif REACH:
+            # Each mutant's tests alone: tools/mutants/cargo-nextest, first
+            # on PATH, narrows cargo-mutants' nextest run to the tests that
+            # ran the mutated lines (the map tools/tests/reach.py keeps for
+            # HEAD's tree), the whole suite where the rule says so.
+            env["PATH"] = os.path.join(tree, "tools", "mutants") + os.pathsep + env.get("PATH", "")
+            env["MUTANTS_REACH"] = "1"
+            env["TESTS_MAP_DIR"] = os.path.join(ROOT, "tmp", "tests-map")
         # Consecutive slices (cargo-mutants' default): a shard's mutants in one
         # file one after another rebuild less (round-robin evened the shards
         # and made each build 10% slower, the run no faster, October 21).

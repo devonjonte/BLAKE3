@@ -51,7 +51,7 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-MAPS = os.path.join(ROOT, "tmp", "tests-map")
+MAPS = os.environ.get("TESTS_MAP_DIR") or os.path.join(ROOT, "tmp", "tests-map")
 TARGET = os.path.join(ROOT, "target", "tests-coverage")
 # The cargo arguments the suite runs with (CONTRIBUTING: the library's and
 # the integration tests, release).
