@@ -15,6 +15,16 @@ class ContextTests(unittest.TestCase):
     def tearDown(self):
         canon.set_context([], set())
 
+    def test_array_fingerprint_distinguishes_chunk_offsets(self):
+        from z3 import Array, BitVecSort, BitVecVal, Select, simplify
+        name = "stride_test_input"
+        array = Array(name, BitVecSort(64), BitVecSort(8))
+        canon._values[(name, 0, 0)] = 0x0123456789ABCDEF
+        canon._values[(name, 0, 1)] = 0
+        sampled = canon.sample(name, array, 0)
+        self.assertEqual(simplify(Select(sampled, BitVecVal(0, 64))).as_long(), 0)
+        self.assertEqual(simplify(Select(sampled, BitVecVal(256, 64))).as_long(), 0x23)
+
     def test_iteration_counter_is_a_parameter(self):
         counter, iteration = BitVecs("counter len_k", 64)
         canon.set_context([], {"len_k"})
@@ -87,6 +97,22 @@ class GeneralizationTests(unittest.TestCase):
             return Concat(Extract(31, 24, t), Extract(23, 16, t), Extract(15, 8, t), Extract(7, 0, t))
         self.assertEqual(induction.constant_difference(loaded(x), loaded(x + 1)), 1)
         self.assertIsNone(induction.constant_difference(x, x * x))
+
+    def test_explicit_counter_halves_at_the_next_iteration(self):
+        from types import SimpleNamespace
+        from z3 import BitVecVal, simplify, substitute
+        state = SimpleNamespace(x={}, v={}, regions={})
+        counter, k = BitVecs("counter len_k", 64)
+        g = induction.Generalized(state, state, k)
+        values = [counter + 8 * k + lane for lane in range(2)]
+        inst = g.at(BitVecVal(1, 64))
+        # The low word carries while each packed 32-bit lane advances
+        # independently. An affine 64-bit packed-word step gets this wrong.
+        for high, expected in [(False, 1 << 32), (True, (1 << 32) + 1)]:
+            lo = 32 if high else 0
+            packed = Concat(Extract(lo + 31, lo, values[1]), Extract(lo + 31, lo, values[0]))
+            got = simplify(substitute(inst(packed), (counter, BitVecVal((1 << 32) - 8, 64))))
+            self.assertEqual(got.as_long(), expected)
 
 
 if __name__ == "__main__":
