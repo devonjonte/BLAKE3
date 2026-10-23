@@ -19,15 +19,26 @@ Each completed proof covers every input value within its stated contract.
 The checks also examine memory accesses, the calling convention, and
 whether input bytes or keys affect branches or addresses.
 
-The integer and NEON kernels' supported block counts are covered. For
-SME2, the proofs covering every batch count are being strengthened: they
-must establish loop progress and allow independent input data across
-batches. Full batch-count assurance remains open while those repairs and
-their deliberate-error tests are validated.
+The integer and NEON kernels' supported block counts are covered. The
+SME2 proofs also cover every group count in their stated ranges. Their
+loop proofs establish progress to the next group, and every group's input
+bytes are independent, so a kernel that read another group's bytes would
+compute a different result.
 
 On Intel and AMD processors, upstream's assembly kernels are checked the
-same way. Single compressions and the enumerated batch and extended-output
-cases are proved. Coverage of arbitrary counts remains open.
+same way. Single compressions and extended output at 1 to 32 blocks are
+proved. For batch hashing, an induction proof covers every input count
+in the stated range for each instruction set and calling convention, at
+block lengths 1 to 16 with a fixed counter and at 16 blocks with an
+incrementing counter. Each proof uses one symbolic entry-stack alignment
+covering the four legal ABI alignments.
+
+Two further checks test the prover itself. The instruction models are
+run against real processors on random states, including memory
+instructions and deliberate unaligned-address controls. We also plant
+mistakes in the assembly (a wrong stride, a wrong rotation, a loop that
+cannot finish, a write into the caller's stack) and require the proof to
+reject every one.
 
 The proofs do not cover the fork's own Intel and AMD kernels, written in
 Rust, or the Rust code that prepares work and combines results.
@@ -107,10 +118,11 @@ mistakes in some of the tools and models used to construct the proofs.
 ## What remains uncertain
 
 No human has carefully reviewed every line, and nobody outside the
-project has audited the code. Full batch-count proof assurance remains
-open on Arm and x86-64. Tests also cover those cases, the fork's own Intel
-and AMD kernels, and the Rust code around the assembly.
-These checks reduce risk, but they cannot guarantee that no bug remains.
+project has audited the code. The proofs trust the written specification,
+the instruction models, Z3, and each kernel's stated memory and calling
+convention. Tests cover the fork's own Intel and AMD kernels and the Rust
+code around the assembly. These checks reduce risk, but they cannot
+guarantee that no bug remains.
 
 ## Run the checks
 

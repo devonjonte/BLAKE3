@@ -29,9 +29,12 @@ def snapshot(m):
     for name, r in m.regions.items():
         r2 = copy.copy(r)
         r2.bytes = dict(r.bytes)
+        r2.offset_terms = dict(getattr(r, "offset_terms", {}))
         c.regions[name] = r2
     c.assumptions = list(m.assumptions)
     c.lengths = set(m.lengths)
+    if hasattr(m, "k"):
+        c.k = dict(m.k)
     if getattr(m, "za", None) is not None:
         c.za = [[list(row) for row in tile] for tile in m.za]
     if hasattr(m, "p"):
@@ -59,10 +62,12 @@ def paths(m, pc, heads):
                 continue
             if pc not in m.code:
                 raise Unproved(f"execution reached {pc:#x}, outside the code under proof")
-            mnem, ops = m.code[pc]
+            mnem, ops = m.code[pc][:2]
             aarch64.EXECUTED.add((mnem, tuple(ops)))
             try:
-                nxt = aarch64.step(m, pc, mnem, ops)
+                # A machine with its own stepper (x86.py's) steps itself;
+                # the AArch64 machines take the path they always have.
+                nxt = m.step_at(pc) if hasattr(m, "step_at") else aarch64.step(m, pc, mnem, ops)
             except Undecided as e:
                 for answer in (e.cond, Not(e.cond)):
                     b = snapshot(m)
@@ -71,6 +76,9 @@ def paths(m, pc, heads):
                 break
             m.steps += 1
             if nxt == "ret":
+                if hasattr(m, "step_at"):
+                    done.append((m, "return"))
+                    break
                 to = m.x[30]
                 if isinstance(to, Ptr) and to.region == "return":
                     done.append((m, "return"))
@@ -103,6 +111,8 @@ class Generalized:
         self.wild = 0
         self.x = {r: self.unify(s0.x[r], s1.x[r]) for r in s0.x}
         self.v = {r: [self.unify(a, b) for a, b in zip(s0.v[r], s1.v[r])] for r in s0.v}
+        self.masks = ({r: self.unify(s0.k[r], s1.k[r]) for r in s0.k}
+                      if hasattr(s0, "k") else None)
         # SME2's state: the ZA tiles and the predicates.
         self.za = None
         if getattr(s0, "za", None) is not None and getattr(s1, "za", None) is not None:
@@ -127,13 +137,38 @@ class Generalized:
         for name, mem in self.mem.items():
             r0, r1 = s0.regions[name], s1.regions[name]
             for off in [o for o, b in mem.items() if b is None and isinstance(o, int) and o % 8 == 0]:
-                w0, w1 = word(r0, off), word(r1, off)
-                if w0 is None or w1 is None:
+                w0 = word(r0, off)
+                if w0 is None:
+                    continue
+                w1 = word(r1, off)
+                if w1 is None:
                     continue
                 g = self.unify(w0, w1, wildcard=False)
                 if g is not None:
                     for i in range(8):
                         mem[off + i] = ("word", g, i)
+            # The same reconstruction at symbolic offsets (an entry stack
+            # whose residue is a length symbol): group the differing byte
+            # keys by the constant differences of their offset terms.
+            terms = {o: r0.offset_terms[o] for o, b in mem.items()
+                     if b is None and not isinstance(o, int) and o in r0.offset_terms and o in r1.offset_terms}
+            # Round each differing byte down to its aligned word. A word
+            # whose first bytes agree is not itself among the differing
+            # keys, so grouping differing keys alone would start mid-word.
+            bases = {}
+            for term in terms.values():
+                residue = forced(s0, aarch64.as_bv(term) & 7)
+                if residue is not None:
+                    base = simplify(aarch64.as_bv(term) - residue, som=True, bv_sort_ac=True)
+                    bases[aarch64.key(base)] = base
+            for base_key, base in bases.items():
+                w0, w1 = symbolic_word(r0, base), symbolic_word(r1, base)
+                if w0 is None or w1 is None:
+                    continue
+                g = self.unify(w0, w1, wildcard=False)
+                if g is not None:
+                    for i in range(8):
+                        mem[aarch64.key(base + i)] = ("word", g, i, base_key)
 
     def forget(self, pos):
         """Make a position unknown in the invariant."""
@@ -142,6 +177,8 @@ class Generalized:
             self.x[pos[1]] = ("unknown", 64)
         elif kind == "v":
             self.v[pos[1]][pos[2]] = ("unknown", 32)
+        elif kind == "mask":
+            self.masks[pos[1]] = ("unknown", 16)
         elif kind == "za":
             self.za[pos[1]][pos[2]][pos[3]] = ("unknown", 32)
         elif kind == "p":
@@ -149,8 +186,14 @@ class Generalized:
         elif kind == "mem":
             self.mem[pos[1]][pos[2]] = None
         elif kind == "word":
-            for i in range(8):
-                self.mem[pos[1]][pos[2] + i] = None
+            mem = self.mem[pos[1]]
+            for off, b in list(mem.items()):
+                if isinstance(b, tuple) and b[0] == "word" and (b[3] if len(b) > 3 else off - b[2]) == pos[2]:
+                    mem[off] = None
+            if isinstance(pos[2], int):
+                for i in range(8):
+                    if pos[2] + i in mem:
+                        mem[pos[2] + i] = None
 
     def fresh(self, size):
         self.wild += 1
@@ -159,8 +202,13 @@ class Generalized:
     def unify(self, a, b, wildcard=True):
         """The general form of a pair: kept, a + K x d, or an unknown."""
         if isinstance(a, Ptr) and isinstance(b, Ptr) and a.region == b.region:
+            if same_ptr(a, b):
+                return a
             if isinstance(a.offset, int) and isinstance(b.offset, int):
-                return a if a.offset == b.offset else ("ptr", a.region, a.offset, b.offset - a.offset)
+                return ("ptr", a.region, a.offset, b.offset - a.offset)
+            difference = constant_difference(aarch64.as_bv(a.offset), aarch64.as_bv(b.offset))
+            if difference is not None:
+                return ("ptr", a.region, a.offset, difference)
             return None if not wildcard else ("unknown", 64)
         if isinstance(a, Ptr) or isinstance(b, Ptr):
             return ("unknown", 64) if wildcard else None
@@ -185,7 +233,7 @@ class Generalized:
         def inst(g, size=64):
             if isinstance(g, tuple):
                 if g[0] == "ptr":
-                    return Ptr(g[1], simplify(BitVecVal(g[2], 64) + kval * g[3], som=True, bv_sort_ac=True))
+                    return Ptr(g[1], simplify(aarch64.as_bv(g[2]) + kval * g[3], som=True, bv_sort_ac=True))
                 if g[0] == "step":
                     a, d = g[1], g[2]
                     kk = kval if a.size() == 64 else Extract(a.size() - 1, 0, kval)
@@ -206,18 +254,22 @@ class Generalized:
             m.x[r] = v if v is not None else self.fresh(64)
         for r, lanes in self.v.items():
             m.v[r] = [(inst(g) if inst(g) is not None else self.fresh(32)) for g in lanes]
+        if self.masks is not None:
+            m.k = {r: (inst(g) if inst(g) is not None else self.fresh(16)) for r, g in self.masks.items()}
         for name, mem in self.mem.items():
             region = m.regions[name]
             region.bytes = {}
             words = {}
             for off, b in mem.items():
                 if isinstance(b, tuple) and b[0] == "word":
-                    w = words.setdefault(off - b[2], inst(b[1]))
+                    w = words.setdefault(b[3] if len(b) > 3 else off - b[2], inst(b[1]))
                     region.bytes[off] = Extract(8 * b[2] + 7, 8 * b[2], w) if not isinstance(w, Ptr) else (w, b[2])
                 elif b is not None:
                     region.bytes[off] = b
                 # unknown bytes stay unwritten: a read of one fails the proof
         m.nzcv = None
+        if hasattr(m, "flags"):
+            m.flags = None
         if self.za is not None:
             m.za = [[[(inst(g) if inst(g) is not None else self.fresh(32)) for g in row] for row in tile] for tile in self.za]
         if self.p is not None:
@@ -287,6 +339,19 @@ def word(r, off):
     return simplify(Concat(*reversed(parts)))
 
 
+def symbolic_word(r, base):
+    """The 8-byte word at a symbolic offset term, as word() at an int."""
+    parts = [r.bytes.get(aarch64.key(base + i)) for i in range(8)]
+    if any(p is None for p in parts):
+        return None
+    if all(isinstance(p, tuple) for p in parts):
+        return parts[0][0] if all(p[1] == i and p[0] is parts[0][0] for i, p in enumerate(parts)) else None
+    if any(isinstance(p, tuple) for p in parts):
+        return None
+    from z3 import Concat
+    return simplify(Concat(*reversed(parts)))
+
+
 def same_term(a, b):
     if isinstance(a, tuple) or isinstance(b, tuple):
         return a == b if not (isinstance(a, tuple) and isinstance(b, tuple)) else (a[1] == b[1] and same_ptr(a[0], b[0]))
@@ -329,9 +394,13 @@ def mismatches(m, g, kval):
         if isinstance(b, Ptr) or isinstance(a, Ptr):
             return (isinstance(a, Ptr) and isinstance(b, Ptr) and a.region == b.region
                     and aarch64.holds(m, aarch64.as_bv(a.offset) == aarch64.as_bv(b.offset)))
-        if same(a, b):
+        if eq(a, b):
             return True
-        return aarch64.lengths_only(m, a - b) and aarch64.holds(m, a == b)
+        # Public arithmetic needs one equality proof, rather than hash
+        # normalization's search among other leaves with similar samples.
+        if aarch64.lengths_only(m, a - b):
+            return aarch64.holds(m, a == b)
+        return same(a, b)
     bad = []
     for r, gv in g.x.items():
         if not agree(m.x[r], inst(gv)):
@@ -340,6 +409,10 @@ def mismatches(m, g, kval):
         for l, gv in enumerate(lanes):
             if not agree(m.v[r][l], inst(gv)):
                 bad.append(("v", r, l))
+    if g.masks is not None:
+        for r, gv in g.masks.items():
+            if not agree(m.k[r], inst(gv)):
+                bad.append(("mask", r))
     if g.za is not None:
         for t, tile in enumerate(g.za):
             for row, cells in enumerate(tile):
@@ -359,8 +432,8 @@ def mismatches(m, g, kval):
                 continue
             if off not in region.bytes or not agree(region.bytes[off], b):
                 bad.append(("mem", name, off))
-        for off in {o - b[2] for o, b in mem.items() if isinstance(b, tuple) and b[0] == "word"}:
-            w = word(region, off)
+        for off in {b[3] if len(b) > 3 else o - b[2] for o, b in mem.items() if isinstance(b, tuple) and b[0] == "word"}:
+            w = symbolic_word(region, region.offset_terms[off]) if isinstance(off, str) else word(region, off)
             if w is None or not agree(w, inst(mem[off][1])):
                 bad.append(("word", name, off))
     return bad
