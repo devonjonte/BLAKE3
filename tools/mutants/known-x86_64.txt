@@ -61,7 +61,7 @@ src/lanes.rs	replace + with * in sme2_prefix	1	speed: how the work is cut among 
 src/lanes.rs	replace + with * in sources::Source::publish	1	a scheduling choice: the wake-a-worker threshold counts one task fewer waiting; the task is published and taken the same, a worker woken one publish later
 src/lanes.rs	replace + with - in Pool::run_job	1	the pool's scheduling: how many workers a job wakes; the caller takes what waits
 src/lanes.rs	replace + with - in sources::Source::publish	1	the pool's scheduling: when a waiting task wakes a worker; the caller takes what waits
-src/lanes.rs	replace + with - in sources::Source::publish_job	1	OPEN: surfaced October 23 when the skip list (hangs.txt) went and these mutants ran: it survives the tests, and neither a test nor a reason has been written yet
+src/lanes.rs	replace + with - in sources::Source::publish_job	1	OPEN: surfaced October 23 when the skip list (hangs.txt) went: claimed set below the job's base when the caller takes pieces of its own (own > 0); the tests pass, so either own is 0 on every path they take or the workers' extra claims are harmless; a test of a caller taking its own pieces is the next step
 src/lanes.rs	replace += with *= in hash_each	1	a scheduling choice: bytes stays 0, so every item goes into one piece; the digests are the same, the speed gate's business (one piece hashes on one worker)
 src/lanes.rs	replace += with -= in hash_each	1	speed: how the work is cut among threads (every cut tiles the items; `remaining` feeds the piece length alone)
 src/lanes.rs	replace - with + in Pool::run_job	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
@@ -84,7 +84,7 @@ src/lanes.rs	replace < with <= in Pool::wake_for	1	OPEN: the pool's scheduling u
 src/lanes.rs	replace < with <= in group_cvs	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace < with <= in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace < with <= in hash_many	2	speed: moves a threshold between equally correct paths (the serial path and the pool, both right)
-src/lanes.rs	replace < with <= in sources::Source::wait	1	OPEN: surfaced October 23 when the skip list (hangs.txt) went and these mutants ran: it survives the tests, and neither a test nor a reason has been written yet
+src/lanes.rs	replace < with <= in sources::Source::wait	1	speed: how long a caller spins before it sleeps, a boundary in elapsed time a clock crosses once (no effect on results)
 src/lanes.rs	replace < with == in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace < with == in group_cvs	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace < with == in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
@@ -114,7 +114,7 @@ src/lanes.rs	replace > with == in sme2_serve	1	SME2 only: sme2_serve never runs 
 src/lanes.rs	replace > with == in sources::open	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with >= in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
 src/lanes.rs	replace > with >= in Pool::wake_for	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (bench-hashes NEXT-STEPS, "Mutation testing beside the proofs")
-src/lanes.rs	replace > with >= in Task::run	1	OPEN: surfaced October 23 when the skip list (hangs.txt) went and these mutants ran: it survives the tests, and neither a test nor a reason has been written yet
+src/lanes.rs	replace > with >= in Task::run	1	equivalent: a subtree task at counter zero is more than one chunk (the pool splits at MIN_SPLIT_LEN and above), so len == CHUNK_LEN never reaches this branch
 src/lanes.rs	replace > with >= in cut_with_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace > with >= in initialize	1	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
 src/lanes.rs	replace > with >= in sme2_serve	1	SME2 only: sme2_serve never runs on x86 (no SME2 thread starts); whether a gathered task takes the SME2 turn
@@ -275,7 +275,7 @@ src/many.rs	replace * with + in hash_two_chunks	4	NEON only: hash_two_chunks is 
 src/many.rs	replace * with / in chunked	1	SME2 only: cfg!(blake3_sme2) is false on x86, so chunked() is false whatever the rest
 src/many.rs	replace * with / in hash_chunked	3	SME2 only: hash_chunked is cfg(blake3_sme2), compiled out on x86
 src/many.rs	replace * with / in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
-src/many.rs	replace * with / in hash_many_on	2	OPEN: surfaced October 23 when the skip list (hangs.txt) went and these mutants ran: it survives the tests, and neither a test nor a reason has been written yet
+src/many.rs	replace * with / in hash_many_on	2	another architecture's code: the two places are in the NEON two-chunk gate (blake3_neon) and the serial path for non-x86 (cfg(not(target_arch = "x86_64"))), neither compiled here; AArch64's list is their judge
 src/many.rs	replace * with / in hash_two_chunks	4	NEON only: hash_two_chunks is cfg(blake3_neon), compiled out on x86
 src/many.rs	replace + with * in chunked	1	SME2 only: cfg!(blake3_sme2) is false on x86, so chunked() is false whatever the rest
 src/many.rs	replace + with * in hash_chunked	2	SME2 only: hash_chunked is cfg(blake3_sme2), compiled out on x86
@@ -336,7 +336,7 @@ src/many.rs	replace sme2_chunked_min -> usize with 1	1	SME2 only: called under c
 src/many.rs	replace sme2_sized -> bool with false	1	speed: moves a threshold between equally correct paths
 src/many.rs	replace sme2_sized -> bool with true	1	speed: moves a threshold between equally correct paths
 src/many.rs	replace | with & in hash_blocks	1	SME2 only: the SME2 block in hash_blocks is cfg(blake3_sme2), compiled out on x86
-src/many.rs	replace | with & in hash_run_padded	1	OPEN: surfaced October 23 when the skip list (hangs.txt) went and these mutants ran: it survives the tests, and neither a test nor a reason has been written yet
+src/many.rs	replace | with & in hash_run_padded	1	another architecture's code: SME2's padded run (blake3_sme2), compiled out here; on AArch64 it was seen to hang a test (the old hangs.txt)
 src/many.rs	replace | with & in hash_two_chunks	1	NEON only: hash_two_chunks is cfg(blake3_neon), compiled out on x86
 src/many.rs	replace | with & in neon_plans_last_len	1	NEON only: its body is cfg(blake3_neon); on x86 neon_plans() is false and it is not called
 src/many.rs	replace | with ^ in hash_blocks	1	equivalent: | and ^ agree on flag bits that never overlap
