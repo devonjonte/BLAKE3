@@ -23,6 +23,24 @@ status() {
 		curl -sSf -o /dev/null -X POST -H "Authorization: token $token" -d @- \
 			"https://api.github.com/repos/johnservil/BLAKE3/statuses/$commit"
 }
+b64() { printf %s "$1" | tr a-f A-F | basenc --base16 -d | basenc --base64url | tr -d '='; }
+# The inputs that can change a proof result: the kernels, the proof
+# tools (this script among them), the specification, and the hybrid
+# generator. A green run for the same inputs is the same evidence, so
+# a commit that changes none of them is not proved again; its status
+# names the run that already passed.
+inputs=$(git -C "$root" ls-tree "$commit" -- c c2sp tools/verify tools/gen_neon_hybrid.py | sha256sum | cut -d' ' -f1)
+record=$root/tmp/long-proofs/inputs/$inputs.txt
+if [ -f "$record" ]; then
+	prior=$(sed -n '1p' "$record")
+	psha=$(sed -n '2p' "$record")
+	pb3=$(sed -n '3p' "$record")
+	description="passed; inputs as $(printf %s "$prior" | cut -c1-12); SHA-256 $(b64 $psha) BLAKE3 $(b64 $pb3)"
+	[ ${#description} -le 140 ] || { echo "long-proofs: the status description is ${#description} characters, over GitHub's 140: $description" >&2; exit 1; }
+	status success "$description"
+	echo "long proofs passed for $commit; same proof inputs as $prior, not rerun; logs in $root/tmp/long-proofs/$prior, SHA-256 $psha, BLAKE3 $pb3 (hex)"
+	exit 0
+fi
 mkdir -p "$logs"
 rm -rf "$tree"
 git -C "$root" worktree prune
@@ -51,9 +69,12 @@ sha=$(cat "$logs"/*.txt | sha256sum | cut -d' ' -f1)
 # The status's description holds 140 characters: the logs' two hashes,
 # each whole in base64url (RFC 4648, 43 characters for 256 bits), fit
 # beside the verdict.
-b64() { printf %s "$1" | tr a-f A-F | basenc --base16 -d | basenc --base64url | tr -d '='; }
 description="$verdict; base64url SHA-256 $(b64 $sha) BLAKE3 $(b64 $b3)"
 [ ${#description} -le 140 ] || { echo "long-proofs: the status description is ${#description} characters, over GitHub's 140: $description" >&2; exit 1; }
 status "$state" "$description"
+if [ "$state" = success ]; then
+	mkdir -p "$root/tmp/long-proofs/inputs"
+	printf '%s\n%s\n%s\n' "$commit" "$sha" "$b3" > "$record"
+fi
 echo "long proofs $verdict for $commit; logs in $logs, SHA-256 $sha, BLAKE3 $b3 (hex)"
 [ "$state" = success ]
