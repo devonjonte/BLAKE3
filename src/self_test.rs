@@ -392,6 +392,8 @@ fn chunk_values(platform: Platform, input: &[u8], key: &[u8; 32], out: &mut [u8]
 /// Run every case and panic on the first that differs from the reference;
 /// how many cases ran (every one of CASES).
 fn run() -> usize {
+    #[cfg(all(test, feature = "std"))]
+    assert!(!PLANTED_FAILURE.load(core::sync::atomic::Ordering::Relaxed), "a failure planted by a test");
     compiled_features_present();
     let platform = Platform::detect_unchecked();
     let mut checked = 0;
@@ -450,6 +452,11 @@ static STATE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(U
 /// time, before it gives the verdict.
 #[cfg(all(test, feature = "std"))]
 static WAITING: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// A failure a test plants in the self-test's run (test builds only), as
+/// a CPU or build that computes wrong digests would fail it.
+#[cfg(all(test, feature = "std"))]
+static PLANTED_FAILURE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// Run the self-test unless it has passed: once per process, the first
 /// caller running it and any other waiting. It publishes no data, so a
@@ -535,6 +542,27 @@ mod test {
             STATE.store(verdict, Relaxed);
             assert_eq!(waiter.join().is_ok(), returns, "the waiting thread, after the verdict {verdict}");
         }
+    }
+
+    /// A self-test that fails leaves FAILED behind, so every later caller
+    /// stops too ("failed on another thread"), where it would otherwise
+    /// wait on RUNNING forever. The state is read outright after the
+    /// failing run, so a broken guard fails this test rather than hanging
+    /// it (the mutation check had it OPEN: no test made the self-test fail).
+    #[test]
+    #[cfg(not(miri))]
+    fn test_a_failing_self_test_stops_every_caller() {
+        use core::sync::atomic::Ordering::Relaxed;
+        STATE.store(UNTESTED, Relaxed);
+        PLANTED_FAILURE.store(true, Relaxed);
+        let first = std::panic::catch_unwind(ensure_slow);
+        PLANTED_FAILURE.store(false, Relaxed);
+        assert!(first.is_err(), "the failing run stops its caller");
+        assert_eq!(STATE.load(Relaxed), FAILED, "a failed run leaves FAILED for the rest");
+        let later = std::panic::catch_unwind(ensure_slow).expect_err("a later caller stops too");
+        let message = later.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| later.downcast_ref::<std::string::String>().cloned()).unwrap_or_default();
+        assert!(message.contains("failed on another thread"), "{message}");
+        STATE.store(PASSED, Relaxed);
     }
 
     /// The self-test runs every assembly entry point this machine has:
