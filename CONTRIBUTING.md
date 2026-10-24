@@ -93,6 +93,19 @@ by hanging: where a loop's variant or a wait's end can be asserted, make
 it a failure instead (`CvStack::merge`, `update_turn`, `ensure_slow`
 were made so), and the row goes.
 
+A survivor no test can kill is first a line to consider removing: an
+unreachable branch goes (Task::run's batch branch did), and a pure
+predicate gets a test of one thread even inside the pool (`visible`'s).
+Where both paths are correct and one is faster, the reason says
+`speed` and cites a measurement with the shortcut switched off
+(`spare_lane`: 7935 B +29-53% without it). The handshake files
+(`model files:` in the list: `finish.rs`, `park.rs`) are judged by
+Shuttle's schedules as well as the suite, place by place: a mutant is
+caught where either catches it. `check.py` narrows each mutant's tests
+to those that ran its lines (`reach.py`'s map), gives each shard a
+share of the CPUs, and caps each test process's memory, so a runaway
+mutant cannot take the machine.
+
 CI (`.github/workflows/ci.yml`) runs the suites on Linux x86-64 and arm64
 (without SME2, and without SHA-3 under QEMU), and Windows with MSVC,
 for every pull request from a fork, and by hand for a
@@ -136,6 +149,21 @@ exit status:
 `sh tools/install-git-hooks.sh` installs a pre-commit hook that runs it
 for every commit that touches code. To run the full
 benchmark against your working tree, see bench-hashes' `CONTRIBUTING.md`.
+
+The check runs its pairs in two stages: four pairs over every cell the
+change reaches, then sixteen fresh pairs over the cells it suspects,
+judged among themselves. Planted at one input length, it caught +20%
+and +10%, not +6%, which cells after a gap drown in (bench-hashes #66).
+Where a short-message cell turns on where a stack or a buffer happens to
+sit (4 KiB aliasing, bench-hashes #65), one build's layout can decide
+its verdict; Sam Shackleton's `tools/offset_check.py` (BLAKE3 #141)
+measures that.
+
+One machine's verdict covers that machine. A change to the pool or to a
+kernel faces the many-core x86 machine (the EPYC) and the Mac before it
+lands: removing the owed wakes passed the i7 and made the EPYC 4-12%
+slower in 14 pool cells (BLAKE3 #119), and the i7 then found its fix
+16-25% slower.
 
 A regression holds the commit: find its cause and fix it. When the
 slowdown is the price of something worth more (correctness, a simpler
