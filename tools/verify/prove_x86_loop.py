@@ -236,7 +236,6 @@ def prove(so, isa, windows, blocks, increment):
         original_counter = counter
         current_counter = BitVec('counter_pass', 64)
         k = BitVec('len_at', 64)
-        general.k = k
         counter = current_counter - width * k
         def rebase(value):
             if is_bv(value):

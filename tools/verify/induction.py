@@ -453,7 +453,8 @@ def mismatches(m, g, kval):
         # Public arithmetic needs one equality proof, rather than hash
         # normalization's search among other leaves with similar samples.
         if aarch64.lengths_only(m, a - b):
-            if is_const(g.k) and not aarch64.unsatisfiable((), Not(substitute(a == b, (g.k, BitVecVal(1, 64))))):
+            sub1 = [(g.k, BitVecVal(1, 64)), (BitVec("len_at", 64), BitVecVal(1, 64))]
+            if not aarch64.holds(m, substitute(a == b, *sub1)):
                 return False
             return aarch64.holds(m, a == b)
         return same(a, b)
