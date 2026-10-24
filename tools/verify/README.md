@@ -23,7 +23,7 @@ Commands:
 
 They need Python 3 with Z3 (`python3-z3`), an AArch64 machine with the
 SHA-3 extension, and Clang and llvm-objdump 17 or later (for SME2). The
-fork's VM runs them (`long-proofs.sh`); the SME2 cross-check needs an
+project's VM runs them (`long-proofs.sh`); the SME2 cross-check needs an
 SME2 CPU (Apple M4, or the VM on it).
 
 **Coverage.** The hybrid kernels at every block count they take (1 to
@@ -216,17 +216,11 @@ timeout --signal=KILL 850s python3 tools/verify/prove_x86_loop.py "[('avx2', Fal
 `--help` describes the command. With no case list it runs the full matrix;
 `cases()` enumerates that matrix in one place, tested against its declared
 shapes. Fresh workers keep proof caches bounded; set the caller's
-memory limit before launching. AVX-512 whole-chunk cases on an i7-12700K
-have needed a 1800-second batch deadline. The full matrix takes hours on
-that host, so bounded batches preserve completed evidence. The proof's
-model and scope stay separate from hardware-speed evidence. Source-matched
-[results and current progress](https://github.com/devonjonte/bench-hashes/tree/data/2026-10-22/x86-universal-counts)
-record the completed cases and remaining work; the promotion result above is the current result for this fork.
-
-**Code changed for the proofs.** The SME2 message kernel took the last
-block's length with a branch (0 for 64), so a proof had to fix the
-length; it now computes `((length - 1) & 63) + 1`, three instructions a
-group, and one proof covers every length.
+memory limit before launching, and choose `--workers` from the host's
+memory. Run selected batches under a bounded process-group supervisor,
+so a batch that exceeds its deadline preserves the evidence of the
+batches before it. The proof's model and scope stay separate from
+hardware-speed evidence.
 
 ## Extending
 

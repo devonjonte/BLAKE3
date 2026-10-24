@@ -1,9 +1,0 @@
-prefix=@PREFIX@
-libdir=${prefix}/lib
-includedir=${prefix}/include
-
-Name: b3_servil
-Description: BLAKE3, the servil fork's C API
-Version: @VERSION@
-Libs: -L${libdir} -lb3_servil
-Cflags: -I${includedir}

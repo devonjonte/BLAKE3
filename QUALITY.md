@@ -1,47 +1,49 @@
 # How blake3-servil is checked
 
-blake3-servil is a modified BLAKE3 implementation that aims to produce
-exactly the official digests, faster.
+blake3-servil is a fast BLAKE3 implementation. It aims to produce
+exactly the official digests.
 
 Most of the extra speed comes from code written for specific processors
 and from splitting work across processor cores. That is also where
-mistakes are most likely, so the project checks the code in several
-different ways.
+mistakes are most likely, so the code is checked in several different
+ways.
 
 ## Proofs of the kernels
 
-The fastest parts are small routines called kernels, some of them
-written in assembly.
+The fastest parts are small routines called kernels. Most kernels are
+written in assembly; a few, for Intel and AMD processors, are written
+in Rust.
 
-For Arm kernels, the project uses formal verification: symbolic execution
-compares assembled instructions with a written specification of BLAKE3.
-Each completed proof covers every input value within its stated contract.
-The checks also examine memory accesses, the calling convention, and
-whether input bytes or keys affect branches or addresses.
+For the assembly kernels, the project uses formal verification:
+symbolic execution compares the assembled instructions with a written
+specification of BLAKE3. Each completed proof covers every input value
+within its stated contract. The checks also examine memory accesses,
+the calling convention, and whether input bytes or keys affect
+branches or addresses.
 
-The integer and NEON kernels' supported block counts are covered. The
-SME2 proofs also cover every group count in their stated ranges. Their
-loop proofs establish progress to the next group, and every group's input
-bytes are independent, so a kernel that read another group's bytes would
-compute a different result.
+The Arm kernels are covered at every block count they support. The
+SME2 kernels process data in groups of sixteen chunks, and their
+proofs cover any number of groups. In those proofs, each group's bytes
+are separate symbols. So if a kernel read the wrong group's bytes, its
+output would not match the specification, and the proof would fail.
 
-On Intel and AMD processors, upstream's assembly kernels are checked the
-same way. Single compressions and extended output at 1 to 32 blocks are
-proved. For batch hashing, an induction proof covers every input count
-in the stated range for each instruction set and calling convention, at
-block lengths 1 to 16 with a fixed counter and at 16 blocks with an
-incrementing counter. Each proof uses one symbolic entry-stack alignment
-covering the four legal ABI alignments.
+The Intel and AMD assembly kernels are checked the same way. Single
+compressions and extended output at 1 to 32 blocks are proved. For
+batch hashing, an induction proof covers every input count in the
+stated range for each instruction set and calling convention, at block
+lengths 1 to 16 with a fixed counter and at 16 blocks with an
+incrementing counter. Each proof uses one symbolic entry-stack
+alignment covering the four legal ABI alignments.
 
 Two further checks test the prover itself. The instruction models are
 run against real processors on random states, including memory
 instructions and deliberate unaligned-address controls. We also plant
-mistakes in the assembly (a wrong stride, a wrong rotation, a loop that
-cannot finish, a write into the caller's stack) and require the proof to
-reject every one.
+mistakes in the assembly (a wrong stride, a wrong rotation, a loop
+that cannot finish, a write into the caller's stack) and require the
+proof to reject every one.
 
-The proofs do not cover the fork's own Intel and AMD kernels, written in
-Rust, or the Rust code that prepares work and combines results.
+The proofs cover the assembly kernels. The Rust kernels, and the Rust
+code that prepares work and combines results, are covered by tests.
 
 ## Tests, and tests of the tests
 
@@ -65,13 +67,13 @@ caught, explained, or listed as a wait, and the list of each is in the
 repository.
 
 Each program also runs a startup self-test. Before doing real work, it
-hashes a few inputs with known answers. This can catch a broken build or
-a processor that does not execute the code as expected.
+hashes a few inputs with known answers. This can catch a broken build
+or a processor that does not execute the code as expected.
 
 ## Memory and thread safety
 
 Some performance-critical Rust code is `unsafe`: there the programmer
-keeps Rust's memory rules, which the compiler checks everywhere else. Assembly code needs separate checks.
+keeps Rust's memory rules, which the compiler checks everywhere else.
 
 - **AddressSanitizer** rebuilds the Rust and C code with extra memory
   checks. It catches reads and writes outside allocated memory and use
@@ -103,17 +105,15 @@ assembly, which is why guard pages matter.
 
 ## What the checks found
 
-The checks found eight bugs. All are fixed, and none is known to have
-reached a user. Examples:
+The checks found eight bugs. All are fixed. Examples:
 
 - an Arm kernel produced the wrong digest for the shortest messages;
 - a function silently ignored a partial final block of input;
 - a reading helper could lose bytes it had already read when a later
   operation failed;
 - Miri found an unsafe pattern in code shared between threads;
-- batch assembly on Intel and AMD processors read beyond the end of an
-  input, which could crash a program. This bug came from upstream
-  BLAKE3 and has been reported there.
+- batch assembly on Intel and AMD processors read beyond the end of
+  an input, which could crash a program.
 
 The proofs have not found a bug in the Arm kernels. They did find
 mistakes in some of the tools and models used to construct the proofs.
@@ -121,11 +121,12 @@ mistakes in some of the tools and models used to construct the proofs.
 ## What remains uncertain
 
 No human has carefully reviewed every line, and nobody outside the
-project has audited the code. The proofs trust the written specification,
-the instruction models, Z3, and each kernel's stated memory and calling
-convention. Tests cover the fork's own Intel and AMD kernels and the Rust
-code around the assembly. These checks reduce risk, but they cannot
-guarantee that no bug remains.
+project has audited the code. The proofs trust the written
+specification, the instruction models, the automated prover (Z3),
+and each kernel's stated
+memory and calling convention. Tests cover the Rust kernels and the
+Rust code around the assembly. These checks reduce risk, but they
+cannot guarantee that no bug remains.
 
 ## Run the checks
 
@@ -135,6 +136,6 @@ cd BLAKE3
 cargo nextest run --release --lib --tests   # with cargo-nextest (https://nexte.st)
 ```
 
-The [quality manual](docs/quality-manual.md) gives details for experts
-and maintainers, including the limits of each check and how to run the
-proofs.
+The [quality manual](docs/quality-manual.md) gives details for
+experts and maintainers, including the limits of each check and how
+to run the proofs.

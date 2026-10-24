@@ -13,8 +13,9 @@
  * library's threads; its calls still finish, on the calling thread.
  *
  * Link with -lb3_servil (libb3_servil.a, or libb3_servil.so /
- * libb3_servil.dylib, built by `cargo build --release` in capi/; the
- * shared library carries its version in its soname). C11, or C++11.
+ * libb3_servil.dylib). Build and install with `cargo cinstall --release`
+ * in capi/; `pkg-config --cflags --libs b3_servil` gives the compiler flags.
+ * The shared library has a versioned soname. C11, or C++11.
  * B3_VERSION names the header's version; b3_version() the library's, so a
  * program can check that the two agree.
  */
