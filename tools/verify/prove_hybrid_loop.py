@@ -259,7 +259,9 @@ def summary(gen_a, gen_b, entry, chains, chain16, chain17, lanes, key, group=lam
                 w = pbl.lane_word(cell)
                 if w is None or w[0].decl().name() not in names:
                     raise Unproved(f"ZA tile 0 cell {row},{col} holds no SME2 chunk's bytes entering the loop")
-                j = next((c for c in range(0, 64, 4) if aarch64.holds(m, aarch64.as_bv(w[1]) == base + c)), None)
+                j = aarch64.concrete(simplify(aarch64.as_bv(w[1]) - base))
+                if j is None:
+                    j = next((c for c in range(0, 64, 4) if aarch64.holds(m, aarch64.as_bv(w[1]) == base + c)), None)
                 if j is None:
                     raise Unproved(f"ZA tile 0 cell {row},{col} holds other than the group's block 0 entering the loop")
                 seen.add((w[0].decl().name(), j))

@@ -1,3 +1,4 @@
+import functools
 _FACT_CACHE = {}
 
 """A model of the x86-64 instructions BLAKE3's kernels use, for proving
@@ -63,6 +64,7 @@ def link(obj):
     return so
 
 
+@functools.lru_cache(None)
 def disassemble(so, start, stop):
     """{address: (mnemonic, [operands], next address)} for [start, stop)."""
     out = subprocess.run([LLVM_OBJDUMP, "-d", "--no-show-raw-insn", "-M", "intel", f"--start-address={start}",
@@ -117,6 +119,7 @@ def split(ops):
     return out
 
 
+@functools.lru_cache(None)
 def sections(so):
     """{name: (address, size)} of the image's sections."""
     out = subprocess.run([LLVM_OBJDUMP, "-h", so], capture_output=True, text=True, check=True).stdout
@@ -128,6 +131,7 @@ def sections(so):
     return secs
 
 
+@functools.lru_cache(None)
 def symbols(so):
     """{name: address}: ELF's absolute values; COFF's (a Windows image)
     relative to their section, .text here."""
@@ -144,11 +148,13 @@ def symbols(so):
     return syms
 
 
+@functools.lru_cache(None)
 def text_end(so):
     addr, size = sections(so)[".text"]
     return addr + size
 
 
+@functools.lru_cache(None)
 def image(so):
     """The image's loaded bytes, {address: int}: code and constants."""
     names = [n for n in sections(so) if n in (".text", ".rodata", ".rdata", ".data")]
@@ -272,7 +278,7 @@ class Machine(aarch64.Machine):
         return r
 
     def _normal(self, t):
-        if not terms.small(t) or not terms.symbols(t) <= self.fact_symbols:
+        if not terms.symbols(t) <= self.fact_symbols or not terms.small(t):
             return t
         # Only facts that agree with t at the sample points can equal it
         # (equal terms agree at every point), so the solver tries those

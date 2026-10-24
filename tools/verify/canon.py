@@ -120,19 +120,26 @@ def _symbols_of(n, out, seen):
 # points (so leaves equal under the assumptions share a fingerprint).
 _context = {"assumptions": [], "points": [], "lengths": set(), "key": None}
 _used_assumptions = False
+_last_nonempty_lset = None
 _points_cache = {}
+_pieces_memo = {}
 
 
 def set_context(assumptions, lengths):
     """Compare under `assumptions` on the symbols named `lengths`; the
-    normal forms and their caches start afresh."""
+    normal forms and their caches start afresh when the context requires it."""
     global _used_assumptions
-    _used_assumptions = False
     lset = frozenset(lengths)
-    if _context.get("lset") != lset:
+    lset_changed = _context.get("lset") != lset
+    if lset_changed:
         _data.clear()
         _context["lset"] = lset
-    _ids.clear(); _nodes.clear(); _memo.clear(); _leaves.clear(); _leaf_by_id.clear(); _leaf_terms.clear(); _free_leaves.clear(); _zero_leaves.clear()
+    clear_canon = lset_changed or _used_assumptions
+    _used_assumptions = False
+    _leaves.clear()
+    _pieces_memo.clear()
+    if clear_canon:
+        _ids.clear(); _nodes.clear(); _memo.clear(); _leaf_by_id.clear(); _leaf_terms.clear(); _free_leaves.clear(); _zero_leaves.clear()
     free = {x for a in assumptions for x in terms.symbols(a)} - set(lengths)
     assert not free, f"assumptions on symbols other than the lengths: {sorted(free)}"
     if not assumptions:
@@ -301,6 +308,14 @@ def summands(n):
 def pieces(n):
     """`n` as a list of (node, hi, lo) bit ranges, most significant first,
     seeing through concatenations, extractions, and zero extensions."""
+    r = _pieces_memo.get(n.id)
+    if r is not None:
+        return r
+    r = _pieces_memo[n.id] = merged(_pieces_raw(n))
+    return r
+
+
+def _pieces_raw(n):
     kind = n.kind
     if kind == Z3_OP_CONCAT:
         return [p for c in n.kids for p in pieces(c)]

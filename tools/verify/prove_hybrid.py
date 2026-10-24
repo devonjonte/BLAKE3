@@ -337,8 +337,13 @@ def prove_case(case):
 
 
 def main():
+    global OBJ
     import workers
-    todo = cases(set(sys.argv[1:]))
+    OBJ = assemble()
+    aarch64.symbols(OBJ)
+    aarch64.text_bytes(OBJ)
+    todo = sorted(cases(set(sys.argv[1:])),
+                  key=lambda c: -(int(c[0].lstrip("ckpqnx") or 1) * (16 if c[0][0] == "q" else c[1])))
     failed = 0
     # Every CPU: a case holds under 400 MB (CPython, October 22).
     for (name, _, _), verdict in workers.each(prove_case, todo, len(todo)):

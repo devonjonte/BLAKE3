@@ -333,6 +333,9 @@ def prove_every(obj, chunks=False):
         if isinstance(offset, int):
             group, within = offset // 128, offset % 128
             return (Ptr(f"lane{within // 8}", 1024 * group), within % 8)
+        within = aarch64.concrete(aarch64.as_bv(offset) - 128 * k)
+        if within is not None and 0 <= within < 128:
+            return (Ptr(f"lane{within // 8}", simplify(k * 1024, som=True, bv_sort_ac=True)), within % 8)
         within = induction.forced(aarch64._machine[0], offset & 127)
         if within is None:
             raise Unproved("a table read whose lane the lengths leave open")

@@ -1,3 +1,4 @@
+import functools
 """Symbolic execution of AArch64 machine code, for proving the assembly
 kernels equal to BLAKE3's specification (tools/verify/README.md).
 
@@ -198,6 +199,52 @@ class Region:
 ZERO64 = BitVecVal(0, 64)
 
 
+_bounds_span = {}    # (rel_ids, lo_id, base_id, size_id) -> proved upper span S
+
+
+def _split_const_add(t):
+    """For `c + base` or `base + c` (with `0 <= c < 2^62`), `(c, base)`; else `(0, t)`."""
+    n = terms.node(t)
+    if n.kind == 1028 and len(n.kids) == 2:
+        if is_bv_value(n.kids[0].expr):
+            c = n.kids[0].expr.as_long()
+            if 0 <= c < (1 << 62):
+                return c, n.kids[1].expr
+        if is_bv_value(n.kids[1].expr):
+            c = n.kids[1].expr.as_long()
+            if 0 <= c < (1 << 62):
+                return c, n.kids[0].expr
+    return 0, t
+
+
+def _stride_hint(size_bv):
+    n = terms.node(size_bv)
+    if n.kind == 1030 and len(n.kids) == 2:
+        for k in n.kids:
+            if is_bv_value(k.expr):
+                s = k.expr.as_long()
+                if 0 < s < (1 << 32):
+                    return s
+    return None
+
+
+def _in_bounds(m, lo, off, n, size):
+    c, base = _split_const_add(off)
+    if c >= 0 and n >= 0:
+        probe = And(UGE(base, lo), ULE(base, size))
+        rel = relevant_assumptions(m.assumptions, probe)
+        bkey = (tuple(terms.ast_id(a) for a in rel), terms.ast_id(lo), terms.ast_id(base), terms.ast_id(size))
+        proved_s = _bounds_span.get(bkey, 0)
+        if c + n <= proved_s:
+            return True
+        hint = _stride_hint(size)
+        if hint is not None and c + n <= hint:
+            if holds(m, And(UGE(base, lo), ULE(base + hint, size), ULE(base, base + hint))):
+                _bounds_span[bkey] = hint
+                return True
+    return holds(m, And(UGE(off, lo), ULE(off + n, size), ULE(off, off + n)))
+
+
 class Machine:
     def __init__(self, code, regions):
         """`code`: {address: (mnemonic, operands)}; `regions`: {name: Region}."""
@@ -249,7 +296,7 @@ class Machine:
         else:
             # Offsets and sizes on lengths: in bounds under the run's assumptions.
             off = as_bv(addr.offset)
-            inside = holds(self, And(UGE(off, as_bv(lo)), ULE(off + n, as_bv(r.size)), ULE(off, off + n)))
+            inside = _in_bounds(self, as_bv(lo), off, n, as_bv(r.size))
         if not inside:
             raise Unproved(f"{'write' if write else 'read'} of {n} bytes at {addr} outside [{lo}, {r.size})")
         if write and not r.writable:
@@ -344,6 +391,7 @@ LLVM_OBJDUMP = next((c for c in ("llvm-objdump-19", "llvm-objdump-18", "llvm-obj
                      if shutil.which(c)), None)
 
 
+@functools.lru_cache(None)
 def disassemble(obj, start, stop, llvm=False):
     """{address: (mnemonic, [operand strings])} for [start, stop) of `obj`.
     GNU objdump for the NEON file; LLVM's (`llvm`) for the SME2 file, whose
@@ -361,6 +409,7 @@ def disassemble(obj, start, stop, llvm=False):
     return code
 
 
+@functools.lru_cache(None)
 def text_bytes(obj):
     """The .text section's bytes, {address: int}."""
     out = subprocess.run(["objdump", "-s", "-j", ".text", obj], capture_output=True, text=True, check=True).stdout
@@ -376,6 +425,7 @@ def text_bytes(obj):
     return data
 
 
+@functools.lru_cache(None)
 def image_bytes(obj):
     """The loaded sections' bytes, {address: int}: the image a shared
     library maps, for its read-only constants. Sections that are not
@@ -396,6 +446,7 @@ def image_bytes(obj):
     return data
 
 
+@functools.lru_cache(None)
 def symbols(obj):
     out = subprocess.run(["nm", obj], capture_output=True, text=True, check=True).stdout
     return {p[2]: int(p[0], 16) for p in (l.split() for l in out.splitlines()) if len(p) == 3}
