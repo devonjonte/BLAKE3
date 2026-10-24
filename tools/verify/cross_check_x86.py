@@ -15,6 +15,7 @@ this CPU check. Address/trace and ABI-boundary controls are in test_x86_memory.p
 import ctypes
 import os
 import random
+random.seed(0)
 import resource
 import signal
 import re

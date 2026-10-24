@@ -370,6 +370,9 @@ def prove_every(obj, gen_a, gen_b):
             group, within = offset // 144, offset % 144
             return (Ptr(f"lane{within // 8}", 1024 * group), within % 8)
         o = aarch64.as_bv(offset)
+        within = aarch64.concrete(o - 144 * k)
+        if within is not None and 0 <= within < 144:
+            return (Ptr(f"lane{within // 8}", simplify(k * 1024, som=True, bv_sort_ac=True)), within % 8)
         within = induction.forced(aarch64._machine[0], URem(o, 144))
         if within is None:
             raise Unproved("a table read whose chunk the lengths leave open")

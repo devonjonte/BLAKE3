@@ -35,13 +35,25 @@ def assemble():
     return obj
 
 
+_same_cache = {}
+
+
 def same(a, b):
     """Whether two terms are equal for every value of their symbols: by
     normal form (canon.py); two small terms with no rounds in them, by the
     solver."""
-    if a.eq(b):
+    import terms
+    ia, ib = terms.ast_id(a), terms.ast_id(b)
+    if ia == ib:
         return True      # one term (Z3 shares structurally equal terms)
+    skey = (ia, ib, canon._context.get("lset"))
+    if skey in _same_cache:
+        return True
     if canon.canon(a) == canon.canon(b):
+        if not canon._used_assumptions:
+            terms.keep(a)
+            terms.keep(b)
+            _same_cache[skey] = True
         return True
     if canon.has_arith(a) or canon.has_arith(b):
         return False     # the normal forms differ: no search over the rounds

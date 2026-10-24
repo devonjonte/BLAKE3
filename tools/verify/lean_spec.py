@@ -48,17 +48,30 @@ def template():
         outs = [terms[i] for i in graph["outputs"]]
         h = [BitVec(f"lean_h{i}", 32) for i in range(8)]
         m = [BitVec(f"lean_m{i}", 32) for i in range(16)]
-        _template = (h, m, t, BitVec("lean_len", 32), BitVec("lean_flags", 32), outs)
-    return _template
+        from z3 import z3core as C
+        len_v, flags_v = BitVec("lean_len", 32), BitVec("lean_flags", 32)
+        all_vars = list(h) + list(m) + [t, len_v, flags_v]
+        from_arr = (C.Ast * len(all_vars))(*(v.ast for v in all_vars))
+        _template = (h, m, t, len_v, flags_v, outs, from_arr)
+    return _template[:6]
 
 
 def compress(cv, block, counter, block_len, flags):
     """The specification's 16 output words for these terms: `cv` 8 and
     `block` 16 32-bit terms, `counter` 64-bit, `block_len` and `flags`
     32-bit."""
-    h, m, t, length, f, outs = template()
-    pairs = list(zip(h, cv)) + list(zip(m, block)) + [(t, counter), (length, block_len), (f, flags)]
-    return [substitute(w, *pairs) for w in outs]
+    from z3 import z3core as C, main_ctx
+    from z3.z3 import _to_expr_ref
+    if _template is None:
+        template()
+    _, _, _, _, _, outs, from_arr = _template
+    ctx = main_ctx()
+    ref = ctx.ref()
+    to_list = list(cv) + list(block) + [counter, block_len, flags]
+    n = len(to_list)
+    to_arr = (C.Ast * n)(*(v.ast for v in to_list))
+    sub_fn = C.Z3_substitute.__defaults__[0].f
+    return [_to_expr_ref(sub_fn(ref, w.ast, n, from_arr, to_arr), ctx) for w in outs]
 
 
 def join(parts):

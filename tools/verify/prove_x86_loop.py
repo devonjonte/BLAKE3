@@ -150,22 +150,32 @@ def prove(so, isa, windows, blocks, increment):
     machine.assumptions = list(machine.assumptions) + bounds
     head = pass_head(setup, so, width)
 
+    lane_cache = {}
+
+    def lane_info(idx):
+        lkey = (arm.key(idx), arm.key(counter))
+        info = lane_cache.get(lkey)
+        if info is None:
+            inp = [Extract(8 * (j % 4) + 7, 8 * (j % 4),
+                           Select(data, Concat(idx * 8, BitVecVal(4 * (j // 4), 64))))
+                   for j in range(64 * blocks)]
+            ctr = counter + idx if increment else counter
+            cv = table_cvs([inp], key, [ctr], flags, start, end, BitVecVal(64, 8), blocks)[0]
+            offsets = [arm.key(32 * idx + j) for j in range(32)]
+            info = lane_cache[lkey] = (offsets, cv)
+        return info
+
     def check_range(m, first, n):
         first = arm.as_bv(first)
-        inputs = [[Extract(8 * (j % 4) + 7, 8 * (j % 4),
-                           Select(data, Concat((first + lane) * 8, BitVecVal(4 * (j // 4), 64))))
-                   for j in range(64 * blocks)] for lane in range(n)]
-        counters = [counter + first + lane if increment else counter for lane in range(n)]
-        cvs = table_cvs(inputs, key, counters, flags, start, end, BitVecVal(64, 8), blocks)
         out, expected = m.regions['out'], set()
         for lane in range(n):
-            offsets = [arm.key(32 * (first + lane) + j) for j in range(32)]
+            offsets, cv = lane_info(first + lane)
             expected.update(offsets)
             if any(o not in out.bytes for o in offsets):
                 raise Unproved(f'output {lane} incomplete')
             got = spec.words([out.bytes[o] for o in offsets])
             for word in range(8):
-                if not same(got[word], cvs[lane][word]):
+                if not same(got[word], cv[word]):
                     raise Unproved(f'output {lane}, word {word}, differs')
         return expected
 
@@ -226,6 +236,7 @@ def prove(so, isa, windows, blocks, increment):
         original_counter = counter
         current_counter = BitVec('counter_pass', 64)
         k = BitVec('len_at', 64)
+        general.k = k
         counter = current_counter - width * k
         def rebase(value):
             if is_bv(value):

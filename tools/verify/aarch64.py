@@ -63,8 +63,36 @@ def decide(m, cond):
     raise Undecided(c)
 
 
+def relevant_assumptions(assumptions, term):
+    """The subset of `assumptions` in the connected component of symbols of
+    `term`. Reachable states have satisfiable assumptions, so constraints on
+    disjoint symbols cannot change whether `term` is satisfiable."""
+    if not assumptions:
+        return ()
+    needed = set(term_symbols(term))
+    if not needed:
+        return ()
+    pairs = [(a, term_symbols(a)) for a in assumptions]
+    changed = True
+    while changed:
+        changed = False
+        for _, syms in pairs:
+            if syms & needed and not syms <= needed:
+                needed |= syms
+                changed = True
+    return tuple(a for a, syms in pairs if syms & needed)
+
+
 def holds(m, cond):
     """Whether `cond` (on lengths) follows from the run's assumptions."""
+    if isinstance(cond, bool):
+        return cond
+    if not term_symbols(cond):
+        c = simplify(cond)
+        if is_true(c):
+            return True
+        if is_false(c):
+            return False
     return unsatisfiable(m.assumptions, Not(cond))
 
 
@@ -76,15 +104,33 @@ def unsatisfiable(assumptions, test):
     the solver once for each: the loops' passes ask the same questions
     again (two in three, on SME2's 'every'). terms.py keeps every term of
     the key, so their ids stay their own and the memo is exact."""
-    k = (tuple(a.get_id() for a in assumptions), test.get_id())
+    rel = relevant_assumptions(assumptions, test)
+    k = (tuple(terms.ast_id(a) for a in rel), terms.ast_id(test))
     r = _unsat.get(k)
     if r is None:
-        for a in assumptions:
+        for a in rel:
             terms.keep(a)
         terms.keep(test)
         s = Solver()
-        s.add(*assumptions, test)
+        s.add(*rel, test)
         r = _unsat[k] = s.check() == unsat
+    return r
+
+
+_keys = {}           # offset ast id -> (key, simplified bv term)
+
+
+def key_and_term(offset):
+    if isinstance(offset, int):
+        return offset, BitVecVal(offset % (1 << 64), 64)
+    oid = offset.get_id()
+    r = _keys.get(oid)
+    if r is None:
+        terms.keep(offset)
+        t = simplify(offset, som=True, bv_sort_ac=True)
+        terms.keep(t)
+        k = t.as_long() if is_bv_value(t) else t.sexpr()
+        r = _keys[oid] = (k, t)
     return r
 
 
@@ -93,8 +139,7 @@ def key(offset):
     normal form (a sum of products of length symbols and constants)."""
     if isinstance(offset, int):
         return offset
-    t = simplify(offset, som=True, bv_sort_ac=True)
-    return t.as_long() if is_bv_value(t) else t.sexpr()
+    return key_and_term(offset)[0]
 
 
 def as_bv(offset):
@@ -109,14 +154,28 @@ def concrete(term):
     return t.as_long() if is_bv_value(t) else None
 
 
+_ptr_add = {}        # (offset ast id, int n) -> simplified offset term
+
+
 class Ptr:
     """An address: `offset` bytes into region `region`."""
     def __init__(self, region, offset):
         self.region, self.offset = region, offset
 
     def __add__(self, n):
+        if isinstance(n, int) and n == 0:
+            return self
         if isinstance(self.offset, int) and isinstance(n, int):
             return Ptr(self.region, self.offset + n)
+        if not isinstance(self.offset, int) and isinstance(n, int):
+            pkey = (self.offset.get_id(), n)
+            off = _ptr_add.get(pkey)
+            if off is None:
+                terms.keep(self.offset)
+                off = simplify(self.offset + BitVecVal(n % (1 << 64), 64), som=True, bv_sort_ac=True)
+                terms.keep(off)
+                _ptr_add[pkey] = off
+            return Ptr(self.region, off)
         return Ptr(self.region, simplify(as_bv(self.offset) + as_bv(n), som=True, bv_sort_ac=True))
 
     def __repr__(self):
@@ -197,12 +256,18 @@ class Machine:
             raise Unproved(f"write to read-only {r.name}")
         return r
 
-    def load(self, addr, n):
-        r = self.access(addr, n, False)
+    def _read_bytes(self, r, addr, n):
         parts = []
+        base_int = isinstance(addr.offset, int)
         for i in range(n):
-            k = key((addr + i).offset)
-            r.offset_terms[k] = as_bv((addr + i).offset)
+            if base_int:
+                k = addr.offset + i
+                r.offset_terms[k] = BitVecVal(k % (1 << 64), 64)
+                off_i = k
+            else:
+                off_i = (addr + i).offset
+                k, t = key_and_term(off_i)
+                r.offset_terms[k] = t
             b = r.bytes.get(k)
             if b is None:
                 if r.initial is None:
@@ -211,10 +276,15 @@ class Machine:
                     # A symbolic offset: a region whose initial bytes depend on it.
                     if not getattr(r, "symbolic_initial", False):
                         raise Unproved(f"read of unwritten {addr + i}")
-                    b = r.initial((addr + i).offset)
+                    b = r.initial(off_i)
                 else:
                     b = r.initial(k)
             parts.append(b)
+        return parts
+
+    def load(self, addr, n):
+        r = self.access(addr, n, False)
+        parts = self._read_bytes(r, addr, n)
         if all(isinstance(p, tuple) for p in parts) and n == 8:
             ptrs = {(p[0].region, p[0].offset) for p in parts}
             if len(ptrs) == 1 and [p[1] for p in parts] == list(range(8)):
@@ -223,11 +293,19 @@ class Machine:
             raise Unproved(f"partial read of a stored pointer at {addr}")
         return Concat(*reversed(parts)) if n > 1 else parts[0]
 
+    def load_words(self, addr, words):
+        """Load `words` 32-bit lanes from `addr` with one bounds check."""
+        r = self.access(addr, 4 * words, False)
+        parts = self._read_bytes(r, addr, 4 * words)
+        if any(isinstance(p, tuple) for p in parts):
+            raise Unproved(f"partial read of a stored pointer at {addr}")
+        return [Concat(parts[4 * i + 3], parts[4 * i + 2], parts[4 * i + 1], parts[4 * i]) for i in range(words)]
+
     def load_raw(self, addr):
         """The byte at `addr` as memory holds it: data, or a stored pointer's piece."""
         r = self.access(addr, 1, False)
-        k = key(addr.offset)
-        r.offset_terms[k] = as_bv(addr.offset)
+        k, t = key_and_term(addr.offset)
+        r.offset_terms[k] = t
         b = r.bytes.get(k)
         if b is None:
             if r.initial is None or not isinstance(k, int):
@@ -237,16 +315,25 @@ class Machine:
 
     def store(self, addr, val, n):
         r = self.access(addr, n, True)
+        base_int = isinstance(addr.offset, int)
         if isinstance(val, Ptr):
             assert n == 8, "a pointer stored in 8 bytes"
             for i in range(8):
-                k = key((addr + i).offset)
-                r.offset_terms[k] = as_bv((addr + i).offset)
+                if base_int:
+                    k = addr.offset + i
+                    r.offset_terms[k] = BitVecVal(k % (1 << 64), 64)
+                else:
+                    k, t = key_and_term((addr + i).offset)
+                    r.offset_terms[k] = t
                 r.bytes[k] = (val, i)
             return
         for i in range(n):
-            k = key((addr + i).offset)
-            r.offset_terms[k] = as_bv((addr + i).offset)
+            if base_int:
+                k = addr.offset + i
+                r.offset_terms[k] = BitVecVal(k % (1 << 64), 64)
+            else:
+                k, t = key_and_term((addr + i).offset)
+                r.offset_terms[k] = t
             r.bytes[k] = Extract(8 * i + 7, 8 * i, val)
 
 

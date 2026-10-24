@@ -1,3 +1,5 @@
+_FACT_CACHE = {}
+
 """A model of the x86-64 instructions BLAKE3's kernels use, for proving
 the assembled machine code (upstream's c/blake3_{sse41,avx2,avx512}_
 x86-64_unix.S and their MSVC twins) as aarch64.py proves the Arm kernels.
@@ -251,34 +253,39 @@ class Machine(aarch64.Machine):
         that the solver proves equal. Each term is decided once for each
         `facts` (a tuple, so adding facts makes a new one and starts the
         memo afresh); terms.py keeps the term, so its id stays its own."""
-        if not self.facts or is_bv_value(t):
+        if not self.facts:
             return t
         if self.normals_for is not self.facts:
-            self.normals, self.normals_for, self.fact_values = {}, self.facts, None
-        k = t.get_id()
+            fkey = tuple(terms.ast_id(f) for f in self.facts)
+            entry = _FACT_CACHE.get(fkey)
+            if entry is None:
+                for f in self.facts:
+                    terms.keep(f)
+                entry = [{terms.ast_id(f): f for f in self.facts}, None, None]
+                _FACT_CACHE[fkey] = entry
+            self.normals, self._fact_entry, self.normals_for = entry[0], entry, self.facts
+        k = terms.ast_id(t)
         r = self.normals.get(k)
         if r is None:
             terms.keep(t)
-            r = self.normals[k] = self._normal(t)
+            r = self.normals[k] = t if is_bv_value(t) else self._normal(t)
         return r
 
     def _normal(self, t):
-        for f in self.facts:
-            if t.eq(f):
-                return t
         if not terms.small(t) or not terms.symbols(t) <= self.fact_symbols:
             return t
         # Only facts that agree with t at the sample points can equal it
         # (equal terms agree at every point), so the solver tries those
         # alone; a t whose value there is not a constant (a symbol no fact
         # has) goes to the solver against every fact.
-        if self.fact_values is None:
+        entry = self._fact_entry
+        if entry[1] is None:
             syms = {}
             for f in self.facts:
                 canon.symbols_of(f, syms, set())
             rng = random.Random(0)
-            self.points = [[(v, BitVecVal(rng.getrandbits(v.size()), v.size())) for v in syms.values()]
-                           for _ in range(2)]
+            points = [[(v, BitVecVal(rng.getrandbits(v.size()), v.size())) for v in syms.values()]
+                      for _ in range(2)]
             # Adjacent counter high halves almost always agree randomly.
             # Probe each declared offset's carry boundary with the other
             # parameters zero, so false candidates reach the solver rarely.
@@ -288,13 +295,15 @@ class Machine(aarch64.Machine):
             for bits, offset in sorted(boundaries):
                 for v in syms.values():
                     if v.size() == 64:
-                        self.points.append([(u, BitVecVal((1 << bits) - offset if u.eq(v) else 0, u.size()))
-                                            for u in syms.values()])
-            self.fact_values = [[simplify(substitute(f, *p)) for p in self.points] for f in self.facts]
-            assert all(is_bv_value(v) for fv in self.fact_values for v in fv), "a fact's symbol without a point"
-        values = [simplify(substitute(t, *p)) for p in self.points]
+                        points.append([(u, BitVecVal((1 << bits) - offset if u.eq(v) else 0, u.size()))
+                                       for u in syms.values()])
+            entry[1] = points
+            entry[2] = [[simplify(substitute(f, *p)) for p in points] for f in self.facts]
+            assert all(is_bv_value(v) for fv in entry[2] for v in fv), "a fact's symbol without a point"
+        points, fact_values = entry[1], entry[2]
+        values = [simplify(substitute(t, *p)) for p in points]
         sampled = all(is_bv_value(v) for v in values)
-        for f, fv in zip(self.facts, self.fact_values):
+        for f, fv in zip(self.facts, fact_values):
             if sampled and not all(x.eq(y) for x, y in zip(values, fv)):
                 continue
             s = Solver()
@@ -373,7 +382,7 @@ def load_lanes(m, op, w):
         return [word] * w
     n = 4 * w if size is None else size
     # Each lane as its four bytes, in lean_spec.join's form.
-    return [m.load(addr + 4 * i, 4) for i in range(n // 4)]
+    return m.load_words(addr, n // 4)
 
 
 def src_lanes(m, op, w):

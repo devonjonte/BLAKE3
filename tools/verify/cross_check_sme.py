@@ -12,6 +12,7 @@ it); elsewhere it says so and exits 0.
 import ctypes
 import os
 import random
+random.seed(0)
 import re
 import subprocess
 import sys
