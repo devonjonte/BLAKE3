@@ -161,6 +161,7 @@ extern crate std;
 #[cfg(test)]
 mod test;
 
+mod block;
 pub mod convenience;
 #[cfg(feature = "std")]
 mod each;

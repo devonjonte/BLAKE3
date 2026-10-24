@@ -41,6 +41,7 @@ fn every_stream_completes_on_one_cpu() {
     let lens = [0, 64, 1000, 16 << 10, 64 << 10, (1 << 20) + 1, 5 << 20];
     let messages: Vec<Vec<u8>> = lens.iter().map(|&len| input(len)).collect();
     let batch = input(64 * 4096);
+    let blocks: Vec<blake3_servil::performance::Block> = batch.chunks_exact(64).map(|b| blake3_servil::performance::Block(b.try_into().unwrap())).collect();
     let mut want = Vec::new();
     let mut got = vec![Hash::from_bytes([0; 32]); 3 * messages.len() + 16 + 4096];
     let handed = std::cell::Cell::new(0);
@@ -58,7 +59,7 @@ fn every_stream_completes_on_one_cpu() {
                 want.extend([reference(message); 3]);
             }
             for (count, out) in [(16, small), (4096, large)] {
-                s.submit_batch(&batch[..64 * count], 64, out);
+                s.submit_batch(&blocks[..count], 64, out);
                 want.extend(batch[..64 * count].chunks(64).map(reference));
             }
             s.finish();
