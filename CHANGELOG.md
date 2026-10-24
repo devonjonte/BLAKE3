@@ -49,7 +49,8 @@ and the tests are tested ([QUALITY.md](QUALITY.md)).
 ## Different
 
 - A startup self-test checks the build and the CPU. A wrong digest stops
-  the program and names the code path.
+  the process, uncatchably: with `std` it names the code path and aborts;
+  without it, the CPU's trap instruction.
 - A panic on one of the crate's threads, or in a caller during a
   multithreaded call, ends the process.
 - A `Hasher` is about 18 KiB. It gathers short updates and hashes them

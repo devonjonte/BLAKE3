@@ -115,9 +115,10 @@
 //! `initialize` checks the build and the CPU before the process first
 //! hashes, in well under a millisecond. It runs every assembly kernel built
 //! for this machine on fixed inputs and compares the outputs with the
-//! reference implementation's. A mismatch stops the program with a panic
-//! naming the code path. Other threads that call `initialize` meanwhile
-//! wait for it, and stop with it if it fails.
+//! reference implementation's. A mismatch stops the process, which no
+//! caller can catch: with `std` it names the code path on stderr and
+//! aborts; without it, the CPU's trap instruction stops it. Other threads
+//! that call `initialize` meanwhile wait for it.
 //!
 //! # Cargo Features
 //!
