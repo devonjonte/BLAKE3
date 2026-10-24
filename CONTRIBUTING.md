@@ -166,6 +166,12 @@ what was checked is what lands) once:
   natively on an Apple M4 Max. A candidate that changes no compiled code
   needs no speed check: it would compare identical code.
 
+A change to a tool that runs for hours (`tools/mutants/check.py`,
+`tools/verify/long-proofs.sh`, `bench-hashes regress` and `check`) lands
+after a short run of it, start to finish, on each kind of machine that
+runs it (the VM, the Mac, x86-64 Linux): a fault in its setup or
+teardown otherwise costs a whole run, found at its end.
+
 Jobs of hours run on `servil` overnight: the whole mutation run, and the
 long proofs (`sh tools/verify/long-proofs.sh servil`, which posts the
 commit's "long proofs" status) after a change to an AArch64 kernel or
