@@ -40,6 +40,14 @@ fn every_stream_completes_on_one_cpu() {
     // written, and read; and batches small and large.
     let lens = [0, 64, 1000, 16 << 10, 64 << 10, (1 << 20) + 1, 5 << 20];
     let messages: Vec<Vec<u8>> = lens.iter().map(|&len| input(len)).collect();
+    let in_blocks: Vec<Vec<blake3_servil::performance::Block>> = messages
+        .iter()
+        .map(|m| {
+            let mut b = vec![blake3_servil::performance::Block::ZERO; m.len().div_ceil(64).max(1)];
+            blake3_servil::performance::Block::bytes_mut(&mut b)[..m.len()].copy_from_slice(m);
+            b
+        })
+        .collect();
     let batch = input(64 * 4096);
     let blocks: Vec<blake3_servil::performance::Block> = batch.chunks_exact(64).map(|b| blake3_servil::performance::Block(b.try_into().unwrap())).collect();
     let mut want = Vec::new();
@@ -52,8 +60,8 @@ fn every_stream_completes_on_one_cpu() {
         Mode::Hash,
         |d: &mut [Hash]| handed.set(handed.get() + d.len()),
         |s| {
-            for message in &messages {
-                s.submit(message, singles.next().unwrap());
+            for (message, blocks) in messages.iter().zip(&in_blocks) {
+                s.submit(blocks, message.len(), singles.next().unwrap());
                 s.submit_with(message.len(), |at, room| room.copy_from_slice(&message[at..][..room.len()]), singles.next().unwrap());
                 s.submit_reader(&message[..], None, singles.next().unwrap()).unwrap();
                 want.extend([reference(message); 3]);
@@ -81,7 +89,7 @@ fn every_stream_completes_on_one_cpu() {
             free.borrow_mut().push(&mut d[0]);
         },
         |s| {
-            for message in &messages[..4] {
+            for (message, blocks) in messages[..4].iter().zip(&in_blocks[..4]) {
                 for _ in 0..8 {
                     let place = loop {
                         if let Some(place) = free.borrow_mut().pop() {
@@ -89,7 +97,7 @@ fn every_stream_completes_on_one_cpu() {
                         }
                         s.collect();
                     };
-                    s.submit(message, place);
+                    s.submit(blocks, message.len(), place);
                 }
             }
             s.finish();

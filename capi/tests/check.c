@@ -45,7 +45,7 @@ int main(void) {
   if (strcmp(b3_version(), B3_VERSION) != 0) return 2; /* the header and the library disagree */
   printf("hasher %zu %zu\n", sizeof(b3_hasher), _Alignof(b3_hasher));
   /* 64-byte aligned: the batch calls below take it as a batch. */
-  static B3_ALIGN64 uint8_t input[100000];
+  static B3_ALIGN64 uint8_t input[100032]; /* whole 64-byte blocks */
   for (size_t i = 0; i < sizeof input; i++) input[i] = (uint8_t)(i % 251);
   uint8_t key[32];
   memcpy(key, "whats the Elvish word for friend", 32);

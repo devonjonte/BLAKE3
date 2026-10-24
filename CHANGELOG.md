@@ -23,8 +23,9 @@ and the tests are tested ([QUALITY.md](QUALITY.md)).
    output. `performance`, for power users, has every way to hash fast,
    the `Hasher` among them (`Hasher::new_with(mode)` replaces
    `Hasher::new_keyed` and `Hasher::new_derive_key`): the program takes
-   on more of the work, with inputs starting at 64-byte boundaries,
-   digests into its places, and a `Mode` in every call.
+   on more of the work, with inputs as `Block`s (64 bytes on a 64-byte
+   boundary: a message is blocks and a length, a batch messages of one
+   length), digests into its places, and a `Mode` in every call.
 4. Threads are the crate's own. `Hasher::update_rayon` is now
    `update_multithreaded`. `performance::hash_multithreaded(mode, input)`
    hashes one message over the threads. There is no `rayon` feature.

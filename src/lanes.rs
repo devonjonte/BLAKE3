@@ -1388,7 +1388,7 @@ mod test {
         let pool = pool();
         let input = std::vec![0x3Cu8; MIN_SPLIT_LEN];
         crate::RAN.with(|r| r.set(0));
-        assert_eq!(crate::performance::hash_multithreaded(crate::Mode::Hash, &input), crate::convenience::hash(&input));
+        assert_eq!(crate::performance::hash_multithreaded(crate::Mode::Hash, &crate::test::message(&input), input.len()), crate::convenience::hash(&input));
         assert_past_the_split("the call");
         assert_eq!(pool.callers.load(Ordering::SeqCst), 0, "the caller's place given back");
     }
@@ -1569,7 +1569,7 @@ mod test {
             assert_eq!(want, hash_with_key(&input[..len], crate::IV, 0), "len = {len}");
             let key = [42u8; KEY_LEN];
             assert_eq!(
-                crate::performance::hash(crate::Mode::Keyed(&key), &input[..len]),
+                crate::convenience::hash_with(crate::Mode::Keyed(&key), &input[..len]),
                 hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
                 "keyed len = {len}"
             );
@@ -1606,7 +1606,7 @@ mod test {
                     }
                     let what = format!("len {len}, first {first}, pieces of {piece}");
                     assert_eq!(hasher.finalize(), crate::convenience::hash(&input[..len]), "{what}");
-                    assert_eq!(keyed.finalize(), crate::performance::hash(crate::Mode::Keyed(&key), &input[..len]), "keyed {what}");
+                    assert_eq!(keyed.finalize(), crate::convenience::hash_with(crate::Mode::Keyed(&key), &input[..len]), "keyed {what}");
                 }
             }
         }

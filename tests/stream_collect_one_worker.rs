@@ -26,6 +26,14 @@ fn a_caller_looping_on_collect_makes_progress_without_workers() {
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let messages: Vec<Vec<u8>> = (0..1000usize).map(|i| (0..1 + i * 7 % 3000).map(|j| (j % 251) as u8).collect()).collect();
+        let in_blocks: Vec<Vec<blake3_servil::performance::Block>> = messages
+            .iter()
+            .map(|m| {
+                let mut b = vec![blake3_servil::performance::Block::ZERO; m.len().div_ceil(64).max(1)];
+                blake3_servil::performance::Block::bytes_mut(&mut b)[..m.len()].copy_from_slice(m);
+                b
+            })
+            .collect();
         // Every worker parked before the stream opens: waited for, not
         // slept for (a loaded machine could outlast any sleep).
         while !blake3_servil::__all_workers_parked() {
@@ -41,14 +49,14 @@ fn a_caller_looping_on_collect_makes_progress_without_workers() {
                 free.borrow_mut().push(&mut place[0]);
             },
             |s| {
-                for message in &messages {
+                for (message, blocks) in messages.iter().zip(&in_blocks) {
                     let place = loop {
                         if let Some(place) = free.borrow_mut().pop() {
                             break place;
                         }
                         s.collect();
                     };
-                    s.submit(message, place);
+                    s.submit(blocks, message.len(), place);
                 }
                 s.finish();
             },

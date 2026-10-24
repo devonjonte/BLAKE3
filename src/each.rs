@@ -8,6 +8,7 @@
 //! last partial chunk hashes on its own. Each message's chunk chaining values
 //! then merge into its root as BLAKE3's tree places them.
 
+use crate::performance::Block;
 use crate::platform::Platform;
 use crate::{CHUNK_END, CHUNK_LEN, CHUNK_START, CVBytes, CVWords, ChunkState, Hash, Hasher, IncrementCounter, Mode, OUT_LEN};
 
@@ -18,16 +19,16 @@ use crate::{CHUNK_END, CHUNK_LEN, CHUNK_START, CVBytes, CVWords, ChunkState, Has
 ///
 /// ```
 /// # blake3_servil::initialize_multithreaded(None);
-/// use blake3_servil::Mode;
-/// let items: Vec<Vec<u8>> = (0..100).map(|i| vec![i as u8; 1000 * i]).collect();
-/// let slices: Vec<&[u8]> = items.iter().map(|m| m.as_slice()).collect();
+/// use blake3_servil::{Mode, performance::{self, Block}};
+/// let blocks: Vec<Vec<Block>> = (0..100).map(|i| vec![Block([i as u8; 64]); (1000 * i as usize).div_ceil(64)]).collect();
+/// let items: Vec<(&[Block], usize)> = blocks.iter().enumerate().map(|(i, b)| (&b[..], 1000 * i)).collect();
 /// let (mut a, mut b) = (vec![[0u8; 32]; 100], vec![[0u8; 32]; 100]);
-/// blake3_servil::performance::hash_each_multithreaded(Mode::Hash, &slices, &mut a);
-/// blake3_servil::performance::hash_each(Mode::Hash, &slices, &mut b);
+/// performance::hash_each_multithreaded(Mode::Hash, &items, &mut a);
+/// performance::hash_each(Mode::Hash, &items, &mut b);
 /// assert_eq!(a, b);
 /// ```
 #[cfg(feature = "std")]
-pub fn hash_each_multithreaded(mode: Mode, items: &[&[u8]], out: &mut [[u8; OUT_LEN]]) {
+pub fn hash_each_multithreaded(mode: Mode, items: &[(&[Block], usize)], out: &mut [[u8; OUT_LEN]]) {
     crate::lanes::require();
     assert_eq!(items.len(), out.len(), "one digest per item");
     let mut room = core::mem::MaybeUninit::uninit();
@@ -35,13 +36,13 @@ pub fn hash_each_multithreaded(mode: Mode, items: &[&[u8]], out: &mut [[u8; OUT_
     let alone = |item: &[u8]| item.len() >= crate::lanes::MIN_SPLIT_LEN;
     // The collection with each item that hashes alone set aside (an empty
     // stand-in, its digest written after).
-    let small: Vec<&[u8]> = items.iter().map(|&i| if alone(i) { &[][..] } else { i }).collect();
+    let small: Vec<&[u8]> = items.iter().map(|i| if alone(i.bytes()) { &[][..] } else { i.bytes() }).collect();
     if small.iter().map(|i| i.len()).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN {
         hash_each_on(key, flags, &small, out, Platform::detect(), |item| crate::hash_serial(item, key, flags));
     } else {
         crate::lanes::hash_each(key, flags, &small, out);
     }
-    for (item, out) in items.iter().zip(out.iter_mut()) {
+    for (item, out) in items.iter().map(Item::bytes).zip(out.iter_mut()) {
         if alone(item) {
             *out = *crate::lanes::hash_with_key(item, key, flags).as_bytes();
         }
@@ -220,38 +221,60 @@ fn hash_held(_: &mut [Hasher], held: &[usize]) {
 const ALONE_CHUNKS: usize = 16;
 
 /// The hash of each message, of any lengths, on the calling thread:
-/// `out[i]` is [`hash_with`](crate::performance::hash)`(mode, items[i])`. Short
-/// messages hash together, so a collection of small items (a directory's
-/// files, a repository's objects) takes less time than one call each.
-/// Requires `out.len() == items.len()`.
+/// `out[i]` is [`hash`](crate::performance::hash)`(mode, items[i].0,
+/// items[i].1)`, each item a message of `items[i].1` bytes starting its
+/// blocks (the bytes past its end ignored). Short messages hash together,
+/// so a collection of small items (a directory's files, a repository's
+/// objects) takes less time than one call each. Requires `out.len() ==
+/// items.len()`.
 ///
 /// ```
 /// # blake3_servil::initialize();
-/// use blake3_servil::Mode;
-/// let items: Vec<Vec<u8>> = (0..100).map(|i| vec![i as u8; 100 * i]).collect();
-/// let slices: Vec<&[u8]> = items.iter().map(|m| m.as_slice()).collect();
-/// let mut out = vec![[0u8; 32]; slices.len()];
-/// blake3_servil::performance::hash_each(Mode::Hash, &slices, &mut out);
-/// assert_eq!(&out[42], blake3_servil::convenience::hash(&items[42]).as_bytes());
+/// use blake3_servil::{Mode, convenience, performance::{self, Block}};
+/// let blocks: Vec<Vec<Block>> = (0..100).map(|i| vec![Block([i as u8; 64]); (100 * i as usize).div_ceil(64)]).collect();
+/// let items: Vec<(&[Block], usize)> = blocks.iter().enumerate().map(|(i, b)| (&b[..], 100 * i)).collect();
+/// let mut out = vec![[0u8; 32]; items.len()];
+/// performance::hash_each(Mode::Hash, &items, &mut out);
+/// assert_eq!(&out[42], convenience::hash(&[42u8; 4200]).as_bytes());
 /// ```
-pub fn hash_each(mode: Mode, items: &[&[u8]], out: &mut [[u8; OUT_LEN]]) {
+pub fn hash_each(mode: Mode, items: &[(&[Block], usize)], out: &mut [[u8; OUT_LEN]]) {
     assert_eq!(items.len(), out.len(), "one digest per item");
     let mut room = core::mem::MaybeUninit::uninit();
     let (key, flags) = mode.key(&mut room);
     hash_each_on(key, flags, items, out, Platform::detect(), |item| crate::hash_serial(item, key, flags));
 }
 
+/// An item of a collection, as hash_each_on reads it: its bytes. The
+/// public calls' items are messages in blocks; the pool's ranges, bytes.
+pub(crate) trait Item {
+    fn bytes(&self) -> &[u8];
+}
+
+impl Item for &[u8] {
+    #[inline(always)]
+    fn bytes(&self) -> &[u8] {
+        self
+    }
+}
+
+impl Item for (&[Block], usize) {
+    #[inline(always)]
+    fn bytes(&self) -> &[u8] {
+        &Block::bytes(self.0)[..self.1]
+    }
+}
+
 /// [`hash_each`] in the mode of `key` and `flags`, the lanes on
 /// `platform`, each message that fills the lanes alone (or is a chunk or
 /// less) through `alone`.
-pub(crate) fn hash_each_on(key: &CVWords, flags: u8, items: &[&[u8]], out: &mut [[u8; OUT_LEN]], platform: Platform, alone: impl Fn(&[u8]) -> Hash) {
+pub(crate) fn hash_each_on<I: Item>(key: &CVWords, flags: u8, items: &[I], out: &mut [[u8; OUT_LEN]], platform: Platform, alone: impl Fn(&[u8]) -> Hash) {
     let key = *key;
     // The messages whose full chunks share the lanes: each one's index, and
     // where its chunk values start in `cvs`.
     let mut shared: Vec<(usize, usize)> = Vec::new();
     let mut slots = 0;
     let mut most_full = 0;
-    for (i, item) in items.iter().enumerate() {
+    for (i, item) in items.iter().map(Item::bytes).enumerate() {
         let chunks = item.len().div_ceil(CHUNK_LEN);
         if chunks <= 1 || chunks >= ALONE_CHUNKS {
             out[i] = *alone(item).as_bytes();
@@ -269,7 +292,7 @@ pub(crate) fn hash_each_on(key: &CVWords, flags: u8, items: &[&[u8]], out: &mut 
         refs.clear();
         owners.clear();
         for &(i, at) in &shared {
-            if let Some(chunk) = items[i].get(k * CHUNK_LEN..(k + 1) * CHUNK_LEN) {
+            if let Some(chunk) = items[i].bytes().get(k * CHUNK_LEN..(k + 1) * CHUNK_LEN) {
                 refs.push(chunk.try_into().unwrap());
                 owners.push(at + k);
             }
@@ -281,7 +304,7 @@ pub(crate) fn hash_each_on(key: &CVWords, flags: u8, items: &[&[u8]], out: &mut 
         }
     }
     for &(i, at) in &shared {
-        let item = items[i];
+        let item = items[i].bytes();
         let chunks = item.len().div_ceil(CHUNK_LEN);
         let full = item.len() / CHUNK_LEN;
         if full < chunks {
@@ -331,9 +354,9 @@ mod test {
         let items: Vec<&[u8]> = input.chunks(crate::lanes::MIN_SPLIT_LEN / 40 + 7).collect();
         let (mut a, mut b) = (vec![[0u8; OUT_LEN]; items.len()], vec![[0u8; OUT_LEN]; items.len()]);
         crate::RAN.with(|r| r.set(0));
-        crate::performance::hash_each_multithreaded(Mode::Hash, &items, &mut a);
+        crate::performance::hash_each_multithreaded(Mode::Hash, &crate::test::items(&crate::test::messages(&items), &items), &mut a);
         crate::lanes::assert_past_the_split("the items");
-        crate::performance::hash_each(Mode::Hash, &items, &mut b);
+        crate::performance::hash_each(Mode::Hash, &crate::test::items(&crate::test::messages(&items), &items), &mut b);
         assert_eq!(a, b);
     }
 
@@ -356,8 +379,8 @@ mod test {
         let key = [9u8; 32];
         for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("each mt")] {
             let (mut a, mut b) = (vec![[0u8; OUT_LEN]; items.len()], vec![[0u8; OUT_LEN]; items.len()]);
-            crate::performance::hash_each_multithreaded(mode, &items, &mut a);
-            crate::performance::hash_each(mode, &items, &mut b);
+            crate::performance::hash_each_multithreaded(mode, &crate::test::items(&crate::test::messages(&items), &items), &mut a);
+            crate::performance::hash_each(mode, &crate::test::items(&crate::test::messages(&items), &items), &mut b);
             assert_eq!(a, b);
             // Below the split, on the calling thread: the items of 16 KiB
             // or less, which sum to less than the split's length.
@@ -365,7 +388,7 @@ mod test {
             assert!(small.iter().map(|&k| items[k].len()).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN);
             let small_items: Vec<&[u8]> = small.iter().map(|&k| items[k]).collect();
             let mut c = vec![[0u8; OUT_LEN]; small.len()];
-            crate::performance::hash_each_multithreaded(mode, &small_items, &mut c);
+            crate::performance::hash_each_multithreaded(mode, &crate::test::items(&crate::test::messages(&small_items), &small_items), &mut c);
             assert!(small.iter().zip(&c).all(|(&k, d)| *d == b[k]));
         }
     }
@@ -452,7 +475,7 @@ mod test {
         crate::performance::update_each(&mut hashers, &turn);
         for (i, h) in hashers.iter().enumerate() {
             let message = &input[start(i)..start(i) + 2 * crate::STAGE_LEN + 7];
-            assert_eq!(h.finalize(), crate::performance::hash(crate::Mode::Keyed(&keys[i % 2]), message), "hasher {i}, {platform:?}");
+            assert_eq!(h.finalize(), crate::convenience::hash_with(crate::Mode::Keyed(&keys[i % 2]), message), "hasher {i}, {platform:?}");
         }
         // And each hasher's first group (chunk counter zero, which hands
         // its core the group's two halves), six at once: a first piece
@@ -464,7 +487,7 @@ mod test {
         for (i, h) in fresh.iter().enumerate() {
             assert_eq!(
                 h.finalize(),
-                crate::performance::hash(crate::Mode::Keyed(&keys[i % 2]), &input[start(i)..start(i) + group + 7]),
+                crate::convenience::hash_with(crate::Mode::Keyed(&keys[i % 2]), &input[start(i)..start(i) + group + 7]),
                 "fresh hasher {i}, {platform:?}"
             );
         }
@@ -503,7 +526,7 @@ mod test {
             crate::performance::finalize_each(&hashers, &which, &mut out);
             for (k, &i) in which.iter().enumerate() {
                 let want = if i % 3 == 1 {
-                    crate::performance::hash(crate::Mode::Keyed(&key), &input[..lens[i]])
+                    crate::convenience::hash_with(crate::Mode::Keyed(&key), &input[..lens[i]])
                 } else {
                     crate::convenience::hash(&input[..lens[i]])
                 };
@@ -550,9 +573,9 @@ mod test {
         let key = [9u8; 32];
         for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("hash_each test")] {
             let mut out = vec![[0u8; OUT_LEN]; items.len()];
-            crate::performance::hash_each(mode, &items, &mut out);
+            crate::performance::hash_each(mode, &crate::test::items(&crate::test::messages(&items), &items), &mut out);
             for (item, digest) in items.iter().zip(&out) {
-                assert_eq!(digest, crate::performance::hash(mode, item).as_bytes(), "length {}", item.len());
+                assert_eq!(digest, crate::convenience::hash_with(mode, item).as_bytes(), "length {}", item.len());
             }
         }
     }
