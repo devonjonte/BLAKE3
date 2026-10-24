@@ -121,6 +121,15 @@ pub fn hash<K: Kernels>(k: &K, input: &[u8]) -> Cv {
     if input.len() <= CHUNK_LEN {
         return k.chunk_root(input);
     }
+    hash_tree(k, input)
+}
+
+/// A tree of two chunks or more, out of line: its frame (the children's
+/// chaining values, 64-byte aligned, and the registers it saves) would
+/// otherwise be set up on every call, a chunk or less included, whose one
+/// kernel call needs none of it.
+#[inline(never)]
+fn hash_tree<K: Kernels>(k: &K, input: &[u8]) -> Cv {
     k.parent_root(&root_children(k, input, 0, 0))
 }
 
