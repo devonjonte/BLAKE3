@@ -49,12 +49,19 @@ unsafe fn call(avx512: bool, input: &[u8], key: &CVWords, last: *const u8, packe
     // `last` holding 64 readable bytes; `out` has 32 writable ones; the
     // caller has the ISA.
     unsafe {
+        #[cfg(blake3_gpr_experiment)]
+        {
+            // The prototype needs SSE2 only. Permit the same opt-in on
+            // SSE4.1/AVX2 machines, so Intel without AVX-512 can test it.
+            // Record the actual experimental entry in native test traces.
+            let _ = avx512;
+            crate::ran_kernel(ffi::blake3_gpr_chunk_root as *const ());
+            ffi::blake3_gpr_chunk_root(input.as_ptr(), key.as_ptr(), last, packed, out.as_mut_ptr().cast());
+        }
+        #[cfg(not(blake3_gpr_experiment))]
         if avx512 {
             crate::ran_kernel(ffi::blake3_avx512_chunk_root as *const ());
-            #[cfg(not(blake3_gpr_experiment))]
             ffi::blake3_avx512_chunk_root(input.as_ptr(), key.as_ptr(), last, packed, out.as_mut_ptr().cast());
-            #[cfg(blake3_gpr_experiment)]
-            ffi::blake3_gpr_chunk_root(input.as_ptr(), key.as_ptr(), last, packed, out.as_mut_ptr().cast());
         } else {
             crate::ran_kernel(ffi::blake3_sse41_chunk_root as *const ());
             ffi::blake3_sse41_chunk_root(input.as_ptr(), key.as_ptr(), last, packed, out.as_mut_ptr().cast());
@@ -90,6 +97,23 @@ mod test {
             v.push(true);
         }
         v
+    }
+
+    #[cfg(blake3_gpr_experiment)]
+    #[test]
+    fn test_gpr_opt_in_uses_the_actual_entry_on_both_x86_routes() {
+        let input = [7u8; 64];
+        for avx512 in variants() {
+            crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
+            let got = crate::by_value(|out| unsafe { chunk_root(avx512, &input, crate::IV, 0, out) });
+            crate::RAN_ENTRIES.with(|r| {
+                let entries = r.borrow();
+                assert!(entries.contains(&(ffi::blake3_gpr_chunk_root as *const () as usize)));
+                assert!(!entries.contains(&(ffi::blake3_sse41_chunk_root as *const () as usize)));
+                assert!(!entries.contains(&(ffi::blake3_avx512_chunk_root as *const () as usize)));
+            });
+            assert_eq!(got.0, reference(&input, crate::IV, 0));
+        }
     }
 
     /// Every length of 0 to 1024 bytes, at four alignments, in the three
