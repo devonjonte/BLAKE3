@@ -24,7 +24,7 @@ fn a_caller_looping_on_collect_wakes_a_parked_worker() {
             }
             let mut place = Hash::from([0; 32]);
             let got = std::cell::Cell::new(false);
-            blake3_servil::stream(
+            blake3_servil::performance::stream(
                 Mode::Hash,
                 |_: &mut [Hash]| got.set(true),
                 |s| {
@@ -35,7 +35,7 @@ fn a_caller_looping_on_collect_wakes_a_parked_worker() {
                     s.finish();
                 },
             );
-            assert_eq!(place, blake3_servil::hash(&message), "round {round}");
+            assert_eq!(place, blake3_servil::convenience::hash(&message), "round {round}");
         }
         done.send(()).unwrap();
     });
