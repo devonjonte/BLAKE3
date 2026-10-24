@@ -24,6 +24,9 @@
 blake3_sse41_chunk_root:
 _blake3_sse41_chunk_root:
 _CET_ENDBR
+        # Code-size control (local, not for landing): 1972 bytes of
+        # executed no-ops, the SIMD entry at the GPR kernel's 2996 bytes.
+        .nops 1972
         movzx r11d, cl
         mov r10, rcx
         shr r10, 8
