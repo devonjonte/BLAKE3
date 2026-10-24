@@ -2,13 +2,14 @@
 """Whether short-message speed depends on where buffers and stacks happen to
 sit, modulo the 4 KiB page (4 KiB aliasing), and whether that changed.
 
-    python3 tools/offset_check.py [--exe BENCH] [--coarse] [--keep DIR]
+    python3 tools/offset_check.py [--exe BENCH] [--step BYTES] [--keep DIR]
 
 Run from the fork's root with a bench-hashes checkout in `bench-hashes/` (or
 pass --exe, a `bench-hashes build-against` executable). Linux with glibc:
-it moves the duo-copy threads' stacks (glibc.rtld.optional_static_tls) and
-the main thread's (environment size) through one whole page in 64-byte
-steps (128 with --coarse), and measures a short-message cell set at each.
+it moves the duo-copy threads' stacks (glibc.rtld.optional_static_tls)
+through one whole page in 16-byte steps, the stack's own alignment
+(--step for others), and measures a short-message cell set at each (the
+main thread's stack: see offsets()).
 
 Why: a caller writes a short message and hashes it at once. When our call
 chain's stack accesses share the message's low 12 address bits, the CPU
@@ -17,10 +18,15 @@ holds them behind the caller's stores (EPYC 9255: 1.05 to 1.5 ns/B for a
 count, environment and allocation history, none of which a relink changes,
 so one offset can decide a comparison (bench-hashes #65).
 
-How: a scan (one quick run per offset, reading the bench's printed report)
-picks the worst offset for each cell; then `bench-hashes regress` compares
-each cell's best scanned offset against its worst on fresh runs, judged as every
-comparison is (clocks::summary). Selection and verdict use separate runs.
+How: a scan (one quick run per offset, reading the bench's printed report),
+then a rescan of each cell's few worst offsets, twice more: a slow state
+stays slow when measured again, a stray reading does not, so a candidate's
+score is the lowest of its three readings. Each cell's best-scoring
+candidate is then compared against its best scanned offset by `bench-hashes
+regress` on fresh runs, judged as every comparison is (clocks::summary).
+Selection and verdict use separate runs; no threshold stands between a
+small effect and its confirmation (the i7-12700K's is +9-11% in a window
+48 bytes wide, which steps of 64 and a 10% screen both missed).
 
 Verdicts:
 - IMMUNE_CELLS are the cells our APIs keep free of the effect (the batch
@@ -52,19 +58,30 @@ CONTROL_CELLS = [f'{CONTENDER}|{s}|{u}|64 B' for s in ('solo', 'shared')
                  for u in ('LentMessages', 'ContinuousMessages')]
 PAGE = 4096
 DEFAULT_TLS = 512
-# Screening: a cell whose worst scanned run is this far above its median
-# gets a confirmation. Confirmation alone decides.
-SCREEN = 1.10
+# Each cell's worst scanned offsets rescanned, and how many times.
+CANDIDATES = 3
+RESCANS = 2
 MAX_CONFIRMATIONS = 8
+# Pairs per confirmation. regress judges every cell of the set at once
+# (Benjamini-Hochberg over 16 cells), and four pairs cannot get a cell
+# below its bar: on the i7-12700K the slow offset ran +8% to +20% in every
+# one of four pairs and was judged level. Eight can.
+PAIRS = 8
 
 
 def offsets(step):
-    """(name, environment additions) for each offset, the default first."""
+    """(name, environment additions) for each offset, the default first.
+
+    The duo threads' stacks only. The main thread's stack also moves with
+    the environment's size, but its top holds the command line as well,
+    and `regress` runs the bench with other arguments than the scan, so a
+    main-stack offset found in the scan lands elsewhere in its
+    confirmation: on the i7-12700K one read 1.38 times the median in all
+    three scans and level under regress. Until a confirmation can hold the
+    main stack where the scan had it, solo cells are not covered."""
     yield 'default', {}
     for k in range(1, PAGE // step):
         yield f'thread-stack+{k * step}', {'GLIBC_TUNABLES': f'glibc.rtld.optional_static_tls={DEFAULT_TLS + k * step}'}
-    for k in range(1, PAGE // step):
-        yield f'main-stack+{k * step}', {'OFFSET_CHECK_PAD': 'x' * (k * step)}
 
 
 def run_env(extra):
@@ -92,10 +109,11 @@ def parse_report(text):
     return cells
 
 
-def scan(exe, step, work):
+def scan(exe, named, work, label='scan'):
+    """{offset name: {cell: mean}}, one quick run per (name, environment)."""
     results = {}
-    for name, extra in offsets(step):
-        out = work / 'scan' / name
+    for name, extra in named:
+        out = work / label / name
         out.mkdir(parents=True)
         subprocess.run([exe, '--contenders', CONTENDER, '--points', ','.join(POINTS),
                         '--for-regression-check', '--rounds', '24'],
@@ -103,25 +121,40 @@ def scan(exe, step, work):
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         report = next(out.glob('benchmark-results/*/bench-hashes.result.txt'))
         results[name] = parse_report(report.read_text())
-        print(f'scan {name}: {len(results[name])} cells', file=sys.stderr, flush=True)
+        print(f'{label} {name}: {len(results[name])} cells', file=sys.stderr, flush=True)
     return results
 
 
-def pick(results):
-    """(slow, fast) offset pairs to confirm: for each screened cell, its
-    worst and best scanned offsets, most-affected first. The default offset
+def candidates(results):
+    """The offsets to rescan: each cell's CANDIDATES worst."""
+    cells = set().union(*(r.keys() for r in results.values()))
+    chosen = set()
+    for cell in cells:
+        runs = {name: r[cell] for name, r in results.items() if cell in r}
+        chosen.update(sorted(runs, key=runs.get, reverse=True)[:CANDIDATES])
+    return chosen
+
+
+def pick(results, rescans):
+    """(slow, fast) offset pairs to confirm, most-affected first: for each
+    cell, the rescanned offset whose lowest reading (scan and rescans) is
+    highest, against the cell's fastest scanned offset. The default offset
     has no special role: a build may sit in the slow state by default."""
     cells = set().union(*(r.keys() for r in results.values()))
     picks = {}
     for cell in cells:
         runs = {name: r[cell] for name, r in results.items() if cell in r}
         median = statistics.median(runs.values())
-        worst, best = max(runs, key=runs.get), min(runs, key=runs.get)
-        ratio = runs[worst] / median
-        if ratio >= SCREEN and picks.get(worst, (0,))[0] < ratio:
+        lowest = {name: min([runs[name]] + [r[name][cell] for r in rescans if cell in r.get(name, {})])
+                  for name in rescans[0] if name in runs}
+        if not lowest:
+            continue
+        worst, best = max(lowest, key=lowest.get), min(runs, key=runs.get)
+        ratio = lowest[worst] / median
+        if picks.get(worst, (0,))[0] < ratio:
             picks[worst] = (ratio, best)
     order = sorted(picks, key=lambda w: picks[w][0], reverse=True)[:MAX_CONFIRMATIONS]
-    return [(w, picks[w][1]) for w in order], len(cells)
+    return [(w, picks[w][1], picks[w][0]) for w in order], len(cells)
 
 
 def wrapper(path, exe, extra):
@@ -135,10 +168,10 @@ def confirm(exe, slow, fast, extras, work):
     """regress: the fast offset (old side) against the slow one (new)."""
     out = work / 'confirm' / slow
     out.mkdir(parents=True)
-    old = [wrapper(out / f'fast-{i}', exe, extras[fast]) for i in range(4)]
-    new = [wrapper(out / f'slow-{i}', exe, extras[slow]) for i in range(4)]
+    old = [wrapper(out / f'fast-{i}', exe, extras[fast]) for i in range(PAIRS)]
+    new = [wrapper(out / f'slow-{i}', exe, extras[slow]) for i in range(PAIRS)]
     done = subprocess.run([exe, 'regress', '--contenders', CONTENDER, '--points', ','.join(POINTS),
-                           '--pairs', '4', '--keep', str(out / 'samples'), *old, '--', *new],
+                           '--pairs', str(PAIRS), '--keep', str(out / 'samples'), *old, '--', *new],
                           cwd=out, capture_output=True, text=True)
     (out / 'regress.out').write_text(done.stdout)
     (out / 'regress.err').write_text(done.stderr)
@@ -149,7 +182,7 @@ def confirm(exe, slow, fast, extras, work):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--exe', help='a bench-hashes build-against executable (default: build one)')
-    parser.add_argument('--coarse', action='store_true', help='128-byte steps: half the runs')
+    parser.add_argument('--step', type=int, default=16, help='bytes between offsets (default 16, the stack alignment)')
     parser.add_argument('--keep', help='keep the scan and confirmation runs here')
     args = parser.parse_args()
     if not (sys.platform.startswith('linux') and os.confstr('CS_GNU_LIBC_VERSION')):
@@ -161,13 +194,15 @@ def main():
     exe = str(pathlib.Path(exe).resolve())
     work = pathlib.Path(args.keep) if args.keep else pathlib.Path(tempfile.mkdtemp(prefix='offset-check-'))
     work.mkdir(parents=True, exist_ok=True)
-    results = scan(exe, 128 if args.coarse else 64, work)
-    picks, ncells = pick(results)
-    print(f'scanned {len(results)} offsets x {ncells} cells; confirming {len(picks)}: '
-          + (', '.join(f'{s} against {f}' for s, f in picks) or 'none'))
-    extras = dict(offsets(128 if args.coarse else 64))
+    extras = dict(offsets(args.step))
+    results = scan(exe, extras.items(), work)
+    again = sorted(candidates(results))
+    rescans = [scan(exe, [(name, extras[name]) for name in again], work, f'rescan{i + 1}') for i in range(RESCANS)]
+    picks, ncells = pick(results, rescans)
+    print(f'scanned {len(results)} offsets x {ncells} cells, rescanned {len(again)} twice; confirming {len(picks)}: '
+          + (', '.join(f'{s} ({r:.2f}x the median at its lowest) against {f}' for s, f, r in picks) or 'none'))
     sensitive, no_verdict = {}, False
-    for slow, fast in picks:
+    for slow, fast, _ in picks:
         code, slower = confirm(exe, slow, fast, extras, work)
         no_verdict |= code == 2
         for cell in slower:
