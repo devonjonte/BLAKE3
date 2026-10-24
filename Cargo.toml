@@ -96,6 +96,10 @@ libc = { version = "0.2", default-features = false }
 [target.'cfg(all(target_arch = "x86_64", any(target_vendor = "apple", target_os = "linux")))'.dev-dependencies]
 libc = { version = "0.2", default-features = false }
 
+# Co-linking test: upstream's native symbols must not replace ours.
+[target.'cfg(target_arch = "x86_64")'.dev-dependencies]
+blake3 = { version = "=1.8.7", default-features = false, features = ["std"] }
+
 [dev-dependencies]
 rand = "0.10.0"
 hmac = "0.13.0"

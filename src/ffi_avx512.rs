@@ -56,8 +56,11 @@ pub unsafe fn xof_many(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, cou
 
 pub mod ffi {
     unsafe extern "C" {
+        #[link_name = "blake3_servil_compress_in_place_avx512"]
         pub fn blake3_compress_in_place_avx512(cv: *mut u32, block: *const u8, block_len: u8, counter: u64, flags: u8);
+        #[link_name = "blake3_servil_compress_xof_avx512"]
         pub fn blake3_compress_xof_avx512(cv: *const u32, block: *const u8, block_len: u8, counter: u64, flags: u8, out: *mut u8);
+        #[link_name = "blake3_servil_hash_many_avx512"]
         pub fn blake3_hash_many_avx512(
             inputs: *const *const u8,
             num_inputs: usize,
@@ -71,6 +74,7 @@ pub mod ffi {
             out: *mut u8,
         );
         #[cfg(unix)]
+        #[link_name = "blake3_servil_xof_many_avx512"]
         pub fn blake3_xof_many_avx512(cv: *const u32, block: *const u8, block_len: u8, counter: u64, flags: u8, out: *mut u8, outblocks: usize);
     }
 }
