@@ -160,6 +160,10 @@ REACH = "--whole-suite" not in sys.argv
 SHARDS = 6
 # The host's target triple, for its target runner's variable.
 HOST = next(l.split(": ", 1)[1] for l in subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True).stdout.splitlines() if l.startswith("host: "))
+# The target directory cargo is set to use (a cargo config's target-dir, or
+# the checkout's target/): the shards build inside it.
+TARGET_DIR = json.loads(subprocess.run(["cargo", "metadata", "--format-version", "1", "--no-deps"], cwd=ROOT,
+                                       capture_output=True, text=True, check=True).stdout)["target_directory"]
 # cargo-mutants needs a limit on a mutant's tests (with --in-place it would
 # otherwise take 300 s). The run's one clock is nextest's, a test's 30 s
 # (.config/nextest.toml, profile mutants), which ends a hanging test first;
@@ -239,6 +243,31 @@ def scratch_dir():
     return path
 
 
+# The shards' worktrees: sources alone (their builds go under TARGET_DIR),
+# a few MB each, in the system's temporary directory. In the repository's
+# tmp/ they sat on the VM's shared mount, which runs nothing and fails to
+# delete a large tree ("Directory not empty"): a run lost its verdict so
+# on October 24.
+WORKTREES = os.path.join(tempfile.gettempdir(), "blake3-servil-mutants")
+
+
+def remove_leftovers():
+    """The worktrees and builds an earlier run left (a crash, a stop by
+    hand: a run removes none of its own, crash-only), removed before this
+    run starts, so a failure to remove them costs no run. One run at a
+    time: none of them is live."""
+    listed = subprocess.run(["git", "-C", ROOT, "worktree", "list", "--porcelain"], capture_output=True, text=True, check=True).stdout
+    home = os.path.realpath(WORKTREES) + os.sep
+    for line in listed.splitlines():
+        tree = line.removeprefix("worktree ")
+        if line.startswith("worktree ") and os.path.realpath(tree).startswith(home):
+            subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
+    subprocess.run(["git", "-C", ROOT, "worktree", "prune"], check=True)
+    shutil.rmtree(WORKTREES, ignore_errors=True)
+    shutil.rmtree(os.path.join(TARGET_DIR, "mutants"), ignore_errors=True)
+    os.makedirs(WORKTREES)
+
+
 def run(files, extra=(), shards=SHARDS, label="run", loom=False):
     """The mutants that survive the library's tests, by name, counted, and
     every mutant's outcome by function. Each shard's results are kept in
@@ -250,25 +279,34 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
             "--test-tool", "nextest", *extra]
     for f in files:
         args += ["--file", f]
-    runs, scratch = [], scratch_dir()
+    runs = []
     for k in range(shards):
-        # Under the repository's tmp/, on disk: /tmp is memory (tmpfs) on
-        # some machines, and six worktrees' release builds there filled a
-        # 14 GiB machine (i7, three times, October 22-23).
-        tree = tempfile.mkdtemp(prefix="mutants-", dir=scratch)
+        # Its sources in WORKTREES; its build under TARGET_DIR, on disk
+        # where cargo builds (six worktrees' release builds in a tmpfs
+        # /tmp filled a 14 GiB machine: i7, three times, October 22-23).
+        tree = tempfile.mkdtemp(prefix="mutants-", dir=WORKTREES)
         subprocess.run(["git", "-C", ROOT, "worktree", "add", "-q", "--detach", tree, "HEAD"], check=True)
+        # The checkout's lock (git ignores it): the shard builds what the
+        # checkout builds, from the crates already downloaded, without the
+        # network (a slow crates.io failed a run's baseline, October 24).
+        if os.path.exists(os.path.join(ROOT, "Cargo.lock")):
+            shutil.copy(os.path.join(ROOT, "Cargo.lock"), tree)
         # The library's and the integration tests; the doc tests stay out
         # (each compiles a program of its own: minutes per mutant).
         # Its own build directory, named outright (a cargo config's
         # target-dir would otherwise give the shards one, and each would
-        # test the others' builds).
-        env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"), NEXTEST_PROFILE="mutants-map" if MAP else "mutants")
+        # test the others' builds), inside the target directory cargo is
+        # set to use: where this machine runs what it builds (the VM's
+        # shared mount runs nothing, so its cargo builds in /tmp).
+        target = os.path.join(TARGET_DIR, "mutants", os.path.basename(tree))
+        env = dict(os.environ, CARGO_TARGET_DIR=target, NEXTEST_PROFILE="mutants-map" if MAP else "mutants")
         # The tests' own threads and memory cap (test_limits), the cap set
         # by a target runner for test binaries alone; builds keep theirs.
         threads, test_cap = test_limits(shards, os.cpu_count(), os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"))
         env["NEXTEST_TEST_THREADS"] = str(threads)
         env["MUTANTS_TEST_DATA_KIB"] = str(test_cap >> 10)
-        env[f"CARGO_TARGET_{HOST.upper().replace('-', '_')}_RUNNER"] = os.path.join(ROOT, "tools", "mutants", "test-runner")
+        # Through sh: a checkout's files may sit where nothing executes.
+        env[f"CARGO_TARGET_{HOST.upper().replace('-', '_')}_RUNNER"] = "sh " + os.path.join(ROOT, "tools", "mutants", "test-runner")
         if loom:
             # The model checker's build of the same files (tests/shuttle_*.rs
             # compile them beside Shuttle's primitives): every schedule it
@@ -340,8 +378,6 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
             functions[(mutant["file"], function)].append((summary, name))
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
-        subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
-        shutil.rmtree(tree, ignore_errors=True)
     if rows:
         os.makedirs(kept, exist_ok=True)
         with open(os.path.join(kept, "tests.tsv"), "w") as f:
@@ -557,6 +593,7 @@ def figure(functions, known):
 
 
 def main():
+    remove_leftovers()
     files, known = read_known()
     _, tknown = read_known(TIMEOUTS, INACTIVE_TIMEOUTS)
     # A test known to be missing is work to do now, not a survivor to keep:
