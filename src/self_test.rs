@@ -392,8 +392,12 @@ fn chunk_values(platform: Platform, input: &[u8], key: &[u8; 32], out: &mut [u8]
 /// Run every case and panic on the first that differs from the reference;
 /// how many cases ran (every one of CASES).
 fn run() -> usize {
-    #[cfg(all(test, feature = "std"))]
-    assert!(!PLANTED_FAILURE.load(core::sync::atomic::Ordering::Relaxed), "a failure planted by a test");
+    // A kernel's panic, as a test plants it: the guard in ensure_slow
+    // stops the process for it.
+    #[cfg(test)]
+    if PLANTED_FAILURE.load(core::sync::atomic::Ordering::Relaxed) {
+        panic!("a kernel's panic, planted by a test");
+    }
     compiled_features_present();
     let platform = Platform::detect_unchecked();
     let mut checked = 0;
@@ -401,13 +405,14 @@ fn run() -> usize {
         |case, input, previous, out| outputs(platform, case, input, previous, out),
         |index, folded| {
             checked += 1;
-            assert!(
-                folded == EXPECTED[index],
-                "blake3-servil startup self-test failed: case {index}, {} (platform {}): this build or this CPU \
-                 computes wrong BLAKE3 digests on that path",
-                CASES[index].1,
-                platform.name(),
-            );
+            if folded != EXPECTED[index] {
+                stop(format_args!(
+                    "blake3-servil startup self-test failed: case {index}, {} (platform {}): this build or this CPU \
+                     computes wrong BLAKE3 digests on that path",
+                    CASES[index].1,
+                    platform.name(),
+                ));
+            }
         },
     );
     checked
@@ -427,9 +432,9 @@ fn compiled_features_present() {
         use core::arch::x86_64::__cpuid_count;
         let cpuid = |leaf, sub| __cpuid_count(leaf, sub);
         let lacks = |feature: &str| -> ! {
-            panic!(
+            stop(format_args!(
                 "blake3-servil: this binary was compiled for CPUs with {feature}, which this CPU lacks, and here it would compute wrong digests; build it for this CPU"
-            )
+            ))
         };
         if cfg!(target_feature = "lzcnt") && cpuid(0x8000_0001, 0).ecx & (1 << 5) == 0 {
             lacks("LZCNT");
@@ -440,11 +445,53 @@ fn compiled_features_present() {
     }
 }
 
-/// The self-test's progress in this process.
+/// Stop the process: this build or this CPU computes wrong digests, and
+/// nothing may hash on. No caller can catch it; a panic can be caught
+/// (catch_unwind, a thread's join, an FFI boundary), and the program
+/// would go on hashing wrong digests (Zooko, October 24). With std, the
+/// reason to stderr, then abort (SIGABRT). Without std, the CPU's trap
+/// instruction (an illegal-instruction fault, SIGILL where there are
+/// signals): stable Rust, no library. On an architecture with no trap
+/// named here, a panic, to the program's panic handler.
+#[cold]
+fn stop(why: core::fmt::Arguments) -> ! {
+    #[cfg(feature = "std")]
+    {
+        std::eprintln!("{why}");
+        std::process::abort()
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        let _ = why;
+        trap()
+    }
+}
+
+/// The CPU's own stop: an instruction defined to fault.
+#[cfg(not(feature = "std"))]
+#[inline(always)]
+fn trap() -> ! {
+    // Sound: each instruction faults where it is executed; nothing after
+    // it runs.
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    unsafe {
+        core::arch::asm!("ud2", options(noreturn, nomem, nostack))
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        core::arch::asm!("udf #0", options(noreturn, nomem, nostack))
+    }
+    #[cfg(target_arch = "wasm32")]
+    core::arch::wasm32::unreachable();
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "x86", target_arch = "aarch64", target_arch = "wasm32")))]
+    panic!("blake3-servil startup self-test failed: this build or this CPU computes wrong BLAKE3 digests")
+}
+
+/// The self-test's progress in this process. A failed one stops the
+/// process (stop), so no state says so.
 const UNTESTED: u8 = 0;
 const RUNNING: u8 = 1;
 const PASSED: u8 = 2;
-const FAILED: u8 = 3;
 static STATE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(UNTESTED);
 
 /// The threads that have reached the wait for another's verdict (test
@@ -455,7 +502,7 @@ static WAITING: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsiz
 
 /// A failure a test plants in the self-test's run (test builds only), as
 /// a CPU or build that computes wrong digests would fail it.
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 static PLANTED_FAILURE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// Run the self-test unless it has passed: once per process, the first
@@ -475,12 +522,12 @@ pub(crate) fn ensure() {
 fn ensure_slow() {
     use core::sync::atomic::Ordering::Relaxed;
     if STATE.compare_exchange(UNTESTED, RUNNING, Relaxed, Relaxed).is_ok() {
-        /// A failure (the panic below, or one inside a kernel) leaves
-        /// FAILED, so that the waiting threads stop too.
+        /// A kernel that panics during the test stops the process too:
+        /// its unwind passes here.
         struct Failed;
         impl Drop for Failed {
             fn drop(&mut self) {
-                STATE.store(FAILED, Relaxed);
+                stop(format_args!("blake3-servil startup self-test failed: a kernel panicked on this build or this CPU"));
             }
         }
         let failed = Failed;
@@ -491,18 +538,16 @@ fn ensure_slow() {
     }
     #[cfg(all(test, feature = "std"))]
     WAITING.fetch_add(1, Relaxed);
-    // Wait for the verdict, then act on it: a loop that spins while the
-    // test runs and leaves on any other state, so no change to the arms
-    // below can make a thread spin forever (the mutation check's clock
-    // was the only thing stopping two such changes).
+    // Wait for the verdict: a test that fails stops the process, so the
+    // one a thread sees leave RUNNING is PASSED. The loop spins while the
+    // test runs and leaves on any other state, so no change below can
+    // make a thread spin forever (the mutation check's clock was the only
+    // thing stopping two such changes).
     while STATE.load(Relaxed) == RUNNING {
         core::hint::spin_loop();
     }
-    match STATE.load(Relaxed) {
-        PASSED => {}
-        FAILED => panic!("blake3-servil startup self-test failed on another thread: this build or this CPU computes wrong BLAKE3 digests"),
-        state => unreachable!("the self-test's state is {state} after it ran"),
-    }
+    let state = STATE.load(Relaxed);
+    assert!(state == PASSED, "the self-test's state is {state} after it ran");
 }
 
 #[cfg(all(test, feature = "std"))]
@@ -532,37 +577,14 @@ mod test {
         use core::sync::atomic::Ordering::Relaxed;
         crate::initialize();
         assert_eq!(STATE.load(Relaxed), PASSED, "initialize runs the self-test");
-        for (verdict, returns) in [(PASSED, true), (FAILED, false)] {
-            STATE.store(RUNNING, Relaxed);
-            let arrived = WAITING.load(Relaxed);
-            let waiter = std::thread::spawn(ensure_slow);
-            while WAITING.load(Relaxed) == arrived {
-                std::thread::yield_now();
-            }
-            STATE.store(verdict, Relaxed);
-            assert_eq!(waiter.join().is_ok(), returns, "the waiting thread, after the verdict {verdict}");
+        STATE.store(RUNNING, Relaxed);
+        let arrived = WAITING.load(Relaxed);
+        let waiter = std::thread::spawn(ensure_slow);
+        while WAITING.load(Relaxed) == arrived {
+            std::thread::yield_now();
         }
-    }
-
-    /// A self-test that fails leaves FAILED behind, so every later caller
-    /// stops too ("failed on another thread"), where it would otherwise
-    /// wait on RUNNING forever. The state is read outright after the
-    /// failing run, so a broken guard fails this test rather than hanging
-    /// it (the mutation check had it OPEN: no test made the self-test fail).
-    #[test]
-    #[cfg(not(miri))]
-    fn test_a_failing_self_test_stops_every_caller() {
-        use core::sync::atomic::Ordering::Relaxed;
-        STATE.store(UNTESTED, Relaxed);
-        PLANTED_FAILURE.store(true, Relaxed);
-        let first = std::panic::catch_unwind(ensure_slow);
-        PLANTED_FAILURE.store(false, Relaxed);
-        assert!(first.is_err(), "the failing run stops its caller");
-        assert_eq!(STATE.load(Relaxed), FAILED, "a failed run leaves FAILED for the rest");
-        let later = std::panic::catch_unwind(ensure_slow).expect_err("a later caller stops too");
-        let message = later.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| later.downcast_ref::<std::string::String>().cloned()).unwrap_or_default();
-        assert!(message.contains("failed on another thread"), "{message}");
         STATE.store(PASSED, Relaxed);
+        assert!(waiter.join().is_ok(), "the waiting thread returns after the verdict");
     }
 
     /// The self-test runs every assembly entry point this machine has:
@@ -636,5 +658,46 @@ mod test {
         chain(into(reference), |_, folded| folds.push(folded));
         let table: std::string::String = folds.iter().map(|f| std::format!("    0x{f:016x},\n")).collect();
         assert!(folds == EXPECTED, "EXPECTED differs from the reference implementation; its table:\n{table}");
+    }
+}
+
+/// The self-test's stop, in every test build (std or not: the tests use
+/// std in every build).
+#[cfg(test)]
+mod stops {
+    use super::*;
+
+    /// A self-test that fails stops the process: no caller can catch it
+    /// and go on hashing wrong digests (with std an abort, SIGABRT; without
+    /// it the CPU's trap, SIGILL). Run in a child process of
+    /// this test binary, which plants a kernel's panic and calls the
+    /// self-test inside catch_unwind, as a careless caller might: the
+    /// child must die of SIGABRT, saying why. With the guard broken it
+    /// would catch the panic and exit 0 (the mutation check had the guard
+    /// OPEN: no test made the self-test fail).
+    #[test]
+    #[cfg(all(not(miri), unix))]
+    fn test_a_failing_self_test_stops_the_process() {
+        use core::sync::atomic::Ordering::Relaxed;
+        const CHILD: &str = "BLAKE3_SERVIL_TEST_PLANTED_FAILURE";
+        if std::env::var_os(CHILD).is_some() {
+            STATE.store(UNTESTED, Relaxed);
+            PLANTED_FAILURE.store(true, Relaxed);
+            let _ = std::panic::catch_unwind(ensure_slow);
+            std::process::exit(0);
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "self_test::stops::test_a_failing_self_test_stops_the_process", "--nocapture", "--test-threads", "1"])
+            .env(CHILD, "1")
+            .output()
+            .expect("the test binary runs again");
+        use std::os::unix::process::ExitStatusExt as _;
+        let stderr = std::string::String::from_utf8_lossy(&out.stderr);
+        if cfg!(feature = "std") {
+            assert_eq!(out.status.signal(), Some(6), "the child aborts (SIGABRT): {:?}\n{stderr}", out.status);
+            assert!(stderr.contains("startup self-test failed"), "it says why: {stderr}");
+        } else {
+            assert_eq!(out.status.signal(), Some(4), "the child traps (SIGILL): {:?}\n{stderr}", out.status);
+        }
     }
 }
