@@ -58,8 +58,12 @@ CONTROL_CELLS = [f'{CONTENDER}|{s}|{u}|64 B' for s in ('solo', 'shared')
                  for u in ('LentMessages', 'ContinuousMessages')]
 PAGE = 4096
 DEFAULT_TLS = 512
-# Each cell's worst scanned offsets rescanned, and how many times.
-CANDIDATES = 3
+# Each cell's worst scanned offsets rescanned, and how many times. A single
+# quick reading strays as high as a slow state reads (on the i7-12700K the
+# window's 0.80 ns/B ranked anywhere from 1st to 10th among 256 offsets,
+# under readings of 0.83-0.86 that read 0.73 again when rescanned), so ten
+# a cell; a rescan run takes a fraction of a second.
+CANDIDATES = 10
 RESCANS = 2
 MAX_CONFIRMATIONS = 8
 # Pairs per confirmation. regress judges every cell of the set at once
