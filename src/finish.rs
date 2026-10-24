@@ -97,7 +97,7 @@ impl Finish {
         let mut count = self.state.fetch_or(SLEEPING, Ordering::SeqCst) & !SLEEPING;
         while count < target {
             thread::park();
-            count = self.state.load(Ordering::SeqCst) & !SLEEPING;
+            count = self.finished_count();
         }
         self.state.fetch_and(!SLEEPING, Ordering::SeqCst);
     }

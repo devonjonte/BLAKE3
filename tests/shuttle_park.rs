@@ -157,3 +157,41 @@ fn wake_for_wakes_one_a_piece() {
         3,
     );
 }
+
+/// Two wakers at once, two workers parked: each waker's wake lands on a
+/// different worker (a waker that counts a bit another cleared as its own
+/// leaves one worker parked, and this deadlocks).
+#[test]
+fn two_wakers_wake_two_workers() {
+    shuttle::check_pct(
+        || {
+            let park = Arc::new(Park::new(2));
+            let go = Arc::new(AtomicUsize::new(0));
+            let mut threads = Vec::new();
+            for me in 0..2 {
+                let (park, go) = (park.clone(), go.clone());
+                threads.push(thread::spawn(move || {
+                    park.register(me);
+                    park.park_unless(me, || go.load(Ordering::SeqCst) == 2);
+                }));
+            }
+            for _ in 0..2 {
+                let (park, go) = (park.clone(), go.clone());
+                threads.push(thread::spawn(move || {
+                    go.fetch_add(1, Ordering::SeqCst);
+                    while !park.wake_one() {
+                        if go.load(Ordering::SeqCst) == 2 && park.parked_count() == 0 {
+                            return;
+                        }
+                        thread::yield_now();
+                    }
+                }));
+            }
+            for t in threads {
+                t.join().unwrap();
+            }
+        },
+        3000,
+        3,
+    );
+}
