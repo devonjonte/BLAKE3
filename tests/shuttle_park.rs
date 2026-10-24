@@ -18,7 +18,7 @@
 
 /// Shuttle's primitives, under the names src/park.rs imports them by.
 mod park_sync {
-    pub use shuttle::sync::atomic::{AtomicU64, Ordering};
+    pub use shuttle::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     pub use shuttle::thread;
 
     /// A once-set cell, as std's OnceLock (which Shuttle lacks): set once,
@@ -84,7 +84,9 @@ fn run(workers: usize, publishers: usize, each: usize) {
                         }
                         // None: park unless work shows, as the pool's worker does.
                         let visible = || taken.load(Ordering::SeqCst) < published.load(Ordering::SeqCst) || taken.load(Ordering::SeqCst) == total;
-                        park.park_unless(me, visible);
+                        if park.park_unless(me, visible) {
+                            park.pay_owed();
+                        }
                     }
                 }));
             }
@@ -125,10 +127,11 @@ fn two_workers_two_publishers() {
     run(2, 2, 2);
 }
 
-/// wake_for wakes as many as the pieces want: with three workers parked
-/// and three pieces published at once, every worker is woken.
+/// wake_for owes wakes that cascade: with three workers parked and three
+/// pieces published at once, the publisher wakes one and every worker is
+/// woken.
 #[test]
-fn wake_for_wakes_one_a_piece() {
+fn owed_wakes_cascade() {
     shuttle::check_pct(
         || {
             let park = Arc::new(Park::new(3));
@@ -139,7 +142,9 @@ fn wake_for_wakes_one_a_piece() {
                 let (park, published, woken) = (park.clone(), published.clone(), woken.clone());
                 threads.push(thread::spawn(move || {
                     park.register(me);
-                    park.park_unless(me, || published.load(Ordering::SeqCst) > 0);
+                    if park.park_unless(me, || published.load(Ordering::SeqCst) > 0) {
+                        park.pay_owed();
+                    }
                     woken.fetch_add(1, Ordering::SeqCst);
                 }));
             }
@@ -172,7 +177,9 @@ fn two_wakers_wake_two_workers() {
                 let (park, go) = (park.clone(), go.clone());
                 threads.push(thread::spawn(move || {
                     park.register(me);
-                    park.park_unless(me, || go.load(Ordering::SeqCst) == 2);
+                    if park.park_unless(me, || go.load(Ordering::SeqCst) == 2) {
+                        park.pay_owed();
+                    }
                 }));
             }
             for _ in 0..2 {

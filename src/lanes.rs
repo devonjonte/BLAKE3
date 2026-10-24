@@ -716,8 +716,11 @@ impl Pool {
             if sources::open() && spin_for_work() {
                 continue;
             }
-            // Park unless work shows (crate::park's handshake).
-            self.park.park_unless(me, || sources::visible(false));
+            // Park unless work shows (crate::park's handshake); woken, pay
+            // the wakes owed before working.
+            if self.park.park_unless(me, || sources::visible(false)) {
+                self.park.pay_owed();
+            }
         }
     }
 }
