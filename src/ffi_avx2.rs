@@ -36,6 +36,7 @@ pub unsafe fn hash_many<const N: usize>(
 
 pub mod ffi {
     unsafe extern "C" {
+        #[link_name = "blake3_servil_hash_many_avx2"]
         pub fn blake3_hash_many_avx2(
             inputs: *const *const u8,
             num_inputs: usize,
