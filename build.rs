@@ -172,7 +172,7 @@ fn build_sse41_avx2_assembly() {
         build.file("c/blake3_chunk_root_x86-64_unix.S");
         // Experimental GPR arithmetic, measured only with this build-time opt-in.
         println!("cargo:rerun-if-env-changed=BLAKE3_DIAGNOSTIC_GPR");
-        if std::env::var_os("BLAKE3_DIAGNOSTIC_GPR").is_some() {
+        if true || std::env::var_os("BLAKE3_DIAGNOSTIC_GPR").is_some() {
             build.file("c/blake3_gpr_chunk_root_x86-64_unix.S");
             println!("cargo:rustc-cfg=blake3_gpr_experiment");
         }
