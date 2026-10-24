@@ -78,6 +78,14 @@ class Readers(unittest.TestCase):
                  self.assertRaisesRegex(ValueError, "missing or malformed"):
                 check.cpu_flags()
 
+class Placeholders(unittest.TestCase):
+    def test_a_new_time_outs_placeholder_names_the_stopped_tests(self):
+        name = "src/lanes.rs\treplace spin_for_work -> bool with true"
+        with patch.object(check, "STOPPED", {name: {"blake3-servil b_test", "blake3-servil a_test"}}):
+            self.assertEqual(check.unclassified(name),
+                             "UNCLASSIFIED (the clock stopped: blake3-servil a_test, blake3-servil b_test)")
+            self.assertEqual(check.unclassified("src/lib.rs\tother"), "UNCLASSIFIED")
+
 
 if __name__ == "__main__":
     unittest.main()
