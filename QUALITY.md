@@ -1,7 +1,7 @@
 # How blake3-servil is checked
 
-blake3-servil is a BLAKE3 implementation that aims to produce exactly
-the official digests, faster.
+blake3-servil is a fast BLAKE3 implementation. It aims to produce
+exactly the official digests.
 
 Most of the extra speed comes from code written for specific processors
 and from splitting work across processor cores. That is also where
