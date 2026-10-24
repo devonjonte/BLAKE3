@@ -102,11 +102,18 @@ impl Park {
         }
         let awake = workers - parked;
         if awake < wanted {
+            // Experiment (BLAKE3 #119): the publisher makes up to 8 wakes
+            // itself and owes the rest.
             let need = (wanted - awake).min(parked);
-            if need > 1 {
-                self.owed.fetch_add(need - 1, Ordering::SeqCst);
+            let direct = need.min(8);
+            if need > direct {
+                self.owed.fetch_add(need - direct, Ordering::SeqCst);
             }
-            self.wake_one();
+            for _ in 0..direct {
+                if !self.wake_one() {
+                    break;
+                }
+            }
         }
     }
 
