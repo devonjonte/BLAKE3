@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
-"""Experimental System V x86-64 single-chunk root kernel.
+"""Experimental System V x86-64 single-chunk root kernel; SSE2.
 
-Same arguments and readable bounds as blake3_sse41_chunk_root:
-(input, key, last, packed=flags | last_len<<8 | whole<<16, out).
+ABI: (input, key, last, packed=flags | last_len<<8 | whole<<16, out).
 whole=0..15; last_len=0..64; chunk counter zero; mode flags only.
-Reads whole 64-byte blocks and the supplied padded final block, writes
-exactly 32 output bytes. Input/output may be unaligned. SSE2 required.
+Read whole 64-byte blocks at input, eight u32 key words, and 64 readable
+bytes at last (padded by the caller). Write exactly 32 bytes at out once.
+Unaligned pointers are supported; aligned-input performance is measured
+separately. No explicit stack access, push/pop, call or RIP-relative load.
 
-Twelve state words stay in GPRs. The four remaining words park in xmm0..3;
-two at a time move into eax/esi while two independent Gs are interleaved.
-The input pointer occupies rdi. Message permutations become fixed memory
-offsets in seven unrolled rounds. All ADD/XOR/ROR arithmetic is 32-bit.
-Packing is used for control fields, not for word arithmetic: no carry may
-cross a BLAKE3 word boundary.
+v0..v7 = r8d..r15d; v8..v11 = ebx,ebp,ecx,edx. At round boundaries,
+D0/D1 = eax/esi, D2/D3 = xmm0/xmm1. rdi holds the input pointer.
+xmm4 = packed control, xmm5 = last, xmm6 = out. xmm8..13 preserve the
+six callee-saved GPRs (rbx,rbp,r12..r15). All other used registers and flags
+are caller-saved. The integer arithmetic is 32-bit: no cross-word carry
+or rotation. Packing is for control fields, not two words' arithmetic.
 
-Six callee-saved GPRs are preserved in caller-saved XMM registers. No
-push/pop, stack scratch, calls or RIP-relative loads. This costs register
-transfers and repeated message loads, and about 5 KiB of unrolled code;
-measure those costs rather than assuming lower scalar latency wins.
+Independent Gs are ordered to keep two D words in GPRs across rounds:
+  columns 0,1: eax=D0 esi=D1 xmm0=D2 xmm1=D3
+  columns 2,3 / diagonals 3,0: eax=D2 esi=D3 xmm2=D0 xmm3=D1
+  diagonals 1,2 / next round: eax=D0 esi=D1 xmm0=D2 xmm1=D3
+Eight GP/XMM transfers per round; message permutations become fixed load
+offsets in seven unrolled rounds. The resulting kernel is 2996 bytes.
+Short calls after other work regressed: keep this opt-in pending review.
 
-Generate with python3 tools/gen_x86_gpr_chunk_root.py > c/blake3_gpr_chunk_root_x86-64_unix.S
+Generate: python3 tools/gen_x86_gpr_chunk_root.py > c/blake3_gpr_chunk_root_x86-64_unix.S
 """
 
 V = [f'r{i}d' for i in range(8, 16)] + ['ebx', 'ebp', 'ecx', 'edx']
@@ -43,45 +47,43 @@ def g(quad, d, mx, my):
 
 
 def pair(quads, words):
-    out = [f'movd eax, xmm{quads[0][3] - 12}', f'movd esi, xmm{quads[1][3] - 12}']
+    assert set(quads[0]).isdisjoint(quads[1]), 'the two Gs are independent'
     left = g(quads[0], 'eax', words[0], words[1])
     right = g(quads[1], 'esi', words[2], words[3])
-    for a, b in zip(left, right):
-        out += [a, b]
-    return out + [f'movd xmm{quads[0][3] - 12}, eax', f'movd xmm{quads[1][3] - 12}, esi']
+    return [ins for stage in zip(left, right) for ins in stage]
 
 
 def kernel():
-    out = []
-    for i, reg in enumerate(SAVED, 8):
-        out += [f'movq xmm{i}, {reg}']
-    # Save metadata before assigning its argument registers to state.
+    out = [f'movq xmm{i}, {reg}' for i, reg in enumerate(SAVED, 8)]
+    # Save arguments before assigning their registers to state.
     out += ['movq xmm5, rdx', 'movq xmm6, r8', 'or ecx, 1', 'movq xmm4, rcx']
     out += [f'mov {V[i]}, dword ptr [rsi+{4*i}]' for i in range(8)]
     out += ['.Lblock:', 'movq rax, xmm4', 'shr eax, 16', 'test eax, eax', 'jz .Llast',
-            'mov eax, 64', 'movd xmm2, eax', 'movq rax, xmm4', 'movzx eax, al',
-            'movd xmm3, eax', 'jmp .Linit', '.Llast:', 'movq rdi, xmm5',
-            'movq rax, xmm4', 'shr eax, 8', 'and eax, 255', 'movd xmm2, eax',
-            'movq rax, xmm4', 'movzx eax, al', 'or eax, 10', 'movd xmm3, eax',
-            '.Linit:', 'pxor xmm0, xmm0', 'pxor xmm1, xmm1']
+            'mov eax, 64', 'movd xmm0, eax', 'movq rax, xmm4', 'movzx eax, al',
+            'movd xmm1, eax', 'jmp .Linit', '.Llast:', 'movq rdi, xmm5',
+            'movq rax, xmm4', 'shr eax, 8', 'and eax, 255', 'movd xmm0, eax',
+            'movq rax, xmm4', 'movzx eax, al', 'or eax, 10', 'movd xmm1, eax',
+            '.Linit:', 'xor eax, eax', 'xor esi, esi']
     out += [f'mov {V[8+i]}, {iv:#x}' for i, iv in enumerate(IV4)]
     schedule = list(range(16))
     for rnd in range(7):
-        out += [f'// Round {rnd}; message indices {schedule}']
-        for groups, start in [(COLUMNS, 0), (DIAGONALS, 8)]:
-            for i in (0, 2):
-                out += pair(groups[i:i+2], schedule[start+2*i:start+2*i+4])
+        out += [f'// Round {rnd}; D0/D1 resident; message indices {schedule}']
+        out += pair(COLUMNS[:2], schedule[:4])
+        out += ['movd xmm2, eax', 'movd xmm3, esi', 'movd eax, xmm0', 'movd esi, xmm1']
+        out += pair(COLUMNS[2:], schedule[4:8])
+        out += pair([DIAGONALS[3], DIAGONALS[0]], [schedule[14], schedule[15], schedule[8], schedule[9]])
+        out += ['movd xmm0, eax', 'movd xmm1, esi', 'movd eax, xmm2', 'movd esi, xmm3']
+        out += pair(DIAGONALS[1:3], schedule[10:14])
         schedule = [schedule[i] for i in PERM]
-    # Feed-forward: CV' = state[0..8] XOR state[8..16].
+    # CV' = v0..v7 XOR v8..v15; D0/D1 are still in eax/esi.
     out += [f'xor {V[i]}, {V[i+8]}' for i in range(4)]
-    for i in range(4):
-        out += [f'movd eax, xmm{i}', f'xor {V[4+i]}, eax']
+    out += ['xor r12d, eax', 'xor r13d, esi', 'movd eax, xmm0', 'xor r14d, eax',
+            'movd eax, xmm1', 'xor r15d, eax']
     out += ['movq rax, xmm4', 'mov rsi, rax', 'shr esi, 16', 'test esi, esi', 'jz .Ldone',
             'sub eax, 65536', 'and eax, -2', 'movq xmm4, rax', 'add rdi, 64', 'jmp .Lblock',
             '.Ldone:', 'movq rdi, xmm6']
     out += [f'mov dword ptr [rdi+{4*i}], {V[i]}' for i in range(8)]
-    for i, reg in enumerate(SAVED, 8):
-        out += [f'movq {reg}, xmm{i}']
+    out += [f'movq {reg}, xmm{i}' for i, reg in enumerate(SAVED, 8)]
     return out + ['ret']
 
 
