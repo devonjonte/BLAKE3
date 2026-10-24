@@ -239,6 +239,23 @@ def scratch_dir():
     return path
 
 
+def remove_leftovers():
+    """A run stopped before it finished (a supervisor's memory floor, a
+    stop by hand) leaves its shards' worktrees in tmp/, each with a
+    mutant applied; this run is the next, and the one run at a time
+    (run-bounded.py), so none of them is live: they go (six were found
+    on October 24)."""
+    # The repository's own worktrees under tmp/ alone: tmp/mutants-last,
+    # the last run's kept results, is no worktree and stays.
+    listed = subprocess.run(["git", "-C", ROOT, "worktree", "list", "--porcelain"], capture_output=True, text=True, check=True).stdout
+    scratch = os.path.realpath(scratch_dir()) + os.sep
+    for line in listed.splitlines():
+        tree = line.removeprefix("worktree ")
+        if line.startswith("worktree ") and os.path.realpath(tree).startswith(scratch) and os.path.basename(tree).startswith("mutants-"):
+            subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
+    subprocess.run(["git", "-C", ROOT, "worktree", "prune"], check=True)
+
+
 def run(files, extra=(), shards=SHARDS, label="run", loom=False):
     """The mutants that survive the library's tests, by name, counted, and
     every mutant's outcome by function. Each shard's results are kept in
@@ -557,6 +574,7 @@ def figure(functions, known):
 
 
 def main():
+    remove_leftovers()
     files, known = read_known()
     _, tknown = read_known(TIMEOUTS, INACTIVE_TIMEOUTS)
     # A test known to be missing is work to do now, not a survivor to keep:

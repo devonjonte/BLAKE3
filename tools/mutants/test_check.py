@@ -110,6 +110,24 @@ class Limits(unittest.TestCase):
         with patch.object(check, "memory_cap", lambda shards: 8 * gib):
             self.assertEqual(check.test_limits(6, 4, 15 * gib)[0], 1, "at least one test thread")
 
+class Leftovers(unittest.TestCase):
+    def test_only_the_repositorys_mutant_worktrees_go(self):
+        listed = "\n".join([
+            "worktree /repo", "HEAD a", "",
+            "worktree /repo/tmp/mutants-abc123", "HEAD b", "",
+            "worktree /elsewhere/mutants-xyz", "HEAD c", "",
+            "worktree /repo/tmp/tests-map-worktree", "HEAD d", "",
+        ])
+        calls = []
+        def run(args, **kw):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout=listed if "list" in args else "")
+        with patch.object(check, "ROOT", "/repo"), patch.object(check, "scratch_dir", lambda: "/repo/tmp"), \
+             patch.object(check.os.path, "realpath", lambda p: p), patch.object(check.subprocess, "run", run):
+            check.remove_leftovers()
+        removed = [a[-1] for a in calls if "remove" in a]
+        self.assertEqual(removed, ["/repo/tmp/mutants-abc123"], "tmp/mutants-last and other worktrees stay")
+
 
 if __name__ == "__main__":
     unittest.main()
