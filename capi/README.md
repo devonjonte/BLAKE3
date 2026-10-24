@@ -1,6 +1,6 @@
 # BLAKE3 servil for C and C++
 
-`libb3_servil` exposes the servil fork's one-shot, incremental, batch, and
+`libb3_servil` exposes `blake3-servil`'s one-shot, incremental, batch, and
 streaming hashing through [`b3.h`](b3.h). The header documents each call's
 contract. It works with C11 and C++11.
 

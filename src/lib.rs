@@ -1,7 +1,6 @@
-//! The [BLAKE3] cryptographic hash function, in the servil fork: the same
-//! digests as official BLAKE3, faster on 64-bit Arm (above all Apple
-//! M4-class chips) and on x86-64, with a call for each way programs hash
-//! (the table below).
+//! `blake3-servil` is a fast [BLAKE3] implementation for 64-bit Arm and
+//! x86-64. It produces the same digests as official BLAKE3, with a call
+//! for each way programs hash (the table below).
 //!
 //! # Examples
 //!
@@ -60,11 +59,9 @@
 //! [`hash_many`] call take about a fifth of the time of 1024 [`hash`]
 //! calls.
 //!
-//! **Keyed hashing and key derivation** run at the plain hash's speed:
-//! the keyed hash and key derivation, through a [`Mode`],
-//! taken by its `_with` form ([`hash_with`], [`hash_many_with`], ...),
-//! by [`Hasher::new_with`], and by a
-//! [`stream`].
+//! **Keyed hashing and key derivation** run at the plain hash's speed
+//! through a [`Mode`], passed to a call's `_with` form ([`hash_with`],
+//! [`hash_many_with`], ...), to [`Hasher::new_with`], or to a [`stream`].
 //!
 //! **Hashing now and then** (rather than nonstop) is slower per byte on
 //! every hash function, since its code and data must come back into the
@@ -115,24 +112,12 @@
 //! calls or streams calls [`initialize_multithreaded`]**: a
 //! multithreaded call or a stream before it panics (one load per call).
 //!
-//! In `initialize`, the crate checks the build and the machine running it
-//! before the process first hashes: a miscompilation, a faulty CPU, a
-//! binary built for another CPU, or tampering that breaks the digests.
-//! (What the code computes is the tests' and the proofs' to establish.) It
-//! hashes fixed inputs (42 on AArch64, 9 elsewhere), chosen so that
-//! together they run every one of its assembly kernels on this machine (a
-//! unit test checks it on every run), each input carrying the previous
-//! output, and compares each result with the reference implementation's; on x86 it first checks that the CPU has the
-//! LZCNT and BMI1 instructions a build for newer CPUs assumes, which older
-//! ones run as other instructions instead of stopping. A difference means
-//! this build or this CPU computes wrong digests, and stops the program
-//! with a panic naming the code path. The check takes 0.1 to 0.2 ms once
-//! per process on AArch64 (Apple M4 Max, and a Linux VM on it) and about
-//! 28 µs on x86-64 (i7-12700K, a performance core; 47 µs on an efficiency
-//! core), in every build, with or without the `std` feature. Other threads
-//! that call `initialize` meanwhile wait for it, and stop with it if it
-//! fails. Without `std`, the panic goes to the program's panic handler,
-//! which aborts or halts.
+//! `initialize` checks the build and the CPU before the process first
+//! hashes, in well under a millisecond. It runs every assembly kernel built
+//! for this machine on fixed inputs and compares the outputs with the
+//! reference implementation's. A mismatch stops the program with a panic
+//! naming the code path. Other threads that call `initialize` meanwhile
+//! wait for it, and stop with it if it fails.
 //!
 //! # Cargo Features
 //!

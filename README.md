@@ -1,7 +1,7 @@
-# BLAKE3, the servil fork
+# blake3-servil
 
-A faster [BLAKE3](https://blake3.io) for 64-bit Arm and x86-64. It computes the same
-digests as official BLAKE3.
+A fast [BLAKE3](https://blake3.io) implementation for 64-bit Arm and x86-64. It computes the
+same digests as official BLAKE3.
 
 > Devon Jonte's line of the fork, maintained: John Servil's
 > [`servil`](https://github.com/johnservil/BLAKE3) plus the changes that have passed
@@ -18,8 +18,9 @@ digests as official BLAKE3.
 
 Speed depends on your machine and on how your program hashes.
 [bench-hashes](https://github.com/johnservil/bench-hashes) measures both on your own
-computer; its published maps cover an [Intel i7-12700K](https://devonjonte.github.io/bench-hashes/)
-and an [Apple M4 Max](https://johnservil.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.map.html).
+computer; its published maps cover an [Apple M4 Max](https://johnservil.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.map.html),
+an [AMD EPYC 9255](https://johnservil.github.io/bench-hashes/benchmark-results/AMDEPYC925524CoreProcessor.linux70038generic/bench-hashes.map.html),
+and an [Intel i7-12700K](https://devonjonte.github.io/bench-hashes/).
 
 ## How it is checked
 
@@ -30,8 +31,8 @@ Its checks go further than most:
 
 - Assembly kernels are checked against BLAKE3's specification with **symbolic proofs**.
   [QUALITY.md](QUALITY.md) explains the proof coverage and its scope.
-- **The tests are tested:** about 2,500 likely bugs are planted in the Rust code, one at a
-  time, and a test must catch each one.
+- **The tests are tested:** about 2,500 small mistakes are planted in the Rust code, one
+  at a time, and the tests are checked against each one.
 - Digests are checked against the official test vectors and an independent
   implementation, and each process checks its kernels before its first hash.
 - Memory use is checked with sanitizers, Miri, and guard pages that catch a kernel reading
@@ -61,7 +62,7 @@ let hash = blake3_servil::hash(b"foobarbaz");
 ```
 
 The [crate documentation](https://johnservil.github.io/BLAKE3/blake3_servil/) covers the
-faster calls for programs that hash a lot, and the C library in [`capi/`](capi/).
+calls for programs that hash a lot, and the C library in [`capi/`](capi/).
 [`b3sum/README.md`](b3sum/README.md) covers the command-line tool.
 
 It runs on 64-bit Arm (Linux, macOS) and x86-64 (Linux, Windows) with the latest stable
@@ -81,6 +82,6 @@ the clearest place to see how BLAKE3 works.
 
 ## Contributing and licenses
 
-[CONTRIBUTING.md](CONTRIBUTING.md) says how to work on the fork. Released into the public
-domain with [CC0 1.0](./LICENSE_CC0), or under [Apache 2.0](./LICENSE_A2) or [Apache 2.0
-with LLVM exceptions](./LICENSE_A2LLVM).
+[CONTRIBUTING.md](CONTRIBUTING.md) says how to work on this repository. Released into the
+public domain with [CC0 1.0](./LICENSE_CC0), or under [Apache 2.0](./LICENSE_A2) or
+[Apache 2.0 with LLVM exceptions](./LICENSE_A2LLVM).
