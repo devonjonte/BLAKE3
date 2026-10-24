@@ -15,24 +15,39 @@ use core::mem::MaybeUninit;
 pub(crate) unsafe fn chunk_root(avx512: bool, input: &[u8], key: &CVWords, flags: u8) -> [u8; OUT_LEN] {
     assert!(input.len() <= CHUNK_LEN, "one chunk or less");
     let blocks = input.len() / BLOCK_LEN;
+    if blocks == 0 || input.len() % BLOCK_LEN != 0 {
+        return unsafe { chunk_root_partial(avx512, input, key, flags) };
+    }
+    // Whole blocks only, the last in place: no copy, and no aligned stack
+    // buffer, whose dynamic realignment (and the spills around it) would
+    // put stack traffic back on this path (John, #141).
+    // Sound: the input holds `blocks` whole blocks; the last is in place.
+    let last = unsafe { input.as_ptr().add((blocks - 1) * BLOCK_LEN) };
+    unsafe { call(avx512, input, key, last, flags as u64 | (BLOCK_LEN as u64) << 8 | ((blocks - 1) as u64) << 16) }
+}
+
+/// An input that ends in a partial block, or is empty: the final block
+/// zero-padded in a 64-byte-aligned copy on this function's own stack.
+#[cold]
+#[inline(never)]
+unsafe fn chunk_root_partial(avx512: bool, input: &[u8], key: &CVWords, flags: u8) -> [u8; OUT_LEN] {
+    let blocks = input.len() / BLOCK_LEN;
     let tail = input.len() % BLOCK_LEN;
     /// The zero-padded final block, 64-byte aligned.
     #[repr(align(64))]
     struct Padded([u8; BLOCK_LEN]);
-    let padded;
-    let (whole, last, last_len) = if tail == 0 && blocks > 0 {
-        // Sound: the input holds `blocks` whole blocks; the last is in place.
-        (blocks - 1, unsafe { input.as_ptr().add((blocks - 1) * BLOCK_LEN) }, BLOCK_LEN)
-    } else {
-        let mut block = Padded([0; BLOCK_LEN]);
-        block.0[..tail].copy_from_slice(&input[blocks * BLOCK_LEN..]);
-        padded = block;
-        (blocks, padded.0.as_ptr(), tail)
-    };
-    let packed = flags as u64 | (last_len as u64) << 8 | (whole as u64) << 16;
+    let mut padded = Padded([0; BLOCK_LEN]);
+    padded.0[..tail].copy_from_slice(&input[blocks * BLOCK_LEN..]);
+    unsafe { call(avx512, input, key, padded.0.as_ptr(), flags as u64 | (tail as u64) << 8 | (blocks as u64) << 16) }
+}
+
+/// One kernel call: `packed` is flags | last_len << 8 | whole << 16.
+#[inline(always)]
+unsafe fn call(avx512: bool, input: &[u8], key: &CVWords, last: *const u8, packed: u64) -> [u8; OUT_LEN] {
     let mut out = MaybeUninit::<[u8; OUT_LEN]>::uninit();
-    // Sound: `whole` blocks precede `last` in the input, `last` holds 64
-    // readable bytes, `out` 32 writable ones; the caller has the ISA.
+    // Sound: the caller passes `whole` blocks of input before `last`, and
+    // `last` holding 64 readable bytes; `out` has 32 writable ones; the
+    // caller has the ISA.
     unsafe {
         if avx512 {
             crate::ran_kernel(ffi::blake3_avx512_chunk_root as *const ());
