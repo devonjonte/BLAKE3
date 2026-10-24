@@ -346,7 +346,6 @@ src/pair.rs	replace + with * in takes	1	equally correct paths: the two-chunk pat
 src/pair.rs	replace takes -> bool with false	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
 src/pair.rs	replace takes_platform -> bool with false	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
 src/pair.rs	replace | with ^ in parent	1	equivalent: | and ^ agree on flag bits that never overlap
-src/park.rs	replace - with + in Park::wake_for	1	speed: no worker woken for a multithreaded call's pieces; the caller hashes them itself
 src/park.rs	replace Park::any_parked -> bool with true	1	speed: a publisher tries a wake with nobody parked; wake_one finds no bit
 src/platform.rs	delete ! in Platform::xof_many	1	speed: chooses between equally correct paths
 src/platform.rs	delete ! in Sme2Turn::take	1	SME2 only: on x86 no SME2 turn is held; take returns the platform unchanged and drop releases nothing
