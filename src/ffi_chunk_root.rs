@@ -97,6 +97,30 @@ mod test {
         }
     }
 
+    /// Every placement of the input within a cache line that selects a
+    /// different load path in the avx512 kernel (16 and 48 bytes in: one
+    /// 64-byte load), and the bytes around them, for every length.
+    #[test]
+    fn test_chunk_root_line_placements() {
+        #[repr(C, align(64))]
+        struct Lines([u8; 2 * CHUNK_LEN]);
+        let variants = variants();
+        let mut lines = Lines([0; 2 * CHUNK_LEN]);
+        crate::test::paint_test_input(&mut lines.0);
+        let keyed = crate::platform::words_from_le_bytes_32(&[0x42; 32]);
+        for &avx512 in &variants {
+            for offset in [0, 1, 15, 16, 17, 31, 32, 33, 47, 48, 49, 63, 64 + 16, 64 + 48] {
+                for len in 0..=CHUNK_LEN {
+                    for (key, flags) in [(crate::IV, 0), (&keyed, crate::KEYED_HASH)] {
+                        let input = &lines.0[offset..][..len];
+                        let got = unsafe { chunk_root(avx512, input, key, flags) };
+                        assert_eq!(got, reference(input, key, flags), "avx512={avx512} offset={offset} len={len} flags={flags}");
+                    }
+                }
+            }
+        }
+    }
+
     /// The kernel source keeps off the stack and out of constant memory:
     /// no push or pop, no rsp- or rbp-based operand, no rip-relative load.
     /// A kernel that spilled would put the aliasing it exists to avoid
