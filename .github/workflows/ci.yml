@@ -230,7 +230,7 @@ jobs:
         if ($LASTEXITCODE -ne 0) { exit 1 }
         cl /nologo /EHsc /W4 /WX /I $inc capi/tests/check.cpp /link /LIBPATH:$lib b3_servil.lib ws2_32.lib ntdll.lib userenv.lib /OUT:${{ runner.temp }}/check-cpp.exe
         if ($LASTEXITCODE -ne 0) { exit 1 }
-        $env:PATH = "$lib;$env:PATH"
+        $env:PATH = "$lib;${{ runner.temp }}/b3-stage/b3-capi-test/bin;$env:PATH"
         foreach ($exe in @("check-static", "check-shared", "check-cpp")) {
           $out = & "${{ runner.temp }}/$exe.exe" 2>&1
           $code = $LASTEXITCODE
