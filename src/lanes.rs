@@ -652,7 +652,7 @@ static POOL: OnceLock<Pool> = OnceLock::new();
 /// Whether every worker is parked: false before the pool exists
 /// ([`crate::__all_workers_parked`], for tests).
 pub(crate) fn all_workers_parked() -> bool {
-    POOL.get().is_some_and(|pool| (0..pool.threads - 1).all(|w| pool.park.is_parked(w)))
+    POOL.get().is_some_and(|pool| pool.park.parked_count() == pool.threads - 1)
 }
 
 /// The pool. The caller must have called
@@ -749,11 +749,8 @@ impl Pool {
             if sources::open() && spin_for_work() {
                 continue;
             }
-            // Park unless work shows (crate::park's handshake); woken, pay
-            // the wakes owed before working.
-            if self.park.park_unless(me, || sources::visible(false)) {
-                self.park.pay_owed();
-            }
+            // Park unless work shows (crate::park's handshake).
+            self.park.park_unless(me, || sources::visible(false));
         }
     }
 }
@@ -1726,7 +1723,7 @@ mod test {
     fn test_idle_workers_park_while_a_stream_is_open() {
         let pool = pool();
         let workers = pool.threads - 1;
-        let all_parked = || (0..workers).all(|w| pool.park.is_parked(w));
+        let all_parked = || pool.park.parked_count() == workers;
         crate::stream(
             crate::Mode::Hash,
             |_: &mut [Hash]| {},

@@ -1,11 +1,18 @@
 //! A job's finish line: how many of a source's pieces are published and
 //! how many finished, and the handshake between the caller waiting for
 //! its last piece and the worker that finishes it. The one place a wake
-//! can be lost, so the one place Loom checks every interleaving:
+//! can be lost, so the one place Shuttle checks every schedule it can:
 //! `tests/shuttle_finish.rs` compiles this same file beside a `finish_sync`
 //! of Shuttle's atomics, mutex and threads, where the library's `finish_sync`
 //! is the standard library's. Nothing here names the rest of the crate,
 //! so that the two builds see one source.
+//!
+//! Every atomic here is SeqCst. Shuttle (like a reader) assumes one total
+//! order of the operations; a weaker ordering would open a class of bug
+//! the model cannot see, and Sam Shackleton found one (October 24): a
+//! Relaxed count load let `wait` return on its polling path before the
+//! finished pieces' outputs were visible to the caller. One ordering, the
+//! one the model checks, and the test below holds the file to it.
 //!
 //! The handshake lives in one word: the count of pieces finished, and in
 //! its top bit whether the caller sleeps. The waiter sets the bit with
@@ -15,12 +22,11 @@
 //! of the two sees the other's: the finisher sees the sleeper and
 //! unparks, or the sleeper sees the count complete and returns. A word
 //! apart for the flag would need the two sides' stores and loads in one
-//! total order (SeqCst), which the hardware gives and Loom does not
-//! model (store buffering: loom 0.7, October 23, 2026), and which a
-//! reader must reason about; one word needs neither.
+//! total order (SeqCst), which a reader must reason about; one word
+//! needs only its own read-modify-writes.
 //!
 // The primitives come from the including module: the library's
-// `finish_sync` is the standard library's, the Loom test's is Loom's.
+// `finish_sync` is the standard library's, the Shuttle test's is Shuttle's.
 use super::finish_sync::{AtomicUsize, Mutex, Ordering, thread};
 
 /// Any value on a cache line of its own.
@@ -55,7 +61,7 @@ impl Finish {
 
     /// The pieces finished so far.
     pub(crate) fn finished_count(&self) -> usize {
-        self.state.load(Ordering::Relaxed) & !SLEEPING
+        self.state.load(Ordering::SeqCst) & !SLEEPING
     }
 
     /// The thread that waits on this source from now on.
@@ -66,8 +72,8 @@ impl Finish {
     /// Count `n` pieces finished (their outputs written before); the last
     /// one wakes a caller parked for it.
     pub(crate) fn finished(&self, n: usize) {
-        let before = self.state.fetch_add(n, Ordering::AcqRel);
-        if before & SLEEPING != 0 && (before & !SLEEPING) + n == self.published.load(Ordering::Acquire) {
+        let before = self.state.fetch_add(n, Ordering::SeqCst);
+        if before & SLEEPING != 0 && (before & !SLEEPING) + n == self.published.load(Ordering::SeqCst) {
             if let Some(owner) = &*self.owner.lock().unwrap() {
                 owner.unpark();
             }
@@ -88,12 +94,12 @@ impl Finish {
         }
         // The bit and the count in one read: a finisher after this sees
         // the bit; one before it left its count here.
-        let mut count = self.state.fetch_or(SLEEPING, Ordering::AcqRel) & !SLEEPING;
+        let mut count = self.state.fetch_or(SLEEPING, Ordering::SeqCst) & !SLEEPING;
         while count < target {
             thread::park();
-            count = self.state.load(Ordering::Acquire) & !SLEEPING;
+            count = self.state.load(Ordering::SeqCst) & !SLEEPING;
         }
-        self.state.fetch_and(!SLEEPING, Ordering::AcqRel);
+        self.state.fetch_and(!SLEEPING, Ordering::SeqCst);
     }
 }
 
@@ -103,6 +109,19 @@ impl Finish {
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    /// The handshake files use one ordering, SeqCst, the one the model
+    /// checker assumes; this fires on any other, with the reason above.
+    #[test]
+    fn every_atomic_in_the_handshake_files_is_seqcst() {
+        for (name, text) in [("finish.rs", include_str!("finish.rs")), ("park.rs", include_str!("park.rs"))] {
+            for (n, line) in text.lines().enumerate() {
+                if line.contains("Ordering::") && !line.contains("Ordering::SeqCst") && !line.trim_start().starts_with("//") {
+                    panic!("{name}:{}: {} (every atomic here is SeqCst: see finish.rs's head)", n + 1, line.trim());
+                }
+            }
+        }
+    }
 
     /// A wake with no piece behind it, as the operating system may give
     /// (std::thread::park allows spurious wakeups), sends the waiter back

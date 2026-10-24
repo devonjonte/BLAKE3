@@ -17,7 +17,7 @@
 //! Shuttle: Zooko, October 23.)
 #![cfg(shuttle)]
 
-/// Loom's primitives, under the name src/finish.rs imports them by.
+/// Shuttle's primitives, under the name src/finish.rs imports them by.
 mod finish_sync {
     pub use shuttle::sync::Mutex;
     pub use shuttle::sync::atomic::{AtomicUsize, Ordering};
@@ -30,7 +30,7 @@ mod finish;
 
 use finish::Finish;
 use shuttle::sync::Arc;
-use shuttle::sync::atomic::Ordering;
+use shuttle::sync::atomic::{AtomicUsize, Ordering};
 use shuttle::thread;
 
 /// The caller publishes `pieces`, each worker finishes one, the caller
@@ -43,10 +43,18 @@ fn run(pieces: usize, polls: usize) {
             let finish = Arc::new(Finish::new());
             finish.published.store(pieces, Ordering::SeqCst);
             finish.own();
+            // Each worker writes its output, then counts its piece; the
+            // caller reads every output as soon as `wait` returns (Sam
+            // Shackleton's control, October 24: a return before the
+            // outputs are visible is the bug a weaker ordering allows).
+            let outputs: Arc<Vec<AtomicUsize>> = Arc::new((0..pieces).map(|_| AtomicUsize::new(0)).collect());
             let workers: Vec<_> = (0..pieces)
-                .map(|_| {
-                    let f = finish.clone();
-                    thread::spawn(move || f.finished(1))
+                .map(|i| {
+                    let (f, out) = (finish.clone(), outputs.clone());
+                    thread::spawn(move || {
+                        out[i].store(1, Ordering::Relaxed);
+                        f.finished(1)
+                    })
                 })
                 .collect();
             let mut left = polls;
@@ -55,6 +63,9 @@ fn run(pieces: usize, polls: usize) {
                 left = left.saturating_sub(1);
                 left > 0
             });
+            for (i, out) in outputs.iter().enumerate() {
+                assert_eq!(out.load(Ordering::Relaxed), 1, "wait returned without worker {i}'s output published");
+            }
             assert_eq!(finish.finished_count(), pieces);
             for w in workers {
                 w.join().unwrap();

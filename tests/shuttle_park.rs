@@ -18,7 +18,7 @@
 
 /// Shuttle's primitives, under the names src/park.rs imports them by.
 mod park_sync {
-    pub use shuttle::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    pub use shuttle::sync::atomic::{AtomicU64, Ordering};
     pub use shuttle::thread;
 
     /// A once-set cell, as std's OnceLock (which Shuttle lacks): set once,
@@ -84,9 +84,7 @@ fn run(workers: usize, publishers: usize, each: usize) {
                         }
                         // None: park unless work shows, as the pool's worker does.
                         let visible = || taken.load(Ordering::SeqCst) < published.load(Ordering::SeqCst) || taken.load(Ordering::SeqCst) == total;
-                        if park.park_unless(me, visible) {
-                            park.pay_owed();
-                        }
+                        park.park_unless(me, visible);
                     }
                 }));
             }
@@ -127,10 +125,10 @@ fn two_workers_two_publishers() {
     run(2, 2, 2);
 }
 
-/// wake_for owes wakes that cascade: with three workers parked and three
-/// pieces published at once, every worker is woken.
+/// wake_for wakes as many as the pieces want: with three workers parked
+/// and three pieces published at once, every worker is woken.
 #[test]
-fn owed_wakes_cascade() {
+fn wake_for_wakes_one_a_piece() {
     shuttle::check_pct(
         || {
             let park = Arc::new(Park::new(3));
@@ -141,9 +139,7 @@ fn owed_wakes_cascade() {
                 let (park, published, woken) = (park.clone(), published.clone(), woken.clone());
                 threads.push(thread::spawn(move || {
                     park.register(me);
-                    if park.park_unless(me, || published.load(Ordering::SeqCst) > 0) {
-                        park.pay_owed();
-                    }
+                    park.park_unless(me, || published.load(Ordering::SeqCst) > 0);
                     woken.fetch_add(1, Ordering::SeqCst);
                 }));
             }

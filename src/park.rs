@@ -15,7 +15,7 @@
 //! on every target the fork builds for, and what Shuttle models (Loom
 //! does not: data branch, 2026-10-23/model-checkers).
 
-use super::park_sync::{AtomicU64, AtomicUsize, OnceLock, Ordering, thread};
+use super::park_sync::{AtomicU64, OnceLock, Ordering, thread};
 
 /// Any value on a cache line of its own.
 #[repr(align(128))]
@@ -36,17 +36,11 @@ pub(crate) struct Park {
     parked: Box<[Line<AtomicU64>]>,
     /// Each worker's thread, set as it starts.
     handles: Box<[OnceLock<thread::Thread>]>,
-    /// Wakes still owed: each woken worker pays them before it works.
-    owed: AtomicUsize,
 }
 
 impl Park {
     pub(crate) fn new(workers: usize) -> Park {
-        Park {
-            parked: (0..workers.div_ceil(64).max(1)).map(|_| Line(AtomicU64::new(0))).collect(),
-            handles: (0..workers).map(|_| OnceLock::new()).collect(),
-            owed: AtomicUsize::new(0),
-        }
+        Park { parked: (0..workers.div_ceil(64).max(1)).map(|_| Line(AtomicU64::new(0))).collect(), handles: (0..workers).map(|_| OnceLock::new()).collect() }
     }
 
     /// Worker `me` records its thread, once, as it starts.
@@ -54,13 +48,14 @@ impl Park {
         assert!(self.handles[me].set(thread::current()).is_ok(), "each worker sets its thread once");
     }
 
-    pub(crate) fn is_parked(&self, worker: usize) -> bool {
-        self.parked[worker / 64].load(Ordering::SeqCst) & (1 << (worker % 64)) != 0
+    /// Worker `me`'s word and its bit in it.
+    fn place(&self, me: usize) -> (&AtomicU64, u64) {
+        (&self.parked[me / 64], 1u64.wrapping_shl(me as u32))
     }
 
     /// Whether any worker is parked (one load a word).
     pub(crate) fn any_parked(&self) -> bool {
-        self.parked.iter().any(|w| w.load(Ordering::Relaxed) != 0)
+        self.parked.iter().any(|w| w.load(Ordering::SeqCst) != 0)
     }
 
     /// How many workers are parked.
@@ -70,14 +65,13 @@ impl Park {
 
     /// Wake one parked worker, if any: whether one was.
     pub(crate) fn wake_one(&self) -> bool {
-        for (w, word) in self.parked.iter().enumerate() {
+        for (word, handles) in self.parked.iter().zip(self.handles.chunks(64)) {
             let mut bits = word.load(Ordering::SeqCst);
             while bits != 0 {
                 let bit = 1u64 << bits.trailing_zeros();
                 let before = word.fetch_and(!bit, Ordering::SeqCst);
                 if before & bit != 0 {
-                    let worker = w * 64 + bit.trailing_zeros() as usize;
-                    self.handles[worker].get().expect("a parked worker has set its thread").unpark();
+                    handles[bit.trailing_zeros() as usize].get().expect("a parked worker has set its thread").unpark();
                     return true;
                 }
                 bits = before & !bit;
@@ -87,70 +81,40 @@ impl Park {
     }
 
     /// Wake workers for `wanted` pieces of new work, given `workers`
-    /// workers in all: one now, and the rest owed, which each woken worker
-    /// pays before it works (so a publisher wakes once, and the wakes
-    /// cascade). A publisher's read of `parked` follows its publication
-    /// (a SeqCst store or a fence), as a parking worker's re-check follows
-    /// its bit: one of the two sees the other.
+    /// workers in all: as many parked ones as the awake ones leave wanting.
+    /// A publisher's read of `parked` follows its publication (a SeqCst
+    /// store or a fence), as a parking worker's re-check follows its bit:
+    /// one of the two sees the other.
     pub(crate) fn wake_for(&self, wanted: usize, workers: usize) {
-        let parked = self.parked_count();
-        if parked == 0 {
-            return;
-        }
-        let awake = workers - parked;
-        if awake < wanted {
-            let need = (wanted - awake).min(parked);
-            if need > 1 {
-                self.owed.fetch_add(need - 1, Ordering::SeqCst);
+        let awake = workers - self.parked_count();
+        for _ in awake..wanted {
+            if !self.wake_one() {
+                return;
             }
-            self.wake_one();
         }
     }
 
     /// Worker `me` parks unless `visible()` finds work: the bit first,
     /// then one more look (a publisher stores, then reads `parked`; this
     /// sets the bit, then looks: one of the two sees the other), then the
-    /// token, until a waker clears the bit. Returns having found work
-    /// (false) or having been woken (true); a woken worker then pays the
-    /// wakes owed ([`Park::pay_owed`]).
-    pub(crate) fn park_unless(&self, me: usize, visible: impl Fn() -> bool) -> bool {
-        let (word, bit) = (&self.parked[me / 64], 1u64 << (me % 64));
+    /// token, until a waker clears the bit.
+    pub(crate) fn park_unless(&self, me: usize, visible: impl Fn() -> bool) {
+        let (word, bit) = self.place(me);
         word.fetch_or(bit, Ordering::SeqCst);
         if visible() {
             // Ours to clear, unless a waker cleared it first: then its wake
             // was spent on a worker that was leaving anyway (its unpark
             // leaves a token a later park returns from at once), and a
             // worker still parked may be the one it was for. Pass the wake
-            // on, and return as woken so the caller pays what a woken
-            // worker owes. Dropping it left a parked worker unwoken with
-            // work published: Shuttle found both schedules (October 23).
+            // on. Dropping it left a parked worker unwoken with work
+            // published: Shuttle found both schedules (October 23).
             if word.fetch_and(!bit, Ordering::SeqCst) & bit == 0 {
                 self.wake_one();
-                return true;
             }
-            return false;
+            return;
         }
         while word.load(Ordering::SeqCst) & bit != 0 {
             thread::park();
-        }
-        true
-    }
-
-    /// A woken worker pays the wakes owed before working: one more worker
-    /// each, until none is owed or none is parked.
-    pub(crate) fn pay_owed(&self) {
-        loop {
-            let owed = self.owed.load(Ordering::SeqCst);
-            if owed == 0 {
-                return;
-            }
-            if self.owed.compare_exchange(owed, owed - 1, Ordering::SeqCst, Ordering::SeqCst).is_err() {
-                continue;
-            }
-            if !self.wake_one() {
-                self.owed.store(0, Ordering::SeqCst);
-                return;
-            }
         }
     }
 }
