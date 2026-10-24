@@ -232,8 +232,11 @@ jobs:
         if ($LASTEXITCODE -ne 0) { exit 1 }
         $env:PATH = "$lib;$env:PATH"
         foreach ($exe in @("check-static", "check-shared", "check-cpp")) {
-          $out = & "${{ runner.temp }}/$exe.exe"
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $out = & "${{ runner.temp }}/$exe.exe" 2>&1
+          $code = $LASTEXITCODE
+          Write-Host "$exe exit $code"
+          Write-Host "$out"
+          if ($code -ne 0) { exit 1 }
           if ($exe -ne "check-cpp" -and "$out" -notmatch "stream ok") { Write-Error "$exe did not print stream ok"; exit 1 }
         }
 
