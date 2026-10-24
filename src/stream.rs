@@ -221,6 +221,22 @@ struct FreeStorage(&'static mut Storage);
 // owns it alone.
 unsafe impl Send for FreeStorage {}
 
+/// The ring: RING_BYTES, zeroed, untouched pages (only the bytes used are
+/// faulted in), at a 64-byte boundary, kept for good. Allocated as bytes,
+/// glibc put it 16 bytes into a cache line (its header before an mmap'd
+/// block), so every room the program writes a message into straddled a
+/// line, which costs a load from it: 4 KiB aliasing's windows need it
+/// (bench-hashes #65; John Servil, October 24).
+fn ring() -> *mut u8 {
+    let layout = std::alloc::Layout::from_size_align(RING_BYTES, 64).expect("the ring's layout");
+    // Sound: the layout is not zero-sized.
+    let ring = unsafe { std::alloc::alloc_zeroed(layout) };
+    if ring.is_null() {
+        std::alloc::handle_alloc_error(layout);
+    }
+    ring
+}
+
 impl Storage {
     /// A storage from the free list, or a new one (kept for good).
     fn take() -> &'static mut Storage {
@@ -234,14 +250,15 @@ impl Storage {
         Storage {
             source: Box::leak(Box::new(crate::lanes::sources::Source::new(ENTRIES))),
             entries: std::vec![Entry { len: 0, kind: Kind::Abandoned, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
-            // Zeroed, untouched pages: only the bytes used are faulted in.
-            ring: Box::into_raw(std::vec![0u8; RING_BYTES].into_boxed_slice()) as *mut u8,
+            ring: ring(),
             pieces_out: (0..ENTRIES).map(|_| OwnLine(Out(UnsafeCell::new([0; 64])))).collect(),
             lefts: (0..ENTRIES).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
         }
     }
 
-    /// The ring's byte at `at`.
+    /// The ring's byte at `at`. Every room starts at a multiple of 64 from
+    /// the ring's start, and the ring at a 64-byte boundary, so a room is
+    /// aligned to its cache line (ring()).
     fn ring_at(&self, at: usize) -> *mut u8 {
         debug_assert!(at <= RING_BYTES);
         // Sound: `at` is in the ring.
@@ -717,6 +734,17 @@ impl<D> Drop for Stream<'_, D> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// The ring starts on a cache line, so every room, at a multiple of 64
+    /// from its start, does too (ring()); its bytes start zeroed.
+    #[test]
+    fn test_the_ring_starts_on_a_cache_line() {
+        let storage = Storage::new();
+        assert_eq!(storage.ring_at(0) as usize % 64, 0, "the ring at a 64-byte boundary");
+        // Sound: the ring holds RING_BYTES, zeroed.
+        let bytes = unsafe { core::slice::from_raw_parts(storage.ring_at(0), RING_BYTES) };
+        assert!(bytes.iter().all(|&b| b == 0), "the ring starts zeroed");
+    }
 
     /// Places for `n` digests, each starting as zeros.
     fn places(n: usize) -> std::vec::Vec<Hash> {
