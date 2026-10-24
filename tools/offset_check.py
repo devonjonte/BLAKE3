@@ -29,8 +29,8 @@ small effect and its confirmation (the i7-12700K's is +9-11% in a window
 48 bytes wide, which steps of 64 and a 10% screen both missed).
 
 Verdicts:
-- IMMUNE_CELLS are the cells our APIs keep free of the effect (the batch
-  calls). Any one of them judged slower at some offset: exit 1.
+- IMMUNE_CELLS are the cells our APIs keep free of the effect (none
+  today). Any one of them judged slower at some offset: exit 1.
 - CONTROL_CELLS are known to be sensitive today (hash() of 64 bytes, a
   buffer lent or owned). If
   none is judged slower, the check lost its sight of the effect: exit 3.
@@ -50,10 +50,14 @@ import tempfile
 CONTENDER = 'blake3-servil-st'
 POINTS = ['lent 64 B', 'lent 256 B', 'continuous 64 B', 'continuous 256 B',
           'lent batch 16', 'lent batch 64', 'continuous batch 16', 'continuous batch 64']
-# Batches of 64 messages: written long enough before the call. Batches of 16
-# showed +6-8% at one offset on the EPYC, so they are on neither list.
-IMMUNE_CELLS = [f'{CONTENDER}|{s}|{u}|64' for s in ('solo', 'shared')
-                for u in ('LentBatches', 'ContinuousBatches')]
+# No cell is immune today. Batches were thought so, from scans in 64-byte
+# steps; at 16-byte steps the EPYC 9255 shows 64-message batches +3-4% and
+# 16-message +4-7% at a few offsets, every run (Sam Shackleton, #65,
+# October 24), while the i7-12700K shows none. They are measured and
+# reported with the rest. A change that makes a cell immune (an API that
+# aligns its messages to 64 bytes, say) lists it here, and the check then
+# fails if it turns sensitive again.
+IMMUNE_CELLS = []
 CONTROL_CELLS = [f'{CONTENDER}|{s}|{u}|64 B' for s in ('solo', 'shared')
                  for u in ('LentMessages', 'ContinuousMessages')]
 PAGE = 4096
