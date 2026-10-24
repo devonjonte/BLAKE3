@@ -1072,6 +1072,17 @@ pub(crate) mod sources {
             assert!(!find(|t| core::ptr::eq(t, source)), "an unregistered source is still reached");
         }
 
+        /// A thread's exit gives its job source back, and the next thread
+        /// to need one takes it: none is leaked per thread (a source that
+        /// stayed with its finished thread was one more allocation for
+        /// every thread a program ever started).
+        #[test]
+        fn test_a_finished_threads_source_is_the_next_threads() {
+            let first = std::thread::spawn(|| job_source() as *const Source as usize).join().unwrap();
+            let second = std::thread::spawn(|| job_source() as *const Source as usize).join().unwrap();
+            assert_eq!(first, second, "the second thread takes the source the first gave back");
+        }
+
         /// Unregistering one source leaves the others registered: its bit
         /// alone leaves ACTIVE (a change that cleared every other bit
         /// would strand the rest, unseen by a test of one source).
@@ -1184,16 +1195,12 @@ impl Task {
             unsafe { &*self.left }.fetch_sub(self.members, Ordering::Release);
             return;
         }
+        // A task without members is a piece of a long message: a stream's
+        // batch parts are always members (Stream::add_part adds one to the
+        // task it opens, and only an opened task is handed over).
+        assert!(self.batch.is_none(), "a task of batch parts has members");
         // Sound: the stream keeps these in place until `left` is zero.
         let bytes = unsafe { core::slice::from_raw_parts(self.input, self.len) };
-        if let Some(message_len) = self.batch {
-            let count = self.len / crate::many::slot_len(message_len);
-            // Sound: `out` holds a digest per message of the range.
-            let digests = unsafe { core::slice::from_raw_parts_mut(self.out as *mut [u8; crate::OUT_LEN], count) };
-            crate::many::hash_many_on(bytes, message_len, &self.key, self.flags, digests, platform);
-            unsafe { &*self.left }.fetch_sub(1, Ordering::Release);
-            return;
-        }
         // Sound: a subtree's `out` is one 64-byte block.
         let out = unsafe { &mut *(self.out as *mut [u8; crate::BLOCK_LEN]) };
         if self.counter == 0 && self.len > CHUNK_LEN {
