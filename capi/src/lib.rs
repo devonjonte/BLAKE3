@@ -3,7 +3,7 @@
 //! every `extern "C"` panic does). Each call initializes the crate first
 //! (a load once it has).
 
-use blake3_servil::performance::{Hasher, Stream};
+use blake3_servil::performance::{Block, Hasher, Stream};
 use blake3_servil::{Hash, Mode, OUT_LEN};
 use core::ffi::{CStr, c_char, c_void};
 
@@ -120,10 +120,13 @@ pub unsafe extern "C" fn b3_hash_multithreaded(mode: *const B3Mode, input: *cons
 }
 
 /// The batch's input and digests, as slices.
-unsafe fn batch<'a>(input: *const c_void, message_len: usize, count: usize, out: *mut Digest) -> (&'a [u8], &'a mut [[u8; OUT_LEN]]) {
+unsafe fn batch<'a>(input: *const c_void, message_len: usize, count: usize, out: *mut Digest) -> (&'a [Block], &'a mut [[u8; OUT_LEN]]) {
     let stride = if message_len == 0 { 64 } else { message_len.div_ceil(64) * 64 };
     let total = stride.checked_mul(count).expect("b3: the batch's length fits a size_t");
-    let input = unsafe { bytes(input, total, "the batch") };
+    // The Rust calls take blocks, which a misaligned pointer cannot be made
+    // into soundly: this stop is Rust's soundness, the one check the batch
+    // calls keep (BLAKE3 #146), at C's door.
+    let input = Block::from_bytes(unsafe { bytes(input, total, "the batch") }).expect("b3: a batch starts at a 64-byte boundary (aligned_alloc(64, n))");
     if count == 0 {
         return (input, &mut []);
     }
@@ -271,7 +274,7 @@ pub unsafe extern "C" fn b3_stream_submit_batch(stream: *mut B3Stream, input: *c
     let s = unsafe { stream_mut(stream) };
     let (input, places) = unsafe { batch(input, message_len, count, out) };
     // Sound: the batch and its places live until finish; a [u8; 32] is a Hash.
-    let input: &'static [u8] = unsafe { core::slice::from_raw_parts(input.as_ptr(), input.len()) };
+    let input: &'static [Block] = unsafe { core::slice::from_raw_parts(input.as_ptr(), input.len()) };
     let places: &'static mut [Hash] = unsafe { core::slice::from_raw_parts_mut(places.as_mut_ptr() as *mut Hash, places.len()) };
     s.stream.submit_batch(input, message_len, places);
 }

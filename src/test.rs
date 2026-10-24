@@ -5,6 +5,12 @@ use crate::{IncrementCounter, OUT_LEN};
 include!("../tools/require_nextest.rs");
 use arrayvec::ArrayVec;
 
+/// `bytes` (whole blocks) copied into blocks, as the batch calls take them.
+pub(crate) fn blocks(bytes: &[u8]) -> std::vec::Vec<crate::performance::Block> {
+    assert_eq!(bytes.len() % crate::BLOCK_LEN, 0, "whole blocks");
+    bytes.chunks_exact(crate::BLOCK_LEN).map(|b| crate::performance::Block(b.try_into().unwrap())).collect()
+}
+
 // Interesting input lengths to run tests on.
 pub const TEST_CASES: &[usize] = &[
     0,
@@ -711,7 +717,7 @@ mod unsafe_paths {
                     message[len..].fill(0);
                 }
                 let mut out = vec![[0u8; OUT_LEN]; count];
-                crate::performance::hash_many(Mode::Hash, &data, len, &mut out);
+                crate::performance::hash_many(Mode::Hash, &crate::test::blocks(&data), len, &mut out);
                 for (i, digest) in out.iter().enumerate() {
                     assert_eq!(*digest, *crate::convenience::hash(&data[i * slot..][..len]).as_bytes(), "{count} x {len} B, message {i}");
                 }
@@ -726,14 +732,14 @@ mod unsafe_paths {
         let batch = input(1024 * 64, 1);
         let tree = input(65 * 1024 + 3, 2);
         let mut expected = vec![[0u8; OUT_LEN]; 1024];
-        crate::performance::hash_many(Mode::Hash, &batch, 64, &mut expected);
+        crate::performance::hash_many(Mode::Hash, &crate::test::blocks(&batch), 64, &mut expected);
         let expected_tree = crate::convenience::hash(&tree);
         std::thread::scope(|scope| {
             for caller in 0..2 {
                 let (batch, tree, expected) = (&batch, &tree, &expected);
                 scope.spawn(move || {
                     let mut out = vec![[0u8; OUT_LEN]; 1024];
-                    crate::performance::hash_many_multithreaded(Mode::Hash, batch, 64, &mut out);
+                    crate::performance::hash_many_multithreaded(Mode::Hash, &crate::test::blocks(batch), 64, &mut out);
                     assert_eq!(&out, expected, "batch, caller {caller}");
                     assert_eq!(crate::performance::hash_multithreaded(crate::Mode::Hash, tree), expected_tree, "tree, caller {caller}");
                 });
@@ -889,14 +895,24 @@ mod guard_pages {
                     }
                     let mut out = Guarded::new(count * OUT_LEN, !at_end);
                     let outputs: &mut [[u8; OUT_LEN]] = unsafe { core::slice::from_raw_parts_mut(out.bytes().as_mut_ptr() as *mut [u8; OUT_LEN], count) };
-                    crate::performance::hash_many(Mode::Hash, input.bytes(), len, outputs);
+                    crate::performance::hash_many(
+                        Mode::Hash,
+                        crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
+                        len,
+                        outputs,
+                    );
                     let data = input.bytes().to_vec();
                     for (i, digest) in outputs.iter().enumerate() {
                         assert_eq!(*digest, *crate::convenience::hash(&data[i * slot..][..len]).as_bytes(), "{count} x {len} B, message {i}, at end {at_end}");
                     }
                     if slot * count >= 64 * CHUNK_LEN {
                         let mut mt = vec![[0u8; OUT_LEN]; count];
-                        crate::performance::hash_many_multithreaded(Mode::Hash, input.bytes(), len, &mut mt);
+                        crate::performance::hash_many_multithreaded(
+                            Mode::Hash,
+                            crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
+                            len,
+                            &mut mt,
+                        );
                         assert_eq!(&mt[..], &outputs[..], "mt, {count} x {len} B");
                     }
                 }

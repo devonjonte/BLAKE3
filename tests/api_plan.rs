@@ -8,6 +8,7 @@
 //! Keep: it detects, by hanging, mutants the clock then stops
 //! (tools/mutants/timeouts-x86_64.txt: register, unregister, wake_one, find, run_one).
 
+use blake3_servil::performance::{Batch, Block};
 use blake3_servil::{Hash, Mode};
 
 const KEY: &[u8; 32] = b"whats the Elvish word for friend";
@@ -52,7 +53,7 @@ fn modes() -> [Mode<'static>; 3] {
 
 /// Each one-shot call's full form (every mode).
 const HASH_WITH: [(&str, fn(Mode, &[u8]) -> Hash); 1] = [("performance::hash", blake3_servil::performance::hash)];
-const HASH_MANY_WITH: [(&str, fn(Mode, &[u8], usize, &mut [[u8; 32]])); 2] = [
+const HASH_MANY_WITH: [(&str, fn(Mode, &[Block], usize, &mut [[u8; 32]])); 2] = [
     ("performance::hash_many", blake3_servil::performance::hash_many),
     ("performance::hash_many_multithreaded", blake3_servil::performance::hash_many_multithreaded),
 ];
@@ -153,14 +154,13 @@ fn one_message_large_inputs_match_the_reference() {
 /// pattern starting at i (so messages differ), laid out by the padded batch
 /// contract: slot i at i x stride, stride len rounded up to 64 (64 for 0),
 /// zeros between a message's end and the next slot.
-fn padded_batch(count: usize, len: usize) -> (Vec<u8>, Vec<Vec<u8>>) {
-    let stride = if len == 0 { 64 } else { len.next_multiple_of(64) };
-    let mut buffer = vec![0u8; stride * count];
+fn padded_batch(count: usize, len: usize) -> (Batch, Vec<Vec<u8>>) {
+    let mut batch = Batch::new(len, count);
     let messages: Vec<Vec<u8>> = (0..count).map(|i| (0..len).map(|j| ((i + j) % 251) as u8).collect()).collect();
     for (i, message) in messages.iter().enumerate() {
-        buffer[i * stride..i * stride + len].copy_from_slice(message);
+        batch.set(i, message);
     }
-    (buffer, messages)
+    (batch, messages)
 }
 
 #[test]
@@ -189,15 +189,15 @@ fn batches_every_form_match_the_reference() {
         let (buffer, messages) = padded_batch(count, len);
         let expected: Vec<Vec<[u8; 32]>> = (0..3).map(|m| messages.iter().map(|message| reference(m, message)).collect()).collect();
         let mut out = vec![[0u8; 32]; count];
-        blake3_servil::performance::hash_many(blake3_servil::Mode::Hash, &buffer, len, &mut out);
+        blake3_servil::performance::hash_many(blake3_servil::Mode::Hash, buffer.blocks(), len, &mut out);
         assert_eq!(out, expected[0], "hash_many, {count} x {len} B");
         out.fill([0; 32]);
-        blake3_servil::performance::hash_many_multithreaded(blake3_servil::Mode::Hash, &buffer, len, &mut out);
+        blake3_servil::performance::hash_many_multithreaded(blake3_servil::Mode::Hash, buffer.blocks(), len, &mut out);
         assert_eq!(out, expected[0], "hash_many_multithreaded, {count} x {len} B");
         for (m, mode) in modes().into_iter().enumerate() {
             for (name, form) in HASH_MANY_WITH {
                 out.fill([0; 32]);
-                form(mode, &buffer, len, &mut out);
+                form(mode, buffer.blocks(), len, &mut out);
                 assert_eq!(out, expected[m], "{name} mode {m}, {count} x {len} B");
             }
         }
@@ -206,10 +206,10 @@ fn batches_every_form_match_the_reference() {
 
 #[test]
 #[should_panic]
-fn a_batch_whose_buffer_is_not_whole_slots_is_refused() {
+fn a_batch_whose_buffer_is_short_of_its_messages_is_refused() {
     blake3_servil::initialize_multithreaded(None);
     let mut out = [[0u8; 32]; 2];
-    blake3_servil::performance::hash_many(blake3_servil::Mode::Hash, &[0u8; 100], 64, &mut out);
+    blake3_servil::performance::hash_many(blake3_servil::Mode::Hash, &[Block::ZERO], 64, &mut out);
 }
 
 // ---------- The stream ----------
@@ -257,7 +257,7 @@ fn a_stream_puts_every_digest_in_its_place_and_hands_the_places_back_in_order() 
 fn a_streams_batches_fill_the_callers_places() {
     blake3_servil::initialize_multithreaded(None);
     let cases = [(64, 1), (64, 4096), (100, 7), (1024, 300), (1500, 33)];
-    let batches: Vec<(Vec<u8>, Vec<Vec<u8>>)> = cases.iter().map(|&(len, count)| padded_batch(count, len)).collect();
+    let batches: Vec<(Batch, Vec<Vec<u8>>)> = cases.iter().map(|&(len, count)| padded_batch(count, len)).collect();
     for (m, mode) in modes().into_iter().enumerate() {
         let mut places: Vec<Vec<Hash>> = cases.iter().map(|&(_, count)| zeros(count)).collect();
         let mut handed = Vec::new();
@@ -267,9 +267,9 @@ fn a_streams_batches_fill_the_callers_places() {
             |s| {
                 for (k, ((&(len, _), (buffer, _)), place)) in cases.iter().zip(&batches).zip(&mut places).enumerate() {
                     if k % 2 == 0 {
-                        s.submit_batch(buffer, len, place);
+                        s.submit_batch(buffer.blocks(), len, place);
                     } else {
-                        s.submit_batch_with(len, |at, room| room.copy_from_slice(&buffer[at..][..room.len()]), place);
+                        s.submit_batch_with(len, |at, room| room.copy_from_slice(&Block::bytes(buffer.blocks())[at..][..room.len()]), place);
                     }
                 }
                 s.finish();
@@ -298,7 +298,7 @@ fn bursts_of_large_batches_after_pauses_complete() {
             |_: &mut [Hash]| {},
             |s| {
                 for place in places.iter_mut() {
-                    s.submit_batch(&buffer, 64, place);
+                    s.submit_batch(buffer.blocks(), 64, place);
                 }
                 s.finish();
             },

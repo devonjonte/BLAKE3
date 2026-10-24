@@ -658,14 +658,14 @@ mod test {
     fn check(len: usize, count: usize) {
         let input = messages(len, count);
         let mut out = vec![[0u8; OUT_LEN]; count];
-        crate::performance::hash_many(crate::Mode::Hash, &input, len, &mut out);
+        crate::performance::hash_many(crate::Mode::Hash, &crate::test::blocks(&input), len, &mut out);
         for (i, digest) in out.iter().enumerate() {
             assert_eq!(*digest, *crate::convenience::hash(message(&input, len, i)).as_bytes(), "message {i} of {count}, {len} bytes");
         }
         #[cfg(feature = "std")]
         {
             let mut mt = vec![[0u8; OUT_LEN]; count];
-            crate::performance::hash_many_multithreaded(crate::Mode::Hash, &input, len, &mut mt);
+            crate::performance::hash_many_multithreaded(crate::Mode::Hash, &crate::test::blocks(&input), len, &mut mt);
             assert_eq!(mt, out, "multithreaded, {count} messages of {len} bytes");
         }
     }
@@ -943,7 +943,7 @@ mod test {
                     }
                     std::thread::sleep(std::time::Duration::from_micros(300));
                     let mut out = vec![[0u8; OUT_LEN]; count];
-                    crate::performance::hash_many(mode, &input, len, &mut out);
+                    crate::performance::hash_many(mode, &crate::test::blocks(&input), len, &mut out);
                     for (k, digest) in out.iter().enumerate() {
                         assert_eq!(digest, crate::performance::hash(mode, &input[k * slot..][..len]).as_bytes(), "len {len} count {count} message {k}");
                     }
@@ -955,21 +955,15 @@ mod test {
     #[test]
     #[should_panic(expected = "input holds one slot of whole blocks per output")]
     fn test_hash_many_needs_the_input_it_names() {
-        crate::performance::hash_many(crate::Mode::Hash, &[0u8; 100], 64, &mut [[0u8; OUT_LEN]; 2]);
-    }
-
-    #[test]
-    #[should_panic(expected = "input holds one slot of whole blocks per output")]
-    fn test_hash_many_needs_whole_slots() {
-        crate::performance::hash_many(crate::Mode::Hash, &[0u8; 200], 100, &mut [[0u8; OUT_LEN]; 2]);
+        crate::performance::hash_many(crate::Mode::Hash, &[crate::performance::Block::ZERO], 64, &mut [[0u8; OUT_LEN]; 2]);
     }
 
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "every slot's bytes past its message are zero")]
     fn test_hash_many_needs_zero_padding() {
-        let mut input = [0u8; 256];
-        input[120] = 1;
+        let mut input = [crate::performance::Block::ZERO; 4];
+        input[1].0[120 - 64] = 1;
         crate::performance::hash_many(crate::Mode::Hash, &input, 100, &mut [[0u8; OUT_LEN]; 2]);
     }
 }
