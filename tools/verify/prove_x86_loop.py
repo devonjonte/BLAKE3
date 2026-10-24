@@ -302,7 +302,7 @@ def main():
     import workers
     parser = argparse.ArgumentParser(description=main.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('cases', nargs='?', help='Python literal list of selected cases; default: the complete matrix')
-    parser.add_argument('--workers', type=int, default=4, help='fresh prover processes at once (default: 4)')
+    parser.add_argument('--workers', type=int, default=8, help='fresh prover processes at once (default: 8)')
     arguments = parser.parse_args()
     import prove_x86 as p
     declared = cases()
