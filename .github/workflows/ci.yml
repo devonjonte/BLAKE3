@@ -187,6 +187,56 @@ jobs:
       run: cargo nextest run --release
       working-directory: ./capi
 
+  capi_macos:
+    # A pull request from a branch of this repository: its push runs CI already.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    name: "C API on macOS (installed consumers)"
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: taiki-e/install-action@nextest
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-c@0.10.26
+    - run: brew install pkg-config
+    # The same installed-consumer test as on Linux: shared and static
+    # installations, pkg-config flags, C11 and C++11 callers.
+    - name: C API
+      run: cargo nextest run --release --manifest-path capi/Cargo.toml
+
+  capi_windows_consumer:
+    # A pull request from a branch of this repository: its push runs CI already.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    name: "C API consumer on Windows MSVC"
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-c@0.10.26
+    - uses: ilammy/msvc-dev-cmd@v1
+    - name: install the C library
+      run: cargo cinstall --release --manifest-path capi/Cargo.toml --destdir=${{ runner.temp }}/b3-stage --prefix=/b3-capi-test --libdir=lib
+    - name: build and run C and C++ consumers (static, then shared)
+      shell: pwsh
+      run: |
+        $inc = "${{ runner.temp }}/b3-stage/b3-capi-test/include"
+        $lib = "${{ runner.temp }}/b3-stage/b3-capi-test/lib"
+        cl /nologo /std:c11 /W4 /WX /I $inc capi/tests/check.c /link /LIBPATH:$lib b3_servil.lib /OUT:${{ runner.temp }}/check-static.exe
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        cl /nologo /std:c11 /W4 /WX /I $inc capi/tests/check.c /link /LIBPATH:$lib b3_servil.dll.lib /OUT:${{ runner.temp }}/check-shared.exe
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        cl /nologo /EHsc /W4 /WX /I $inc capi/tests/check.cpp /link /LIBPATH:$lib b3_servil.lib /OUT:${{ runner.temp }}/check-cpp.exe
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        $env:PATH = "$lib;$env:PATH"
+        foreach ($exe in @("check-static", "check-shared", "check-cpp")) {
+          $out = & "${{ runner.temp }}/$exe.exe"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if ($exe -ne "check-cpp" -and "$out" -notmatch "stream ok") { Write-Error "$exe did not print stream ok"; exit 1 }
+        }
+
   # The oldest GCC supported (CONTRIBUTING.md): Debian 12's, the oldest in a
   # supported distribution (Debian 11's support ended in August 2026). Older compilers are unsupported (GCC 5.4's
   # assembler rejects the AVX-512 code GCC 5.4 itself emits at -O3; GCC 5
