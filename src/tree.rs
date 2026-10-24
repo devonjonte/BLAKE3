@@ -181,7 +181,20 @@ impl Kernels for PlatformKernels<'_> {
         #[cfg(blake3_neon)]
         return crate::hash_one_chunk_root(input, self.key, self.flags).0;
         #[cfg(not(blake3_neon))]
-        return crate::ChunkState::new(self.key, 0, self.flags, self.platform).update(input).output().root_bytes();
+        {
+            // One kernel call that keeps off the stack (src/ffi_chunk_root.rs):
+            // a caller's just-written message has none of our loads to hold back.
+            #[cfg(all(blake3_sse41_ffi, not(target_os = "windows")))]
+            match self.platform {
+                #[cfg(blake3_avx512_ffi)]
+                crate::platform::Platform::AVX512 => return unsafe { crate::chunk_root::chunk_root(true, input, self.key, self.flags) },
+                crate::platform::Platform::SSE41 | crate::platform::Platform::AVX2 => {
+                    return unsafe { crate::chunk_root::chunk_root(false, input, self.key, self.flags) };
+                }
+                _ => {}
+            }
+            crate::ChunkState::new(self.key, 0, self.flags, self.platform).update(input).output().root_bytes()
+        }
     }
 
     #[inline(always)]
