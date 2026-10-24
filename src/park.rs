@@ -40,6 +40,15 @@ pub(crate) struct Park {
     owed: AtomicUsize,
 }
 
+/// The most wakes a publisher makes itself before its own pieces; the rest
+/// are owed, and the workers it woke pay them, side by side (BLAKE3 #119).
+/// Every wake direct costs the publisher a system call per worker before
+/// it starts: 47 on the EPYC 9255 made 14 pool cells 4-12% slower. One
+/// direct wake and a cascade makes each worker wait for the one before:
+/// the i7-12700K's one-shots of 1-2 MiB 16-25% slower. At 8, the i7 reads
+/// level (data 2026-10-24/wakes-i7, 2026-10-25/wakes8-i7).
+const DIRECT_WAKES: usize = 8;
+
 impl Park {
     pub(crate) fn new(workers: usize) -> Park {
         Park {
@@ -102,11 +111,18 @@ impl Park {
         }
         let awake = workers - parked;
         if awake < wanted {
+            // The publisher makes up to DIRECT_WAKES wakes itself and owes
+            // the rest, which the woken workers pay.
             let need = (wanted - awake).min(parked);
-            if need > 1 {
-                self.owed.fetch_add(need - 1, Ordering::SeqCst);
+            let direct = need.min(DIRECT_WAKES);
+            if need > direct {
+                self.owed.fetch_add(need - direct, Ordering::SeqCst);
             }
-            self.wake_one();
+            for _ in 0..direct {
+                if !self.wake_one() {
+                    break;
+                }
+            }
         }
     }
 
