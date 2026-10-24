@@ -1156,10 +1156,10 @@ mod dispatch {
         }
         let input = vec![3u8; 2 * CHUNK_LEN * 32];
         let at = |len: usize, count: usize| {
-            let mut out = vec![[0u8; 32]; count];
-            crate::hash_many(&input[..crate::many::slot_len(len) * count], len, &mut out);
             ran(&|| {
                 let mut out = vec![[0u8; 32]; count];
+                crate::hash_many(&input[..crate::many::slot_len(len) * count], len, &mut out);
+                crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
                 crate::hash_many(&input[..crate::many::slot_len(len) * count], len, &mut out);
             })
         };

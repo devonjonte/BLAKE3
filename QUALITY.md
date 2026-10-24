@@ -57,14 +57,8 @@ project supports.
 The project also uses mutation testing to check the tests themselves.
 It introduces one small mistake at a time (changing a comparison, say,
 or skipping a step) and requires at least one test to fail. If no test
-notices, the developers add a test or record why that mistake is
-harmless. A mistake that makes a test wait forever is a third outcome:
-the clock stops the test, which is recorded too, and where the code can
-be made to fail instead of waiting (a loop that counts, a wait that
-checks its end) it is, so the tests see the mistake. On the x86-64
-machine that runs the check, every one of about 1,070 such mistakes is
-caught, explained, or listed as a wait, and the list of each is in the
-repository.
+catches the newly introduced bug, the developers add a test to catch
+that bug, or figure out why it isn't actually a bug.
 
 Each program also runs a startup self-test. Before doing real work, it
 hashes a few inputs with known answers. This can catch a broken build
@@ -81,27 +75,17 @@ keeps Rust's memory rules, which the compiler checks everywhere else.
 - **ThreadSanitizer** watches access from multiple threads. It catches
   data races, where threads access the same memory without proper
   coordination and at least one of them writes.
-- **Miri** runs Rust code in an interpreter that enforces Rust's memory
-  rules. It is slow, but it can catch mistakes in `unsafe` code that a
-  normal test run may not expose.
+- **Miri** runs Rust code in an interpreter that enforces Rust's
+  memory rules. It is slow, but it can catch mistakes in `unsafe` code
+  that a normal test run may not expose.
 - **A model checker (Shuttle)** runs the small pieces of threaded code
-  where a thread waits for another, the pool's "handshakes", under
-  thousands of different orders its threads could take, instead of the
-  one order a test run happens to take. A wait that could never end
-  shows up as a deadlock, at once and with the order that caused it,
-  rather than as a test that hangs until a clock stops it. The mutation
-  check uses the same tests to judge mistakes planted in that code. On
-  October 23, 2026 it found a schedule in which a wake meant for a
-  parked worker was spent on one that was leaving anyway, so a worker
-  could stay parked with work published; the fix is in the code with the
-  schedule as its test.
-- **Guard pages** cover assembly. A test places an inaccessible page of
-  memory immediately beside an input or output buffer. If a kernel reads
-  or writes even one byte outside that buffer, the processor faults and
-  the test crashes.
-
-These tools see different layers. None of the first three can inspect
-assembly, which is why guard pages matter.
+  where one thread waits for another under thousands of thread
+  schedules. A wait that could hang shows up immediately as a deadlock
+  with the schedule that caused it.
+- **Guard pages** cover assembly. A test places an inaccessible page
+  of memory immediately beside an input or output buffer. If a kernel
+  reads or writes even one byte outside that buffer, the processor
+  faults and the test crashes.
 
 ## What the checks found
 
