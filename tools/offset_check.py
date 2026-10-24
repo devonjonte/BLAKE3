@@ -29,12 +29,13 @@ small effect and its confirmation (the i7-12700K's is +9-11% in a window
 48 bytes wide, which steps of 64 and a 10% screen both missed).
 
 Verdicts:
-- IMMUNE_CELLS are the cells our APIs keep free of the effect (none
-  today). Any one of them judged slower at some offset: exit 1.
-- CONTROL_CELLS are known to be sensitive today (hash() of 64 bytes, a
-  buffer lent or owned). If
-  none is judged slower, the check lost its sight of the effect: exit 3.
-  A change that makes them immune moves them to IMMUNE_CELLS with it.
+- IMMUNE_CELLS are the cells our APIs keep free of the effect: our hash()
+  of 64 bytes, a buffer lent or owned, since the x86-64 chunk-root kernel
+  (#141). Any one of them judged slower at some offset: exit 1.
+- CONTROL_CELLS are known to be sensitive: the upstream blake3 crate's
+  hash() of 64 bytes, whose chunk path keeps its state on the stack as ours
+  did. If none is judged slower, the check lost its sight of the effect:
+  exit 3.
 - Exit 0 otherwise; 2 when regress gave no verdict (a busy machine).
 """
 import argparse
@@ -48,17 +49,21 @@ import sys
 import tempfile
 
 CONTENDER = 'blake3-servil-st'
+# The control contender: the upstream crate, whose 64-byte hash() still
+# reads stack memory the caller's stores can hold back.
+CONTROL = 'blake3-official'
 POINTS = ['lent 64 B', 'lent 256 B', 'continuous 64 B', 'continuous 256 B',
           'lent batch 16', 'lent batch 64', 'continuous batch 16', 'continuous batch 64']
-# No cell is immune today. Batches were thought so, from scans in 64-byte
-# steps; at 16-byte steps the EPYC 9255 shows 64-message batches +3-4% and
-# 16-message +4-7% at a few offsets, every run (Sam Shackleton, #65,
-# October 24), while the i7-12700K shows none. They are measured and
-# reported with the rest. A change that makes a cell immune (an API that
-# aligns its messages to 64 bytes, say) lists it here, and the check then
-# fails if it turns sensitive again.
-IMMUNE_CELLS = []
-CONTROL_CELLS = [f'{CONTENDER}|{s}|{u}|64 B' for s in ('solo', 'shared')
+# Our 64-byte hash() is immune since the chunk-root kernel (#141). Batches
+# are not: they were thought so, from scans in 64-byte steps; at 16-byte
+# steps the EPYC 9255 shows 64-message batches +3-4% and 16-message +4-7%
+# at a few offsets, every run (Sam Shackleton, #65, October 24), while the
+# i7-12700K shows none. They are measured and reported with the rest. A
+# change that makes a cell immune lists it here, and the check then fails
+# if it turns sensitive again.
+IMMUNE_CELLS = [f'{CONTENDER}|{s}|{u}|64 B' for s in ('solo', 'shared')
+                for u in ('LentMessages', 'ContinuousMessages')]
+CONTROL_CELLS = [f'{CONTROL}|{s}|{u}|64 B' for s in ('solo', 'shared')
                  for u in ('LentMessages', 'ContinuousMessages')]
 PAGE = 4096
 DEFAULT_TLS = 512
@@ -99,21 +104,23 @@ def run_env(extra):
 
 
 def parse_report(text):
-    """{(scenario, table title, size label): mean} from the printed report."""
-    cells, scenario, table, header = {}, None, None, False
+    """{(column, scenario, table title, size label): mean} from the printed
+    report; one column per contender, headed by its display name."""
+    cells, scenario, table, columns = {}, None, None, None
     for line in text.splitlines():
         if line.startswith('SOLO'):
             scenario = 'solo'
         elif line.startswith('SHARED'):
             scenario = 'shared'
         elif re.match(r'^  \S.*\((ns|us)/', line):
-            table, header = line.strip(), False
+            table, columns = line.strip(), None
         elif re.match(r'^  (size|messages)\s', line):
-            header = True
-        elif header and scenario and table:
-            m = re.match(r'^\s+(\d+(?: [KMG]?i?B)?)\s+([\d.]+)\s*$', line)
+            columns = re.split(r'\s{2,}', line.strip())[1:]
+        elif columns and scenario and table:
+            m = re.match(r'^\s+(\d+(?: [KMG]?i?B)?)((?:\s+[\d.]+)+)\s*$', line)
             if m:
-                cells[(scenario, table, m.group(1))] = float(m.group(2))
+                for column, value in zip(columns, m.group(2).split()):
+                    cells[(column, scenario, table, m.group(1))] = float(value)
     return cells
 
 
@@ -123,7 +130,7 @@ def scan(exe, named, work, label='scan'):
     for name, extra in named:
         out = work / label / name
         out.mkdir(parents=True)
-        subprocess.run([exe, '--contenders', CONTENDER, '--points', ','.join(POINTS),
+        subprocess.run([exe, '--contenders', f'{CONTENDER},{CONTROL}', '--points', ','.join(POINTS),
                         '--for-regression-check', '--rounds', '24'],
                        cwd=out, env=run_env(extra), check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -178,7 +185,7 @@ def confirm(exe, slow, fast, extras, work):
     out.mkdir(parents=True)
     old = [wrapper(out / f'fast-{i}', exe, extras[fast]) for i in range(PAIRS)]
     new = [wrapper(out / f'slow-{i}', exe, extras[slow]) for i in range(PAIRS)]
-    done = subprocess.run([exe, 'regress', '--contenders', CONTENDER, '--points', ','.join(POINTS),
+    done = subprocess.run([exe, 'regress', '--contenders', f'{CONTENDER},{CONTROL}', '--points', ','.join(POINTS),
                            '--pairs', str(PAIRS), '--keep', str(out / 'samples'), *old, '--', *new],
                           cwd=out, capture_output=True, text=True)
     (out / 'regress.out').write_text(done.stdout)
