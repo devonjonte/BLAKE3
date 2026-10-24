@@ -67,7 +67,13 @@ fn installed_consumer(kind: &str) -> String {
         }
         let status = compile.arg("-o").arg(&program).status().expect("a C and C++ compiler");
         assert!(status.success(), "{source} compiles and links against {kind}");
-        let out = Command::new(&program).output().unwrap();
+        let mut run = Command::new(&program);
+        if kind == "cdylib" {
+            // The staged dylib's install name is the deployment prefix;
+            // macOS falls back to this path by leaf name. Linux ignores it.
+            run.env("DYLD_LIBRARY_PATH", &lib_dir);
+        }
+        let out = run.output().unwrap();
         assert!(out.status.success(), "{source}: {}", String::from_utf8_lossy(&out.stderr));
         if source == "check.c" {
             output = String::from_utf8(out.stdout).unwrap();
