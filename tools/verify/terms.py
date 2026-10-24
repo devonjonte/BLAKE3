@@ -10,9 +10,9 @@ where Z3 must compute (simplify, substitute, the solver): Node.expr.
 
 Each prover case runs in a fresh process (workers.py), so every node lives
 as long as the process: `node(t)` keeps t, and a child's pointer stays
-valid because the kept term above it holds it. A Z3 id then names one term
-for the process's life, so a fact memoized by id (here, and in canon.py)
-is exact.
+valid because the kept term above it holds it. Z3 hash-conses every AST in
+the context, so a kept AST's pointer value (`ptr.value`) names one term for
+the process's life, with no C call needed to look it up.
 """
 from z3 import main_ctx, Z3_OP_UNINTERPRETED, Z3_APP_AST, Z3_NUMERAL_AST, Z3_BV_SORT, Z3_PARAMETER_INT
 from z3 import z3core as C
@@ -20,7 +20,20 @@ from z3.z3 import _to_expr_ref
 
 CTX = main_ctx()
 REF = CTX.ref()
-_nodes = {}          # id -> Node
+_get_ast_kind = C.Z3_get_ast_kind.__defaults__[0].f
+_get_app_decl = C.Z3_get_app_decl.__defaults__[0].f
+_get_decl_kind = C.Z3_get_decl_kind.__defaults__[0].f
+_get_app_num_args = C.Z3_get_app_num_args.__defaults__[0].f
+_get_app_arg = C.Z3_get_app_arg.__defaults__[0].f
+_get_sort = C.Z3_get_sort.__defaults__[0].f
+_get_sort_kind = C.Z3_get_sort_kind.__defaults__[0].f
+_get_bv_sort_size = C.Z3_get_bv_sort_size.__defaults__[0].f
+_get_decl_num_parameters = C.Z3_get_decl_num_parameters.__defaults__[0].f
+_get_decl_parameter_kind = C.Z3_get_decl_parameter_kind.__defaults__[0].f
+_get_decl_int_parameter = C.Z3_get_decl_int_parameter.__defaults__[0].f
+_get_decl_name = C.Z3_get_decl_name.__defaults__[0].f
+
+_nodes = {}          # ptr.value -> Node
 
 
 class Node:
@@ -41,8 +54,8 @@ class Node:
     def kind(self):
         """The operator's kind (Z3_OP_*), as t.decl().kind()."""
         if self._kind is None:
-            assert C.Z3_get_ast_kind(REF, self.ptr) in (Z3_APP_AST, Z3_NUMERAL_AST), "a term that is not an application"
-            self._kind = C.Z3_get_decl_kind(REF, C.Z3_get_app_decl(REF, self.ptr))
+            assert _get_ast_kind(REF, self.ptr) in (Z3_APP_AST, Z3_NUMERAL_AST), "a term that is not an application"
+            self._kind = _get_decl_kind(REF, _get_app_decl(REF, self.ptr))
         return self._kind
 
     @property
@@ -50,15 +63,15 @@ class Node:
         """The children, as t.children()."""
         if self._kids is None:
             a = self.ptr
-            self._kids = tuple(_node_at(C.Z3_get_app_arg(REF, a, i)) for i in range(C.Z3_get_app_num_args(REF, a)))
+            self._kids = tuple(_node_at(_get_app_arg(REF, a, i)) for i in range(_get_app_num_args(REF, a)))
         return self._kids
 
     @property
     def size(self):
         """A bit-vector's width, as t.size(); None for any other sort."""
         if self._size is None:
-            s = C.Z3_get_sort(REF, self.ptr)
-            self._size = C.Z3_get_bv_sort_size(REF, s) if C.Z3_get_sort_kind(REF, s) == Z3_BV_SORT else 0
+            s = _get_sort(REF, self.ptr)
+            self._size = _get_bv_sort_size(REF, s) if _get_sort_kind(REF, s) == Z3_BV_SORT else 0
         return self._size or None
 
     @property
@@ -66,10 +79,10 @@ class Node:
         """The operator's parameters, as t.params() (read raw when all are
         integers: Extract's, ZeroExt's, a rotation's)."""
         if self._params is None:
-            d = C.Z3_get_app_decl(REF, self.ptr)
-            n = C.Z3_get_decl_num_parameters(REF, d)
-            if all(C.Z3_get_decl_parameter_kind(REF, d, i) == Z3_PARAMETER_INT for i in range(n)):
-                self._params = tuple(C.Z3_get_decl_int_parameter(REF, d, i) for i in range(n))
+            d = _get_app_decl(REF, self.ptr)
+            n = _get_decl_num_parameters(REF, d)
+            if all(_get_decl_parameter_kind(REF, d, i) == Z3_PARAMETER_INT for i in range(n)):
+                self._params = tuple(_get_decl_int_parameter(REF, d, i) for i in range(n))
             else:
                 self._params = tuple(self.expr.params())
         return self._params
@@ -80,19 +93,26 @@ class Node:
 
 
 def _node_at(ptr):
-    k = C.Z3_get_ast_id(REF, ptr)
+    k = ptr if isinstance(ptr, int) else ptr.value
     n = _nodes.get(k)
     if n is None:
         n = _nodes[k] = Node(ptr, k)
     return n
 
 
+def ast_id(t):
+    """The process-unique integer key of a Z3 AST `t`."""
+    ptr = t.ast
+    return ptr if isinstance(ptr, int) else ptr.value
+
+
 def node(t):
     """t's node; t is kept for the process's life."""
-    k = t.get_id()
+    ptr = t.ast
+    k = ptr if isinstance(ptr, int) else ptr.value
     n = _nodes.get(k)
     if n is None:
-        n = _nodes[k] = Node(t.as_ast(), k, t)
+        n = _nodes[k] = Node(ptr, k, t)
     elif n._expr is None:
         n._expr = t
     return n
@@ -133,7 +153,7 @@ def _union(sets):
 
 def _leaf_symbols(n):
     if n.kind == Z3_OP_UNINTERPRETED:
-        return frozenset([C.Z3_get_symbol_string(REF, C.Z3_get_decl_name(REF, C.Z3_get_app_decl(REF, n.ptr)))])
+        return frozenset([C.Z3_get_symbol_string(REF, _get_decl_name(REF, _get_app_decl(REF, n.ptr)))])
     return frozenset()
 
 

@@ -42,9 +42,47 @@ def snapshot(m):
     return c
 
 
+def _can_reach(code, heads):
+    """The PCs in `code` from which control can still reach `heads`."""
+    import re
+    preds = {}
+    for pc, item in code.items():
+        mnem, ops = item[0], item[1]
+        nxts = []
+        if len(item) > 2:
+            if mnem not in ("ret", "jmp") and item[2] in code:
+                nxts.append(item[2])
+        else:
+            if mnem not in ("ret", "b") and (pc + 4) in code:
+                nxts.append(pc + 4)
+        for op in ops:
+            for tok in re.findall(r"0x[0-9a-fA-F]+|\b[0-9a-fA-F]+\b", op):
+                try:
+                    t = int(tok, 16)
+                    if t in code:
+                        nxts.append(t)
+                except ValueError:
+                    pass
+        for s in nxts:
+            preds.setdefault(s, []).append(pc)
+    reach = set(heads)
+    stack = list(heads)
+    while stack:
+        cur = stack.pop()
+        for p in preds.get(cur, ()):
+            if p not in reach:
+                reach.add(p)
+                stack.append(p)
+    return reach
+
+
 def paths(m, pc, heads):
     """Every path from `pc`: (machine, "head" or "return"), splitting where
     a branch on lengths is open. `heads`: the pcs at which a path stops."""
+    defer_exits = getattr(m, "_defer_exits", None)
+    if defer_exits is not None:
+        del m._defer_exits
+    reach = _can_reach(m.code, heads) if (defer_exits is not None and heads and not getattr(m, "summaries", None)) else None
     work, done = [(m, pc, True)], []
     while work:
         m, pc, first = work.pop()
@@ -52,6 +90,9 @@ def paths(m, pc, heads):
             if pc in heads and not first:
                 m.stopped_at = pc
                 done.append((m, "head"))
+                break
+            if reach is not None and not first and pc not in reach:
+                defer_exits.append((m, pc))
                 break
             first = False
             # Code taken by its proved effect (a loop by its induction): the
@@ -311,8 +352,7 @@ def constant_difference(a, b):
     canon.symbols_of(diff, syms, set())
     values = set()
     for r in range(3):
-        # Fresh random values each call (canon.sample's cache, keyed apart).
-        point = [(v, canon.sample(("difference", random.getrandbits(64), n), v, r)) for n, v in syms.items()]
+        point = [(v, canon.sample(n, v, ("difference", r))) for n, v in syms.items()]
         values.add(simplify(substitute(diff, *point)).as_long())
         if len(values) > 1:
             return None
@@ -364,19 +404,33 @@ def same_ptr(a, b):
     return a.region == b.region and aarch64.key(a.offset) == aarch64.key(b.offset)
 
 
+_forced = {}
+
+
 def forced(m, term):
     """`term`'s value when the run's assumptions force one (a model's value,
     and no other possible), else None."""
     from z3 import Solver, sat
+    import terms
     c = aarch64.concrete(term)
     if c is not None:
         return c
+    rel = aarch64.relevant_assumptions(m.assumptions, term)
+    k = (tuple(a.get_id() for a in rel), term.get_id())
+    if k in _forced:
+        return _forced[k]
+    for a in rel:
+        terms.keep(a)
+    terms.keep(term)
     s = Solver()
-    s.add(*m.assumptions)
+    s.add(*rel)
     if s.check() != sat:
+        _forced[k] = None
         return None
     v = s.model().eval(term, model_completion=True)
-    return v.as_long() if aarch64.holds(m, term == v) else None
+    res = v.as_long() if aarch64.unsatisfiable(rel, Not(term == v)) else None
+    _forced[k] = res
+    return res
 
 
 def mismatches(m, g, kval):
@@ -399,6 +453,9 @@ def mismatches(m, g, kval):
         # Public arithmetic needs one equality proof, rather than hash
         # normalization's search among other leaves with similar samples.
         if aarch64.lengths_only(m, a - b):
+            sub1 = [(g.k, BitVecVal(1, 64)), (BitVec("len_at", 64), BitVecVal(1, 64))]
+            if not aarch64.holds(m, substitute(a == b, *sub1)):
+                return False
             return aarch64.holds(m, a == b)
         return same(a, b)
     bad = []
@@ -454,6 +511,8 @@ def loop_step(g, start, kval, assumptions, head, check):
         passes += 1
         mk = g.machine(start, kval)
         mk.assumptions = assumptions
+        deferred = []
+        mk._defer_exits = deferred
         ends = paths(mk, head, {head})
         forget = set()
         for end, how in ends:
@@ -461,6 +520,9 @@ def loop_step(g, start, kval, assumptions, head, check):
                 canon.set_context(end.assumptions, end.lengths)
                 forget.update(mismatches(end, g, kval + 1))
         canon.set_context([], set())
+        if not forget:
+            for dm, dpc in deferred:
+                ends.extend(paths(dm, dpc, {head}))
         print(f"  induction pass {passes}: {len(ends)} paths, {len(forget)} positions left unknown {sorted(map(str, forget))[:8]}", flush=True)
         if not forget:
             break

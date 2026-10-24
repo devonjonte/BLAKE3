@@ -515,7 +515,10 @@ def prove_case(case):
 
 
 def main():
+    global OBJ
     import workers
+    OBJ = assemble()
+    HYBRID_OBJ[0] = assemble_hybrid()
     # The longest cases first, so none is left to run alone at the end: the
     # inductions of the kernel with an integer lane (about 12 minutes) and
     # of the chunk kernel (2).

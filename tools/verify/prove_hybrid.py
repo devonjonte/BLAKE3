@@ -35,13 +35,25 @@ def assemble():
     return obj
 
 
+_same_cache = {}
+
+
 def same(a, b):
     """Whether two terms are equal for every value of their symbols: by
     normal form (canon.py); two small terms with no rounds in them, by the
     solver."""
-    if a.eq(b):
+    import terms
+    ia, ib = terms.ast_id(a), terms.ast_id(b)
+    if ia == ib:
         return True      # one term (Z3 shares structurally equal terms)
+    skey = (ia, ib, canon._context.get("lset"))
+    if skey in _same_cache:
+        return True
     if canon.canon(a) == canon.canon(b):
+        if not canon._used_assumptions:
+            terms.keep(a)
+            terms.keep(b)
+            _same_cache[skey] = True
         return True
     if canon.has_arith(a) or canon.has_arith(b):
         return False     # the normal forms differ: no search over the rounds
@@ -325,8 +337,13 @@ def prove_case(case):
 
 
 def main():
+    global OBJ
     import workers
-    todo = cases(set(sys.argv[1:]))
+    OBJ = assemble()
+    aarch64.symbols(OBJ)
+    aarch64.text_bytes(OBJ)
+    todo = sorted(cases(set(sys.argv[1:])),
+                  key=lambda c: -(int(c[0].lstrip("ckpqnx") or 1) * (16 if c[0][0] == "q" else c[1])))
     failed = 0
     # Every CPU: a case holds under 400 MB (CPython, October 22).
     for (name, _, _), verdict in workers.each(prove_case, todo, len(todo)):

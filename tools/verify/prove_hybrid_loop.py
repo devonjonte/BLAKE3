@@ -259,7 +259,9 @@ def summary(gen_a, gen_b, entry, chains, chain16, chain17, lanes, key, group=lam
                 w = pbl.lane_word(cell)
                 if w is None or w[0].decl().name() not in names:
                     raise Unproved(f"ZA tile 0 cell {row},{col} holds no SME2 chunk's bytes entering the loop")
-                j = next((c for c in range(0, 64, 4) if aarch64.holds(m, aarch64.as_bv(w[1]) == base + c)), None)
+                j = aarch64.concrete(simplify(aarch64.as_bv(w[1]) - base))
+                if j is None:
+                    j = next((c for c in range(0, 64, 4) if aarch64.holds(m, aarch64.as_bv(w[1]) == base + c)), None)
                 if j is None:
                     raise Unproved(f"ZA tile 0 cell {row},{col} holds other than the group's block 0 entering the loop")
                 seen.add((w[0].decl().name(), j))
@@ -370,6 +372,9 @@ def prove_every(obj, gen_a, gen_b):
             group, within = offset // 144, offset % 144
             return (Ptr(f"lane{within // 8}", 1024 * group), within % 8)
         o = aarch64.as_bv(offset)
+        within = aarch64.concrete(o - 144 * k)
+        if within is not None and 0 <= within < 144:
+            return (Ptr(f"lane{within // 8}", simplify(k * 1024, som=True, bv_sort_ac=True)), within % 8)
         within = induction.forced(aarch64._machine[0], URem(o, 144))
         if within is None:
             raise Unproved("a table read whose chunk the lengths leave open")

@@ -36,6 +36,8 @@ WIN_ARGS = ["rcx", "rdx", "r8", "r9"]
 
 
 def assemble(isa, windows):
+    if (isa, windows) in OBJS:
+        return OBJS[(isa, windows)]
     d = tempfile.mkdtemp()
     if windows:
         obj = os.path.join(d, f"{isa}.obj")
@@ -45,11 +47,14 @@ def assemble(isa, windows):
         so = os.path.join(d, f"{isa}.dll")
         subprocess.run([x86.tool("lld-link"), "/dll", "/noentry", "/force:unresolved", "/debug:symtab", f"/out:{so}", obj],
                        check=True, stdout=subprocess.DEVNULL)
+        OBJS[(isa, windows)] = so
         return so
     obj = os.path.join(d, f"{isa}.o")
     subprocess.run([CLANG, "-c", "--target=x86_64-linux-gnu", os.path.join(ROOT_DIR, f"c/blake3_{isa}_x86-64_unix.S"),
                     "-o", obj], check=True)
-    return x86.link(obj)
+    so = x86.link(obj)
+    OBJS[(isa, windows)] = so
+    return so
 
 
 class Setup:
@@ -286,6 +291,11 @@ def prove_case(case):
 def main():
     import workers
     todo = representative_cases() if sys.argv[1:] == ["--representative"] else cases(set(sys.argv[1:]))
+    for isa, windows in {(c[0], c[1]) for c in todo}:
+        so = assemble(isa, windows)
+        x86.symbols(so)
+        x86.image(so)
+    todo.sort(key=lambda c: -(c[3][0] * c[3][1] if isinstance(c[3], tuple) else (c[3] or 1)))
     failed = 0
     for (isa, windows, kind, arg), verdict in workers.each(prove_case, todo, 16):
         print(f"{isa} {'windows' if windows else 'unix'} {kind} {arg or ''}: {verdict}", flush=True)

@@ -84,7 +84,9 @@ def _has_arith(n):
 
 
 _leaves = {}       # fingerprint -> [(simplified leaf, id)]
+_leaf_by_id = {}   # simplified leaf ast id -> normal-form id
 _values = {}       # symbol name -> random values, one per fingerprint round
+_samples = {}      # (symbol name, sort key, round) -> Z3 ExprRef
 ROUNDS = 3
 # Rounds whose free symbols (those the assumptions leave alone: data,
 # counters, flags) have their low 32-bit word at 2**32 - j for each j in
@@ -116,54 +118,92 @@ def _symbols_of(n, out, seen):
 # its length symbols, and points that satisfy them. Leaves are compared
 # under the assumptions, and fingerprinted with the length symbols at those
 # points (so leaves equal under the assumptions share a fingerprint).
-_context = {"assumptions": [], "points": [], "lengths": set()}
+_context = {"assumptions": [], "points": [], "lengths": set(), "key": None}
+_used_assumptions = False
+_last_nonempty_lset = None
+_points_cache = {}
+_pieces_memo = {}
 
 
 def set_context(assumptions, lengths):
     """Compare under `assumptions` on the symbols named `lengths`; the
-    normal forms and their caches start afresh."""
-    _ids.clear(); _nodes.clear(); _memo.clear(); _arith.clear(); _data.clear(); _leaves.clear(); _leaf_terms.clear()
+    normal forms and their caches start afresh when the context requires it."""
+    global _used_assumptions
+    lset = frozenset(lengths)
+    lset_changed = _context.get("lset") != lset
+    if lset_changed:
+        _data.clear()
+        _context["lset"] = lset
+    clear_canon = lset_changed or _used_assumptions
+    _used_assumptions = False
+    _leaves.clear()
+    _pieces_memo.clear()
+    if clear_canon:
+        _ids.clear(); _nodes.clear(); _memo.clear(); _leaf_by_id.clear(); _leaf_terms.clear(); _free_leaves.clear(); _zero_leaves.clear()
     free = {x for a in assumptions for x in terms.symbols(a)} - set(lengths)
     assert not free, f"assumptions on symbols other than the lengths: {sorted(free)}"
-    points = []
-    if assumptions:
-        s = Solver()
-        s.add(*assumptions)
-        for _ in range(ROUNDS):
-            if s.check() != sat:
-                break
-            model = s.model()
-            point = {d.name(): model[d] for d in model.decls() if d.name() in lengths}
-            points.append(point)
-            s.add(Or([BitVec(n, v.size()) != v for n, v in point.items()]) if point else False)
+    if not assumptions:
+        _context["assumptions"], _context["points"], _context["lengths"] = [], [], set(lengths)
+        return
+    ckey = (tuple(terms.ast_id(a) for a in assumptions), lset)
+    points = _points_cache.get(ckey)
+    if points is None:
+        for a in assumptions:
+            terms.keep(a)
+        points = []
+        if assumptions:
+            s = Solver()
+            s.add(*assumptions)
+            for _ in range(ROUNDS):
+                if s.check() != sat:
+                    break
+                model = s.model()
+                point = {d.name(): model[d] for d in model.decls() if d.name() in lengths}
+                points.append(point)
+                s.add(Or([BitVec(n, v.size()) != v for n, v in point.items()]) if point else False)
+        _points_cache[ckey] = points
     _context["assumptions"], _context["points"] = list(assumptions), points
     _context["lengths"] = set(lengths)
+    _context["key"] = ckey
 
 
 def sample(n, v, r):
-    """Symbol `v` (named `n`) at sample point `r`: a random value; an array
-    (a message read at any offset) a random function of its index, so
-    bytes at different offsets differ. Only a fingerprint: equal leaves are
-    proved equal by the solver."""
+    """Symbol `v` (named `n`) at sample point `r`: a deterministic sample
+    seeded by `(n, r)`; an array (a message read at any offset) a linear
+    function of its index, so bytes at different offsets differ. Only a
+    fingerprint: equal leaves are proved equal by the solver."""
     from z3 import is_array, Lambda, Extract, BitVec as BV
-    if is_array(v):
+    arr = is_array(v)
+    skey = (n, (v.domain().size(), v.range().size()) if arr else v.size(), r)
+    cached = _samples.get(skey)
+    if cached is not None:
+        return cached
+    if arr:
         i = BV("sample_index", v.domain().size())
-        a, b = (_values.setdefault((n, r, j), random.getrandbits(v.domain().size())) for j in (0, 1))
+        a, b = (_values.setdefault((n, r, j), random.Random(f"0:{n}:{r}:{j}").getrandbits(v.domain().size())) for j in (0, 1))
         # High bits mix every index bit into a byte fingerprint. Taking
         # the low byte made offsets 256 bytes apart collide at every
         # point, forcing needless solver calls between unrelated chunks.
-        return Lambda([i], Extract(v.domain().size() - 1, v.domain().size() - v.range().size(), i * a + b))
-    return BitVecVal(_values.setdefault((n, r), random.getrandbits(v.size())) % (1 << v.size()), v.size())
+        cached = Lambda([i], Extract(v.domain().size() - 1, v.domain().size() - v.range().size(), i * a + b))
+    else:
+        cached = BitVecVal(_values.setdefault((n, r), random.Random(f"0:{n}:{r}").getrandbits(v.size())) % (1 << v.size()), v.size())
+    _samples[skey] = cached
+    return cached
 
 
 def edge_sample(n, v, j):
-    """Symbol `v` (named `n`) in edge round `j`: a random value whose low 32
-    bits are 2**32 - j; an array, or a narrower value, as `sample`."""
+    """Symbol `v` (named `n`) in edge round `j`: a deterministic sample
+    whose low 32 bits are 2**32 - j; an array, or a narrower value, as
+    `sample`."""
     from z3 import is_array
     if is_array(v) or v.size() < 32:
         return sample(n, v, ("edge", j))
-    x = _values.setdefault((n, "edge", j), random.getrandbits(v.size()) & ~0xffffffff | (1 << 32) - j)
-    return BitVecVal(x, v.size())
+    skey = (n, v.size(), ("edge", j))
+    cached = _samples.get(skey)
+    if cached is None:
+        x = _values.setdefault((n, "edge", j), random.Random(f"0:{n}:edge:{j}").getrandbits(v.size()) & ~0xffffffff | (1 << 32) - j)
+        cached = _samples[skey] = BitVecVal(x, v.size())
+    return cached
 
 
 def leaf(t):
@@ -173,9 +213,20 @@ def leaf(t):
     polynomial normal form first makes most equal leaves identical. A Bool
     (a mask lane's compare, in the AVX-512 XOF at four blocks and more) is
     canonicalised as the one-bit vector it selects."""
+    from z3 import is_array
     if is_bool(t):
         t = If(t, BitVecVal(1, 1), BitVecVal(0, 1))
     t = simplify(t, som=True, bv_sort_ac=True)
+    tid = t.get_id()
+    cached = _leaf_by_id.get(tid)
+    if cached is not None:
+        return cached
+    terms.keep(t)
+    if is_bv_value(t):
+        n = intern(("leaf", t.sexpr()))
+        _leaf_by_id[tid] = n
+        _record_leaf(n, t, True)
+        return n
     syms = {}
     symbols_of(t, syms, set())
     print_ = []
@@ -183,43 +234,67 @@ def leaf(t):
     for r in range(ROUNDS):
         point = points[r] if r < len(points) else {}
         sub = [(v, point[n] if n in point else sample(n, v, r)) for n, v in syms.items()]
-        print_.append(simplify(substitute(t, *sub)).as_long() if sub else simplify(t).as_long())
+        print_.append(simplify(substitute(t, *sub)).as_long() if sub else t.as_long())
     # The edge rounds take the lengths at a point that satisfies the
     # assumptions, so leaves equal under them still share a fingerprint.
+    # Only terms with a >=32-bit free bit-vector symbol (such as a counter)
+    # vary across EDGES.
     point = points[0] if points else {}
-    for j in EDGES:
-        sub = [(v, point[n] if n in point else edge_sample(n, v, j)) for n, v in syms.items()]
-        print_.append(simplify(substitute(t, *sub)).as_long() if sub else simplify(t).as_long())
+    if any(n not in point and not is_array(v) and v.size() >= 32 for n, v in syms.items()):
+        for j in EDGES:
+            sub = [(v, point[n] if n in point else edge_sample(n, v, j)) for n, v in syms.items()]
+            print_.append(simplify(substitute(t, *sub)).as_long() if sub else t.as_long())
     key = (t.size(), tuple(print_))
     for other, n in _leaves.get(key, []):
         if other.eq(t):
+            _leaf_by_id[tid] = n
             return n
+        global _used_assumptions
         s = Solver()
         s.set("timeout", 60_000)
         s.add(*_context["assumptions"], other != t)
         if s.check() == unsat:
+            if _context["assumptions"]:
+                _used_assumptions = True
+            _leaf_by_id[tid] = n
             return n
     n = intern(("leaf", t.sexpr()))
     _leaves.setdefault(key, []).append((t, n))
-    _leaf_terms[n] = t
+    _leaf_by_id[tid] = n
+    _record_leaf(n, t, False)
     return n
 
 
 _leaf_terms = {}   # leaf id -> its simplified term
+_free_leaves = {}  # data-free leaf id -> its simplified term
+_zero_leaves = set()
+
+
+def _record_leaf(n, t, is_const_val=False):
+    _leaf_terms[n] = t
+    if is_const_val:
+        _free_leaves[n] = t
+        if t.as_long() == 0:
+            _zero_leaves.add(n)
+    elif not has_data(t):
+        _free_leaves[n] = t
 
 
 def constants_merged(ids, op, unit):
     """`ids` with their data-free leaves (constants and parameters) made one
     leaf, combined by `op` (a sum's or an xor's), left out when it is `unit`'s
     value: however the summands were nested or folded, one normal form."""
-    free = [x for x in ids if x in _leaf_terms and not has_data(_leaf_terms[x])]
-    if len(free) < 2 and not (free and is_bv_value(_leaf_terms[free[0]]) and _leaf_terms[free[0]].as_long() == unit):
+    free = [x for x in ids if x in _free_leaves]
+    if not free:
         return ids
-    r = _leaf_terms[free[0]]
+    if len(free) == 1:
+        return [x for x in ids if x != free[0]] if (unit == 0 and free[0] in _zero_leaves) else ids
+    r = _free_leaves[free[0]]
     for x in free[1:]:
-        r = op(r, _leaf_terms[x])
+        r = op(r, _free_leaves[x])
     r = simplify(r)
-    rest = [x for x in ids if x not in free]
+    fset = set(free)
+    rest = [x for x in ids if x not in fset]
     return rest if is_bv_value(r) and r.as_long() == unit else rest + [leaf(r)]
 
 
@@ -233,6 +308,14 @@ def summands(n):
 def pieces(n):
     """`n` as a list of (node, hi, lo) bit ranges, most significant first,
     seeing through concatenations, extractions, and zero extensions."""
+    r = _pieces_memo.get(n.id)
+    if r is not None:
+        return r
+    r = _pieces_memo[n.id] = merged(_pieces_raw(n))
+    return r
+
+
+def _pieces_raw(n):
     kind = n.kind
     if kind == Z3_OP_CONCAT:
         return [p for c in n.kids for p in pieces(c)]
@@ -317,37 +400,19 @@ def _canon(n):
                 return intern(("ror", l2, _canon_memo(x)))
         return intern(("cat", tuple((_canon_memo(x), h, l) for x, h, l in ps)))
     if kind == Z3_OP_BADD:
-        # The summands without data (lengths, parameters, constants) become
-        # one leaf, their sum: equal sums whose length parts are split
-        # differently (K + 1 against a group number the kernel computes from
-        # an address) then share a normal form.
-        data, rest = [], []
-        for c in summands(n):
-            (data if _has_data(c) else rest).append(c)
-        if len(rest) > 1:
-            rest = [terms.node(simplify(sum((c.expr for c in rest[1:]), rest[0].expr)))]
-        if rest and is_bv_value(simplify(rest[0].expr)) and simplify(rest[0].expr).as_long() == 0:
-            rest = []
-        if not data:
-            return leaf(n.expr)
+        # Children flatten through _canon_memo; constants_merged folds all
+        # data-free leaves (lengths, parameters, constants) into one leaf.
         ids = []
-        for c in data + rest:
+        for c in n.kids:
             k = _canon_memo(c)
             ids.extend(node(k)[1] if node(k)[0] == "add" else [k])
         ids = constants_merged(ids, lambda a, b: a + b, 0)
+        if not ids:
+            return leaf(BitVecVal(0, n.size))
         return ids[0] if len(ids) == 1 else intern(("add", tuple(sorted(ids))))
     if kind == Z3_OP_BXOR:
-        # As for sums: the operands without data become one leaf, their xor,
-        # left out when it is zero (a kernel may fold constants the
-        # specification xors apart).
-        data, rest = [], []
-        for c in xors(n):
-            (data if _has_data(c) else rest).append(c)
-        if rest:
-            r = simplify(rest[0].expr if len(rest) == 1 else xor_all([c.expr for c in rest]))
-            rest = [] if is_bv_value(r) and r.as_long() == 0 else [terms.node(r)]
         seen = {}
-        for c in data + rest:
+        for c in n.kids:
             k = _canon_memo(c)
             for x in (node(k)[1] if node(k)[0] == "xor" else [k]):
                 seen[x] = seen.get(x, 0) ^ 1

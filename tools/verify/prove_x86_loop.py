@@ -150,22 +150,32 @@ def prove(so, isa, windows, blocks, increment):
     machine.assumptions = list(machine.assumptions) + bounds
     head = pass_head(setup, so, width)
 
+    lane_cache = {}
+
+    def lane_info(idx):
+        lkey = (arm.key(idx), arm.key(counter))
+        info = lane_cache.get(lkey)
+        if info is None:
+            inp = [Extract(8 * (j % 4) + 7, 8 * (j % 4),
+                           Select(data, Concat(idx * 8, BitVecVal(4 * (j // 4), 64))))
+                   for j in range(64 * blocks)]
+            ctr = counter + idx if increment else counter
+            cv = table_cvs([inp], key, [ctr], flags, start, end, BitVecVal(64, 8), blocks)[0]
+            offsets = [arm.key(32 * idx + j) for j in range(32)]
+            info = lane_cache[lkey] = (offsets, cv)
+        return info
+
     def check_range(m, first, n):
         first = arm.as_bv(first)
-        inputs = [[Extract(8 * (j % 4) + 7, 8 * (j % 4),
-                           Select(data, Concat((first + lane) * 8, BitVecVal(4 * (j // 4), 64))))
-                   for j in range(64 * blocks)] for lane in range(n)]
-        counters = [counter + first + lane if increment else counter for lane in range(n)]
-        cvs = table_cvs(inputs, key, counters, flags, start, end, BitVecVal(64, 8), blocks)
         out, expected = m.regions['out'], set()
         for lane in range(n):
-            offsets = [arm.key(32 * (first + lane) + j) for j in range(32)]
+            offsets, cv = lane_info(first + lane)
             expected.update(offsets)
             if any(o not in out.bytes for o in offsets):
                 raise Unproved(f'output {lane} incomplete')
             got = spec.words([out.bytes[o] for o in offsets])
             for word in range(8):
-                if not same(got[word], cvs[lane][word]):
+                if not same(got[word], cv[word]):
                     raise Unproved(f'output {lane}, word {word}, differs')
         return expected
 
@@ -192,7 +202,7 @@ def prove(so, isa, windows, blocks, increment):
         canon.set_context(m.assumptions, m.lengths)
         exactly(m, check_range(m, 0, tail_count(m)))
         p.check_abi(m, windows)
-        canon.set_context([], set())
+    canon.set_context([], set())
 
     print('  base paths proved; constructing the group invariant', flush=True)
     start_machine = ind.snapshot(machine)
@@ -292,10 +302,16 @@ def main():
     import workers
     parser = argparse.ArgumentParser(description=main.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('cases', nargs='?', help='Python literal list of selected cases; default: the complete matrix')
-    parser.add_argument('--workers', type=int, default=2, help='fresh prover processes at once (default: 2)')
+    parser.add_argument('--workers', type=int, default=8, help='fresh prover processes at once (default: 8)')
     arguments = parser.parse_args()
+    import prove_x86 as p
     declared = cases()
     todo = ast.literal_eval(arguments.cases) if arguments.cases is not None else declared
+    for isa, windows in {(c[0], c[1]) for c in todo}:
+        so = p.assemble(isa, windows)
+        x86.symbols(so)
+        x86.image(so)
+    todo = sorted(todo, key=lambda c: (-c[3], -p.WIDTH[c[0]], -c[2]))
     assert todo and all(case in declared for case in todo), 'select nonempty cases from the declared 102-case matrix'
     assert arguments.workers >= 1, 'at least one worker'
     failures = 0

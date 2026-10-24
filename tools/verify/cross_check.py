@@ -15,6 +15,7 @@ address against its region, and their models are a few lines each.
 import ctypes
 import os
 import random
+random.seed(0)
 import re
 import subprocess
 import sys
