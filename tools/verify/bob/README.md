@@ -80,7 +80,7 @@ Rust is proved too (#120).
 
 Arm's ASL reaches Lean through Sail by a long chain (`asl_to_sail`, Sail's
 type checker and rewrites, its Lean backend), tens of thousands of lines.
-A probe (`probe/sail-lean`) found two translation bugs in two
+The October 10 probe (`probe/sail-lean`) found two translation bugs in two
 days (dropped tuple assignments, rems-project/sail#1772; `MOD` computing a
 quotient, rems-project/sail-arm#33), the whole model ran out of memory at
 81 GB, and Lean took over 40 minutes to elaborate the decoder. Our own
@@ -95,7 +95,7 @@ can read, asks less of him than either.
   from `https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-A64-ISA/ISA_A64/ISA_A64_xml_A_profile-2026-03_96.tar.gz`
   (SHA-256 `9d138aa4dd6db8b04bd6ad3a378205537bf67172a5f99180729517d1445f1906`,
   BLAKE3 `cc29573c01df924dce36a89389f49ab1e9ff747530ab008c6ba87f8915a95109`,
-  Arm's other download pages answer bots with
+  fetched October 22, 2026; Arm's other download pages answer bots with
   403). The archive holds the 2025-09 release in ASL1, the version of the
   language that Arm's reference manual and ASLRef define:
   `ISA_A64_xml_A_profile_2025-09_96-2025-09_ASL1/`, one XML file per
@@ -124,7 +124,7 @@ can read, asks less of him than either.
 ## What Lean's kernel computes, and how fast
 
 Without `native_decide`, every step Bob relies on is reduced by Lean's
-kernel (`decide +kernel`). Measured on the VM, Lean 4.34.1:
+kernel (`decide +kernel`). Measured on the VM, Lean 4.34.1 (October 22):
 
 | work | size | time |
 |---|---|---|

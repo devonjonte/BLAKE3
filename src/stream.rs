@@ -234,8 +234,17 @@ impl Storage {
         Storage {
             source: Box::leak(Box::new(crate::lanes::sources::Source::new(ENTRIES))),
             entries: std::vec![Entry { len: 0, kind: Kind::Abandoned, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
-            // Zeroed, untouched pages: only the bytes used are faulted in.
-            ring: Box::into_raw(std::vec![0u8; RING_BYTES].into_boxed_slice()) as *mut u8,
+            ring: {
+                // Zeroed, untouched pages (only the bytes used are faulted
+                // in: calloc maps them lazily, where an aligned allocation
+                // would write all 2 MiB), starting at the first 64-byte
+                // boundary, as each room's offset is, so every room starts
+                // a cache line (glibc puts a 2 MiB block 16 bytes into
+                // one). Kept for good, as the storage is.
+                let block = Box::leak(std::vec![0u8; RING_BYTES + 64].into_boxed_slice());
+                let start = block.as_ptr().align_offset(64);
+                block[start..].as_mut_ptr()
+            },
             pieces_out: (0..ENTRIES).map(|_| OwnLine(Out(UnsafeCell::new([0; 64])))).collect(),
             lefts: (0..ENTRIES).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
         }
@@ -310,9 +319,9 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// stream's own bytes, in pieces of up to 64 KiB, its digest into
     /// `out`: `fill(at, room)` writes the message's bytes from `at` into
     /// all of `room` (a read from a file or socket straight into the
-    /// stream). The stream reuses the bytes once `out` is handed back; a
-    /// stream keeps 4 MiB of them, and `submit_with` waits for room as
-    /// `submit` does.
+    /// stream). Each `room` starts on a 64-byte boundary. The stream
+    /// reuses the bytes once `out` is handed back; a stream keeps 2 MiB of
+    /// them, and `submit_with` waits for room as `submit` does.
     pub fn submit_with(&mut self, len: usize, mut fill: impl FnMut(usize, &mut [u8]), out: &'env mut Hash) {
         let out: *mut Hash = out;
         let pieces = len.div_ceil(PIECE).max(1);
@@ -852,12 +861,26 @@ mod test {
         stream(Mode::Hash, record(&mut handed), |s| {
             for len in lens {
                 s.submit(&input[..len], &mut take(&mut rest, 1)[0]);
-                s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), &mut take(&mut rest, 1)[0]);
+                s.submit_with(
+                    len,
+                    |at, room| {
+                        assert_eq!(room.as_ptr() as usize % 64, 0, "a room starts a cache line");
+                        room.copy_from_slice(&input[at..][..room.len()])
+                    },
+                    &mut take(&mut rest, 1)[0],
+                );
             }
             assert_eq!(s.submit_reader(&input[..2 * PIECE + 1], None, &mut take(&mut rest, 1)[0]).unwrap(), 2 * PIECE as u64 + 1);
             assert!(s.submit_reader(Uneven { data: &input, at: 0, calls: 0, fail_at: Some(PIECE + 1) }, None, &mut take(&mut rest, 1)[0]).is_err());
             s.submit_batch(&input[..4 * 64], 64, take(&mut rest, 4));
-            s.submit_batch_with(64, |at, room| room.copy_from_slice(&input[at..][..room.len()]), take(&mut rest, 3));
+            s.submit_batch_with(
+                64,
+                |at, room| {
+                    assert_eq!(room.as_ptr() as usize % 64, 0, "a room starts a cache line");
+                    room.copy_from_slice(&input[at..][..room.len()])
+                },
+                take(&mut rest, 3),
+            );
             s.finish();
         });
         let mut want: std::vec::Vec<Hash> = lens.iter().flat_map(|&l| [crate::hash(&input[..l]); 2]).collect();
