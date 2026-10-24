@@ -86,6 +86,19 @@ class Placeholders(unittest.TestCase):
                              "UNCLASSIFIED (the clock stopped: blake3-servil a_test, blake3-servil b_test)")
             self.assertEqual(check.unclassified("src/lib.rs\tother"), "UNCLASSIFIED")
 
+class Model(unittest.TestCase):
+    def test_a_name_counts_place_by_place_with_the_model(self):
+        # gate20 (October 24): Finish::wait's deleted ! at two places; the
+        # suite's clock stopped one, which the model catches, and the
+        # other survives both. Counted by name, the caught place stood as
+        # a time-out.
+        name = "src/finish.rs\tdelete ! in Finish::wait"
+        outcomes = {"run": {(name, "91:16"): "MissedMutant", (name, "97:75"): "TimedOut"},
+                    "loom": {(name, "91:16"): "MissedMutant", (name, "97:75"): "CaughtMutant"}}
+        with patch.object(check, "PLACE_OUTCOMES", outcomes), patch.object(check, "LOOM_FILES", ["src/finish.rs"]):
+            found, timed = check.with_model("run", {name: 1}, {name: 1})
+        self.assertEqual((found.get(name, 0), timed.get(name, 0)), (1, 0))
+
 
 if __name__ == "__main__":
     unittest.main()

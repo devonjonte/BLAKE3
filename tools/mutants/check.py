@@ -186,19 +186,35 @@ def cap_memory(shards=SHARDS):
     resource.setrlimit(resource.RLIMIT_DATA, (cap, cap))
 
 
-def with_loom(found, timed, functions, loom_found, loom_functions, loom_timed):
-    """The suite's outcomes with Loom's for the loom files' mutants: a
-    mutant is caught when either catches it (Loom sees every interleaving
-    of the handshake; the suite has the standard library's tests of it,
-    such as a spurious wake), so a name survives, or times out, only as
-    far as both left it."""
-    for k in {k for k in list(found) + list(timed) if k.split("\t", 1)[0] in LOOM_FILES}:
-        left = loom_found.get(k, 0) + loom_timed.get(k, 0)
-        found[k] = min(found.get(k, 0), left)
-        timed[k] = min(timed.get(k, 0), left)
-    found, timed = +found, +timed
-    functions = {**functions, **{k: v for k, v in loom_functions.items()}}
-    return found, timed, functions
+def with_model(label, found, timed):
+    """`found` and `timed` with the model files' names counted again place
+    by place, from `label`'s run and the model's ("loom"): a place is
+    caught when either catches it (the model runs the handshake's
+    schedules; the suite has the standard library's tests of it, such as
+    a spurious wake). A name counts per place, never by its totals: two
+    places of one name may fall each to a different side (Finish::wait's
+    deleted !: the model catches one, the other survives both; counted
+    by name, the caught one stood as a time-out, gate20, October 24)."""
+    found, timed = collections.Counter(found), collections.Counter(timed)
+    outcomes, model = PLACE_OUTCOMES.get(label, {}), PLACE_OUTCOMES.get("loom", {})
+    names = {n for n, _ in outcomes if n.split("\t", 1)[0] in LOOM_FILES}
+    for n in names:
+        found[n] = timed[n] = 0
+    for (n, place), summary in outcomes.items():
+        if n not in names or summary == "CaughtMutant" or model.get((n, place)) == "CaughtMutant":
+            continue
+        if summary == "MissedMutant":
+            found[n] += 1
+        else:
+            timed[n] += 1
+    return +found, +timed
+
+
+def with_loom(found, timed, functions, loom_functions):
+    """The suite's outcomes with the model's for the model files' mutants
+    (with_model), and the model's functions beside the suite's."""
+    found, timed = with_model("run", found, timed)
+    return found, timed, {**functions, **loom_functions}
 
 
 def scratch_dir():
@@ -299,6 +315,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
                     timed[name] += 1
                     CLOCK_ONLY.add(f"{name}\t{place}")
                     STOPPED.setdefault(name, set()).update(t for t, o, _ in tests if o == "TIMEOUT")
+                PLACE_OUTCOMES.setdefault(label, {})[(name, place)] = summary
             functions[(mutant["file"], function)].append((summary, name))
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
@@ -320,6 +337,9 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
 # TIMEOUTS): a hang, or a test made slow by the mutant, or by the machine's
 # load (a mutant compiled out of the build was stopped so once, at 5 s).
 CLOCK_ONLY = set()
+# Each run's outcome a place, by label: {(name, place): summary}, for
+# with_model's count place by place.
+PLACE_OUTCOMES = {}
 # The tests the clock stopped, a timed-out name's: a new row's placeholder
 # names them, so its reason starts from what stopped (October 24).
 STOPPED = {}
@@ -402,6 +422,8 @@ def confirm(found, known, timed, tknown, differ=None):
         return found, timed
     patterns = [": " + re.escape(k.split("\t", 1)[1]) + "$" for k in differ]
     again, _, again_timed = run(sorted({k.split("\t", 1)[0] for k in differ}), [arg for p in patterns for arg in ("--re", p)], shards=1, label="confirm")
+    if LOOM_FILES:
+        again, again_timed = with_model("confirm", again, again_timed)
     confirmed, confirmed_timed = collections.Counter(found), collections.Counter(timed)
     for k in differ:
         confirmed[k], confirmed_timed[k] = again.get(k, 0), again_timed.get(k, 0)
@@ -549,7 +571,7 @@ def main():
         # One shard: a change's mutants are few, and each shard builds anew.
         found, functions, timed = run(files, ["--in-diff", path], shards=1) if diff else (collections.Counter(), {}, collections.Counter())
         if any(f in diff for f in LOOM_FILES):
-            found, timed, functions = with_loom(found, timed, functions, *run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True))
+            found, timed, functions = with_loom(found, timed, functions, run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True)[1])
         if extra:
             # The altered tests' catches, wherever they are: by name.
             again, more, again_timed = run(sorted({k.split("\t", 1)[0] for k in extra}), [arg for k in extra for arg in ("--re", ": " + re.escape(k.split("\t", 1)[1]) + "$")], label="tests")
@@ -572,7 +594,7 @@ def main():
         sys.exit(1 if new else 2 if new_timed else 0)
     found, functions, timed = run(files)
     if LOOM_FILES:
-        found, timed, functions = with_loom(found, timed, functions, *run(LOOM_FILES, shards=1, label="loom", loom=True))
+        found, timed, functions = with_loom(found, timed, functions, run(LOOM_FILES, shards=1, label="loom", loom=True)[1])
     found, timed = confirm(found, known, timed, tknown)
     figure(functions, {**{k: tknown.get(k, (n, "UNCLASSIFIED")) for k, n in timed.items()},
                        **{k: known.get(k, (n, "UNCLASSIFIED")) for k, n in found.items()}})
