@@ -170,6 +170,12 @@ fn build_sse41_avx2_assembly() {
         build.file("c/blake3_avx2_x86-64_unix.S");
         // One chunk or less as the root, off the stack (src/ffi_chunk_root.rs).
         build.file("c/blake3_chunk_root_x86-64_unix.S");
+        // Experimental GPR arithmetic, measured only with this build-time opt-in.
+        println!("cargo:rerun-if-env-changed=BLAKE3_DIAGNOSTIC_GPR");
+        if std::env::var_os("BLAKE3_DIAGNOSTIC_GPR").is_some() {
+            build.file("c/blake3_gpr_chunk_root_x86-64_unix.S");
+            println!("cargo:rustc-cfg=blake3_gpr_experiment");
+        }
     }
     build.compile("blake3_sse41_avx2_assembly");
 }
@@ -268,6 +274,7 @@ fn build_neon_hybrid_assembly() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rustc-check-cfg=cfg(blake3_gpr_experiment)");
     // If CFLAGS is set, make sure LTO is disabled by appending -fno-lto. (We can't do this with
     // .flag() later on, because CFLAGS takes precedence.) Any mismatch between the C compiler and
     // the Rust linker can cause linker errors in our C intrinsics implementations if LTO is
