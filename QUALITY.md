@@ -102,7 +102,8 @@ mistakes in some of the tools and models used to construct the proofs.
 
 No human has carefully reviewed every line, and nobody outside the
 project has audited the code. The proofs trust the written
-specification, the instruction models, Z3, and each kernel's stated
+specification, the instruction models, the automated prover (Z3),
+and each kernel's stated
 memory and calling convention. Tests cover the Rust kernels and the
 Rust code around the assembly. These checks reduce risk, but they
 cannot guarantee that no bug remains.
