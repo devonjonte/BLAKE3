@@ -557,6 +557,11 @@ def figure(functions, known):
 
 
 def main():
+    # The run's first line names what it measured, so a release gate can
+    # hold its log to the release's commit (John Servil, BLAKE3 #125).
+    commit = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    changed = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, check=True).stdout.strip()
+    print(f"mutants: the fork at {commit}{', with uncommitted changes' if changed else ''}", flush=True)
     files, known = read_known()
     _, tknown = read_known(TIMEOUTS, INACTIVE_TIMEOUTS)
     # A test known to be missing is work to do now, not a survivor to keep:
