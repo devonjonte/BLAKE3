@@ -20,8 +20,7 @@ The README lists what the fork adds for callers; the code is laid out so:
 - `src/`: the Rust around them. `lib.rs` (the one-shot calls, the
   `Hasher`), `platform.rs` (detection and dispatch), `many.rs` (batches),
   `each.rs` (collections, `update_each`), `lanes.rs` (the thread pool),
-  `stream.rs` (the stream), `outboard.rs` (outboards and the `Verifier`),
-  `self_test.rs` (the startup self-test), `hasher.rs` (the Hasher's
+  `stream.rs` (the stream), `self_test.rs` (the startup self-test), `hasher.rs` (the Hasher's
   stack, loop, and chunk state), and `tree.rs` (the tree walk).
 - `capi/`: the C API, `b3.h`, a thin layer over the crate
   (`capi/src/lib.rs`), tested from Rust against the official test vectors

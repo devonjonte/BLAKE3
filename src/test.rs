@@ -932,8 +932,6 @@ mod guard_pages {
                         assert_eq!(*h.finalize().as_bytes(), want[i], "update_each, {count} x {len} B, at end {at_end}");
                     }
                     if count == 1 {
-                        let (hash, _) = crate::outboard_with(Mode::Hash, items[0]);
-                        assert_eq!(*hash.as_bytes(), want[0], "outboard_with, {len} B, at end {at_end}");
                         let mut h = crate::Hasher::new();
                         for piece in items[0].chunks(1000) {
                             h.update(piece);
