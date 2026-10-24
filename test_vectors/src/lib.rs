@@ -248,8 +248,8 @@ mod tests {
 
     fn test_recursive(key: &[u8; blake3::KEY_LEN], input: &[u8], expected_hash: &[u8], expected_keyed_hash: &[u8], expected_derive_key: &[u8]) {
         assert_eq!(&expected_hash[..32], blake3::convenience::hash(input).as_bytes());
-        assert_eq!(&expected_keyed_hash[..32], blake3::performance::hash(blake3::Mode::Keyed(key), input).as_bytes(),);
-        assert_eq!(expected_derive_key[..32], *blake3::performance::hash(blake3::Mode::DeriveKey(TEST_CONTEXT), input).as_bytes());
+        assert_eq!(&expected_keyed_hash[..32], blake3::convenience::hash_with(blake3::Mode::Keyed(key), input).as_bytes(),);
+        assert_eq!(expected_derive_key[..32], *blake3::convenience::hash_with(blake3::Mode::DeriveKey(TEST_CONTEXT), input).as_bytes());
     }
 
     #[test]

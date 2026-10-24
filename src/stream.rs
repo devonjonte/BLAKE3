@@ -135,18 +135,19 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 ///
 /// ```
 /// # blake3_servil::initialize_multithreaded(None);
-/// use blake3_servil::{Hash, Mode};
-/// let messages: Vec<Vec<u8>> = (0..1000u32).map(|i| i.to_le_bytes().repeat(16)).collect();
+/// use blake3_servil::{Hash, Mode, performance::Block};
+/// // Each message 64 bytes in one block, as the stream borrows messages.
+/// let messages: Vec<Block> = (0..1000u32).map(|i| Block(i.to_le_bytes().repeat(16).try_into().unwrap())).collect();
 /// let mut digests = vec![Hash::from_bytes([0; 32]); messages.len()];
 /// let mut handed_back = 0;
 /// blake3_servil::performance::stream(Mode::Hash, |done: &mut [Hash]| handed_back += done.len(), |s| {
 ///     for (message, digest) in messages.iter().zip(&mut digests) {
-///         s.submit(message, digest);
+///         s.submit(core::slice::from_ref(message), 64, digest);
 ///     }
 ///     s.finish();
 /// });
 /// assert_eq!(handed_back, 1000);
-/// assert_eq!(digests[7], blake3_servil::convenience::hash(&messages[7]));
+/// assert_eq!(digests[7], blake3_servil::convenience::hash(&messages[7].0));
 /// ```
 pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: impl for<'s> FnOnce(&'s mut Stream<'env, D>) -> T) -> T {
     let mut stream = Stream::open(mode, done);
@@ -295,8 +296,12 @@ pub struct Stream<'env, D> {
 unsafe impl<D: Send> Send for Stream<'_, D> {}
 
 impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
-    /// Hash `message` where it is, its digest into `out`.
-    pub fn submit(&mut self, message: &'env [u8], out: &'env mut Hash) {
+    /// Hash the message of `len` bytes that starts `message`, where it is,
+    /// its digest into `out`: a [`Block`](crate::performance::Block)-aligned
+    /// message, as [`hash`](crate::performance::hash) takes one (the bytes
+    /// past its end ignored).
+    pub fn submit(&mut self, message: &'env [crate::performance::Block], len: usize, out: &'env mut Hash) {
+        let message: &'env [u8] = &crate::performance::Block::bytes(message)[..len];
         let out: *mut Hash = out;
         let pieces = message.len().div_ceil(PIECE).max(1);
         for i in 0..pieces {
@@ -752,7 +757,9 @@ mod test {
         let key = [5u8; 32];
         let lens: std::vec::Vec<usize> =
             (0..12000).map(|i| [0, 1, 63, 64, 64, 64, 100, 1024, 1024, 1500, 4096, PIECE, PIECE + 1, 200_000, (1 << 20) + 7, 64][i % 16]).collect();
-        let message = |i: usize| &input[i % 97..][..lens[i]];
+        // Borrowed messages start their blocks: 0, 1 or 2 blocks in.
+        let blocks = crate::test::message(&input);
+        let message = |i: usize| &input[64 * (i % 3)..][..lens[i]];
         for (mode, ways) in [(Mode::Hash, 0), (Mode::Keyed(&key), 1), (Mode::DeriveKey("stream test"), 2)] {
             let mut got = places(lens.len());
             let want_handed: std::vec::Vec<(usize, usize)> = got.iter().map(|h| (h as *const Hash as usize, 1)).collect();
@@ -766,7 +773,7 @@ mod test {
                     // Borrowed, written in place (in reads of up to 1000
                     // bytes), or each in turn.
                     if ways == 0 || (ways == 2 && i % 3 == 0) {
-                        s.submit(message(i), out);
+                        s.submit(&blocks[i % 3..], lens[i], out);
                     } else {
                         s.submit_with(
                             lens[i],
@@ -786,7 +793,7 @@ mod test {
             });
             assert!(handed == want_handed, "every place handed back once, in order");
             for i in 0..lens.len() {
-                assert_eq!(got[i], crate::performance::hash(mode, message(i)), "message {i}, {} bytes", lens[i]);
+                assert_eq!(got[i], crate::convenience::hash_with(mode, message(i)), "message {i}, {} bytes", lens[i]);
             }
         }
     }
@@ -797,6 +804,7 @@ mod test {
     #[cfg_attr(not(panic = "unwind"), ignore = "catches panics, which this target aborts on")]
     fn test_stream_panics() {
         let input = std::vec![9u8; 300_000];
+        let blocks = crate::test::message(&input);
         for unwinding in [false, true] {
             let result = std::panic::catch_unwind(|| {
                 let mut got = places(4);
@@ -805,7 +813,7 @@ mod test {
                     |_: &mut [Hash]| {},
                     |s| {
                         for (len, out) in [10, 100_000, 64, 300_000].into_iter().zip(&mut got) {
-                            s.submit(&input[..len], out);
+                            s.submit(&blocks, len, out);
                         }
                         assert!(!unwinding, "the body panics");
                     },
@@ -849,13 +857,14 @@ mod test {
     fn test_miri_stream() {
         let input = std::vec![3u8; 3 * PIECE + 5];
         let batch = crate::test::blocks(&input[..4 * 64]);
+        let blocks = crate::test::message(&input);
         let lens = [0, 64, 64, 1000, PIECE + 1, 3 * PIECE + 5];
         let mut got = places(2 * lens.len() + 2 + 7);
         let mut handed = std::vec::Vec::new();
         let mut rest: &mut [Hash] = &mut got;
         stream(Mode::Hash, record(&mut handed), |s| {
             for len in lens {
-                s.submit(&input[..len], &mut take(&mut rest, 1)[0]);
+                s.submit(&blocks, len, &mut take(&mut rest, 1)[0]);
                 s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), &mut take(&mut rest, 1)[0]);
             }
             assert_eq!(s.submit_reader(&input[..2 * PIECE + 1], None, &mut take(&mut rest, 1)[0]).unwrap(), 2 * PIECE as u64 + 1);

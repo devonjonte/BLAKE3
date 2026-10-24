@@ -107,7 +107,7 @@ pub unsafe extern "C" fn b3_derive_key(context: *const c_char) -> B3Mode {
 pub unsafe extern "C" fn b3_hash(mode: *const B3Mode, input: *const c_void, len: usize) -> Digest {
     blake3_servil::initialize();
     let mode = unsafe { self::mode(mode) };
-    digest(blake3_servil::performance::hash(mode.mode(), unsafe { bytes(input, len, "the input") }))
+    digest(blake3_servil::convenience::hash_with(mode.mode(), unsafe { bytes(input, len, "the input") }))
 }
 
 /// # Safety
@@ -116,7 +116,9 @@ pub unsafe extern "C" fn b3_hash(mode: *const B3Mode, input: *const c_void, len:
 pub unsafe extern "C" fn b3_hash_multithreaded(mode: *const B3Mode, input: *const c_void, len: usize) -> Digest {
     blake3_servil::initialize_multithreaded(None);
     let mode = unsafe { self::mode(mode) };
-    digest(blake3_servil::performance::hash_multithreaded(mode.mode(), unsafe { bytes(input, len, "the input") }))
+    // Any pointer, as b3_hash takes: the Hasher takes any slice, at the
+    // one-shot's speed (the i7, 512 KiB to 1 GiB).
+    digest(Hasher::new_with(mode.mode()).update_multithreaded(unsafe { bytes(input, len, "the input") }).finalize())
 }
 
 /// The batch's input and digests, as slices.
@@ -252,17 +254,28 @@ pub unsafe extern "C" fn b3_stream_begin(mode: *const B3Mode, done: B3Done, ctx:
 }
 
 /// # Safety
-/// `stream` came from `b3_stream_begin` and is not finished; `input` holds
-/// `len` bytes (NULL only with `len` 0) and `out` a digest's room, both
-/// alive until `b3_stream_finish`.
+/// `stream` came from `b3_stream_begin` and is not finished; `input` starts
+/// at a 64-byte boundary and holds `len` bytes rounded up to whole 64-byte
+/// blocks (one block for `len` 0; NULL only with `len` 0), and `out` a
+/// digest's room, both alive until `b3_stream_finish`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn b3_stream_submit(stream: *mut B3Stream, input: *const c_void, len: usize, out: *mut Digest) {
     let s = unsafe { stream_mut(stream) };
     assert!(!out.is_null(), "b3: the digest's place is NULL");
     // Sound by the contract: both live until finish, which is 'static to
     // the stream; a Digest is a Hash.
-    let input: &'static [u8] = unsafe { bytes(input, len, "the input") };
-    s.stream.submit(input, unsafe { &mut *(out as *mut Hash) });
+    let blocks = len.div_ceil(64).max(1);
+    // The message's blocks: a misaligned pointer cannot soundly become a
+    // &[Block], the stop Rust's soundness needs (as for a batch).
+    let input = if input.is_null() {
+        assert_eq!(len, 0, "b3: the input is NULL with a length of {len}");
+        &[Block::ZERO][..]
+    } else {
+        Block::from_bytes(unsafe { bytes(input, blocks * 64, "the input") })
+            .expect("b3: a submitted message starts at a 64-byte boundary (aligned_alloc(64, n))")
+    };
+    let input: &'static [Block] = unsafe { core::slice::from_raw_parts(input.as_ptr(), input.len()) };
+    s.stream.submit(input, len, unsafe { &mut *(out as *mut Hash) });
 }
 
 /// # Safety

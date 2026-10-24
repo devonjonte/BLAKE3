@@ -42,9 +42,10 @@
 //! - **[`performance`]**, for power users: every way this crate makes
 //!   hashing fast (other cores, batches, collections, streams, the
 //!   [`Hasher`] for a message fed in pieces). The
-//!   program takes on more of the work: inputs start at 64-byte
-//!   boundaries, batches are laid out in 64-byte slots, digests go into
-//!   the program's places, and every call takes a [`Mode`].
+//!   program takes on more of the work: inputs come as
+//!   [`Block`](performance::Block)s (64 bytes on a 64-byte boundary, so
+//!   alignment is the type's), digests go into the program's places, and
+//!   every call takes a [`Mode`].
 //!
 //! A program that wants more speed than the convenience calls give moves
 //! to the performance ones.
@@ -928,7 +929,8 @@ pub fn initialize() {
 ///
 /// ```
 /// blake3_servil::initialize_multithreaded(None);
-/// let hash = blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Hash, &[0u8; 1 << 20]);
+/// let message = vec![blake3_servil::performance::Block::ZERO; (1 << 20) / 64];
+/// let hash = blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Hash, &message, 1 << 20);
 /// assert_eq!(hash, blake3_servil::convenience::hash(&[0u8; 1 << 20]));
 /// ```
 #[cfg(feature = "std")]
