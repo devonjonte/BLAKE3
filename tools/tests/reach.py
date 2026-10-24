@@ -242,9 +242,17 @@ def fn_body_lines(text, const_too=False):
     come back as a second set."""
     blank = re.sub(r"//[^\n]*|/\*.*?\*/|\"(\\.|[^\"\\])*\"|'(\\.|[^'\\])'", lambda m: re.sub(r"[^\n]", " ", m.group(0)), text, flags=re.S)
     inside, in_const, depth, pending, body_depths = set(), set(), 0, None, []
+    # A function's qualifiers are the words since the last item ended (a
+    # `;`, `{` or `}`), on this line or earlier ones: `const` among them
+    # makes it a const fn, in whatever form (`const extern "C" fn`, with
+    # the ABI string blanked above; `const` on one line and `fn` on the
+    # next: Sam Shackleton's controls, October 24).
+    header = ""
     for number, line in enumerate(blank.splitlines(), 1):
-        if re.search(r"\bfn\b", line):
-            pending = "const" if re.search(r"\bconst\s+(unsafe\s+)?(extern\s+\"[^\"]*\"\s+)?fn\b", line) else "fn"
+        m = re.search(r"\bfn\b", line)
+        if m:
+            pending = "const" if re.search(r"\bconst\b", header + line[: m.start()]) else "fn"
+        header += line + "\n"
         for ch in line:
             if ch == "{":
                 depth += 1
@@ -255,6 +263,8 @@ def fn_body_lines(text, const_too=False):
                 if body_depths and depth == body_depths[-1][0]:
                     body_depths.pop()
                 depth -= 1
+        if re.search(r"[;{}]", line):
+            header = ""
         if ";" in line and pending and "{" not in line:
             pending = None  # a trait's method without a body
         if body_depths:

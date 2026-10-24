@@ -75,6 +75,25 @@ class Rule(unittest.TestCase):
         chosen, everything = reach.select(tests, {"src/lib.rs": set(range(1, 11))}, ["direct", "indirect"], diff)
         self.assertIsNotNone(everything)
 
+    def test_a_const_fn_in_any_form_runs_every_test(self):
+        # Sam Shackleton's controls, October 24: `const extern "C" fn`, and
+        # `const` on one line with `fn` on the next, are const fns too.
+        for header in ['#[inline(never)]\nconst extern "C" fn base() -> u16 {', "#[inline(never)]\nconst\nfn base() -> u16 {", "pub const unsafe fn base() -> u16 {"]:
+            lib = header + "\n    3\n}\nconst B: u16 = base();\npub fn direct() -> u8 {\n    base() as u8\n}\npub fn indirect() -> u16 {\n    B\n}\n"
+            base({"src/lib.rs": lib})
+            body = header.count("\n") + 2
+            lines = lib.count("\n")
+            tests = {"direct": {"src/lib.rs": set(range(1, body + 5))}, "indirect": {"src/lib.rs": set(range(body + 5, lines + 1))}}
+            diff = {"src/lib.rs": [hunk(body, 1, body, 1, ["    259"])]}
+            chosen, everything = reach.select(tests, {"src/lib.rs": set(range(1, lines + 1))}, ["direct", "indirect"], diff)
+            self.assertIsNotNone(everything, header)
+        # And a plain fn after a const item stays a plain fn: its body
+        # line selects its own tests.
+        base({"src/lib.rs": self.LIB})
+        chosen, everything = reach.select(self.TESTS, self.INSTRUMENTED, ["two", "three"], {"src/lib.rs": [hunk(4, 1, 4, 1, ["    let y = x + x;"])]})
+        self.assertIsNone(everything)
+        self.assertEqual(set(chosen), {"two"})
+
     def test_what_coverage_cannot_see_runs_every_test(self):
         for path in ["c/blake3_avx2_x86-64_unix.S", "build.rs", "Cargo.toml", ".config/nextest.toml"]:
             diff = {path: [hunk(1, 1, 1, 1, ["x"])]}
