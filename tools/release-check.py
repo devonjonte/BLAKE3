@@ -17,13 +17,15 @@ and the rest timed out or have no verdict.
 - Mac check: runner/results/*/verdict.json whose job names this commit as
   new_commit and the previous release as old_commit (a "check" job with
   "cells": "all").
-- VM check: tmp/night/check-release-vm.log, written by
-  `cd bench-hashes && cargo run --release -- check --against <previous tag> --cells all`.
-- Full mutation run: tmp/night/mutants-release.log ending "each known and
-  explained", from `python3 tools/mutants/check.py` on the commit.
-- check-builds: tmp/night/check-builds-release.log ending "every build passes".
-- Publish dry run: tmp/night/publish-dry-run.log, from
-  `cargo publish --dry-run` in the root and in b3sum/.
+- The logs, each named for the commit it ran on (C: the commit's first 12
+  hex digits), so an earlier commit's log cannot stand in for it:
+  - VM check: tmp/night/check-release-vm-C.log, from
+    `cd bench-hashes && cargo run --release -- check --against <previous tag> --cells all`.
+  - Full mutation run: tmp/night/mutants-C.log ending "each known and
+    explained", from `python3 tools/mutants/check.py` with the commit checked out.
+  - check-builds: tmp/night/check-builds-C.log ending "every build passes".
+  - Publish dry run: tmp/night/publish-dry-run-C.log, from
+    `cargo publish --dry-run` in the root and in b3sum/.
 - The pages: README.md, QUALITY.md, CHANGELOG.md changed since the
   previous release (a release rewrites them for its readers).
 """
@@ -127,14 +129,14 @@ def main():
          f"a check job (cells all) with old_commit {previous or '<previous tag>'} and new_commit {commit[:10]}"
          + (f" (the last one: {mac})" if mac in ("timed out", "no verdict") else ""))
 
-    step("VM check against the previous release", log_ends_with("tmp/night/check-release-vm.log", "no cell slower"),
-         f"(cd bench-hashes && cargo run --release -- check --against {previous or '<previous tag>'} --cells all) > tmp/night/check-release-vm.log")
-    step("full mutation run", log_ends_with("tmp/night/mutants-release.log", "each known and explained"),
-         "python3 tools/mutants/check.py > tmp/night/mutants-release.log (overnight)")
-    step("check-builds", log_ends_with("tmp/night/check-builds-release.log", "every build passes"),
-         "sh tools/check-builds.sh > tmp/night/check-builds-release.log")
-    step("cargo publish --dry-run", log_ends_with("tmp/night/publish-dry-run.log", "publish-dry-run: ok"),
-         "(cargo publish --dry-run --allow-dirty && cd b3sum && cargo publish --dry-run --allow-dirty) > tmp/night/publish-dry-run.log && echo publish-dry-run: ok >> tmp/night/publish-dry-run.log")
+    step("VM check against the previous release", log_ends_with(f"tmp/night/check-release-vm-{commit[:12]}.log", "no cell slower"),
+         f"(cd bench-hashes && cargo run --release -- check --against {previous or '<previous tag>'} --cells all) > tmp/night/check-release-vm-{commit[:12]}.log")
+    step("full mutation run", log_ends_with(f"tmp/night/mutants-{commit[:12]}.log", "each known and explained"),
+         f"python3 tools/mutants/check.py > tmp/night/mutants-{commit[:12]}.log, the commit checked out (overnight)")
+    step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "every build passes"),
+         f"sh tools/check-builds.sh > tmp/night/check-builds-{commit[:12]}.log")
+    step("cargo publish --dry-run", log_ends_with(f"tmp/night/publish-dry-run-{commit[:12]}.log", "publish-dry-run: ok"),
+         f"(cargo publish --dry-run --allow-dirty && cd b3sum && cargo publish --dry-run --allow-dirty) > tmp/night/publish-dry-run-{commit[:12]}.log && echo publish-dry-run: ok >> tmp/night/publish-dry-run-{commit[:12]}.log")
 
     if previous:
         changed = set(git("diff", "--name-only", previous, commit).split())
