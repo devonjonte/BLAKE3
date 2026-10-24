@@ -3,7 +3,8 @@
 //! every `extern "C"` panic does). Each call initializes the crate first
 //! (a load once it has).
 
-use blake3_servil::{Hash, Hasher, Mode, OUT_LEN, Stream};
+use blake3_servil::performance::{Hasher, Stream};
+use blake3_servil::{Hash, Mode, OUT_LEN};
 use core::ffi::{CStr, c_char, c_void};
 
 /// `b3_digest`.
@@ -97,7 +98,7 @@ pub unsafe extern "C" fn b3_derive_key(context: *const c_char) -> B3Mode {
     blake3_servil::initialize();
     assert!(!context.is_null(), "b3: the context is NULL");
     let context = unsafe { CStr::from_ptr(context) }.to_str().expect("b3: the context is UTF-8");
-    B3Mode { kind: 2, key: blake3_servil::hash_derive_key_context(context) }
+    B3Mode { kind: 2, key: blake3_servil::performance::hash_derive_key_context(context) }
 }
 
 /// # Safety
@@ -106,7 +107,7 @@ pub unsafe extern "C" fn b3_derive_key(context: *const c_char) -> B3Mode {
 pub unsafe extern "C" fn b3_hash(mode: *const B3Mode, input: *const c_void, len: usize) -> Digest {
     blake3_servil::initialize();
     let mode = unsafe { self::mode(mode) };
-    digest(blake3_servil::hash_with(mode.mode(), unsafe { bytes(input, len, "the input") }))
+    digest(blake3_servil::performance::hash(mode.mode(), unsafe { bytes(input, len, "the input") }))
 }
 
 /// # Safety
@@ -115,7 +116,7 @@ pub unsafe extern "C" fn b3_hash(mode: *const B3Mode, input: *const c_void, len:
 pub unsafe extern "C" fn b3_hash_multithreaded(mode: *const B3Mode, input: *const c_void, len: usize) -> Digest {
     blake3_servil::initialize_multithreaded(None);
     let mode = unsafe { self::mode(mode) };
-    digest(blake3_servil::hash_multithreaded_with(mode.mode(), unsafe { bytes(input, len, "the input") }))
+    digest(blake3_servil::performance::hash_multithreaded(mode.mode(), unsafe { bytes(input, len, "the input") }))
 }
 
 /// The batch's input and digests, as slices.
@@ -141,7 +142,7 @@ pub unsafe extern "C" fn b3_hash_many(mode: *const B3Mode, input: *const c_void,
     blake3_servil::initialize();
     let mode = unsafe { self::mode(mode) };
     let (input, out) = unsafe { batch(input, message_len, count, out) };
-    blake3_servil::hash_many_with(mode.mode(), input, message_len, out);
+    blake3_servil::performance::hash_many(mode.mode(), input, message_len, out);
 }
 
 /// # Safety
@@ -151,7 +152,7 @@ pub unsafe extern "C" fn b3_hash_many_multithreaded(mode: *const B3Mode, input: 
     blake3_servil::initialize_multithreaded(None);
     let mode = unsafe { self::mode(mode) };
     let (input, out) = unsafe { batch(input, message_len, count, out) };
-    blake3_servil::hash_many_multithreaded_with(mode.mode(), input, message_len, out);
+    blake3_servil::performance::hash_many_multithreaded(mode.mode(), input, message_len, out);
 }
 
 /// # Safety

@@ -19,10 +19,10 @@ fn one_thread_starts_no_workers() {
     let before = threads();
     blake3_servil::initialize_multithreaded(Some(NonZeroUsize::MIN));
     let input: Vec<u8> = (0..8u32 << 20).map(|i| (i * 31 + i / 509) as u8).collect();
-    assert_eq!(blake3_servil::hash_multithreaded(&input), blake3_servil::hash(&input));
+    assert_eq!(blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Hash, &input), blake3_servil::convenience::hash(&input));
     blake3_servil::initialize_multithreaded(None);
     blake3_servil::initialize_multithreaded(Some(NonZeroUsize::MIN));
-    assert_eq!(blake3_servil::hash_multithreaded(&input), blake3_servil::hash(&input));
+    assert_eq!(blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Hash, &input), blake3_servil::convenience::hash(&input));
     // No other thread: no workers, no SME2 thread.
     #[cfg(target_os = "linux")]
     assert!(threads() <= before, "{before} threads before, {} after", threads());

@@ -14,14 +14,20 @@ and the tests are tested ([QUALITY.md](QUALITY.md)).
 2. Call `blake3_servil::initialize()` once before any other call. A
    program that makes multithreaded calls or uses a stream calls
    `initialize_multithreaded(None)` instead. A call before it panics.
-3. `keyed_hash(key, input)` is now `hash_with(Mode::Keyed(key), input)`.
-   `derive_key(context, material)` is now
-   `hash_with(Mode::DeriveKey(context), material)`. `Hasher::new_keyed`
-   and `Hasher::new_derive_key` are now `Hasher::new_with(mode)`. `hash`
-   and `Hasher::new` are unchanged.
+3. Two kinds of call, in two modules. `convenience`: one call per hash,
+   every feature, any slice, the result returned: `hash(input)` is now
+   `convenience::hash(input)`, `keyed_hash(key, input)` is
+   `convenience::hash_with(Mode::Keyed(key), input)`, `derive_key(context,
+   material)` is `convenience::hash_with(Mode::DeriveKey(context),
+   material)`, and `convenience::hash_xof(mode, input)` gives extended
+   output. `performance`, for power users, has every way to hash fast,
+   the `Hasher` among them (`Hasher::new_with(mode)` replaces
+   `Hasher::new_keyed` and `Hasher::new_derive_key`): the program takes
+   on more of the work, with inputs starting at 64-byte boundaries,
+   digests into its places, and a `Mode` in every call.
 4. Threads are the crate's own. `Hasher::update_rayon` is now
-   `update_multithreaded`. `hash_multithreaded(input)` hashes one message
-   over the threads. There is no `rayon` feature.
+   `update_multithreaded`. `performance::hash_multithreaded(mode, input)`
+   hashes one message over the threads. There is no `rayon` feature.
 5. Removed: `Hasher::update_mmap` and the `mmap` feature (map the file
    yourself, or use `update_reader`), the `traits-preview` feature, the
    `guts`, `hazmat`, and `platform` modules, and the `no_avx2`,
@@ -34,14 +40,16 @@ and the tests are tested ([QUALITY.md](QUALITY.md)).
 
 ## New
 
-- `hash_many` and `hash_many_multithreaded`: messages of one length in
-  one buffer.
-- `hash_each_with` and `hash_each_multithreaded_with`: a collection of any
-  lengths.
-- `Hasher::update_each`: many messages in progress at once.
-- `stream()`: inputs one after another, hashed behind the caller.
+- `performance::hash_many` and `hash_many_multithreaded`: messages of
+  one length in one buffer.
+- `performance::hash_each` and `hash_each_multithreaded`: a collection of
+  any lengths.
+- `performance::update_each` and `finalize_each`: many messages in
+  progress at once, each with its own `Hasher`.
+- `performance::stream()`: inputs one after another, hashed behind the
+  caller.
 - A C API in `capi/b3.h`. The library is `libb3_servil`. C11 and C++11.
-- `Mode::DeriveKeyMaterial` with `hash_derive_key_context`: one context
+- `Mode::DeriveKeyMaterial` with `performance::hash_derive_key_context`: one context
   hashed once for many derivations.
 
 ## Different

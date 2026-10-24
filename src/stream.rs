@@ -126,7 +126,7 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// threads keep looking for its next message for a few microseconds before
 /// they sleep, which makes streams of messages 3-5% faster. A program that
 /// streams and then soon makes a one-shot multithreaded call pays for it:
-/// on an i7-12700K under Linux, [`crate::hash_many_multithreaded`] on 16384
+/// on an i7-12700K under Linux, [`crate::performance::hash_many_multithreaded`] on 16384
 /// messages right after streams of 16-64 KiB messages ran about 5% slower.
 /// A program that keeps streaming does not pay it; one that alternates can
 /// stream its other work
@@ -139,14 +139,14 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// let messages: Vec<Vec<u8>> = (0..1000u32).map(|i| i.to_le_bytes().repeat(16)).collect();
 /// let mut digests = vec![Hash::from_bytes([0; 32]); messages.len()];
 /// let mut handed_back = 0;
-/// blake3_servil::stream(Mode::Hash, |done: &mut [Hash]| handed_back += done.len(), |s| {
+/// blake3_servil::performance::stream(Mode::Hash, |done: &mut [Hash]| handed_back += done.len(), |s| {
 ///     for (message, digest) in messages.iter().zip(&mut digests) {
 ///         s.submit(message, digest);
 ///     }
 ///     s.finish();
 /// });
 /// assert_eq!(handed_back, 1000);
-/// assert_eq!(digests[7], blake3_servil::hash(&messages[7]));
+/// assert_eq!(digests[7], blake3_servil::convenience::hash(&messages[7]));
 /// ```
 pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: impl for<'s> FnOnce(&'s mut Stream<'env, D>) -> T) -> T {
     let mut stream = Stream::open(mode, done);
@@ -418,7 +418,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     }
 
     /// Hash a batch of messages of `message_len` bytes where it is, laid
-    /// out as [`hash_many`](crate::hash_many) takes them (each in whole
+    /// out as [`hash_many`](crate::performance::hash_many) takes them (each in whole
     /// blocks, zero after its bytes), a digest per message into `out`, in
     /// the messages' order: `out` holds one per message. The batch goes in
     /// parts of up to 64 KiB, each one entry; `out` comes back whole.
@@ -441,7 +441,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     }
 
     /// Hash a batch of `out.len()` messages of `message_len` bytes that
-    /// `fill` writes in place, laid out as [`hash_many`](crate::hash_many)
+    /// `fill` writes in place, laid out as [`hash_many`](crate::performance::hash_many)
     /// takes them: `fill(at, room)` writes the batch's bytes from `at`
     /// (padding included: each message in whole blocks, zero after its
     /// bytes) into all of `room`, a part of up to 64 KiB at a time. As
@@ -792,7 +792,7 @@ mod test {
             });
             assert!(handed == want_handed, "every place handed back once, in order");
             for i in 0..lens.len() {
-                assert_eq!(got[i], crate::hash_with(mode, message(i)), "message {i}, {} bytes", lens[i]);
+                assert_eq!(got[i], crate::performance::hash(mode, message(i)), "message {i}, {} bytes", lens[i]);
             }
         }
     }
@@ -883,10 +883,10 @@ mod test {
             );
             s.finish();
         });
-        let mut want: std::vec::Vec<Hash> = lens.iter().flat_map(|&l| [crate::hash(&input[..l]); 2]).collect();
-        want.push(crate::hash(&input[..2 * PIECE + 1]));
+        let mut want: std::vec::Vec<Hash> = lens.iter().flat_map(|&l| [crate::convenience::hash(&input[..l]); 2]).collect();
+        want.push(crate::convenience::hash(&input[..2 * PIECE + 1]));
         want.push(Hash::from_bytes([0; 32]));
-        want.extend([crate::hash(&input[..64]); 7]);
+        want.extend([crate::convenience::hash(&input[..64]); 7]);
         assert_eq!(got, want);
         assert_eq!(handed.len(), 2 * lens.len() + 1 + 2, "a place back per submission, none for the failed reader");
     }

@@ -59,6 +59,6 @@ fn every_call_against_the_test_vectors() {
 fn null_with_nothing() {
     let mode = b3_plain();
     let empty = unsafe { b3_hash(&mode, core::ptr::null(), 0) };
-    assert_eq!(empty.bytes, *blake3_servil::hash(b"").as_bytes());
+    assert_eq!(empty.bytes, *blake3_servil::convenience::hash(b"").as_bytes());
     unsafe { b3_hash_many(&mode, core::ptr::null(), 64, 0, core::ptr::null_mut()) };
 }

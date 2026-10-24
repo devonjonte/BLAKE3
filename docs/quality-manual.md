@@ -28,8 +28,8 @@ algorithm:
   messages and a two-input path (`src/many.rs`, `src/pair.rs`);
 - a pool of worker threads for multithreaded hashing (`src/lanes.rs`);
 - batches of many messages in one call (`hash_many`, `src/many.rs`),
-  collections of messages and many hashers at once (`hash_each_with`,
-  `Hasher::update_each`, `src/each.rs`);
+  collections of messages and many hashers at once (`performance::hash_each`,
+  `performance::update_each`, `src/each.rs`);
 - the stream, which hashes the program's messages behind it, each digest
   into the place the program names (`stream`, `src/stream.rs`).
 - the startup self-test (`src/self_test.rs`);
@@ -189,8 +189,8 @@ unrolled kernel code.
   at every length to 2 KiB + 70 and around chunk counts up to 1025,
   `hash_many` at 15 message lengths and 20 counts, every input of a batch
   against a guard page of its own on every kernel the build and CPU have
-  (1 to 17 inputs), the collection calls (`hash_each_with`, its
-  multithreaded form, `Hasher::update_each`) with each
+  (1 to 17 inputs), the collection calls (`performance::hash_each`, its
+  multithreaded form, `performance::update_each`) with each
   item in its own pages, and extended output at 10 lengths from three
   positions. They found bug 8 below as a crash.
 - **AddressSanitizer** over the library tests: clean. As a control, a
