@@ -99,6 +99,17 @@ class Model(unittest.TestCase):
             found, timed = check.with_model("run", {name: 1}, {name: 1})
         self.assertEqual((found.get(name, 0), timed.get(name, 0)), (1, 0))
 
+class Limits(unittest.TestCase):
+    def test_tests_share_the_cpus_and_fit_in_memory(self):
+        gib = 1 << 30
+        with patch.object(check, "memory_cap", lambda shards: min(8 * gib, (15 * gib - 4 * gib) // shards)):
+            threads, cap = check.test_limits(6, 20, 15 * gib)
+        self.assertEqual(threads, 3)
+        self.assertLessEqual(6 * threads * cap, 11 * gib, "every shard's tests at their cap fit")
+        self.assertGreater(cap, 10 * 41 << 20, "ten times the heaviest honest test")
+        with patch.object(check, "memory_cap", lambda shards: 8 * gib):
+            self.assertEqual(check.test_limits(6, 4, 15 * gib)[0], 1, "at least one test thread")
+
 
 if __name__ == "__main__":
     unittest.main()

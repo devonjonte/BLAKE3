@@ -1,0 +1,6 @@
+#!/bin/sh
+# cargo's target runner for a mutation run's test binaries (check.py):
+# each test process may hold MUTANTS_TEST_DATA_KIB of data (RLIMIT_DATA),
+# its own cap, well under the builds' (check.py, test_limits).
+ulimit -d "$MUTANTS_TEST_DATA_KIB" || exit 101
+exec "$@"

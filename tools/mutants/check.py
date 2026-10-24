@@ -158,6 +158,8 @@ REACH = "--whole-suite" not in sys.argv
 # Runs at once, each in its own worktree and build: on the VM (16 CPUs),
 # a whole run took 47 minutes at 6 and about 60 at 3 (October 20).
 SHARDS = 6
+# The host's target triple, for its target runner's variable.
+HOST = next(l.split(": ", 1)[1] for l in subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True).stdout.splitlines() if l.startswith("host: "))
 # cargo-mutants needs a limit on a mutant's tests (with --in-place it would
 # otherwise take 300 s). The run's one clock is nextest's, a test's 30 s
 # (.config/nextest.toml, profile mutants), which ends a hanging test first;
@@ -178,6 +180,19 @@ BACKSTOP = 3600
 def memory_cap(shards):
     total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
     return min(8 << 30, (total - (4 << 30)) // shards)
+
+
+def test_limits(shards, cpus, total):
+    """(test threads a shard, each test process's data cap in bytes). A
+    shard runs cpus / shards tests at once, so the run keeps every CPU
+    busy as one nextest per CPU did, and shards x threads test processes
+    at their cap fit in the machine's memory less 4 GiB. One per CPU in
+    each shard was 120 test processes on the i7, each allowed the builds'
+    1.8 GiB: a runaway mutant's tests, several at once in each shard, took
+    the machine to 1.4 GiB free (gate22, October 24), where no honest test
+    holds more than 41 MiB (the suite, measured the same day)."""
+    threads = max(1, cpus // shards)
+    return threads, min(memory_cap(shards), (total - (4 << 30)) // (shards * threads))
 
 
 def cap_memory(shards=SHARDS):
@@ -248,6 +263,12 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
         # target-dir would otherwise give the shards one, and each would
         # test the others' builds).
         env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"), NEXTEST_PROFILE="mutants-map" if MAP else "mutants")
+        # The tests' own threads and memory cap (test_limits), the cap set
+        # by a target runner for test binaries alone; builds keep theirs.
+        threads, test_cap = test_limits(shards, os.cpu_count(), os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"))
+        env["NEXTEST_TEST_THREADS"] = str(threads)
+        env["MUTANTS_TEST_DATA_KIB"] = str(test_cap >> 10)
+        env[f"CARGO_TARGET_{HOST.upper().replace('-', '_')}_RUNNER"] = os.path.join(ROOT, "tools", "mutants", "test-runner")
         if loom:
             # The model checker's build of the same files (tests/shuttle_*.rs
             # compile them beside Shuttle's primitives): every schedule it
