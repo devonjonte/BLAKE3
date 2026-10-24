@@ -3,6 +3,12 @@
 sit, modulo the 4 KiB page (4 KiB aliasing), and whether that changed.
 
     python3 tools/offset_check.py [--exe BENCH] [--step BYTES] [--keep DIR]
+    python3 tools/offset_check.py --axis core [--exe BENCH] [--keep DIR]
+
+With --axis core, the place a cell runs is each CPU in turn, pinned (Linux):
+the cells bench-hashes #69 found to follow the physical core, solo, cores of
+one kind compared (a hybrid's P and E cores apart), reported as
+core-sensitive where the slowest core is confirmed slower than the fastest.
 
 Run from the fork's root with a bench-hashes checkout in `bench-hashes/` (or
 pass --exe, a `bench-hashes build-against` executable). Linux with glibc:
@@ -97,6 +103,41 @@ def offsets(step):
         yield f'thread-stack+{k * step}', {'GLIBC_TUNABLES': f'glibc.rtld.optional_static_tls={DEFAULT_TLS + k * step}'}
 
 
+# The core axis (--axis core): the cells bench-hashes #69 found to follow
+# the physical core on the EPYC 9255 (odd cores up to 1.4x slower, same
+# clock): batches of 64 and 256 messages and one message of 64 KiB, after
+# other work, solo (pinned to one CPU, a shared cell's two copies would
+# share it).
+CORE_POINTS = ['64', '256', '64 KiB']
+
+
+def cpu_kinds():
+    """{cpu: kind} for the CPUs this process may use: a hybrid's core types
+    from Linux's perf devices (cpu_core, cpu_atom), else one kind. Cores of
+    different kinds differ by design (an E core is slower), so the core
+    axis compares cores of one kind only."""
+    allowed = sorted(os.sched_getaffinity(0))
+    kinds = {}
+    for kind in ('cpu_core', 'cpu_atom'):
+        path = pathlib.Path(f'/sys/bus/event_source/devices/{kind}/cpus')
+        if path.exists():
+            for part in path.read_text().strip().split(','):
+                lo, _, hi = part.partition('-')
+                for cpu in range(int(lo), int(hi or lo) + 1):
+                    kinds[cpu] = kind
+    return {cpu: kinds.get(cpu, 'cpu') for cpu in allowed}
+
+
+def cores():
+    """The core axis's places: (name, (environment, cpu)) for each CPU."""
+    return [(f'cpu{cpu}', ({}, cpu)) for cpu in cpu_kinds()]
+
+
+def pinned(cpu):
+    """A command's prefix that pins it to `cpu` (none for no pin)."""
+    return [] if cpu is None else ['taskset', '-c', str(cpu)]
+
+
 def run_env(extra):
     env = {'PATH': os.environ['PATH'], 'HOME': os.environ.get('HOME', '/')}
     env.update(extra)
@@ -124,13 +165,14 @@ def parse_report(text):
     return cells
 
 
-def scan(exe, named, work, label='scan'):
-    """{offset name: {cell: mean}}, one quick run per (name, environment)."""
+def scan(exe, named, work, points, label='scan'):
+    """{place name: {cell: mean}}, one quick run per (name, (environment,
+    cpu)): the environment moves the stacks, the cpu (if any) pins it."""
     results = {}
-    for name, extra in named:
+    for name, (extra, cpu) in named:
         out = work / label / name
         out.mkdir(parents=True)
-        subprocess.run([exe, '--contenders', f'{CONTENDER},{CONTROL}', '--points', ','.join(POINTS),
+        subprocess.run([*pinned(cpu), exe, '--contenders', f'{CONTENDER},{CONTROL}', '--points', ','.join(points),
                         '--for-regression-check', '--rounds', '24'],
                        cwd=out, env=run_env(extra), check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -150,42 +192,47 @@ def candidates(results):
     return chosen
 
 
-def pick(results, rescans):
-    """(slow, fast) offset pairs to confirm, most-affected first: for each
-    cell, the rescanned offset whose lowest reading (scan and rescans) is
-    highest, against the cell's fastest scanned offset. The default offset
-    has no special role: a build may sit in the slow state by default."""
-    cells = set().union(*(r.keys() for r in results.values()))
+def pick(results, rescans, kind=lambda name: None, cell_ok=lambda cell: True):
+    """(slow, fast) place pairs to confirm, most-affected first: for each
+    cell, and among places of one kind (the core axis: a core type), the
+    rescanned place whose lowest reading (scan and rescans) is highest,
+    against the cell's fastest scanned place of that kind. The default
+    place has no special role: a build may sit in the slow state there."""
+    cells = {c for c in set().union(*(r.keys() for r in results.values())) if cell_ok(c)}
     picks = {}
     for cell in cells:
-        runs = {name: r[cell] for name, r in results.items() if cell in r}
-        median = statistics.median(runs.values())
-        lowest = {name: min([runs[name]] + [r[name][cell] for r in rescans if cell in r.get(name, {})])
-                  for name in rescans[0] if name in runs}
-        if not lowest:
-            continue
-        worst, best = max(lowest, key=lowest.get), min(runs, key=runs.get)
-        ratio = lowest[worst] / median
-        if picks.get(worst, (0,))[0] < ratio:
-            picks[worst] = (ratio, best)
+        for k in {kind(name) for name in results}:
+            runs = {name: r[cell] for name, r in results.items() if cell in r and kind(name) == k}
+            if len(runs) < 2:
+                continue
+            median = statistics.median(runs.values())
+            lowest = {name: min([runs[name]] + [r[name][cell] for r in rescans if cell in r.get(name, {})])
+                      for name in rescans[0] if name in runs}
+            if not lowest:
+                continue
+            worst, best = max(lowest, key=lowest.get), min(runs, key=runs.get)
+            ratio = lowest[worst] / median
+            if picks.get(worst, (0,))[0] < ratio:
+                picks[worst] = (ratio, best)
     order = sorted(picks, key=lambda w: picks[w][0], reverse=True)[:MAX_CONFIRMATIONS]
     return [(w, picks[w][1], picks[w][0]) for w in order], len(cells)
 
 
-def wrapper(path, exe, extra):
-    lines = ['#!/bin/sh', 'exec env -i ' + ' '.join(f"'{k}={v}'" for k, v in run_env(extra).items()) + f" '{exe}' \"$@\""]
+def wrapper(path, exe, place):
+    extra, cpu = place
+    lines = ['#!/bin/sh', 'exec ' + ''.join(f"{w} " for w in pinned(cpu)) + 'env -i ' + ' '.join(f"'{k}={v}'" for k, v in run_env(extra).items()) + f" '{exe}' \"$@\""]
     path.write_text('\n'.join(lines) + '\n')
     path.chmod(0o755)
     return str(path)
 
 
-def confirm(exe, slow, fast, extras, work):
-    """regress: the fast offset (old side) against the slow one (new)."""
+def confirm(exe, slow, fast, places, work, points):
+    """regress: the fast place (old side) against the slow one (new)."""
     out = work / 'confirm' / slow
     out.mkdir(parents=True)
-    old = [wrapper(out / f'fast-{i}', exe, extras[fast]) for i in range(PAIRS)]
-    new = [wrapper(out / f'slow-{i}', exe, extras[slow]) for i in range(PAIRS)]
-    done = subprocess.run([exe, 'regress', '--contenders', f'{CONTENDER},{CONTROL}', '--points', ','.join(POINTS),
+    old = [wrapper(out / f'fast-{i}', exe, places[fast]) for i in range(PAIRS)]
+    new = [wrapper(out / f'slow-{i}', exe, places[slow]) for i in range(PAIRS)]
+    done = subprocess.run([exe, 'regress', '--contenders', f'{CONTENDER},{CONTROL}', '--points', ','.join(points),
                            '--pairs', str(PAIRS), '--keep', str(out / 'samples'), *old, '--', *new],
                           cwd=out, capture_output=True, text=True)
     (out / 'regress.out').write_text(done.stdout)
@@ -199,6 +246,8 @@ def main():
     parser.add_argument('--exe', help='a bench-hashes build-against executable (default: build one)')
     parser.add_argument('--step', type=int, default=16, help='bytes between offsets (default 16, the stack alignment)')
     parser.add_argument('--keep', help='keep the scan and confirmation runs here')
+    parser.add_argument('--axis', choices=['stack', 'core'], default='stack',
+                        help="stack: the duo threads' stack through a page (default); core: each CPU in turn, pinned (bench-hashes #69)")
     args = parser.parse_args()
     if not (sys.platform.startswith('linux') and os.confstr('CS_GNU_LIBC_VERSION')):
         sys.exit('offset_check: Linux with glibc only (it moves thread stacks with a glibc tunable)')
@@ -209,16 +258,18 @@ def main():
     exe = str(pathlib.Path(exe).resolve())
     work = pathlib.Path(args.keep) if args.keep else pathlib.Path(tempfile.mkdtemp(prefix='offset-check-'))
     work.mkdir(parents=True, exist_ok=True)
-    extras = dict(offsets(args.step))
-    results = scan(exe, extras.items(), work)
+    if args.axis == 'core':
+        return core_axis(exe, work, args.keep)
+    places = {name: (extra, None) for name, extra in offsets(args.step)}
+    results = scan(exe, places.items(), work, POINTS)
     again = sorted(candidates(results))
-    rescans = [scan(exe, [(name, extras[name]) for name in again], work, f'rescan{i + 1}') for i in range(RESCANS)]
+    rescans = [scan(exe, [(name, places[name]) for name in again], work, POINTS, f'rescan{i + 1}') for i in range(RESCANS)]
     picks, ncells = pick(results, rescans)
     print(f'scanned {len(results)} offsets x {ncells} cells, rescanned {len(again)} twice; confirming {len(picks)}: '
           + (', '.join(f'{s} ({r:.2f}x the median at its lowest) against {f}' for s, f, r in picks) or 'none'))
     sensitive, no_verdict = {}, False
     for slow, fast, _ in picks:
-        code, slower = confirm(exe, slow, fast, extras, work)
+        code, slower = confirm(exe, slow, fast, places, work, POINTS)
         no_verdict |= code == 2
         for cell in slower:
             sensitive.setdefault(cell, []).append(f'{slow} vs {fast}')
@@ -239,6 +290,40 @@ def main():
         print('FAIL: no control cell was judged sensitive: the check cannot see the effect here')
         return 3
     print(f'ok: immune cells stay immune; the check still sees the effect ({", ".join(seen)})')
+    return 0
+
+
+def core_axis(exe, work, keep):
+    """The core axis: each CPU this process may use in turn, solo cells
+    only, cores of one kind compared; each cell whose slowest core is
+    confirmed slower than its fastest is core-sensitive. A measurement:
+    exit 0 whatever it finds, 2 when a confirmation found the machine
+    busy."""
+    kinds = cpu_kinds()
+    places = dict(cores())
+    kind = lambda name: kinds[int(name[3:])]
+    results = scan(exe, places.items(), work, CORE_POINTS)
+    again = sorted(candidates(results))
+    rescans = [scan(exe, [(name, places[name]) for name in again], work, CORE_POINTS, f'rescan{i + 1}') for i in range(RESCANS)]
+    solo = lambda cell: cell[1] == 'solo'
+    picks, ncells = pick(results, rescans, kind, solo)
+    print(f'scanned {len(results)} CPUs ({", ".join(sorted(set(kinds.values())))}) x {ncells} solo cells, rescanned {len(again)} twice; confirming {len(picks)}: '
+          + (', '.join(f'{s} ({r:.2f}x its kind\'s median at its lowest) against {f}' for s, f, r in picks) or 'none'))
+    sensitive, no_verdict = {}, False
+    for slow, fast, _ in picks:
+        code, slower = confirm(exe, slow, fast, places, work, CORE_POINTS)
+        no_verdict |= code == 2
+        for cell in (c for c in slower if c.split('|')[1] == 'solo'):
+            sensitive.setdefault(cell, []).append(f'{slow} vs {fast}')
+        print(f'confirm {slow} against {fast}: regress exit {code}; slower: {", ".join(sorted(slower)) or "none"}')
+    for cell, names in sorted(sensitive.items()):
+        print(f'core-sensitive: {cell} (slower on {", ".join(names)})')
+    if not keep:
+        shutil.rmtree(work)
+    if no_verdict and not sensitive:
+        print('no verdict: a confirmation found the machine busy')
+        return 2
+    print(f'{len(sensitive)} cells core-sensitive' if sensitive else 'no cell core-sensitive: every core of a kind ran them alike')
     return 0
 
 
