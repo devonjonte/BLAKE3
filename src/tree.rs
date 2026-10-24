@@ -133,6 +133,15 @@ fn hash_tree<K: Kernels>(k: &K, input: &[u8]) -> Cv {
     k.parent_root(&root_children(k, input, 0, 0))
 }
 
+/// A chunk or less through ChunkState, for platforms without a one-call
+/// kernel; out of line, so that its 64-byte-aligned block buffer does not
+/// realign the stack of every caller of `hash`, on platforms with one.
+#[cfg(not(blake3_neon))]
+#[inline(never)]
+fn chunk_root_by_state(k: &PlatformKernels<'_>, input: &[u8]) -> Cv {
+    crate::ChunkState::new(k.key, 0, k.flags, k.platform).update(input).output().root_bytes()
+}
+
 /// The library's kernels for one key and flags on one platform.
 pub(crate) struct PlatformKernels<'a> {
     pub key: &'a CVWords,
@@ -202,7 +211,7 @@ impl Kernels for PlatformKernels<'_> {
                 }
                 _ => {}
             }
-            crate::ChunkState::new(self.key, 0, self.flags, self.platform).update(input).output().root_bytes()
+            chunk_root_by_state(self, input)
         }
     }
 
