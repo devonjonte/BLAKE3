@@ -1072,6 +1072,29 @@ pub(crate) mod sources {
             assert!(!find(|t| core::ptr::eq(t, source)), "an unregistered source is still reached");
         }
 
+        /// What a worker looks for before it parks: a registered source
+        /// with an item published and not yet claimed, any source's for a
+        /// worker (visible(false)), a stream's alone for the SME2 thread
+        /// (visible(true)). The predicate alone, no thread: its four
+        /// survivors under the mutation check had stood as scheduling.
+        #[test]
+        fn test_visible_sees_a_waiting_item_and_its_kind() {
+            let job: &'static Source = &*Box::leak(Box::new(Source::new(0)));
+            let stream: &'static Source = &*Box::leak(Box::new(Source::new(4)));
+            let slots = [job.register().expect("a free slot"), stream.register().expect("a free slot")];
+            assert!(!visible(false) && !visible(true), "nothing published: nothing visible");
+            job.finish.published.store(1, Ordering::SeqCst);
+            assert!(visible(false), "a job's piece waits: a worker sees it");
+            assert!(!visible(true), "the SME2 thread looks at streams alone");
+            job.claimed.store(1, Ordering::SeqCst);
+            assert!(!visible(false), "the piece was claimed: nothing waits");
+            stream.finish.published.store(1, Ordering::SeqCst);
+            assert!(visible(false) && visible(true), "a stream's task waits: both see it");
+            for slot in slots {
+                Source::unregister(slot);
+            }
+        }
+
         /// A thread's exit gives its job source back, and the next thread
         /// to need one takes it: none is leaked per thread (a source that
         /// stayed with its finished thread was one more allocation for
