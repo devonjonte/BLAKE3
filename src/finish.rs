@@ -2,8 +2,8 @@
 //! how many finished, and the handshake between the caller waiting for
 //! its last piece and the worker that finishes it. The one place a wake
 //! can be lost, so the one place Loom checks every interleaving:
-//! `tests/loom_finish.rs` compiles this same file beside a `finish_sync`
-//! of Loom's atomics, mutex and threads, where the library's `finish_sync`
+//! `tests/shuttle_finish.rs` compiles this same file beside a `finish_sync`
+//! of Shuttle's atomics, mutex and threads, where the library's `finish_sync`
 //! is the standard library's. Nothing here names the rest of the crate,
 //! so that the two builds see one source.
 //!
@@ -97,9 +97,9 @@ impl Finish {
     }
 }
 
-// The standard library's test alone: under Loom (tests/loom_finish.rs) the
-// file compiles beside Loom's primitives, which have no sleep.
-#[cfg(all(test, not(loom)))]
+// The standard library's test alone: under Shuttle (tests/shuttle_finish.rs)
+// the file compiles beside Shuttle's primitives, which have no sleep.
+#[cfg(all(test, not(shuttle)))]
 mod tests {
     use super::*;
     use std::sync::Arc;

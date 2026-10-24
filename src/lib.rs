@@ -217,7 +217,7 @@ mod sse41;
 #[cfg(feature = "std")]
 mod io;
 /// The primitives src/finish.rs runs on: the standard library's here, and
-/// Loom's in tests/loom_finish.rs, which compiles that file beside its own
+/// Shuttle's in tests/shuttle_finish.rs, which compiles that file beside its own
 /// `finish_sync`.
 #[cfg(feature = "std")]
 mod finish_sync {
@@ -227,9 +227,20 @@ mod finish_sync {
 }
 #[cfg(feature = "std")]
 mod finish;
+/// The primitives src/park.rs runs on: the standard library's here, and
+/// Shuttle's in tests/shuttle_park.rs, which compiles that file beside its
+/// own `park_sync`.
+#[cfg(feature = "std")]
+mod park_sync {
+    pub use std::sync::OnceLock;
+    pub use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    pub use std::thread;
+}
 #[cfg(feature = "std")]
 mod lanes;
 mod many;
+#[cfg(feature = "std")]
+mod park;
 #[cfg(feature = "std")]
 #[cfg(feature = "std")]
 #[cfg(feature = "std")]

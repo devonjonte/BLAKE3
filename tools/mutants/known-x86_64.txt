@@ -2,8 +2,8 @@
 # AVX2 without AVX-512), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/each.rs src/finish.rs src/ffi_avx2.rs src/ffi_sse41.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/rust_avx2.rs src/rust_sse41.rs src/self_test.rs src/tree.rs
-loom files: src/finish.rs
+files: src/each.rs src/finish.rs src/park.rs src/ffi_avx2.rs src/ffi_sse41.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/rust_avx2.rs src/rust_sse41.rs src/self_test.rs src/tree.rs
+model files: src/finish.rs src/park.rs
 src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace < with <= in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
 src/each.rs	replace < with == in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths

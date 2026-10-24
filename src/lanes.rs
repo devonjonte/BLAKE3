@@ -601,16 +601,9 @@ struct Pool {
     threads: usize,
     /// Whether the SME2 thread runs (this CPU has SME2).
     sme2: bool,
-    /// Workers parked: bit w of word w / 64 for worker w (0 for
-    /// blake3-worker-1). A worker sets its own bit before it parks; a
-    /// waker clears one (fetch_and), which makes it the one to unpark that
-    /// worker. Each worker parks on its own thread's token (std's park), so
-    /// no two share a lock or a futex word.
-    parked: Box<[OwnLine<AtomicU64>]>,
-    /// Each worker's thread, set as it starts.
-    handles: Box<[OnceLock<std::thread::Thread>]>,
-    /// Wakes still owed: each woken worker pays them before it works.
-    owed: AtomicUsize,
+    /// Which workers are parked, how one parks without missing work, and
+    /// how a publisher wakes one (crate::park, which Shuttle checks).
+    park: crate::park::Park,
 }
 
 /// Create the pool and start its threads in the background, once per
@@ -620,14 +613,7 @@ struct Pool {
 pub(crate) fn initialize(threads: usize) {
     // With one thread, none beside the caller: no SME2 thread either.
     let sme2 = threads > 1 && cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect()));
-    let pool = Pool {
-        callers: AtomicUsize::new(0),
-        threads,
-        sme2,
-        parked: (0..threads.div_ceil(64)).map(|_| OwnLine(AtomicU64::new(0))).collect(),
-        handles: (0..threads).map(|_| OnceLock::new()).collect(),
-        owed: AtomicUsize::new(0),
-    };
+    let pool = Pool { callers: AtomicUsize::new(0), threads, sme2, park: crate::park::Park::new(threads - 1) };
     assert!(POOL.set(pool).is_ok(), "initialize_multithreaded creates the pool once");
     if sme2 {
         std::thread::Builder::new().name("blake3-sme2".into()).spawn(sme2_main).expect("spawning the SME2 thread");
@@ -666,7 +652,7 @@ static POOL: OnceLock<Pool> = OnceLock::new();
 /// Whether every worker is parked: false before the pool exists
 /// ([`crate::__all_workers_parked`], for tests).
 pub(crate) fn all_workers_parked() -> bool {
-    POOL.get().is_some_and(|pool| (0..pool.threads - 1).all(|w| pool.parked[w / 64].load(Ordering::SeqCst) & (1 << (w % 64)) != 0))
+    POOL.get().is_some_and(|pool| (0..pool.threads - 1).all(|w| pool.park.is_parked(w)))
 }
 
 /// The pool. The caller must have called
@@ -737,54 +723,25 @@ impl Pool {
         }
     }
 
-    /// Make `wanted` workers awake or on their way, waking parked ones as
-    /// needed: the caller wakes one, the woken wake the rest (owed). The
-    /// read of `parked` follows the caller's publication of its work (a
-    /// locked instruction, or the fence in publish), as a parking worker's
-    /// re-check follows its bit: one of the two sees the other.
+    /// Wake workers for `wanted` pieces of new work (crate::park).
     pub(crate) fn wake_for(&self, wanted: usize) {
-        let parked: usize = self.parked.iter().map(|w| w.load(Ordering::SeqCst).count_ones() as usize).sum();
-        if parked == 0 {
-            return;
-        }
-        let awake = self.threads - 1 - parked;
-        if awake < wanted {
-            let need = (wanted - awake).min(parked);
-            if need > 1 {
-                self.owed.fetch_add(need - 1, Ordering::SeqCst);
-            }
-            self.wake_one();
-        }
+        self.park.wake_for(wanted, self.threads - 1);
     }
 
     /// Wake one parked worker, if any: whether one was.
     pub(crate) fn wake_one(&self) -> bool {
-        for (w, word) in self.parked.iter().enumerate() {
-            let mut bits = word.load(Ordering::SeqCst);
-            while bits != 0 {
-                let bit = 1u64 << bits.trailing_zeros();
-                let before = word.fetch_and(!bit, Ordering::SeqCst);
-                if before & bit != 0 {
-                    let worker = w * 64 + bit.trailing_zeros() as usize;
-                    self.handles[worker].get().expect("a parked worker has set its thread").unpark();
-                    return true;
-                }
-                bits = before & !bit;
-            }
-        }
-        false
+        self.park.wake_one()
     }
 
-    /// Whether any worker is parked (one load a word).
+    /// Whether any worker is parked.
     pub(crate) fn any_parked(&self) -> bool {
-        self.parked.iter().any(|w| w.load(Ordering::Relaxed) != 0)
+        self.park.any_parked()
     }
 
     /// Worker `me`'s loop: the sources' tasks and pieces; spinning a while
     /// when a stream is open (more is coming), else parked, whenever it
     /// finds nothing.
     fn serve(&self, me: usize) -> ! {
-        let (word, bit) = (&self.parked[me / 64], 1u64 << (me % 64));
         loop {
             if sources::run_one() {
                 continue;
@@ -792,25 +749,10 @@ impl Pool {
             if sources::open() && spin_for_work() {
                 continue;
             }
-            // Park: the bit first, then one more look (a publisher stores,
-            // then reads `parked`; this sets the bit, then looks: one of the
-            // two sees the other), then the token.
-            word.fetch_or(bit, Ordering::SeqCst);
-            if sources::visible(false) {
-                // Ours to clear unless a waker cleared it first (then its
-                // unpark leaves a token, and a later park returns at once).
-                word.fetch_and(!bit, Ordering::SeqCst);
-                continue;
-            }
-            while word.load(Ordering::SeqCst) & bit != 0 {
-                std::thread::park();
-            }
-            // Woken: pay the wakes owed before working.
-            while self.owed.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok() {
-                if !self.wake_one() {
-                    self.owed.store(0, Ordering::SeqCst);
-                    break;
-                }
+            // Park unless work shows (crate::park's handshake); woken, pay
+            // the wakes owed before working.
+            if self.park.park_unless(me, || sources::visible(false)) {
+                self.park.pay_owed();
             }
         }
     }
@@ -1411,7 +1353,7 @@ fn worker_main(me: usize) {
     // the panic's message printed first by the panic hook.
     let _ = std::panic::catch_unwind(move || {
         let pool = pool();
-        assert!(pool.handles[me].set(std::thread::current()).is_ok(), "each worker sets its thread once");
+        pool.park.register(me);
         pool.serve(me)
     });
     std::process::abort()
@@ -1784,7 +1726,7 @@ mod test {
     fn test_idle_workers_park_while_a_stream_is_open() {
         let pool = pool();
         let workers = pool.threads - 1;
-        let all_parked = || (0..workers).all(|w| pool.parked[w / 64].load(Ordering::SeqCst) & (1 << (w % 64)) != 0);
+        let all_parked = || (0..workers).all(|w| pool.park.is_parked(w));
         crate::stream(
             crate::Mode::Hash,
             |_: &mut [Hash]| {},

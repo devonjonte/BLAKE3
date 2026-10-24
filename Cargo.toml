@@ -101,8 +101,8 @@ clocks = { path = "./clocks" }
 tempfile = "3.8.0"
 serde_json = "1.0.107"
 ciborium = "0.2.2"
-# tests/loom_finish.rs: every interleaving of the finish handshake.
-loom = "0.7"
+# tests/shuttle_*.rs: the pool's handshakes under a model checker.
+shuttle = "0.8"
 
 [build-dependencies]
 cc = "1.1.12"

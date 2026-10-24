@@ -12,11 +12,10 @@ stale), and on a listed one whose reason is still UNCLASSIFIED. A mutant
 is named by its file, function, and change, without its line: the same
 change at several places in one function counts once per place. It runs
 in git worktrees of HEAD of its own (SHARDS at once), so the checkout is
-never mutated. A `loom files:` line names the files whose mutants Loom
-judges (tests/loom_finish.rs, every interleaving of the finish handshake,
-deterministic, in a tenth of a second) in place of the suite's schedule
-and its clock: a wait that never ends is a deadlock Loom reports, not a
-time-out. With --write, the list is rewritten from this run, each
+never mutated. A `model files:` line names the files whose mutants the
+model checker judges beside the suite (tests/shuttle_*.rs: Shuttle, over
+the pool's handshakes, thousands of schedules in seconds): a wait that
+never ends is a deadlock it reports, not a time-out. With --write, the list is rewritten from this run, each
 new mutant's reason UNCLASSIFIED and the others' kept.
 
 A mutant whose tests no test fails, but the clock stops (nextest's, or
@@ -123,9 +122,9 @@ def read_known(path=None, inactive=None):
         line = line.rstrip("\n")
         if line.startswith("files:"):
             files = line.split()[1:]
-        elif line.startswith("loom files: "):
-            # The files whose mutants Loom judges (tests/loom_finish.rs, every
-            # interleaving, deterministic) in place of the suite and its clock.
+        elif line.startswith("model files: "):
+            # The files whose mutants the model checker judges beside the
+            # suite (tests/shuttle_*.rs), in place of the suite's clock.
             LOOM_FILES.extend(line.split()[2:])
         elif line and not line.startswith("#"):
             file, mutant, count, reason = line.split("\t")
@@ -234,10 +233,10 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
         # test the others' builds).
         env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(tree, "target"), NEXTEST_PROFILE="mutants-map" if MAP else "mutants")
         if loom:
-            # Loom's build of the same files (tests/loom_finish.rs compiles
-            # them beside Loom's primitives): every interleaving, in place
-            # of the suite's schedule and its clock.
-            env["RUSTFLAGS"] = os.environ.get("RUSTFLAGS", "") + " --cfg loom"
+            # The model checker's build of the same files (tests/shuttle_*.rs
+            # compile them beside Shuttle's primitives): every schedule it
+            # tries, in place of the suite's one schedule and its clock.
+            env["RUSTFLAGS"] = os.environ.get("RUSTFLAGS", "") + " --cfg shuttle"
         elif REACH:
             # Each mutant's tests alone: tools/mutants/cargo-nextest, first
             # on PATH, narrows cargo-mutants' nextest run to the tests that
@@ -249,7 +248,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
         # Consecutive slices (cargo-mutants' default): a shard's mutants in one
         # file one after another rebuild less (round-robin evened the shards
         # and made each build 10% slower, the run no faster, October 21).
-        tests = ["--test", "loom_finish"] if loom else ["--lib", "--tests"]
+        tests = ["--test", "shuttle_finish", "--test", "shuttle_park"] if loom else ["--lib", "--tests"]
         shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", *tests]
         runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=lambda: cap_memory(shards))))
     names = collections.Counter()
@@ -567,7 +566,7 @@ def main():
     figure(functions, {**{k: tknown.get(k, (n, "UNCLASSIFIED")) for k, n in timed.items()},
                        **{k: known.get(k, (n, "UNCLASSIFIED")) for k, n in found.items()}})
     if "--write" in sys.argv:
-        header = [l.rstrip("\n") for l in open(KNOWN) if l.startswith("#") or l.startswith(("files:", "loom files:"))]
+        header = [l.rstrip("\n") for l in open(KNOWN) if l.startswith("#") or l.startswith(("files:", "model files:"))]
         # The rows for other CPUs stay as they were: this run cannot see them.
         rows = sorted([f"{k}\t{n}\t{known.get(k, (0, 'UNCLASSIFIED'))[1]}" for k, n in found.items()] + INACTIVE)
         open(KNOWN, "w").write("\n".join(header + rows) + "\n")
