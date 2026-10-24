@@ -5,6 +5,21 @@ use crate::{IncrementCounter, OUT_LEN};
 include!("../tools/require_nextest.rs");
 use arrayvec::ArrayVec;
 
+/// The digest [`crate::hash_with`] writes, as a value, for comparisons.
+pub(crate) fn hash_with_value(mode: crate::Mode, input: &[u8]) -> crate::Hash {
+    let mut out = crate::Hash::from([0; 32]);
+    crate::hash_with(mode, input, &mut out);
+    out
+}
+
+/// The digest [`crate::hash_multithreaded_with`] writes, as a value.
+#[cfg(feature = "std")]
+pub(crate) fn hash_multithreaded_with_value(mode: crate::Mode, input: &[u8]) -> crate::Hash {
+    let mut out = crate::Hash::from([0; 32]);
+    crate::hash_multithreaded_with(mode, input, &mut out);
+    out
+}
+
 // Interesting input lengths to run tests on.
 pub const TEST_CASES: &[usize] = &[
     0,
@@ -380,14 +395,14 @@ fn test_reset() {
     keyed_hasher.update(&[42; 3 * CHUNK_LEN + 7]);
     keyed_hasher.reset();
     keyed_hasher.update(&[42; CHUNK_LEN + 3]);
-    assert_eq!(keyed_hasher.finalize(), crate::hash_with(crate::Mode::Keyed(key), &[42; CHUNK_LEN + 3]),);
+    assert_eq!(keyed_hasher.finalize(), crate::test::hash_with_value(crate::Mode::Keyed(key), &[42; CHUNK_LEN + 3]),);
 
     let context = "BLAKE3 2020-02-12 10:20:58 reset test";
     let mut kdf = crate::Hasher::new_with(crate::Mode::DeriveKey(context));
     kdf.update(&[42; 3 * CHUNK_LEN + 7]);
     kdf.reset();
     kdf.update(&[42; CHUNK_LEN + 3]);
-    let expected = *crate::hash_with(crate::Mode::DeriveKey(context), &[42; CHUNK_LEN + 3]).as_bytes();
+    let expected = *crate::test::hash_with_value(crate::Mode::DeriveKey(context), &[42; CHUNK_LEN + 3]).as_bytes();
     assert_eq!(kdf.finalize(), expected);
 
     // A reset after the stack holds values (past the stage, which keeps
@@ -735,7 +750,7 @@ mod unsafe_paths {
                     let mut out = vec![[0u8; OUT_LEN]; 1024];
                     hash_many_multithreaded_with(Mode::Hash, batch, 64, &mut out);
                     assert_eq!(&out, expected, "batch, caller {caller}");
-                    assert_eq!(hash_multithreaded_with(Mode::Hash, tree), expected_tree, "tree, caller {caller}");
+                    assert_eq!(crate::test::hash_multithreaded_with_value(Mode::Hash, tree), expected_tree, "tree, caller {caller}");
                 });
             }
         });
@@ -813,7 +828,11 @@ mod guard_pages {
                 let input = g.bytes();
                 let want = ChunkState::new(IV, 0, 0, platform::Platform::Portable).update(input).output().root_bytes();
                 for &avx512 in &variants {
-                    assert_eq!(unsafe { crate::chunk_root::chunk_root(avx512, input, IV, 0) }, want, "avx512={avx512} len={len} at_end={at_end}");
+                    assert_eq!(
+                        crate::by_value(|out| unsafe { crate::chunk_root::chunk_root(avx512, input, IV, 0, out) }).0,
+                        want,
+                        "avx512={avx512} len={len} at_end={at_end}"
+                    );
                 }
             }
         }

@@ -2,6 +2,7 @@
 
 use crate::platform::{MAX_SIMD_DEGREE_OR_2, Platform};
 use crate::{CHUNK_LEN, CVWords, OUT_LEN};
+use core::mem::MaybeUninit;
 
 /// A chaining value.
 pub(crate) type Cv = [u8; OUT_LEN];
@@ -27,9 +28,9 @@ pub trait Kernels {
     /// What `root_children` returns for `input`, computed another way where
     /// the kernels have one (None: they have none for it).
     fn children(&self, input: &[u8], ahead: usize, counter: u64) -> Option<[Cv; 2]>;
-    /// The root output (32 bytes) of an input of at most CHUNK_LEN bytes:
-    /// its only chunk, numbered 0, as the root.
-    fn chunk_root(&self, input: &[u8]) -> Cv;
+    /// The root output (32 bytes) of an input of at most CHUNK_LEN bytes,
+    /// its only chunk, numbered 0, as the root: written into all of `out`.
+    fn chunk_root(&self, input: &[u8], out: &mut MaybeUninit<Cv>);
     /// The root output (32 bytes) of the parent of `children`, as the root.
     fn parent_root(&self, children: &[Cv; 2]) -> Cv;
 }
@@ -115,13 +116,14 @@ pub fn root_children<K: Kernels>(k: &K, input: &[u8], ahead: usize, counter: u64
     }
 }
 
-/// The hash (the 32-byte root output) of `input`.
+/// The hash (the 32-byte root output) of `input`, written into all of
+/// `out` (the caller's own place: see crate::hash_with).
 #[inline(always)]
-pub fn hash<K: Kernels>(k: &K, input: &[u8]) -> Cv {
+pub fn hash<K: Kernels>(k: &K, input: &[u8], out: &mut MaybeUninit<Cv>) {
     if input.len() <= CHUNK_LEN {
-        return k.chunk_root(input);
+        return k.chunk_root(input, out);
     }
-    hash_tree(k, input)
+    out.write(hash_tree(k, input));
 }
 
 /// A tree of two chunks or more, out of line: its frame (the children's
@@ -194,10 +196,10 @@ impl Kernels for PlatformKernels<'_> {
     }
 
     #[inline(always)]
-    fn chunk_root(&self, input: &[u8]) -> Cv {
+    fn chunk_root(&self, input: &[u8], out: &mut MaybeUninit<Cv>) {
         // The scalar kernel, on every AArch64 core (crate::hash_one_chunk_root).
         #[cfg(blake3_neon)]
-        return crate::hash_one_chunk_root(input, self.key, self.flags).0;
+        return crate::hash_one_chunk_root(input, self.key, self.flags, out);
         #[cfg(not(blake3_neon))]
         {
             // One kernel call that keeps off the stack (src/ffi_chunk_root.rs):
@@ -205,13 +207,13 @@ impl Kernels for PlatformKernels<'_> {
             #[cfg(all(blake3_sse41_ffi, not(target_os = "windows")))]
             match self.platform {
                 #[cfg(blake3_avx512_ffi)]
-                crate::platform::Platform::AVX512 => return unsafe { crate::chunk_root::chunk_root(true, input, self.key, self.flags) },
+                crate::platform::Platform::AVX512 => return unsafe { crate::chunk_root::chunk_root(true, input, self.key, self.flags, out) },
                 crate::platform::Platform::SSE41 | crate::platform::Platform::AVX2 => {
-                    return unsafe { crate::chunk_root::chunk_root(false, input, self.key, self.flags) };
+                    return unsafe { crate::chunk_root::chunk_root(false, input, self.key, self.flags, out) };
                 }
                 _ => {}
             }
-            chunk_root_by_state(self, input)
+            out.write(chunk_root_by_state(self, input));
         }
     }
 

@@ -197,7 +197,7 @@ fn test_keyed() {
     let f = tempfile::NamedTempFile::new().unwrap();
     f.as_file().write_all(b"foo").unwrap();
     f.as_file().flush().unwrap();
-    let expected = blake3::hash_with(blake3::Mode::Keyed(&key), b"foo").to_hex();
+    let expected = blake3::Hasher::new_with(blake3::Mode::Keyed(&key)).update(b"foo").finalize().to_hex();
     let output = cmd!(b3sum_exe(), "--keyed", "--no-names", f.path()).stdin_bytes(&key[..]).read().unwrap();
     assert_eq!(&*expected, &*output);
 
@@ -220,7 +220,7 @@ fn test_derive_key() {
     let f = tempfile::NamedTempFile::new().unwrap();
     f.as_file().write_all(b"key material").unwrap();
     f.as_file().flush().unwrap();
-    let expected = hex::encode(*blake3::hash_with(blake3::Mode::DeriveKey(context), b"key material").as_bytes());
+    let expected = hex::encode(*blake3::Hasher::new_with(blake3::Mode::DeriveKey(context)).update(b"key material").finalize().as_bytes());
     let output = cmd!(b3sum_exe(), "--derive-key", context, "--no-names", f.path()).read().unwrap();
     assert_eq!(&*expected, &*output);
 }

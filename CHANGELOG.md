@@ -14,10 +14,13 @@ and the tests are tested ([QUALITY.md](QUALITY.md)).
 2. Call `blake3_servil::initialize()` once before any other call. A
    program that makes multithreaded calls or uses a stream calls
    `initialize_multithreaded(None)` instead. A call before it panics.
-3. `keyed_hash(key, input)` is now `hash_with(Mode::Keyed(key), input)`.
+3. `keyed_hash(key, input)` is now `hash_with(Mode::Keyed(key), input,
+   &mut out)`, which writes the digest into the caller's `out`: a digest
+   returned by value goes through a temporary on the stack and a copy.
    `derive_key(context, material)` is now
-   `hash_with(Mode::DeriveKey(context), material)`. `Hasher::new_keyed`
-   and `Hasher::new_derive_key` are now `Hasher::new_with(mode)`. `hash`
+   `hash_with(Mode::DeriveKey(context), material, &mut out)`.
+   `Hasher::new_keyed` and `Hasher::new_derive_key` are now
+   `Hasher::new_with(mode)`, whose `finalize()` returns a value. `hash`
    and `Hasher::new` are unchanged.
 4. Threads are the crate's own. `Hasher::update_rayon` is now
    `update_multithreaded`. `hash_multithreaded(input)` hashes one message

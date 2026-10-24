@@ -36,7 +36,7 @@ pub fn hash_each_multithreaded_with(mode: Mode, items: &[&[u8]], out: &mut [[u8;
     // stand-in, its digest written after).
     let small: Vec<&[u8]> = items.iter().map(|&i| if alone(i) { &[][..] } else { i }).collect();
     if small.iter().map(|i| i.len()).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN {
-        hash_each_on(&key, flags, &small, out, Platform::detect(), |item| crate::hash_with(mode, item));
+        hash_each_on(&key, flags, &small, out, Platform::detect(), |item, out| crate::hash_serial(item, &key, flags, out));
     } else {
         crate::lanes::hash_each(&key, flags, &small, out);
     }
@@ -236,13 +236,20 @@ const ALONE_CHUNKS: usize = 16;
 pub fn hash_each_with(mode: Mode, items: &[&[u8]], out: &mut [[u8; OUT_LEN]]) {
     assert_eq!(items.len(), out.len(), "one digest per item");
     let (key, flags) = mode.key_and_flags();
-    hash_each_on(&key, flags, items, out, Platform::detect(), |item| crate::hash_with(mode, item));
+    hash_each_on(&key, flags, items, out, Platform::detect(), |item, out| crate::hash_serial(item, &key, flags, out));
 }
 
 /// [`hash_each_with`] in the mode of `key` and `flags`, the lanes on
 /// `platform`, each message that fills the lanes alone (or is a chunk or
-/// less) through `alone`.
-pub(crate) fn hash_each_on(key: &CVWords, flags: u8, items: &[&[u8]], out: &mut [[u8; OUT_LEN]], platform: Platform, alone: impl Fn(&[u8]) -> Hash) {
+/// less) through `alone`, which writes its digest into its place in `out`.
+pub(crate) fn hash_each_on(
+    key: &CVWords,
+    flags: u8,
+    items: &[&[u8]],
+    out: &mut [[u8; OUT_LEN]],
+    platform: Platform,
+    alone: impl Fn(&[u8], &mut core::mem::MaybeUninit<[u8; OUT_LEN]>),
+) {
     let key = *key;
     // The messages whose full chunks share the lanes: each one's index, and
     // where its chunk values start in `cvs`.
@@ -252,7 +259,7 @@ pub(crate) fn hash_each_on(key: &CVWords, flags: u8, items: &[&[u8]], out: &mut 
     for (i, item) in items.iter().enumerate() {
         let chunks = item.len().div_ceil(CHUNK_LEN);
         if chunks <= 1 || chunks >= ALONE_CHUNKS {
-            out[i] = *alone(item).as_bytes();
+            alone(item, crate::place(&mut out[i]));
         } else {
             most_full = most_full.max(item.len() / CHUNK_LEN);
             shared.push((i, slots));
@@ -450,7 +457,7 @@ mod test {
         Hasher::update_each(&mut hashers, &turn);
         for (i, h) in hashers.iter().enumerate() {
             let message = &input[start(i)..start(i) + 2 * crate::STAGE_LEN + 7];
-            assert_eq!(h.finalize(), crate::hash_with(crate::Mode::Keyed(&keys[i % 2]), message), "hasher {i}, {platform:?}");
+            assert_eq!(h.finalize(), crate::test::hash_with_value(crate::Mode::Keyed(&keys[i % 2]), message), "hasher {i}, {platform:?}");
         }
         // And each hasher's first group (chunk counter zero, which hands
         // its core the group's two halves), six at once: a first piece
@@ -462,7 +469,7 @@ mod test {
         for (i, h) in fresh.iter().enumerate() {
             assert_eq!(
                 h.finalize(),
-                crate::hash_with(crate::Mode::Keyed(&keys[i % 2]), &input[start(i)..start(i) + group + 7]),
+                crate::test::hash_with_value(crate::Mode::Keyed(&keys[i % 2]), &input[start(i)..start(i) + group + 7]),
                 "fresh hasher {i}, {platform:?}"
             );
         }
@@ -500,7 +507,7 @@ mod test {
             let mut out = vec![[0u8; OUT_LEN]; lens.len()];
             Hasher::finalize_each(&hashers, &which, &mut out);
             for (k, &i) in which.iter().enumerate() {
-                let want = if i % 3 == 1 { crate::hash_with(crate::Mode::Keyed(&key), &input[..lens[i]]) } else { crate::hash(&input[..lens[i]]) };
+                let want = if i % 3 == 1 { crate::test::hash_with_value(crate::Mode::Keyed(&key), &input[..lens[i]]) } else { crate::hash(&input[..lens[i]]) };
                 assert_eq!(&out[k], want.as_bytes(), "len {} multithreaded {multithreaded}", lens[i]);
             }
         }
@@ -546,7 +553,7 @@ mod test {
             let mut out = vec![[0u8; OUT_LEN]; items.len()];
             hash_each_with(mode, &items, &mut out);
             for (item, digest) in items.iter().zip(&out) {
-                assert_eq!(digest, crate::hash_with(mode, item).as_bytes(), "length {}", item.len());
+                assert_eq!(digest, crate::test::hash_with_value(mode, item).as_bytes(), "length {}", item.len());
             }
         }
     }

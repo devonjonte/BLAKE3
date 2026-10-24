@@ -478,14 +478,14 @@ pub unsafe fn hash_chunk(
     flags: u8,
     flags_start: u8,
     flags_end: u8,
-    out: &mut [u8; OUT_LEN],
+    out: &mut core::mem::MaybeUninit<[u8; OUT_LEN]>,
 ) {
     debug_assert!((1..=16).contains(&blocks));
     debug_assert!(last_len as usize <= BLOCK_LEN);
     let packed = flags as u64 | (flags_start as u64) << 8 | (flags_end as u64) << 16 | (last_len as u64) << 24;
     unsafe {
         crate::ran_kernel(asm::blake3_hybrid_c1 as *const ());
-        asm::blake3_hybrid_c1(input, blocks as u64, key.as_ptr(), counter, packed, out.as_mut_ptr(), last.as_ptr());
+        asm::blake3_hybrid_c1(input, blocks as u64, key.as_ptr(), counter, packed, out.as_mut_ptr().cast(), last.as_ptr());
     }
 }
 

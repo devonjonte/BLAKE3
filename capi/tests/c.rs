@@ -95,13 +95,13 @@ fn from_c() {
         let mut expected = Vec::new();
         for mode in modes {
             for len in [0, 1025, 100000] {
-                let d = blake3_servil::hash_with(mode, &input[..len]).to_hex();
+                let d = blake3_servil::Hasher::new_with(mode).update(&input[..len]).finalize().to_hex();
                 for _ in 0..3 {
                     expected.push(d.to_string());
                 }
             }
             for i in 0..4 {
-                expected.push(blake3_servil::hash_with(mode, &input[i * 64..(i + 1) * 64]).to_hex().to_string());
+                expected.push(blake3_servil::Hasher::new_with(mode).update(&input[i * 64..(i + 1) * 64]).finalize().to_hex().to_string());
             }
         }
         // b3.h's b3_hasher holds the crate's Hasher.

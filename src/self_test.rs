@@ -293,13 +293,13 @@ pub(crate) fn outputs(platform: Platform, case: Case, input: &[u8], previous: &[
         32
     };
     match case {
-        Hash { offset, len } => digest(crate::hash_serial_from(platform, &input[offset..][..len], crate::IV, 0)),
+        Hash { offset, len } => digest(crate::by_value(|out| crate::hash_serial_from(platform, &input[offset..][..len], crate::IV, 0, out))),
         Many { offset, len, count } => many(platform, &input[..len * count], offset, len, &mut out[..count * crate::OUT_LEN]),
         ChunkValues { chunks } => chunk_values(platform, &input[..chunks * crate::CHUNK_LEN], previous, out),
-        Keyed { len } => digest(crate::hash_serial_from(platform, &input[..len], &words(previous), crate::KEYED_HASH)),
+        Keyed { len } => digest(crate::by_value(|out| crate::hash_serial_from(platform, &input[..len], &words(previous), crate::KEYED_HASH, out))),
         Derive { len } => {
-            let context = crate::hash_serial_from(platform, CONTEXT.as_bytes(), crate::IV, crate::DERIVE_KEY_CONTEXT);
-            digest(crate::hash_serial_from(platform, &input[..len], &words(context.as_bytes()), crate::DERIVE_KEY_MATERIAL))
+            let context = crate::by_value(|out| crate::hash_serial_from(platform, CONTEXT.as_bytes(), crate::IV, crate::DERIVE_KEY_CONTEXT, out));
+            digest(crate::by_value(|out| crate::hash_serial_from(platform, &input[..len], &words(context.as_bytes()), crate::DERIVE_KEY_MATERIAL, out)))
         }
         Incremental { len, piece } => digest(incremental(platform, &input[..len], piece)),
         Xof { len, skip, out: n } => xof(platform, &input[..len], skip, &mut out[..n]),

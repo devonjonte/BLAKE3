@@ -178,7 +178,7 @@ pub(crate) fn hash_with_key(input: &[u8], key: &crate::CVWords, flags: u8) -> Ha
     // The short path first and inline, so a small input costs what hash()
     // costs; everything the pool needs is behind the call below.
     if input.len() < MIN_SPLIT_LEN {
-        return crate::hash_serial(input, key, flags);
+        return crate::by_value(|out| crate::hash_serial(input, key, flags, out));
     }
     hash_over_pool(input, key, flags)
 }
@@ -186,7 +186,7 @@ pub(crate) fn hash_with_key(input: &[u8], key: &crate::CVWords, flags: u8) -> Ha
 #[inline(never)]
 fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
     let Some((pool, _caller)) = spare_pool() else {
-        return crate::hash_serial(input, key, flags);
+        return crate::by_value(|out| crate::hash_serial(input, key, flags, out));
     };
     let (pieces, mut cvs) = tree_cvs(pool, input, key, 0, flags);
     merge_root(&pieces, &mut cvs, key, flags)
@@ -267,7 +267,7 @@ pub(crate) fn hash_each(key: &crate::CVWords, flags: u8, items: &[&[u8]], out: &
     assert!(items.iter().all(|i| i.len() < MIN_SPLIT_LEN), "items under MIN_SPLIT_LEN");
     let Some((pool, _caller)) = spare_pool() else {
         let platform = Platform::detect();
-        return crate::each::hash_each_on(key, flags, items, out, platform, |item| crate::hash_serial_on(item, key, flags, platform));
+        return crate::each::hash_each_on(key, flags, items, out, platform, |item, out| crate::hash_serial_on(item, key, flags, platform, out));
     };
     let mut remaining: usize = items.iter().map(|i| i.len()).sum();
     let mut pieces = Vec::with_capacity(64);
@@ -418,7 +418,7 @@ impl Job<'_> {
                 // Sound: this range of outputs belongs to piece `index` alone.
                 let digests = unsafe { core::slice::from_raw_parts_mut(outputs.add(piece.offset), piece.len) };
                 let range = &items[piece.offset..][..piece.len];
-                crate::each::hash_each_on(key, *flags, range, digests, platform, |item| crate::hash_serial_on(item, key, *flags, platform));
+                crate::each::hash_each_on(key, *flags, range, digests, platform, |item, out| crate::hash_serial_on(item, key, *flags, platform, out));
             }
         }
     }
@@ -1241,8 +1241,8 @@ impl Task {
         }
         for m in members {
             let bytes = unsafe { core::slice::from_raw_parts(m.input, m.len) };
-            let hash = crate::hash_serial_on(bytes, &self.key, self.flags, platform);
-            unsafe { core::ptr::copy_nonoverlapping(hash.as_bytes().as_ptr(), m.out, crate::OUT_LEN) };
+            // Sound: m.out is the member's 32-byte digest place, its alone.
+            crate::hash_serial_on(bytes, &self.key, self.flags, platform, unsafe { &mut *m.out.cast() });
         }
     }
 }
@@ -1572,7 +1572,7 @@ mod test {
             assert_eq!(want, hash(&input[..len]), "len = {len}");
             let key = [42u8; KEY_LEN];
             assert_eq!(
-                crate::hash_with(crate::Mode::Keyed(&key), &input[..len]),
+                crate::test::hash_with_value(crate::Mode::Keyed(&key), &input[..len]),
                 hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
                 "keyed len = {len}"
             );
@@ -1609,7 +1609,7 @@ mod test {
                     }
                     let what = format!("len {len}, first {first}, pieces of {piece}");
                     assert_eq!(hasher.finalize(), crate::hash(&input[..len]), "{what}");
-                    assert_eq!(keyed.finalize(), crate::hash_with(crate::Mode::Keyed(&key), &input[..len]), "keyed {what}");
+                    assert_eq!(keyed.finalize(), crate::test::hash_with_value(crate::Mode::Keyed(&key), &input[..len]), "keyed {what}");
                 }
             }
         }

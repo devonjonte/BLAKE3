@@ -54,7 +54,8 @@ pub fn outboard_multithreaded_with(mode: Mode, input: &[u8]) -> (Hash, Vec<u8>) 
 fn outboard(mode: Mode, input: &[u8], pooled: bool) -> (Hash, Vec<u8>) {
     let chunks = chunks_of(input.len() as u64);
     if chunks <= GROUP_CHUNKS {
-        return (crate::hash_with(mode, input), Vec::new());
+        let (key, flags) = mode.key_and_flags();
+        return (crate::by_value(|out| crate::hash_serial(input, &key, flags, out)), Vec::new());
     }
     let (key, flags) = mode.key_and_flags();
     // The process's SME2 turn, as every one-thread call takes it (the
@@ -91,7 +92,8 @@ pub fn verify_range_with(mode: Mode, hash: &Hash, len: u64, outboard: &[u8], fir
     assert!(first < groups && end <= len && (end % GROUP_LEN as u64 == 0 || end == len), "a range of whole groups within the message");
     assert!(!bytes.is_empty() || len == 0, "a nonempty range");
     if groups == 1 {
-        return crate::hash_with(mode, bytes) == *hash;
+        let (key, flags) = mode.key_and_flags();
+        return crate::by_value(|out| crate::hash_serial(bytes, &key, flags, out)) == *hash;
     }
     let (key, flags) = mode.key_and_flags();
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
@@ -282,7 +284,7 @@ impl Verifier {
                 }
             } else {
                 let ok = match expected {
-                    None => crate::hash_serial(bytes, &self.key, self.flags) == self.mode_hash,
+                    None => crate::by_value(|out| crate::hash_serial(bytes, &self.key, self.flags, out)) == self.mode_hash,
                     Some(cv) => *cvs.next().unwrap() == cv,
                 };
                 if ok {
@@ -487,7 +489,7 @@ mod test {
         for len in [GROUP_LEN, 3 * GROUP_LEN + 5] {
             let mut message = vec![0u8; len];
             crate::test::paint_test_input(&mut message);
-            let hash = crate::hash_with(Mode::Hash, &message);
+            let hash = crate::test::hash_with_value(Mode::Hash, &message);
             let encoding = test_encoding(Mode::Hash, &message);
             let mut verifier = Verifier::new(Mode::Hash, &hash, message.len() as u64);
             assert_eq!(verifier.remaining(), encoding.len() as u64);
@@ -559,7 +561,7 @@ mod test {
             for &len in &lens {
                 let message = &input[..len];
                 let (hash, outboard) = outboard_with(mode, message);
-                assert_eq!(hash, crate::hash_with(mode, message), "len {len}");
+                assert_eq!(hash, crate::test::hash_with_value(mode, message), "len {len}");
                 assert_eq!((hash, outboard.clone()), outboard_multithreaded_with(mode, message), "multithreaded, len {len}");
                 let groups = groups_of(chunks_of(len as u64));
                 assert_eq!(outboard.len() as u64, 64 * (groups - 1));

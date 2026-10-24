@@ -50,11 +50,19 @@ fn modes() -> [Mode<'static>; 3] {
     [Mode::Hash, Mode::Keyed(KEY), Mode::DeriveKey(CONTEXT)]
 }
 
-/// Each one-shot call's two full forms, single-threaded and multithreaded.
-const HASH_WITH: [(&str, fn(Mode, &[u8]) -> Hash); 2] =
+/// Each one-shot call's two full forms, single-threaded and multithreaded,
+/// each writing its digest into the caller's place.
+const HASH_WITH: [(&str, fn(Mode, &[u8], &mut Hash)); 2] =
     [("hash_with", blake3_servil::hash_with), ("hash_multithreaded_with", blake3_servil::hash_multithreaded_with)];
 const HASH_MANY_WITH: [(&str, fn(Mode, &[u8], usize, &mut [[u8; 32]])); 2] =
     [("hash_many_with", blake3_servil::hash_many_with), ("hash_many_multithreaded_with", blake3_servil::hash_many_multithreaded_with)];
+
+/// What `form` writes for `input` (its place starting as anything else).
+fn written(form: fn(Mode, &[u8], &mut Hash), mode: Mode, input: &[u8]) -> Hash {
+    let mut out = Hash::from([0xA5; 32]);
+    form(mode, input, &mut out);
+    out
+}
 
 /// Lengths past the official vectors, around the multithreaded split (512 KiB) and a subtree edge.
 const LARGE: [usize; 5] = [(512 << 10) - 1, 512 << 10, 1 << 20, (1 << 20) + 1, (3 << 20) + 12345];
@@ -68,11 +76,11 @@ fn one_message_every_form_matches_the_vectors() {
         let data = input(len);
         assert_eq!(blake3_servil::hash(&data), Hash::from(expected[0]), "hash, {len} bytes");
         assert_eq!(blake3_servil::hash_multithreaded(&data), Hash::from(expected[0]), "hash_multithreaded, {len} bytes");
-        assert_eq!(blake3_servil::hash_with(Mode::Keyed(KEY), &data), Hash::from(expected[1]), "keyed_hash, {len} bytes");
-        assert_eq!(*blake3_servil::hash_with(Mode::DeriveKey(CONTEXT), &data).as_bytes(), expected[2], "derive_key, {len} bytes");
+        assert_eq!(written(blake3_servil::hash_with, Mode::Keyed(KEY), &data), Hash::from(expected[1]), "keyed_hash, {len} bytes");
+        assert_eq!(*written(blake3_servil::hash_with, Mode::DeriveKey(CONTEXT), &data).as_bytes(), expected[2], "derive_key, {len} bytes");
         for (m, mode) in modes().into_iter().enumerate() {
             for (name, form) in HASH_WITH {
-                assert_eq!(form(mode, &data), Hash::from(expected[m]), "{name} mode {m}, {len} bytes");
+                assert_eq!(written(form, mode, &data), Hash::from(expected[m]), "{name} mode {m}, {len} bytes");
             }
         }
     }
@@ -132,7 +140,7 @@ fn one_message_large_inputs_match_the_reference() {
         assert_eq!(blake3_servil::hash_multithreaded(&data), Hash::from(reference(0, &data)), "hash_multithreaded, {len} bytes");
         for (m, mode) in modes().into_iter().enumerate() {
             for (name, form) in HASH_WITH {
-                assert_eq!(form(mode, &data), Hash::from(reference(m, &data)), "{name} mode {m}, {len} bytes");
+                assert_eq!(written(form, mode, &data), Hash::from(reference(m, &data)), "{name} mode {m}, {len} bytes");
             }
         }
     }

@@ -106,7 +106,9 @@ pub unsafe extern "C" fn b3_derive_key(context: *const c_char) -> B3Mode {
 pub unsafe extern "C" fn b3_hash(mode: *const B3Mode, input: *const c_void, len: usize) -> Digest {
     blake3_servil::initialize();
     let mode = unsafe { self::mode(mode) };
-    digest(blake3_servil::hash_with(mode.mode(), unsafe { bytes(input, len, "the input") }))
+    let mut out = blake3_servil::Hash::from([0; 32]);
+    blake3_servil::hash_with(mode.mode(), unsafe { bytes(input, len, "the input") }, &mut out);
+    digest(out)
 }
 
 /// # Safety
@@ -115,7 +117,9 @@ pub unsafe extern "C" fn b3_hash(mode: *const B3Mode, input: *const c_void, len:
 pub unsafe extern "C" fn b3_hash_multithreaded(mode: *const B3Mode, input: *const c_void, len: usize) -> Digest {
     blake3_servil::initialize_multithreaded(None);
     let mode = unsafe { self::mode(mode) };
-    digest(blake3_servil::hash_multithreaded_with(mode.mode(), unsafe { bytes(input, len, "the input") }))
+    let mut out = blake3_servil::Hash::from([0; 32]);
+    blake3_servil::hash_multithreaded_with(mode.mode(), unsafe { bytes(input, len, "the input") }, &mut out);
+    digest(out)
 }
 
 /// The batch's input and digests, as slices.

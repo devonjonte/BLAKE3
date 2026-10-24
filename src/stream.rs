@@ -783,7 +783,7 @@ mod test {
             });
             assert!(handed == want_handed, "every place handed back once, in order");
             for i in 0..lens.len() {
-                assert_eq!(got[i], crate::hash_with(mode, message(i)), "message {i}, {} bytes", lens[i]);
+                assert_eq!(got[i], crate::test::hash_with_value(mode, message(i)), "message {i}, {} bytes", lens[i]);
             }
         }
     }

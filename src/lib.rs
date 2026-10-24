@@ -841,7 +841,7 @@ fn compress_subtree_to_parent_node(input: &[u8], ahead: usize, key: &CVWords, ch
 // platform check.
 #[cfg(blake3_neon)]
 #[inline]
-fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8) -> Hash {
+fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8, out: &mut core::mem::MaybeUninit<tree::Cv>) {
     debug_assert!(input.len() <= CHUNK_LEN);
     let blocks = cmp::max(1, input.len().div_ceil(BLOCK_LEN));
     let whole = (blocks - 1) * BLOCK_LEN;
@@ -860,12 +860,10 @@ fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8) -> Hash {
             &padded.0
         }
     };
-    let mut out = [0u8; OUT_LEN];
     // Safe: `input` holds `whole` bytes before `tail`, and blocks is 1..=16.
     unsafe {
-        neon_hybrid::hash_chunk(input.as_ptr(), blocks, last, tail.len() as u8, key, 0, flags, CHUNK_START, CHUNK_END | ROOT, &mut out);
+        neon_hybrid::hash_chunk(input.as_ptr(), blocks, last, tail.len() as u8, key, 0, flags, CHUNK_START, CHUNK_END | ROOT, out);
     }
-    Hash(out)
 }
 
 // Hash a whole subtree at its chunk counter (or the whole input at zero).
@@ -929,7 +927,27 @@ fn hash_all_at_once(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8, 
 // (i7-12700K, after idling, 64 B: -16.5%, 8 fresh layouts a side).
 #[inline]
 pub fn hash(input: &[u8]) -> Hash {
-    hash_serial(input, IV, 0)
+    by_value(|out| hash_serial(input, IV, 0, out))
+}
+
+/// The digest a serial hash writes into its destination, as a value: the
+/// one way from the serial chain's destination form (hash_serial and the
+/// functions under it, which write the caller's `out` themselves) to a
+/// returned [`Hash`].
+#[inline(always)]
+pub(crate) fn by_value(write: impl FnOnce(&mut core::mem::MaybeUninit<tree::Cv>)) -> Hash {
+    let mut out = core::mem::MaybeUninit::uninit();
+    write(&mut out);
+    // Sound: every function of the serial chain writes all of `out`.
+    Hash(unsafe { out.assume_init() })
+}
+
+/// `out` as a destination of the serial chain, which writes all of it.
+#[inline(always)]
+pub(crate) fn place(out: &mut tree::Cv) -> &mut core::mem::MaybeUninit<tree::Cv> {
+    // Sound: MaybeUninit<T> has T's layout, and the chain writes only
+    // initialized bytes into it.
+    unsafe { &mut *(out as *mut tree::Cv).cast() }
 }
 
 /// The hash of `input`, using other CPU cores where that is faster: the same
@@ -1058,11 +1076,13 @@ pub type ContextKey = [u8; KEY_LEN];
 /// use blake3_servil::Mode;
 ///
 /// let context_key = blake3_servil::hash_derive_key_context("foo");
-/// let derived = blake3_servil::hash_with(Mode::DeriveKeyMaterial(&context_key), b"bar");
-/// assert_eq!(derived, blake3_servil::hash_with(Mode::DeriveKey("foo"), b"bar"));
+/// let (mut derived, mut direct) = (blake3_servil::Hash::from([0; 32]), blake3_servil::Hash::from([0; 32]));
+/// blake3_servil::hash_with(Mode::DeriveKeyMaterial(&context_key), b"bar", &mut derived);
+/// blake3_servil::hash_with(Mode::DeriveKey("foo"), b"bar", &mut direct);
+/// assert_eq!(derived, direct);
 /// ```
 pub fn hash_derive_key_context(context: &str) -> ContextKey {
-    hash_serial(context.as_bytes(), IV, DERIVE_KEY_CONTEXT).0
+    by_value(|out| hash_serial(context.as_bytes(), IV, DERIVE_KEY_CONTEXT, out)).0
 }
 
 /// The most bytes a subtree starting at byte `input_offset` of a message
@@ -1100,7 +1120,10 @@ pub enum Mode<'a> {
 }
 
 impl Mode<'_> {
-    /// The key words and flags this mode hashes with.
+    /// The key words and flags this mode hashes with. Inlined, so a
+    /// constant mode folds to its constants (out of line, a caller's
+    /// Mode::Hash stored IV to the stack and read it back).
+    #[inline]
     fn key_and_flags(self) -> (CVWords, u8) {
         match self {
             Mode::Hash => (*IV, 0),
@@ -1111,34 +1134,56 @@ impl Mode<'_> {
     }
 }
 
-/// [`hash`] in any [`Mode`]: the plain hash, the keyed hash, or key
-/// derivation, at [`hash`]'s speed.
+/// [`hash`] in any [`Mode`] (the plain hash, the keyed hash, or key
+/// derivation), its digest written into `out`: the form for a caller that
+/// keeps its digests. A digest returned by value passes through a
+/// temporary on the stack and a copy, even in `*out = hash(m)` (a call
+/// that may panic cannot write into `out` before it returns); this one's
+/// kernel writes `out` itself.
 ///
 /// ```
 /// # blake3_servil::initialize();
-/// use blake3_servil::Mode;
+/// use blake3_servil::{Hash, Mode};
 /// let key = [7u8; 32];
-/// assert_eq!(blake3_servil::hash_with(Mode::Keyed(&key), b"foo").as_bytes().len(), 32);
+/// let mut mac = Hash::from([0; 32]);
+/// blake3_servil::hash_with(Mode::Keyed(&key), b"foo", &mut mac);
+/// assert_eq!(mac, blake3_servil::Hasher::new_with(Mode::Keyed(&key)).update(b"foo").finalize());
 /// ```
-pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
-    let (key, flags) = mode.key_and_flags();
-    hash_serial(input, &key, flags)
+// Inlined into its caller, as hash() is (a constant mode folds away).
+#[inline]
+pub fn hash_with(mode: Mode, input: &[u8], out: &mut Hash) {
+    // The plain mode's key is the constant IV, passed where it is, as
+    // hash() passes it: a copy would put 32 bytes of stores on the stack
+    // just before the message's loads (bench-hashes #65).
+    // One call of the chain (two would keep it out of line).
+    let other;
+    let (key, flags) = match mode {
+        Mode::Hash => (IV, 0),
+        _ => {
+            other = mode.key_and_flags();
+            (&other.0, other.1)
+        }
+    };
+    hash_serial(input, key, flags, place(&mut out.0));
 }
 
-/// [`hash_multithreaded`] in any [`Mode`], at its speed.
+/// [`hash_multithreaded`] in any [`Mode`], at its speed, its digest
+/// written into `out` (as [`hash_with`]'s).
 ///
 /// ```
 /// # blake3_servil::initialize_multithreaded(None);
-/// use blake3_servil::Mode;
+/// use blake3_servil::{Hash, Mode};
 /// let key = [7u8; 32];
 /// let input = vec![1u8; 1 << 20];
-/// assert_eq!(blake3_servil::hash_multithreaded_with(Mode::Keyed(&key), &input), blake3_servil::hash_with(Mode::Keyed(&key), &input));
+/// let mut mac = Hash::from([0; 32]);
+/// blake3_servil::hash_multithreaded_with(Mode::Keyed(&key), &input, &mut mac);
+/// assert_eq!(mac, blake3_servil::Hasher::new_with(Mode::Keyed(&key)).update(&input).finalize());
 /// ```
 #[cfg(feature = "std")]
-pub fn hash_multithreaded_with(mode: Mode, input: &[u8]) -> Hash {
+pub fn hash_multithreaded_with(mode: Mode, input: &[u8], out: &mut Hash) {
     lanes::require();
     let (key, flags) = mode.key_and_flags();
-    lanes::hash_with_key(input, &key, flags)
+    *out = lanes::hash_with_key(input, &key, flags);
 }
 
 /// The whole input on the calling thread, in the given mode: the one-chunk
@@ -1146,14 +1191,14 @@ pub fn hash_multithreaded_with(mode: Mode, input: &[u8]) -> Hash {
 /// hash() in its modes and hash_multithreaded()'s short path all come
 /// through here.
 #[inline]
-fn hash_serial(input: &[u8], key: &CVWords, flags: u8) -> Hash {
-    hash_serial_from(Platform::detect(), input, key, flags)
+fn hash_serial(input: &[u8], key: &CVWords, flags: u8, out: &mut core::mem::MaybeUninit<tree::Cv>) {
+    hash_serial_from(Platform::detect(), input, key, flags, out)
 }
 
 /// [`hash_serial`] from `platform`: the startup self-test's way in, which
 /// has not run `Platform::detect`'s check (it is that check).
 #[inline]
-fn hash_serial_from(platform: Platform, input: &[u8], key: &CVWords, flags: u8) -> Hash {
+fn hash_serial_from(platform: Platform, input: &[u8], key: &CVWords, flags: u8, out: &mut core::mem::MaybeUninit<tree::Cv>) {
     let turn = platform::Sme2Turn::take(platform, input.len() >= SME2_SIZED_LEN);
     // One comparison on the path of a chunk or less: everything else is
     // out of line, so that path's code stays as small as it was (a call
@@ -1162,7 +1207,7 @@ fn hash_serial_from(platform: Platform, input: &[u8], key: &CVWords, flags: u8) 
     if (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
         prefetch_after_pause(input.len(), turn.platform(), false);
     }
-    hash_serial_on(input, key, flags, turn.platform())
+    hash_serial_on(input, key, flags, turn.platform(), out)
 }
 
 /// Below this length a one-shot call that follows a pause prefetches its
@@ -1332,8 +1377,8 @@ pub(crate) const SME2_SIZED_BATCH: usize = 16;
 /// piece runs the NEON hybrids); one chunk or less runs the scalar kernel
 /// on every platform.
 #[inline]
-fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) -> Hash {
-    Hash(tree::hash(&tree::PlatformKernels { key, flags, platform }, input))
+fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform, out: &mut core::mem::MaybeUninit<tree::Cv>) {
+    tree::hash(&tree::PlatformKernels { key, flags, platform }, input, out)
 }
 
 /// The hashes of many messages of one length, laid out in one buffer, on
@@ -1424,7 +1469,7 @@ pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8;
 /// let nodes = vec![1u8; 20 * 64];
 /// let mut macs = vec![[0u8; 32]; 20];
 /// blake3_servil::hash_many_with(Mode::Keyed(&key), &nodes, 64, &mut macs);
-/// assert_eq!(macs[5], *blake3_servil::hash_with(blake3_servil::Mode::Keyed(&key), &[1u8; 64]).as_bytes());
+/// assert_eq!(macs[5], *blake3_servil::Hasher::new_with(blake3_servil::Mode::Keyed(&key)).update(&[1u8; 64]).finalize().as_bytes());
 /// ```
 pub fn hash_many_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
     let (key, flags) = mode.key_and_flags();
@@ -1440,7 +1485,7 @@ pub fn hash_many_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[
 /// let nodes = vec![1u8; 20000 * 64];
 /// let mut macs = vec![[0u8; 32]; 20000];
 /// blake3_servil::hash_many_multithreaded_with(Mode::Keyed(&key), &nodes, 64, &mut macs);
-/// assert_eq!(macs[5], *blake3_servil::hash_with(blake3_servil::Mode::Keyed(&key), &[1u8; 64]).as_bytes());
+/// assert_eq!(macs[5], *blake3_servil::Hasher::new_with(blake3_servil::Mode::Keyed(&key)).update(&[1u8; 64]).finalize().as_bytes());
 /// ```
 #[cfg(feature = "std")]
 pub fn hash_many_multithreaded_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {

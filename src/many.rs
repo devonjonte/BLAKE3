@@ -61,7 +61,7 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
     let slot = slot_len(len);
     assert_slots(input, len, outputs.len());
     if len == 0 {
-        outputs.fill(*crate::hash_serial_on(&[], key, flags, platform).as_bytes());
+        outputs.fill(crate::by_value(|out| crate::hash_serial_on(&[], key, flags, platform, out)).0);
         return;
     }
     #[cfg(blake3_sme2)]
@@ -78,7 +78,7 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
         #[cfg(not(target_arch = "x86_64"))]
         {
             for (i, output) in outputs.iter_mut().enumerate() {
-                *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
+                crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform, crate::place(output));
             }
             return;
         }
@@ -161,7 +161,7 @@ fn hash_chunked(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mu
     let grouped = outputs.len() - alone;
     let (groups, rest) = outputs.split_at_mut(grouped);
     for (i, output) in rest.iter_mut().enumerate() {
-        *output = *crate::hash_serial_on(&input[(grouped + i) * slot..][..len], key, flags, platform).as_bytes();
+        crate::hash_serial_on(&input[(grouped + i) * slot..][..len], key, flags, platform, crate::place(output));
     }
     for (g, digests) in groups.chunks_mut(GROUP).enumerate() {
         let mut lanes = [core::ptr::null::<u8>(); GROUP];
@@ -255,7 +255,7 @@ fn hash_long_or_single(input: &[u8], len: usize, key: &CVWords, flags: u8, outpu
     }
     let slot = slot_len(len);
     for (i, output) in outputs.iter_mut().enumerate() {
-        *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
+        crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform, crate::place(output));
     }
 }
 
@@ -454,7 +454,7 @@ fn hash_run_short<const N: usize>(messages: &[u8], key: &CVWords, flags: u8, out
         neon_plans_last_len::<N>(lanes, key, flags, last_len, outputs);
     } else {
         for (output, message) in outputs.iter_mut().zip(messages.chunks_exact(N)) {
-            *output = *crate::hash_serial_on(&message[..last_len], key, flags, platform).as_bytes();
+            crate::hash_serial_on(&message[..last_len], key, flags, platform, crate::place(output));
         }
     }
 }
@@ -563,7 +563,7 @@ fn hash_blocks<const N: usize>(messages: &[u8], key: &CVWords, flags: u8, output
             hash_four_at_a_time::<N>(rest_lanes, key, flags, rest, platform);
         } else {
             for (output, message) in rest.iter_mut().zip(rest_lanes) {
-                *output = *crate::hash_serial_on(&message[..(N - BLOCK_LEN) + last_len], key, flags, platform).as_bytes();
+                crate::hash_serial_on(&message[..(N - BLOCK_LEN) + last_len], key, flags, platform, crate::place(output));
             }
         }
     }
@@ -604,7 +604,7 @@ fn hash_four_at_a_time<const N: usize>(lanes: &[&[u8; N]], key: &CVWords, flags:
         }
         _ => {
             for (output, message) in outputs[fours..].iter_mut().zip(&lanes[fours..]) {
-                *output = *crate::hash_serial_on(&message[..], key, flags, platform).as_bytes();
+                crate::hash_serial_on(&message[..], key, flags, platform, crate::place(output));
             }
         }
     }
@@ -904,9 +904,9 @@ mod test {
         let context = "blake3-servil many modes test";
         let context_key = crate::hash_derive_key_context(context);
         let modes: [(CVWords, u8, &dyn Fn(&[u8]) -> [u8; OUT_LEN]); 2] = [
-            (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH, &|m| *crate::hash_with(crate::Mode::Keyed(&key), m).as_bytes()),
+            (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH, &|m| *crate::test::hash_with_value(crate::Mode::Keyed(&key), m).as_bytes()),
             (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL, &|m| {
-                *crate::hash_with(crate::Mode::DeriveKey(context), m).as_bytes()
+                *crate::test::hash_with_value(crate::Mode::DeriveKey(context), m).as_bytes()
             }),
         ];
         for len in [0, 1, 63, BLOCK_LEN, 100, 256, 1000, CHUNK_LEN, CHUNK_LEN + 1, 2000, 2 * CHUNK_LEN, 4000, 15 * CHUNK_LEN, 16 * CHUNK_LEN + 5] {
@@ -945,7 +945,7 @@ mod test {
                     let mut out = vec![[0u8; OUT_LEN]; count];
                     crate::hash_many_with(mode, &input, len, &mut out);
                     for (k, digest) in out.iter().enumerate() {
-                        assert_eq!(digest, crate::hash_with(mode, &input[k * slot..][..len]).as_bytes(), "len {len} count {count} message {k}");
+                        assert_eq!(digest, crate::test::hash_with_value(mode, &input[k * slot..][..len]).as_bytes(), "len {len} count {count} message {k}");
                     }
                 }
             }
