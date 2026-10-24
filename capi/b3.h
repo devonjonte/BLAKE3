@@ -1,4 +1,4 @@
-/* BLAKE3, the servil fork's C API.
+/* libb3_servil: the C API of blake3-servil.
  *
  * Every call succeeds. A call whose arguments break its contract (below)
  * stops the program with a message. The first call runs the library's
