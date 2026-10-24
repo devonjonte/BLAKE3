@@ -298,6 +298,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
                     summary = "TimedOut"
                     timed[name] += 1
                     CLOCK_ONLY.add(f"{name}\t{place}")
+                    STOPPED.setdefault(name, set()).update(t for t, o, _ in tests if o == "TIMEOUT")
             functions[(mutant["file"], function)].append((summary, name))
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
@@ -319,6 +320,16 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
 # TIMEOUTS): a hang, or a test made slow by the mutant, or by the machine's
 # load (a mutant compiled out of the build was stopped so once, at 5 s).
 CLOCK_ONLY = set()
+# The tests the clock stopped, a timed-out name's: a new row's placeholder
+# names them, so its reason starts from what stopped (October 24).
+STOPPED = {}
+
+
+def unclassified(name):
+    """A new row's reason until someone writes one: UNCLASSIFIED, and for a
+    time-out the tests the clock stopped."""
+    stopped = STOPPED.get(name)
+    return "UNCLASSIFIED" + (f" (the clock stopped: {', '.join(sorted(stopped))})" if stopped else "")
 
 UNMUTATED = "(unmutated)\t\t"
 HEADER = "# mutant (file, change, line:column)\tfunction\ttest\toutcome\tms\n"  # the record's format
@@ -574,11 +585,11 @@ def main():
         theader = [l.rstrip("\n") for l in open(TIMEOUTS) if l.startswith("#")] if os.path.exists(TIMEOUTS) else \
             [f"# The mutants that time out on {platform.machine()}: no test fails, the clock stops one (tools/mutants/check.py, TIMEOUTS).",
              "# A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason."]
-        trows = sorted([f"{k}\t{n}\t{tknown.get(k, (0, 'UNCLASSIFIED'))[1]}" for k, n in timed.items()] + INACTIVE_TIMEOUTS)
+        trows = sorted([f"{k}\t{n}\t{tknown.get(k, (0, unclassified(k)))[1]}" for k, n in timed.items()] + INACTIVE_TIMEOUTS)
         open(TIMEOUTS, "w").write("\n".join(theader + trows) + "\n")
         print(f"{TIMEOUTS}: {sum(timed.values())} time-outs, {sum(1 for k in timed if k not in tknown)} names new")
         return
-    unexplained = sorted(k for k, (_, reason) in {**tknown, **known}.items() if reason == "UNCLASSIFIED")
+    unexplained = sorted(k for k, (_, reason) in {**tknown, **known}.items() if reason.startswith("UNCLASSIFIED"))
     for k in unexplained:
         print(f"NO REASON: {k}")
     new = {k: n for k, n in found.items() if n > known.get(k, (0, ""))[0]}
