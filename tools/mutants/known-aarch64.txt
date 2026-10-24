@@ -450,7 +450,6 @@ src/self_test.rs	replace + with -	6	x86 only: compiled out on AArch64 (CI's x86 
 src/self_test.rs	replace << with >> in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace == with != in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace compiled_features_present with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/self_test.rs	replace ensure_slow::<impl Drop for Failed>::drop with ()	1	OPEN: the self-test's failure path (a CPU or build that computes wrong digests); no test makes the self-test fail
 src/self_test.rs	replace | with ^ in chunk_values	2	equivalent: | and ^ agree on flag bits that never overlap
 src/tree.rs	replace * with + in root_children	1	speed: the arrays' size (each choice holds the values; only the stack frame changes)
 src/tree.rs	replace * with / in root_children	1	speed: the arrays' size (each choice holds the values; only the stack frame changes)

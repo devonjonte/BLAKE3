@@ -449,7 +449,6 @@ src/self_test.rs	replace == with != in compiled_features_present	2	this CPU has 
 src/self_test.rs	replace chunk_values -> usize with 0	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace chunk_values -> usize with 1	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace compiled_features_present with ()	1	this CPU has LZCNT and BMI1: every form of the check reads them present; the case it guards is a CPU without them
-src/self_test.rs	replace ensure_slow::<impl Drop for Failed>::drop with ()	1	OPEN: the self-test's failure path (a CPU or build that computes wrong digests); no test makes the self-test fail
 src/self_test.rs	replace | with & in chunk_values	2	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace | with ^ in chunk_values	2	equivalent: | and ^ agree on flag bits that never overlap
 src/tree.rs	replace && with || in <impl Kernels for PlatformKernels<'_>>::children	1	SME2 only: the block is cfg(blake3_sme2), compiled out on x86
