@@ -218,7 +218,7 @@ mod finish;
 #[cfg(feature = "std")]
 mod park_sync {
     pub use std::sync::OnceLock;
-    pub use std::sync::atomic::{AtomicU64, Ordering};
+    pub use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     pub use std::thread;
 }
 #[cfg(feature = "std")]
