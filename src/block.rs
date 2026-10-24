@@ -35,7 +35,8 @@ impl Block {
 
     /// The blocks as 32-byte digests, two a block: a Merkle layer's digests
     /// written straight into the next layer's input (its 64-byte messages,
-    /// two children each).
+    /// two children each). A layer of an odd count leaves a slot to spare:
+    /// slice it, `&mut Block::digests_mut(blocks)[..count]`.
     pub fn digests_mut(blocks: &mut [Block]) -> &mut [[u8; 32]] {
         // Sound: a [u8; 32] is 32 bytes with alignment 1; two fill a Block.
         unsafe { core::slice::from_raw_parts_mut(blocks.as_mut_ptr().cast(), blocks.len() * 2) }
@@ -95,7 +96,9 @@ pub struct Batch {
 
 #[cfg(feature = "std")]
 impl Batch {
-    /// `count` messages of `message_len` bytes, every byte zero.
+    /// `count` messages of `message_len` bytes, every byte zero. The zeros
+    /// are written now, so all of a `Batch`'s memory is resident from its
+    /// making, not as its pages are first touched: make one and refill it.
     pub fn new(message_len: usize, count: usize) -> Self {
         let per = Self::blocks_per(message_len);
         Batch { blocks: std::vec![Block::ZERO; per * count], message_len, count }
