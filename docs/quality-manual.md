@@ -32,8 +32,6 @@ algorithm:
   `Hasher::update_each`, `src/each.rs`);
 - the stream, which hashes the program's messages behind it, each digest
   into the place the program names (`stream`, `src/stream.rs`).
-- outboards and their verification (`outboard_with`, `Verifier`,
-  `src/outboard.rs`);
 - the startup self-test (`src/self_test.rs`);
 - the C API (`capi/b3.h` over the crate, `capi/src/lib.rs`), tested
   through every call against the official test vectors, and from a C
@@ -192,7 +190,7 @@ unrolled kernel code.
   `hash_many` at 15 message lengths and 20 counts, every input of a batch
   against a guard page of its own on every kernel the build and CPU have
   (1 to 17 inputs), the collection calls (`hash_each_with`, its
-  multithreaded form, `Hasher::update_each`, `outboard_with`) with each
+  multithreaded form, `Hasher::update_each`) with each
   item in its own pages, and extended output at 10 lengths from three
   positions. They found bug 8 below as a crash.
 - **AddressSanitizer** over the library tests: clean. As a control, a
@@ -211,7 +209,7 @@ unrolled kernel code.
   assembly or SIMD intrinsics): `test::unsafe_paths` (batches, the pool
   with two callers), and the `test_miri_*` tests CI's Miri step runs on
   every change: the stream (`stream::test::test_miri_stream`), the
-  pool's collections, outboards, and the `Verifier`, and x86's whole-
+  pool's collections, and x86's whole-
   and-partial-chunk passes. Under Miri the pool splits work from 16 KiB
   (512 KiB elsewhere), so these tests reach the same pool code on small
   inputs, and each asserts it got there; CI's Miri step takes about three

@@ -40,8 +40,6 @@ and the tests are tested ([QUALITY.md](QUALITY.md)).
   lengths.
 - `Hasher::update_each`: many messages in progress at once.
 - `stream()`: inputs one after another, hashed behind the caller.
-- `outboard_with`, `verify_range_with` and `Verifier`: verified streaming
-  in iroh-blobs' format.
 - A C API in `capi/b3.h`. The library is `libb3_servil`. C11 and C++11.
 - `Mode::DeriveKeyMaterial` with `hash_derive_key_context`: one context
   hashed once for many derivations.

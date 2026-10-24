@@ -44,7 +44,6 @@
 //! | Many messages of different lengths, in memory | [`hash_each_multithreaded_with`] |
 //! | Many messages arriving at once (a server's uploads) | [`Hasher::update_each`] |
 //! | A stream of messages read, made, or arriving | [`stream`] |
-//! | A message read in verified ranges (Bao, iroh-blobs) | [`outboard_with`], [`verify_range_with`], [`Verifier`] |
 //!
 //! Each call returns once its hash is done, and uses other CPU cores
 //! where that is faster (the forms without `multithreaded` stay on the
@@ -83,14 +82,7 @@
 //!   [`Hasher::update`] and [`Hasher::finalize`], and [`OutputReader`].
 //!   [`Hasher::update_reader`] uses a 1 MiB buffer while it reads past
 //!   64 KiB, and [`hash_each_with`] 32 bytes for each chunk of its messages
-//!   of 2 to 15 chunks, each freed when it returns. [`outboard_with`]
-//!   returns the outboard it allocates (64 bytes for each 16 KiB), and
-//!   [`verify_range_with`] allocates 32 bytes for each group of its range,
-//!   freed when it returns. A [`Verifier`] keeps up to 16 KiB, for a group
-//!   that arrives in pieces, and 48 bytes for each level of the tree; each
-//!   [`Verifier::update`] allocates about 100 bytes for each node its piece
-//!   holds, and its groups' working space (about 60 bytes a chunk), freed when it
-//!   returns.
+//!   of 2 to 15 chunks, each freed when it returns.
 //! - **Multithreaded calls** allocate nothing below 512 KiB, where they
 //!   hash on the calling thread. Above it they keep a list of the pieces
 //!   they hand out, freed when they return: 48 bytes for each 128 KiB of
@@ -159,12 +151,6 @@ mod test;
 mod each;
 #[cfg(feature = "std")]
 pub use each::{hash_each_multithreaded_with, hash_each_with};
-#[cfg(feature = "std")]
-mod outboard;
-#[cfg(feature = "std")]
-#[doc(hidden)]
-#[cfg(feature = "std")]
-pub use outboard::{GROUP_LEN, Verifier, outboard_multithreaded_with, outboard_with, verify_range_with};
 
 mod platform;
 
@@ -1969,9 +1955,9 @@ impl HasherCore {
         }
     }
 
-    /// Start the subtree at byte `offset` of the message (the outboard's
-    /// positioned subtrees; set_input_offset in the tests).
-    #[cfg(any(feature = "std", test))]
+    /// Start the subtree at byte `offset` of the message: the tests' own
+    /// (set_input_offset), since the outboard, its one caller, is gone.
+    #[cfg(test)]
     pub(crate) fn set_input_offset(&mut self, offset: u64) -> &mut Self {
         assert_eq!(self.count(), 0, "hasher has already accepted input");
         assert_eq!(offset % CHUNK_LEN as u64, 0, "offset ({offset}) must be a chunk boundary (divisible by {CHUNK_LEN})",);
