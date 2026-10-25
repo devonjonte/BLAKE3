@@ -111,6 +111,11 @@ fn build_avx512_assembly() {
     println!("cargo::rustc-cfg=blake3_avx512_ffi");
     let mut build = new_build();
     build.file("c/blake3_avx512_x86-64_unix.S");
+    // The wide kernels (32 inputs a pass; tools/gen_avx512_32.py): ELF
+    // directives, so Linux, the one x86-64 target.
+    if env::var("CARGO_CFG_TARGET_OS").unwrap() == "linux" {
+        build.file("c/blake3_avx512_32.S");
+    }
     // Older versions of Clang require these flags, even for assembly. See
     // https://github.com/BLAKE3-team/BLAKE3/issues/79.
     build.flag("-mavx512f");
