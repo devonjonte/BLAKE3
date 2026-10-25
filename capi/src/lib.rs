@@ -229,14 +229,13 @@ type Done = Box<dyn FnMut(&'static mut [Hash])>;
 /// here.
 pub struct B3Stream {
     stream: Stream<'static, Done>,
-    finished: bool,
 }
 
 unsafe fn stream_mut<'a>(stream: *mut B3Stream) -> &'a mut B3Stream {
     assert!(!stream.is_null(), "b3: the stream is NULL");
-    let s = unsafe { &mut *stream };
-    assert!(!s.finished, "b3: the stream is finished; begin another");
-    s
+    // A finished stream is freed; its pointer is the caller's to forget
+    // (b3.h: a stream ends at b3_stream_finish).
+    unsafe { &mut *stream }
 }
 
 /// # Safety
@@ -250,7 +249,7 @@ pub unsafe extern "C" fn b3_stream_begin(mode: *const B3Mode, done: B3Done, ctx:
         // Sound: a Hash is a Digest (both 32 bytes, repr(transparent)).
         unsafe { done(ctx as *mut c_void, places.as_mut_ptr() as *mut Digest, places.len()) }
     });
-    Box::into_raw(Box::new(B3Stream { stream: Stream::open(mode.mode(), handler), finished: false }))
+    Box::into_raw(Box::new(B3Stream { stream: Stream::open(mode.mode(), handler) }))
 }
 
 /// # Safety
@@ -307,7 +306,6 @@ pub unsafe extern "C" fn b3_stream_collect(stream: *mut B3Stream) {
 pub unsafe extern "C" fn b3_stream_finish(stream: *mut B3Stream) {
     let s = unsafe { stream_mut(stream) };
     s.stream.finish();
-    s.finished = true;
     // Sound: made by Box::into_raw in b3_stream_begin, finished once.
     drop(unsafe { Box::from_raw(stream) });
 }
