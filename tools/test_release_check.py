@@ -16,6 +16,7 @@ spec.loader.exec_module(check)
 
 HEAD, OLD = "a" * 40, "b" * 40
 RUN = {"id": 7, "name": "tests", "event": "workflow_dispatch", "status": "completed", "conclusion": "success"}
+MUTATION_OK = "mutants: 12 survive, each known and explained\nmutants: 3 time out, each known (timeouts-x86_64.txt)\n"
 
 
 def job(conclusion="success", status="completed"):
@@ -69,7 +70,7 @@ class CI(unittest.TestCase):
 
 
 class ReleaseEvidence(unittest.TestCase):
-    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch"):
+    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch", mutation_log=MUTATION_OK):
         jobs = [job(), job()] if ci_jobs is None else ci_jobs
         def git(*args):
             if args[0] == "rev-parse":
@@ -100,9 +101,16 @@ class ReleaseEvidence(unittest.TestCase):
                 task["cells"] = cells
             (root / "runner/jobs/job.json").write_text(json.dumps(task))
             (root / "runner/results/1/verdict.json").write_text(json.dumps({"job": "job.json", "status": verdict}))
+            logs = root / "tmp/night"
+            logs.mkdir(parents=True)
+            candidate = (git_override or git)("rev-parse", "candidate")[:12]
+            for name, text in [("check-release-vm", "no cell slower"), ("check-builds", "every build passes"), ("publish-dry-run", "publish-dry-run: ok")]:
+                (logs / f"{name}-{candidate}.log").write_text(text + "\n")
+            if mutation_log is not None:
+                (logs / f"mutants-{candidate}.log").write_text(mutation_log)
             output = io.StringIO()
             with patch.object(check, "MAIN", tmp), patch.object(check, "git", git_override or git), \
-                 patch.object(check, "github", github), patch.object(check, "log_ends_with", return_value=True), \
+                 patch.object(check, "github", github), \
                  patch("sys.argv", ["release-check.py", "candidate"]), contextlib.redirect_stdout(output):
                 with self.assertRaises(SystemExit) as caught:
                     check.main()
@@ -132,6 +140,25 @@ class ReleaseEvidence(unittest.TestCase):
     def test_wrong_commits_not_pass(self):
         self.assertEqual(self.run_gate(new="c" * 40)[0], 1)
         self.assertEqual(self.run_gate(old="c" * 40)[0], 1)
+
+    def test_mutation_timeout_mismatch_is_no_verdict(self):
+        text = "mutants: 12 survive, each known and explained\nmutants: the time-outs differ from timeouts-x86_64.txt (no verdict on those mutants)\n"
+        code, output = self.run_gate(mutation_log=text)
+        self.assertEqual(code, 2, output)
+        self.assertIn("NO VERDICT  full mutation run", output)
+
+    def test_mutation_survivor_failure_is_failed(self):
+        text = "mutants: the list and this run differ, or a listed mutant has no reason\nmutants: 3 time out, each known (timeouts-x86_64.txt)\n"
+        code, output = self.run_gate(mutation_log=text)
+        self.assertEqual(code, 1, output)
+        self.assertIn("FAIL  full mutation run", output)
+
+    def test_incomplete_mutation_log_is_open(self):
+        for text in [None, "", MUTATION_OK.splitlines()[0], MUTATION_OK + "interrupted\n"]:
+            with self.subTest(text=text):
+                code, output = self.run_gate(mutation_log=text)
+                self.assertEqual(code, 1, output)
+                self.assertIn("OPEN  full mutation run", output)
 
     def test_mac_undecided_outcomes_remain_distinct(self):
         for verdict, label in [("timed out", "TIMED OUT"), ("no verdict", "NO VERDICT")]:

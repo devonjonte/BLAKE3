@@ -23,11 +23,13 @@ and the rest timed out or have no verdict.
   hex digits), so an earlier commit's log cannot stand in for it:
   - VM check: tmp/night/check-release-vm-C.log, from
     `cd bench-hashes && cargo run --release -- check --against <previous tag> --cells all`.
-  - Full mutation run: tmp/night/mutants-C.log ending "each known and
-    explained", from `python3 tools/mutants/check.py` with the commit checked out.
+  - Full mutation run: tmp/night/mutants-C.log with both final summaries
+    matching their survivor and timeout lists, from
+    `python3 tools/mutants/check.py` with the commit checked out.
   - check-builds: tmp/night/check-builds-C.log ending "every build passes".
-  - Publish dry run: tmp/night/publish-dry-run-C.log, from
-    `cargo publish --dry-run` in the root and in b3sum/.
+  - Publish dry run: tmp/night/publish-dry-run-C.log, from the paired
+    package dry-run in CONTRIBUTING.md, followed by "publish-dry-run: ok"
+    only on success.
 - The pages: README.md, QUALITY.md, CHANGELOG.md changed since the
   previous release (a release rewrites them for its readers).
 
@@ -81,11 +83,34 @@ def github(path):
         raise
 
 
-def log_ends_with(path, text):
+def log_tail(path):
     full = os.path.join(MAIN, path)
     if not os.path.exists(full):
         return None
-    return text in open(full, errors="replace").read()[-4000:]
+    return Path(full).read_text(errors="replace")[-4000:]
+
+
+def log_ends_with(path, text):
+    tail = log_tail(path)
+    return None if tail is None else text in tail
+
+
+def mutation_result(path):
+    """check.py exits zero only when both survivor and timeout lists agree."""
+    tail = log_tail(path)
+    lines = [] if tail is None else tail.strip().splitlines()
+    if len(lines) < 2:
+        return None
+    survivors, timeouts = lines[-2:]
+    if survivors == "mutants: the list and this run differ, or a listed mutant has no reason":
+        return False
+    if not re.fullmatch(r"mutants: \d+ survive, each known and explained", survivors):
+        return None
+    if re.fullmatch(r"mutants: \d+ time out, each known \([^)]+\)", timeouts):
+        return True
+    if re.fullmatch(r"mutants: the time-outs differ from .+ \(no verdict on those mutants\)", timeouts):
+        return NO_VERDICT
+    return None
 
 
 def ci_result(run):
@@ -172,12 +197,12 @@ def main():
 
     step("VM check against the previous release", log_ends_with(f"tmp/night/check-release-vm-{commit[:12]}.log", "no cell slower"),
          f"(cd bench-hashes && cargo run --release -- check --against {previous or '<previous tag>'} --cells all) > tmp/night/check-release-vm-{commit[:12]}.log")
-    step("full mutation run", log_ends_with(f"tmp/night/mutants-{commit[:12]}.log", "each known and explained"),
+    step("full mutation run", mutation_result(f"tmp/night/mutants-{commit[:12]}.log"),
          f"python3 tools/mutants/check.py > tmp/night/mutants-{commit[:12]}.log, the commit checked out (overnight)")
     step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "every build passes"),
          f"sh tools/check-builds.sh > tmp/night/check-builds-{commit[:12]}.log")
     step("cargo publish --dry-run", log_ends_with(f"tmp/night/publish-dry-run-{commit[:12]}.log", "publish-dry-run: ok"),
-         f"(cargo publish --dry-run --allow-dirty && cd b3sum && cargo publish --dry-run --allow-dirty) > tmp/night/publish-dry-run-{commit[:12]}.log && echo publish-dry-run: ok >> tmp/night/publish-dry-run-{commit[:12]}.log")
+         f"paired package dry-run in CONTRIBUTING.md; save its output to tmp/night/publish-dry-run-{commit[:12]}.log and append 'publish-dry-run: ok' only on success")
 
     if previous:
         changed = set(git("diff", "--name-only", previous, commit).split())
