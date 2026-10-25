@@ -97,11 +97,10 @@ void b3_hash_many_multithreaded(const b3_mode *mode, const void *input, size_t m
 /* One message fed in pieces. A b3_hasher is your memory (18 KiB; on the
  * stack, in a struct, or allocated). It needs no library destructor; the
  * caller frees any heap storage it supplied. b3_hasher_init starts a
- * message, and starts one over. Heap storage must also be 64-byte aligned:
- * ordinary malloc
- * does not guarantee this over-alignment. Use an aligned allocator (such
- * as aligned_alloc on Unix, or _aligned_malloc on Windows) and its matching
- * deallocator. Use the header matching the linked library. */
+ * message, and starts one over. Heap storage must also be 64-byte aligned;
+ * ordinary malloc does not guarantee this over-alignment. Use a
+ * platform-appropriate aligned allocator and its matching deallocator.
+ * Use the header matching the linked library. */
 #define B3_HASHER_SIZE 18432
 #ifdef __cplusplus
 #define B3_ALIGN64 alignas(64)
