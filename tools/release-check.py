@@ -12,7 +12,9 @@ judge: a check whose machine was busy). Exit status 0 only when every step
 passes; 1 when a step failed or is open; 2 when every other step passes
 and the rest timed out or have no verdict.
 
-- CI: GitHub's workflow runs on the commit (every job succeeded).
+- CI: a workflow_dispatch run on the commit (every job succeeded).
+  Pull-request runs check a synthetic merge by default, not the head SHA
+  GitHub associates with the run, so they are not release evidence.
 - Long proofs: the commit's GitHub status "long proofs" (long-proofs.sh).
 - Mac check: runner/results/*/verdict.json whose job names this commit as
   new_commit and the previous release as old_commit (a "check" job with
@@ -87,7 +89,9 @@ def log_ends_with(path, text):
 
 
 def ci_result(run):
-    """A green workflow must include successful jobs, not skipped checks."""
+    """Release CI tests the actual candidate, with every job executed."""
+    if run["event"] != "workflow_dispatch":
+        return None
     if run["status"] != "completed":
         return None
     if run["conclusion"] != "success":
@@ -132,7 +136,7 @@ def main():
         print(f"{label}  {name}" + ("" if ok is True else f": {how}"))
 
     try:
-        runs = github(f"/repos/johnservil/BLAKE3/actions/runs?head_sha={commit}&per_page=20").get("workflow_runs", [])
+        runs = github(f"/repos/johnservil/BLAKE3/actions/runs?head_sha={commit}&event=workflow_dispatch&per_page=20").get("workflow_runs", [])
         ci = [r for r in runs if r["name"] == "tests"]
         result = ci_result(ci[0]) if ci else None
         step("CI, every job", result,

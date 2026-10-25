@@ -191,7 +191,9 @@ reads where each step left its result and prints PASS, FAIL, or OPEN
 with the command that makes the evidence. The release's tracking issue
 lists what it takes and ticks each step:
 
-1. CI, every job, on the tip; `sh tools/check-builds.sh`.
+1. CI, every job, dispatched with `workflow_dispatch` on the exact candidate;
+   `sh tools/check-builds.sh`. Pull-request CI normally checks a synthetic
+   merge, so its head-SHA label alone is not evidence for the release commit.
 2. `bench-hashes check --against <previous release tag> --cells all`, on
    the VM and the Mac: each commit was checked against its parent alone,
    and this sees what small slowdowns add up to.

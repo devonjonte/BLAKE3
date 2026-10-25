@@ -15,7 +15,7 @@ check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check)
 
 HEAD, OLD = "a" * 40, "b" * 40
-RUN = {"id": 7, "name": "tests", "status": "completed", "conclusion": "success"}
+RUN = {"id": 7, "name": "tests", "event": "workflow_dispatch", "status": "completed", "conclusion": "success"}
 
 
 def job(conclusion="success", status="completed"):
@@ -26,6 +26,11 @@ class CI(unittest.TestCase):
     def result(self, jobs):
         with patch.object(check, "github", return_value={"total_count": len(jobs), "jobs": jobs}):
             return check.ci_result(RUN)
+
+    def test_pr_merge_run_is_not_release_evidence(self):
+        with patch.object(check, "github") as github:
+            self.assertIsNone(check.ci_result(dict(RUN, event="pull_request")))
+            github.assert_not_called()
 
     def test_success_needs_successful_jobs(self):
         self.assertIs(self.result([job(), job()]), True)
@@ -64,7 +69,7 @@ class CI(unittest.TestCase):
 
 
 class ReleaseEvidence(unittest.TestCase):
-    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None):
+    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch"):
         jobs = [job(), job()] if ci_jobs is None else ci_jobs
         def git(*args):
             if args[0] == "rev-parse":
@@ -79,7 +84,7 @@ class ReleaseEvidence(unittest.TestCase):
 
         def github(path):
             if "/actions/runs?" in path:
-                return {"workflow_runs": [RUN]}
+                return {"workflow_runs": [dict(RUN, event=ci_event)]}
             if "/actions/runs/7/jobs?" in path:
                 return {"total_count": len(jobs), "jobs": jobs}
             if path.endswith("/statuses"):
@@ -105,6 +110,11 @@ class ReleaseEvidence(unittest.TestCase):
 
     def test_complete_fixture_passes(self):
         self.assertEqual(self.run_gate()[0], 0)
+
+    def test_pr_merge_ci_not_pass(self):
+        code, output = self.run_gate(ci_event="pull_request")
+        self.assertEqual(code, 1)
+        self.assertIn("OPEN  CI, every job", output)
 
     def test_skipped_ci_not_pass(self):
         code, output = self.run_gate(ci_jobs=[job(), job("skipped")])
