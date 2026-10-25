@@ -72,6 +72,18 @@ Other implementations: [official BLAKE3](https://github.com/BLAKE3-team/BLAKE3) 
 and C, and this repository's [reference implementation](reference_impl/reference_impl.rs),
 the clearest place to see how BLAKE3 works.
 
+## What comes from official BLAKE3
+
+This is a fork of official BLAKE3 1.8.7, and much of what makes it good is theirs. On
+x86-64, every compression runs Samuel Neves' SSE4.1, AVX2 and AVX-512 assembly, renamed
+and with one fix; the speed of a single message there is his. The API (`Hasher`,
+`update`, `finalize`, `finalize_xof`, `OutputReader`, `Hash`, key derivation) and the
+crate's architecture are Jack O'Connor's, kept and rebuilt around. `b3sum`'s command
+line and checkfiles, the test vectors and the reference implementation are the BLAKE3
+team's. What this fork adds: the 64-bit Arm kernels (NEON with integer lanes, and SME2),
+the x86-64 kernels for whole chunks with a partial one and for the chunk root, the thread
+pool, the stream and batch calls, the C API, the proofs, and the tests of the tests.
+
 ## Contributing and licenses
 
 [CONTRIBUTING.md](CONTRIBUTING.md) says how to work on this repository. Released into the
