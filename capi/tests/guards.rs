@@ -91,6 +91,10 @@ unsafe fn bad_call(case: &str) {
 #[cfg_attr(miri, ignore = "select an individual B3_CAPI_GUARD_CASE with --run-ignored only")]
 fn bad_calls_stop_at_the_guard() {
     if let Ok(case) = std::env::var(CHILD) {
+        if case == "list" {
+            println!("B3_CAPI_GUARD_CASES={}", serde_json::to_string(CASES).unwrap());
+            return;
+        }
         unsafe { bad_call(&case) };
     }
     assert!(!cfg!(miri), "select an individual guard case under Miri");
