@@ -97,6 +97,24 @@ October 25, 2026.
 - **Wasmer** keys its module cache with BLAKE3
   ([`lib/cache/Cargo.toml`](https://github.com/wasmerio/wasmer/blob/main/lib/cache/Cargo.toml)).
 
+## Zero-knowledge proof systems
+
+BLAKE3 is the hash of choice in the post-quantum proof systems built on
+hashing rather than elliptic curves: Polygon's **Plonky3** (a BLAKE3
+AIR among its primitives:
+[`Cargo.toml`](https://github.com/Plonky3/Plonky3/blob/main/Cargo.toml)),
+Succinct's **SP1** zkVM
+([`Cargo.toml`](https://github.com/succinctlabs/sp1/blob/dev/Cargo.toml)),
+StarkWare's **stwo** prover
+([`Cargo.toml`](https://github.com/starkware-libs/stwo/blob/dev/Cargo.toml)),
+a16z's **Jolt** zkVM
+([`Cargo.toml`](https://github.com/a16z/jolt/blob/main/Cargo.toml)),
+and the **WHIR** polynomial commitment scheme
+([`Cargo.toml`](https://github.com/WizardOfMenlo/whir/blob/main/Cargo.toml)).
+BLAKE3's security margin is part of the reason: no attack faster than
+brute force reaches past 2 of its 7 rounds, where SHA-256 has attacks
+on up to 39 of its 64 ([hashsma.sh](https://hashsma.sh/)).
+
 ## BLAKE2
 
 BLAKE3's predecessor runs in places of the same rank. The **Linux

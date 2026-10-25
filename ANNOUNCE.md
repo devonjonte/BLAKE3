@@ -34,24 +34,24 @@ Here are three reasons you might want to use `BLAKE3-Servil`:
 
    * BLAKE3 has quietly become [the de facto standard secure hash function](docs/who-uses-blake3.md)
      for systems infrastructure: compilers, linkers, file systems, GPU drivers, build systems,
-     storage back ends, etc. The build-id in every Android, Chrome, ChromeOS, and Fuschia binary is
+     storage back ends, etc. The build-id in every Android, Chrome, ChromeOS, and Fuchsia binary is
      a BLAKE3 hash. It's in Mesa (every Linux GPU driver), Ceph, Hugging Face's Buckets, Meta's new
      source control tool Sapling/Mononoke, Google's TensorStore, Unreal Engine, OpenZFS, Solana,
      Nix, Bazel, Buck2, Wasmer, the Swift compiler, rustc, cargo, and Iroh. These projects needed a
      hash function that was both fast and secure, and chose the one that was both. BLAKE3's
-     immediate ancestor, BLAKE2, is used in Wireguard and the Linux kernel.
+     immediate ancestor, BLAKE2, is used in WireGuard and the Linux kernel.
 
    * BLAKE3 is the leading contender to become the de facto standard secure hash function in the
      next generation of post-quantum zero-knowledge proof systems. BLAKE3 has a thicker security
      margin than SHA256 does. There are no known attacks faster than brute force that break more
-     than 2 out of 7 of BLAKE's rounds. In contrast, there are known attacks faster than brute force
+     than 2 out of 7 of BLAKE3's rounds. In contrast, there are known attacks faster than brute force
      that break up to 39 out of 64 of SHA256's rounds.
 
      <img src="docs/images/blake3-security-margin.png" alt="BLAKE3 security margin" width="720">
 
      <img src="docs/images/sha256-security-margin.png" alt="SHA256 security margin" width="720">
 
-    (Source: https://hashsma.sh/, screenshotted 2026-10-25.)
+     (Source: https://hashsma.sh/, screenshotted 2026-10-25.)
 
 3. The `BLAKE3-Servil` code comes with excellent quality assurance:
 
