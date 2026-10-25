@@ -30,6 +30,18 @@
 //!
 //! // Print a hash as hex.
 //! println!("{}", hash1);
+//!
+//! // Many short messages in one call: a Batch lays them out in Blocks.
+//! # #[cfg(feature = "std")] {
+//! use blake3_servil::{performance::{self, Batch}, Mode};
+//! let mut batch = Batch::new(64, 3);
+//! for i in 0..3 {
+//!     batch.set(i, &[i as u8; 64]);
+//! }
+//! let mut hashes = [[0u8; 32]; 3];
+//! performance::hash_many(Mode::Hash, batch.blocks(), 64, &mut hashes);
+//! assert_eq!(hashes[2], *blake3_servil::convenience::hash(&[2u8; 64]).as_bytes());
+//! # }
 //! # Ok(())
 //! # }
 //! ```
@@ -149,8 +161,6 @@
 //! [`Read`]: https://doc.rust-lang.org/std/io/trait.Read.html
 //! [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
 //! [`Seek`]: https://doc.rust-lang.org/std/io/trait.Seek.html
-//! [`digest`]: https://crates.io/crates/digest
-//! [`signature`]: https://crates.io/crates/signature
 
 #![cfg_attr(not(feature = "std"), no_std)]
 

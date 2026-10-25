@@ -14,6 +14,8 @@ export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-/tmp/target/check-builds}
 rustup target add x86_64-unknown-linux-gnu 2>/dev/null
 step() { echo "== $*"; "$@"; }
 step cargo nextest run --cargo-quiet --release --no-default-features
+# nextest skips doc tests: the examples without std too, where Batch is absent.
+step cargo test -q --release --doc --no-default-features
 # One CPU, as in a one-CPU container: the pool has no worker thread, and
 # the caller hashes everything (the suites run on many CPUs and never
 # reach that path).

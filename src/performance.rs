@@ -37,10 +37,12 @@ use crate::{ContextKey, DERIVE_KEY_CONTEXT, Hash, IV, Mode, OUT_LEN};
 ///
 /// ```
 /// # blake3_servil::initialize();
+/// # #[cfg(feature = "std")] {
 /// use blake3_servil::{Mode, convenience, performance::{self, Batch}};
 /// let mut message = Batch::new(100, 1);
 /// message.set(0, &[7u8; 100]);
 /// assert_eq!(performance::hash(Mode::Hash, message.blocks(), 100), convenience::hash(&[7u8; 100]));
+/// # }
 /// ```
 // Inlined, so a constant mode folds to its constants (as
 // convenience::hash is: no mode stored for the call to read).
@@ -65,6 +67,7 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 ///
 /// ```
 /// # blake3_servil::initialize();
+/// # #[cfg(feature = "std")] {
 /// use blake3_servil::{Mode, convenience, performance::{self, Batch}};
 /// let mut leaves = Batch::new(256, 1000);
 /// for i in 0..1000 {
@@ -73,6 +76,7 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// let mut hashes = vec![[0u8; 32]; 1000];
 /// performance::hash_many(Mode::Hash, leaves.blocks(), 256, &mut hashes);
 /// assert_eq!(hashes[3], *convenience::hash(&[7u8; 256]).as_bytes());
+/// # }
 /// ```
 ///
 /// **Speed**: short messages hash several at a time, so a batch beats a
