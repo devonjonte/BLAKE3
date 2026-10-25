@@ -36,6 +36,9 @@ and the rest timed out or have no verdict.
 The previous release is the nearest reachable v* tag, excluding tags on
 this candidate itself. Creating the release's tag must not make the check
 compare the release against itself; tags on other branches are irrelevant.
+The first release has none: its checks run against the main line before
+the release's changes (the commit the release's tracking issue names),
+and its pages are read fresh rather than diffed.
 """
 
 import glob
@@ -192,11 +195,11 @@ def main():
     # pass nor a regression.
     step("Mac check against the previous release",
          None if mac is None else TIMED_OUT if mac == "timed out" else NO_VERDICT if mac == "no verdict" else mac == "no regression",
-         f"a check job (cells all) with old_commit {previous or '<previous tag>'} and new_commit {commit[:10]}"
+         f"a check job (cells all) with old_commit {previous or '<the main line before this release>'} and new_commit {commit[:10]}"
          + (f" (the last one: {mac})" if mac in ("timed out", "no verdict") else ""))
 
     step("VM check against the previous release", log_ends_with(f"tmp/night/check-release-vm-{commit[:12]}.log", "no cell slower"),
-         f"(cd bench-hashes && cargo run --release -- check --against {previous or '<previous tag>'} --cells all) > tmp/night/check-release-vm-{commit[:12]}.log")
+         f"(cd bench-hashes && cargo run --release -- check --against {previous or '<the main line before this release>'} --cells all) > tmp/night/check-release-vm-{commit[:12]}.log")
     step("full mutation run", mutation_result(f"tmp/night/mutants-{commit[:12]}.log"),
          f"python3 tools/mutants/check.py > tmp/night/mutants-{commit[:12]}.log, the commit checked out (overnight)")
     step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "every build passes"),
@@ -209,7 +212,7 @@ def main():
         for page in ["README.md", "QUALITY.md", "CHANGELOG.md"]:
             step(f"{page} rewritten since {previous}", page in changed, "a release rewrites it for its readers")
     else:
-        step("pages rewritten since the previous release", None, "no previous release tag found")
+        step("pages read fresh for the first release", None, "no previous release: read README.md, QUALITY.md and CHANGELOG.md as a newcomer would, and record it in the release issue")
 
     failing = sum(1 for r in results if r is False or r is None)
     undecided = sum(1 for r in results if r in (TIMED_OUT, NO_VERDICT))
