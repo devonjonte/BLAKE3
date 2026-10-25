@@ -113,6 +113,12 @@ StarkWare's **stwo** prover
 ([`Cargo.toml`](https://github.com/starkware-libs/stwo/blob/dev/Cargo.toml)),
 a16z's **Jolt** zkVM
 ([`Cargo.toml`](https://github.com/a16z/jolt/blob/main/Cargo.toml)),
+**Binius64**, Irreducible's binary-field SNARK (BLAKE3 Merkle trees,
+with AVX-512 and NEON prover kernels:
+[`crates/hash/src/blake3.rs`](https://github.com/binius-zk/binius64/blob/main/crates/hash/src/blake3.rs),
+[`crates/hash-prover/src/blake3`](https://github.com/binius-zk/binius64/tree/main/crates/hash-prover/src/blake3)),
+and Succinct's **Flock**, the binary-field STARK built on it
+([`Cargo.toml`](https://github.com/succinctlabs/flock/blob/main/Cargo.toml)),
 Meta's **Winterfell** STARK prover
 ([`crypto/Cargo.toml`](https://github.com/facebook/winterfell/blob/main/crypto/Cargo.toml)),
 **Aztec**'s Barretenberg
