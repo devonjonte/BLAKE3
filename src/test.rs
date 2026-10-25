@@ -30,6 +30,7 @@ fn test_native_kernels_are_private_when_official_is_linked() {
     let input = core::hint::black_box([42u8; 4096]);
     assert_eq!(crate::hash_serial(&input, crate::IV, 0).as_bytes(), blake3::hash(&input).as_bytes());
     assert_ne!(crate::avx512::ffi::blake3_hash_many_avx512 as *const (), blake3_hash_many_avx512 as *const (), "servil's FFI bound upstream's native kernel");
+}
 
 /// `bytes` copied into whole blocks, zero after them: a message as the
 /// performance calls take one.
@@ -1349,13 +1350,14 @@ mod dispatch {
         if !crate::platform::sme2_detected() {
             return;
         }
-        let input = vec![3u8; 2 * CHUNK_LEN * 32];
+        let input = crate::test::blocks(&vec![3u8; 2 * CHUNK_LEN * 32]);
         let at = |len: usize, count: usize| {
             ran(&|| {
                 let mut out = vec![[0u8; 32]; count];
-                crate::performance::hash_many(crate::Mode::Hash, &input[..crate::many::slot_len(len) * count], len, &mut out);
+                let batch = &input[..crate::many::slot_len(len) * count / crate::BLOCK_LEN];
+                crate::performance::hash_many(crate::Mode::Hash, batch, len, &mut out);
                 crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
-                crate::performance::hash_many(crate::Mode::Hash, &input[..crate::many::slot_len(len) * count], len, &mut out);
+                crate::performance::hash_many(crate::Mode::Hash, batch, len, &mut out);
             })
         };
         assert_eq!(crate::many::ONE_BLOCK_PAD_MIN, 11);

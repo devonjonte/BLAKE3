@@ -113,7 +113,7 @@ fn every_call_inside_guard_pages() {
                     blocks.bytes()[..len].copy_from_slice(&message);
                     let one = Guarded::new(32, !at_end);
                     let three = Guarded::new(3 * 32, at_end);
-                    let stream = b3_stream_begin(mode, ignore, core::ptr::null_mut());
+                    let stream = b3_stream_begin(mode, Some(ignore), core::ptr::null_mut());
                     b3_stream_submit(stream, blocks.ptr() as *const c_void, len, one.ptr() as *mut Digest);
                     b3_stream_submit_batch(stream, batch.ptr() as *const c_void, len, 3, three.ptr() as *mut Digest);
                     b3_stream_finish(stream);

@@ -13,6 +13,7 @@
 //! SME2 the SME2 thread, woken on every publish, takes the task, so the
 //! condition shows on CPUs without it.
 
+use blake3_servil::performance::Batch;
 use blake3_servil::{Hash, Mode};
 
 /// Twenty rounds of one message, every worker parked first: the stream's
@@ -21,6 +22,8 @@ use blake3_servil::{Hash, Mode};
 fn rounds(finish: bool) {
     blake3_servil::initialize_multithreaded(Some(std::num::NonZeroUsize::new(4).unwrap()));
     let message = vec![7u8; 3000];
+    let mut blocks = Batch::new(message.len(), 1);
+    blocks.set(0, &message);
     for round in 0..20 {
         // Every worker parked before the stream opens: waited for, not
         // slept for (a loaded machine could outlast any sleep).
@@ -29,11 +32,11 @@ fn rounds(finish: bool) {
         }
         let mut place = Hash::from([0; 32]);
         let ended = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            blake3_servil::stream(
+            blake3_servil::performance::stream(
                 Mode::Hash,
                 |_: &mut [Hash]| {},
                 |s| {
-                    s.submit(&message, &mut place);
+                    s.submit(blocks.blocks(), message.len(), &mut place);
                     if finish {
                         s.finish();
                     } else {
@@ -44,7 +47,7 @@ fn rounds(finish: bool) {
         }));
         assert_eq!(ended.is_ok(), finish, "round {round}");
         if finish {
-            assert_eq!(place, blake3_servil::hash(&message), "round {round}");
+            assert_eq!(place, blake3_servil::convenience::hash(&message), "round {round}");
         }
     }
 }
