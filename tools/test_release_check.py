@@ -219,7 +219,7 @@ class PreviousRelease(unittest.TestCase):
         self.git("tag", "v0.8.0+fixture")
         code, output = ReleaseEvidence.run_gate(self, new=self.new, old=self.old, git_override=self.git)
         self.assertEqual(code, 1)
-        self.assertIn("no previous release tag found", output)
+        self.assertIn("no previous release: read README.md", output)
 
     def test_release_on_second_parent_is_reachable(self):
         self.git("checkout", "-qb", "release-side", self.old)
