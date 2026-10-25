@@ -82,6 +82,29 @@ def log_ends_with(path, text):
     return text in open(full, errors="replace").read()[-4000:]
 
 
+def ci_result(run):
+    """A green workflow must include successful jobs, not skipped checks."""
+    if run["status"] != "completed":
+        return None
+    if run["conclusion"] != "success":
+        return TIMED_OUT if run["conclusion"] == "timed_out" else False
+    jobs, page = [], 1
+    while True:
+        reply = github(f"/repos/johnservil/BLAKE3/actions/runs/{run['id']}/jobs?per_page=100&page={page}")
+        jobs.extend(reply["jobs"])
+        if len(jobs) == reply["total_count"]:
+            break
+        assert reply["jobs"] and len(jobs) < reply["total_count"], "CI jobs response is incomplete or inconsistent"
+        page += 1
+    if not jobs:
+        return None
+    if any(job["conclusion"] == "timed_out" for job in jobs):
+        return TIMED_OUT
+    if any(job["status"] != "completed" or job["conclusion"] in (None, "skipped") for job in jobs):
+        return None
+    return all(job["conclusion"] == "success" for job in jobs)
+
+
 def main():
     commit = git("rev-parse", sys.argv[1] if len(sys.argv) > 1 else "servil")
     tags = [t for t in git("tag", "--list", "v*", "--sort=-creatordate").split() if t]
@@ -98,10 +121,9 @@ def main():
     try:
         runs = github(f"/repos/johnservil/BLAKE3/actions/runs?head_sha={commit}&per_page=20").get("workflow_runs", [])
         ci = [r for r in runs if r["name"] == "tests"]
-        conclusion = ci[0]["conclusion"] if ci and ci[0]["status"] == "completed" else None
-        # GitHub's own outcome for a job past its timeout-minutes.
-        step("CI, every job", None if conclusion is None else TIMED_OUT if conclusion == "timed_out" else conclusion == "success",
-             "dispatch the tests workflow on the commit and wait" if conclusion != "timed_out" else "a job reached its timeout-minutes")
+        result = ci_result(ci[0]) if ci else None
+        step("CI, every job", result,
+             "dispatch the tests workflow on the commit; every job must run and succeed" if result != TIMED_OUT else "a job reached its timeout-minutes")
     except GitHubTimedOut as e:
         step("CI, every job", TIMED_OUT, str(e))
 
@@ -119,7 +141,9 @@ def main():
         if not os.path.exists(job):
             continue
         j = json.loads(Path(job).read_text())
-        if j.get("new_commit") == commit and (previous is None or j.get("old_commit") == git("rev-parse", previous)):
+        if (j.get("type") == "check" and j.get("cells") == "all"
+                and j.get("new_commit") == commit
+                and (previous is None or j.get("old_commit") == git("rev-parse", previous))):
             mac = v["status"]
     # The runner's verdict, each status as itself: "timed out" (its limit
     # ended the job) and "no verdict" (the machine was busy) are neither a
