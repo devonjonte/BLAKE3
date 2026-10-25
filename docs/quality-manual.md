@@ -10,8 +10,8 @@ overview, read [QUALITY.md](../QUALITY.md) first.
 
 | Platform | Its kernels | Checked |
 |---|---|---|
-| 64-bit Arm: Apple Silicon, Linux and macOS | assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved in part**, and tested |
-| x86-64: Linux, Windows (MSVC) | assembly | **proved in part** (below), and tested |
+| 64-bit Arm: Apple Silicon, Linux and macOS | assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved** at every shape the crate calls, and tested |
+| x86-64: Linux, Windows (MSVC) | assembly | **proved** at every shape the crate calls (below), and tested |
 | | kernels in Rust intrinsics | tested |
 
 ## What is new, and so where the risk is
@@ -271,13 +271,19 @@ these cases:
   length at one full-width fixed-counter pass, and the first, full-width
   and two-pass counts at 16 blocks with an incrementing counter, for each
   instruction set and convention;
-- AVX-512 `xof_many`: 1 to 32 blocks.
+- `hash_many` with two inputs at consecutive counters over 1 to 15
+  blocks, on AVX2 and AVX-512, both conventions (60 cases): `pair.rs`'s
+  shape, a whole chunk and a partial one side by side (#163);
+- AVX-512 `xof_many`: 1 to 32 blocks, which is how the crate calls it:
+  `ffi_avx512.rs` makes one call per 32 blocks of a longer output (#163).
 
 The promotion validation therefore runs 154 direct x86 cases beside the
 102 arbitrary-count cases. `prove_x86.py` without `--representative`
 keeps the exhaustive 472-case finite matrix as a longer regression set.
-Open: extended output beyond 32 blocks, and counts or shapes outside the
-harnesses' stated contracts.
+Every call the crate makes into an assembly kernel, on x86-64 and on
+AArch64, falls within these cases (each call against its proof: #163).
+Open: counts or shapes outside the harnesses' stated contracts, which
+the crate does not call.
 
 The x86-64 kernels in Rust intrinsics, and the Rust code (the
 dispatch, the tree walk, the `Hasher`, the pool, the batch APIs), are
