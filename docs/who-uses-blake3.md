@@ -1,10 +1,8 @@
 # Who uses BLAKE3
 
-BLAKE3 is load-bearing in software most people run every day, usually
-without announcement. Each entry below names what the project does with
-BLAKE3 and links the source or document that shows it. Every link was
-read on October 25, 2026; a project that merely offers BLAKE3 to its
-users (a `blake3()` function, a hash option) is listed apart, at the end.
+BLAKE3 is load-bearing in software most people run every day. Each entry below names what the
+project does with BLAKE3 and links the source or document that shows it. Every link was read on
+October 25, 2026.
 
 ## Compilers, linkers and build systems
 
@@ -47,22 +45,17 @@ users (a `blake3()` function, a hash option) is listed apart, at the end.
   ([`rustc_span/src/lib.rs`](https://github.com/rust-lang/rust/blob/master/compiler/rustc_span/src/lib.rs)),
   and Cargo's `-Zchecksum-freshness` decides rebuilds by BLAKE3 checksums
   ([`Cargo.toml`](https://github.com/rust-lang/cargo/blob/master/Cargo.toml)).
-- **Meta: Buck2, Sapling, DotSlash.** Buck2's action digests
-  ([`cas_digest.rs`](https://github.com/facebook/buck2/blob/main/app/buck2_common/src/cas_digest.rs));
-  Sapling and Mononoke, Meta's source control, address blobs and their
-  content store by BLAKE3
+- **Meta: Sapling and Buck2.** Sapling and Mononoke, Meta's source
+  control, address blobs and their content store by BLAKE3
   ([`eden/scm/lib/types/src/blake3.rs`](https://github.com/facebook/sapling/blob/main/eden/scm/lib/types/src/blake3.rs),
   [`mononoke_types/src/hash.rs`](https://github.com/facebook/sapling/blob/main/eden/mononoke/mononoke_types/src/hash.rs));
-  DotSlash verifies fetched executables by BLAKE3
-  ([file format](https://github.com/facebook/dotslash/blob/main/website/docs/dotslash-file.md)).
+  Buck2's action digests
+  ([`cas_digest.rs`](https://github.com/facebook/buck2/blob/main/app/buck2_common/src/cas_digest.rs)).
 - **Bazel and the Remote Execution API.** `DigestFunction.BLAKE3` in the
   protocol
   ([`remote_execution.proto`](https://github.com/bazelbuild/remote-apis/blob/main/build/bazel/remote/execution/v2/remote_execution.proto))
   and Bazel's implementation
   ([`Blake3HashFunction.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/vfs/bazel/Blake3HashFunction.java)).
-- **sccache** keys its compilation cache with BLAKE3
-  ([`Cargo.toml`](https://github.com/mozilla/sccache/blob/main/Cargo.toml)).
-
 ## Graphics
 
 - **Mesa.** The shader disk cache is keyed by BLAKE3
@@ -70,9 +63,7 @@ users (a `blake3()` function, a hash option) is listed apart, at the end.
   [`src/util/blake3`](https://gitlab.freedesktop.org/mesa/mesa/-/tree/main/src/util/blake3)).
   Which would mean nearly every Linux GPU driver benefits from this:
   Intel, AMD, and the open Nvidia and Arm drivers, on desktops,
-  Chromebooks, Android devices and the Steam Deck. Google's SwiftShader
-  carries it too
-  ([`BUILD.gn`](https://github.com/google/swiftshader/blob/master/third_party/llvm-16.0/BUILD.gn)).
+  Chromebooks, Android devices and the Steam Deck.
 - **Unreal Engine.** `FIoHash`, the hash behind its content-addressed
   data (cooked content, the derived-data cache, Zen), is BLAKE3-160
   (`Engine/Source/Runtime/Core/Public/IO/IoHash.h`; the engine's
@@ -95,9 +86,6 @@ users (a `blake3()` function, a hash option) is listed apart, at the end.
   [announcement](https://huggingface.co/blog/xet-on-the-hub)).
 - **Nix.** A store hash algorithm
   ([`hash.hh`](https://github.com/NixOS/nix/blob/master/src/libutil/include/nix/util/hash.hh)).
-- **Kopia** offers BLAKE3 for its content hashes
-  ([`blake3_hashes.go`](https://github.com/kopia/kopia/blob/master/repo/hashing/blake3_hashes.go)).
-
 ## Networks and ledgers
 
 - **Solana.** The accounts hash, and a BLAKE3 syscall for on-chain
@@ -106,22 +94,10 @@ users (a `blake3()` function, a hash option) is listed apart, at the end.
   [`blake3-hasher`](https://github.com/anza-xyz/solana-sdk/tree/master/blake3-hasher)).
 - **iroh.** Content addressing and verified streaming (Bao) on BLAKE3
   ([iroh-blobs](https://github.com/n0-computer/iroh-blobs/blob/main/Cargo.toml)).
-- **IPFS.** A multihash code
-  ([`table.csv`](https://github.com/multiformats/multicodec/blob/master/table.csv)),
-  supported by Kubo.
 - **Wasmer** keys its module cache with BLAKE3
   ([`lib/cache/Cargo.toml`](https://github.com/wasmerio/wasmer/blob/main/lib/cache/Cargo.toml)).
 
-## Offered to users
-
-ClickHouse ([`BLAKE3()`](https://github.com/ClickHouse/ClickHouse/blob/master/src/Functions/FunctionsStringHashFixedString.cpp)),
-Apache DataFusion ([`blake3()`](https://github.com/apache/datafusion/blob/main/datafusion/functions/Cargo.toml)),
-HHVM ([`hash('blake3')`](https://github.com/facebook/hhvm/blob/master/hphp/runtime/ext/hash/hash_blake3.cpp)),
-Zig's standard library ([`std.crypto.hash.Blake3`](https://github.com/ziglang/zig/blob/master/lib/std/crypto/blake3.zig)),
-rclone ([`hash.go`](https://github.com/rclone/rclone/blob/master/fs/hash/hash.go)),
-and the `blake3` packages of Python, Go, and most other languages.
-
-## BLAKE2, for comparison
+## BLAKE2
 
 BLAKE3's predecessor runs in places of the same rank. The **Linux
 kernel**'s random number generator keeps its entropy pool in a BLAKE2s
@@ -131,4 +107,4 @@ state
 ([`noise.c`](https://github.com/torvalds/linux/blob/master/drivers/net/wireguard/noise.c));
 **Jujutsu** hashes its content with BLAKE2b
 ([`Cargo.toml`](https://github.com/jj-vcs/jj/blob/main/Cargo.toml));
-**Zcash** and **Argon2** are built on BLAKE2b. The kernel has no BLAKE3.
+**Zcash** and **Argon2** are built on BLAKE2b.
