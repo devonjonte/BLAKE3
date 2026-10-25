@@ -45,12 +45,21 @@ pub unsafe fn hash_many<const N: usize>(
     }
 }
 
+/// The most blocks one call of the AVX-512 extended-output kernel makes:
+/// its proof covers 1 to 32 (tools/verify/prove_x86.py, xof_many), so a
+/// longer output takes one call per 32 blocks and every call stays within
+/// what is proved (#163).
+pub const XOF_PROVED_BLOCKS: usize = 32;
+
 // Unsafe because this may only be called on platforms supporting AVX-512.
 #[cfg(unix)]
 pub unsafe fn xof_many(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8, out: &mut [u8]) {
-    unsafe {
-        debug_assert_eq!(0, out.len() % BLOCK_LEN, "whole blocks only");
-        ffi::blake3_servil_xof_many_avx512(cv.as_ptr(), block.as_ptr(), block_len, counter, flags, out.as_mut_ptr(), out.len() / BLOCK_LEN);
+    debug_assert_eq!(0, out.len() % BLOCK_LEN, "whole blocks only");
+    for (i, part) in out.chunks_mut(XOF_PROVED_BLOCKS * BLOCK_LEN).enumerate() {
+        let blocks = part.len() / BLOCK_LEN;
+        debug_assert!((1..=XOF_PROVED_BLOCKS).contains(&blocks), "a call within the proof's 1 to 32 blocks");
+        let at = counter + (i * XOF_PROVED_BLOCKS) as u64;
+        unsafe { ffi::blake3_servil_xof_many_avx512(cv.as_ptr(), block.as_ptr(), block_len, at, flags, part.as_mut_ptr(), blocks) };
     }
 }
 
