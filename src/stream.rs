@@ -126,7 +126,7 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// threads keep looking for its next message for a few microseconds before
 /// they sleep, which makes streams of messages 3-5% faster. A program that
 /// streams and then soon makes a one-shot multithreaded call pays for it:
-/// on an i7-12700K under Linux, [`crate::hash_many_multithreaded`] on 16384
+/// on an i7-12700K under Linux, [`crate::performance::hash_many_multithreaded`] on 16384
 /// messages right after streams of 16-64 KiB messages ran about 5% slower.
 /// A program that keeps streaming does not pay it; one that alternates can
 /// stream its other work
@@ -135,18 +135,19 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 ///
 /// ```
 /// # blake3_servil::initialize_multithreaded(None);
-/// use blake3_servil::{Hash, Mode};
-/// let messages: Vec<Vec<u8>> = (0..1000u32).map(|i| i.to_le_bytes().repeat(16)).collect();
+/// use blake3_servil::{Hash, Mode, performance::Block};
+/// // Each message 64 bytes in one block, as the stream borrows messages.
+/// let messages: Vec<Block> = (0..1000u32).map(|i| Block(i.to_le_bytes().repeat(16).try_into().unwrap())).collect();
 /// let mut digests = vec![Hash::from_bytes([0; 32]); messages.len()];
 /// let mut handed_back = 0;
-/// blake3_servil::stream(Mode::Hash, |done: &mut [Hash]| handed_back += done.len(), |s| {
+/// blake3_servil::performance::stream(Mode::Hash, |done: &mut [Hash]| handed_back += done.len(), |s| {
 ///     for (message, digest) in messages.iter().zip(&mut digests) {
-///         s.submit(message, digest);
+///         s.submit(core::slice::from_ref(message), 64, digest);
 ///     }
 ///     s.finish();
 /// });
 /// assert_eq!(handed_back, 1000);
-/// assert_eq!(digests[7], blake3_servil::hash(&messages[7]));
+/// assert_eq!(digests[7], blake3_servil::convenience::hash(&messages[7].0));
 /// ```
 pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: impl for<'s> FnOnce(&'s mut Stream<'env, D>) -> T) -> T {
     let mut stream = Stream::open(mode, done);
@@ -317,8 +318,12 @@ pub struct Stream<'env, D> {
 unsafe impl<D: Send> Send for Stream<'_, D> {}
 
 impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
-    /// Hash `message` where it is, its digest into `out`.
-    pub fn submit(&mut self, message: &'env [u8], out: &'env mut Hash) {
+    /// Hash the message of `len` bytes that starts `message`, where it is,
+    /// its digest into `out`: a [`Block`](crate::performance::Block)-aligned
+    /// message, as [`hash`](crate::performance::hash) takes one (the bytes
+    /// past its end ignored).
+    pub fn submit(&mut self, message: &'env [crate::performance::Block], len: usize, out: &'env mut Hash) {
+        let message: &'env [u8] = &crate::performance::Block::bytes(message)[..len];
         let out: *mut Hash = out;
         let pieces = message.len().div_ceil(PIECE).max(1);
         for i in 0..pieces {
@@ -430,12 +435,15 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
         (at, end, n, Ok(()))
     }
 
-    /// Hash a batch of messages of `message_len` bytes where it is, laid
-    /// out as [`hash_many`](crate::hash_many) takes them (each in whole
-    /// blocks, zero after its bytes), a digest per message into `out`, in
+    /// Hash a batch of messages of `message_len` bytes where it is, in
+    /// [`Block`](crate::performance::Block)s as
+    /// [`hash_many`](crate::performance::hash_many) takes them (each in whole
+    /// blocks, zero after its bytes; a [`Batch`](crate::performance::Batch)
+    /// keeps them so), a digest per message into `out`, in
     /// the messages' order: `out` holds one per message. The batch goes in
     /// parts of up to 64 KiB, each one entry; `out` comes back whole.
-    pub fn submit_batch(&mut self, batch: &'env [u8], message_len: usize, out: &'env mut [Hash]) {
+    pub fn submit_batch(&mut self, batch: &'env [crate::performance::Block], message_len: usize, out: &'env mut [Hash]) {
+        let batch = crate::performance::Block::bytes(batch);
         let slot = crate::many::slot_len(message_len);
         assert_eq!(Some(batch.len()), slot.checked_mul(out.len()), "a batch's digest space holds one digest per message");
         crate::many::assert_slots(batch, message_len, out.len());
@@ -454,10 +462,12 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     }
 
     /// Hash a batch of `out.len()` messages of `message_len` bytes that
-    /// `fill` writes in place, laid out as [`hash_many`](crate::hash_many)
-    /// takes them: `fill(at, room)` writes the batch's bytes from `at`
-    /// (padding included: each message in whole blocks, zero after its
-    /// bytes) into all of `room`, a part of up to 64 KiB at a time. As
+    /// `fill` writes in place, laid out as [`hash_many`](crate::performance::hash_many)
+    /// takes them: `fill(at, room)` writes the batch's bytes from `at` into
+    /// `room`, a part of up to 64 KiB at a time, each message at the start
+    /// of its slot of whole blocks. The bytes past each message are the
+    /// stream's: whatever `fill` leaves there, the stream zeroes them before
+    /// hashing, so a room reused for shorter messages hashes right. As
     /// [`submit_with`](Stream::submit_with) and [`submit_batch`](Stream::submit_batch).
     pub fn submit_batch_with(&mut self, message_len: usize, mut fill: impl FnMut(usize, &mut [u8]), out: &'env mut [Hash]) {
         let slot = crate::many::slot_len(message_len);
@@ -471,7 +481,13 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
             // Sound: as in submit_with.
             let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring_at(at), count * slot) };
             fill(first * slot, room);
-            crate::many::assert_slots(room, message_len, count);
+            // The bytes past each message, zero (none when the length is a
+            // multiple of 64): a reused room holds an earlier batch's bytes.
+            if message_len % 64 != 0 || message_len == 0 {
+                for message in room.chunks_exact_mut(slot) {
+                    message[message_len..].fill(0);
+                }
+            }
             let end = self.head;
             let kind = Kind::Batch { message_len, whole: (p + 1 == parts).then_some(whole) };
             // Sound: `first` is within the batch's space.
@@ -752,7 +768,9 @@ mod test {
         let key = [5u8; 32];
         let lens: std::vec::Vec<usize> =
             (0..12000).map(|i| [0, 1, 63, 64, 64, 64, 100, 1024, 1024, 1500, 4096, PIECE, PIECE + 1, 200_000, (1 << 20) + 7, 64][i % 16]).collect();
-        let message = |i: usize| &input[i % 97..][..lens[i]];
+        // Borrowed messages start their blocks: 0, 1 or 2 blocks in.
+        let blocks = crate::test::message(&input);
+        let message = |i: usize| &input[64 * (i % 3)..][..lens[i]];
         for (mode, ways) in [(Mode::Hash, 0), (Mode::Keyed(&key), 1), (Mode::DeriveKey("stream test"), 2)] {
             let mut got = places(lens.len());
             let want_handed: std::vec::Vec<(usize, usize)> = got.iter().map(|h| (h as *const Hash as usize, 1)).collect();
@@ -766,7 +784,7 @@ mod test {
                     // Borrowed, written in place (in reads of up to 1000
                     // bytes), or each in turn.
                     if ways == 0 || (ways == 2 && i % 3 == 0) {
-                        s.submit(message(i), out);
+                        s.submit(&blocks[i % 3..], lens[i], out);
                     } else {
                         s.submit_with(
                             lens[i],
@@ -786,8 +804,28 @@ mod test {
             });
             assert!(handed == want_handed, "every place handed back once, in order");
             for i in 0..lens.len() {
-                assert_eq!(got[i], crate::hash_with(mode, message(i)), "message {i}, {} bytes", lens[i]);
+                assert_eq!(got[i], crate::convenience::hash_with(mode, message(i)), "message {i}, {} bytes", lens[i]);
             }
+        }
+    }
+
+    /// A batch written in place hashes its messages whatever `fill` leaves
+    /// past each one: the stream zeroes those bytes, for every length that
+    /// leaves some (an empty message's whole block, a partial last block).
+    #[test]
+    fn test_batch_with_zeroes_past_each_message() {
+        for len in [0, 1, 63, 100, 1000] {
+            let count = 5;
+            let mut got = places(count);
+            stream(
+                Mode::Hash,
+                |_| {},
+                |s| {
+                    s.submit_batch_with(len, |_, room| room.fill(0xAB), &mut got);
+                    s.finish();
+                },
+            );
+            assert_eq!(got, std::vec![crate::convenience::hash(&std::vec![0xABu8; len]); count], "{len}-byte messages");
         }
     }
 
@@ -797,6 +835,7 @@ mod test {
     #[cfg_attr(not(panic = "unwind"), ignore = "catches panics, which this target aborts on")]
     fn test_stream_panics() {
         let input = std::vec![9u8; 300_000];
+        let blocks = crate::test::message(&input);
         for unwinding in [false, true] {
             let result = std::panic::catch_unwind(|| {
                 let mut got = places(4);
@@ -805,7 +844,7 @@ mod test {
                     |_: &mut [Hash]| {},
                     |s| {
                         for (len, out) in [10, 100_000, 64, 300_000].into_iter().zip(&mut got) {
-                            s.submit(&input[..len], out);
+                            s.submit(&blocks, len, out);
                         }
                         assert!(!unwinding, "the body panics");
                     },
@@ -848,13 +887,15 @@ mod test {
     #[test]
     fn test_miri_stream() {
         let input = std::vec![3u8; 3 * PIECE + 5];
+        let batch = crate::test::blocks(&input[..4 * 64]);
+        let blocks = crate::test::message(&input);
         let lens = [0, 64, 64, 1000, PIECE + 1, 3 * PIECE + 5];
         let mut got = places(2 * lens.len() + 2 + 7);
         let mut handed = std::vec::Vec::new();
         let mut rest: &mut [Hash] = &mut got;
         stream(Mode::Hash, record(&mut handed), |s| {
             for len in lens {
-                s.submit(&input[..len], &mut take(&mut rest, 1)[0]);
+                s.submit(&blocks, len, &mut take(&mut rest, 1)[0]);
                 s.submit_with(
                     len,
                     |at, room| {
@@ -866,7 +907,7 @@ mod test {
             }
             assert_eq!(s.submit_reader(&input[..2 * PIECE + 1], None, &mut take(&mut rest, 1)[0]).unwrap(), 2 * PIECE as u64 + 1);
             assert!(s.submit_reader(Uneven { data: &input, at: 0, calls: 0, fail_at: Some(PIECE + 1) }, None, &mut take(&mut rest, 1)[0]).is_err());
-            s.submit_batch(&input[..4 * 64], 64, take(&mut rest, 4));
+            s.submit_batch(&batch, 64, take(&mut rest, 4));
             s.submit_batch_with(
                 64,
                 |at, room| {
@@ -877,10 +918,10 @@ mod test {
             );
             s.finish();
         });
-        let mut want: std::vec::Vec<Hash> = lens.iter().flat_map(|&l| [crate::hash(&input[..l]); 2]).collect();
-        want.push(crate::hash(&input[..2 * PIECE + 1]));
+        let mut want: std::vec::Vec<Hash> = lens.iter().flat_map(|&l| [crate::convenience::hash(&input[..l]); 2]).collect();
+        want.push(crate::convenience::hash(&input[..2 * PIECE + 1]));
         want.push(Hash::from_bytes([0; 32]));
-        want.extend([crate::hash(&input[..64]); 7]);
+        want.extend([crate::convenience::hash(&input[..64]); 7]);
         assert_eq!(got, want);
         assert_eq!(handed.len(), 2 * lens.len() + 1 + 2, "a place back per submission, none for the failed reader");
     }

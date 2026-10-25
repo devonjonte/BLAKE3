@@ -30,6 +30,33 @@ fn test_native_kernels_are_private_when_official_is_linked() {
     let input = core::hint::black_box([42u8; 4096]);
     assert_eq!(crate::hash_serial(&input, crate::IV, 0).as_bytes(), blake3::hash(&input).as_bytes());
     assert_ne!(crate::avx512::ffi::blake3_hash_many_avx512 as *const (), blake3_hash_many_avx512 as *const (), "servil's FFI bound upstream's native kernel");
+
+/// `bytes` copied into whole blocks, zero after them: a message as the
+/// performance calls take one.
+#[cfg(feature = "std")]
+pub(crate) fn message(bytes: &[u8]) -> std::vec::Vec<crate::performance::Block> {
+    let mut blocks = std::vec![crate::performance::Block::ZERO; bytes.len().div_ceil(crate::BLOCK_LEN).max(1)];
+    crate::performance::Block::bytes_mut(&mut blocks)[..bytes.len()].copy_from_slice(bytes);
+    blocks
+}
+
+/// Each of `items` copied into blocks (`message`).
+#[cfg(feature = "std")]
+pub(crate) fn messages(items: &[&[u8]]) -> std::vec::Vec<std::vec::Vec<crate::performance::Block>> {
+    items.iter().map(|i| message(i)).collect()
+}
+
+/// `owned`'s messages (from `message`) as hash_each's items, `items`'
+/// lengths.
+#[cfg(feature = "std")]
+pub(crate) fn items<'a>(owned: &'a [std::vec::Vec<crate::performance::Block>], items: &[&[u8]]) -> std::vec::Vec<(&'a [crate::performance::Block], usize)> {
+    owned.iter().zip(items).map(|(b, i)| (&b[..], i.len())).collect()
+}
+
+/// `bytes` (whole blocks) copied into blocks, as the batch calls take them.
+pub(crate) fn blocks(bytes: &[u8]) -> std::vec::Vec<crate::performance::Block> {
+    assert_eq!(bytes.len() % crate::BLOCK_LEN, 0, "whole blocks");
+    bytes.chunks_exact(crate::BLOCK_LEN).map(|b| crate::performance::Block(b.try_into().unwrap())).collect()
 }
 
 // Interesting input lengths to run tests on.
@@ -400,21 +427,21 @@ fn test_reset() {
     hasher.update(&[42; 3 * CHUNK_LEN + 7]);
     hasher.reset();
     hasher.update(&[42; CHUNK_LEN + 3]);
-    assert_eq!(hasher.finalize(), crate::hash(&[42; CHUNK_LEN + 3]));
+    assert_eq!(hasher.finalize(), crate::convenience::hash(&[42; CHUNK_LEN + 3]));
 
     let key = &[99; crate::KEY_LEN];
     let mut keyed_hasher = crate::Hasher::new_with(crate::Mode::Keyed(key));
     keyed_hasher.update(&[42; 3 * CHUNK_LEN + 7]);
     keyed_hasher.reset();
     keyed_hasher.update(&[42; CHUNK_LEN + 3]);
-    assert_eq!(keyed_hasher.finalize(), crate::hash_with(crate::Mode::Keyed(key), &[42; CHUNK_LEN + 3]),);
+    assert_eq!(keyed_hasher.finalize(), crate::convenience::hash_with(crate::Mode::Keyed(key), &[42; CHUNK_LEN + 3]),);
 
     let context = "BLAKE3 2020-02-12 10:20:58 reset test";
     let mut kdf = crate::Hasher::new_with(crate::Mode::DeriveKey(context));
     kdf.update(&[42; 3 * CHUNK_LEN + 7]);
     kdf.reset();
     kdf.update(&[42; CHUNK_LEN + 3]);
-    let expected = *crate::hash_with(crate::Mode::DeriveKey(context), &[42; CHUNK_LEN + 3]).as_bytes();
+    let expected = *crate::convenience::hash_with(crate::Mode::DeriveKey(context), &[42; CHUNK_LEN + 3]).as_bytes();
     assert_eq!(kdf.finalize(), expected);
 
     // A reset after the stack holds values (past the stage, which keeps
@@ -424,7 +451,7 @@ fn test_reset() {
     hasher.update(&long);
     hasher.reset();
     hasher.update(&long[..CHUNK_LEN + 3]);
-    assert_eq!(hasher.finalize(), crate::hash(&[42; CHUNK_LEN + 3]));
+    assert_eq!(hasher.finalize(), crate::convenience::hash(&[42; CHUNK_LEN + 3]));
 }
 
 #[test]
@@ -616,7 +643,7 @@ fn test_update_reader_keeps_every_byte_across_errors() {
             errors += 1;
         }
         assert_eq!(errors, fail_at.len());
-        assert_eq!(hasher.finalize(), crate::hash(&input), "failing at {fail_at:?}");
+        assert_eq!(hasher.finalize(), crate::convenience::hash(&input), "failing at {fail_at:?}");
     }
 }
 
@@ -650,7 +677,7 @@ fn test_update_reader_interrupted() -> std::io::Result<()> {
     let mut reader = InterruptingReader::new(input);
     let mut hasher = crate::Hasher::new();
     hasher.update_reader(&mut reader)?;
-    assert_eq!(hasher.finalize(), crate::hash(input));
+    assert_eq!(hasher.finalize(), crate::convenience::hash(input));
     Ok(())
 }
 
@@ -718,7 +745,7 @@ fn test_miri_smoketest() {
 // `pure` feature, where no assembly takes part): the batch tables and
 // padded lanes of many.rs, the pool's jobs from concurrent callers (Miri
 // with -Zmiri-num-cpus=4 spawns three workers), and a stream past one
-// buffer. Each against hash() or the reference implementation. Also run
+// buffer. Each against crate::convenience::hash() or the reference implementation. Also run
 // natively, where they are quick.
 #[cfg(feature = "std")]
 mod unsafe_paths {
@@ -738,9 +765,9 @@ mod unsafe_paths {
                     message[len..].fill(0);
                 }
                 let mut out = vec![[0u8; OUT_LEN]; count];
-                hash_many(&data, len, &mut out);
+                crate::performance::hash_many(Mode::Hash, &crate::test::blocks(&data), len, &mut out);
                 for (i, digest) in out.iter().enumerate() {
-                    assert_eq!(*digest, *hash(&data[i * slot..][..len]).as_bytes(), "{count} x {len} B, message {i}");
+                    assert_eq!(*digest, *crate::convenience::hash(&data[i * slot..][..len]).as_bytes(), "{count} x {len} B, message {i}");
                 }
             }
         }
@@ -753,16 +780,20 @@ mod unsafe_paths {
         let batch = input(1024 * 64, 1);
         let tree = input(65 * 1024 + 3, 2);
         let mut expected = vec![[0u8; OUT_LEN]; 1024];
-        hash_many(&batch, 64, &mut expected);
-        let expected_tree = hash(&tree);
+        crate::performance::hash_many(Mode::Hash, &crate::test::blocks(&batch), 64, &mut expected);
+        let expected_tree = crate::convenience::hash(&tree);
         std::thread::scope(|scope| {
             for caller in 0..2 {
                 let (batch, tree, expected) = (&batch, &tree, &expected);
                 scope.spawn(move || {
                     let mut out = vec![[0u8; OUT_LEN]; 1024];
-                    hash_many_multithreaded_with(Mode::Hash, batch, 64, &mut out);
+                    crate::performance::hash_many_multithreaded(Mode::Hash, &crate::test::blocks(batch), 64, &mut out);
                     assert_eq!(&out, expected, "batch, caller {caller}");
-                    assert_eq!(hash_multithreaded_with(Mode::Hash, tree), expected_tree, "tree, caller {caller}");
+                    assert_eq!(
+                        crate::performance::hash_multithreaded(crate::Mode::Hash, &crate::test::message(tree), tree.len()),
+                        expected_tree,
+                        "tree, caller {caller}"
+                    );
                 });
             }
         });
@@ -896,9 +927,14 @@ mod guard_pages {
             for at_end in [true, false] {
                 let mut g = filled(len, at_end);
                 let data = g.bytes().to_vec();
-                assert_eq!(hash(g.bytes()), crate::test::reference_hash(&data), "{len} bytes, at end {at_end}");
+                assert_eq!(crate::convenience::hash(g.bytes()), crate::test::reference_hash(&data), "{len} bytes, at end {at_end}");
                 if len >= 64 * CHUNK_LEN && len % 7 == 0 {
-                    assert_eq!(hash_multithreaded(g.bytes()), hash(&data), "mt, {len} bytes");
+                    // The message's whole blocks flush against the page: the
+                    // performance call may read to their end, no further.
+                    let mut blocks = filled(len.div_ceil(64) * 64, at_end);
+                    let message = blocks.bytes()[..len].to_vec();
+                    let input = crate::performance::Block::from_bytes(blocks.bytes()).expect("a page-end region of whole blocks starts aligned");
+                    assert_eq!(crate::performance::hash_multithreaded(crate::Mode::Hash, input, len), crate::convenience::hash(&message), "mt, {len} bytes");
                 }
             }
         }
@@ -916,14 +952,24 @@ mod guard_pages {
                     }
                     let mut out = Guarded::new(count * OUT_LEN, !at_end);
                     let outputs: &mut [[u8; OUT_LEN]] = unsafe { core::slice::from_raw_parts_mut(out.bytes().as_mut_ptr() as *mut [u8; OUT_LEN], count) };
-                    hash_many(input.bytes(), len, outputs);
+                    crate::performance::hash_many(
+                        Mode::Hash,
+                        crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
+                        len,
+                        outputs,
+                    );
                     let data = input.bytes().to_vec();
                     for (i, digest) in outputs.iter().enumerate() {
-                        assert_eq!(*digest, *hash(&data[i * slot..][..len]).as_bytes(), "{count} x {len} B, message {i}, at end {at_end}");
+                        assert_eq!(*digest, *crate::convenience::hash(&data[i * slot..][..len]).as_bytes(), "{count} x {len} B, message {i}, at end {at_end}");
                     }
                     if slot * count >= 64 * CHUNK_LEN {
-                        let mut mt = vec![[0u8; OUT_LEN]; count];
-                        hash_many_multithreaded(input.bytes(), len, &mut mt);
+                        let (_page, mt) = digests(count, at_end);
+                        crate::performance::hash_many_multithreaded(
+                            Mode::Hash,
+                            crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
+                            len,
+                            mt,
+                        );
                         assert_eq!(&mt[..], &outputs[..], "mt, {count} x {len} B");
                     }
                 }
@@ -943,24 +989,31 @@ mod guard_pages {
         for count in [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 33] {
             for &len in &lens {
                 for at_end in [true, false] {
-                    let guarded: Vec<Guarded> = (0..count).map(|i| filled(len + (i % 3), at_end)).collect();
-                    let items: Vec<&[u8]> = guarded.iter().map(|g| unsafe { core::slice::from_raw_parts(g.base.add(g.start), g.len) }).collect();
+                    // Each item's whole blocks flush against a page of its own:
+                    // a performance call may read to their end, no further.
+                    let lens: Vec<usize> = (0..count).map(|i| len + (i % 3)).collect();
+                    let guarded: Vec<Guarded> = lens.iter().map(|&l| filled(l.div_ceil(64).max(1) * 64, at_end)).collect();
+                    let regions: Vec<&[u8]> = guarded.iter().map(|g| unsafe { core::slice::from_raw_parts(g.base.add(g.start), g.len) }).collect();
+                    let items: Vec<&[u8]> = regions.iter().zip(&lens).map(|(r, &l)| &r[..l]).collect();
+                    let in_blocks: Vec<(&[crate::performance::Block], usize)> = regions
+                        .iter()
+                        .zip(&lens)
+                        .map(|(r, &l)| (crate::performance::Block::from_bytes(r).expect("a page-end region of whole blocks starts aligned"), l))
+                        .collect();
                     let want: Vec<[u8; 32]> = items.iter().map(|m| *crate::test::reference_hash(m).as_bytes()).collect();
-                    let mut got = vec![[0u8; 32]; count];
-                    crate::hash_each_with(Mode::Hash, &items, &mut got);
-                    assert_eq!(got, want, "hash_each_with, {count} x {len} B, at end {at_end}");
-                    let mut got = vec![[0u8; 32]; count];
-                    crate::hash_each_multithreaded_with(Mode::Hash, &items, &mut got);
-                    assert_eq!(got, want, "hash_each_multithreaded_with, {count} x {len} B, at end {at_end}");
+                    let (_page, got) = digests(count, !at_end);
+                    crate::performance::hash_each(Mode::Hash, &in_blocks, got);
+                    assert_eq!(got, &want[..], "hash_each_with, {count} x {len} B, at end {at_end}");
+                    let (_page, got) = digests(count, at_end);
+                    crate::performance::hash_each_multithreaded(Mode::Hash, &in_blocks, got);
+                    assert_eq!(got, &want[..], "hash_each_multithreaded_with, {count} x {len} B, at end {at_end}");
                     let mut hashers: Vec<crate::Hasher> = (0..count).map(|_| crate::Hasher::new()).collect();
                     let pieces: Vec<(usize, &[u8])> = items.iter().copied().enumerate().collect();
-                    crate::Hasher::update_each(&mut hashers, &pieces);
+                    crate::performance::update_each(&mut hashers, &pieces);
                     for (i, h) in hashers.iter().enumerate() {
                         assert_eq!(*h.finalize().as_bytes(), want[i], "update_each, {count} x {len} B, at end {at_end}");
                     }
                     if count == 1 {
-                        let (hash, _) = crate::outboard_with(Mode::Hash, items[0]);
-                        assert_eq!(*hash.as_bytes(), want[0], "outboard_with, {len} B, at end {at_end}");
                         let mut h = crate::Hasher::new();
                         for piece in items[0].chunks(1000) {
                             h.update(piece);
@@ -992,6 +1045,121 @@ mod guard_pages {
             }
         }
     }
+
+    /// `count` digests' places flush against a guard page (after them, or
+    /// before): a call writes no byte outside its outputs.
+    fn places(count: usize, at_end: bool) -> (Guarded, &'static mut [Hash]) {
+        let mut g = Guarded::new(count * OUT_LEN, at_end);
+        // Sound: Hash is repr(transparent) over [u8; 32], align 1, and the
+        // pages live until the Guarded drops, after every use here.
+        let out = unsafe { core::slice::from_raw_parts_mut(g.bytes().as_mut_ptr() as *mut Hash, count) };
+        (g, out)
+    }
+
+    /// The same places as digests' bytes, for the calls that write those.
+    fn digests(count: usize, at_end: bool) -> (Guarded, &'static mut [[u8; OUT_LEN]]) {
+        let mut g = Guarded::new(count * OUT_LEN, at_end);
+        let out = unsafe { core::slice::from_raw_parts_mut(g.bytes().as_mut_ptr() as *mut [u8; OUT_LEN], count) };
+        (g, out)
+    }
+
+    /// The reference implementation's digest and first 100 bytes of
+    /// extended output in each mode, for the calls below to match.
+    fn reference(mode: Mode, input: &[u8]) -> ([u8; 32], [u8; 100]) {
+        let mut hasher = match mode {
+            Mode::Hash => reference_impl::Hasher::new(),
+            Mode::Keyed(key) => reference_impl::Hasher::new_keyed(key),
+            Mode::DeriveKey(context) => reference_impl::Hasher::new_derive_key(context),
+            Mode::DeriveKeyMaterial(_) => unreachable!("the context's own mode is DeriveKey"),
+        };
+        hasher.update(input);
+        let (mut digest, mut xof) = ([0; 32], [0; 100]);
+        hasher.finalize(&mut digest);
+        hasher.finalize(&mut xof);
+        (digest, xof)
+    }
+
+    /// Every public call that reads a caller's bytes or writes into a
+    /// caller's places, in every mode, its inputs and outputs each flush
+    /// against a guard page, after them and then before: the convenience
+    /// calls, the single-message performance calls, the Hasher's
+    /// multithreaded update, finalize_each, the stream's three ways in
+    /// with its digests, and the key and context themselves. With the
+    /// batch and collection tests above, no call is left out.
+    #[test]
+    fn test_every_call_inside_guard_pages() {
+        let lens =
+            [0, 1, 63, 64, 65, 127, 128, 1023, 1024, 1025, 2047, 2048, 2049, 3839, 4470, 7935, 8192, 16383, 16384, 16385, 65543, 131073, 524291, (1 << 20) + 5];
+        for at_end in [true, false] {
+            let mut key_page = filled(KEY_LEN, at_end);
+            // Sound: the page holds KEY_LEN bytes and outlives the modes.
+            let key: &[u8; KEY_LEN] = unsafe { &*(key_page.bytes().as_ptr() as *const [u8; KEY_LEN]) };
+            let context_text = "guard pages 2026-10-25 every call";
+            let mut context_page = Guarded::new(context_text.len(), at_end);
+            context_page.bytes().copy_from_slice(context_text.as_bytes());
+            let context = core::str::from_utf8(context_page.bytes()).unwrap();
+            let context_key = crate::performance::hash_derive_key_context(context);
+            for (name, mode) in [("hash", Mode::Hash), ("keyed", Mode::Keyed(key)), ("derive key", Mode::DeriveKey(context))] {
+                for len in lens {
+                    let mut flush = filled(len, at_end);
+                    let message = flush.bytes().to_vec();
+                    let (want, want_xof) = reference(mode, &message);
+                    let what = format!("{name}, {len} B, at end {at_end}");
+                    assert_eq!(*crate::convenience::hash_with(mode, flush.bytes()).as_bytes(), want, "hash_with, {what}");
+                    let mut xof = Guarded::new(100, !at_end);
+                    crate::convenience::hash_xof(mode, flush.bytes()).fill(xof.bytes());
+                    assert_eq!(xof.bytes(), &want_xof[..], "hash_xof, {what}");
+                    if let Mode::DeriveKey(_) = mode {
+                        let material = Mode::DeriveKeyMaterial(&context_key);
+                        assert_eq!(*crate::convenience::hash_with(material, flush.bytes()).as_bytes(), want, "hash_with, its context hashed once, {what}");
+                    }
+                    // The message's whole blocks flush against the page.
+                    let mut region = filled(len.div_ceil(64).max(1) * 64, at_end);
+                    region.bytes()[..len].copy_from_slice(&message);
+                    let blocks = crate::performance::Block::from_bytes(unsafe { core::slice::from_raw_parts(region.base.add(region.start), region.len) })
+                        .expect("a page-end region of whole blocks starts aligned");
+                    assert_eq!(*crate::performance::hash(mode, blocks, len).as_bytes(), want, "performance::hash, {what}");
+                    assert_eq!(*crate::performance::hash_multithreaded(mode, blocks, len).as_bytes(), want, "hash_multithreaded, {what}");
+                    let mut hasher = crate::Hasher::new_with(mode);
+                    hasher.update_multithreaded(flush.bytes());
+                    assert_eq!(*hasher.finalize().as_bytes(), want, "update_multithreaded, {what}");
+                    let (_out_page, out) = digests(1, !at_end);
+                    crate::performance::finalize_each(core::slice::from_ref(&hasher), &[0], out);
+                    assert_eq!(out[0], want, "finalize_each, {what}");
+                    // A stream: the message where it is, the message written into
+                    // its rooms, and a batch of three, every digest into places
+                    // flush against a page.
+                    let count = 3;
+                    let slot = crate::many::slot_len(len);
+                    let mut batch = filled(slot * count, at_end);
+                    for i in 0..count {
+                        let m = &mut batch.bytes()[i * slot..][..slot];
+                        m[..len].copy_from_slice(&message);
+                        m[len..].fill(0);
+                    }
+                    let batch_blocks = crate::performance::Block::from_bytes(unsafe { core::slice::from_raw_parts(batch.base.add(batch.start), batch.len) })
+                        .expect("a page-end batch starts aligned");
+                    let (_page_one, one) = places(1, !at_end);
+                    let (_page_with, with) = places(1, at_end);
+                    let (_page_batch, batched) = places(count, !at_end);
+                    let input: &[u8] = unsafe { core::slice::from_raw_parts(flush.base.add(flush.start), flush.len) };
+                    crate::performance::stream(
+                        mode,
+                        |_| {},
+                        |s| {
+                            s.submit(blocks, len, &mut one[0]);
+                            s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), &mut with[0]);
+                            s.submit_batch(batch_blocks, len, batched);
+                            s.finish();
+                        },
+                    );
+                    assert_eq!(*one[0].as_bytes(), want, "stream submit, {what}");
+                    assert_eq!(*with[0].as_bytes(), want, "stream submit_with, {what}");
+                    assert!(batched.iter().all(|h| *h.as_bytes() == want), "stream submit_batch, {what}");
+                }
+            }
+        }
+    }
 }
 
 /// The Hasher's stage: pieces of many lengths across 16 KiB boundaries,
@@ -1017,11 +1185,11 @@ fn test_hasher_gathers() {
             done += n;
             k += 1;
             if k % 5 == 0 {
-                assert_eq!(hasher.finalize(), crate::hash(&input[..done]), "after {done} bytes");
+                assert_eq!(hasher.finalize(), crate::convenience::hash(&input[..done]), "after {done} bytes");
                 assert_eq!(hasher.count(), done as u64);
             }
         }
-        assert_eq!(hasher.finalize(), crate::hash(&input), "pieces from {start}");
+        assert_eq!(hasher.finalize(), crate::convenience::hash(&input), "pieces from {start}");
     }
     // A subtree of 64 chunks at offset 64 KiB, in small pieces, against one update.
     let sub = &input[..64 * CHUNK_LEN];
@@ -1040,8 +1208,8 @@ fn test_hasher_gathers() {
 /// length; Display as the hex digest, Debug as Hash("hex").
 #[test]
 fn test_hash_comparisons_and_formats() {
-    let a = crate::hash(b"a");
-    let b = crate::hash(b"b");
+    let a = crate::convenience::hash(b"a");
+    let b = crate::convenience::hash(b"b");
     assert!(a == a && a != b);
     assert!(a == *a.as_bytes() && a != *b.as_bytes());
     assert!(a == a.as_bytes()[..] && a != b.as_bytes()[..] && a != a.as_bytes()[..31]);
@@ -1078,7 +1246,7 @@ fn test_hasher_io_write() {
     assert_eq!(hasher.write(&input[..1000]).unwrap(), 1000);
     hasher.write_all(&input[1000..]).unwrap();
     hasher.flush().unwrap();
-    assert_eq!(hasher.finalize(), crate::hash(&input));
+    assert_eq!(hasher.finalize(), crate::convenience::hash(&input));
 }
 
 /// The dispatch, pinned by the kernels each call runs: for a one-shot
@@ -1148,9 +1316,9 @@ mod dispatch {
         }
         let input = vec![7u8; 2 * crate::sme2::LANE_MIN_CHUNKS * CHUNK_LEN];
         let at = |len: usize| {
-            let _ = crate::hash(&input[..len]);
+            let _ = crate::convenience::hash(&input[..len]);
             ran(&|| {
-                let _ = crate::hash(&input[..len]);
+                let _ = crate::convenience::hash(&input[..len]);
             })
         };
         let lane = crate::sme2::LANE_MIN_CHUNKS * CHUNK_LEN;
@@ -1185,9 +1353,9 @@ mod dispatch {
         let at = |len: usize, count: usize| {
             ran(&|| {
                 let mut out = vec![[0u8; 32]; count];
-                crate::hash_many(&input[..crate::many::slot_len(len) * count], len, &mut out);
+                crate::performance::hash_many(crate::Mode::Hash, &input[..crate::many::slot_len(len) * count], len, &mut out);
                 crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
-                crate::hash_many(&input[..crate::many::slot_len(len) * count], len, &mut out);
+                crate::performance::hash_many(crate::Mode::Hash, &input[..crate::many::slot_len(len) * count], len, &mut out);
             })
         };
         assert_eq!(crate::many::ONE_BLOCK_PAD_MIN, 11);
@@ -1297,7 +1465,7 @@ fn test_grouped_hash() {
                 continue;
             }
             let input = &input_buf[..case];
-            let expected_hash = crate::hash(input);
+            let expected_hash = crate::convenience::hash(input);
             let mut chaining_values = ArrayVec::<CVBytes, MAX_CHUNKS>::new();
             let mut subtree_offset = 0;
             while subtree_offset < input.len() {

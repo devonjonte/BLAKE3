@@ -95,19 +95,19 @@ fn from_c() {
         let mut expected = Vec::new();
         for mode in modes {
             for len in [0, 1025, 100000] {
-                let d = blake3_servil::hash_with(mode, &input[..len]).to_hex();
+                let d = blake3_servil::convenience::hash_with(mode, &input[..len]).to_hex();
                 for _ in 0..3 {
                     expected.push(d.to_string());
                 }
             }
             for i in 0..4 {
-                expected.push(blake3_servil::hash_with(mode, &input[i * 64..(i + 1) * 64]).to_hex().to_string());
+                expected.push(blake3_servil::convenience::hash_with(mode, &input[i * 64..(i + 1) * 64]).to_hex().to_string());
             }
         }
         // b3.h's b3_hasher holds the crate's Hasher.
         let first = out.lines().next().unwrap();
-        assert_eq!(first, format!("hasher {} 64", size_of::<blake3_servil::Hasher>()), "b3.h's B3_HASHER_SIZE");
-        assert!(align_of::<blake3_servil::Hasher>() <= 64);
+        assert_eq!(first, format!("hasher {} 64", size_of::<blake3_servil::performance::Hasher>()), "b3.h's B3_HASHER_SIZE");
+        assert!(align_of::<blake3_servil::performance::Hasher>() <= 64);
         // The stream's own check prints its verdict last.
         let got: Vec<&str> = out.lines().skip(1).filter(|l| *l != "stream ok").map(|l| l.split(' ').nth(1).unwrap()).collect();
         assert_eq!(got.len(), expected.len(), "{out}");

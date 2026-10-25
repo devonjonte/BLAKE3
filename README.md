@@ -51,7 +51,7 @@ come.
 
 ```rust
 blake3_servil::initialize(); // once, before any other call
-let hash = blake3_servil::hash(b"foobarbaz");
+let hash = blake3_servil::convenience::hash(b"foobarbaz");
 ```
 
 The [crate documentation](https://johnservil.github.io/BLAKE3/blake3_servil/) covers the

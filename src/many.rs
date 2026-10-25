@@ -658,14 +658,14 @@ mod test {
     fn check(len: usize, count: usize) {
         let input = messages(len, count);
         let mut out = vec![[0u8; OUT_LEN]; count];
-        crate::hash_many(&input, len, &mut out);
+        crate::performance::hash_many(crate::Mode::Hash, &crate::test::blocks(&input), len, &mut out);
         for (i, digest) in out.iter().enumerate() {
-            assert_eq!(*digest, *crate::hash(message(&input, len, i)).as_bytes(), "message {i} of {count}, {len} bytes");
+            assert_eq!(*digest, *crate::convenience::hash(message(&input, len, i)).as_bytes(), "message {i} of {count}, {len} bytes");
         }
         #[cfg(feature = "std")]
         {
             let mut mt = vec![[0u8; OUT_LEN]; count];
-            crate::hash_many_multithreaded(&input, len, &mut mt);
+            crate::performance::hash_many_multithreaded(crate::Mode::Hash, &crate::test::blocks(&input), len, &mut mt);
             assert_eq!(mt, out, "multithreaded, {count} messages of {len} bytes");
         }
     }
@@ -693,7 +693,7 @@ mod test {
         platforms.extend(Platform::avx512());
         let key = [0x5Au8; crate::KEY_LEN];
         let context = "Linux whole-block batch dispatch";
-        let context_key = crate::hash_derive_key_context(context);
+        let context_key = crate::performance::hash_derive_key_context(context);
         let modes = [
             (*crate::IV, 0),
             (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
@@ -753,7 +753,7 @@ mod test {
     fn portable_across_partial_chunks_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
-        let context_key = crate::hash_derive_key_context(context);
+        let context_key = crate::performance::hash_derive_key_context(context);
         let modes = [
             (*crate::IV, 0),
             (crate::platform::words_from_le_bytes_32(key), crate::KEYED_HASH),
@@ -811,7 +811,7 @@ mod test {
     fn portable_two_chunk_batch_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
-        let context_key = crate::hash_derive_key_context(context);
+        let context_key = crate::performance::hash_derive_key_context(context);
         let modes = [
             (*crate::IV, 0),
             (crate::platform::words_from_le_bytes_32(key), crate::KEYED_HASH),
@@ -840,7 +840,7 @@ mod test {
     fn portable_four_chunk_batch_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
-        let context_key = crate::hash_derive_key_context(context);
+        let context_key = crate::performance::hash_derive_key_context(context);
         let modes = [
             (*crate::IV, 0),
             (crate::platform::words_from_le_bytes_32(key), crate::KEYED_HASH),
@@ -884,7 +884,7 @@ mod test {
                 hash_blocks::<{ 4 * BLOCK_LEN }>(&input, crate::IV, 0, &mut out[..count], platform, false, BLOCK_LEN);
                 assert!(out[count..].iter().all(|d| *d == [0xAA; OUT_LEN]), "{platform:?}, {count}: a store past the last output");
                 for (i, digest) in out[..count].iter().enumerate() {
-                    assert_eq!(*digest, *crate::hash(message(&input, 256, i)).as_bytes(), "{platform:?}, message {i} of {count}");
+                    assert_eq!(*digest, *crate::convenience::hash(message(&input, 256, i)).as_bytes(), "{platform:?}, message {i} of {count}");
                 }
             }
         }
@@ -902,11 +902,11 @@ mod test {
         platforms.push(Platform::neon().expect("NEON on AArch64"));
         let key = [0x5Au8; crate::KEY_LEN];
         let context = "blake3-servil many modes test";
-        let context_key = crate::hash_derive_key_context(context);
+        let context_key = crate::performance::hash_derive_key_context(context);
         let modes: [(CVWords, u8, &dyn Fn(&[u8]) -> [u8; OUT_LEN]); 2] = [
-            (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH, &|m| *crate::hash_with(crate::Mode::Keyed(&key), m).as_bytes()),
+            (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH, &|m| *crate::convenience::hash_with(crate::Mode::Keyed(&key), m).as_bytes()),
             (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL, &|m| {
-                *crate::hash_with(crate::Mode::DeriveKey(context), m).as_bytes()
+                *crate::convenience::hash_with(crate::Mode::DeriveKey(context), m).as_bytes()
             }),
         ];
         for len in [0, 1, 63, BLOCK_LEN, 100, 256, 1000, CHUNK_LEN, CHUNK_LEN + 1, 2000, 2 * CHUNK_LEN, 4000, 15 * CHUNK_LEN, 16 * CHUNK_LEN + 5] {
@@ -943,9 +943,9 @@ mod test {
                     }
                     std::thread::sleep(std::time::Duration::from_micros(300));
                     let mut out = vec![[0u8; OUT_LEN]; count];
-                    crate::hash_many_with(mode, &input, len, &mut out);
+                    crate::performance::hash_many(mode, &crate::test::blocks(&input), len, &mut out);
                     for (k, digest) in out.iter().enumerate() {
-                        assert_eq!(digest, crate::hash_with(mode, &input[k * slot..][..len]).as_bytes(), "len {len} count {count} message {k}");
+                        assert_eq!(digest, crate::convenience::hash_with(mode, &input[k * slot..][..len]).as_bytes(), "len {len} count {count} message {k}");
                     }
                 }
             }
@@ -955,21 +955,15 @@ mod test {
     #[test]
     #[should_panic(expected = "input holds one slot of whole blocks per output")]
     fn test_hash_many_needs_the_input_it_names() {
-        crate::hash_many(&[0u8; 100], 64, &mut [[0u8; OUT_LEN]; 2]);
-    }
-
-    #[test]
-    #[should_panic(expected = "input holds one slot of whole blocks per output")]
-    fn test_hash_many_needs_whole_slots() {
-        crate::hash_many(&[0u8; 200], 100, &mut [[0u8; OUT_LEN]; 2]);
+        crate::performance::hash_many(crate::Mode::Hash, &[crate::performance::Block::ZERO], 64, &mut [[0u8; OUT_LEN]; 2]);
     }
 
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "every slot's bytes past its message are zero")]
     fn test_hash_many_needs_zero_padding() {
-        let mut input = [0u8; 256];
-        input[120] = 1;
-        crate::hash_many(&input, 100, &mut [[0u8; OUT_LEN]; 2]);
+        let mut input = [crate::performance::Block::ZERO; 4];
+        input[1].0[120 - 64] = 1;
+        crate::performance::hash_many(crate::Mode::Hash, &input, 100, &mut [[0u8; OUT_LEN]; 2]);
     }
 }

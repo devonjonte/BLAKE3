@@ -2,10 +2,10 @@
 # SME2 and the SHA-3 extension), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/each.rs src/finish.rs src/park.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/neon_xof.rs src/outboard.rs src/pair.rs src/platform.rs src/portable.rs src/self_test.rs src/traits.rs src/tree.rs
+files: src/each.rs src/finish.rs src/park.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/neon_xof.rs src/pair.rs src/platform.rs src/portable.rs src/self_test.rs src/traits.rs src/tree.rs src/convenience.rs src/performance.rs src/incremental.rs src/block.rs
 model files: src/finish.rs src/park.rs
-src/each.rs	replace < with <= in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
-src/each.rs	replace < with == in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
+src/each.rs	replace < with <= in hash_each_multithreaded	1	speed: moves a threshold between equally correct paths
+src/each.rs	replace < with == in hash_each_multithreaded	1	speed: moves a threshold between equally correct paths
 src/each.rs	replace >= with < in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace hash_held with ()	1	compiled out: the copy of hash_held without std (check-builds' no_std tests reach it)
 src/each.rs	replace | with ^ in hash_held	1	equivalent: | and ^ agree on flag bits that never overlap
@@ -166,8 +166,8 @@ src/lanes.rs	replace | with ^ in Task::run_equal_members	4	equivalent: | and ^ a
 src/lanes.rs	replace || with && in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace || with && in hash_many	1	speed: MIN_SPLIT_LEN, the threshold from which a call leaves its thread (equally correct either way)
 src/lanes.rs	replace || with && in sources::visible	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lib.rs	delete ! in <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv	1	speed: chooses between equally correct paths
-src/lib.rs	delete ! in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
+src/incremental.rs	delete ! in <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv	1	speed: chooses between equally correct paths
+src/incremental.rs	delete ! in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
 src/lib.rs	delete ! in batch_after_pause	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	delete ! in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	delete ! in prefetch_update_kernels	2	speed: whether and what to prefetch after a pause (no effect on results)
@@ -175,8 +175,8 @@ src/lib.rs	delete match arm (Platform::AVX2, 6..= 7) in spare_lane	1	x86 only: c
 src/lib.rs	delete match arm (Platform::SSE41 | Platform::AVX2, 3) in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace % with + in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace % with / in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace && with || in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace && with || in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
+src/incremental.rs	replace && with || in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
+src/incremental.rs	replace && with || in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
 src/lib.rs	replace && with || in batch_after_pause	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace && with || in prefetch_kernels	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace && with || in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
@@ -184,15 +184,15 @@ src/lib.rs	replace * with +	2	speed: the lengths PREFETCH_BELOW and SME2_SIZED_L
 src/lib.rs	replace * with + in compress_chunks_parallel	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace * with + in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace * with /	2	speed: the lengths PREFETCH_BELOW and SME2_SIZED_LEN, between equally correct paths
-src/lib.rs	replace * with / in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
+src/incremental.rs	replace * with / in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
 src/lib.rs	replace * with / in compress_chunks_parallel	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace * with / in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/lib.rs	replace + with * in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
+src/incremental.rs	replace + with * in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace + with * in compress_chunks_parallel	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace + with * in hash_serial_from	1	speed: moves a threshold between equally correct paths
-src/lib.rs	replace + with - in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
-src/lib.rs	replace + with - in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace + with - in HasherCore::update_part_with_results	1	equivalent: at counter zero the stack holds one value, and merging it to the right counter's ones (one) or the wrapped one's (more) does nothing
+src/incremental.rs	replace + with - in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
+src/incremental.rs	replace + with - in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
+src/incremental.rs	replace + with - in HasherCore::update_part_with_results	1	equivalent: at counter zero the stack holds one value, and merging it to the right counter's ones (one) or the wrapped one's (more) does nothing
 src/lib.rs	replace + with - in compress_chunks_parallel	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace + with - in hash_serial_from	1	speed: moves a threshold between equally correct paths
 src/lib.rs	replace += with *= in prefetch_update_kernels	2	speed: whether and what to prefetch after a pause (no effect on results)
@@ -201,13 +201,13 @@ src/lib.rs	replace -= with /= in prefetch_update_kernels	2	speed: whether and wh
 src/lib.rs	replace / with % in compress_parents_parallel	1	equivalent in a release build: the count of children feeds only debug assertions
 src/lib.rs	replace / with % in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace / with % in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace / with * in HasherCore::update_part_with_results	1	equivalent: a power of two times or over 2 has the same one bit, so the stack merges alike
+src/incremental.rs	replace / with * in HasherCore::update_part_with_results	1	equivalent: a power of two times or over 2 has the same one bit, so the stack merges alike
 src/lib.rs	replace / with * in compress_parents_parallel	1	equivalent in a release build: the count of children feeds only debug assertions
 src/lib.rs	replace / with * in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace / with * in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace << with >>	1	equivalent: 1 << 0 and 1 >> 0 are both 1
-src/lib.rs	replace <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv -> Option<CVBytes> with None	1	speed: chooses between equally correct paths
-src/lib.rs	replace == with != in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
+src/incremental.rs	replace <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv -> Option<CVBytes> with None	1	speed: chooses between equally correct paths
+src/incremental.rs	replace == with != in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace == with != in compress_chunks_parallel	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace == with != in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with < in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
@@ -215,22 +215,22 @@ src/lib.rs	replace > with < in spare_lane	1	x86 only: compiled out on AArch64 (C
 src/lib.rs	replace > with == in code_may_be_cold	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with == in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with == in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/lib.rs	replace > with >= in HasherCore::update_part_with_results	2	equivalent for its one caller: a held group is exactly 16 KiB (16 chunks), so no length it compares equals one chunk
+src/incremental.rs	replace > with >= in HasherCore::update_part_with_results	2	equivalent for its one caller: a held group is exactly 16 KiB (16 chunks), so no length it compares equals one chunk
 src/lib.rs	replace > with >= in OutputReader::fill	1	equivalent: xof_many of no whole block returns at once
 src/lib.rs	replace > with >= in code_may_be_cold	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with >= in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with >= in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/lib.rs	replace >= with < in <impl hasher::Hooks for HasherHooks<'_>>::children	1	speed: chooses between equally correct paths
-src/lib.rs	replace >= with < in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
+src/incremental.rs	replace >= with < in <impl hasher::Hooks for HasherHooks<'_>>::children	1	speed: chooses between equally correct paths
+src/incremental.rs	replace >= with < in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
 src/lib.rs	replace >= with < in batch_after_pause	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace >= with < in hash_serial_from	1	speed: moves a threshold between equally correct paths
 src/lib.rs	replace >= with < in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace >= with < in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with None	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
-src/lib.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((0, Box::leak(Box::new([0; STAGE_LEN]))))	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
-src/lib.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((0, Box::leak(Box::new([1; STAGE_LEN]))))	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
-src/lib.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((1, Box::leak(Box::new([0; STAGE_LEN]))))	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
-src/lib.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((1, Box::leak(Box::new([1; STAGE_LEN]))))	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
+src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with None	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
+src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((0, Box::leak(Box::new([0; STAGE_LEN]))))	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
+src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((0, Box::leak(Box::new([1; STAGE_LEN]))))	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
+src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((1, Box::leak(Box::new([0; STAGE_LEN]))))	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
+src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((1, Box::leak(Box::new([1; STAGE_LEN]))))	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
 src/lib.rs	replace batch_after_pause -> bool with false	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace code_may_be_cold -> bool with false	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace match guard partial > 5 * BLOCK_LEN with false in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
@@ -248,7 +248,7 @@ src/lib.rs	replace | with ^ in compress_parents_parallel	1	equivalent: | and ^ a
 src/lib.rs	replace | with ^ in hash_all_at_once	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in hash_one_chunk_root	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in ran	1	test-only: the tests' record of what ran (crate::ran); no shipped build has it
-src/lib.rs	replace || with && in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
+src/incremental.rs	replace || with && in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
 src/many.rs	delete ! in across_from	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	delete match arm 3 in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace != with == in across_from	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
@@ -343,10 +343,6 @@ src/many.rs	replace | with ^ in neon_plans_last_len	1	equivalent: | and ^ agree 
 src/many.rs	replace | with ^ in subtree_across	2	equivalent: | and ^ agree on flag bits that never overlap
 src/many.rs	replace || with && in across_from	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace || with && in sme2_sized	4	speed: moves a threshold between equally correct paths
-src/outboard.rs	delete ! in Verifier::check	1	speed: whether the check takes the SME2 turn
-src/outboard.rs	delete ! in outboard	1	speed: whether the outboard takes the SME2 turn
-src/outboard.rs	replace && with || in Verifier::check	1	equivalent: only the root lacks an expected value, and in the encoding's pre-order a batch's first node with one starts where its first group does
-src/outboard.rs	replace | with ^ in groups_cvs_into	1	equivalent: | and ^ agree on flag bits that never overlap
 src/pair.rs	delete match arm Platform::AVX2 in takes_platform	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
 src/pair.rs	delete match arm Platform::AVX512 in takes_platform	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
 src/pair.rs	replace * with + in parent	3	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)

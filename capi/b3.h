@@ -72,9 +72,11 @@ b3_digest b3_hash_multithreaded(const b3_mode *mode, const void *input, size_t l
 #define B3_STRIDE(message_len) ((message_len) == 0 ? (size_t)64 : ((size_t)(message_len) + 63) / 64 * 64)
 
 /* The digests of `count` messages of `message_len` bytes each, into
- * `out[0..count]`, on the calling thread. Message i starts at byte
- * i * B3_STRIDE(message_len) of `input`, and the bytes between a message's
- * end and the next stride are zero. Messages whose length is a multiple of
+ * `out[0..count]`, on the calling thread. `input` starts at a 64-byte
+ * boundary (aligned_alloc(64, n) gives one; a misplaced batch stops the
+ * program). Message i starts at byte i * B3_STRIDE(message_len) of
+ * `input`, and the bytes between a message's end and the next stride are
+ * zero. Messages whose length is a multiple of
  * 64 sit back to back: a Merkle tree's layer of leaves, or of 64-byte
  * pairs of child digests. Short messages hash fastest this way: 1024
  * messages of 64 bytes take about a fifth of the time of 1024 b3_hash
@@ -122,6 +124,9 @@ void b3_hasher_output(const b3_hasher *hasher, uint64_t offset, void *out, size_
  * that calls the stream: during a submit when the stream is full (it holds
  * up to 1024 messages in flight), during b3_stream_collect, and during
  * b3_stream_finish, which hands back every place and ends the stream.
+ * A submitted message starts at a 64-byte boundary, its storage whole
+ * 64-byte blocks (aligned_alloc(64, n) with n a multiple of 64; the bytes
+ * past its end are ignored); a misplaced message stops the program.
  * Every message and place submitted lives until b3_stream_finish. A
  * message stays unhashed in a task still open until the task fills or you
  * call collect or finish, so call one of them when you need a digest soon.

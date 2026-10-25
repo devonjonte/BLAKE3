@@ -17,11 +17,11 @@ The README lists what the fork adds for callers; the code is laid out so:
   `tools/gen_neon_hybrid.py`) and the SME2 kernels; on x86-64, upstream's
   SSE4.1, AVX2, and AVX-512 kernels. The fork's own x86-64 kernels, in
   Rust intrinsics, are in `src/rust_sse41.rs` and `src/rust_avx2.rs`.
-- `src/`: the Rust around them. `lib.rs` (the one-shot calls, the
-  `Hasher`), `platform.rs` (detection and dispatch), `many.rs` (batches),
+- `src/`: the Rust around them. `convenience.rs` and `performance.rs`
+  (the two kinds of call, their contracts at the top), `incremental.rs`
+  (the `Hasher`), `block.rs` (`Block` and `Batch`, the batch calls' input), `lib.rs` (what the calls share), `platform.rs` (detection and dispatch), `many.rs` (batches),
   `each.rs` (collections, `update_each`), `lanes.rs` (the thread pool),
-  `stream.rs` (the stream), `outboard.rs` (outboards and the `Verifier`),
-  `self_test.rs` (the startup self-test), `hasher.rs` (the Hasher's
+  `stream.rs` (the stream), `self_test.rs` (the startup self-test), `hasher.rs` (the Hasher's
   stack, loop, and chunk state), and `tree.rs` (the tree walk).
 - `capi/`: the C API, `b3.h`, a thin layer over the crate
   (`capi/src/lib.rs`), tested from Rust against the official test vectors

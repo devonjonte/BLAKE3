@@ -10,10 +10,10 @@
 //! blake3_servil::initialize();
 //!
 //! // Hash an input all at once.
-//! let hash1 = blake3_servil::hash(b"foobarbaz");
+//! let hash1 = blake3_servil::convenience::hash(b"foobarbaz");
 //!
 //! // Hash an input incrementally.
-//! let mut hasher = blake3_servil::Hasher::new();
+//! let mut hasher = blake3_servil::performance::Hasher::new();
 //! hasher.update(b"foo");
 //! hasher.update(b"bar");
 //! hasher.update(b"baz");
@@ -30,25 +30,50 @@
 //!
 //! // Print a hash as hex.
 //! println!("{}", hash1);
+//!
+//! // Many short messages in one call: a Batch lays them out in Blocks.
+//! # #[cfg(feature = "std")] {
+//! use blake3_servil::{performance::{self, Batch}, Mode};
+//! let mut batch = Batch::new(64, 3);
+//! for i in 0..3 {
+//!     batch.set(i, &[i as u8; 64]);
+//! }
+//! let mut hashes = [[0u8; 32]; 3];
+//! performance::hash_many(Mode::Hash, batch.blocks(), 64, &mut hashes);
+//! assert_eq!(hashes[2], *blake3_servil::convenience::hash(&[2u8; 64]).as_bytes());
+//! # }
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! # Which call to use
+//! # Two kinds of call
+//!
+//! - **[`convenience`]**: one call per hash, every feature of BLAKE3 (the
+//!   plain hash, the keyed hash, key derivation, extended output), any
+//!   slice, the result returned.
+//! - **[`performance`]**, for power users: every way this crate makes
+//!   hashing fast (other cores, batches, collections, streams, the
+//!   [`Hasher`] for a message fed in pieces). The
+//!   program takes on more of the work: inputs come as
+//!   [`Block`](performance::Block)s (64 bytes on a 64-byte boundary, so
+//!   alignment is the type's), digests go into the program's places, and
+//!   every call takes a [`Mode`].
+//!
+//! A program that wants more speed than the convenience calls give moves
+//! to the performance ones.
 //!
 //! | Your data | Call |
 //! |---|---|
-//! | One message in memory | [`hash_multithreaded`] |
-//! | One message arriving in pieces | [`Hasher::update`] |
-//! | Many messages of one length, in one buffer | [`hash_many_multithreaded`] |
-//! | Many messages of different lengths, in memory | [`hash_each_multithreaded_with`] |
-//! | Many messages arriving at once (a server's uploads) | [`Hasher::update_each`] |
-//! | A stream of messages read, made, or arriving | [`stream`] |
-//! | A message read in verified ranges (Bao, iroh-blobs) | [`outboard_with`], [`verify_range_with`], [`Verifier`] |
+//! | One message in memory | [`convenience::hash`], or for speed [`performance::hash_multithreaded`] |
+//! | One message arriving in pieces | [`performance::Hasher`] |
+//! | Many messages of one length, in one buffer | [`performance::hash_many_multithreaded`] |
+//! | Many messages of different lengths, in memory | [`performance::hash_each_multithreaded`] |
+//! | Many messages arriving at once (a server's uploads) | [`performance::update_each`] |
+//! | A stream of messages read, made, or arriving | [`performance::stream`] |
 //!
 //! Each call returns once its hash is done, and uses other CPU cores
 //! where that is faster (the forms without `multithreaded` stay on the
-//! calling thread). A [`stream`] is different: your program submits
+//! calling thread). A [stream](performance::stream) is different: your program submits
 //! messages and goes on to read or make the next ones while other threads
 //! hash them; each digest arrives in the place your program named, a
 //! little later. Choose it when reading or making the data keeps your
@@ -56,12 +81,12 @@
 //! the most bytes per second.
 //!
 //! Short messages hash fastest together: 1024 messages of 64 bytes in one
-//! [`hash_many`] call take about a fifth of the time of 1024 [`hash`]
-//! calls.
+//! [`performance::hash_many`] call take about a fifth of the time of 1024
+//! [`convenience::hash`] calls.
 //!
 //! **Keyed hashing and key derivation** run at the plain hash's speed
-//! through a [`Mode`], passed to a call's `_with` form ([`hash_with`],
-//! [`hash_many_with`], ...), to [`Hasher::new_with`], or to a [`stream`].
+//! through a [`Mode`], passed to every performance call, or to
+//! [`Hasher::new_with`].
 //!
 //! **Hashing now and then** (rather than nonstop) is slower per byte on
 //! every hash function, since its code and data must come back into the
@@ -79,23 +104,17 @@
 //! # Memory
 //!
 //! - **A [`Hasher`] is about 18 KiB**; box it where that matters.
-//! - **Single-threaded calls allocate nothing**: [`hash`], [`hash_with`], [`hash_many`], [`hash_many_with`],
-//!   [`Hasher::update`] and [`Hasher::finalize`], and [`OutputReader`].
+//! - **Single-threaded calls allocate nothing**: [`convenience::hash`],
+//!   [`performance::hash`], [`performance::hash_many`], [`Hasher::update`]
+//!   and [`Hasher::finalize`], and [`OutputReader`].
 //!   [`Hasher::update_reader`] uses a 1 MiB buffer while it reads past
-//!   64 KiB, and [`hash_each_with`] 32 bytes for each chunk of its messages
-//!   of 2 to 15 chunks, each freed when it returns. [`outboard_with`]
-//!   returns the outboard it allocates (64 bytes for each 16 KiB), and
-//!   [`verify_range_with`] allocates 32 bytes for each group of its range,
-//!   freed when it returns. A [`Verifier`] keeps up to 16 KiB, for a group
-//!   that arrives in pieces, and 48 bytes for each level of the tree; each
-//!   [`Verifier::update`] allocates about 100 bytes for each node its piece
-//!   holds, and its groups' working space (about 60 bytes a chunk), freed when it
-//!   returns.
+//!   64 KiB, and [`performance::hash_each`] 32 bytes for each chunk of its messages
+//!   of 2 to 15 chunks, each freed when it returns.
 //! - **Multithreaded calls** allocate nothing below 512 KiB, where they
 //!   hash on the calling thread. Above it they keep a list of the pieces
 //!   they hand out, freed when they return: 48 bytes for each 128 KiB of
 //!   input, and at most 200 bytes for each CPU (1 GiB on 16 CPUs: 390 KiB).
-//! - **A [`stream`]** takes its storage (its 2 MiB ring and its entries)
+//! - **A [stream](performance::stream)** takes its storage (its 2 MiB ring and its entries)
 //!   from a pool the process keeps: a thread's first stream allocates it
 //!   and later streams reuse it, never freed.
 //! - **Once per process**: the startup self-test's buffers, about 45 KiB
@@ -142,8 +161,6 @@
 //! [`Read`]: https://doc.rust-lang.org/std/io/trait.Read.html
 //! [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
 //! [`Seek`]: https://doc.rust-lang.org/std/io/trait.Seek.html
-//! [`digest`]: https://crates.io/crates/digest
-//! [`signature`]: https://crates.io/crates/signature
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -155,16 +172,11 @@ extern crate std;
 #[cfg(test)]
 mod test;
 
+mod block;
+pub mod convenience;
 #[cfg(feature = "std")]
 mod each;
-#[cfg(feature = "std")]
-pub use each::{hash_each_multithreaded_with, hash_each_with};
-#[cfg(feature = "std")]
-mod outboard;
-#[cfg(feature = "std")]
-#[doc(hidden)]
-#[cfg(feature = "std")]
-pub use outboard::{GROUP_LEN, Verifier, outboard_multithreaded_with, outboard_with, verify_range_with};
+pub mod performance;
 
 mod platform;
 
@@ -225,17 +237,13 @@ mod park_sync {
 #[cfg(feature = "std")]
 mod lanes;
 mod many;
+mod pair;
 #[cfg(feature = "std")]
 mod park;
-#[cfg(feature = "std")]
-#[cfg(feature = "std")]
+mod self_test;
 #[cfg(feature = "std")]
 mod stream;
 mod tree;
-#[cfg(feature = "std")]
-pub use stream::{Stream, stream};
-mod pair;
-mod self_test;
 
 /// A kind of kernel or path a call ran, for the tests that check which
 /// path a call took. Each build notes the kinds it has.
@@ -895,81 +903,6 @@ fn hash_all_at_once(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8, 
     }
 }
 
-/// The hash of `input`, on the calling thread.
-///
-/// ```
-/// # blake3_servil::initialize();
-/// let hash = blake3_servil::hash(b"foo");
-/// # let hash1 = hash;
-///
-/// let hash = blake3_servil::Hasher::new().update(b"foo").finalize();
-/// # let hash2 = hash;
-/// # assert_eq!(hash1, hash2);
-/// ```
-///
-/// Choose it for short inputs, or where your program wants one thread; for
-/// any input in memory, [`hash_multithreaded`] is never slower. For output
-/// sizes other than 32 bytes, see [`Hasher::finalize_xof`] and
-/// [`OutputReader`].
-///
-/// **Speed**, nonstop on an Apple M4 Max: about 50 ns for 64 bytes, 0.7 µs
-/// for 1 KiB, 4 GB/s at 16 KiB, and 6 GB/s from 1 MiB. A call after a pause
-/// or after other work takes longer (its code and data have left the
-/// CPU's caches): 64 bytes then take about 0.2 to 0.6 µs. On Apple M4 and
-/// later, threads that hash inputs of 16 KiB or more at the same moment
-/// share one accelerator: one runs at full speed and the others at about
-/// two thirds of it.
-///
-/// The first hash in a process first runs a self-test (see the crate's
-/// documentation), under 0.2 ms; [`initialize`] moves it to start-up.
-// Inlined into its caller: its one call, out of line, sat apart from
-// hash_serial, one more code line to fetch from DRAM in a call after a pause
-// (i7-12700K, after idling, 64 B: -16.5%, 8 fresh layouts a side).
-#[inline]
-pub fn hash(input: &[u8]) -> Hash {
-    hash_serial(input, IV, 0)
-}
-
-/// The hash of `input`, using other CPU cores where that is faster: the same
-/// [`Hash`](struct@Hash) as [`hash`], never slower.
-///
-/// ```
-/// # blake3_servil::initialize_multithreaded(None);
-/// let hash = blake3_servil::hash_multithreaded(&[0u8; 1 << 20]);
-/// assert_eq!(hash, blake3_servil::hash(&[0u8; 1 << 20]));
-/// ```
-///
-/// The default choice for one message in memory.
-///
-/// **Speed**, on an Apple M4 Max (16 cores): below 512 KiB it hashes on the
-/// calling thread, at [`hash`]'s speed; from 512 KiB it uses the other cores
-/// too: about 12 GB/s at 1 MiB, 20 GB/s at 4 MiB, and 25 GB/s from 16 MiB,
-/// 4 to 6 times [`hash`]. The extra threads wait asleep between calls and
-/// use no CPU then.
-///
-/// **Several callers at once**: calls from several threads of one program
-/// share the cores in turn, each getting a fair part; a call that finds the
-/// cores all busy hashes on its own thread, at [`hash`]'s speed.
-///
-/// **CPUs with performance and efficiency cores** (Intel's since Alder
-/// Lake): a multithreaded call or stream uses every core, and afterwards
-/// the OS sometimes leaves the calling thread on an efficiency core for a
-/// while, where single-threaded hashing runs at about half speed (AVX2's
-/// 256-bit operations run as two halves there). Measured on an i7-12700K
-/// under Linux 7.0: beside nonstop multithreaded streams, 7% of 16 KiB
-/// single-threaded hashes ran partly on an efficiency core, 2.2 times
-/// slower, about 6% on their average. A program that alternates the two
-/// and needs its single-threaded speed steady can keep that thread on the
-/// performance cores (`sched_setaffinity` on Linux).
-///
-/// The program calls [`initialize_multithreaded`] first; a call before it
-/// panics.
-#[cfg(feature = "std")]
-pub fn hash_multithreaded(input: &[u8]) -> Hash {
-    lanes::require();
-    lanes::hash(input)
-}
-
 /// Run the startup self-test and detect the CPU: every program calls this
 /// (or [`initialize_multithreaded`]) once, before any other call of this
 /// crate, and a call before it panics. Under 0.2 ms, once per process
@@ -977,8 +910,8 @@ pub fn hash_multithreaded(input: &[u8]) -> Hash {
 ///
 /// ```
 /// blake3_servil::initialize();
-/// let hash = blake3_servil::hash(b"foo");
-/// # assert_eq!(hash, blake3_servil::Hasher::new().update(b"foo").finalize());
+/// let hash = blake3_servil::convenience::hash(b"foo");
+/// # assert_eq!(hash, blake3_servil::performance::Hasher::new().update(b"foo").finalize());
 /// ```
 pub fn initialize() {
     self_test::ensure();
@@ -986,7 +919,7 @@ pub fn initialize() {
 }
 
 /// [`initialize`], and start the threads that the multithreaded calls and
-/// [`stream`] use: every program that makes such calls calls this once,
+/// [`stream`](performance::stream) use: every program that makes such calls calls this once,
 /// before them, in place of `initialize`. It starts `threads - 1` workers,
 /// and each multithreaded call hashes on its calling thread and the
 /// workers (calls made at once share the workers), and on CPUs with SME2
@@ -1006,8 +939,9 @@ pub fn initialize() {
 ///
 /// ```
 /// blake3_servil::initialize_multithreaded(None);
-/// let hash = blake3_servil::hash_multithreaded(&[0u8; 1 << 20]);
-/// assert_eq!(hash, blake3_servil::hash(&[0u8; 1 << 20]));
+/// let message = vec![blake3_servil::performance::Block::ZERO; (1 << 20) / 64];
+/// let hash = blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Hash, &message, 1 << 20);
+/// assert_eq!(hash, blake3_servil::convenience::hash(&[0u8; 1 << 20]));
 /// ```
 #[cfg(feature = "std")]
 pub fn initialize_multithreaded(threads: Option<core::num::NonZeroUsize>) {
@@ -1038,30 +972,8 @@ pub fn __all_workers_parked() -> bool {
     lanes::all_workers_parked()
 }
 
-/// An alias to distinguish [`hash_derive_key_context`] outputs from other keys.
+/// An alias to distinguish [`hash_derive_key_context`](performance::hash_derive_key_context) outputs from other keys.
 pub type ContextKey = [u8; KEY_LEN];
-
-/// Hash a key-derivation context string and return a [`ContextKey`].
-///
-/// This has the same security requirement as key derivation. **The context
-/// string should be hardcoded, globally unique, and application-specific.**
-///
-/// Its one use is [`Mode::DeriveKeyMaterial`]: a program that derives many
-/// keys from one context hashes the context once.
-///
-/// # Example
-///
-/// ```
-/// # blake3_servil::initialize();
-/// use blake3_servil::Mode;
-///
-/// let context_key = blake3_servil::hash_derive_key_context("foo");
-/// let derived = blake3_servil::hash_with(Mode::DeriveKeyMaterial(&context_key), b"bar");
-/// assert_eq!(derived, blake3_servil::hash_with(Mode::DeriveKey("foo"), b"bar"));
-/// ```
-pub fn hash_derive_key_context(context: &str) -> ContextKey {
-    hash_serial(context.as_bytes(), IV, DERIVE_KEY_CONTEXT).0
-}
 
 /// The most bytes a subtree starting at byte `input_offset` of a message
 /// can hold: `None` at offset zero (the whole message), else the largest
@@ -1079,13 +991,13 @@ pub(crate) fn max_subtree_len(input_offset: u64) -> Option<u64> {
 }
 
 /// Which of BLAKE3's three functions a call computes: the plain hash
-/// ([`hash`]), the keyed hash, or key derivation. Every call that takes a mode runs each one at the same
+/// ([`hash`](convenience::hash)), the keyed hash, or key derivation. Every call that takes a mode runs each one at the same
 /// speed, but for `DeriveKey`, which first hashes its context string (once
 /// per call; [`DeriveKeyMaterial`](Mode::DeriveKeyMaterial) takes it hashed
 /// once for many calls).
 #[derive(Clone, Copy)]
 pub enum Mode<'a> {
-    /// The default hash function, as [`hash`].
+    /// The default hash function, as [`hash`](convenience::hash).
     Hash,
     /// The keyed hash function with this key.
     Keyed(&'a [u8; KEY_LEN]),
@@ -1093,50 +1005,37 @@ pub enum Mode<'a> {
     /// is the key material.
     DeriveKey(&'a str),
     /// The key derivation function with its context string already hashed
-    /// ([`hash_derive_key_context`]); the input is the key material.
+    /// ([`hash_derive_key_context`](performance::hash_derive_key_context)); the input is the key material.
     DeriveKeyMaterial(&'a ContextKey),
 }
 
 impl Mode<'_> {
+    /// The key words and flags this mode hashes with, the plain mode's IV
+    /// where it is: a public call's one way to its key. A copy of the IV
+    /// put 32 bytes of stores on the stack before the message's loads of
+    /// every call (October 24, the i7's disassembly of a caller); a
+    /// constant mode folds to its constants, inlined.
+    #[inline]
+    pub(crate) fn key(self, room: &mut core::mem::MaybeUninit<CVWords>) -> (&CVWords, u8) {
+        match self {
+            Mode::Hash => (IV, 0),
+            _ => {
+                let (key, flags) = self.key_and_flags();
+                (room.write(key), flags)
+            }
+        }
+    }
+
     /// The key words and flags this mode hashes with.
+    #[inline]
     fn key_and_flags(self) -> (CVWords, u8) {
         match self {
             Mode::Hash => (*IV, 0),
             Mode::Keyed(key) => (platform::words_from_le_bytes_32(key), KEYED_HASH),
-            Mode::DeriveKey(context) => (platform::words_from_le_bytes_32(&hash_derive_key_context(context)), DERIVE_KEY_MATERIAL),
+            Mode::DeriveKey(context) => (platform::words_from_le_bytes_32(&performance::hash_derive_key_context(context)), DERIVE_KEY_MATERIAL),
             Mode::DeriveKeyMaterial(context_key) => (platform::words_from_le_bytes_32(context_key), DERIVE_KEY_MATERIAL),
         }
     }
-}
-
-/// [`hash`] in any [`Mode`]: the plain hash, the keyed hash, or key
-/// derivation, at [`hash`]'s speed.
-///
-/// ```
-/// # blake3_servil::initialize();
-/// use blake3_servil::Mode;
-/// let key = [7u8; 32];
-/// assert_eq!(blake3_servil::hash_with(Mode::Keyed(&key), b"foo").as_bytes().len(), 32);
-/// ```
-pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
-    let (key, flags) = mode.key_and_flags();
-    hash_serial(input, &key, flags)
-}
-
-/// [`hash_multithreaded`] in any [`Mode`], at its speed.
-///
-/// ```
-/// # blake3_servil::initialize_multithreaded(None);
-/// use blake3_servil::Mode;
-/// let key = [7u8; 32];
-/// let input = vec![1u8; 1 << 20];
-/// assert_eq!(blake3_servil::hash_multithreaded_with(Mode::Keyed(&key), &input), blake3_servil::hash_with(Mode::Keyed(&key), &input));
-/// ```
-#[cfg(feature = "std")]
-pub fn hash_multithreaded_with(mode: Mode, input: &[u8]) -> Hash {
-    lanes::require();
-    let (key, flags) = mode.key_and_flags();
-    lanes::hash_with_key(input, &key, flags)
 }
 
 /// The whole input on the calling thread, in the given mode: the one-chunk
@@ -1334,44 +1233,6 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
     Hash(tree::hash(&tree::PlatformKernels { key, flags, platform }, input))
 }
 
-/// The hashes of many messages of one length, laid out in one buffer, on
-/// the calling thread: `out[i]` becomes the [`hash`] of message `i`.
-///
-/// Message `i` starts at byte `i * stride` of `input`, where `stride` is
-/// `message_len` rounded up to a multiple of 64 (64 for empty messages), so
-/// messages whose length is a multiple of 64 sit back to back. `input`
-/// holds exactly `out.len()` strides, and the bytes between a message's end
-/// and the next stride are zero (debug builds check; another byte there
-/// changes that message's hash). This is the shape of a Merkle tree's
-/// layer: leaves of one size, or nodes of two 32-byte children
-/// (`message_len` 64).
-///
-/// ```
-/// # blake3_servil::initialize();
-/// let leaves = vec![7u8; 1000 * 256];
-/// let mut hashes = vec![[0u8; 32]; 1000];
-/// blake3_servil::hash_many(&leaves, 256, &mut hashes);
-/// assert_eq!(hashes[3], *blake3_servil::hash(&leaves[3 * 256..4 * 256]).as_bytes());
-///
-/// // 100-byte messages sit 128 bytes apart, zero between them.
-/// let mut records = vec![0u8; 10 * 128];
-/// for (i, record) in records.chunks_mut(128).enumerate() {
-///     record[..100].fill(i as u8 + 1);
-/// }
-/// let mut digests = vec![[0u8; 32]; 10];
-/// blake3_servil::hash_many(&records, 100, &mut digests);
-/// assert_eq!(digests[9], *blake3_servil::hash(&[10u8; 100]).as_bytes());
-/// ```
-///
-/// **Speed**: short messages hash several at a time, so a batch beats a
-/// loop of [`hash`]: on an Apple M4 Max, 64-byte messages take about 10 to
-/// 20 ns each in batches of 16 or more, against about 50 for one [`hash`]
-/// each. Messages longer than 15 KiB cost what [`hash`] costs. For the
-/// same hashes over several cores, see [`hash_many_multithreaded`].
-pub fn hash_many(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    hash_many_serial(input, message_len, IV, 0, out);
-}
-
 /// [`hash_many`] in the mode of `key` and `flags`, on the calling thread.
 #[inline]
 pub(crate) fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]]) {
@@ -1392,651 +1253,11 @@ fn hash_many_serial_from(platform: Platform, input: &[u8], message_len: usize, k
     many::hash_many_on(input, message_len, key, flags, out, turn.platform());
 }
 
-/// [`hash_many`], using other CPU cores where that is faster: the same
-/// hashes, never slower.
-///
-/// ```
-/// # blake3_servil::initialize_multithreaded(None);
-/// let leaves = vec![7u8; 4096 * 256];
-/// let mut hashes = vec![[0u8; 32]; 4096];
-/// blake3_servil::hash_many_multithreaded(&leaves, 256, &mut hashes);
-/// assert!(hashes.iter().all(|h| h == blake3_servil::hash(&[7u8; 256]).as_bytes()));
-/// ```
-///
-/// **Speed**: below 512 KiB in all it runs on the calling thread, at
-/// [`hash_many`]'s speed; larger batches use the other cores too (on an
-/// Apple M4 Max, 64-byte messages from about 10 down to 3 ns each). It
-/// shares the cores with other callers as [`hash_multithreaded`] does.
-#[cfg(feature = "std")]
-pub fn hash_many_multithreaded(input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    lanes::require();
-    lanes::hash_many(input, message_len, IV, 0, out);
-}
-
-/// [`hash_many`] in any [`Mode`], at its speed.
-///
-/// ```
-/// # blake3_servil::initialize();
-/// use blake3_servil::Mode;
-/// let key = [7u8; 32];
-/// let nodes = vec![1u8; 20 * 64];
-/// let mut macs = vec![[0u8; 32]; 20];
-/// blake3_servil::hash_many_with(Mode::Keyed(&key), &nodes, 64, &mut macs);
-/// assert_eq!(macs[5], *blake3_servil::hash_with(blake3_servil::Mode::Keyed(&key), &[1u8; 64]).as_bytes());
-/// ```
-pub fn hash_many_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    let (key, flags) = mode.key_and_flags();
-    hash_many_serial(input, message_len, &key, flags, out);
-}
-
-/// [`hash_many_multithreaded`] in any [`Mode`], at its speed.
-///
-/// ```
-/// # blake3_servil::initialize_multithreaded(None);
-/// use blake3_servil::Mode;
-/// let key = [7u8; 32];
-/// let nodes = vec![1u8; 20000 * 64];
-/// let mut macs = vec![[0u8; 32]; 20000];
-/// blake3_servil::hash_many_multithreaded_with(Mode::Keyed(&key), &nodes, 64, &mut macs);
-/// assert_eq!(macs[5], *blake3_servil::hash_with(blake3_servil::Mode::Keyed(&key), &[1u8; 64]).as_bytes());
-/// ```
-#[cfg(feature = "std")]
-pub fn hash_many_multithreaded_with(mode: Mode, input: &[u8], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
-    lanes::require();
-    let (key, flags) = mode.key_and_flags();
-    lanes::hash_many(input, message_len, &key, flags, out);
-}
-
-/// A message's hash, fed in pieces: [`update`](Hasher::update) with each
-/// piece, in order, then [`finalize`](Hasher::finalize). The pieces may be
-/// of any lengths; the hash is the same as [`hash`] of them all at once.
-///
-/// A `Hasher` is about 18 KiB (it holds short pieces until it has 16 KiB
-/// to hash at once); box it where that matters.
-///
-/// # Examples
-///
-/// ```
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # blake3_servil::initialize();
-/// // Hash an input incrementally.
-/// let mut hasher = blake3_servil::Hasher::new();
-/// hasher.update(b"foo");
-/// hasher.update(b"bar");
-/// hasher.update(b"baz");
-/// assert_eq!(hasher.finalize(), blake3_servil::hash(b"foobarbaz"));
-///
-/// // Extended output. OutputReader also implements Read and Seek.
-/// # #[cfg(feature = "std")] {
-/// let mut output = [0; 1000];
-/// let mut output_reader = hasher.finalize_xof();
-/// output_reader.fill(&mut output);
-/// assert_eq!(&output[..32], blake3_servil::hash(b"foobarbaz").as_bytes());
-/// # }
-/// # Ok(())
-/// # }
-/// ```
-#[derive(Clone)]
-pub struct Hasher {
-    core: HasherCore,
-    /// The message's bytes from its last 16 KiB boundary, gathered while
-    /// they arrive in shorter updates: the first `staged`.
-    staged: usize,
-    stage: [core::mem::MaybeUninit<u8>; STAGE_LEN],
-}
-
-/// The bytes a Hasher gathers before they hash side by side: 16 chunks,
-/// the widest kernels' lanes.
-const STAGE_LEN: usize = 16 * CHUNK_LEN;
-
-/// The tree's state behind a [`Hasher`]: its chunk, and the chaining values
-/// of its finished subtrees.
-#[derive(Clone)]
-pub(crate) struct HasherCore {
-    key: CVWords,
-    chunk_state: ChunkState,
-    initial_chunk_counter: u64,
-    // The stack size is MAX_DEPTH + 1 because we do lazy merging. For example,
-    // with 7 chunks, we have 3 entries in the stack. Adding an 8th chunk
-    // requires a 4th entry, rather than merging everything down to 1, because
-    // we don't know whether more input is coming. This is different from how
-    // the reference implementation does things.
-    cv_stack: CvStack,
-}
-
 mod hasher;
 use hasher::CvStack;
 
-/// What the Hasher's kernels take from the library (hasher::Hooks): with
-/// `pooled`, subtrees of lanes::MIN_SPLIT_LEN and more on the pool; whole
-/// subtrees on `platform` (an SME2 turn's); `chunk_platform`, the chunk
-/// state's, otherwise.
-struct HasherHooks<'a> {
-    key: &'a CVWords,
-    flags: u8,
-    chunk_platform: Platform,
-    platform: Platform,
-    pooled: bool,
-}
-
-impl hasher::Hooks for HasherHooks<'_> {
-    #[inline(always)]
-    #[allow(unused_variables)]
-    fn subtree_cv(&self, input: &[u8], ahead: usize, counter: u64) -> Option<CVBytes> {
-        // After the first input, no subtree is the root: on SME2 the flat
-        // walk runs it down to its own chaining value, so one value goes
-        // on the stack and about one merge runs on the core between SME2
-        // kernels (about 0.2 us of other work between them puts the SME
-        // unit in its slow state: `sme2`'s documentation).
-        #[cfg(blake3_sme2)]
-        if !self.pooled && matches!(self.platform, Platform::SME2) && sme2::flat_takes(input.len()) {
-            // Safe: the SME2 platform is selected only where the CPU has it.
-            return Some(unsafe { sme2::compress_subtree_flat_to_cv(input, ahead, self.key, counter, self.flags) });
-        }
-        None
-    }
-
-    #[inline(always)]
-    fn children(&self, input: &[u8], ahead: usize, counter: u64) -> [CVBytes; 2] {
-        #[cfg(feature = "std")]
-        let pool_takes = self.pooled && input.len() >= lanes::MIN_SPLIT_LEN;
-        #[cfg(not(feature = "std"))]
-        let pool_takes = false;
-        let pair = if pool_takes {
-            #[cfg(feature = "std")]
-            {
-                lanes::subtree_children(input, self.key, counter, self.flags)
-            }
-            #[cfg(not(feature = "std"))]
-            unreachable!()
-        } else if self.pooled {
-            // Pooled, the subtrees below take the lock one at a time, and
-            // the pool's own never use SME2.
-            let own = platform::Sme2Turn::take(self.chunk_platform, input.len() >= SME2_SIZED_LEN);
-            compress_subtree_to_parent_node(input, ahead, self.key, counter, self.flags, own.platform())
-        } else {
-            compress_subtree_to_parent_node(input, ahead, self.key, counter, self.flags, self.platform)
-        };
-        [pair[..OUT_LEN].try_into().unwrap(), pair[OUT_LEN..].try_into().unwrap()]
-    }
-}
-
-/// The Hasher's kernels: chunks, nodes, and parents on the chunk state's
-/// platform, the rest from `hooks`.
-type HasherKernels<'a> = hasher::Kernels<'a, Platform, HasherHooks<'a>>;
-
-/// A Hasher's kernels on its key and chunk state (see HasherHooks).
-#[inline(always)]
-fn kernels_on<'a>(key: &'a CVWords, chunk_state: &ChunkState, platform: Platform, pooled: bool) -> HasherKernels<'a> {
-    hasher::Kernels {
-        key,
-        flags: chunk_state.flags,
-        platform: chunk_state.platform,
-        hooks: HasherHooks { key, flags: chunk_state.flags, chunk_platform: chunk_state.platform, platform, pooled },
-    }
-}
-
-impl Hasher {
-    fn from_core(core: HasherCore) -> Self {
-        Self { core, staged: 0, stage: [core::mem::MaybeUninit::uninit(); STAGE_LEN] }
-    }
-
-    /// The bytes gathered in the stage.
-    fn staged_bytes(&self) -> &[u8] {
-        // Sound: the first `staged` bytes of the stage were written (gather).
-        unsafe { core::slice::from_raw_parts(self.stage.as_ptr() as *const u8, self.staged) }
-    }
-
-    /// Copy `bytes` into the stage after what it holds.
-    fn stage(&mut self, bytes: &[u8]) {
-        // Sound: MaybeUninit<u8> has u8's layout, and the bytes fit (gather).
-        let room = unsafe { core::slice::from_raw_parts_mut(self.stage.as_mut_ptr().add(self.staged) as *mut u8, bytes.len()) };
-        room.copy_from_slice(bytes);
-        self.staged += bytes.len();
-    }
-
-    /// `update`'s gathering: an update of STAGE_LEN or more from a 16 KiB
-    /// boundary of the message (or an empty stage) goes to the core whole;
-    /// shorter ones gather in the stage until it reaches the next boundary
-    /// (but a fresh hasher's first chunk goes to the core),
-    /// and the stage goes to the core as one update, its chunks side by
-    /// side in the lanes.
-    fn gather(&mut self, input: &[u8], pooled: bool) -> &mut Self {
-        self.gather_part(input, pooled, false);
-        self
-    }
-
-    /// [`gather`](Hasher::gather), but with `hold`, a stage that fills a
-    /// whole group (from offset zero) is kept for the caller to hash with
-    /// others' (`held_group`), and the rest of `input`
-    /// returned; else nothing is left.
-    fn gather_part<'a>(&mut self, mut input: &'a [u8], pooled: bool, hold: bool) -> &'a [u8] {
-        self.core.assert_room(self.count(), input.len());
-        while !input.is_empty() {
-            // Whole groups, and a fresh hasher's first chunk (which hashes
-            // serially either way), skip the stage.
-            if self.staged == 0 && (input.len() >= STAGE_LEN || self.core.count() + input.len() as u64 <= CHUNK_LEN as u64) {
-                self.core.update_pooled(input, pooled);
-                return &[];
-            }
-            let at = (self.core.initial_chunk_counter * CHUNK_LEN as u64 + self.count()) % STAGE_LEN as u64;
-            let to_boundary = STAGE_LEN - at as usize;
-            let take = cmp::min(to_boundary, input.len());
-            // The loop's variant: every pass stages at least one byte of
-            // the input, which is not empty (`at` is below STAGE_LEN).
-            assert!(take > 0, "the stage took nothing");
-            self.stage(&input[..take]);
-            input = &input[take..];
-            if take < to_boundary {
-                return &[];
-            }
-            if hold && self.held_group().is_some() {
-                return input;
-            }
-            let staged = core::mem::replace(&mut self.staged, 0);
-            // Sound: the first `staged` bytes were written; the core reads
-            // them before the stage is written again.
-            let bytes = unsafe { core::slice::from_raw_parts(self.stage.as_ptr() as *const u8, staged) };
-            self.core.update_pooled(bytes, pooled);
-        }
-        &[]
-    }
-
-    /// A whole group in the stage, from offset zero: its first chunk's
-    /// counter and its bytes.
-    #[cfg(feature = "std")]
-    fn held_group(&self) -> Option<(u64, &[u8; STAGE_LEN])> {
-        (self.staged == STAGE_LEN && self.core.initial_chunk_counter == 0)
-            .then(|| (self.core.count() / CHUNK_LEN as u64, self.staged_bytes().try_into().unwrap()))
-    }
-
-    #[cfg(not(feature = "std"))]
-    fn held_group(&self) -> Option<(u64, &[u8; STAGE_LEN])> {
-        None
-    }
-
-    /// The held group's subtree, as [`HasherCore::update_with_results`]
-    /// takes it (its two halves' values at chunk zero, else its own), into
-    /// the core; the stage empty again.
-    #[cfg(feature = "std")]
-    fn take_held(&mut self, result: &[u8; BLOCK_LEN]) {
-        let staged = core::mem::replace(&mut self.staged, 0);
-        // Sound: as in gather_part.
-        let bytes = unsafe { core::slice::from_raw_parts(self.stage.as_ptr() as *const u8, staged) };
-        self.core.update_with_results(bytes, &mut core::iter::once(result));
-    }
-
-    /// The root's output: the core's, after the stage's bytes.
-    fn final_output(&self) -> Output {
-        if self.staged == 0 {
-            return self.core.final_output();
-        }
-        let mut core = self.core.clone();
-        core.update(self.staged_bytes());
-        core.final_output()
-    }
-
-    /// Construct a new `Hasher` for the regular hash function.
-    pub fn new() -> Self {
-        Self::from_core(HasherCore::new_internal(IV, 0))
-    }
-
-    /// Construct a new `Hasher` in a [`Mode`]: the keyed hash, or key
-    /// derivation with a context string or a context hashed once.
-    pub fn new_with(mode: Mode) -> Self {
-        let (key, flags) = mode.key_and_flags();
-        Self::from_core(HasherCore::new_internal(&key, flags))
-    }
-
-    /// Reset the `Hasher` to its initial state.
-    ///
-    /// This is functionally the same as overwriting the `Hasher` with a new
-    /// one, using the same key or context string if any.
-    pub fn reset(&mut self) -> &mut Self {
-        self.core.reset();
-        self.staged = 0;
-        self
-    }
-
-    /// Add the message's next piece, of any length, on the calling thread.
-    ///
-    /// **Speed**: pieces of any size hash at nearly the speed of whole
-    /// buffers: short pieces are copied into the `Hasher` until it holds
-    /// 16 KiB, which then hash at once. Pieces of 16 KiB and more, starting
-    /// at a multiple of 16 KiB of the message, skip the copy (about 5% of the
-    /// time on an Apple M4). For a whole message in memory, [`hash`] is a
-    /// little faster; for a file or reader, see
-    /// [`update_reader`](#method.update_reader).
-    pub fn update(&mut self, input: &[u8]) -> &mut Self {
-        // A fresh hasher's first update is a one-shot call's work (a
-        // Hasher per message, the digest traits): it prefetches its code
-        // after a pause, as hash() does.
-        #[cfg(all(blake3_neon, feature = "std"))]
-        if self.count() == 0 && (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
-            prefetch_after_pause(input.len(), self.core.chunk_state.platform, true);
-        }
-        self.gather(input, false)
-    }
-
-    /// [`update`](Hasher::update), using other CPU cores where that is
-    /// faster: the same result, never slower. Pieces of 512 KiB and more
-    /// use them, as [`hash_multithreaded`] does; shorter ones hash on the
-    /// calling thread. One `Hasher` may mix the two calls. When reading
-    /// the pieces keeps your thread busy, a [`stream`] is faster
-    /// ([`Stream::submit_reader`], or [`Stream::submit_with`]): it hashes
-    /// each piece while your thread reads the next.
-    ///
-    /// ```
-    /// # blake3_servil::initialize_multithreaded(None);
-    /// let input = vec![7u8; 3 << 20];
-    /// let mut hasher = blake3_servil::Hasher::new();
-    /// for piece in input.chunks(64 * 1024) {
-    ///     hasher.update_multithreaded(piece);
-    /// }
-    /// assert_eq!(hasher.finalize(), blake3_servil::hash(&input));
-    /// ```
-    #[cfg(feature = "std")]
-    pub fn update_multithreaded(&mut self, input: &[u8]) -> &mut Self {
-        lanes::require();
-        self.gather(input, true)
-    }
-
-    /// Finalize the hash state and return the [`Hash`](struct.Hash.html) of
-    /// the input.
-    ///
-    /// This method is idempotent. Calling it twice will give the same result.
-    /// You can also add more input and finalize again.
-    pub fn finalize(&self) -> Hash {
-        assert_eq!(self.core.initial_chunk_counter, 0, "set_input_offset must be used with finalize_non_root",);
-        self.final_output().root_hash()
-    }
-
-    /// Finalize the hash state and return an [`OutputReader`], which can
-    /// supply any number of output bytes.
-    ///
-    /// This method is idempotent. Calling it twice will give the same result.
-    /// You can also add more input and finalize again.
-    ///
-    /// [`OutputReader`]: struct.OutputReader.html
-    pub fn finalize_xof(&self) -> OutputReader {
-        assert_eq!(self.core.initial_chunk_counter, 0, "set_input_offset must be used with finalize_non_root",);
-        OutputReader::new(self.final_output())
-    }
-
-    /// The number of bytes passed to [`update`](Hasher::update) so far.
-    pub fn count(&self) -> u64 {
-        self.core.count() + self.staged as u64
-    }
-
-    /// As [`update`](Hasher::update), but reading from a
-    /// [`std::io::Read`](https://doc.rust-lang.org/std/io/trait.Read.html) implementation.
-    ///
-    /// [`Hasher`] implements
-    /// [`std::io::Write`](https://doc.rust-lang.org/std/io/trait.Write.html), so it's possible to
-    /// use [`std::io::copy`](https://doc.rust-lang.org/std/io/fn.copy.html) to update a [`Hasher`]
-    /// from any reader. Unfortunately, this standard approach can limit performance, because
-    /// `copy` currently uses an internal 8 KiB buffer that isn't big enough to take advantage of
-    /// all SIMD instruction sets. (In particular, [AVX-512](https://en.wikipedia.org/wiki/AVX-512)
-    /// needs a 16 KiB buffer.) `update_reader` avoids this performance problem and is slightly
-    /// more convenient.
-    ///
-    /// The internal buffer size this method uses may change at any time, and it may be different
-    /// for different targets. The only guarantee is that it will be large enough for all of this
-    /// crate's SIMD implementations on the current platform.
-    ///
-    /// The most common implementer of
-    /// [`std::io::Read`](https://doc.rust-lang.org/std/io/trait.Read.html) might be
-    /// [`std::fs::File`](https://doc.rust-lang.org/std/fs/struct.File.html).
-    ///
-    /// This method requires the `std` Cargo feature, which is enabled by default.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use std::fs::File;
-    /// # use std::io;
-    /// # fn main() -> io::Result<()> {
-    /// # blake3_servil::initialize();
-    /// // Hash standard input.
-    /// let mut hasher = blake3_servil::Hasher::new();
-    /// hasher.update_reader(std::io::stdin().lock())?;
-    /// println!("{}", hasher.finalize());
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[cfg(feature = "std")]
-    pub fn update_reader(&mut self, reader: impl std::io::Read) -> std::io::Result<&mut Self> {
-        io::copy_wide(reader, self)?;
-        Ok(self)
-    }
-}
-
-impl HasherCore {
-    pub(crate) fn new_internal(key: &CVWords, flags: u8) -> Self {
-        Self::new_from(key, flags, Platform::detect())
-    }
-
-    /// [`HasherCore::new_internal`] on `platform` (the self-test's way in,
-    /// as [`hash_serial_from`]).
-    pub(crate) fn new_from(key: &CVWords, flags: u8, platform: Platform) -> Self {
-        Self { key: *key, chunk_state: ChunkState::new(key, 0, flags, platform), initial_chunk_counter: 0, cv_stack: CvStack::new() }
-    }
-
-    /// Back to the empty message, with the same key, flags, and platform.
-    pub(crate) fn reset(&mut self) -> &mut Self {
-        self.chunk_state = ChunkState::new(&self.key, 0, self.chunk_state.flags, self.chunk_state.platform);
-        self.cv_stack.clear();
-        self
-    }
-
-    // As described in push_cv() below, we do "lazy merging", delaying merges
-    // until right before the next CV is about to be added. This is different
-    // from the reference implementation. Another difference is that we aren't
-    // always merging 1 chunk at a time. Instead, each CV might represent any
-    // power-of-two number of chunks, as long as the smaller-above-larger stack
-    // order is maintained. Instead of the "count the trailing 0-bits"
-    // algorithm described in the spec (which assumes you're adding one chunk
-    // at a time), we use a "count the total number of 1-bits" variant (which
-    // doesn't assume that). The principle is the same: each CV that should
-    // remain in the stack is represented by a 1-bit in the total number of
-    // chunks (or bytes) so far.
-    #[cfg(feature = "std")]
-    fn merge_cv_stack(&mut self, chunk_counter: u64) {
-        // Its callers (the queue's hashers, and a Hasher's held group) start
-        // at offset zero; a positioned subtree's offset takes the core's path.
-        debug_assert_eq!(self.initial_chunk_counter, 0, "a hasher at offset zero");
-        let post_merge_stack_len = hasher::ones(chunk_counter);
-        let kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, false);
-        self.cv_stack.merge(&kernels, post_merge_stack_len);
-    }
-
-    /// The kernels on this Hasher's key and flags (see HasherKernels).
-    #[inline(always)]
-    fn kernels(&self, platform: Platform, pooled: bool) -> HasherKernels<'_> {
-        kernels_on(&self.key, &self.chunk_state, platform, pooled)
-    }
-
-    // In reference_impl.rs, we merge the new CV with existing CVs from the
-    // stack before pushing it. We can do that because we know more input is
-    // coming, so we know none of the merges are root.
-    //
-    // This setting is different. We want to feed as much input as possible to
-    // the walk (`tree::wide`), without setting aside anything for the
-    // chunk_state. If the user gives us 64 KiB, we want to parallelize over
-    // all 64 KiB at once as a single subtree, if at all possible.
-    //
-    // This leads to two problems:
-    // 1) This 64 KiB input might be the only call that ever gets made to
-    //    update. In this case, the root node of the 64 KiB subtree would be
-    //    the root node of the whole tree, and it would need to be ROOT
-    //    finalized. We can't compress it until we know.
-    // 2) This 64 KiB input might complete a larger tree, whose root node is
-    //    similarly going to be the root of the whole tree. For example,
-    //    maybe we have 196 KiB (that is, 128 + 64) hashed so far. We can't
-    //    compress the node at the root of the 256 KiB subtree until we know
-    //    how to finalize it.
-    //
-    // The second problem is solved with "lazy merging". That is, when we're
-    // about to add a CV to the stack, we don't merge it with anything first,
-    // as the reference impl does. Instead we do merges using the *previous* CV
-    // that was added, which is sitting on top of the stack, and we put the new
-    // CV (unmerged) on top of the stack afterwards. This guarantees that we
-    // never merge the root node until finalize().
-    //
-    // Solving the first problem requires an additional tool,
-    // compress_subtree_to_parent_node(). That function always returns the top
-    // *two* chaining values of the subtree it's compressing. We then do lazy
-    // merging with each of them separately, so that the second CV will always
-    // remain unmerged. (That also helps us support extendable output when
-    // we're hashing an input all-at-once.)
-    #[cfg(feature = "std")]
-    fn push_cv(&mut self, new_cv: &CVBytes, chunk_counter: u64) {
-        self.merge_cv_stack(chunk_counter);
-        self.cv_stack.push(*new_cv);
-    }
-
-    /// [`update`](Hasher::update) with every whole subtree's result taken
-    /// from `results`, one a whole subtree in order (in parts of
-    /// [`lanes::TASK_LEN`], as [`hasher::subtree_len`] cuts them), as
-    /// [`lanes::Task`] computes them.
-    #[cfg(feature = "std")]
-    pub(crate) fn update_with_results<'a>(&mut self, input: &[u8], results: &mut impl Iterator<Item = &'a [u8; BLOCK_LEN]>) {
-        for part in input.chunks(lanes::TASK_LEN) {
-            self.update_part_with_results(part, results);
-        }
-    }
-
-    #[cfg(feature = "std")]
-    fn update_part_with_results<'a>(&mut self, mut input: &[u8], results: &mut impl Iterator<Item = &'a [u8; BLOCK_LEN]>) {
-        // Its one caller hands it a whole held group, from a group boundary,
-        // where the core's chunk is empty (Hasher::take_held).
-        debug_assert_eq!(self.chunk_state.count(), 0, "a held group starts where the core's chunk is empty");
-        while input.len() > CHUNK_LEN {
-            let len = hasher::subtree_len(self.chunk_state.chunk_counter, input.len());
-            let chunks = (len / CHUNK_LEN) as u64;
-            let result = results.next().expect("a result for every planned subtree");
-            let counter = self.chunk_state.chunk_counter;
-            if counter == 0 && len > CHUNK_LEN {
-                self.push_cv(result[..OUT_LEN].try_into().unwrap(), counter);
-                self.push_cv(result[OUT_LEN..].try_into().unwrap(), counter + chunks / 2);
-            } else {
-                self.push_cv(result[..OUT_LEN].try_into().unwrap(), counter);
-            }
-            self.chunk_state.chunk_counter += chunks;
-            input = &input[len..];
-        }
-        if !input.is_empty() {
-            self.chunk_state.update(input);
-            self.merge_cv_stack(self.chunk_state.chunk_counter);
-        }
-    }
-
-    /// `update`'s loop; with `pooled`, whole subtrees of
-    /// `lanes::MIN_SPLIT_LEN` and more go to the pool.
-    pub(crate) fn update_pooled(&mut self, input: &[u8], pooled: bool) -> &mut Self {
-        #[cfg(not(feature = "std"))]
-        let _ = pooled;
-        self.assert_room(self.count(), input.len());
-        // The partial chunk first (hasher::fill), then whole subtrees and the
-        // last chunk (hasher::feed), as src/hasher.rs describes.
-        let fill_kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, pooled);
-        let rest = hasher::fill(&fill_kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, input);
-        if rest.is_empty() {
-            return self;
-        }
-        // Pooled, the subtrees take the lock one at a time (children).
-        let turn = platform::Sme2Turn::take(self.chunk_state.platform, !pooled && rest.len() >= SME2_SIZED_LEN);
-        let kernels = kernels_on(&self.key, &self.chunk_state, turn.platform(), pooled);
-        hasher::feed(&kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, rest);
-        self
-    }
-
-    pub(crate) fn final_output(&self) -> Output {
-        hasher::final_node(&self.kernels(self.chunk_state.platform, false), &self.chunk_state, &self.cv_stack)
-    }
-
-    /// The serial update: whole subtrees now, the last chunk kept.
-    pub(crate) fn update(&mut self, input: &[u8]) -> &mut Self {
-        self.update_pooled(input, false)
-    }
-
-    /// Requires that `len` more bytes after `count` fit the subtree that
-    /// set_input_offset started (max_subtree_len).
-    pub(crate) fn assert_room(&self, count: u64, len: usize) {
-        let input_offset = self.initial_chunk_counter * CHUNK_LEN as u64;
-        if let Some(max) = max_subtree_len(input_offset) {
-            assert!(len as u64 <= max - count, "the subtree starting at {} contains at most {} bytes (found {})", input_offset, max, count + len as u64,);
-        }
-    }
-
-    /// Start the subtree at byte `offset` of the message (the outboard's
-    /// positioned subtrees; set_input_offset in the tests).
-    #[cfg(any(feature = "std", test))]
-    pub(crate) fn set_input_offset(&mut self, offset: u64) -> &mut Self {
-        assert_eq!(self.count(), 0, "hasher has already accepted input");
-        assert_eq!(offset % CHUNK_LEN as u64, 0, "offset ({offset}) must be a chunk boundary (divisible by {CHUNK_LEN})",);
-        let counter = offset / CHUNK_LEN as u64;
-        self.chunk_state.chunk_counter = counter;
-        self.initial_chunk_counter = counter;
-        self
-    }
-
-    /// Bytes so far, counted from the input offset.
-    pub(crate) fn count(&self) -> u64 {
-        (self.chunk_state.chunk_counter - self.initial_chunk_counter) * CHUNK_LEN as u64 + self.chunk_state.count() as u64
-    }
-}
-
-// Don't derive(Debug), because the state may be secret.
-impl fmt::Debug for Hasher {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Hasher").field("flags", &self.core.chunk_state.flags).field("platform", &self.core.chunk_state.platform).finish()
-    }
-}
-
-impl Default for Hasher {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::io::Write for Hasher {
-    /// This is equivalent to [`update`](#method.update).
-    #[inline]
-    fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
-        self.update(input);
-        Ok(input.len())
-    }
-
-    #[inline]
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-#[cfg(feature = "zeroize")]
-impl Zeroize for Hasher {
-    fn zeroize(&mut self) {
-        self.core.zeroize();
-        self.stage.fill(core::mem::MaybeUninit::new(0));
-        self.staged = 0;
-    }
-}
-
-#[cfg(feature = "zeroize")]
-impl Zeroize for HasherCore {
-    fn zeroize(&mut self) {
-        // Destructuring to trigger compile error as a reminder to update this impl.
-        let Self { key, chunk_state, initial_chunk_counter, cv_stack } = self;
-
-        key.zeroize();
-        chunk_state.zeroize();
-        initial_chunk_counter.zeroize();
-        cv_stack.zeroize();
-    }
-}
+mod incremental;
+pub(crate) use incremental::*;
 
 /// An incremental reader for extended output, returned by
 /// [`Hasher::finalize_xof`](struct.Hasher.html#method.finalize_xof).

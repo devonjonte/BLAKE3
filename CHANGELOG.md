@@ -5,6 +5,58 @@ x86-64. Every Arm assembly kernel and the x86-64 assembly kernels are
 proved correct within their stated contracts. Everything else is tested,
 and the tests are tested ([QUALITY.md](QUALITY.md)).
 
+## Faster
+
+Each figure is blake3-servil's speed over official BLAKE3 1.8.7's, both
+measured in the same run by [bench-hashes](https://github.com/johnservil/bench-hashes)
+(0.17.0, one run per machine, October 23–24; the release's own runs
+replace these figures):
+
+| | Intel i7-12700K | AMD EPYC 9255 | Apple M4 Max |
+|---|---|---|---|
+| One message of 64 B | 1.0× | 0.9× | 1.5× |
+| One message of 1 KiB | 1.0× | 1.0× | 1.1× |
+| One message of 1 MiB, one thread | 1.0× | 1.0× | 2.5× |
+| One message of 128 MiB, every core | 1.0× | 1.0× | not yet measured |
+| A stream of 64 KiB messages | 7.8× | 7.5× | not yet measured |
+| A batch of 1024 messages, 64 B each | 1.1× | 1.2× | 1.9× |
+| b3sum over 1000 files of mixed sizes | 2.9× | 5.7× | 4.4× |
+
+On 64-bit Arm, new kernels make every size faster: SME2 on the M4 and
+later, and kernels that run the integer and NEON units side by side.
+On x86-64, a single message hashes with official's own assembly (each
+proved below), so it runs at official's speed, and at 64 B on the EPYC
+slower (0.9×). The gains there come from many messages at once: a
+stream that hashes on other cores while the program reads the next
+input, batches of short messages, and b3sum over many files. The
+M4 Max's run measured official's single-threaded form only, so its
+every-core rows wait for the release's run.
+
+## Checked more
+
+Beyond official's tests (published test vectors and a reference
+implementation), this crate adds:
+
+- **Formal proofs of every assembly kernel**, official's own x86-64
+  assembly among them, at every shape this crate calls it: symbolic
+  execution against a specification of BLAKE3, with memory accesses,
+  the calling convention and secret-dependent branches checked too.
+- **Mutation testing**: one small mistake planted at a time, and a test
+  must fail for each; the few that survive are listed with their reason.
+- **A model checker (Shuttle)** for the thread pool's waits, under
+  thousands of thread schedules.
+- **Guard pages**: tests put an inaccessible page beside every input,
+  output, key and context of every public call, in Rust and in C, so
+  a call that touches one byte past the caller's memory crashes the
+  test.
+- **A startup self-test** of the build and the CPU before the first
+  hash.
+
+These found eight bugs before release, among them the AVX2 and AVX-512
+batch kernels reading past an input's end at shapes this crate's batch
+calls use (fixed here; see below). [QUALITY.md](QUALITY.md) says what
+each check covers and what remains unproved.
+
 ## Before you switch
 
 1. Targets: 64-bit Arm on Linux and macOS, x86-64 on Linux and Windows
@@ -14,14 +66,21 @@ and the tests are tested ([QUALITY.md](QUALITY.md)).
 2. Call `blake3_servil::initialize()` once before any other call. A
    program that makes multithreaded calls or uses a stream calls
    `initialize_multithreaded(None)` instead. A call before it panics.
-3. `keyed_hash(key, input)` is now `hash_with(Mode::Keyed(key), input)`.
-   `derive_key(context, material)` is now
-   `hash_with(Mode::DeriveKey(context), material)`. `Hasher::new_keyed`
-   and `Hasher::new_derive_key` are now `Hasher::new_with(mode)`. `hash`
-   and `Hasher::new` are unchanged.
+3. Two kinds of call, in two modules. `convenience`: one call per hash,
+   every feature, any slice, the result returned: `hash(input)` is now
+   `convenience::hash(input)`, `keyed_hash(key, input)` is
+   `convenience::hash_with(Mode::Keyed(key), input)`, `derive_key(context,
+   material)` is `convenience::hash_with(Mode::DeriveKey(context),
+   material)`, and `convenience::hash_xof(mode, input)` gives extended
+   output. `performance`, for power users, has every way to hash fast,
+   the `Hasher` among them (`Hasher::new_with(mode)` replaces
+   `Hasher::new_keyed` and `Hasher::new_derive_key`): the program takes
+   on more of the work, with inputs as `Block`s (64 bytes on a 64-byte
+   boundary: a message is blocks and a length, a batch messages of one
+   length), digests into its places, and a `Mode` in every call.
 4. Threads are the crate's own. `Hasher::update_rayon` is now
-   `update_multithreaded`. `hash_multithreaded(input)` hashes one message
-   over the threads. There is no `rayon` feature.
+   `update_multithreaded`. `performance::hash_multithreaded(mode, input)`
+   hashes one message over the threads. There is no `rayon` feature.
 5. Removed: `Hasher::update_mmap` and the `mmap` feature (map the file
    yourself, or use `update_reader`), the `traits-preview` feature, the
    `guts`, `hazmat`, and `platform` modules, and the `no_avx2`,
@@ -34,16 +93,17 @@ and the tests are tested ([QUALITY.md](QUALITY.md)).
 
 ## New
 
-- `hash_many` and `hash_many_multithreaded`: messages of one length in
-  one buffer.
-- `hash_each_with` and `hash_each_multithreaded_with`: a collection of any
-  lengths.
-- `Hasher::update_each`: many messages in progress at once.
-- `stream()`: inputs one after another, hashed behind the caller.
-- `outboard_with`, `verify_range_with` and `Verifier`: verified streaming
-  in iroh-blobs' format.
+- `performance::hash_many` and `hash_many_multithreaded`: messages of
+  one length in `Block`s (64 bytes on a 64-byte boundary), which a
+  `Batch` builds with every byte past each message zero.
+- `performance::hash_each` and `hash_each_multithreaded`: a collection of
+  any lengths.
+- `performance::update_each` and `finalize_each`: many messages in
+  progress at once, each with its own `Hasher`.
+- `performance::stream()`: inputs one after another, hashed behind the
+  caller.
 - A C API in `capi/b3.h`. The library is `libb3_servil`. C11 and C++11.
-- `Mode::DeriveKeyMaterial` with `hash_derive_key_context`: one context
+- `Mode::DeriveKeyMaterial` with `performance::hash_derive_key_context`: one context
   hashed once for many derivations.
 
 ## Different

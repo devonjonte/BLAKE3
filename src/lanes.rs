@@ -165,12 +165,6 @@ fn next_piece_len(remaining: usize, threads: usize) -> usize {
     1 << (usize::BITS - 1 - want.leading_zeros())
 }
 
-/// Hash `input` over the machine's threads.
-#[inline]
-pub(crate) fn hash(input: &[u8]) -> Hash {
-    hash_with_key(input, crate::IV, 0)
-}
-
 /// Hash `input` over the machine's threads in the mode of `key` and
 /// `flags` (IV and 0 for plain hashing).
 #[inline]
@@ -287,23 +281,6 @@ pub(crate) fn hash_each(key: &crate::CVWords, flags: u8, items: &[&[u8]], out: &
     pool.run_job(work, pieces.len(), 0, pool_platform());
 }
 
-/// The chaining value of each of `groups`, a message's 16 KiB groups from
-/// `first_group` on, each whole but the last (crate::outboard), into
-/// `cvs`, over the machine's threads: below MIN_SPLIT_LEN of them on this
-/// thread.
-pub(crate) fn group_cvs(groups: &[&[u8]], first_group: u64, key: &crate::CVWords, flags: u8, cvs: &mut [ChainingValue]) {
-    assert_eq!(groups.len(), cvs.len(), "a chaining value for each group");
-    if groups.len() * crate::outboard::GROUP_LEN < MIN_SPLIT_LEN {
-        return crate::outboard::groups_cvs_into(groups, first_group, key, flags, Platform::detect(), cvs);
-    }
-    let Some((pool, _caller)) = spare_pool() else {
-        return crate::outboard::groups_cvs_into(groups, first_group, key, flags, Platform::detect(), cvs);
-    };
-    let pieces = cut_messages(groups.len(), crate::outboard::GROUP_LEN, pool.threads);
-    let work = Work::Groups { groups, first_group, pieces: &pieces, key: *key, flags, cvs: cvs.as_mut_ptr() };
-    pool.run_job(work, pieces.len(), 0, pool_platform());
-}
-
 /// Cut `count` messages in slots of `message_len` bytes into ranges for `threads`
 /// threads, in order: each range holds about [`next_piece_len`] of the
 /// bytes that remain, at least one message, so ranges shrink toward the
@@ -363,10 +340,6 @@ enum Work<'a> {
         counter: u64,
         flags: u8,
     },
-    /// Ranges of a message's 16 KiB groups, wherever each lies (`offset`
-    /// and `len` count groups, from `first_group`); one chaining value each
-    /// (crate::outboard).
-    Groups { groups: &'a [&'a [u8]], first_group: u64, pieces: &'a [Piece], key: crate::CVWords, flags: u8, cvs: *mut ChainingValue },
     /// Ranges of a batch of messages of one length, each in its slot of
     /// whole blocks in `input` (`offset` and `len` count messages); one
     /// digest each.
@@ -398,12 +371,6 @@ impl Job<'_> {
                 let counter = counter + (piece.offset / CHUNK_LEN) as u64;
                 let cv = crate::hash_all_at_once(bytes, key, counter, *flags, platform).chaining_value();
                 unsafe { *cvs.add(index) = cv };
-            }
-            Work::Groups { groups, first_group, pieces, key, flags, cvs } => {
-                let piece = pieces[index];
-                // Sound: this range of chaining values belongs to piece `index` alone.
-                let out = unsafe { core::slice::from_raw_parts_mut(cvs.add(piece.offset), piece.len) };
-                crate::outboard::groups_cvs_into(&groups[piece.offset..][..piece.len], first_group + piece.offset as u64, key, *flags, platform, out);
             }
             Work::Messages { input, message_len, key, flags, pieces, outputs } => {
                 let piece = pieces[index];
@@ -1401,7 +1368,7 @@ mod test {
     #[test]
     fn test_simd_merge_matches_recursive() {
         let key = [93u8; KEY_LEN];
-        let context_key = crate::hash_derive_key_context("parallel merge test");
+        let context_key = crate::performance::hash_derive_key_context("parallel merge test");
         for (threads, len) in [(3, MIN_SPLIT_LEN + 1025), (2, (64 << 20) + 1)] {
             let pieces = cut_subtrees(len, threads);
             let mut cvs = vec![[0u8; crate::OUT_LEN]; pieces.len()];
@@ -1421,7 +1388,7 @@ mod test {
         let pool = pool();
         let input = std::vec![0x3Cu8; MIN_SPLIT_LEN];
         crate::RAN.with(|r| r.set(0));
-        assert_eq!(crate::hash_multithreaded(&input), crate::hash(&input));
+        assert_eq!(crate::performance::hash_multithreaded(crate::Mode::Hash, &crate::test::message(&input), input.len()), crate::convenience::hash(&input));
         assert_past_the_split("the call");
         assert_eq!(pool.callers.load(Ordering::SeqCst), 0, "the caller's place given back");
     }
@@ -1474,7 +1441,7 @@ mod test {
         platforms.push(Platform::detect());
         let key = [0x5Au8; crate::KEY_LEN];
         let context = "equal queue members";
-        let context_key = crate::hash_derive_key_context(context);
+        let context_key = crate::performance::hash_derive_key_context(context);
         let modes = [
             (*crate::IV, 0),
             (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
@@ -1575,7 +1542,7 @@ mod test {
                         crate::hash_all_at_once(&input[p.offset..][..p.len], crate::IV, (p.offset / CHUNK_LEN) as u64, 0, Platform::detect()).chaining_value()
                     })
                     .collect();
-                assert_eq!(merge_root(&pieces, &mut cvs, crate::IV, 0), crate::hash(&input[..len]), "{len} {threads}");
+                assert_eq!(merge_root(&pieces, &mut cvs, crate::IV, 0), crate::convenience::hash(&input[..len]), "{len} {threads}");
             }
         }
     }
@@ -1598,15 +1565,15 @@ mod test {
             3 << 20,
             input.len(),
         ] {
-            let want = crate::hash(&input[..len]);
-            assert_eq!(want, hash(&input[..len]), "len = {len}");
+            let want = crate::convenience::hash(&input[..len]);
+            assert_eq!(want, hash_with_key(&input[..len], crate::IV, 0), "len = {len}");
             let key = [42u8; KEY_LEN];
             assert_eq!(
-                crate::hash_with(crate::Mode::Keyed(&key), &input[..len]),
+                crate::convenience::hash_with(crate::Mode::Keyed(&key), &input[..len]),
                 hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
                 "keyed len = {len}"
             );
-            let context_key = crate::hash_derive_key_context("lanes test");
+            let context_key = crate::performance::hash_derive_key_context("lanes test");
             assert_eq!(
                 *Hasher::new_with(crate::Mode::DeriveKeyMaterial(&context_key)).update(&input[..len]).finalize().as_bytes(),
                 *hash_with_key(&input[..len], &crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL).as_bytes(),
@@ -1638,8 +1605,8 @@ mod test {
                         keyed.update_multithreaded(part);
                     }
                     let what = format!("len {len}, first {first}, pieces of {piece}");
-                    assert_eq!(hasher.finalize(), crate::hash(&input[..len]), "{what}");
-                    assert_eq!(keyed.finalize(), crate::hash_with(crate::Mode::Keyed(&key), &input[..len]), "keyed {what}");
+                    assert_eq!(hasher.finalize(), crate::convenience::hash(&input[..len]), "{what}");
+                    assert_eq!(keyed.finalize(), crate::convenience::hash_with(crate::Mode::Keyed(&key), &input[..len]), "keyed {what}");
                 }
             }
         }
@@ -1651,7 +1618,7 @@ mod test {
     fn test_concurrent_callers_agree() {
         let mut input = vec![0u8; 8 * MIN_SPLIT_LEN + 1];
         crate::test::paint_test_input(&mut input);
-        let want = crate::hash(&input);
+        let want = crate::convenience::hash(&input);
         let input = &input[..];
         let barrier = std::sync::Barrier::new(32);
         std::thread::scope(|scope| {
@@ -1660,7 +1627,7 @@ mod test {
                 scope.spawn(move || {
                     barrier.wait();
                     for _ in 0..20 {
-                        assert_eq!(want, hash(input));
+                        assert_eq!(want, hash_with_key(input, crate::IV, 0));
                     }
                 });
             }
@@ -1703,9 +1670,9 @@ mod test {
             }
             let input = &owned[..];
             let mut want = vec![[0u8; crate::OUT_LEN]; count];
-            crate::hash_many(input, message_len, &mut want);
+            crate::performance::hash_many(crate::Mode::Hash, &crate::test::blocks(input), message_len, &mut want);
             for (i, digest) in want.iter().enumerate().take(200) {
-                assert_eq!(*digest, *crate::hash(&input[i * slot..][..message_len]).as_bytes(), "message {i}");
+                assert_eq!(*digest, *crate::convenience::hash(&input[i * slot..][..message_len]).as_bytes(), "message {i}");
             }
             let mut got = vec![[0u8; crate::OUT_LEN]; count];
             hash_many(input, message_len, crate::IV, 0, &mut got);
@@ -1720,8 +1687,8 @@ mod test {
         crate::test::paint_test_input(&mut buffer);
         let count = buffer.len() / crate::BLOCK_LEN;
         let mut want = vec![[0u8; crate::OUT_LEN]; count];
-        crate::hash_many(&buffer, crate::BLOCK_LEN, &mut want);
-        let tree_want = crate::hash(&buffer);
+        crate::performance::hash_many(crate::Mode::Hash, &crate::test::blocks(&buffer), crate::BLOCK_LEN, &mut want);
+        let tree_want = crate::convenience::hash(&buffer);
         let (want, buffer) = (&want[..], &buffer[..]);
         let barrier = std::sync::Barrier::new(16);
         std::thread::scope(|scope| {
@@ -1735,7 +1702,7 @@ mod test {
                             hash_many(buffer, crate::BLOCK_LEN, crate::IV, 0, &mut got);
                             assert_eq!(want, &got[..]);
                         } else {
-                            assert_eq!(tree_want, hash(buffer));
+                            assert_eq!(tree_want, hash_with_key(buffer, crate::IV, 0));
                         }
                     }
                 });
@@ -1754,7 +1721,7 @@ mod test {
         let pool = pool();
         let workers = pool.threads - 1;
         let all_parked = || pool.park.parked_count() == workers;
-        crate::stream(
+        crate::performance::stream(
             crate::Mode::Hash,
             |_: &mut [Hash]| {},
             |s| {

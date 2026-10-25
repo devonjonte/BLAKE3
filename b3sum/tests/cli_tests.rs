@@ -46,13 +46,13 @@ fn test_pseudo_file() {
     let Ok(content) = fs::read("/proc/version") else { return };
     let output = cmd!(b3sum_exe(), "--no-names", "/proc/version").stdout_capture().stderr_capture().unchecked().run().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(blake3::hash(&content).to_hex().to_string(), String::from_utf8_lossy(&output.stdout).trim_end());
+    assert_eq!(blake3::convenience::hash(&content).to_hex().to_string(), String::from_utf8_lossy(&output.stdout).trim_end());
 }
 
 #[test]
 fn test_hash_one() {
     blake3::initialize();
-    let expected = format!("{}  -", blake3::hash(b"foo").to_hex());
+    let expected = format!("{}  -", blake3::convenience::hash(b"foo").to_hex());
     let output = cmd!(b3sum_exe()).stdin_bytes("foo").read().unwrap();
     assert_eq!(&*expected, output);
 }
@@ -60,7 +60,7 @@ fn test_hash_one() {
 #[test]
 fn test_hash_one_tag() {
     blake3::initialize();
-    let expected = format!("BLAKE3 (-) = {}", blake3::hash(b"foo").to_hex());
+    let expected = format!("BLAKE3 (-) = {}", blake3::convenience::hash(b"foo").to_hex());
     let output = cmd!(b3sum_exe(), "--tag").stdin_bytes("foo").read().unwrap();
     assert_eq!(&*expected, output);
 }
@@ -68,7 +68,7 @@ fn test_hash_one_tag() {
 #[test]
 fn test_hash_one_raw() {
     blake3::initialize();
-    let expected = blake3::hash(b"foo").as_bytes().to_owned();
+    let expected = blake3::convenience::hash(b"foo").as_bytes().to_owned();
     let output = cmd!(b3sum_exe(), "--raw").stdin_bytes("foo").stdout_capture().run().unwrap().stdout;
     assert_eq!(expected, output.as_slice());
 }
@@ -83,8 +83,8 @@ fn test_hash_many() {
     fs::write(&file2, b"bar").unwrap();
 
     let output = cmd!(b3sum_exe(), &file1, &file2).read().unwrap();
-    let foo_hash = blake3::hash(b"foo");
-    let bar_hash = blake3::hash(b"bar");
+    let foo_hash = blake3::convenience::hash(b"foo");
+    let bar_hash = blake3::convenience::hash(b"bar");
     let expected = format!(
         "{}  {}\n{}  {}",
         foo_hash.to_hex(),
@@ -116,7 +116,7 @@ fn test_hash_many_sizes() {
         let bytes: Vec<u8> = (0..len).map(|j| (j as u32 * 31 + i as u32) as u8).collect();
         let path = dir.path().join(format!("{i:03}"));
         fs::write(&path, &bytes).unwrap();
-        expected += &format!("{}\n", blake3::hash(&bytes).to_hex());
+        expected += &format!("{}\n", blake3::convenience::hash(&bytes).to_hex());
         files.push(path);
     }
     // One thread holds the deepest batch (64 files), two half of it.
@@ -137,8 +137,8 @@ fn test_hash_many_tag() {
     fs::write(&file2, b"bar").unwrap();
 
     let output = cmd!(b3sum_exe(), "--tag", &file1, &file2).read().unwrap();
-    let foo_hash = blake3::hash(b"foo");
-    let bar_hash = blake3::hash(b"bar");
+    let foo_hash = blake3::convenience::hash(b"foo");
+    let bar_hash = blake3::convenience::hash(b"bar");
     let expected = format!(
         "BLAKE3 ({}) = {}\nBLAKE3 ({}) = {}",
         // account for slash normalization on Windows
@@ -162,8 +162,8 @@ fn test_missing_files() {
     let output = cmd!(b3sum_exe(), "file1", "missing_file", "file2").dir(dir.path()).stdout_capture().stderr_capture().unchecked().run().unwrap();
     assert!(!output.status.success());
 
-    let foo_hash = blake3::hash(b"foo");
-    let bar_hash = blake3::hash(b"bar");
+    let foo_hash = blake3::convenience::hash(b"foo");
+    let bar_hash = blake3::convenience::hash(b"bar");
     let expected_stdout = format!("{}  file1\n{}  file2\n", foo_hash.to_hex(), bar_hash.to_hex(),);
     assert_eq!(expected_stdout.as_bytes(), &output.stdout[..]);
 
@@ -176,7 +176,7 @@ fn test_missing_files() {
 fn test_hash_length_and_seek() {
     blake3::initialize();
     let mut expected = [0; 100];
-    blake3::Hasher::new().update(b"foo").finalize_xof().fill(&mut expected);
+    blake3::performance::Hasher::new().update(b"foo").finalize_xof().fill(&mut expected);
     let output = cmd!(b3sum_exe(), "--raw", "--length=100").stdin_bytes("foo").stdout_capture().run().unwrap().stdout;
     assert_eq!(expected[..], output);
 
@@ -197,7 +197,7 @@ fn test_keyed() {
     let f = tempfile::NamedTempFile::new().unwrap();
     f.as_file().write_all(b"foo").unwrap();
     f.as_file().flush().unwrap();
-    let expected = blake3::hash_with(blake3::Mode::Keyed(&key), b"foo").to_hex();
+    let expected = blake3::convenience::hash_with(blake3::Mode::Keyed(&key), b"foo").to_hex();
     let output = cmd!(b3sum_exe(), "--keyed", "--no-names", f.path()).stdin_bytes(&key[..]).read().unwrap();
     assert_eq!(&*expected, &*output);
 
@@ -220,7 +220,7 @@ fn test_derive_key() {
     let f = tempfile::NamedTempFile::new().unwrap();
     f.as_file().write_all(b"key material").unwrap();
     f.as_file().flush().unwrap();
-    let expected = hex::encode(*blake3::hash_with(blake3::Mode::DeriveKey(context), b"key material").as_bytes());
+    let expected = hex::encode(*blake3::convenience::hash_with(blake3::Mode::DeriveKey(context), b"key material").as_bytes());
     let output = cmd!(b3sum_exe(), "--derive-key", context, "--no-names", f.path()).read().unwrap();
     assert_eq!(&*expected, &*output);
 }
@@ -232,7 +232,7 @@ fn test_no_mmap() {
     f.as_file().write_all(b"foo").unwrap();
     f.as_file().flush().unwrap();
 
-    let expected = blake3::hash(b"foo").to_hex();
+    let expected = blake3::convenience::hash(b"foo").to_hex();
     let output = cmd!(b3sum_exe(), "--no-mmap", "--no-names", f.path()).read().unwrap();
     assert_eq!(&*expected, &*output);
 }
@@ -241,7 +241,7 @@ fn test_no_mmap() {
 #[cfg(windows)]
 fn test_null_device_on_windows() {
     blake3::initialize();
-    let expected = blake3::hash(b"").to_hex();
+    let expected = blake3::convenience::hash(b"").to_hex();
     let output = cmd!(b3sum_exe(), "--no-names", "NUL").read().unwrap();
     assert_eq!(&*expected, output);
     let output = cmd!(b3sum_exe(), "--no-names", "--no-mmap", "NUL").read().unwrap();
@@ -274,7 +274,7 @@ fn test_raw_with_multi_files_is_an_error() {
 #[cfg(unix)]
 fn test_newline_and_backslash_escaping_on_unix() {
     blake3::initialize();
-    let empty_hash = blake3::hash(b"").to_hex();
+    let empty_hash = blake3::convenience::hash(b"").to_hex();
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir(dir.path().join("subdir")).unwrap();
     let names = ["abcdef", "abc\ndef", "abc\\def", "abc\rdef", "abc\r\ndef", "subdir/foo"];
@@ -311,7 +311,7 @@ fn test_newline_and_backslash_escaping_on_unix() {
 #[cfg(windows)]
 fn test_slash_normalization_on_windows() {
     blake3::initialize();
-    let empty_hash = blake3::hash(b"").to_hex();
+    let empty_hash = blake3::convenience::hash(b"").to_hex();
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir(dir.path().join("subdir")).unwrap();
     // Note that filenames can't contain newlines or backslashes on Windows, so
@@ -350,7 +350,7 @@ fn test_invalid_unicode_on_unix() {
     blake3::initialize();
     use std::os::unix::ffi::OsStringExt;
 
-    let empty_hash = blake3::hash(b"").to_hex();
+    let empty_hash = blake3::convenience::hash(b"").to_hex();
     let dir = tempfile::tempdir().unwrap();
     let names = ["abcdef".into(), OsString::from_vec(b"abc\xffdef".to_vec())];
     let mut paths = Vec::new();
@@ -393,7 +393,7 @@ fn test_invalid_unicode_on_windows() {
     blake3::initialize();
     use std::os::windows::ffi::OsStringExt;
 
-    let empty_hash = blake3::hash(b"").to_hex();
+    let empty_hash = blake3::convenience::hash(b"").to_hex();
     let dir = tempfile::tempdir().unwrap();
     let surrogate_char = 0xDC00;
     let bad_unicode_wchars = ['a' as u16, 'b' as u16, 'c' as u16, surrogate_char, 'd' as u16, 'e' as u16, 'f' as u16];
@@ -429,9 +429,9 @@ fn test_check() {
     blake3::initialize();
     // Make a directory full of files, and make sure the b3sum output in that
     // directory is what we expect.
-    let a_hash = blake3::hash(b"a").to_hex();
-    let b_hash = blake3::hash(b"b").to_hex();
-    let cd_hash = blake3::hash(b"cd").to_hex();
+    let a_hash = blake3::convenience::hash(b"a").to_hex();
+    let b_hash = blake3::convenience::hash(b"b").to_hex();
+    let cd_hash = blake3::convenience::hash(b"cd").to_hex();
     for tagged in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("a"), b"a").unwrap();
@@ -626,8 +626,8 @@ fn test_globbing() {
     let file2 = dir.path().join("file2");
     fs::write(&file2, b"bar").unwrap();
 
-    let foo_hash = blake3::hash(b"foo");
-    let bar_hash = blake3::hash(b"bar");
+    let foo_hash = blake3::convenience::hash(b"foo");
+    let bar_hash = blake3::convenience::hash(b"bar");
     // NOTE: This assumes that the glob will be expanded in alphabetical order,
     //       to "file1 file2" rather than "file2 file1". So far, this seems to
     //       be true (guaranteed?) of Unix shell behavior, and true in practice
@@ -656,12 +656,12 @@ fn test_num_threads() {
     let (file1, file2) = (dir.path().join("big"), dir.path().join("small"));
     fs::write(&file1, &big).unwrap();
     fs::write(&file2, b"bar").unwrap();
-    let expected = format!("{}\n{}", blake3::hash(&big).to_hex(), blake3::hash(b"bar").to_hex());
+    let expected = format!("{}\n{}", blake3::convenience::hash(&big).to_hex(), blake3::convenience::hash(b"bar").to_hex());
     for threads in ["1", "3"] {
         let output = cmd!(b3sum_exe(), "--num-threads", threads, "--no-names", &file1, &file2).read().unwrap();
         assert_eq!(expected, output, "{threads} threads");
         let output = cmd!(b3sum_exe(), "--num-threads", threads, "--no-names").stdin_bytes(big.clone()).read().unwrap();
-        assert_eq!(blake3::hash(&big).to_hex().to_string(), output, "{threads} threads, stdin");
+        assert_eq!(blake3::convenience::hash(&big).to_hex().to_string(), output, "{threads} threads, stdin");
     }
     let zero = cmd!(b3sum_exe(), "--num-threads", "0").stdin_bytes("foo").stderr_null().unchecked().run().unwrap();
     assert!(!zero.status.success(), "0 threads is refused");
@@ -678,7 +678,7 @@ fn test_inputs_around_the_read_piece() {
         let path = dir.path().join(format!("input-{len}"));
         let data: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
         fs::write(&path, &data).unwrap();
-        let expected = blake3::hash(&data).to_hex().to_string();
+        let expected = blake3::convenience::hash(&data).to_hex().to_string();
         let output = cmd!(b3sum_exe(), &path).read().unwrap();
         assert_eq!(&output[..64], expected, "file of {len} bytes");
         let output = cmd!(b3sum_exe()).stdin_bytes(data).read().unwrap();
@@ -692,7 +692,7 @@ fn test_inputs_around_the_read_piece() {
 fn test_one_thread_matches_the_default() {
     let input: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
     blake3::initialize();
-    let expected = blake3::hash(&input).to_hex().to_string();
+    let expected = blake3::convenience::hash(&input).to_hex().to_string();
     for threads in [None, Some("1")] {
         let args: Vec<&str> = threads.map_or(vec!["--no-names"], |n| vec!["--no-names", "--num-threads", n]);
         let out = cmd(b3sum_exe(), &args).stdin_bytes(input.clone()).read().unwrap();
@@ -720,6 +720,6 @@ fn test_pseudo_files_among_many() {
     }
     let output = cmd(b3sum_exe(), std::iter::once("--no-names").chain(present.iter().copied())).stdout_capture().stderr_capture().unchecked().run().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let expected: Vec<String> = present.iter().map(|p| blake3::hash(&fs::read(p).unwrap()).to_hex().to_string()).collect();
+    let expected: Vec<String> = present.iter().map(|p| blake3::convenience::hash(&fs::read(p).unwrap()).to_hex().to_string()).collect();
     assert_eq!(expected.join("\n"), String::from_utf8_lossy(&output.stdout).trim_end());
 }

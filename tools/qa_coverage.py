@@ -48,7 +48,7 @@ ROOT = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=Tr
 NIGHTLY = "nightly-2026-09-17"
 OUT = sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else os.path.join(ROOT, "target", "qa-coverage")
 # Files whose code threads share memory in: TSan's reach.
-SHARED = {"src/lanes.rs", "src/stream.rs", "src/each.rs", "src/outboard.rs", "src/self_test.rs"}
+SHARED = {"src/lanes.rs", "src/stream.rs", "src/each.rs", "src/self_test.rs"}
 # The assembly the proofs cover (tools/verify/README.md), and the kernel
 # they leave out: the README's "every assembly kernel on 64-bit Arm but one".
 PROVED = {"c/blake3_neon_hybrid_aarch64.S", "c/blake3_sme2_aarch64.S", "c/blake3_sme2_hybrid_aarch64.S"}
