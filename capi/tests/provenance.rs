@@ -30,7 +30,7 @@ fn miri_callback_context_retains_pointer_provenance() {
     let context = Box::into_raw(Box::new(Context { expected, calls: 0 }));
     let mut output = Digest { bytes: [0; 32] };
     unsafe {
-        let stream = b3_stream_begin(&mode, completed, context.cast());
+        let stream = b3_stream_begin(&mode, Some(completed), context.cast());
         b3_stream_submit(stream, input.0.as_ptr().cast(), input.0.len(), &mut output);
         b3_stream_finish(stream);
         assert_eq!((*context).calls, 1);

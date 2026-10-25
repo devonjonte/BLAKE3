@@ -11,9 +11,12 @@
  * may overlap; a written range is disjoint from every other range a call
  * uses. Inputs stay unchanged, and outputs are not accessed concurrently
  * by the caller. The stream's longer access/lifetime rules are below.
- * Detected invalid arguments stop the program with a message. Pointer,
- * lifetime and aliasing rules are caller obligations; violating them may
- * cause undefined behavior rather than a diagnostic.
+ * Simple guards reject null callbacks, misaligned handles, unrepresentable
+ * sized ranges, and immediate batch/hasher data overlaps before borrowing
+ * them. Detected invalid arguments stop the program with a message.
+ * These checks do not establish allocation ownership or lifetime and do
+ * not track overlaps between outstanding stream submissions. The remaining
+ * memory rules are caller obligations; violations may be undefined behavior.
  *
  * Threads: any call may be made from any thread. A b3_mode is a value and
  * may be shared and read by any number of threads at once. Calls using the
