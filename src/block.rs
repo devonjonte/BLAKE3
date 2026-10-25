@@ -218,4 +218,23 @@ mod test {
         assert_eq!(root[0], parent(leaf(0), leaf(1)));
         assert_eq!(root[1], parent(leaf(2), leaf(3)));
     }
+
+    /// What a Batch says of itself: its message length and count, empty at
+    /// zero messages; two digests a block from digests_mut, each landing on
+    /// its own 32 bytes; a Block's Debug form names its bytes.
+    #[test]
+    fn test_a_batch_describes_itself() {
+        let batch = Batch::new(100, 3);
+        assert_eq!((batch.message_len(), batch.len(), batch.is_empty()), (100, 3, false));
+        assert_eq!(batch.blocks().len(), 6, "two blocks a 100-byte message");
+        let none = Batch::new(100, 0);
+        assert_eq!((none.len(), none.is_empty()), (0, true));
+        let mut blocks = [Block::ZERO; 3];
+        let digests = Block::digests_mut(&mut blocks);
+        assert_eq!(digests.len(), 6);
+        digests[5] = [7; 32];
+        assert_eq!(&blocks[2].0[32..], &[7u8; 32][..], "the sixth digest is block 2's second half");
+        assert_eq!(&blocks[2].0[..32], &[0u8; 32][..]);
+        assert!(std::format!("{:?}", Block::ZERO).starts_with("Block([00, 00"));
+    }
 }
