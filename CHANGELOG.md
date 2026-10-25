@@ -45,9 +45,10 @@ implementation), this crate adds:
   must fail for each; the few that survive are listed with their reason.
 - **A model checker (Shuttle)** for the thread pool's waits, under
   thousands of thread schedules.
-- **Guard pages**: tests put an inaccessible page beside a kernel's
-  input or output, so a kernel that touches one byte past it crashes
-  the test.
+- **Guard pages**: tests put an inaccessible page beside every input,
+  output, key and context of every public call, in Rust and in C, so
+  a call that touches one byte past the caller's memory crashes the
+  test.
 - **A startup self-test** of the build and the CPU before the first
   hash.
 

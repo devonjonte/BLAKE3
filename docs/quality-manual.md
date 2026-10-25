@@ -192,7 +192,17 @@ unrolled kernel code.
   (1 to 17 inputs), the collection calls (`performance::hash_each`, its
   multithreaded form, `performance::update_each`) with each
   item in its own pages, and extended output at 10 lengths from three
-  positions. They found bug 8 below as a crash.
+  positions. `test_every_call_inside_guard_pages` takes every other
+  public call that reads a caller's bytes or writes into a caller's
+  places, in each mode, from 0 bytes to 1 MiB + 5: `hash_with`,
+  `hash_xof`, `performance::hash` and `hash_multithreaded`,
+  `update_multithreaded`, `finalize_each`, and the stream's `submit`,
+  `submit_with` and `submit_batch` with their digests; the key and the
+  context string sit against pages too. The C API has its own
+  (`capi/tests/guard_pages.rs`), with the hasher's state in guarded
+  memory as well. A byte planted past an input (in `performance::hash`)
+  or past an output (in `b3_hasher_output`) crashes them. They found
+  bug 8 below as a crash.
 - **AddressSanitizer** over the library tests: clean. As a control, a
   deliberate heap overflow in a small program was caught.
 - **ThreadSanitizer** over the pool, stream, and batch tests, 30 runs:

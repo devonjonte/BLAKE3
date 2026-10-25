@@ -23,9 +23,7 @@ impl Guarded {
         let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
         let body = len.div_ceil(page).max(1) * page;
         let total = body + 2 * page;
-        let base = unsafe {
-            libc::mmap(core::ptr::null_mut(), total, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_PRIVATE | libc::MAP_ANONYMOUS, -1, 0)
-        };
+        let base = unsafe { libc::mmap(core::ptr::null_mut(), total, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_PRIVATE | libc::MAP_ANONYMOUS, -1, 0) };
         assert_ne!(base, libc::MAP_FAILED, "mmap");
         let base = base as *mut u8;
         unsafe {
@@ -69,9 +67,7 @@ fn every_call_inside_guard_pages() {
     for at_end in [true, false] {
         let key = Guarded::with(&[7u8; 32], at_end);
         let context = Guarded::with(b"guard pages 2026-10-25 the C calls\0", at_end);
-        let modes = unsafe {
-            [("plain", b3_plain()), ("keyed", b3_keyed(key.ptr())), ("derive key", b3_derive_key(context.ptr() as *const c_char))]
-        };
+        let modes = unsafe { [("plain", b3_plain()), ("keyed", b3_keyed(key.ptr())), ("derive key", b3_derive_key(context.ptr() as *const c_char))] };
         for (name, mode) in &modes {
             for len in lens {
                 let what = format!("{name}, {len} B, at end {at_end}");
@@ -84,7 +80,7 @@ fn every_call_inside_guard_pages() {
                     assert_eq!(b3_hash(mode, input, len).bytes, want, "b3_hash, {what}");
                     assert_eq!(b3_hash_multithreaded(mode, input, len).bytes, want, "b3_hash_multithreaded, {what}");
                     // A hasher whose state sits flush against a page too.
-                    let mut state = Guarded::new(core::mem::size_of::<B3Hasher>(), at_end);
+                    let state = Guarded::new(core::mem::size_of::<B3Hasher>(), at_end);
                     let hasher = state.ptr() as *mut B3Hasher;
                     b3_hasher_init(hasher, mode);
                     b3_hasher_update(hasher, input, len.min(1000));

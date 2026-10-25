@@ -82,10 +82,12 @@ keeps Rust's memory rules, which the compiler checks everywhere else.
   where one thread waits for another under thousands of thread
   schedules. A wait that could hang shows up immediately as a deadlock
   with the schedule that caused it.
-- **Guard pages** cover assembly. A test places an inaccessible page
-  of memory immediately beside an input or output buffer. If a kernel
-  reads or writes even one byte outside that buffer, the processor
-  faults and the test crashes.
+- **Guard pages** cover every call. Tests place an inaccessible page
+  of memory immediately beside each input, output, key and context of
+  every public call, in Rust and in C. If the code reads or writes even
+  one byte outside the caller's memory, the processor faults and the
+  test crashes. This reaches inside the assembly, where the other
+  checks cannot see.
 
 ## What the checks found
 
