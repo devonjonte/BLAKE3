@@ -182,7 +182,7 @@ unrolled kernel code.
 ## Memory safety
 
 - **Guard pages** (`test::guard_pages`), on AArch64 and x86-64, Linux and
-  macOS. The sanitizers cannot see inside assembly, so these tests put
+  macOS. Miri cannot run assembly, so these tests put
   each kernel's input, then its output, flush against an inaccessible
   page (after the buffer, then before it). A kernel that reads or writes
   a single byte outside its buffers crashes the test. They cover `hash`
@@ -203,14 +203,8 @@ unrolled kernel code.
   memory as well. A byte planted past an input (in `performance::hash`)
   or past an output (in `b3_hasher_output`) crashes them. They found
   bug 8 below as a crash.
-- **AddressSanitizer** over the library tests: clean. As a control, a
-  deliberate heap overflow in a small program was caught.
-- **ThreadSanitizer** over the pool, stream, and batch tests, 30 runs:
-  clean. A deliberate data race in a control program was caught.
 - **On the Mac**: every suite in debug builds (overflow checks and
-  debug assertions over the SME2 paths), AddressSanitizer over the
-  library tests, and ThreadSanitizer over the pool, unsafe-path, and
-  batch tests: all clean.
+  debug assertions over the SME2 paths): all clean.
 - **CI on other targets** (GitHub Actions): the suites on Linux x86-64
   and arm64 (without SME2, and without SHA-3 under QEMU), macOS, Windows
   with MSVC.
@@ -396,21 +390,18 @@ cargo test --release --doc                        # 22 doc examples
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 ```
 
-The tests need [cargo-nextest](https://nexte.st); the sanitizers and Miri
-also need nightly Rust
+The tests need [cargo-nextest](https://nexte.st); Miri
+also needs nightly Rust
 (`rustup toolchain install nightly --component miri,rust-src,llvm-tools`):
 
 ```sh
-RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS=detect_leaks=0 cargo +nightly nextest run -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
-RUSTFLAGS="-Zsanitizer=thread" cargo +nightly nextest run -Zbuild-std --target aarch64-unknown-linux-gnu --release --lib
 MIRIFLAGS="-Zmiri-num-cpus=4 -Zmiri-ignore-leaks" cargo +nightly miri nextest run --features pure --lib unsafe_paths miri
 ```
 
 (On macOS, use the target `aarch64-apple-darwin`.) The crate is crash-only
 software: what still exists as a process ends (a pool's threads, a
 recycled source, a test's buffers) is no fault, and no code frees it for a
-checker's sake, so ASan's leak report is off, as Miri's is
-(`-Zmiri-ignore-leaks`).
+checker's sake, so Miri's leak report is off (`-Zmiri-ignore-leaks`).
 
 Timing claims are checked the same way: [bench-hashes](https://github.com/johnservil/bench-hashes)
 measures this implementation against the official crate and others on your machine.
@@ -476,7 +467,7 @@ each bug are in `git log`.
 | Mutation testing | a test suite that misses a likely bug: an operator, a bound, or a condition changed, a call or a result dropped | it found missing cases in `Hash`, the `Hasher`, `OutputReader`, `update_each`, and the self-test, and dead code, each fixed or removed; a mutant every test survives is either caught by a new test or listed with its reason | bugs unlike its changes; thread interleavings the tests leave to chance |
 | Test vectors and the reference implementation | any wrong digest at the lengths and shapes tested, on any platform | found bugs 1 and 2 below | untested lengths and shapes |
 | Startup self-test | a miscompiled, mislinked, or faulty-hardware kernel on the user's machine | its inputs run every kernel entry point (a unit test checks it each run), and each case's output feeds the next, so one wrong result changes every later one | faults that appear only after startup |
-| Sanitizers, Miri, guard pages | out-of-bounds access, use after free, data races, undefined behaviour in the paths tested | Miri found bug 7; controls with planted faults are caught | paths not exercised |
+| Miri, guard pages | out-of-bounds access, use after free, data races, undefined behaviour in the paths tested | Miri found bug 7; controls with planted faults are caught | paths not exercised |
 
 ## Formal verification: what we tried and considered
 
@@ -559,7 +550,7 @@ among them, and however often the hash is timed.
 No human has reviewed the code line by line, and nobody has audited it.
 The test suites have run on an Apple M4 Max, under macOS and in a
 Debian 12 AArch64 VM on it (whose SME2 unit the VM exposes), and on
-CI's hosted machines; the sanitizers on both, Miri in the VM.
+CI's hosted machines; Miri in the VM.
 
 Not yet proved: that the Rust around the kernels (the dispatch, the tree,
 the `Hasher`) keeps secrets from steering a whole call, which is

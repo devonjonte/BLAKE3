@@ -12,10 +12,6 @@ which of those lines it exercises on this machine:
 - the test suites, the guard-page tests, the paths Miri runs, and the
   official test vectors: LLVM source coverage (-C instrument-coverage,
   nightly) of each run, the lines it executed;
-- AddressSanitizer: the lines the test suites execute, assembly excepted
-  (it instruments compiled Rust and C, never assembly);
-- ThreadSanitizer: the lines the test suites execute in the files that
-  share memory between threads (atomics, the pool, the stream);
 - mutation testing: the lines of the functions cargo-mutants plants a
   bug in (`cargo mutants --list` over the files tools/mutants names),
   with the share of their mutants caught on AArch64 (the list of known
@@ -47,8 +43,6 @@ import sys
 ROOT = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip()
 NIGHTLY = "nightly-2026-09-17"
 OUT = sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else os.path.join(ROOT, "target", "qa-coverage")
-# Files whose code threads share memory in: TSan's reach.
-SHARED = {"src/lanes.rs", "src/stream.rs", "src/each.rs", "src/self_test.rs"}
 # The assembly the proofs cover (tools/verify/README.md), and the kernel
 # they leave out: the README's "every assembly kernel on 64-bit Arm but one".
 PROVED = {"c/blake3_neon_hybrid_aarch64.S", "c/blake3_sme2_aarch64.S", "c/blake3_sme2_hybrid_aarch64.S"}
@@ -185,8 +179,6 @@ def main():
         ("Official test vectors", tally(vectors), "lines run while checking the published vectors"),
         ("Guard pages", tally(guard), "lines run with inputs and outputs against unmapped pages; assembly reached, not counted"),
         ("Miri's paths (pure build)", tally(miri), "the lines the tests Miri runs execute natively; Miri checks Rust only"),
-        ("AddressSanitizer", tally(tests, lambda f: not is_asm(f)), "the suites' lines, assembly excepted"),
-        ("ThreadSanitizer", tally(tests, lambda f: f in SHARED), "the suites' lines in files threads share memory in"),
         (f"Mutation testing ({mutant_count} mutants, {mutant_count - survivors} caught on AArch64)", tally(mutants), "lines in functions with a planted bug"),
         ("Proofs (AArch64 assembly)", tally({f: s for f, s in asm_all.items() if f in PROVED}), "every Arm assembly file, each kernel proved"),
     ]
