@@ -937,12 +937,12 @@ mod guard_pages {
                         assert_eq!(*digest, *crate::convenience::hash(&data[i * slot..][..len]).as_bytes(), "{count} x {len} B, message {i}, at end {at_end}");
                     }
                     if slot * count >= 64 * CHUNK_LEN {
-                        let mut mt = vec![[0u8; OUT_LEN]; count];
+                        let (_page, mt) = digests(count, at_end);
                         crate::performance::hash_many_multithreaded(
                             Mode::Hash,
                             crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
                             len,
-                            &mut mt,
+                            mt,
                         );
                         assert_eq!(&mt[..], &outputs[..], "mt, {count} x {len} B");
                     }
@@ -975,12 +975,12 @@ mod guard_pages {
                         .map(|(r, &l)| (crate::performance::Block::from_bytes(r).expect("a page-end region of whole blocks starts aligned"), l))
                         .collect();
                     let want: Vec<[u8; 32]> = items.iter().map(|m| *crate::test::reference_hash(m).as_bytes()).collect();
-                    let mut got = vec![[0u8; 32]; count];
-                    crate::performance::hash_each(Mode::Hash, &in_blocks, &mut got);
-                    assert_eq!(got, want, "hash_each_with, {count} x {len} B, at end {at_end}");
-                    let mut got = vec![[0u8; 32]; count];
-                    crate::performance::hash_each_multithreaded(Mode::Hash, &in_blocks, &mut got);
-                    assert_eq!(got, want, "hash_each_multithreaded_with, {count} x {len} B, at end {at_end}");
+                    let (_page, got) = digests(count, !at_end);
+                    crate::performance::hash_each(Mode::Hash, &in_blocks, got);
+                    assert_eq!(got, &want[..], "hash_each_with, {count} x {len} B, at end {at_end}");
+                    let (_page, got) = digests(count, at_end);
+                    crate::performance::hash_each_multithreaded(Mode::Hash, &in_blocks, got);
+                    assert_eq!(got, &want[..], "hash_each_multithreaded_with, {count} x {len} B, at end {at_end}");
                     let mut hashers: Vec<crate::Hasher> = (0..count).map(|_| crate::Hasher::new()).collect();
                     let pieces: Vec<(usize, &[u8])> = items.iter().copied().enumerate().collect();
                     crate::performance::update_each(&mut hashers, &pieces);
@@ -1015,6 +1015,121 @@ mod guard_pages {
                     reader.set_position(skip as u64);
                     reader.fill(out.bytes());
                     assert_eq!(out.bytes(), &reference[skip..][..len], "{len} B from {skip}, at end {at_end}");
+                }
+            }
+        }
+    }
+
+    /// `count` digests' places flush against a guard page (after them, or
+    /// before): a call writes no byte outside its outputs.
+    fn places(count: usize, at_end: bool) -> (Guarded, &'static mut [Hash]) {
+        let mut g = Guarded::new(count * OUT_LEN, at_end);
+        // Sound: Hash is repr(transparent) over [u8; 32], align 1, and the
+        // pages live until the Guarded drops, after every use here.
+        let out = unsafe { core::slice::from_raw_parts_mut(g.bytes().as_mut_ptr() as *mut Hash, count) };
+        (g, out)
+    }
+
+    /// The same places as digests' bytes, for the calls that write those.
+    fn digests(count: usize, at_end: bool) -> (Guarded, &'static mut [[u8; OUT_LEN]]) {
+        let mut g = Guarded::new(count * OUT_LEN, at_end);
+        let out = unsafe { core::slice::from_raw_parts_mut(g.bytes().as_mut_ptr() as *mut [u8; OUT_LEN], count) };
+        (g, out)
+    }
+
+    /// The reference implementation's digest and first 100 bytes of
+    /// extended output in each mode, for the calls below to match.
+    fn reference(mode: Mode, input: &[u8]) -> ([u8; 32], [u8; 100]) {
+        let mut hasher = match mode {
+            Mode::Hash => reference_impl::Hasher::new(),
+            Mode::Keyed(key) => reference_impl::Hasher::new_keyed(key),
+            Mode::DeriveKey(context) => reference_impl::Hasher::new_derive_key(context),
+            Mode::DeriveKeyMaterial(_) => unreachable!("the context's own mode is DeriveKey"),
+        };
+        hasher.update(input);
+        let (mut digest, mut xof) = ([0; 32], [0; 100]);
+        hasher.finalize(&mut digest);
+        hasher.finalize(&mut xof);
+        (digest, xof)
+    }
+
+    /// Every public call that reads a caller's bytes or writes into a
+    /// caller's places, in every mode, its inputs and outputs each flush
+    /// against a guard page, after them and then before: the convenience
+    /// calls, the single-message performance calls, the Hasher's
+    /// multithreaded update, finalize_each, the stream's three ways in
+    /// with its digests, and the key and context themselves. With the
+    /// batch and collection tests above, no call is left out.
+    #[test]
+    fn test_every_call_inside_guard_pages() {
+        let lens =
+            [0, 1, 63, 64, 65, 127, 128, 1023, 1024, 1025, 2047, 2048, 2049, 3839, 4470, 7935, 8192, 16383, 16384, 16385, 65543, 131073, 524291, (1 << 20) + 5];
+        for at_end in [true, false] {
+            let mut key_page = filled(KEY_LEN, at_end);
+            // Sound: the page holds KEY_LEN bytes and outlives the modes.
+            let key: &[u8; KEY_LEN] = unsafe { &*(key_page.bytes().as_ptr() as *const [u8; KEY_LEN]) };
+            let context_text = "guard pages 2026-10-25 every call";
+            let mut context_page = Guarded::new(context_text.len(), at_end);
+            context_page.bytes().copy_from_slice(context_text.as_bytes());
+            let context = core::str::from_utf8(context_page.bytes()).unwrap();
+            let context_key = crate::performance::hash_derive_key_context(context);
+            for (name, mode) in [("hash", Mode::Hash), ("keyed", Mode::Keyed(key)), ("derive key", Mode::DeriveKey(context))] {
+                for len in lens {
+                    let mut flush = filled(len, at_end);
+                    let message = flush.bytes().to_vec();
+                    let (want, want_xof) = reference(mode, &message);
+                    let what = format!("{name}, {len} B, at end {at_end}");
+                    assert_eq!(*crate::convenience::hash_with(mode, flush.bytes()).as_bytes(), want, "hash_with, {what}");
+                    let mut xof = Guarded::new(100, !at_end);
+                    crate::convenience::hash_xof(mode, flush.bytes()).fill(xof.bytes());
+                    assert_eq!(xof.bytes(), &want_xof[..], "hash_xof, {what}");
+                    if let Mode::DeriveKey(_) = mode {
+                        let material = Mode::DeriveKeyMaterial(&context_key);
+                        assert_eq!(*crate::convenience::hash_with(material, flush.bytes()).as_bytes(), want, "hash_with, its context hashed once, {what}");
+                    }
+                    // The message's whole blocks flush against the page.
+                    let mut region = filled(len.div_ceil(64).max(1) * 64, at_end);
+                    region.bytes()[..len].copy_from_slice(&message);
+                    let blocks = crate::performance::Block::from_bytes(unsafe { core::slice::from_raw_parts(region.base.add(region.start), region.len) })
+                        .expect("a page-end region of whole blocks starts aligned");
+                    assert_eq!(*crate::performance::hash(mode, blocks, len).as_bytes(), want, "performance::hash, {what}");
+                    assert_eq!(*crate::performance::hash_multithreaded(mode, blocks, len).as_bytes(), want, "hash_multithreaded, {what}");
+                    let mut hasher = crate::Hasher::new_with(mode);
+                    hasher.update_multithreaded(flush.bytes());
+                    assert_eq!(*hasher.finalize().as_bytes(), want, "update_multithreaded, {what}");
+                    let (_out_page, out) = digests(1, !at_end);
+                    crate::performance::finalize_each(core::slice::from_ref(&hasher), &[0], out);
+                    assert_eq!(out[0], want, "finalize_each, {what}");
+                    // A stream: the message where it is, the message written into
+                    // its rooms, and a batch of three, every digest into places
+                    // flush against a page.
+                    let count = 3;
+                    let slot = crate::many::slot_len(len);
+                    let mut batch = filled(slot * count, at_end);
+                    for i in 0..count {
+                        let m = &mut batch.bytes()[i * slot..][..slot];
+                        m[..len].copy_from_slice(&message);
+                        m[len..].fill(0);
+                    }
+                    let batch_blocks = crate::performance::Block::from_bytes(unsafe { core::slice::from_raw_parts(batch.base.add(batch.start), batch.len) })
+                        .expect("a page-end batch starts aligned");
+                    let (_page_one, one) = places(1, !at_end);
+                    let (_page_with, with) = places(1, at_end);
+                    let (_page_batch, batched) = places(count, !at_end);
+                    let input: &[u8] = unsafe { core::slice::from_raw_parts(flush.base.add(flush.start), flush.len) };
+                    crate::performance::stream(
+                        mode,
+                        |_| {},
+                        |s| {
+                            s.submit(blocks, len, &mut one[0]);
+                            s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), &mut with[0]);
+                            s.submit_batch(batch_blocks, len, batched);
+                            s.finish();
+                        },
+                    );
+                    assert_eq!(*one[0].as_bytes(), want, "stream submit, {what}");
+                    assert_eq!(*with[0].as_bytes(), want, "stream submit_with, {what}");
+                    assert!(batched.iter().all(|h| *h.as_bytes() == want), "stream submit_batch, {what}");
                 }
             }
         }
