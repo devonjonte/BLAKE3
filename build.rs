@@ -180,6 +180,9 @@ fn build_sse41_avx2_assembly() {
         // explicit workaround for macOS also.
         private_x86_assembly(&mut build, "c/blake3_sse41_x86-64_unix.S");
         private_x86_assembly(&mut build, "c/blake3_avx2_x86-64_unix.S");
+        // One chunk or less as the root, off the stack (src/ffi_chunk_root.rs):
+        // names of its own, which no other crate defines.
+        build.file("c/blake3_chunk_root_x86-64_unix.S");
     }
     build.compile("blake3_sse41_avx2_assembly");
 }

@@ -60,7 +60,7 @@ run generated sh -c 'python3 tools/gen_neon_hybrid.py | cmp - c/blake3_neon_hybr
 run helpers python3 -m unittest discover -s tools/verify -p 'test_*.py'
 run prove_hybrid python3 tools/verify/prove_hybrid.py
 run prove_sme2 python3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof chunks_x2 every parents_every xof_every messages_every x2_every
-run prove_x86 python3 tools/verify/prove_x86.py compress xof hash_many xof_many
+run prove_x86 python3 tools/verify/prove_x86.py compress xof hash_many xof_many chunk_root
 run prove_x86_loop sh -c 'ulimit -v 6291456; exec python3 tools/verify/prove_x86_loop.py'
 run cross_check python3 tools/verify/cross_check.py
 run mutants python3 tools/verify/mutants.py

@@ -564,14 +564,14 @@ def step(m, pc, mnem, ops, nxt):
         m.gwrite(ops[0], m.load(m.x["rsp"], 8))
         m.x["rsp"] = m.x["rsp"] + 8
         return nxt
-    if mnem in ("mov", "movzx") and not any(is_vreg(o) for o in ops):
+    if mnem in ("mov", "movabs", "movzx") and not any(is_vreg(o) for o in ops):
         if ops[0].startswith("[") or " ptr [" in ops[0]:
             size, addr, _ = address(m, ops[0])
             val = gval(m, ops[1], 8 * size)
             m.store(addr, val, size)
         else:
             bits = SUB[ops[0]][1]
-            val = gval(m, ops[1], bits if mnem == "mov" else opbits(m, ops[1]))
+            val = gval(m, ops[1], bits if mnem in ("mov", "movabs") else opbits(m, ops[1]))
             if mnem == "movzx":
                 val = ZeroExt(bits - val.size(), val)
             m.gwrite(ops[0], val)
@@ -806,12 +806,13 @@ def vector(m, mnem, base, vex, ops, nxt):
         a, b = A(), B()
         new = [If(kbit(m, mask, j), y, x) for j, (x, y) in enumerate(zip(a, b))]
         mask = None
-    elif base in ("pinsrd",):
-        a = A()
-        s = rest[0]
-        val = gval(m, s, 32) if (s in SUB or "ptr" in s) else None
-        new = list(a)
-        new[imm(rest[-1]) & 3] = val
+    elif base in ("pinsrd", "pinsrq"):
+        new, s = list(A()), rest[0]
+        if base == "pinsrd":
+            new[imm(rest[-1]) & 3] = gval(m, s, 32) if (s in SUB or "ptr" in s) else None
+        else:
+            val, at = gval(m, s, 64), 2 * (imm(rest[-1]) & 1)
+            new[at:at + 2] = [Extract(31, 0, val), Extract(63, 32, val)]
     elif base in ("broadcasti128", "broadcasti32x4"):
         blk = load_lanes(m, srcs[0], 4)
         new = (blk * 4)[:w]
