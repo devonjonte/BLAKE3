@@ -417,7 +417,17 @@ def main():
         so = assemble(isa, windows)
         x86.symbols(so)
         x86.image(so)
-    todo.sort(key=lambda c: -(c[3][0] * c[3][1] if isinstance(c[3], tuple) else (c[3] or 1)))
+    # The largest cases first, so the pool's tail is short: a case's work,
+    # by kind (hash_many's inputs times blocks; a partial pass's lanes
+    # times 16 blocks; a chunk root's blocks; xof_many's blocks).
+    def work(c):
+        kind, arg = c[2], c[3]
+        if kind == "hash_many":
+            return arg[0] * arg[1]
+        if kind == "partial":
+            return WIDTH[arg[0]] * 16
+        return (arg or 0) + 1
+    todo.sort(key=lambda c: -work(c))
     failed = 0
     for (isa, windows, kind, arg), verdict in workers.each(prove_case, todo, 16):
         print(f"{isa} {'windows' if windows else 'unix'} {kind} {arg or ''}: {verdict}", flush=True)
