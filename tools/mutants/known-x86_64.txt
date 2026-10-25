@@ -2,7 +2,7 @@
 # AVX2 without AVX-512), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/each.rs src/ffi_avx2.rs src/ffi_partial.rs src/ffi_sse41.rs src/finish.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/outboard.rs src/park.rs src/platform.rs src/portable.rs src/self_test.rs src/tree.rs
+files: src/each.rs src/ffi_avx2.rs src/ffi_partial.rs src/ffi_sse41.rs src/finish.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/outboard.rs src/pair.rs src/park.rs src/platform.rs src/portable.rs src/self_test.rs src/tree.rs
 model files: src/finish.rs src/park.rs
 src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace < with <= in hash_each_multithreaded_with	1	speed: moves a threshold between equally correct paths
@@ -338,6 +338,14 @@ src/outboard.rs	delete ! in Verifier::check	1	speed: whether the check takes the
 src/outboard.rs	delete ! in outboard	1	speed: whether the outboard takes the SME2 turn
 src/outboard.rs	replace && with || in Verifier::check	1	equivalent: only the root lacks an expected value, and in the encoding's pre-order a batch's first node with one starts where its first group does
 src/outboard.rs	replace | with ^ in groups_cvs_into	1	equivalent: | and ^ agree on flag bits that never overlap (the mode flags and PARENT)
+src/pair.rs	delete match arm Platform::AVX2 in takes_platform	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	delete match arm Platform::AVX512 in takes_platform	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace * with + in takes	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace * with / in takes	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace + with * in takes	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace takes -> bool with false	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace takes_platform -> bool with false	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace | with ^ in parent	1	equivalent: | and ^ agree on flag bits that never overlap
 src/park.rs	replace Park::any_parked -> bool with true	1	speed: a publisher tries a wake with nobody parked; wake_one finds no bit
 src/platform.rs	delete ! in Platform::xof_many	1	speed: chooses between equally correct paths
 src/platform.rs	delete ! in Sme2Turn::take	1	SME2 only: on x86 no SME2 turn is held; take returns the platform unchanged and drop releases nothing
