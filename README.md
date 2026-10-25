@@ -1,13 +1,12 @@
 # blake3-servil
 
-A fast [BLAKE3](https://blake3.io) implementation for 64-bit Arm and x86-64. It computes the
-same digests as official BLAKE3.
+A fast [BLAKE3](https://blake3.io) implementation for 64-bit Arm and x86-64.
 
 ## How fast
 
-<img src="https://devonjonte.github.io/bench-hashes/benchmark-results/12thGenIntelRCoreTMi712700K.linux70038generic/bench-hashes.chart.svg" alt="Hashing one 128 MiB message after a pause on an i7-12700K: BLAKE3 multi-core and on one core beside SHA-256, SHA3-256 and SHA-1, in GB/s" width="720">
+<img src="https://johnservil.github.io/bench-hashes/benchmark-results/AMDEPYC925524CoreProcessor.linux70038generic/bench-hashes.chart.svg" alt="Hashing one 128 MiB message after a pause on an AMD EPYC 9255: BLAKE3 on every core and on one core beside SHA-256, SHA-1 and SHA3-256, in GB/s" width="720">
 
-<img src="https://devonjonte.github.io/bench-hashes/benchmark-results/12thGenIntelRCoreTMi712700K.linux70038generic/b3sum.chart.svg" alt="Hashing a tree of 1000 files on an i7-12700K: b3sum, multi-core and on one thread, beside sha256sum, sha1sum and md5sum, in GB/s" width="720">
+<img src="https://johnservil.github.io/bench-hashes/benchmark-results/AMDEPYC925524CoreProcessor.linux70038generic/b3sum.chart.svg" alt="Hashing a tree of 1000 files on an AMD EPYC 9255: b3sum on every core and on one thread, beside sha1sum, sha256sum and md5sum, in GB/s" width="720">
 
 Speed depends on your machine and on how your program hashes.
 [bench-hashes](https://github.com/johnservil/bench-hashes) measures both on your own

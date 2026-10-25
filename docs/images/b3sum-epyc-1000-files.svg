@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="286" viewBox="0 0 760 286" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14">
+<rect width="760" height="286" fill="white"/>
+<text x="16" y="26" font-size="17" font-weight="bold">A tree of 1,000 files, 74 MiB, hashed from the page cache</text>
+<text x="16" y="46" fill="#555">AMD EPYC 9255, 48 CPUs, Linux. The command's start to its exit; longer is faster.</text>
+<text x="280" y="86" text-anchor="end">b3sum, BLAKE3-Servil, every core</text>
+<rect x="290" y="72" width="380.0" height="22" fill="#4c1d95" rx="2"/>
+<text x="678.0" y="88" fill="#222">19.1 GB/s</text>
+<text x="280" y="120" text-anchor="end">b3sum, BLAKE3-Servil, one thread</text>
+<rect x="290" y="106" width="89.1" height="22" fill="#7c3aed" rx="2"/>
+<text x="387.1" y="122" fill="#222">4.48 GB/s</text>
+<text x="280" y="154" text-anchor="end">sha256sum</text>
+<rect x="290" y="140" width="33.4" height="22" fill="#e07a45" rx="2"/>
+<text x="331.4" y="156" fill="#222">1.68 GB/s</text>
+<text x="280" y="188" text-anchor="end">sha1sum</text>
+<rect x="290" y="174" width="34.6" height="22" fill="#b4b0a8" rx="2"/>
+<text x="332.6" y="190" fill="#222">1.74 GB/s</text>
+<text x="280" y="222" text-anchor="end">md5sum</text>
+<rect x="290" y="208" width="13.4" height="22" fill="#cfcbc3" rx="2"/>
+<text x="311.4" y="224" fill="#222">0.68 GB/s</text>
+<text x="16" y="264" fill="#555" font-size="12">bench-hashes 0.17.0, 15 rounds; sha256sum, sha1sum and md5sum from uutils coreutils 0.10.0.</text>
+</svg>
