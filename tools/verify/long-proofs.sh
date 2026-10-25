@@ -3,10 +3,11 @@
 # the commit's status "long proofs" (beside CI's checks): the Lean
 # specification against C2SP's text and the proofs' definition from it;
 # the generated files against their generators; the helpers; every
-# hybrid kernel; every SME2 kernel at every group count; the x86-64
-# kernels' compressions, hash_many and xof_many (prove_x86.py), plus the
-# 102-case arbitrary-count hash_many matrix (prove_x86_loop.py); the
-# instruction models checked against the CPU; and the proofs' mutants.
+# hybrid kernel; every SME2 kernel at every group count; every kind of
+# x86-64 case prove_x86.py declares (compressions, hash_many, xof_many,
+# the chunk root, the partial pass), plus hash_many at every input count
+# (prove_x86_loop.py); the instruction models checked against the CPU;
+# and the proofs' mutants.
 # Run under a bounded process-group supervisor; nothing should measure
 # meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
 # the status names their SHA-256 and BLAKE3 hashes.

@@ -4,11 +4,6 @@ These tools compare assembled kernels with the compression function of the
 Lean specification of BLAKE3 (`c2sp/BLAKE3/`). A completed case covers every
 input, key, counter, and flags value under its harness's contract.
 
-**Group-count assurance:** the shared induction checker requires
-successor-domain/rank closure (#126), and the SME2 parent harness uses
-independent input bytes across groups (#129). Their deliberate-error
-controls are in `mutants.py`.
-
 Commands:
 
     python3 tools/verify/prove_hybrid.py [KERNEL...]   # c/blake3_neon_hybrid_aarch64.S: c1, k2-k10, p2-p9, q1-q9, kn, pn, x4, x8 (414 cases, about 6 minutes on 16 CPUs)
@@ -20,11 +15,17 @@ Commands:
     python3 tools/verify/mutants.py                     # wrong kernels are rejected
     python3 -m unittest discover -s tools/verify -p 'test_*.py'  # proof helpers and fail-stop worker controls
     python3 tools/verify/isla_check.py                  # the NEON and integer models against Arm's specification (needs Isla)
+    python3 tools/verify/prove_x86.py [CASE...]         # the x86-64 kernels: compressions, hash_many at fixed counts, xof_many, the chunk root and the partial pass (568 cases; --representative: 186 of them)
+    python3 tools/verify/prove_x86_loop.py              # hash_many at every input count, by induction (102 cases)
+    python3 tools/verify/cross_check_x86.py             # the x86-64 model against the CPU (needs an x86-64 CPU; AVX-512 forms need one with AVX-512)
+    sh tools/verify/long-proofs.sh [COMMIT]             # the proofs, the Arm CPU cross-check and the controls together (Isla and the x86 CPU check apart); posts the commit's "long proofs" status
 
-They need Python 3 with Z3 (`python3-z3`), an AArch64 machine with the
-SHA-3 extension, and Clang and llvm-objdump 17 or later (for SME2). The
-project's VM runs them (`long-proofs.sh`); the SME2 cross-check needs an
-SME2 CPU (Apple M4, or the VM on it).
+The AArch64 proofs need Python 3 with Z3 (`python3-z3`), an AArch64
+machine with the SHA-3 extension, and Clang and llvm-objdump 17 or later
+(for SME2). The project's VM runs them (`long-proofs.sh`); the SME2
+cross-check needs an SME2 CPU (Apple M4, or the VM on it). The x86-64
+proofs run on any machine with Python 3, `python3-z3`, Clang and LLVM's
+`llvm-ml`.
 
 **Coverage.** The hybrid kernels at every block count they take (1 to
 16; the q kernels' partial chunk at every block count), those without
@@ -115,11 +116,10 @@ inputs, pointers are (region, offset) pairs. The run checks:
   affected); the model now does too. `isla_check.py` proves the models
   equal to Arm's own specification (Sail's Armv9.4, run by Isla) for every
   input on every path that completes: the general registers, the flags,
-  and a NEON register's 128 bits. It checks 322 of the 325 forms the
-  proofs use, the flag-setting and conditional ones and the multiplies
-  among them; Isla's symbolic run stops inside Arm's specification for
-  `tbl` with one table register, `addv` and `cnt`, which stay checked
-  against the CPU. It then plants
+  and a NEON register's 128 bits. It checks 85 of the 86 forms the
+  kernels use, the flag-setting and conditional ones among them; Isla's
+  symbolic run stops inside Arm's specification for `tbl` with one table
+  register, which stays checked against the CPU. It then plants
   model errors and requires each rejected: a carry computed as `>`, `hi`
   ignoring Z, `xar` (NEON and streaming) and a shifted `eor` rotated one
   place off, `dup` reading the wrong lane, a ZA move into the wrong tile.
@@ -159,72 +159,57 @@ assumptions.
 Not proved here: the library's Rust (the dispatch, the tree walk, the
 Hasher, the threads), which the tests cover.
 
-**The x86-64 kernels, in progress.** `x86.py` models the instructions
-the x86-64 kernels use, on the same executor as the AArch64 model (a
-fault on an access outside a region, the calling convention checked).
-The writable stack ends at the return slot, Windows shadow space and
-actual stack arguments. Each proof uses one symbolic entry-stack residue:
-8, 24, 40 or 56 modulo 64, the four legal ABI alignments. Vector memory forms enforce the alignment
-their encoding requires; buffer bases carry the alignment their contract
-promises. Addresses and memory masks use declared public parameters,
-prefetch addresses included. `cross_check_x86.py` runs every vector form
-from the Unix and Windows kernels on the CPU and by the model, on random
-states; memory forms also compare the whole buffer, and aligned forms get
-a bounded unaligned-address fault control. AVX-512 forms need an AVX-512
+## The x86-64 kernels
+
+`x86.py` models the instructions the x86-64 kernels use, on the same
+executor as the AArch64 model (a fault on an access outside a region, the
+calling convention checked). The writable stack ends at the return slot,
+Windows shadow space and actual stack arguments. Each proof uses one
+symbolic entry-stack residue: 8, 24, 40 or 56 modulo 64, the four legal
+ABI alignments. Vector memory forms enforce the alignment their encoding
+requires; buffer bases carry the alignment their contract promises.
+Addresses and memory masks use declared public parameters, prefetch
+addresses included. `cross_check_x86.py` runs every vector form from the
+Unix and Windows kernels on the CPU and by the model, on random states;
+memory forms also compare the whole buffer, and aligned forms get a
+bounded unaligned-address fault control. AVX-512 forms need an AVX-512
 CPU and are reported skipped without one (CI's `x86_model` job).
-`prove_x86.py` proves cases against the same
-Lean specification: `compress_in_place` and `compress_xof` for SSE4.1
-and AVX-512, under the Unix and Windows conventions, and `hash_many` at
-the counts run so far, and AVX-512 `xof_many` at 1 to 32 blocks, and the
-chunk-root kernel's SSE4.1 and AVX-512 entries (`c/blake3_chunk_root_x86-64_unix.S`,
-Unix only) at 0 to 15 whole blocks before the last, so every input of a
-chunk or less, for every last-block length and mode flags with
-CHUNK_START clear, the kernel's contract. From
-four blocks its output masks are selects whose condition the path's
-lengths settle; the normal form takes such a select as the arm it
-selects.
 
-**X86 input-count proofs.** The integrated matrix combines Devon's
-all-count work and CLI with the proof-tool optimizations, the
-symbolic-rank precondition from PR #126, and the independent parent
-inputs from PR #129. All SME2 group-loop callers use the natural
-`K < groups` bound: the former `K <= 2^39` caps did not close a domain
-allowing `groups <= 2^40`. The source-matched promotion validation at
-the candidate recorded in the maintainers' notes proved all 102
-all-count cases and 154 representative direct cases (186 with the chunk root's 32), with every entry
-alignment handled by one symbolic stack residue. Hashing machine code
-is unchanged.
+`prove_x86.py` proves these cases against the same Lean specification,
+568 in all (`--representative` runs 186 of them in minutes: every block
+length, and the first, full-width and two-pass counts):
 
-`prove_x86_loop.py` uses the same executor and induction helper for
-`hash_many`. Its declared 102 cases cover fixed
-counters at block lengths 1–16 and incrementing counters at 16 blocks,
-each on SSE4.1, AVX2 and AVX-512, Unix and Windows. These are the caller's
-message/parent shapes and whole-chunk shape. Each case covers zero inputs,
-every full-width pass and every remainder. Every input has its own exact
-read-only region and independent array words; equal physical input bytes
-are allowed. Counts obey the conservative bound `(2^64 - 1) // 32`, so
-the output and pointer table fit 64-bit regions. Keys, counters and flags
-stay arbitrary; counters retain their carries, incoming masks are symbolic,
-outputs are exact, and successor assumptions and unsigned progress close
-the induction. Windows cases assemble the actual MSVC source.
+- `compress_in_place` and `compress_xof` for SSE4.1 and AVX-512, under
+  the Unix and Windows conventions;
+- `hash_many` at every count up to two passes of the kernel's width at
+  1, 2 and 16 blocks with an incrementing counter, and at every block
+  length at one full-width pass with one counter, for each instruction
+  set and convention;
+- AVX-512 `xof_many` at 1 to 32 blocks;
+- the chunk-root kernel's SSE4.1 and AVX-512 entries
+  (`c/blake3_chunk_root_x86-64_unix.S`) at 0 to 15 whole blocks before
+  the last, so every input of a chunk or less, for every last-block
+  length and mode flags with CHUNK_START clear, the kernel's contract.
+  From four blocks its output masks are selects whose condition the
+  path's lengths settle; the normal form takes such a select as the arm
+  it selects;
+- the partial pass (`c/blake3_partial_x86-64_*`, SSE4.1 and AVX2, both
+  conventions) at every block after which its snapshot is taken: each
+  lane's sixteen blocks from its chaining value and counter, with every
+  per-lane, per-block length and flags.
 
-On a Linux host with Z3 and the LLVM assembler/linker tools, select a small
-batch under a bounded process-group supervisor, for example GNU timeout:
-
-```sh
-ulimit -v 6291456
-# Tuple: (ISA, Windows, full blocks per input, increment counter).
-timeout --signal=KILL 850s python3 tools/verify/prove_x86_loop.py "[('avx2', False, 1, False)]"
-```
-
-`--help` describes the command. With no case list it runs the full matrix;
-`cases()` enumerates that matrix in one place, tested against its declared
-shapes. Fresh workers keep proof caches bounded; set the caller's
-memory limit before launching, and choose `--workers` from the host's
-memory. Run selected batches under a bounded process-group supervisor,
-so a batch that exceeds its deadline preserves the evidence of the
-batches before it. The proof's model and scope stay separate from
-hardware-speed evidence.
+`prove_x86_loop.py` proves `hash_many` at every input count, with the
+same executor and induction helper: 102 cases, fixed counters at block
+lengths 1 to 16 and incrementing counters at 16 blocks, each on SSE4.1,
+AVX2 and AVX-512, Unix and Windows (the shapes the crate calls). Each
+case covers zero inputs, every full-width pass and every remainder, up to
+the largest count whose output and pointer table fit 64-bit regions.
+Every input has its own read-only region and independent words; keys,
+counters and flags stay arbitrary, and counters keep their carries.
+Windows cases assemble the MSVC source. A case can take gigabytes; set
+the process's memory limit (`ulimit -v 6291456`) and choose `--workers`
+from the host's memory. `--help` describes the command; with no case list
+it runs the whole matrix, which `cases()` enumerates in one place.
 
 ## Extending
 
@@ -248,15 +233,15 @@ Lessons the tools were built on:
   (a kernel that preloads the next group then fails the check: the
   proof may be incomplete, never unsound).
 - Plant a mutant in each step of a loop the induction proves (its
-  pointers, its counter) and see the proof reject it. `mutants.py` includes
-  the independent-parent stride controls and six assembled AVX2 controls,
-  with an unmodified positive control at the same block/counter settings.
-  The nonterminating loop must fail its successor-domain obligation.
-  Four assembled x86 memory controls cover a caller-stack write, an aligned
-  load of an unaligned buffer, a secret-derived prefetch address and a
-  masked store, each beside unmodified positive controls.
-  Four assembled chunk-root controls (its SSE4.1 entry) cover a wrong
-  input stride, CHUNK_START never set, CHUNK_END dropped, and half the
-  output unwritten.
-  An internal checker exception stops the run; only `Unproved` counts as
-  a mutation rejection.
+  pointers, its counter) and see the proof reject it. `mutants.py` plants,
+  beside an unmodified positive control of each: in the SME2 kernels, a
+  group loop's counter and pointer steps, a parent kernel's input and
+  output strides, and a block loop's offset step and a rotation after it;
+  in the AVX2 kernel, its strides, its counter's direction, a loop that
+  never ends, and a read past an input; four x86 memory controls (a write
+  into the caller's stack, an aligned load of an unaligned buffer, a
+  prefetch address derived from a secret, a masked store); and four
+  chunk-root controls (a wrong input stride, CHUNK_START never set,
+  CHUNK_END dropped, half the output unwritten). Only
+  `Unproved` counts as a rejection; an exception inside the checker stops
+  the run.

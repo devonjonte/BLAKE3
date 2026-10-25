@@ -9,8 +9,9 @@
 //! for, tampering that breaks the digests); what the code computes is the
 //! tests' and the proofs' to establish. So each kernel runs once, on a
 //! small input. On AArch64 it takes 0.1 to 0.2 ms, once (Apple M4 Max:
-//! 93 µs warm, 140-200 µs in a fresh process; the VM: 95 and 125): most
-//! of it is running every assembly kernel, 390 KB of unrolled code, whose
+//! 93 µs warm, 140-200 µs in a fresh process; the VM, October 25:
+//! 160-280 µs): most of it is running every assembly kernel, 500 KB of
+//! unrolled code, whose
 //! first fetch dominates the fresh-process cost (Zooko chose this budget
 //! over a smaller one that leaves kernels out, September 26, 2026).
 //! Elsewhere nine cases reach every x86 kernel: about 28 µs in a fresh

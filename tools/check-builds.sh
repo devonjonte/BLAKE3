@@ -33,4 +33,5 @@ RUSTFLAGS="-D warnings" step cargo check -q --tests --target x86_64-unknown-linu
 # Every generated kernel file is its generator's output.
 step sh -c 'python3 tools/gen_neon_hybrid.py | cmp - c/blake3_neon_hybrid_aarch64.S && python3 tools/gen_sme2_hybrid.py | cmp - c/blake3_sme2_hybrid_aarch64.S'
 step sh -c 'python3 tools/gen_x86.py unix | cmp - c/blake3_partial_x86-64_unix.S && python3 tools/gen_x86.py msvc | cmp - c/blake3_partial_x86-64_windows_msvc.asm'
+step sh -c 'python3 tools/gen_x86_chunk_root.py | cmp - c/blake3_chunk_root_x86-64_unix.S'
 echo "check-builds: every build passes"

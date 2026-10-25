@@ -123,11 +123,13 @@ Windows with MSVC), with the latest stable Rust (and
 any nightly feature the fork chooses to use). Official BLAKE3 serves the
 rest.
 
-The NEON hybrid and the x86 partial-chunk assembly are generated and
-committed. Edit the generator, then run
-`python3 tools/gen_neon_hybrid.py > c/blake3_neon_hybrid_aarch64.S`, or
-`python3 tools/gen_x86.py unix > c/blake3_partial_x86-64_unix.S` and
-`python3 tools/gen_x86.py msvc > c/blake3_partial_x86-64_windows_msvc.asm`;
+The generated kernels are committed beside their generators. Edit the
+generator, then run it: `python3 tools/gen_neon_hybrid.py >
+c/blake3_neon_hybrid_aarch64.S`, `python3 tools/gen_sme2_hybrid.py >
+c/blake3_sme2_hybrid_aarch64.S`, `python3 tools/gen_x86.py unix >
+c/blake3_partial_x86-64_unix.S` and `python3 tools/gen_x86.py msvc >
+c/blake3_partial_x86-64_windows_msvc.asm`, or `python3
+tools/gen_x86_chunk_root.py > c/blake3_chunk_root_x86-64_unix.S`;
 `tools/check-builds.sh` fails when a file and its generator drift apart.
 
 ## Performance
@@ -231,10 +233,8 @@ lists what it takes and ticks each step:
    commit and **local** tag. The version's hash names the code parent; the
    tag names the version commit. cargo-c derives pkg-config's version from
    the C crate; the tool prints the release's exact dependency line. Keep
-   the tag unpublished while validating that commit.
-   An RC branch can make the commit available to CI. Final commit-keyed
-   evidence names this version commit; reuse of unchanged proof inputs needs
-   an explicit identity record, not logs renamed from the parent.
+   the tag unpublished while validating that commit; a branch at it makes
+   it available to CI. Evidence is named by this version commit.
 2. CI, every job, dispatched with `workflow_dispatch` on the exact candidate;
    `sh tools/check-builds.sh`. Pull-request CI normally checks a synthetic
    merge, so its head-SHA label alone is not evidence for the release commit.
