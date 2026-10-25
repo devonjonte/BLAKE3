@@ -2,7 +2,7 @@
 # AVX2 without AVX-512), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/block.rs src/convenience.rs src/each.rs src/ffi_avx2.rs src/ffi_partial.rs src/ffi_sse41.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/performance.rs src/platform.rs src/portable.rs src/self_test.rs src/tree.rs
+files: src/block.rs src/convenience.rs src/each.rs src/ffi_avx2.rs src/ffi_partial.rs src/ffi_sse41.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/performance.rs src/platform.rs src/portable.rs src/self_test.rs src/tree.rs src/pair.rs
 model files: src/finish.rs src/park.rs
 src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace < with <= in hash_each_multithreaded	1	speed: moves a threshold between equally correct paths
@@ -333,6 +333,14 @@ src/many.rs	replace | with ^ in subtree_across	2	equivalent: | and ^ agree on fl
 src/many.rs	replace || with && in across_from	1	equally correct paths: whether a batch hashes across messages or message by message; both give the same digests; speed, measured when written: 0.35-0.52x for batches of 2-15-chunk messages (2478d66); no benchmark cell covers it (data 2026-10-24/shortcuts)
 src/many.rs	replace || with && in hash_many_on	1	speed: moves a threshold between equally correct paths (hash_long_or_single and the batch kernels agree; SME2's branch is compiled out on x86); speed, measured: with the one-block path off, batch cells +21% to +234% (data 2026-10-24/shortcuts)
 src/many.rs	replace || with && in sme2_sized	4	speed: moves a threshold between equally correct paths
+src/pair.rs	delete match arm Platform::AVX2 in takes_platform	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	delete match arm Platform::AVX512 in takes_platform	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace * with + in takes	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace * with / in takes	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace + with * in takes	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace takes -> bool with false	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace takes_platform -> bool with false	1	equally correct paths: the two-chunk path and the serial path agree; speed, measured: with it off, 1536 B +22% to +29% (data 2026-10-24/shortcuts)
+src/pair.rs	replace | with ^ in parent	1	equivalent: | and ^ agree on flag bits that never overlap
 src/park.rs	replace Park::any_parked -> bool with true	1	speed: a publisher tries a wake with nobody parked; wake_one finds no bit
 src/platform.rs	delete ! in Platform::xof_many	1	speed: chooses between equally correct paths
 src/platform.rs	delete ! in Sme2Turn::take	1	SME2 only: on x86 no SME2 turn is held; take returns the platform unchanged and drop releases nothing
