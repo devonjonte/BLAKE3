@@ -16,10 +16,6 @@ include = ["/src", "/c", "/build.rs", "/README.md", "/CHANGELOG.md", "/QUALITY.m
 [features]
 default = ["std"]
 
-# The Wasm SIMD implementation does not participate in dynamic feature detection,
-# Note that not all Wasm implementations support the Wasm SIMD specification.
-# This may become the default in the future.
-
 # Enables std::io traits, including impl Write for Hasher, impl Read and Seek
 # for OutputReader, and the Hasher::update_reader method. This feature is
 # enabled by default. (Previously this also controlled runtime CPU feature
@@ -35,14 +31,10 @@ zeroize = ["dep:zeroize", "arrayvec/zeroize"]
 # The following features are mainly intended for testing and benchmarking, and
 # they might change or disappear at any time without a major version bump.
 
-# By default on x86_64, this crate uses Samuel Neves' hand-written assembly
-# implementations for SSE4.1, AVX2, and AVX512. (These provide both the best
-# runtime performance, and the fastest build times.) If a C compiler is not
-# detected, or if AVX-512 support is missing from the detected compiler,
-# build.rs automatically falls back to a pure Rust build. This feature forces
-# that fallback, for testing purposes. (Note that in CI testing, we set the
-# BLAKE3_CI environment variable, which instructs build.rs to error out rather
-# than doing an automatic fallback.)
+# Portable Rust alone: no assembly kernels, and no SIMD. On x86-64 a build
+# without a C compiler is the same; on AArch64 an assembler that cannot
+# assemble armv8.2-a+sha3 stops the build instead, and this feature is the
+# way past it. (In CI, BLAKE3_CI makes build.rs stop rather than fall back.)
 pure = []
 
 [package.metadata.docs.rs]

@@ -241,8 +241,8 @@ fn build_sme2_assembly() {
 }
 
 // The integer + NEON kernels need an assembler that knows armv8.2-a+sha3
-// (GNU as 2.30+, LLVM 7+). With an older one the crate builds without them,
-// with a warning: the NEON intrinsics and the portable code serve instead.
+// (GNU as 2.30+, LLVM 7+). With an older one the build stops and says so:
+// the `pure` feature is the build without assembly.
 fn assert_assembles_sha3() {
     let compiler = new_build().get_compiler().path().to_owned();
     assert!(
