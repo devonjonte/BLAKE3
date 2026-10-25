@@ -59,8 +59,8 @@
 //!   alignment is the type's), digests go into the program's places, and
 //!   every call takes a [`Mode`].
 //!
-//! A program that wants more speed than the convenience calls give moves
-//! to the performance ones.
+//! Start with the convenience calls; when a program needs more speed, it
+//! moves to the performance ones.
 //!
 //! | Your data | Call |
 //! |---|---|
