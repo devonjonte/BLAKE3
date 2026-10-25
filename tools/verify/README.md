@@ -18,7 +18,7 @@ Commands:
     python3 tools/verify/prove_x86.py [CASE...]         # the x86-64 kernels: compressions, hash_many at fixed counts, xof_many, the chunk root and the partial pass (620 cases; --representative: 246 of them)
     python3 tools/verify/prove_x86_loop.py              # hash_many at every input count, by induction (102 cases)
     python3 tools/verify/cross_check_x86.py             # the x86-64 model against the CPU (needs an x86-64 CPU; AVX-512 forms need one with AVX-512)
-    sh tools/verify/long-proofs.sh [COMMIT]             # the proofs, the Arm CPU cross-check and the controls together (Isla and the x86 CPU check apart); posts the commit's "long proofs" status
+    sh tools/verify/long-proofs.sh [COMMIT]             # the proofs, the Arm CPU cross-check and the controls together (Isla and the x86 CPU check apart); posts the commit's "long proofs" status, from an earlier run when the proofs' inputs (c/, c2sp/, tools/verify/, the NEON generator) are the same
 
 The AArch64 proofs need Python 3 with Z3 (`python3-z3`), an AArch64
 machine with the SHA-3 extension, and Clang and llvm-objdump 17 or later

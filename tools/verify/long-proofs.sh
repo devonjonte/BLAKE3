@@ -24,6 +24,10 @@ status() {
 		curl -sSf -o /dev/null -X POST -H "Authorization: token $token" -d @- \
 			"https://api.github.com/repos/johnservil/BLAKE3/statuses/$commit"
 }
+# A status attaches to a commit GitHub has: an unpushed one fails at the
+# first post (HTTP 422), after nothing; say so plainly.
+curl -sf -o /dev/null -H "Authorization: token $token" "https://api.github.com/repos/johnservil/BLAKE3/commits/$commit" ||
+	{ echo "long-proofs: GitHub has no commit $commit: push it first (the run posts its status there)" >&2; exit 1; }
 b64() { printf %s "$1" | tr a-f A-F | basenc --base16 -d | basenc --base64url | tr -d '='; }
 # The inputs that can change a proof result: the kernels, the proof
 # tools (this script among them), the specification, and the hybrid

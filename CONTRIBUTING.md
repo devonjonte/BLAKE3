@@ -215,8 +215,12 @@ teardown otherwise costs a whole run, found at its end.
 
 Jobs of hours run on `servil` overnight: the whole mutation run, and the
 long proofs (`sh tools/verify/long-proofs.sh servil`, which posts the
-commit's "long proofs" status) after a change to an AArch64 kernel or
-the proof tools. A failure there is fixed first, before the next change
+commit's "long proofs" status). The proofs' inputs are the kernels
+(`c/`), the specification (`c2sp/`), the proof tools (`tools/verify/`)
+and the NEON generator; the script hashes them, and a commit whose
+inputs match a run that passed (`tmp/long-proofs/inputs/`) gets its
+status from that run in a second, so a change to the Rust, the build or
+the pages never waits on the proofs. A failure there is fixed first, before the next change
 to a kernel. After a candidate lands, bench-hashes pins its contender to
 the new tip (`blake3-servil`'s `rev` in `Cargo.toml`, the full hash).
 Its separate `clocks` pin fixes the instrument used on both sides of a
