@@ -96,7 +96,7 @@ the complete invariant at K=0 and the executor checks its successor.
                     mem[arm.key(base + j)] = ('word', value, j, base_key)
 
 
-def prove(so, isa, windows, blocks, increment):
+def prove(so, isa, blocks, increment):
     import prove_x86 as p
     assert 1 <= blocks <= 16, 'hash_many takes 1..16 full blocks per input'
     width = p.WIDTH[isa]
@@ -141,7 +141,7 @@ def prove(so, isa, windows, blocks, increment):
     regions['table'].symbolic_initial = True
     args = [Ptr('table', 0), count, BitVecVal(blocks, 64), Ptr('key', 0), counter,
             BitVecVal(int(increment), 64), ZeroExt(56, flags), ZeroExt(56, start), ZeroExt(56, end), Ptr('out', 0)]
-    setup = p.Setup(so, f'blake3_servil_hash_many_{isa}', regions, args, windows)
+    setup = p.Setup(so, f'blake3_servil_hash_many_{isa}', regions, args)
     machine = setup.m
     flag_words = [ZeroExt(24, f) for f in (flags | start | end, flags | start, flags | end, flags)] + [BitVecVal(64, 32)]
     p.d_row_facts(machine, counter, 2 * width if increment else 1, flag_words)
@@ -201,7 +201,7 @@ def prove(so, isa, windows, blocks, increment):
         import canon
         canon.set_context(m.assumptions, m.lengths)
         exactly(m, check_range(m, 0, tail_count(m)))
-        p.check_abi(m, windows)
+        p.check_abi(m)
     canon.set_context([], set())
 
     print('  base paths proved; constructing the group invariant', flush=True)
@@ -225,7 +225,7 @@ def prove(so, isa, windows, blocks, increment):
             if not arm.holds(m, group == k + 1):
                 raise Unproved('returns before the last full group')
             expected |= check_range(m, (k + 1) * width, tail_count(m))
-            p.check_abi(m, windows)
+            p.check_abi(m)
         exactly(m, expected)
     # Fix the checked pass at A, with independent current counter C.
     # Replacing the original counter by C-W*A is a bijection for each A.
@@ -271,26 +271,25 @@ def prove(so, isa, windows, blocks, increment):
 def cases():
     """The caller's fixed-counter messages/parents and incrementing chunks."""
     import prove_x86 as p
-    return ([(isa, windows, blocks, False)
-             for isa in p.WIDTH for windows in (False, True) for blocks in range(1, 17)]
-            + [(isa, windows, 16, True) for isa in p.WIDTH for windows in (False, True)])
+    return ([(isa, blocks, False) for isa in p.WIDTH for blocks in range(1, 17)]
+            + [(isa, 16, True) for isa in p.WIDTH])
 
 
 def prove_case(case):
     import prove_x86 as p
-    isa, windows, blocks, increment = case
+    isa, blocks, increment = case
     try:
-        result = prove(p.assemble(isa, windows), isa, windows, blocks, increment)
+        result = prove(p.assemble(isa), isa, blocks, increment)
     except Unproved as error:
         return case, False, str(error)
     return case, True, repr(result)
 
 
 def main():
-    """Default: all 102 cases. One optional Python literal selects a batch.
+    """Default: all 51 cases. One optional Python literal selects a batch.
 
-    Each tuple is (ISA, Windows, blocks, increment), for example:
-      python3 tools/verify/prove_x86_loop.py "[('avx2', False, 1, False)]"
+    Each tuple is (ISA, blocks, increment), for example:
+      python3 tools/verify/prove_x86_loop.py "[('avx2', 1, False)]"
     Run under a bounded process-group supervisor. Fresh workers keep
     memory flat; set the caller's virtual-memory limit before launching.
     Choose --workers from the host's memory: each worker is a separate
@@ -307,12 +306,12 @@ def main():
     import prove_x86 as p
     declared = cases()
     todo = ast.literal_eval(arguments.cases) if arguments.cases is not None else declared
-    for isa, windows in {(c[0], c[1]) for c in todo}:
-        so = p.assemble(isa, windows)
+    for isa in {c[0] for c in todo}:
+        so = p.assemble(isa)
         x86.symbols(so)
         x86.image(so)
-    todo = sorted(todo, key=lambda c: (-c[3], -p.WIDTH[c[0]], -c[2]))
-    assert todo and all(case in declared for case in todo), 'select nonempty cases from the declared 102-case matrix'
+    todo = sorted(todo, key=lambda c: (-c[2], -p.WIDTH[c[0]], -c[1]))
+    assert todo and all(case in declared for case in todo), 'select nonempty cases from the declared 51-case matrix'
     assert arguments.workers >= 1, 'at least one worker'
     failures = 0
     for case, passed, details in workers.each(prove_case, todo, arguments.workers):

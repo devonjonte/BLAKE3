@@ -78,7 +78,7 @@ class X86EntryTests(unittest.TestCase):
              patch.object(p.x86, "disassemble", return_value={}), \
              patch.object(p.x86, "text_end", return_value=1), \
              patch.object(p.x86, "image", return_value={0: 0}):
-            setup = p.Setup("unused", "entry", {}, [], False, p.ENTRY_STACKS[0])
+            setup = p.Setup("unused", "entry", {}, [], p.ENTRY_STACKS[0])
         self.assertEqual(set(setup.m.k), set(range(8)))
         self.assertEqual(len({value.get_id() for value in setup.m.k.values()}), 8)
         for value in setup.m.k.values():
@@ -190,27 +190,23 @@ class ConcreteCasesTests(unittest.TestCase):
     def test_representative_cases_are_the_declared_promotion_set(self):
         import prove_x86
         got = prove_x86.representative_cases()
-        self.assertEqual(len(got), 246)
-        self.assertEqual(len(set(got)), 246)
+        self.assertEqual(len(got), 155)
+        self.assertEqual(len(set(got)), 155)
         self.assertTrue(all(case in prove_x86.cases(set()) for case in got))
         # pair.rs's shape: two inputs at consecutive counters, 1 to 15
-        # blocks, AVX2 and AVX-512, both conventions (#163).
+        # blocks, AVX2 and AVX-512 (#163).
         for isa in ("avx2", "avx512"):
-            for windows in (False, True):
-                for blocks in range(1, 16):
-                    self.assertIn((isa, windows, "hash_many", (2, blocks, True)), got)
+            for blocks in range(1, 16):
+                self.assertIn((isa, "hash_many", (2, blocks, True)), got)
 
 
 class EveryCountCasesTests(unittest.TestCase):
     def test_declared_matrix_has_every_caller_shape_once(self):
         import prove_x86_loop
-        expected = {(isa, windows, blocks, False)
-                    for isa in ('sse41', 'avx2', 'avx512')
-                    for windows in (False, True) for blocks in range(1, 17)}
-        expected |= {(isa, windows, 16, True)
-                     for isa in ('sse41', 'avx2', 'avx512') for windows in (False, True)}
+        expected = {(isa, blocks, False) for isa in ('sse41', 'avx2', 'avx512') for blocks in range(1, 17)}
+        expected |= {(isa, 16, True) for isa in ('sse41', 'avx2', 'avx512')}
         got = prove_x86_loop.cases()
-        self.assertEqual(len(got), 102)
+        self.assertEqual(len(got), 51)
         self.assertEqual(set(got), expected)
 
 

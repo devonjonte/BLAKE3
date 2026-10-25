@@ -3,7 +3,8 @@ _FACT_CACHE = {}
 
 """A model of the x86-64 instructions BLAKE3's kernels use, for proving
 the assembled machine code (upstream's c/blake3_{sse41,avx2,avx512}_
-x86-64_unix.S and their MSVC twins) as aarch64.py proves the Arm kernels.
+x86-64_unix.S and the fork's generated kernels) as aarch64.py proves the
+Arm kernels.
 
 The machine runs LLVM's disassembly (Intel syntax) of a linked object, so
 rip-relative constants resolve to the image. General registers hold 64-bit
@@ -81,10 +82,6 @@ def disassemble(so, start, stop):
             t = re.match(r"\s*0x([0-9a-f]+)", comment)
             target = int(t.group(1), 16) if t else None
         rows.append((addr, mnem, split(rest.strip()), target))
-    # A PE image's absolute operands print as the address's low 32 bits,
-    # signed (llvm-objdump on COFF): the full address is the image base
-    # plus those bits. An ELF's are already whole.
-    base = sections(so)[".text"][0] & ~0xFFFFFFFF
     code = {}
     for i, (addr, mnem, ops, target) in enumerate(rows):
         nxt = rows[i + 1][0] if i + 1 < len(rows) else stop
@@ -95,8 +92,6 @@ def disassemble(so, start, stop):
             disp = int(mt.group(2), 16) if mt.group(2) else 0
             return f"[abs {nxt + (-disp if mt.group(1) == '-' else disp):#x}]"
         ops = [re.sub(r"\[rip(?: ([+-]) (0x[0-9a-f]+))?\]", absolute, o) for o in ops]
-        if base:
-            ops = [re.sub(r"\[(-?0x[0-9a-f]+)\]", lambda mt: f"[abs {base + (int(mt.group(1), 16) & 0xFFFFFFFF):#x}]", o) for o in ops]
         code[addr] = (mnem, ops, nxt)
     return code
 
@@ -133,18 +128,13 @@ def sections(so):
 
 @functools.lru_cache(None)
 def symbols(so):
-    """{name: address}: ELF's absolute values; COFF's (a Windows image)
-    relative to their section, .text here."""
+    """{name: address}: the ELF image's symbol values."""
     out = subprocess.run([LLVM_OBJDUMP, "-t", so], capture_output=True, text=True, check=True).stdout
     syms = {}
-    text = sections(so)[".text"][0]
     for line in out.splitlines():
         parts = line.split()
         if len(parts) >= 2 and re.match(r"^[0-9a-f]{16}$", parts[0]):
             syms[parts[-1]] = int(parts[0], 16)
-        coff = re.match(r"^\[\s*\d+\]\(sec\s+1\).* 0x([0-9a-f]+) (\S+)$", line)
-        if coff:
-            syms[coff.group(2)] = text + int(coff.group(1), 16)
     return syms
 
 
@@ -157,7 +147,7 @@ def text_end(so):
 @functools.lru_cache(None)
 def image(so):
     """The image's loaded bytes, {address: int}: code and constants."""
-    names = [n for n in sections(so) if n in (".text", ".rodata", ".rdata", ".data")]
+    names = [n for n in sections(so) if n in (".text", ".rodata", ".data")]
     out = subprocess.run([LLVM_OBJDUMP, "-s"] + [f"--section={n}" for n in names] + [so],
                          capture_output=True, text=True, check=True).stdout
     data = {}

@@ -91,7 +91,7 @@ def code_lines(path):
 def inventory():
     files = sorted(glob.glob("src/*.rs", root_dir=ROOT) + glob.glob("capi/src/*.rs", root_dir=ROOT))
     files = [f for f in files if not f.endswith(("/test.rs",))]
-    asm = sorted(glob.glob("c/*.S", root_dir=ROOT) + glob.glob("c/*.asm", root_dir=ROOT) + glob.glob("c/*.c", root_dir=ROOT))
+    asm = sorted(glob.glob("c/*.S", root_dir=ROOT) + glob.glob("c/*.c", root_dir=ROOT))
     return {f: code_lines(f) for f in files + asm}
 
 

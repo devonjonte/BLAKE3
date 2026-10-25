@@ -224,7 +224,7 @@ def x86_positive(_):
     """The precise domain used by the mutants, in a fresh worker."""
     import prove_x86 as p
     import prove_x86_loop as loop
-    return loop.prove(p.assemble("avx2", False), "avx2", False, 1, True)
+    return loop.prove(p.assemble("avx2"), "avx2", 1, True)
 
 
 def x86_mutant_jobs():
@@ -264,8 +264,8 @@ def x86_mutant_jobs():
 def x86_memory_positive(_):
     """The unmodified kernels at the memory mutants' entry alignment."""
     import prove_x86 as p
-    return (p.prove_compress(p.assemble("sse41", False), "sse41", False, False),
-            p.prove_hash_many(p.assemble("avx2", False), "avx2", False, 8, 1, True))
+    return (p.prove_compress(p.assemble("sse41"), "sse41", False),
+            p.prove_hash_many(p.assemble("avx2"), "avx2", 8, 1, True))
 
 
 def x86_memory_mutant_jobs():

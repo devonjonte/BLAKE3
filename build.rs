@@ -32,44 +32,6 @@ fn is_x86_64() -> bool {
     target_components()[0] == "x86_64"
 }
 
-fn is_windows_target() -> bool {
-    env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows"
-}
-
-/// Windows builds take MSVC's assembler: the fork supports Windows with
-/// MSVC alone (README); official BLAKE3 serves MinGW and Clang there.
-fn assert_msvc_asm() {
-    assert!(
-        use_msvc_asm(),
-        "blake3-servil builds for Windows with MSVC (cl) alone; for MinGW, or Clang in place of cl, use official BLAKE3 (https://github.com/BLAKE3-team/BLAKE3)"
-    );
-}
-
-fn use_msvc_asm() -> bool {
-    const MSVC_NAMES: &[&str] = &["", "cl", "cl.exe"];
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-    let target_windows_msvc = target_os == "windows" && target_env == "msvc";
-    let host_triple = env::var("HOST").unwrap_or_default();
-    let target_triple = env::var("TARGET").unwrap_or_default();
-    let cross_compiling = host_triple != target_triple;
-    let cc = env::var("CC").unwrap_or_default().to_ascii_lowercase();
-    if !target_windows_msvc {
-        // We are not building for Windows with the MSVC toolchain.
-        false
-    } else if !cross_compiling && MSVC_NAMES.contains(&&*cc) {
-        // We are building on Windows with the MSVC toolchain (and not cross-compiling for another architecture or target).
-        true
-    } else {
-        // We are cross-compiling to Windows with the MSVC toolchain.
-        let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-        let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
-        let cc = env::var(format!("CC_{target_arch}_{target_vendor}_windows_msvc")).unwrap_or_default().to_ascii_lowercase();
-        // Check if we are using the MSVC compiler.
-        MSVC_NAMES.contains(&&*cc)
-    }
-}
-
 fn is_aarch64() -> bool {
     target_components()[0] == "aarch64"
 }
@@ -84,21 +46,9 @@ fn is_little_endian() -> bool {
     endianness() == "little"
 }
 
-// Windows targets may be using the MSVC toolchain or the MinGW toolchain. The
-// right compiler flags to use depend on the toolchain. (And we don't want to
-// use flag_if_supported, because we don't want features to be silently
-// disabled by old compilers.)
-fn is_windows_msvc() -> bool {
-    // Some targets are only two components long, so check in steps.
-    let second_component = &target_components()[1];
-    (second_component == "pc" || second_component == "win7") && target_components()[2] == "windows" && target_components()[3] == "msvc"
-}
-
 fn new_build() -> cc::Build {
     let mut build = cc::Build::new();
-    if !is_windows_msvc() {
-        build.flag("-std=c11");
-    }
+    build.flag("-std=c11");
     // Do NOT trigger a rebuild any time the env changes (e.g. $PATH).
     // This prevents all downstream crates from being rebuilt when `cargo check`
     // or `cargo build` are run in different environments, like Rust Analyzer
@@ -117,18 +67,12 @@ use CCompilerSupport::*;
 
 fn c_compiler_support() -> CCompilerSupport {
     let build = new_build();
-    let flags_checked;
-    let support_result: Result<bool, _> = if is_windows_msvc() {
-        flags_checked = "/arch:AVX512";
-        build.is_flag_supported("/arch:AVX512")
-    } else {
-        // Check for both of the flags we use. If -mavx512f works, then -mavx512vl
-        // will probably always work too, but we might as well be thorough.
-        flags_checked = "-mavx512f and -mavx512vl";
-        match build.is_flag_supported("-mavx512f") {
-            Ok(true) => build.is_flag_supported("-mavx512vl"),
-            false_or_error => false_or_error,
-        }
+    // Check for both of the flags we use. If -mavx512f works, then -mavx512vl
+    // will probably always work too, but we might as well be thorough.
+    let flags_checked = "-mavx512f and -mavx512vl";
+    let support_result: Result<bool, _> = match build.is_flag_supported("-mavx512f") {
+        Ok(true) => build.is_flag_supported("-mavx512vl"),
+        false_or_error => false_or_error,
     };
     match support_result {
         Ok(true) => YesAVX512,
@@ -150,23 +94,14 @@ fn build_sse41_avx2_assembly() {
     println!("cargo::rustc-cfg=blake3_sse41_ffi");
     println!("cargo::rustc-cfg=blake3_avx2_ffi");
     let mut build = new_build();
-    if is_windows_target() {
-        assert_msvc_asm();
-        build.file("c/blake3_sse41_x86-64_windows_msvc.asm");
-        build.file("c/blake3_avx2_x86-64_windows_msvc.asm");
-        // The fork's own kernel: names of its own, which no other crate defines.
-        build.file("c/blake3_partial_x86-64_windows_msvc.asm");
-    } else {
-        // All non-Windows implementations are assumed to support
-        // Linux-style assembly. These files do contain a small
-        // explicit workaround for macOS also.
-        build.file("c/blake3_sse41_x86-64_unix.S");
-        build.file("c/blake3_avx2_x86-64_unix.S");
-        // The fork's own kernels (the pass with a partial chunk, the chunk
-        // root in one call): names of their own, which no other crate defines.
-        build.file("c/blake3_partial_x86-64_unix.S");
-        build.file("c/blake3_chunk_root_x86-64_unix.S");
-    }
+    // The Unix assembly (Linux and macOS: the files carry macOS's one
+    // difference themselves).
+    build.file("c/blake3_sse41_x86-64_unix.S");
+    build.file("c/blake3_avx2_x86-64_unix.S");
+    // The fork's own kernels (the pass with a partial chunk, the chunk root
+    // in one call).
+    build.file("c/blake3_partial_x86-64_unix.S");
+    build.file("c/blake3_chunk_root_x86-64_unix.S");
     build.compile("blake3_sse41_avx2_assembly");
 }
 
@@ -175,21 +110,11 @@ fn build_avx512_assembly() {
     assert!(is_x86_64());
     println!("cargo::rustc-cfg=blake3_avx512_ffi");
     let mut build = new_build();
-    let mut is_msvc = false;
-    if is_windows_target() {
-        assert_msvc_asm();
-        build.file("c/blake3_avx512_x86-64_windows_msvc.asm");
-        is_msvc = true;
-    } else {
-        build.file("c/blake3_avx512_x86-64_unix.S");
-    }
-
+    build.file("c/blake3_avx512_x86-64_unix.S");
     // Older versions of Clang require these flags, even for assembly. See
     // https://github.com/BLAKE3-team/BLAKE3/issues/79.
-    if !is_msvc {
-        build.flag("-mavx512f");
-        build.flag("-mavx512vl");
-    }
+    build.flag("-mavx512f");
+    build.flag("-mavx512vl");
     build.compile("blake3_avx512_assembly");
 }
 
@@ -264,17 +189,22 @@ fn build_neon_hybrid_assembly() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Windows is not supported (BLAKE3 #160): one clear stop, before
+    // anything is built, rather than a build that half works.
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    assert!(
+        target_os != "windows",
+        "blake3-servil does not support Windows (https://github.com/johnservil/BLAKE3/issues/160); use official BLAKE3 there (https://github.com/BLAKE3-team/BLAKE3)"
+    );
     // If CFLAGS is set, make sure LTO is disabled by appending -fno-lto. (We can't do this with
     // .flag() later on, because CFLAGS takes precedence.) Any mismatch between the C compiler and
     // the Rust linker can cause linker errors in our C intrinsics implementations if LTO is
     // enabled. See https://github.com/BLAKE3-team/BLAKE3/issues/550.
-    if !is_windows_msvc() {
-        if let Some(mut flags) = env::var_os("CFLAGS") {
-            flags.push(" -fno-lto");
-            // SAFETY: This build script is single-threaded.
-            unsafe {
-                env::set_var("CFLAGS", flags);
-            }
+    if let Some(mut flags) = env::var_os("CFLAGS") {
+        flags.push(" -fno-lto");
+        // SAFETY: This build script is single-threaded.
+        unsafe {
+            env::set_var("CFLAGS", flags);
         }
     }
 

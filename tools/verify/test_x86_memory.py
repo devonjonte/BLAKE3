@@ -23,7 +23,7 @@ class X86Memory(unittest.TestCase):
         from z3 import BitVecVal, Solver, sat, unsat
         with patch.multiple(p.x86, symbols=lambda _: {"entry": 0}, disassemble=lambda *args: {},
                             text_end=lambda _: 1, image=lambda _: {0: 0}):
-            setup = p.Setup("unused", "entry", {}, [], False)
+            setup = p.Setup("unused", "entry", {}, [])
         residue = setup.m.entry_stack - p.STACK
         for value, expected in [(8, sat), (24, sat), (40, sat), (56, sat),
                                 (0, unsat), (16, unsat), (32, unsat), (48, unsat), (64, unsat)]:
@@ -37,17 +37,16 @@ class X86Memory(unittest.TestCase):
         self.assertEqual({s % 64 for s in p.ENTRY_STACKS}, {8, 24, 40, 56})
         with patch.multiple(p.x86, symbols=lambda _: {"entry": 0}, disassemble=lambda *args: {},
                             text_end=lambda _: 1, image=lambda _: {0: 0}):
-            for windows in (False, True):
-                for nargs in (0, 5, 6, 7, 10):
-                    for stack in p.ENTRY_STACKS:
-                        with self.subTest(windows=windows, nargs=nargs, stack=stack):
-                            setup = p.Setup("unused", "entry", {}, [BitVecVal(0, 64)] * nargs, windows, stack)
-                            end = stack + (40 if windows else 8) + 8 * max(0, nargs - (4 if windows else 6))
-                            self.assertEqual(arm.concrete(setup.m.regions["stack"].size), end)
-                            self.assertEqual(setup.m.regions["stack"].alignment, 64)
-                            setup.m.access(Ptr("stack", end - 8), 8, True)
-                            with self.assertRaises(Unproved):
-                                setup.m.access(Ptr("stack", end), 1, True)
+            for nargs in (0, 5, 6, 7, 10):
+                for stack in p.ENTRY_STACKS:
+                    with self.subTest(nargs=nargs, stack=stack):
+                        setup = p.Setup("unused", "entry", {}, [BitVecVal(0, 64)] * nargs, stack)
+                        end = stack + 8 + 8 * max(0, nargs - 6)
+                        self.assertEqual(arm.concrete(setup.m.regions["stack"].size), end)
+                        self.assertEqual(setup.m.regions["stack"].alignment, 64)
+                        setup.m.access(Ptr("stack", end - 8), 8, True)
+                        with self.assertRaises(Unproved):
+                            setup.m.access(Ptr("stack", end), 1, True)
 
     def test_aligned_memory_forms(self):
         forms = [("movaps", ["xmm0", "xmmword ptr [rdi]"], 16),

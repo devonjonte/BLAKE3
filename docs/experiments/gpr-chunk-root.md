@@ -12,8 +12,7 @@ kernel can come back when the evidence changes.
   devonjonte/BLAKE3, Sam's review head. One generator,
   `tools/gen_x86_gpr_chunk_root.py`, emits
   `c/blake3_gpr_chunk_root_x86-64_unix.S`: 920 instructions, 2996 bytes,
-  System V only (it keeps callee-saved registers in XMM8-13, which the
-  Windows ABI forbids). Build with `BLAKE3_DIAGNOSTIC_GPR` set to try it.
+  keeping callee-saved registers in XMM8-13. Build with `BLAKE3_DIAGNOSTIC_GPR` set to try it.
 - **The proof:** tag `archive/gpr-proof-ce874a5` (`tools/verify`).
 - **The evidence:** devonjonte/bench-hashes, branch `data`:
   `2026-10-24/gpr-i7` (Intel) and the links in #150 (the EPYC).

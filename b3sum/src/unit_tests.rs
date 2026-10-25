@@ -33,16 +33,13 @@ fn test_parse_check_line() {
 
     // *Unescaped* backslashes. Note that this line does *not* start with a
     // backslash, so something like "\" + "n" is interpreted as *two*
-    // characters. We forbid all backslashes on Windows, so this test is
-    // Unix-only.
-    if cfg!(not(windows)) {
-        let crate::ParsedCheckLine { file_string, is_escaped, file_path, expected_hash } =
-            crate::parse_check_line("4343434343434343434343434343434343434343434343434343434343434343  fo\\a\\no").unwrap();
-        assert_eq!(expected_hash, blake3::Hash::from([0x43; 32]));
-        assert!(!is_escaped);
-        assert_eq!(file_string, "fo\\a\\no");
-        assert_eq!(file_path, Path::new("fo\\a\\no"));
-    }
+    // characters.
+    let crate::ParsedCheckLine { file_string, is_escaped, file_path, expected_hash } =
+        crate::parse_check_line("4343434343434343434343434343434343434343434343434343434343434343  fo\\a\\no").unwrap();
+    assert_eq!(expected_hash, blake3::Hash::from([0x43; 32]));
+    assert!(!is_escaped);
+    assert_eq!(file_string, "fo\\a\\no");
+    assert_eq!(file_path, Path::new("fo\\a\\no"));
 
     // escaped newlines
     let crate::ParsedCheckLine { file_string, is_escaped, file_path, expected_hash } =
@@ -52,16 +49,13 @@ fn test_parse_check_line() {
     assert_eq!(file_string, "fo\\r\\n\\n\\ro");
     assert_eq!(file_path, Path::new("fo\r\n\n\ro"));
 
-    // Escaped newline and backslash. Again because backslash is not allowed on
-    // Windows, this test is Unix-only.
-    if cfg!(not(windows)) {
-        let crate::ParsedCheckLine { file_string, is_escaped, file_path, expected_hash } =
-            crate::parse_check_line("\\4545454545454545454545454545454545454545454545454545454545454545  fo\\n\\\\o").unwrap();
-        assert_eq!(expected_hash, blake3::Hash::from([0x45; 32]));
-        assert!(is_escaped);
-        assert_eq!(file_string, "fo\\n\\\\o");
-        assert_eq!(file_path, Path::new("fo\n\\o"));
-    }
+    // Escaped newline and backslash.
+    let crate::ParsedCheckLine { file_string, is_escaped, file_path, expected_hash } =
+        crate::parse_check_line("\\4545454545454545454545454545454545454545454545454545454545454545  fo\\n\\\\o").unwrap();
+    assert_eq!(expected_hash, blake3::Hash::from([0x45; 32]));
+    assert!(is_escaped);
+    assert_eq!(file_string, "fo\\n\\\\o");
+    assert_eq!(file_path, Path::new("fo\n\\o"));
 
     // non-ASCII path
     let crate::ParsedCheckLine { file_string, is_escaped, file_path, expected_hash } =
@@ -121,12 +115,6 @@ fn test_parse_check_line() {
 
     // Unicode replacement char
     crate::parse_check_line("0000000000000000000000000000000000000000000000000000000000000000  fo�o").unwrap_err();
-
-    // On Windows only, backslashes are not allowed, escaped or otherwise.
-    if cfg!(windows) {
-        crate::parse_check_line("0000000000000000000000000000000000000000000000000000000000000000  fo\\o").unwrap_err();
-        crate::parse_check_line("\\0000000000000000000000000000000000000000000000000000000000000000  fo\\\\o").unwrap_err();
-    }
 }
 
 #[test]
@@ -137,11 +125,6 @@ fn test_filepath_to_string() {
     assert!(!output.is_escaped);
 
     let output = crate::filepath_to_string(Path::new("f\\ \t\r\noo"));
-    if cfg!(windows) {
-        // We normalize backslashes to forward slashes on Windows.
-        assert_eq!(output.filepath_string, "f/ \t\\r\\noo");
-    } else {
-        assert_eq!(output.filepath_string, "f\\\\ \t\\r\\noo");
-    }
+    assert_eq!(output.filepath_string, "f\\\\ \t\\r\\noo");
     assert!(output.is_escaped);
 }

@@ -45,8 +45,8 @@ header, the tool's README.
 ## Build and test
 
 The supported C compilers are those of supported operating systems: GCC
-12 or later (Debian 12's, the oldest; CI builds and tests with it), Clang,
-and MSVC as current releases ship them; official BLAKE3 serves older ones.
+12 or later (Debian 12's, the oldest; CI builds and tests with it) and
+Clang as current releases ship it; official BLAKE3 serves older ones.
 
 On AArch64 Linux and macOS the build includes the SME2 kernel when the C
 compiler assembles SME2: Clang 17 or later (Xcode 15 or later), or GCC 14
@@ -116,25 +116,24 @@ share of the CPUs, and caps each test process's memory, so a runaway
 mutant cannot take the machine.
 
 CI (`.github/workflows/ci.yml`) runs the suites on Linux x86-64 and arm64
-(without SME2, and without SHA-3 under QEMU), and Windows with MSVC,
+(without SME2, and without SHA-3 under QEMU), and macOS's C API,
 for every pull request, and by hand for a
 candidate that changes code for those targets. The Mac runner
 (`tools/runner/`) runs the Rust suites natively. `sh tools/check-builds.sh`
 runs, in minutes, the builds the suites above leave out: without std, on
 one CPU without SME2, warnings as errors, and compile checks for x86-64.
 
-The supported targets are 64-bit Arm (Linux, macOS), x86-64 (Linux,
-Windows with MSVC), with the latest stable Rust (and
-any nightly feature the fork chooses to use). Official BLAKE3 serves the
-rest.
+The supported targets are 64-bit Arm (Linux, macOS) and x86-64 (Linux),
+with the latest stable Rust (and any nightly feature the fork chooses to
+use). A Windows build stops with a message pointing to official BLAKE3,
+which serves the rest (#160).
 
 The generated kernels are committed beside their generators. Edit the
 generator, then run it: `python3 tools/gen_neon_hybrid.py >
 c/blake3_neon_hybrid_aarch64.S`, `python3 tools/gen_sme2_hybrid.py >
-c/blake3_sme2_hybrid_aarch64.S`, `python3 tools/gen_x86.py unix >
-c/blake3_partial_x86-64_unix.S` and `python3 tools/gen_x86.py msvc >
-c/blake3_partial_x86-64_windows_msvc.asm`, or `python3
-tools/gen_x86_chunk_root.py > c/blake3_chunk_root_x86-64_unix.S`;
+c/blake3_sme2_hybrid_aarch64.S`, `python3 tools/gen_x86.py >
+c/blake3_partial_x86-64_unix.S`, or `python3 tools/gen_x86_chunk_root.py >
+c/blake3_chunk_root_x86-64_unix.S`;
 `tools/check-builds.sh` fails when a file and its generator drift apart.
 
 ## Performance
@@ -198,8 +197,8 @@ what was checked is what lands) once:
 
 - every suite above passes, and `sh tools/check-builds.sh`;
 - CI passes on it, started by hand (`workflow_dispatch`) when it changes
-  code for targets the VM and Mac do not run (x86-64, Windows, AArch64
-  without SME2);
+  code for targets the VM and Mac do not run (x86-64, AArch64 without
+  SME2);
 - mutation testing passes on a change to the Rust
   (`python3 tools/mutants/check.py --since servil`: the mutants in the
   changed lines, and the ones the last map says a changed test catches);

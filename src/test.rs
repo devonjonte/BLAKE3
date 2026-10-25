@@ -16,19 +16,19 @@ fn test_every_assembly_symbol_carries_the_crate_prefix() {
     let mut files = 0;
     for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();
-        if !matches!(path.extension().and_then(|e| e.to_str()), Some("S" | "asm")) {
+        if path.extension().and_then(|e| e.to_str()) != Some("S") {
             continue;
         }
         files += 1;
         for (n, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {
             let mut words = line.split_whitespace();
-            // .globl / .global (Unix), PUBLIC (MSVC): the names the linker sees.
-            if let (Some(".globl" | ".global" | "PUBLIC" | "public"), Some(name)) = (words.next(), words.next()) {
+            // .globl / .global: the names the linker sees.
+            if let (Some(".globl" | ".global"), Some(name)) = (words.next(), words.next()) {
                 assert!(name.trim_start_matches('_').starts_with("blake3_servil_"), "{}:{}: {name} lacks the prefix blake3_servil_", path.display(), n + 1);
             }
         }
     }
-    assert!(files >= 9, "the assembly files in {}: {files}", dir.display());
+    assert!(files >= 8, "the assembly files in {}: {files}", dir.display());
 }
 
 /// The kernels servil shares a name with official BLAKE3 1.8.7, with

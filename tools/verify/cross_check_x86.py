@@ -1,6 +1,6 @@
 """Check x86 vector register and memory forms against a Linux x86-64 CPU.
 
-Every form used by the Unix and Windows kernels gets 200 random states.
+Every form used by the kernels gets 200 random states.
 Memory forms compare the entire buffer as well as the registers. Unaligned
 moves/arithmetic run at an unaligned address too; aligned moves have a
 separate, bounded fault control. AVX2 is required; AVX-512 forms are
@@ -164,11 +164,8 @@ def main():
     total, skipped, bad, memory_forms, faults = 0, 0, 0, 0, 0
     for isa in FILES:
         import prove_x86
-        fl = {}
-        for windows in (False, True):
-            so = prove_x86.assemble(isa, windows)
-            fl.update(dict.fromkeys(forms(x86.disassemble(so, x86.sections(so)[".text"][0], x86.text_end(so)))))
-        fl = list(fl)
+        so = prove_x86.assemble(isa)
+        fl = list(dict.fromkeys(forms(x86.disassemble(so, x86.sections(so)[".text"][0], x86.text_end(so)))))
         if any(wide(t) for _, t in fl) and not avx512:
             skipped += len(fl)
             continue

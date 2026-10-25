@@ -188,7 +188,7 @@ mod avx2;
 #[cfg(blake3_avx512_ffi)]
 #[path = "ffi_avx512.rs"]
 mod avx512;
-#[cfg(all(blake3_sse41_ffi, not(target_os = "windows")))]
+#[cfg(blake3_sse41_ffi)]
 #[path = "ffi_chunk_root.rs"]
 mod chunk_root;
 #[cfg(blake3_neon)]

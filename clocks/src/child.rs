@@ -27,8 +27,6 @@
 //! entry cleared after the reaping, so its CPU time counts once. The
 //! running child's own threads count as it runs; a process it starts in
 //! turn counts once the child reaps it.
-//!
-//! Windows gives wall time alone here.
 
 use crate::Counts;
 
@@ -304,17 +302,6 @@ mod imp {
     }
 }
 
-#[cfg(not(unix))]
-mod imp {
-    use super::Run;
-
-    pub fn finish(mut child: std::process::Child, started: std::time::Instant, started_ns: u64) -> Run {
-        let status = child.wait().expect("wait on the child");
-        let wall_ns = crate::since_ns(started);
-        Run { started_ns, wall_ns, success: status.success(), cpu_ns: None, max_rss_bytes: None, storage_read_bytes: None, major_faults: None, counts: None }
-    }
-}
-
 /// The tests start processes (Unix only).
 #[cfg(all(test, unix))]
 mod tests {
@@ -463,9 +450,9 @@ mod tests {
     #[test]
     fn a_reaped_childs_cpu_time_is_this_processs() {
         let _one = one();
-        let before = crate::process_cpu_ns().expect("unix has a process CPU clock");
+        let before = crate::process_cpu_ns();
         let child = run(std::process::Command::new("sh").args(["-c", "i=0; while [ $i -lt 50000 ]; do i=$((i+1)); done"]));
-        let after = crate::process_cpu_ns().expect("unix has a process CPU clock");
+        let after = crate::process_cpu_ns();
         assert!(after - before >= child.cpu_ns.unwrap(), "{before} {after} {child:?}");
     }
 }

@@ -11,7 +11,7 @@ overview, read [QUALITY.md](../QUALITY.md) first.
 | Platform | Its kernels | Checked |
 |---|---|---|
 | 64-bit Arm: Apple Silicon, Linux and macOS | generated assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved** at every block and group count, and tested |
-| x86-64: Linux, Windows (MSVC) | the fork's generated assembly: whole chunks with a partial one, and the chunk root | **proved** for every input, and tested |
+| x86-64: Linux | the fork's generated assembly: whole chunks with a partial one, and the chunk root | **proved** for every input, and tested |
 | | upstream's assembly, its symbols renamed and its batch kernels' loads kept within each input (bug 8, below) | **proved** at every shape the crate calls (below), and tested |
 
 ## What is new, and so where the risk is
@@ -208,8 +208,7 @@ unrolled kernel code.
 - **On the Mac**: every suite in debug builds (overflow checks and
   debug assertions over the SME2 paths): all clean.
 - **CI on other targets** (GitHub Actions): the suites on Linux x86-64
-  and arm64 (without SME2, and without SHA-3 under QEMU), macOS, Windows
-  with MSVC.
+  and arm64 (without SME2, and without SHA-3 under QEMU), and macOS.
 - **Miri**, which interprets Rust and stops at undefined behaviour, over
   small versions of the unsafe paths in the `pure` build (Miri cannot run
   assembly or SIMD intrinsics): `test::unsafe_paths` (batches, the pool
@@ -255,22 +254,22 @@ keys (the induction proofs also treat counters and their steps as
 public: "Timing and secrets", below).
 
 On x86-64, the fork's generated kernels (`blake3_servil_partial_sse41` and
-`blake3_servil_partial_avx2`, under both calling conventions) are proved for
+`blake3_servil_partial_avx2`) are proved for
 every input: each lane's sixteen blocks from its chaining value and
 counter, with every per-lane, per-block length and flags, and the
-snapshot after every block (`prove_x86.py partial`, 64 cases).
+snapshot after every block (`prove_x86.py partial`, 32 cases).
 The fork's chunk-root kernel (`blake3_chunk_root_x86-64_unix.S`, SSE4.1
 and AVX-512 entries), which hashes an input of one chunk or less to its
 root in one call, is proved for every input: 0 to 15 whole blocks before
 the last, every last-block length, every mode (`prove_x86.py chunk_root`,
-32 cases). Upstream's assembly kernels (SSE4.1, AVX2, AVX-512, each under
-the Unix and the Windows calling convention) are proved the same way,
+32 cases). Upstream's assembly kernels (SSE4.1, AVX2, AVX-512, under the
+System V calling convention of Linux and macOS) are proved the same way,
 against the same definition, as far as these cases:
 
 - one compression (`compress_in_place`, `compress_xof`): SSE4.1 and
-  AVX-512 (AVX2 has none of its own), both conventions;
-- `hash_many` at arbitrary counts (`prove_x86_loop.py`): 102 cases: each
-  instruction set under both conventions, at block lengths 1 to 16 with
+  AVX-512 (AVX2 has none of its own);
+- `hash_many` at arbitrary counts (`prove_x86_loop.py`): 51 cases: each
+  instruction set, at block lengths 1 to 16 with
   a fixed counter and at 16 blocks with an incrementing counter. Counts
   range from zero to the largest whose output and pointer table fit in
   64-bit regions. Every proof uses one symbolic entry-stack residue
@@ -278,11 +277,11 @@ against the same definition, as far as these cases:
 - `hash_many` at fixed counts (`prove_x86.py`): every count up to two
   passes of the kernel's width at 1, 2 and 16 blocks with an incrementing
   counter, and every block length at one full-width pass with one
-  counter, for each instruction set and convention (432 cases; the 114
-  of them `--representative` selects cover every block length and the
-  first, full-width and two-pass counts);
+  counter, for each instruction set (216 cases; the 57 of them
+  `--representative` selects cover every block length and the first,
+  full-width and two-pass counts);
 - `hash_many` with two inputs at consecutive counters over 1 to 15
-  blocks, on AVX2 and AVX-512, both conventions (60 cases): `pair.rs`'s
+  blocks, on AVX2 and AVX-512 (30 cases): `pair.rs`'s
   shape, a whole chunk and a partial one side by side;
 - AVX-512 `xof_many`: 1 to 32 blocks, which is how the crate calls it
   (`ffi_avx512.rs` makes one call per 32 blocks of a longer output).
@@ -369,19 +368,19 @@ python3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
 
 The x86-64 proofs run on any machine with Python 3, `python3-z3`, Clang and
-LLVM's `llvm-ml`; their instruction model is checked against the CPU by
+LLVM's `ld.lld`; their instruction model is checked against the CPU by
 `tools/verify/cross_check_x86.py`, in CI on every change:
 
 ```sh
 python3 tools/verify/prove_x86_loop.py --workers 4
-                                      # ends "102 of 102 all-count cases proved"
-python3 tools/verify/prove_x86.py     # ends "620 of 620 cases proved"
-python3 tools/verify/prove_x86.py --representative   # 246 of them, in minutes
+                                      # ends "51 of 51 all-count cases proved"
+python3 tools/verify/prove_x86.py     # ends "342 of 342 cases proved"
+python3 tools/verify/prove_x86.py --representative   # 155 of them, in minutes
 ```
 
 `sh tools/verify/long-proofs.sh` runs all of it after a change to a
-kernel or the proof tools: 1,177 cases (414 hybrid, 41 SME2, 620 x86 and
-102 all-count x86), the planted-error controls, and the Arm CPU
+kernel or the proof tools: 848 cases (414 hybrid, 41 SME2, 342 x86 and
+51 all-count x86), the planted-error controls, and the Arm CPU
 cross-check. Each case is proved when Z3 finds no input on which the
 code and the definition differ; one that fails prints `NOT PROVED` with
 what it could not prove, and the run ends with exit status 1.
@@ -462,8 +461,7 @@ each bug are in `git log`.
    touched, through the raw pointer. Miri found it; a small test in
    CI's Miri step keeps it covered.
 8. **The AVX2 and AVX-512 batch kernels read past an input's end**
-   (`c/blake3_avx2_x86-64_unix.S`, `c/blake3_avx512_x86-64_unix.S`, and
-   their MSVC forms). Their two- and four-input paths loaded a whole
+   (`c/blake3_avx2_x86-64_unix.S`, `c/blake3_avx512_x86-64_unix.S`). Their two- and four-input paths loaded a whole
    vector from each block's quarters and kept the first 16 bytes: on an
    input's last block, up to 48 bytes past its end. Each load now reads
    only its 16 bytes. The x86 proofs' model found it; guard-page tests

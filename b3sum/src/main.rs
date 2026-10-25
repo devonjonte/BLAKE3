@@ -127,9 +127,7 @@ struct Args {
 
 impl Args {
     fn parse() -> anyhow::Result<Self> {
-        // wild::args_os() is equivalent to std::env::args_os() on Unix,
-        // but on Windows it adds support for globbing.
-        let inner = Inner::parse_from(wild::args_os());
+        let inner = Inner::parse_from(std::env::args_os());
         let file_args = if !inner.file.is_empty() { inner.file.clone() } else { vec!["-".into()] };
         if inner.raw && file_args.len() > 1 {
             bail!("Only one filename can be provided when using --raw");
@@ -454,15 +452,6 @@ struct FilepathString {
 fn filepath_to_string(filepath: &Path) -> FilepathString {
     let unicode_cow = filepath.to_string_lossy();
     let mut filepath_string = unicode_cow.to_string();
-    // If we're on Windows, normalize backslashes to forward slashes. This
-    // avoids a lot of ugly escaping in the common case, and it makes
-    // checkfiles created on Windows more likely to be portable to Unix. It
-    // also allows us to set a blanket "no backslashes allowed in checkfiles on
-    // Windows" rule, rather than allowing a Unix backslash to potentially get
-    // interpreted as a directory separator on Windows.
-    if cfg!(windows) {
-        filepath_string = filepath_string.replace('\\', "/");
-    }
     let mut is_escaped = false;
     if filepath_string.contains(['\\', '\n', '\r']) {
         filepath_string = filepath_string.replace('\\', "\\\\").replace('\n', "\\n").replace('\r', "\\r");
@@ -499,15 +488,6 @@ fn check_for_invalid_characters(utf8_path: &str) -> anyhow::Result<()> {
     // same UTF-8 string.
     if utf8_path.contains('�') {
         bail!("Unicode replacement character in path");
-    }
-    // We normalize all Windows backslashes to forward slashes in our output,
-    // so the only natural way to get a backslash in a checkfile on Windows is
-    // to construct it on Unix and copy it over. (Or of course you could just
-    // doctor it by hand.) To avoid confusing this with a directory separator,
-    // we forbid backslashes entirely on Windows. Note that this check comes
-    // after unescaping has been done.
-    if cfg!(windows) && utf8_path.contains('\\') {
-        bail!("Backslash in path");
     }
     Ok(())
 }
@@ -848,29 +828,13 @@ fn main() -> anyhow::Result<()> {
     // Crash-only: the output flushed, then the process ended at once, with
     // no exit-time teardown. b3sum registers no exit handlers and writes
     // nothing but stdout and stderr, so the teardown has nothing to do, and
-    // the process's exit reclaims everything (Unix: 6 us a 64-byte file,
-    // i7-12700K; Windows unmeasured).
+    // the process's exit reclaims everything (6 us a 64-byte file,
+    // i7-12700K).
     use std::io::Write;
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
-    #[cfg(unix)]
     // Sound: _exit takes any status and does not return.
-    unsafe {
-        libc::_exit(status)
-    }
-    #[cfg(windows)]
-    {
-        unsafe extern "system" {
-            fn GetCurrentProcess() -> *mut core::ffi::c_void;
-            fn TerminateProcess(process: *mut core::ffi::c_void, status: u32) -> i32;
-        }
-        // Sound: GetCurrentProcess returns this process's pseudo-handle (a
-        // constant, no system call), and ending the current process does not
-        // return. (ExitProcess, std's way out, runs every DLL's detach and
-        // the C runtime's handlers first.)
-        unsafe { TerminateProcess(GetCurrentProcess(), status as u32) };
-        unreachable!("TerminateProcess on the current process returns only on failure")
-    }
+    unsafe { libc::_exit(status) }
 }
 
 #[cfg(test)]
