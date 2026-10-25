@@ -1,7 +1,16 @@
-//! The C API (`b3.h`): a thin layer over the `blake3-servil` crate, its
-//! contracts checked at the boundary (a panic here stops the program, as
-//! every `extern "C"` panic does). Each call initializes the crate first
-//! (a load once it has).
+//! The C API (`b3.h`): a thin layer over the `blake3-servil` crate.
+//! Hashing entry points initialize the crate; later initialization calls
+//! check its completed state. Detected invalid arguments panic here and
+//! stop the process across `extern "C"`. Raw-memory obligations remain
+//! the caller's, as the header states.
+//!
+//! Every unsafe entry additionally requires disjoint writable argument
+//! ranges, valid storage/lifetimes, and exclusive use of a mutable handle.
+//! Stream inputs remain unchanged through finish; outputs are inaccessible
+//! until delivered. A callback may use its returned places, but must return
+//! normally and never re-enter the same stream. A place can be resubmitted
+//! after the callback and the library call invoking it have returned.
+// Output-storage initialization remains a separate BLAKE3 #155 review item.
 
 use blake3_servil::{Hash, Hasher, Mode, OUT_LEN, Stream};
 use core::ffi::{CStr, c_char, c_void};
@@ -239,10 +248,10 @@ unsafe fn stream_mut<'a>(stream: *mut B3Stream) -> &'a mut B3Stream {
 pub unsafe extern "C" fn b3_stream_begin(mode: *const B3Mode, done: B3Done, ctx: *mut c_void) -> *mut B3Stream {
     blake3_servil::initialize_multithreaded(None);
     let mode = unsafe { self::mode(mode) };
-    let ctx = ctx as usize;
     let handler: Done = Box::new(move |places: &mut [Hash]| {
         // Sound: a Hash is a Digest (both 32 bytes, repr(transparent)).
-        unsafe { done(ctx as *mut c_void, places.as_mut_ptr() as *mut Digest, places.len()) }
+        // Keep the context as a pointer, preserving its provenance.
+        unsafe { done(ctx, places.as_mut_ptr() as *mut Digest, places.len()) }
     });
     Box::into_raw(Box::new(B3Stream { stream: Stream::open(mode.mode(), handler), finished: false }))
 }

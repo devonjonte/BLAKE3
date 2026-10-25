@@ -1,16 +1,25 @@
 /* libb3_servil: the C API of blake3-servil.
  *
- * Every call succeeds. A call whose arguments break its contract (below)
- * stops the program with a message. The first call runs the library's
- * startup self-test (well under a millisecond), which stops the program if
- * this build or this CPU computes wrong digests; every later call costs
- * nothing extra. Calls that use other CPU cores (`_multithreaded`) start
- * the library's threads at their first use; they last for the process.
+ * Hashing entry points initialize the library automatically. Initialization
+ * runs a startup self-test, which stops the program if this build or CPU
+ * computes wrong digests. Later initialization calls check the completed
+ * state. Calls that use other CPU cores (`_multithreaded`) start the
+ * library's threads at their first use; they last for the process.
+ *
+ * Memory: pointers cover live, correctly aligned storage of the stated
+ * sizes, readable for inputs and writable for outputs. Read-only ranges
+ * may overlap; a written range is disjoint from every other range a call
+ * uses. Inputs stay unchanged, and outputs are not accessed concurrently
+ * by the caller. The stream's longer access/lifetime rules are below.
+ * Detected invalid arguments stop the program with a message. Pointer,
+ * lifetime and aliasing rules are caller obligations; violating them may
+ * cause undefined behavior rather than a diagnostic.
  *
  * Threads: any call may be made from any thread. A b3_mode is a value and
- * may be shared and read by any number of threads at once. A b3_hasher is
- * used by one thread at a time. After fork(), the child has none of the
- * library's threads; its calls still finish, on the calling thread.
+ * may be shared and read by any number of threads at once. Calls using the
+ * same b3_hasher or b3_stream handle are serialized by the caller. After
+ * fork() from a process with other threads, the child must exec before
+ * using this API; no recovery of inherited library state is promised.
  *
  * Link with -lb3_servil (libb3_servil.a, or libb3_servil.so /
  * libb3_servil.dylib). Build and install with `cargo cinstall --release`
@@ -63,8 +72,8 @@ b3_mode b3_derive_key(const char *context);
  * 0), on the calling thread. */
 b3_digest b3_hash(const b3_mode *mode, const void *input, size_t len);
 
-/* b3_hash, using other CPU cores where that is faster: the same digest,
- * never slower. */
+/* b3_hash, using other CPU cores for larger inputs. Threading overhead can
+ * outweigh parallel work near the split threshold; b3_hash stays serial. */
 b3_digest b3_hash_multithreaded(const b3_mode *mode, const void *input, size_t len);
 
 /* The distance between messages in a batch: `message_len` rounded up to a
@@ -86,9 +95,13 @@ void b3_hash_many_multithreaded(const b3_mode *mode, const void *input, size_t m
                                 b3_digest *out);
 
 /* One message fed in pieces. A b3_hasher is your memory (18 KiB; on the
- * stack, in a struct, or allocated), so the library allocates nothing and
- * there is nothing to free. b3_hasher_init starts a message, and starts
- * one over. */
+ * stack, in a struct, or allocated). It needs no library destructor; the
+ * caller frees any heap storage it supplied. b3_hasher_init starts a
+ * message, and starts one over. Heap storage must also be 64-byte aligned:
+ * ordinary malloc
+ * does not guarantee this over-alignment. Use an aligned allocator (such
+ * as aligned_alloc on Unix, or _aligned_malloc on Windows) and its matching
+ * deallocator. Use the header matching the linked library. */
 #define B3_HASHER_SIZE 18432
 #ifdef __cplusplus
 #define B3_ALIGN64 alignas(64)
@@ -122,8 +135,15 @@ void b3_hasher_output(const b3_hasher *hasher, uint64_t offset, void *out, size_
  * that calls the stream: during a submit when the stream is full (it holds
  * up to 1024 messages in flight), during b3_stream_collect, and during
  * b3_stream_finish, which hands back every place and ends the stream.
- * Every message and place submitted lives until b3_stream_finish. A
- * message stays unhashed in a task still open until the task fills or you
+ * Every message and place submitted lives until b3_stream_finish. Inputs
+ * stay unchanged until finish. An output place is disjoint from submitted
+ * inputs and all other outstanding places. After submission, do not
+ * access it until done receives it. The callback may read/write those places. Reuse a returned
+ * place only after the callback and the library call invoking it return.
+ * done is non-null, returns normally (no C++ exception or longjmp through
+ * library frames), and never calls back into the same stream or finishes
+ * it. After b3_stream_finish returns, the stream handle is invalid.
+ * A message stays unhashed in a task still open until the task fills or you
  * call collect or finish, so call one of them when you need a digest soon.
  *
  * A batch (b3_stream_submit_batch) is laid out as for b3_hash_many and
