@@ -13,14 +13,14 @@
 #endif
 
 .intel_syntax noprefix
-.global _blake3_hash_many_avx512
-.global blake3_hash_many_avx512
-.global blake3_compress_in_place_avx512
-.global _blake3_compress_in_place_avx512
-.global blake3_compress_xof_avx512
-.global _blake3_compress_xof_avx512
-.global blake3_xof_many_avx512
-.global _blake3_xof_many_avx512
+.global _blake3_servil_hash_many_avx512
+.global blake3_servil_hash_many_avx512
+.global blake3_servil_compress_in_place_avx512
+.global _blake3_servil_compress_in_place_avx512
+.global blake3_servil_compress_xof_avx512
+.global _blake3_servil_compress_xof_avx512
+.global blake3_servil_xof_many_avx512
+.global _blake3_servil_xof_many_avx512
 
 #ifdef __APPLE__
 .text
@@ -28,8 +28,8 @@
 .section .text
 #endif
 .p2align  6
-_blake3_hash_many_avx512:
-blake3_hash_many_avx512:
+_blake3_servil_hash_many_avx512:
+blake3_servil_hash_many_avx512:
         _CET_ENDBR
         push    r15
         push    r14
@@ -2386,8 +2386,8 @@ blake3_hash_many_avx512:
         vmovdqu xmmword ptr [rbx+0x10], xmm1
         jmp     4b
 .p2align 6
-_blake3_compress_in_place_avx512:
-blake3_compress_in_place_avx512:
+_blake3_servil_compress_in_place_avx512:
+blake3_servil_compress_in_place_avx512:
         _CET_ENDBR
         vmovdqu xmm0, xmmword ptr [rdi]
         vmovdqu xmm1, xmmword ptr [rdi+0x10]
@@ -2469,8 +2469,8 @@ blake3_compress_in_place_avx512:
         ret
 
 .p2align 6
-_blake3_compress_xof_avx512:
-blake3_compress_xof_avx512:
+_blake3_servil_compress_xof_avx512:
+blake3_servil_compress_xof_avx512:
         _CET_ENDBR
         vmovdqu xmm0, xmmword ptr [rdi]
         vmovdqu xmm1, xmmword ptr [rdi+0x10]
@@ -2556,8 +2556,8 @@ blake3_compress_xof_avx512:
         ret
 
 .p2align 6
-blake3_xof_many_avx512:
-_blake3_xof_many_avx512:
+blake3_servil_xof_many_avx512:
+_blake3_servil_xof_many_avx512:
         _CET_ENDBR
         mov    r10,QWORD PTR [rsp+0x8]
         cmp    r10,0x1

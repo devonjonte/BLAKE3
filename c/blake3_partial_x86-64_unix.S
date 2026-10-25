@@ -11,18 +11,18 @@
 #define _CET_ENDBR
 #endif
 .intel_syntax noprefix
-.global _blake3_partial_sse41
-.global blake3_partial_sse41
-.global _blake3_partial_avx2
-.global blake3_partial_avx2
+.global _blake3_servil_partial_sse41
+.global blake3_servil_partial_sse41
+.global _blake3_servil_partial_avx2
+.global blake3_servil_partial_avx2
 #ifdef __APPLE__
 .text
 #else
 .section .text
 #endif
         .p2align 6
-_blake3_partial_sse41:
-blake3_partial_sse41:
+_blake3_servil_partial_sse41:
+blake3_servil_partial_sse41:
         _CET_ENDBR
         push rbp
         push rbx
@@ -47,7 +47,7 @@ blake3_partial_sse41:
         movdqu xmm7, xmmword ptr [rdi+144]
         xor edx, edx
         xor ebx, ebx
-blake3_partial_sse41_block:
+blake3_servil_partial_sse41_block:
         movdqu xmm8, xmmword ptr [r8+rdx]
         movdqu xmm9, xmmword ptr [r9+rdx]
         movdqu xmm10, xmmword ptr [r10+rdx]
@@ -1366,7 +1366,7 @@ blake3_partial_sse41_block:
         pxor xmm6, xmm14
         pxor xmm7, xmm15
         cmp edx, dword ptr [rdi+800]
-        jne blake3_partial_sse41_next
+        jne blake3_servil_partial_sse41_next
         movdqu xmmword ptr [rdi+992], xmm0
         movdqu xmmword ptr [rdi+1008], xmm1
         movdqu xmmword ptr [rdi+1024], xmm2
@@ -1375,11 +1375,11 @@ blake3_partial_sse41_block:
         movdqu xmmword ptr [rdi+1072], xmm5
         movdqu xmmword ptr [rdi+1088], xmm6
         movdqu xmmword ptr [rdi+1104], xmm7
-blake3_partial_sse41_next:
+blake3_servil_partial_sse41_next:
         add rdx, 64
         add rbx, 16
         cmp rdx, 1024
-        jne blake3_partial_sse41_block
+        jne blake3_servil_partial_sse41_block
         movdqu xmmword ptr [rdi+864], xmm0
         movdqu xmmword ptr [rdi+880], xmm1
         movdqu xmmword ptr [rdi+896], xmm2
@@ -1397,8 +1397,8 @@ blake3_partial_sse41_next:
         pop rbp
         ret
         .p2align 6
-_blake3_partial_avx2:
-blake3_partial_avx2:
+_blake3_servil_partial_avx2:
+blake3_servil_partial_avx2:
         _CET_ENDBR
         push rbp
         push rbx
@@ -1427,7 +1427,7 @@ blake3_partial_avx2:
         vmovdqu ymm7, ymmword ptr [rdi+288]
         xor edx, edx
         xor ebx, ebx
-blake3_partial_avx2_block:
+blake3_servil_partial_avx2_block:
         vmovdqu xmm8, xmmword ptr [r8+rdx]
         vinsertf128 ymm8, ymm8, xmmword ptr [r12+rdx], 1
         vmovdqu xmm9, xmmword ptr [r9+rdx]
@@ -2590,7 +2590,7 @@ blake3_partial_avx2_block:
         vpxor ymm6, ymm6, ymm14
         vpxor ymm7, ymm7, ymm15
         cmp edx, dword ptr [rdi+1600]
-        jne blake3_partial_avx2_next
+        jne blake3_servil_partial_avx2_next
         vmovdqu ymmword ptr [rdi+1920], ymm0
         vmovdqu ymmword ptr [rdi+1952], ymm1
         vmovdqu ymmword ptr [rdi+1984], ymm2
@@ -2599,11 +2599,11 @@ blake3_partial_avx2_block:
         vmovdqu ymmword ptr [rdi+2080], ymm5
         vmovdqu ymmword ptr [rdi+2112], ymm6
         vmovdqu ymmword ptr [rdi+2144], ymm7
-blake3_partial_avx2_next:
+blake3_servil_partial_avx2_next:
         add rdx, 64
         add rbx, 32
         cmp rdx, 1024
-        jne blake3_partial_avx2_block
+        jne blake3_servil_partial_avx2_block
         vmovdqu ymmword ptr [rdi+1664], ymm0
         vmovdqu ymmword ptr [rdi+1696], ymm1
         vmovdqu ymmword ptr [rdi+1728], ymm2

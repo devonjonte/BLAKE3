@@ -123,7 +123,7 @@ def prove_c1(obj, blocks, alias):
     }
     if not alias:
         regions["out"] = Region("out", 32, True, None)
-    s = Setup(obj, "blake3_hybrid_c1", "blake3_hybrid_k1_end", regions)
+    s = Setup(obj, "blake3_servil_hybrid_c1", "blake3_servil_hybrid_k1_end", regions)
     counter = BitVec("counter", 64)
     flags, start, end, last_len = (BitVec(n, 8) for n in ("flags", "start", "end", "last_len"))
     m = s.m
@@ -223,7 +223,7 @@ def prove_xof(obj, n):
         for j in range(8):
             table.bytes[8 * i + j] = (Ptr("block", 0), j)
     regions["table"] = table
-    name = f"blake3_hybrid_x{n}"
+    name = f"blake3_servil_hybrid_x{n}"
     s = Setup(obj, name, name + "_end", regions)
     counter = BitVec("counter", 64)
     flags, start, end, last_len = (BitVec(x, 8) for x in ("flags", "start", "end", "last_len"))
@@ -266,7 +266,7 @@ def prove_partial(obj, n, pblocks):
         for j in range(8):
             table.bytes[8 * i + j] = (Ptr(r, 0), j)
     regions["table"] = table
-    s = Setup(obj, f"blake3_hybrid_q{n}", f"blake3_hybrid_q{n}_end", regions)
+    s = Setup(obj, f"blake3_servil_hybrid_q{n}", f"blake3_servil_hybrid_q{n}_end", regions)
     counter = BitVec("counter", 64)
     flags, start, end, last_len, plast = (BitVec(x, 8) for x in ("flags", "start", "end", "last_len", "plast"))
     m = s.m
@@ -329,7 +329,7 @@ def prove_case(case):
         elif name[0] == "x":
             steps = prove_xof(OBJ, int(name[1:]))
         else:
-            steps = prove_table(OBJ, f"blake3_hybrid_{name}", int(name.lstrip("kpn")), blocks, name[0] == "k")
+            steps = prove_table(OBJ, f"blake3_servil_hybrid_{name}", int(name.lstrip("kpn")), blocks, name[0] == "k")
     except Unproved as e:
         return case, f"NOT PROVED: {e}"
     what = f"partial chunk of {blocks} blocks" if name[0] == "q" else f"{blocks} blocks" + (", out = key" if alias else "")

@@ -12,7 +12,7 @@ overview, read [QUALITY.md](../QUALITY.md) first.
 |---|---|---|
 | 64-bit Arm: Apple Silicon, Linux and macOS | generated assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved** at every block and group count, and tested |
 | x86-64: Linux, Windows (MSVC) | the fork's generated assembly: whole chunks with a partial one, and the chunk root | **proved** for every input, and tested |
-| | upstream's assembly, with one fix (bug 8, below) | **proved** at the shapes this crate calls (below), and tested |
+| | upstream's assembly, its symbols renamed and its batch kernels' loads kept within each input (bug 8, below) | **proved** at every shape the crate calls (below), and tested |
 
 ## What is new, and so where the risk is
 
@@ -260,8 +260,8 @@ preservation, and branches and addresses independent of input bytes and
 keys (the induction proofs also treat counters and their steps as
 public: "Timing and secrets", below).
 
-On x86-64, the fork's generated kernels (`blake3_partial_sse41` and
-`blake3_partial_avx2`, under both calling conventions) are proved for
+On x86-64, the fork's generated kernels (`blake3_servil_partial_sse41` and
+`blake3_servil_partial_avx2`, under both calling conventions) are proved for
 every input: each lane's sixteen blocks from its chaining value and
 counter, with every per-lane, per-block length and flags, and the
 snapshot after every block (`prove_x86.py partial`, 64 cases).
@@ -287,10 +287,15 @@ against the same definition, as far as these cases:
   counter, for each instruction set and convention (432 cases; the 114
   of them `--representative` selects cover every block length and the
   first, full-width and two-pass counts);
-- AVX-512 `xof_many`: 1 to 32 blocks.
+- `hash_many` with two inputs at consecutive counters over 1 to 15
+  blocks, on AVX2 and AVX-512, both conventions (60 cases): `pair.rs`'s
+  shape, a whole chunk and a partial one side by side;
+- AVX-512 `xof_many`: 1 to 32 blocks, which is how the crate calls it
+  (`ffi_avx512.rs` makes one call per 32 blocks of a longer output).
 
-Open: extended output beyond 32 blocks, and counts or shapes outside the
-harnesses' stated contracts.
+Every call the crate makes into an assembly kernel, on x86-64 and on
+AArch64, falls within these cases. Open: counts or shapes outside the
+harnesses' stated contracts, which the crate does not call.
 
 The Rust code (the dispatch, the tree walk, the `Hasher`, the pool, the
 batch APIs) is tested, and unproved.
@@ -376,12 +381,12 @@ LLVM's `llvm-ml`; their instruction model is checked against the CPU by
 ```sh
 python3 tools/verify/prove_x86_loop.py --workers 4
                                       # ends "102 of 102 all-count cases proved"
-python3 tools/verify/prove_x86.py     # ends "568 of 568 cases proved"
-python3 tools/verify/prove_x86.py --representative   # 186 of them, in minutes
+python3 tools/verify/prove_x86.py     # ends "620 of 620 cases proved"
+python3 tools/verify/prove_x86.py --representative   # 246 of them, in minutes
 ```
 
 `sh tools/verify/long-proofs.sh` runs all of it after a change to a
-kernel or the proof tools: 1,125 cases (414 hybrid, 41 SME2, 568 x86 and
+kernel or the proof tools: 1,177 cases (414 hybrid, 41 SME2, 620 x86 and
 102 all-count x86), the planted-error controls, and the Arm CPU
 cross-check. Each case is proved when Z3 finds no input on which the
 code and the definition differ; one that fails prints `NOT PROVED` with
@@ -436,7 +441,7 @@ compute the standard's BLAKE3. The commits that introduced and fixed
 each bug are in `git log`.
 
 1. **The SME2 message kernel mishandled one-block messages**
-   (`blake3_sme2_hash16_messages_512` in `c/blake3_sme2_aarch64.S`).
+   (`blake3_servil_sme2_hash16_messages_512` in `c/blake3_sme2_aarch64.S`).
    A one-block message was compressed twice, the second time without
    the chunk-start flag. A one-block message now starts and ends on
    its last block.

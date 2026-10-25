@@ -30,7 +30,7 @@ from immediates). Clobbers rax, rcx, rdx, rdi, r9-r11, xmm0-xmm15 and flags,
 all caller-saved. The sse41 entry needs SSE4.1; the avx512 entry needs
 AVX-512F and AVX-512VL (vprord on xmm).
 
-The compression body is upstream BLAKE3's blake3_compress_in_place_sse41,
+The compression body is upstream BLAKE3's blake3_servil_compress_in_place_sse41,
 instruction for instruction, with its rotations rendered per ISA. Proof
 tooling covers the upstream kernels; this one is not yet in it.
 """
@@ -127,7 +127,7 @@ def row3(isa):
 
 
 def kernel(isa):
-    name = f'blake3_{isa}_chunk_root'
+    name = f'blake3_servil_{isa}_chunk_root'
     x = 'v' if isa == 'avx512' else ''
     out = [f'.p2align 6', f'{name}:', f'_{name}:', '_CET_ENDBR']
     out += ['movzx r11d, cl', 'mov r10, rcx', 'shr r10, 8', 'and r10d, 0xff', 'mov r9, rcx', 'shr r9, 16', 'and r9d, 0xff']
@@ -154,7 +154,7 @@ def main():
     print('#if !defined(_CET_ENDBR)\n#define _CET_ENDBR\n#endif')
     print('.intel_syntax noprefix')
     for isa in ('sse41', 'avx512'):
-        print(f'.global blake3_{isa}_chunk_root\n.global _blake3_{isa}_chunk_root')
+        print(f'.global blake3_servil_{isa}_chunk_root\n.global _blake3_servil_{isa}_chunk_root')
     print('#ifdef __APPLE__\n.text\n#else\n.section .text\n#endif')
     for isa in ('sse41', 'avx512'):
         for line in kernel(isa):

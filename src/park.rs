@@ -15,7 +15,7 @@
 //! on every target the fork builds for, and what Shuttle models (Loom
 //! does not: data branch, 2026-10-23/model-checkers).
 
-use super::park_sync::{AtomicU64, OnceLock, Ordering, thread};
+use super::park_sync::{AtomicU64, AtomicUsize, OnceLock, Ordering, thread};
 
 /// Any value on a cache line of its own.
 #[repr(align(128))]
@@ -36,11 +36,26 @@ pub(crate) struct Park {
     parked: Box<[Line<AtomicU64>]>,
     /// Each worker's thread, set as it starts.
     handles: Box<[OnceLock<thread::Thread>]>,
+    /// Wakes still owed: each woken worker pays them before it works.
+    owed: AtomicUsize,
 }
+
+/// The most wakes a publisher makes itself before its own pieces; the rest
+/// are owed, and the workers it woke pay them, side by side (BLAKE3 #119).
+/// Every wake direct costs the publisher a system call per worker before
+/// it starts: 47 on the EPYC 9255 made 14 pool cells 4-12% slower. One
+/// direct wake and a cascade makes each worker wait for the one before:
+/// the i7-12700K's one-shots of 1-2 MiB 16-25% slower. At 8, the i7 reads
+/// level (data 2026-10-24/wakes-i7, 2026-10-25/wakes8-i7).
+const DIRECT_WAKES: usize = 8;
 
 impl Park {
     pub(crate) fn new(workers: usize) -> Park {
-        Park { parked: (0..workers.div_ceil(64).max(1)).map(|_| Line(AtomicU64::new(0))).collect(), handles: (0..workers).map(|_| OnceLock::new()).collect() }
+        Park {
+            parked: (0..workers.div_ceil(64).max(1)).map(|_| Line(AtomicU64::new(0))).collect(),
+            handles: (0..workers).map(|_| OnceLock::new()).collect(),
+            owed: AtomicUsize::new(0),
+        }
     }
 
     /// Worker `me` records its thread, once, as it starts.
@@ -81,15 +96,32 @@ impl Park {
     }
 
     /// Wake workers for `wanted` pieces of new work, given `workers`
-    /// workers in all: as many parked ones as the awake ones leave wanting.
-    /// A publisher's read of `parked` follows its publication (a SeqCst
-    /// store or a fence), as a parking worker's re-check follows its bit:
-    /// one of the two sees the other.
+    /// workers in all: one now, and the rest owed, which each woken worker
+    /// pays before it works, so the publisher makes one wake and starts on
+    /// its own pieces while the wakes cascade. The publisher making every
+    /// wake itself put up to 47 system calls before its first piece on a
+    /// 48-thread EPYC 9255: 14 pool cells 4-12% slower (BLAKE3 #119, Sam
+    /// Shackleton, October 24). A publisher's read of `parked` follows its
+    /// publication (a SeqCst store or a fence), as a parking worker's
+    /// re-check follows its bit: one of the two sees the other.
     pub(crate) fn wake_for(&self, wanted: usize, workers: usize) {
-        let awake = workers - self.parked_count();
-        for _ in awake..wanted {
-            if !self.wake_one() {
-                return;
+        let parked = self.parked_count();
+        if parked == 0 {
+            return;
+        }
+        let awake = workers - parked;
+        if awake < wanted {
+            // The publisher makes up to DIRECT_WAKES wakes itself and owes
+            // the rest, which the woken workers pay.
+            let need = (wanted - awake).min(parked);
+            let direct = need.min(DIRECT_WAKES);
+            if need > direct {
+                self.owed.fetch_add(need - direct, Ordering::SeqCst);
+            }
+            for _ in 0..direct {
+                if !self.wake_one() {
+                    break;
+                }
             }
         }
     }
@@ -97,8 +129,10 @@ impl Park {
     /// Worker `me` parks unless `visible()` finds work: the bit first,
     /// then one more look (a publisher stores, then reads `parked`; this
     /// sets the bit, then looks: one of the two sees the other), then the
-    /// token, until a waker clears the bit.
-    pub(crate) fn park_unless(&self, me: usize, visible: impl Fn() -> bool) {
+    /// token, until a waker clears the bit. Returns having found work
+    /// (false) or having been woken (true); a woken worker then pays the
+    /// wakes owed ([`Park::pay_owed`]).
+    pub(crate) fn park_unless(&self, me: usize, visible: impl Fn() -> bool) -> bool {
         let (word, bit) = self.place(me);
         word.fetch_or(bit, Ordering::SeqCst);
         if visible() {
@@ -106,15 +140,36 @@ impl Park {
             // was spent on a worker that was leaving anyway (its unpark
             // leaves a token a later park returns from at once), and a
             // worker still parked may be the one it was for. Pass the wake
-            // on. Dropping it left a parked worker unwoken with work
-            // published: Shuttle found both schedules (October 23).
+            // on, and return as woken so the caller pays what a woken
+            // worker owes. Dropping it left a parked worker unwoken with
+            // work published: Shuttle found both schedules (October 23).
             if word.fetch_and(!bit, Ordering::SeqCst) & bit == 0 {
                 self.wake_one();
+                return true;
             }
-            return;
+            return false;
         }
         while word.load(Ordering::SeqCst) & bit != 0 {
             thread::park();
+        }
+        true
+    }
+
+    /// A woken worker pays the wakes owed before working: one more worker
+    /// each, until none is owed or none is parked.
+    pub(crate) fn pay_owed(&self) {
+        loop {
+            let owed = self.owed.load(Ordering::SeqCst);
+            if owed == 0 {
+                return;
+            }
+            if self.owed.compare_exchange(owed, owed - 1, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+                continue;
+            }
+            if !self.wake_one() {
+                self.owed.store(0, Ordering::SeqCst);
+                return;
+            }
         }
     }
 }

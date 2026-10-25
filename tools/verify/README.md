@@ -15,7 +15,7 @@ Commands:
     python3 tools/verify/mutants.py                     # wrong kernels are rejected
     python3 -m unittest discover -s tools/verify -p 'test_*.py'  # proof helpers and fail-stop worker controls
     python3 tools/verify/isla_check.py                  # the NEON and integer models against Arm's specification (needs Isla)
-    python3 tools/verify/prove_x86.py [CASE...]         # the x86-64 kernels: compressions, hash_many at fixed counts, xof_many, the chunk root and the partial pass (568 cases; --representative: 186 of them)
+    python3 tools/verify/prove_x86.py [CASE...]         # the x86-64 kernels: compressions, hash_many at fixed counts, xof_many, the chunk root and the partial pass (620 cases; --representative: 246 of them)
     python3 tools/verify/prove_x86_loop.py              # hash_many at every input count, by induction (102 cases)
     python3 tools/verify/cross_check_x86.py             # the x86-64 model against the CPU (needs an x86-64 CPU; AVX-512 forms need one with AVX-512)
     sh tools/verify/long-proofs.sh [COMMIT]             # the proofs, the Arm CPU cross-check and the controls together (Isla and the x86 CPU check apart); posts the commit's "long proofs" status
@@ -176,8 +176,8 @@ bounded unaligned-address fault control. AVX-512 forms need an AVX-512
 CPU and are reported skipped without one (CI's `x86_model` job).
 
 `prove_x86.py` proves these cases against the same Lean specification,
-568 in all (`--representative` runs 186 of them in minutes: every block
-length, and the first, full-width and two-pass counts):
+620 in all (`--representative` runs 246 of them in minutes: every block
+length, the first, full-width and two-pass counts, and the pair shape):
 
 - `compress_in_place` and `compress_xof` for SSE4.1 and AVX-512, under
   the Unix and Windows conventions;
@@ -185,7 +185,11 @@ length, and the first, full-width and two-pass counts):
   1, 2 and 16 blocks with an incrementing counter, and at every block
   length at one full-width pass with one counter, for each instruction
   set and convention;
-- AVX-512 `xof_many` at 1 to 32 blocks;
+- `hash_many` with two inputs at consecutive counters over 1 to 15
+  blocks, on AVX2 and AVX-512, both conventions: `pair.rs`'s shape, a
+  whole chunk and a partial one side by side;
+- AVX-512 `xof_many` at 1 to 32 blocks, the count per call the crate
+  makes;
 - the chunk-root kernel's SSE4.1 and AVX-512 entries
   (`c/blake3_chunk_root_x86-64_unix.S`) at 0 to 15 whole blocks before
   the last, so every input of a chunk or less, for every last-block

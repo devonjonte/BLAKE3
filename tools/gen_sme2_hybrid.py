@@ -16,7 +16,7 @@ turn, k blocks per step, so over sixteen steps it finishes k chunks.
 Kernels (k divides 16, so integer chunks start and end at loop-iteration
 boundaries): blake3_sme2x<k>_hash_chunks_512 for k in KS.
 
-C ABI, like blake3_sme2_hash16_chunks_512:
+C ABI, like blake3_servil_sme2_hash16_chunks_512:
     uint64_t f(const uint8_t *const *inputs, const uint32_t key[8],
                uint64_t counter, uint32_t flags, uint8_t *out, uint64_t groups)
 inputs holds (16 + k) chunk pointers per group; chunk i of a group gets
@@ -181,7 +181,7 @@ def interleave(a, b):
 
 
 def kernel(k):
-    name = f"blake3_sme2x{k}_hash_chunks_512"
+    name = f"blake3_servil_sme2x{k}_hash_chunks_512"
     per_chunk = 16 // k          # iterations per integer chunk
     shift = per_chunk.bit_length() - 1
     lanes = 16 + k
