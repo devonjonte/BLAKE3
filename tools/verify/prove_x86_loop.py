@@ -141,7 +141,7 @@ def prove(so, isa, windows, blocks, increment):
     regions['table'].symbolic_initial = True
     args = [Ptr('table', 0), count, BitVecVal(blocks, 64), Ptr('key', 0), counter,
             BitVecVal(int(increment), 64), ZeroExt(56, flags), ZeroExt(56, start), ZeroExt(56, end), Ptr('out', 0)]
-    setup = p.Setup(so, f'blake3_hash_many_{isa}', regions, args, windows)
+    setup = p.Setup(so, f'blake3_servil_hash_many_{isa}', regions, args, windows)
     machine = setup.m
     flag_words = [ZeroExt(24, f) for f in (flags | start | end, flags | start, flags | end, flags)] + [BitVecVal(64, 32)]
     p.d_row_facts(machine, counter, 2 * width if increment else 1, flag_words)

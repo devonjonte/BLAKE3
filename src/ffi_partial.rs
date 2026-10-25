@@ -27,8 +27,8 @@ pub struct Params<const W: usize> {
 }
 
 unsafe extern "C" {
-    fn blake3_partial_sse41(params: *mut Params<4>);
-    fn blake3_partial_avx2(params: *mut Params<8>);
+    fn blake3_servil_partial_sse41(params: *mut Params<4>);
+    fn blake3_servil_partial_avx2(params: *mut Params<8>);
 }
 
 /// The byte shuffle (pshufb) that rotates each 32-bit word right by `r`
@@ -102,13 +102,13 @@ fn hash_chunks_with_partial<const W: usize>(
 /// [`hash_chunks_with_partial`] on four lanes: 1 to 3 whole chunks.
 /// Unsafe: the CPU must have SSE4.1.
 pub unsafe fn hash_chunks_with_partial_sse41(whole: &[&[u8; CHUNK_LEN]], partial: &[u8], key: &CVWords, counter: u64, flags: u8, out: &mut [u8]) {
-    hash_chunks_with_partial::<4>(blake3_partial_sse41, whole, partial, key, counter, flags, out)
+    hash_chunks_with_partial::<4>(blake3_servil_partial_sse41, whole, partial, key, counter, flags, out)
 }
 
 /// [`hash_chunks_with_partial`] on eight lanes: 1 to 7 whole chunks.
 /// Unsafe: the CPU must have AVX2.
 pub unsafe fn hash_chunks_with_partial_avx2(whole: &[&[u8; CHUNK_LEN]], partial: &[u8], key: &CVWords, counter: u64, flags: u8, out: &mut [u8]) {
-    hash_chunks_with_partial::<8>(blake3_partial_avx2, whole, partial, key, counter, flags, out)
+    hash_chunks_with_partial::<8>(blake3_servil_partial_avx2, whole, partial, key, counter, flags, out)
 }
 
 #[cfg(test)]

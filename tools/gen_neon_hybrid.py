@@ -44,7 +44,7 @@ C ABI, every kernel:
   order. The pair kernels need the SHA-3 extension (`xar`); the scalar and
   quad kernels (k1, k9, k10, p8, p9, and the kn, pn, and x kernels) run on
   every AArch64 CPU. x18 untouched.
-  blake3_hybrid_c1 is k1 with the input pointer itself in x0 instead of a
+  blake3_servil_hybrid_c1 is k1 with the input pointer itself in x0 instead of a
   one-entry table, and a seventh argument in x6: the address of the last
   block, read from there instead of the input. The entry for a single
   chunk's blocks, whose short final block arrives zero-padded elsewhere.
@@ -820,7 +820,7 @@ def lean_kernel(name, sc, last):
     the first G step of a block never waits on the frame.
 
     Two entries. The k-form takes a one-entry pointer table in x0 like
-    every other kernel. The c-form (`blake3_hybrid_c1`) takes the input
+    every other kernel. The c-form (`blake3_servil_hybrid_c1`) takes the input
     pointer itself in x0 and, in x6, the address of the last block, which
     may lie anywhere: a caller with a short final block hands over its
     zero-padded copy and the kernel hashes the chunk in one call. Register
@@ -1158,55 +1158,55 @@ def build():
     psc1 = lambda slot: [Scalar(0, slot, one, "w23", preg="x24", ctr_step=0)]
     psc2 = lambda s0, s1: [Scalar(0, s0, two_a, "w2", "w3", preg="x0", ctr_step=0), Scalar(1, s1, two_b, "w4", "w5", preg="x1", ctr_step=0)]
     return {
-        "p2": kernel("blake3_hybrid_p2", [], [plone((0, 1))]),
-        "p4": kernel("blake3_hybrid_p4", psc2(0, 1), [plone((2, 3))]),
-        "p8": kernel("blake3_hybrid_p8", [], [pquad(0, (0, 1, 2, 3)), pquad(1, (4, 5, 6, 7))]),
+        "p2": kernel("blake3_servil_hybrid_p2", [], [plone((0, 1))]),
+        "p4": kernel("blake3_servil_hybrid_p4", psc2(0, 1), [plone((2, 3))]),
+        "p8": kernel("blake3_servil_hybrid_p8", [], [pquad(0, (0, 1, 2, 3)), pquad(1, (4, 5, 6, 7))]),
         # p3, p5, p7, p9: one block more on the integer units beside the
         # NEON parents, as k3, k5, k7, k9 do for chunks.
-        "p3": kernel("blake3_hybrid_p3", psc1(0), [plone((1, 2))]),
-        "p5": kernel("blake3_hybrid_p5", psc1(0), [ppair(0, (1, 2)), ppair(1, (3, 4))]),
-        "p7": kernel("blake3_hybrid_p7", psc1(0), [pquad(0, (1, 2, 3, 4)), ppair(1, (5, 6))]),
-        "p9": kernel("blake3_hybrid_p9", psc1(0), [pquad(0, (1, 2, 3, 4)), pquad(1, (5, 6, 7, 8))]),
-        "k1": kernel("blake3_hybrid_k1", sc1(0), []),
-        "k2": kernel("blake3_hybrid_k2", [], [lone_pair((0, 1))]),
-        "k3": kernel("blake3_hybrid_k3", sc1(0), [lone_pair((1, 2))]),
-        "k4": kernel("blake3_hybrid_k4", sc2(0, 1), [lone_pair((2, 3))]),
-        "k5": kernel("blake3_hybrid_k5", sc1(0), [pair(0, (1, 2)), pair(1, (3, 4))]),
-        "k6": kernel("blake3_hybrid_k6", sc2(0, 1), [pair(0, (2, 3)), pair(1, (4, 5))]),
-        "k7": kernel("blake3_hybrid_k7", sc1(0), [quad(0, (1, 2, 3, 4)), pair(1, (5, 6))]),
-        "k8": kernel("blake3_hybrid_k8", sc2(0, 1), [quad(0, (2, 3, 4, 5)), pair(1, (6, 7))]),
-        "k9": kernel("blake3_hybrid_k9", sc1(0), [quad(0, (1, 2, 3, 4)), quad(1, (5, 6, 7, 8))]),
-        "k10": kernel("blake3_hybrid_k10", sc2(0, 1), [quad(0, (2, 3, 4, 5)), quad(1, (6, 7, 8, 9))]),
+        "p3": kernel("blake3_servil_hybrid_p3", psc1(0), [plone((1, 2))]),
+        "p5": kernel("blake3_servil_hybrid_p5", psc1(0), [ppair(0, (1, 2)), ppair(1, (3, 4))]),
+        "p7": kernel("blake3_servil_hybrid_p7", psc1(0), [pquad(0, (1, 2, 3, 4)), ppair(1, (5, 6))]),
+        "p9": kernel("blake3_servil_hybrid_p9", psc1(0), [pquad(0, (1, 2, 3, 4)), pquad(1, (5, 6, 7, 8))]),
+        "k1": kernel("blake3_servil_hybrid_k1", sc1(0), []),
+        "k2": kernel("blake3_servil_hybrid_k2", [], [lone_pair((0, 1))]),
+        "k3": kernel("blake3_servil_hybrid_k3", sc1(0), [lone_pair((1, 2))]),
+        "k4": kernel("blake3_servil_hybrid_k4", sc2(0, 1), [lone_pair((2, 3))]),
+        "k5": kernel("blake3_servil_hybrid_k5", sc1(0), [pair(0, (1, 2)), pair(1, (3, 4))]),
+        "k6": kernel("blake3_servil_hybrid_k6", sc2(0, 1), [pair(0, (2, 3)), pair(1, (4, 5))]),
+        "k7": kernel("blake3_servil_hybrid_k7", sc1(0), [quad(0, (1, 2, 3, 4)), pair(1, (5, 6))]),
+        "k8": kernel("blake3_servil_hybrid_k8", sc2(0, 1), [quad(0, (2, 3, 4, 5)), pair(1, (6, 7))]),
+        "k9": kernel("blake3_servil_hybrid_k9", sc1(0), [quad(0, (1, 2, 3, 4)), quad(1, (5, 6, 7, 8))]),
+        "k10": kernel("blake3_servil_hybrid_k10", sc2(0, 1), [quad(0, (2, 3, 4, 5)), quad(1, (6, 7, 8, 9))]),
         # q<n>: n whole chunks and, in the last slot, a partial chunk on the
         # scalar side, which finishes early; the others run on alone.
         # q1: one whole chunk on a NEON pair (its second lane, slot 2, a
         # duplicate whose value is dropped) and the partial chunk in slot 1.
-        "q1": kernel("blake3_hybrid_q1", sc1(1), [lone_pair((0, 2))], partial=True),
-        "q2": kernel("blake3_hybrid_q2", sc1(2), [lone_pair((0, 1))], partial=True),
-        "q3": kernel("blake3_hybrid_q3", sc2(0, 3), [lone_pair((1, 2))], partial=True),
-        "q4": kernel("blake3_hybrid_q4", sc1(4), [pair(0, (0, 1)), pair(1, (2, 3))], partial=True),
-        "q5": kernel("blake3_hybrid_q5", sc2(0, 5), [pair(0, (1, 2)), pair(1, (3, 4))], partial=True),
-        "q6": kernel("blake3_hybrid_q6", sc1(6), [quad(0, (0, 1, 2, 3)), pair(1, (4, 5))], partial=True),
-        "q7": kernel("blake3_hybrid_q7", sc2(0, 7), [quad(0, (1, 2, 3, 4)), pair(1, (5, 6))], partial=True),
-        "q8": kernel("blake3_hybrid_q8", sc1(8), [quad(0, (0, 1, 2, 3)), quad(1, (4, 5, 6, 7))], partial=True),
-        "q9": kernel("blake3_hybrid_q9", sc2(0, 9), [quad(0, (1, 2, 3, 4)), quad(1, (5, 6, 7, 8))], partial=True),
+        "q1": kernel("blake3_servil_hybrid_q1", sc1(1), [lone_pair((0, 2))], partial=True),
+        "q2": kernel("blake3_servil_hybrid_q2", sc1(2), [lone_pair((0, 1))], partial=True),
+        "q3": kernel("blake3_servil_hybrid_q3", sc2(0, 3), [lone_pair((1, 2))], partial=True),
+        "q4": kernel("blake3_servil_hybrid_q4", sc1(4), [pair(0, (0, 1)), pair(1, (2, 3))], partial=True),
+        "q5": kernel("blake3_servil_hybrid_q5", sc2(0, 5), [pair(0, (1, 2)), pair(1, (3, 4))], partial=True),
+        "q6": kernel("blake3_servil_hybrid_q6", sc1(6), [quad(0, (0, 1, 2, 3)), pair(1, (4, 5))], partial=True),
+        "q7": kernel("blake3_servil_hybrid_q7", sc2(0, 7), [quad(0, (1, 2, 3, 4)), pair(1, (5, 6))], partial=True),
+        "q8": kernel("blake3_servil_hybrid_q8", sc1(8), [quad(0, (0, 1, 2, 3)), quad(1, (4, 5, 6, 7))], partial=True),
+        "q9": kernel("blake3_servil_hybrid_q9", sc2(0, 9), [quad(0, (1, 2, 3, 4)), quad(1, (5, 6, 7, 8))], partial=True),
         # kn<n>, pn<n>: chunks and parents on scalars and quads alone, which
         # need no SHA-3 (the quads rotate with rev32, tbl, and shl + sri):
         # with k1, k9, k10, p8, and p9, every count on a CPU without SHA-3.
-        "kn2": kernel("blake3_hybrid_kn2", sc2(0, 1), []),
-        "kn4": kernel("blake3_hybrid_kn4", [], [quad(0, (0, 1, 2, 3))]),
-        "kn5": kernel("blake3_hybrid_kn5", sc1(0), [quad(0, (1, 2, 3, 4))]),
-        "kn6": kernel("blake3_hybrid_kn6", sc2(0, 1), [quad(0, (2, 3, 4, 5))]),
-        "kn8": kernel("blake3_hybrid_kn8", [], [quad(0, (0, 1, 2, 3)), quad(1, (4, 5, 6, 7))]),
-        "pn2": kernel("blake3_hybrid_pn2", psc2(0, 1), []),
-        "pn4": kernel("blake3_hybrid_pn4", [], [pquad(0, (0, 1, 2, 3))]),
-        "pn5": kernel("blake3_hybrid_pn5", psc1(0), [pquad(0, (1, 2, 3, 4))]),
-        "pn6": kernel("blake3_hybrid_pn6", psc2(0, 1), [pquad(0, (2, 3, 4, 5))]),
-        "pn10": kernel("blake3_hybrid_pn10", psc2(0, 1), [pquad(0, (2, 3, 4, 5)), pquad(1, (6, 7, 8, 9))]),
+        "kn2": kernel("blake3_servil_hybrid_kn2", sc2(0, 1), []),
+        "kn4": kernel("blake3_servil_hybrid_kn4", [], [quad(0, (0, 1, 2, 3))]),
+        "kn5": kernel("blake3_servil_hybrid_kn5", sc1(0), [quad(0, (1, 2, 3, 4))]),
+        "kn6": kernel("blake3_servil_hybrid_kn6", sc2(0, 1), [quad(0, (2, 3, 4, 5))]),
+        "kn8": kernel("blake3_servil_hybrid_kn8", [], [quad(0, (0, 1, 2, 3)), quad(1, (4, 5, 6, 7))]),
+        "pn2": kernel("blake3_servil_hybrid_pn2", psc2(0, 1), []),
+        "pn4": kernel("blake3_servil_hybrid_pn4", [], [pquad(0, (0, 1, 2, 3))]),
+        "pn5": kernel("blake3_servil_hybrid_pn5", psc1(0), [pquad(0, (1, 2, 3, 4))]),
+        "pn6": kernel("blake3_servil_hybrid_pn6", psc2(0, 1), [pquad(0, (2, 3, 4, 5))]),
+        "pn10": kernel("blake3_servil_hybrid_pn10", psc2(0, 1), [pquad(0, (2, 3, 4, 5)), pquad(1, (6, 7, 8, 9))]),
         # x<n>: extended output, n blocks of one block's output at counters
         # counter + i (every table entry the same block), both halves.
-        "x4": kernel("blake3_hybrid_x4", [], [quad(0, (0, 1, 2, 3))], xof=True),
-        "x8": kernel("blake3_hybrid_x8", [], [quad(0, (0, 1, 2, 3)), quad(1, (4, 5, 6, 7))], xof=True),
+        "x4": kernel("blake3_servil_hybrid_x4", [], [quad(0, (0, 1, 2, 3))], xof=True),
+        "x8": kernel("blake3_servil_hybrid_x8", [], [quad(0, (0, 1, 2, 3)), quad(1, (4, 5, 6, 7))], xof=True),
     }
 
 
@@ -1260,7 +1260,7 @@ HEADER = """\
 
 
 def asm_source(kernels):
-    names = [f"blake3_hybrid_{k}" for k in kernels]
+    names = [f"blake3_servil_hybrid_{k}" for k in kernels]
     out = [HEADER]
     for n in names:
         out.append(f".global {n}")

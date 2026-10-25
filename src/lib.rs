@@ -231,13 +231,13 @@ mod park_sync {
 #[cfg(feature = "std")]
 mod lanes;
 mod many;
+mod pair;
 #[cfg(feature = "std")]
 mod park;
 mod self_test;
 #[cfg(feature = "std")]
 mod stream;
 mod tree;
-mod pair;
 
 /// A kind of kernel or path a call ran, for the tests that check which
 /// path a call took. Each build notes the kinds it has.

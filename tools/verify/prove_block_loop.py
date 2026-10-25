@@ -42,7 +42,7 @@ def setup(obj, groups=1, chunks=False):
         for j in range(8):
             table.bytes[8 * i + j] = (Ptr(f"input{i % 16}", 0), j)
     regions["table"] = table
-    s = prove_sme2.SmeSetup(obj, "blake3_sme2_hash16_chunks_512" if chunks else "blake3_sme2_hash16_messages_512", regions)
+    s = prove_sme2.SmeSetup(obj, "blake3_servil_sme2_hash16_chunks_512" if chunks else "blake3_servil_sme2_hash16_messages_512", regions)
     m = s.m
     counter = BitVec("counter", 64)
     flags, start, end, step = (BitVec(x, 8) for x in ("flags", "start", "end", "step"))
@@ -344,7 +344,7 @@ def prove_every(obj, chunks=False):
     table = Region("table", g * 128, False, entry)
     table.symbolic_initial = True
     regions["table"] = table
-    s = prove_sme2.SmeSetup(obj, "blake3_sme2_hash16_chunks_512" if chunks else "blake3_sme2_hash16_messages_512", regions)
+    s = prove_sme2.SmeSetup(obj, "blake3_servil_sme2_hash16_chunks_512" if chunks else "blake3_servil_sme2_hash16_messages_512", regions)
     m = s.m
     m.lengths = {"len_groups", "len_k", "len_blocks", "counter", "step"}
     m.assumptions = [UGE(g, 2), ULE(g, 1 << 40), UGE(n, 2), ULE(n, 16)]

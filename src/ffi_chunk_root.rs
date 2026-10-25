@@ -50,11 +50,11 @@ unsafe fn call(avx512: bool, input: &[u8], key: &CVWords, last: *const u8, packe
     // caller has the ISA.
     unsafe {
         if avx512 {
-            crate::ran_kernel(ffi::blake3_avx512_chunk_root as *const ());
-            ffi::blake3_avx512_chunk_root(input.as_ptr(), key.as_ptr(), last, packed, out.as_mut_ptr().cast());
+            crate::ran_kernel(ffi::blake3_servil_avx512_chunk_root as *const ());
+            ffi::blake3_servil_avx512_chunk_root(input.as_ptr(), key.as_ptr(), last, packed, out.as_mut_ptr().cast());
         } else {
-            crate::ran_kernel(ffi::blake3_sse41_chunk_root as *const ());
-            ffi::blake3_sse41_chunk_root(input.as_ptr(), key.as_ptr(), last, packed, out.as_mut_ptr().cast());
+            crate::ran_kernel(ffi::blake3_servil_sse41_chunk_root as *const ());
+            ffi::blake3_servil_sse41_chunk_root(input.as_ptr(), key.as_ptr(), last, packed, out.as_mut_ptr().cast());
         }
         out.assume_init()
     }
@@ -62,8 +62,8 @@ unsafe fn call(avx512: bool, input: &[u8], key: &CVWords, last: *const u8, packe
 
 pub(crate) mod ffi {
     unsafe extern "C" {
-        pub fn blake3_sse41_chunk_root(input: *const u8, key: *const u32, last: *const u8, packed: u64, out: *mut u8);
-        pub fn blake3_avx512_chunk_root(input: *const u8, key: *const u32, last: *const u8, packed: u64, out: *mut u8);
+        pub fn blake3_servil_sse41_chunk_root(input: *const u8, key: *const u32, last: *const u8, packed: u64, out: *mut u8);
+        pub fn blake3_servil_avx512_chunk_root(input: *const u8, key: *const u32, last: *const u8, packed: u64, out: *mut u8);
     }
 }
 

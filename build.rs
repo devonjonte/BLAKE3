@@ -144,18 +144,6 @@ fn c_compiler_support() -> CCompilerSupport {
     }
 }
 
-/// The inherited x86 assembly exports upstream's names. A program linking
-/// both crates must bind each caller to its own kernels, including our
-/// narrower loads. Namespace the build copies; the checked-in assembly
-/// and the proof tools continue to read the same instruction sources.
-fn private_x86_assembly(build: &mut cc::Build, source: &str) {
-    let source = PathBuf::from(source);
-    let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join(source.file_name().unwrap());
-    let assembly = std::fs::read_to_string(&source).unwrap();
-    std::fs::write(&output, assembly.replace("blake3_", "blake3_servil_")).unwrap();
-    build.file(output);
-}
-
 fn build_sse41_avx2_assembly() {
     // Build the assembly implementations for SSE4.1 and AVX2.
     assert!(is_x86_64());
@@ -164,16 +152,16 @@ fn build_sse41_avx2_assembly() {
     let mut build = new_build();
     if is_windows_target() {
         assert_msvc_asm();
-        private_x86_assembly(&mut build, "c/blake3_sse41_x86-64_windows_msvc.asm");
-        private_x86_assembly(&mut build, "c/blake3_avx2_x86-64_windows_msvc.asm");
+        build.file("c/blake3_sse41_x86-64_windows_msvc.asm");
+        build.file("c/blake3_avx2_x86-64_windows_msvc.asm");
         // The fork's own kernel: names of its own, which no other crate defines.
         build.file("c/blake3_partial_x86-64_windows_msvc.asm");
     } else {
         // All non-Windows implementations are assumed to support
         // Linux-style assembly. These files do contain a small
         // explicit workaround for macOS also.
-        private_x86_assembly(&mut build, "c/blake3_sse41_x86-64_unix.S");
-        private_x86_assembly(&mut build, "c/blake3_avx2_x86-64_unix.S");
+        build.file("c/blake3_sse41_x86-64_unix.S");
+        build.file("c/blake3_avx2_x86-64_unix.S");
         // The fork's own kernels (the pass with a partial chunk, the chunk
         // root in one call): names of their own, which no other crate defines.
         build.file("c/blake3_partial_x86-64_unix.S");
@@ -190,10 +178,10 @@ fn build_avx512_assembly() {
     let mut is_msvc = false;
     if is_windows_target() {
         assert_msvc_asm();
-        private_x86_assembly(&mut build, "c/blake3_avx512_x86-64_windows_msvc.asm");
+        build.file("c/blake3_avx512_x86-64_windows_msvc.asm");
         is_msvc = true;
     } else {
-        private_x86_assembly(&mut build, "c/blake3_avx512_x86-64_unix.S");
+        build.file("c/blake3_avx512_x86-64_unix.S");
     }
 
     // Older versions of Clang require these flags, even for assembly. See

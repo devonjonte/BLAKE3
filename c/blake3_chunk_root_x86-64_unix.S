@@ -11,18 +11,18 @@
 #define _CET_ENDBR
 #endif
 .intel_syntax noprefix
-.global blake3_sse41_chunk_root
-.global _blake3_sse41_chunk_root
-.global blake3_avx512_chunk_root
-.global _blake3_avx512_chunk_root
+.global blake3_servil_sse41_chunk_root
+.global _blake3_servil_sse41_chunk_root
+.global blake3_servil_avx512_chunk_root
+.global _blake3_servil_avx512_chunk_root
 #ifdef __APPLE__
 .text
 #else
 .section .text
 #endif
 .p2align 6
-blake3_sse41_chunk_root:
-_blake3_sse41_chunk_root:
+blake3_servil_sse41_chunk_root:
+_blake3_servil_sse41_chunk_root:
 _CET_ENDBR
         movzx r11d, cl
         mov r10, rcx
@@ -243,8 +243,8 @@ _CET_ENDBR
         movups xmmword ptr [r8+0x10], xmm1
         ret
 .p2align 6
-blake3_avx512_chunk_root:
-_blake3_avx512_chunk_root:
+blake3_servil_avx512_chunk_root:
+_blake3_servil_avx512_chunk_root:
 _CET_ENDBR
         movzx r11d, cl
         mov r10, rcx

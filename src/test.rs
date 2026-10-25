@@ -3,31 +3,72 @@ use crate::{BLOCK_LEN, CHUNK_LEN, CVBytes, CVWords};
 include!("../tools/require_nextest.rs");
 use arrayvec::ArrayVec;
 
-/// Both crates may live in one program. Their AVX-512 hash-many bodies
-/// differ (our remainder loads stay within each input), so their actual
-/// FFI bindings must resolve to distinct entries. This also co-links
-/// upstream into the binary running our existing guard-page tests.
+/// Every symbol the assembly defines carries the crate's prefix,
+/// `blake3_servil_`, so a program that links official BLAKE3 as well (whose
+/// kernels are `blake3_*`) binds each crate's calls to its own kernels
+/// (#151: before, the linker kept one of each name, and servil ran
+/// official's AVX2 and AVX-512 batch kernels). A new kernel without the
+/// prefix fails here, on every machine, before it can meet official's.
 #[test]
-#[cfg(blake3_avx512_ffi)]
-fn test_native_kernels_are_private_when_official_is_linked() {
+#[cfg(feature = "std")]
+fn test_every_assembly_symbol_carries_the_crate_prefix() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("c");
+    let mut files = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if !matches!(path.extension().and_then(|e| e.to_str()), Some("S" | "asm")) {
+            continue;
+        }
+        files += 1;
+        for (n, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {
+            let mut words = line.split_whitespace();
+            // .globl / .global (Unix), PUBLIC (MSVC): the names the linker sees.
+            if let (Some(".globl" | ".global" | "PUBLIC" | "public"), Some(name)) = (words.next(), words.next()) {
+                assert!(name.trim_start_matches('_').starts_with("blake3_servil_"), "{}:{}: {name} lacks the prefix blake3_servil_", path.display(), n + 1);
+            }
+        }
+    }
+    assert!(files >= 9, "the assembly files in {}: {files}", dir.display());
+}
+
+/// The kernels servil shares a name with official BLAKE3 1.8.7, with
+/// official linked into this binary (a dev-dependency): each of servil's
+/// bindings reaches an entry of its own, and both crates hash alike.
+#[test]
+#[cfg(all(feature = "std", target_arch = "x86_64", blake3_sse41_ffi))]
+fn test_official_kernels_and_ours_stay_apart() {
+    // Official's names, as its own assembly exports them.
     unsafe extern "C" {
-        fn blake3_hash_many_avx512(
-            inputs: *const *const u8,
-            num_inputs: usize,
-            blocks: usize,
-            key: *const u32,
-            counter: u64,
-            increment_counter: bool,
-            flags: u8,
-            flags_start: u8,
-            flags_end: u8,
-            out: *mut u8,
-        );
+        fn blake3_compress_in_place_sse41();
+        fn blake3_compress_xof_sse41();
+        fn blake3_hash_many_sse41();
+        fn blake3_hash_many_avx2();
+    }
+    #[cfg(blake3_avx512_ffi)]
+    unsafe extern "C" {
+        fn blake3_compress_in_place_avx512();
+        fn blake3_compress_xof_avx512();
+        fn blake3_hash_many_avx512();
     }
     crate::initialize();
     let input = core::hint::black_box([42u8; 4096]);
     assert_eq!(crate::hash_serial(&input, crate::IV, 0).as_bytes(), blake3::hash(&input).as_bytes());
-    assert_ne!(crate::avx512::ffi::blake3_hash_many_avx512 as *const (), blake3_hash_many_avx512 as *const (), "servil's FFI bound upstream's native kernel");
+    #[allow(unused_mut)]
+    let mut pairs: Vec<(&str, *const (), *const ())> = vec![
+        ("compress_in_place_sse41", crate::sse41::ffi::blake3_servil_compress_in_place_sse41 as *const (), blake3_compress_in_place_sse41 as *const ()),
+        ("compress_xof_sse41", crate::sse41::ffi::blake3_servil_compress_xof_sse41 as *const (), blake3_compress_xof_sse41 as *const ()),
+        ("hash_many_sse41", crate::sse41::ffi::blake3_servil_hash_many_sse41 as *const (), blake3_hash_many_sse41 as *const ()),
+        ("hash_many_avx2", crate::avx2::ffi::blake3_servil_hash_many_avx2 as *const (), blake3_hash_many_avx2 as *const ()),
+    ];
+    #[cfg(blake3_avx512_ffi)]
+    pairs.extend([
+        ("compress_in_place_avx512", crate::avx512::ffi::blake3_servil_compress_in_place_avx512 as *const (), blake3_compress_in_place_avx512 as *const ()),
+        ("compress_xof_avx512", crate::avx512::ffi::blake3_servil_compress_xof_avx512 as *const (), blake3_compress_xof_avx512 as *const ()),
+        ("hash_many_avx512", crate::avx512::ffi::blake3_servil_hash_many_avx512 as *const (), blake3_hash_many_avx512 as *const ()),
+    ]);
+    for (name, ours, official) in pairs {
+        assert_ne!(ours, official, "servil's {name} is bound to official's kernel");
+    }
 }
 
 /// `bytes` copied into whole blocks, zero after them: a message as the

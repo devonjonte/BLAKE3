@@ -156,7 +156,7 @@ def prove_compress(so, isa, windows, xof):
     if xof:
         regions["out"] = Region("out", 64, True, None)
     args = [Ptr("cv", 0), Ptr("block", 0), ZeroExt(56, block_len), counter, ZeroExt(56, flags)] + ([Ptr("out", 0)] if xof else [])
-    name = f"blake3_compress_{'xof' if xof else 'in_place'}_{isa}"
+    name = f"blake3_servil_compress_{'xof' if xof else 'in_place'}_{isa}"
     s = Setup(so, name, regions, args, windows)
     d_row_facts(s.m, counter, 1, [ZeroExt(24, block_len), ZeroExt(24, flags)])
     m = s.run()
@@ -179,7 +179,7 @@ def prove_xof_many(so, n):
     regions = {"cv": Region("cv", 32, False, lambda o: cv[o]), "block": Region("block", 64, False, lambda o: block[o]),
                "out": Region("out", 64 * n, True, None)}
     args = [Ptr("cv", 0), Ptr("block", 0), ZeroExt(56, block_len), counter, ZeroExt(56, flags), Ptr("out", 0), BitVecVal(n, 64)]
-    s = Setup(so, "blake3_xof_many_avx512", regions, args, False)
+    s = Setup(so, "blake3_servil_xof_many_avx512", regions, args, False)
     d_row_facts(s.m, counter, n, [ZeroExt(24, block_len), ZeroExt(24, flags)])
     m = s.run()
     out = m.regions["out"]
@@ -215,7 +215,7 @@ def prove_hash_many(so, isa, windows, n, blocks, increment):
     flags, start, end = u8("flags"), u8("start"), u8("end")
     args = [Ptr("table", 0), BitVecVal(n, 64), BitVecVal(blocks, 64), Ptr("key", 0), counter,
             BitVecVal(1 if increment else 0, 64), ZeroExt(56, flags), ZeroExt(56, start), ZeroExt(56, end), Ptr("out", 0)]
-    s = Setup(so, f"blake3_hash_many_{isa}", regions, args, windows)
+    s = Setup(so, f"blake3_servil_hash_many_{isa}", regions, args, windows)
     d_row_facts(s.m, counter, n if increment else 1, [ZeroExt(24, flags | start | end), ZeroExt(24, flags | start), ZeroExt(24, flags | end), ZeroExt(24, flags), BitVecVal(64, 32)])
     m = s.run()
     out = m.regions["out"]
@@ -248,7 +248,7 @@ def prove_chunk_root(so, isa, whole):
     regions = {"input": Region("input", 64 * whole, False, lambda o: blocks[o]), "key": Region("key", 32, False, lambda o: key[o]),
                "last": Region("last", 64, False, lambda o: last[o]), "out": Region("out", 32, True, None)}
     args = [Ptr("input", 0), Ptr("key", 0), Ptr("last", 0), packed, Ptr("out", 0)]
-    s = Setup(so, f"blake3_{isa}_chunk_root", regions, args, False)
+    s = Setup(so, f"blake3_servil_{isa}_chunk_root", regions, args, False)
     # The last block's length and the mode flags are public, as lengths are.
     s.m.lengths |= {"last_len", "flags"}
     f = ZeroExt(24, flags)
@@ -314,7 +314,7 @@ def prove_partial(so, kisa, windows, last):
             params.bytes[off["MSG"] + 8 * j + k] = (Ptr(f"input{j}", 0), k)
     regions = {f"input{j}": Region(f"input{j}", 1024, False, (lambda b: lambda o: b[o])(inputs[j])) for j in range(w)}
     regions["params"] = params
-    s = Setup(so, f"blake3_partial_{kisa}", regions, [Ptr("params", 0)], windows)
+    s = Setup(so, f"blake3_servil_partial_{kisa}", regions, [Ptr("params", 0)], windows)
     m = s.run()
     out = m.regions["params"]
     for j in range(w):

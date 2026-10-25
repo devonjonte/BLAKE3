@@ -262,8 +262,8 @@ preservation, and branches and addresses independent of input bytes and
 keys. Several induction harnesses classify counters and counter steps as
 public parameters; a trace claim must follow that declared scope.
 
-On x86-64, the fork's generated kernels (`blake3_partial_sse41` and
-`blake3_partial_avx2`, under both calling conventions) are proved for
+On x86-64, the fork's generated kernels (`blake3_servil_partial_sse41` and
+`blake3_servil_partial_avx2`, under both calling conventions) are proved for
 every input: each lane's sixteen blocks from its chaining value and
 counter, with every per-lane, per-block length and flags, and the
 snapshot after every block (`prove_x86.py partial`, 64 cases).
@@ -433,7 +433,7 @@ compute the standard's BLAKE3. The commits that introduced and fixed
 each bug are in `git log`.
 
 1. **The SME2 message kernel mishandled one-block messages**
-   (`blake3_sme2_hash16_messages_512` in `c/blake3_sme2_aarch64.S`).
+   (`blake3_servil_sme2_hash16_messages_512` in `c/blake3_sme2_aarch64.S`).
    A one-block message was compressed twice, the second time without
    the chunk-start flag. A one-block message now starts and ends on
    its last block.
