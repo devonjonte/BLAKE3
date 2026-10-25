@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="760" height="286" viewBox="0 0 760 286" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14">
 <rect width="760" height="286" fill="white"/>
 <text x="16" y="26" font-size="17" font-weight="bold">A tree of 1,000 files, 74 MiB, hashed from the page cache</text>
-<text x="16" y="46" fill="#555">AMD EPYC 9255, 48 CPUs, Linux. The command's start to its exit; longer is faster.</text>
+<text x="16" y="46" fill="#555">AMD EPYC 9255, 48 CPUs, Linux.</text>
 <text x="190" y="86" text-anchor="end">b3sum, every core</text>
 <rect x="200" y="72" width="470.0" height="22" fill="#4c1d95" rx="2"/>
 <text x="678.0" y="88" fill="#222">19.1 GB/s</text>
