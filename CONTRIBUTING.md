@@ -95,7 +95,7 @@ were made so), and the row goes.
 
 CI (`.github/workflows/ci.yml`) runs the suites on Linux x86-64 and arm64
 (without SME2, and without SHA-3 under QEMU), and Windows with MSVC,
-for every pull request from a fork, and by hand for a
+for every pull request, and by hand for a
 candidate that changes code for those targets. The Mac runner
 (`tools/runner/`) runs the Rust suites natively. `sh tools/check-builds.sh`
 runs, in minutes, the builds the suites above leave out: without std, on
@@ -191,26 +191,37 @@ reads where each step left its result and prints PASS, FAIL, or OPEN
 with the command that makes the evidence. The release's tracking issue
 lists what it takes and ticks each step:
 
-1. CI, every job, on the tip; `sh tools/check-builds.sh`.
-2. `bench-hashes check --against <previous release tag> --cells all`, on
+1. Once the code and API scope are settled, run `python3 tools/gen-ver.py
+   X.Y.Z` from a clean release checkout. It stamps `X.Y.Z+<code parent's hash>`
+   into the crate, CLI, C library/header and CHANGELOG, and makes a version
+   commit and **local** tag. The version's hash names the code parent; the
+   tag names the version commit. cargo-c derives pkg-config's version from
+   the C crate; the tool prints the release's exact dependency line. Keep
+   the tag unpublished while validating that commit.
+   An RC branch can make the commit available to CI. Final commit-keyed
+   evidence names this version commit; reuse of unchanged proof inputs needs
+   an explicit identity record, not logs renamed from the parent.
+2. CI, every job, dispatched with `workflow_dispatch` on the exact candidate;
+   `sh tools/check-builds.sh`. Pull-request CI normally checks a synthetic
+   merge, so its head-SHA label alone is not evidence for the release commit.
+3. `bench-hashes check --against <previous release tag> --cells all`, on
    the VM and the Mac: each commit was checked against its parent alone,
    and this sees what small slowdowns add up to.
-3. The long proofs, every kernel; the full mutation run.
-4. `cargo publish --dry-run` in the root and in `b3sum/`.
-5. The pages, read as a newcomer would: the README's servil preface,
+4. The long proofs, every kernel; the full mutation run.
+5. A paired package dry-run (below). The CLI needs the new library version,
+   which is not on crates.io yet; checking it alone cannot validate the pair.
+6. The pages, read as a newcomer would: the README's servil preface,
    `QUALITY.md` and `docs/quality-manual.md`, `CHANGELOG.md` (what
    changed for users, in their terms), the supported-platforms table
    (exactly what CI runs).
-6. A full bench-hashes run on the release commit on the Mac, published to
-   bench-hashes' pages with the release named on the map.
-7. Run `python3 tools/gen-ver.py X.Y.Z` from a clean tree. It commits
-   `X.Y.Z+<its parent's hash>` into the crate, b3sum, the C library's crate
-   and header, and the CHANGELOG's title. It tags that commit and prints
-   the dependency line for the release notes. cargo-c derives the
-   pkg-config version from the C library's crate.
-8. Publish:
-   - the crates: `cargo publish` in the root, then in `b3sum/`, whose
-     package is `b3sums` (crates.io's `b3sum` is official BLAKE3's);
+7. A full bench-hashes run on the version commit on the Mac, its results
+   retained for publication with the release and named on the map.
+8. Once the gates and human reviews accept that exact version commit,
+   publish its tag and artifacts:
+   - the crates: publish the pair from the same staged checkout and lock
+     used for the dry-run, with `--locked` and the same explicit `-p` names.
+     Cargo publishes the dependency first. The CLI package is `b3sums`
+     (crates.io's `b3sum` is official BLAKE3's);
    - b3sum's binaries, built from a clean tree at the tag on each machine
      by `sh tools/b3sum-release.sh` (statically linked on Linux), each
      with its `.sha256` and `.b3`;
@@ -219,6 +230,36 @@ lists what it takes and ticks each step:
      pkg-config file (`capi/README.md`);
    - the GitHub release, its text the CHANGELOG entry.
 9. The eBASH submission, pinned to the tag (`supercop/README.md`).
+
+### Paired package dry-run, before either crate is published
+
+From the version-stamped checkout, with no tracked changes, use Cargo's
+multi-package support in a temporary parent workspace. The staged clone
+is clean; the candidate's manifests and Git tree stay unchanged. Select
+the two packages explicitly, so other path dependencies in the tree are
+not publication targets:
+
+```sh
+(
+set -eu
+git diff --quiet HEAD
+commit=$(git rev-parse HEAD)
+stage=$(mktemp -d)
+git clone --shared --no-checkout . "$stage/checkout"
+git -C "$stage/checkout" checkout --detach "$commit"
+printf '[workspace]\nmembers = ["checkout", "checkout/b3sum"]\nresolver = "3"\n' > "$stage/Cargo.toml"
+cargo publish --dry-run --manifest-path "$stage/Cargo.toml" \
+    --target-dir "$stage/target" -p blake3-servil -p b3sums
+echo "Retain paired-package workspace: $stage"
+)
+```
+
+Cargo stages the unpublished library while verifying the CLI. Retain the
+workspace lock, logs and archives, with both artifact digests. The CLI's
+packaged lock must name the checksum of that exact library archive.
+Append `publish-dry-run: ok` to the commit-named release log only when the
+paired command succeeds; this is a dry-run, never permission to upload.
+The final publication uses the same source and locked dependency resolution.
 
 ## Maintainers' notes
 

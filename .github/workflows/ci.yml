@@ -2,7 +2,7 @@ name: tests
 
 on:
   # Started by hand for a promotion candidate that touches code for other
-  # targets (x86, Windows), and for every fork's pull
+  # targets (x86, Windows), and for every pull
   # request; the AArch64 builds and proofs run on the VM and the Mac
   # (CONTRIBUTING.md: tools/check-builds.sh, tools/verify/long-proofs.sh).
   pull_request:
@@ -32,10 +32,10 @@ jobs:
         components: rustfmt
     - name: cargo fmt --check, in each crate
       run: for d in $(git ls-files '*Cargo.toml' | xargs -n1 dirname); do (cd "$d" && cargo fmt --all -- --check) || exit 1; done
+    - name: Release-evidence tool controls
+      run: python3 tools/test_release_check.py
 
   library_tests:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: ${{ matrix.target.name }} ${{ matrix.channel }}
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
@@ -116,8 +116,6 @@ jobs:
       working-directory: ./reference_impl
 
   b3sum_tests:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: b3sum ${{ matrix.target.name }} ${{ matrix.channel }}
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
@@ -154,8 +152,6 @@ jobs:
       working-directory: ./b3sum
 
   aarch64_without_sme2:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     # The AArch64 paths our machines (an M4 Max and a VM on it) never run:
     # a CPU without SME2 (this runner, a Neoverse N2), and one without the
     # SHA-3 extension either (QEMU as a Cortex-A72, as in a Raspberry Pi 4
@@ -194,8 +190,6 @@ jobs:
       working-directory: ./capi
 
   capi_macos:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: "C API on macOS (installed consumers)"
     runs-on: macos-latest
     steps:
@@ -212,8 +206,6 @@ jobs:
       run: cargo nextest run --release --manifest-path capi/Cargo.toml
 
   capi_windows_consumer:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: "C API consumer on Windows MSVC"
     runs-on: windows-latest
     steps:
@@ -253,8 +245,6 @@ jobs:
   # https://github.com/BLAKE3-team/BLAKE3/issues/271. The runner may lack
   # AVX-512; the build is the check that holds on every runner.
   gcc_floor:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: "compile and test with GCC 12, the oldest supported"
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -273,8 +263,6 @@ jobs:
           ~/.cargo/bin/cargo test --doc
 
   miri_smoketest:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: Miri smoketest
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -295,8 +283,6 @@ jobs:
 
 
   x86_model:
-    # A pull request from a branch of this repository: its push runs CI already.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: "the x86-64 proofs' model against the CPU"
     runs-on: ubuntu-latest
     timeout-minutes: 30

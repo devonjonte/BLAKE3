@@ -12,7 +12,9 @@ judge: a check whose machine was busy). Exit status 0 only when every step
 passes; 1 when a step failed or is open; 2 when every other step passes
 and the rest timed out or have no verdict.
 
-- CI: GitHub's workflow runs on the commit (every job succeeded).
+- CI: a workflow_dispatch run on the commit (every job succeeded).
+  Pull-request runs check a synthetic merge by default, not the head SHA
+  GitHub associates with the run, so they are not release evidence.
 - Long proofs: the commit's GitHub status "long proofs" (long-proofs.sh).
 - Mac check: runner/results/*/verdict.json whose job names this commit as
   new_commit and the previous release as old_commit (a "check" job with
@@ -21,13 +23,19 @@ and the rest timed out or have no verdict.
   hex digits), so an earlier commit's log cannot stand in for it:
   - VM check: tmp/night/check-release-vm-C.log, from
     `cd bench-hashes && cargo run --release -- check --against <previous tag> --cells all`.
-  - Full mutation run: tmp/night/mutants-C.log ending "each known and
-    explained", from `python3 tools/mutants/check.py` with the commit checked out.
+  - Full mutation run: tmp/night/mutants-C.log with both final summaries
+    matching their survivor and timeout lists, from
+    `python3 tools/mutants/check.py` with the commit checked out.
   - check-builds: tmp/night/check-builds-C.log ending "every build passes".
-  - Publish dry run: tmp/night/publish-dry-run-C.log, from
-    `cargo publish --dry-run` in the root and in b3sum/.
+  - Publish dry run: tmp/night/publish-dry-run-C.log, from the paired
+    package dry-run in CONTRIBUTING.md, followed by "publish-dry-run: ok"
+    only on success.
 - The pages: README.md, QUALITY.md, CHANGELOG.md changed since the
   previous release (a release rewrites them for its readers).
+
+The previous release is the nearest reachable v* tag, excluding tags on
+this candidate itself. Creating the release's tag must not make the check
+compare the release against itself; tags on other branches are irrelevant.
 """
 
 import glob
@@ -75,17 +83,74 @@ def github(path):
         raise
 
 
-def log_ends_with(path, text):
+def log_tail(path):
     full = os.path.join(MAIN, path)
     if not os.path.exists(full):
         return None
-    return text in open(full, errors="replace").read()[-4000:]
+    return Path(full).read_text(errors="replace")[-4000:]
+
+
+def log_ends_with(path, text):
+    tail = log_tail(path)
+    return None if tail is None else text in tail
+
+
+def mutation_result(path):
+    """check.py exits zero only when both survivor and timeout lists agree."""
+    tail = log_tail(path)
+    lines = [] if tail is None else tail.strip().splitlines()
+    if len(lines) < 2:
+        return None
+    survivors, timeouts = lines[-2:]
+    if survivors == "mutants: the list and this run differ, or a listed mutant has no reason":
+        return False
+    if not re.fullmatch(r"mutants: \d+ survive, each known and explained", survivors):
+        return None
+    if re.fullmatch(r"mutants: \d+ time out, each known \([^)]+\)", timeouts):
+        return True
+    if re.fullmatch(r"mutants: the time-outs differ from .+ \(no verdict on those mutants\)", timeouts):
+        return NO_VERDICT
+    return None
+
+
+def ci_result(run):
+    """Release CI tests the actual candidate, with every job executed."""
+    if run["event"] != "workflow_dispatch":
+        return None
+    if run["status"] != "completed":
+        return None
+    if run["conclusion"] != "success":
+        return TIMED_OUT if run["conclusion"] == "timed_out" else False
+    jobs, page = [], 1
+    while True:
+        reply = github(f"/repos/johnservil/BLAKE3/actions/runs/{run['id']}/jobs?per_page=100&page={page}")
+        jobs.extend(reply["jobs"])
+        if len(jobs) == reply["total_count"]:
+            break
+        assert reply["jobs"] and len(jobs) < reply["total_count"], "CI jobs response is incomplete or inconsistent"
+        page += 1
+    if not jobs:
+        return None
+    if any(job["conclusion"] == "timed_out" for job in jobs):
+        return TIMED_OUT
+    if any(job["status"] != "completed" or job["conclusion"] in (None, "skipped") for job in jobs):
+        return None
+    return all(job["conclusion"] == "success" for job in jobs)
+
+
+def previous_release(commit):
+    """Nearest reachable release tag, excluding tags on the candidate itself."""
+    tags = git("tag", "--list", "v*", "--merged", commit).split()
+    tags = [tag for tag in tags if git("rev-parse", tag + "^{commit}") != commit]
+    if not tags:
+        return None
+    matches = [arg for tag in tags for arg in ("--match", tag)]
+    return git("describe", "--tags", "--abbrev=0", *matches, commit)
 
 
 def main():
     commit = git("rev-parse", sys.argv[1] if len(sys.argv) > 1 else "servil")
-    tags = [t for t in git("tag", "--list", "v*", "--sort=-creatordate").split() if t]
-    previous = tags[0] if tags else None
+    previous = previous_release(commit)
     results = []
 
     def step(name, ok, how):
@@ -96,12 +161,11 @@ def main():
         print(f"{label}  {name}" + ("" if ok is True else f": {how}"))
 
     try:
-        runs = github(f"/repos/johnservil/BLAKE3/actions/runs?head_sha={commit}&per_page=20").get("workflow_runs", [])
+        runs = github(f"/repos/johnservil/BLAKE3/actions/runs?head_sha={commit}&event=workflow_dispatch&per_page=20").get("workflow_runs", [])
         ci = [r for r in runs if r["name"] == "tests"]
-        conclusion = ci[0]["conclusion"] if ci and ci[0]["status"] == "completed" else None
-        # GitHub's own outcome for a job past its timeout-minutes.
-        step("CI, every job", None if conclusion is None else TIMED_OUT if conclusion == "timed_out" else conclusion == "success",
-             "dispatch the tests workflow on the commit and wait" if conclusion != "timed_out" else "a job reached its timeout-minutes")
+        result = ci_result(ci[0]) if ci else None
+        step("CI, every job", result,
+             "dispatch the tests workflow on the commit; every job must run and succeed" if result != TIMED_OUT else "a job reached its timeout-minutes")
     except GitHubTimedOut as e:
         step("CI, every job", TIMED_OUT, str(e))
 
@@ -119,7 +183,9 @@ def main():
         if not os.path.exists(job):
             continue
         j = json.loads(Path(job).read_text())
-        if j.get("new_commit") == commit and (previous is None or j.get("old_commit") == git("rev-parse", previous)):
+        if (j.get("type") == "check" and j.get("cells") == "all"
+                and j.get("new_commit") == commit
+                and (previous is None or j.get("old_commit") == git("rev-parse", previous))):
             mac = v["status"]
     # The runner's verdict, each status as itself: "timed out" (its limit
     # ended the job) and "no verdict" (the machine was busy) are neither a
@@ -131,12 +197,12 @@ def main():
 
     step("VM check against the previous release", log_ends_with(f"tmp/night/check-release-vm-{commit[:12]}.log", "no cell slower"),
          f"(cd bench-hashes && cargo run --release -- check --against {previous or '<previous tag>'} --cells all) > tmp/night/check-release-vm-{commit[:12]}.log")
-    step("full mutation run", log_ends_with(f"tmp/night/mutants-{commit[:12]}.log", "each known and explained"),
+    step("full mutation run", mutation_result(f"tmp/night/mutants-{commit[:12]}.log"),
          f"python3 tools/mutants/check.py > tmp/night/mutants-{commit[:12]}.log, the commit checked out (overnight)")
     step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "every build passes"),
          f"sh tools/check-builds.sh > tmp/night/check-builds-{commit[:12]}.log")
     step("cargo publish --dry-run", log_ends_with(f"tmp/night/publish-dry-run-{commit[:12]}.log", "publish-dry-run: ok"),
-         f"(cargo publish --dry-run --allow-dirty && cd b3sum && cargo publish --dry-run --allow-dirty) > tmp/night/publish-dry-run-{commit[:12]}.log && echo publish-dry-run: ok >> tmp/night/publish-dry-run-{commit[:12]}.log")
+         f"paired package dry-run in CONTRIBUTING.md; save its output to tmp/night/publish-dry-run-{commit[:12]}.log and append 'publish-dry-run: ok' only on success")
 
     if previous:
         changed = set(git("diff", "--name-only", previous, commit).split())
