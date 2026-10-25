@@ -48,7 +48,9 @@ pub unsafe fn hash_many<const N: usize>(
 /// The most blocks one call of the AVX-512 extended-output kernel makes:
 /// its proof covers 1 to 32 (tools/verify/prove_x86.py, xof_many), so a
 /// longer output takes one call per 32 blocks and every call stays within
-/// what is proved (#163).
+/// what is proved (#163). The kernel is in the Unix assembly alone, as
+/// `xof_many` below.
+#[cfg(unix)]
 pub const XOF_PROVED_BLOCKS: usize = 32;
 
 // Unsafe because this may only be called on platforms supporting AVX-512.
