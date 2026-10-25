@@ -190,9 +190,15 @@ class ConcreteCasesTests(unittest.TestCase):
     def test_representative_cases_are_the_declared_promotion_set(self):
         import prove_x86
         got = prove_x86.representative_cases()
-        self.assertEqual(len(got), 154)
-        self.assertEqual(len(set(got)), 154)
+        self.assertEqual(len(got), 214)
+        self.assertEqual(len(set(got)), 214)
         self.assertTrue(all(case in prove_x86.cases(set()) for case in got))
+        # pair.rs's shape: two inputs at consecutive counters, 1 to 15
+        # blocks, AVX2 and AVX-512, both conventions (#163).
+        for isa in ("avx2", "avx512"):
+            for windows in (False, True):
+                for blocks in range(1, 16):
+                    self.assertIn((isa, windows, "hash_many", (2, blocks, True)), got)
 
 
 class EveryCountCasesTests(unittest.TestCase):
