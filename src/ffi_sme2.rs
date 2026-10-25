@@ -649,7 +649,3 @@ pub mod ffi {
         pub fn blake3_sme2_hash16_parents_512(pairs: *const u8, key: *const u32, counter: u64, flags: u32, out: *mut u8, groups: u64) -> u64;
     }
 }
-
-#[cfg(test)]
-mod test {
-}

@@ -1,10 +1,10 @@
-#!/usr/bin/env pypy3
+#!/usr/bin/env python3
 """Generate the fork's x86-64 kernels: whole chunks and a partial one in one
 pass, side by side, as the Arm q kernels do (c/blake3_partial_x86-64_unix.S
 and c/blake3_partial_x86-64_windows_msvc.asm, the same code in both forms).
 
-    pypy3 tools/gen_x86.py unix > c/blake3_partial_x86-64_unix.S
-    pypy3 tools/gen_x86.py msvc > c/blake3_partial_x86-64_windows_msvc.asm
+    python3 tools/gen_x86.py unix > c/blake3_partial_x86-64_unix.S
+    python3 tools/gen_x86.py msvc > c/blake3_partial_x86-64_windows_msvc.asm
 
 Two kernels, one per width W: blake3_partial_sse41 (W = 4, xmm, legacy SSE
 encodings, for any CPU with SSE4.1) and blake3_partial_avx2 (W = 8, ymm,
