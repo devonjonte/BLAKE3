@@ -40,7 +40,7 @@ class SmeSetup(Setup):
         real = aarch64.disassemble
         aarch64.disassemble = lambda o, a, b: real(o, a, b, llvm=True)
         try:
-            super().__init__(obj, entry, "blake3_sme2_text_end", regions, start_name="blake3_sme2_hash16_chunks_512")
+            super().__init__(obj, entry, "blake3_servil_sme2_text_end", regions, start_name="blake3_servil_sme2_hash16_chunks_512")
         finally:
             aarch64.disassemble = real
 
@@ -92,7 +92,7 @@ def prove_chunks(obj, groups, stored, at, check=True):
     if at:
         cb = [Extract(8 * j + 7, 8 * j, counters[g]) for g in range(groups) for j in range(8)]
         regions["counters"] = Region("counters", 8 * groups, False, lambda o: cb[o])
-    s = SmeSetup(obj, "blake3_sme2_hash16_chunks_at_512" if at else "blake3_sme2_hash16_chunks_512", regions)
+    s = SmeSetup(obj, "blake3_servil_sme2_hash16_chunks_at_512" if at else "blake3_servil_sme2_hash16_chunks_512", regions)
     counter = BitVec("counter", 64)
     flags, start, end = (BitVec(x, 8) for x in ("flags", "start", "end"))
     m = s.m
@@ -129,7 +129,7 @@ def prove_messages(obj, groups, blocks, stored, check=True):
         for j in range(8):
             table.bytes[8 * i + j] = (Ptr(f"input{i}", 0), j)
     regions["table"] = table
-    s = SmeSetup(obj, "blake3_sme2_hash16_messages_512", regions)
+    s = SmeSetup(obj, "blake3_servil_sme2_hash16_messages_512", regions)
     counter = BitVec("counter", 64)
     flags, start, end, step = (BitVec(x, 8) for x in ("flags", "start", "end", "step"))
     last_len = BitVec("last_len", 6)
@@ -167,7 +167,7 @@ def prove_parents(obj, groups, check=True):
     regions = {"pairs": Region("pairs", 64 * n, False, lambda o: pairs[o]),
                "key": Region("key", 32, False, lambda o: key[o]),
                "out": Region("out", 32 * n, True, None)}
-    s = SmeSetup(obj, "blake3_sme2_hash16_parents_512", regions)
+    s = SmeSetup(obj, "blake3_servil_sme2_hash16_parents_512", regions)
     counter, flags = BitVec("counter", 64), BitVec("flags", 32)
     m = s.m
     m.x[0], m.x[1], m.x[2] = Ptr("pairs", 0), Ptr("key", 0), counter
@@ -190,7 +190,7 @@ def prove_xof(obj, groups, check=True):
     regions = {"cv": Region("cv", 32, False, lambda o: cvb[o]),
                "block": Region("block", 64, False, lambda o: block[o]),
                "out": Region("out", 1024 * groups, True, None)}
-    s = SmeSetup(obj, "blake3_sme2_xof16_512", regions)
+    s = SmeSetup(obj, "blake3_servil_sme2_xof16_512", regions)
     counter, flags, length = BitVec("counter", 64), BitVec("flags", 8), BitVec("last_len", 8)
     m = s.m
     m.x[0], m.x[1], m.x[2] = Ptr("cv", 0), Ptr("block", 0), counter
@@ -249,7 +249,7 @@ def prove_parents_every(obj):
                "key": Region("key", 32, False, lambda o: key[o]),
                "out": Region("out", g * 512, True, None)}
     regions["pairs"].symbolic_initial = True
-    s = SmeSetup(obj, "blake3_sme2_hash16_parents_512", regions)
+    s = SmeSetup(obj, "blake3_servil_sme2_hash16_parents_512", regions)
     m = s.m
     m.lengths = {"len_groups", "len_k"}
     m.assumptions = [UGE(g, 2), ULE(g, 1 << 40)]
@@ -320,7 +320,7 @@ def prove_xof_every(obj):
     regions = {"cv": Region("cv", 32, False, lambda o: cvb[o]),
                "block": Region("block", 64, False, lambda o: block[o]),
                "out": Region("out", g * 1024, True, None)}
-    s = SmeSetup(obj, "blake3_sme2_xof16_512", regions)
+    s = SmeSetup(obj, "blake3_servil_sme2_xof16_512", regions)
     m = s.m
     # The counter takes part in conditions (its carry), each decided by the solver.
     m.lengths = {"len_groups", "len_k", "counter"}
@@ -390,7 +390,7 @@ class HybridSetup(Setup):
         real = aarch64.disassemble
         aarch64.disassemble = lambda o, a, b: real(o, a, end, llvm=True)
         try:
-            super().__init__(obj, "blake3_sme2x2_hash_chunks_512", "blake3_sme2x2_hash_chunks_512", regions)
+            super().__init__(obj, "blake3_servil_sme2x2_hash_chunks_512", "blake3_servil_sme2x2_hash_chunks_512", regions)
         finally:
             aarch64.disassemble = real
 
