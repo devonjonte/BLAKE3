@@ -36,25 +36,39 @@ pub(crate) struct Park {
     parked: Box<[Line<AtomicU64>]>,
     /// Each worker's thread, set as it starts.
     handles: Box<[OnceLock<thread::Thread>]>,
-    /// Wakes still owed: each woken worker pays them before it works.
+    /// Wakes still owed: each woken worker pays up to `fanout` of them
+    /// before it works.
     owed: AtomicUsize,
+    /// The most wakes any one waker makes (FANOUT; a test may choose).
+    fanout: usize,
 }
 
-/// The most wakes a publisher makes itself before its own pieces; the rest
-/// are owed, and the workers it woke pay them, side by side (BLAKE3 #119).
-/// Every wake direct costs the publisher a system call per worker before
-/// it starts: 47 on the EPYC 9255 made 14 pool cells 4-12% slower. One
-/// direct wake and a cascade makes each worker wait for the one before:
-/// the i7-12700K's one-shots of 1-2 MiB 16-25% slower. At 8, the i7 reads
-/// level (data 2026-10-24/wakes-i7, 2026-10-25/wakes8-i7).
-const DIRECT_WAKES: usize = 8;
+/// The most wakes any one waker makes, publisher or woken worker: the rest
+/// stay owed for the workers it woke, so a job's wakes spread as a tree,
+/// FANOUT more a hop, and no thread makes more than FANOUT system calls
+/// before its own work (BLAKE3 #119). Every wake direct put up to 47 calls
+/// before the publisher's first piece on the EPYC 9255 (14 pool cells
+/// 4-12% slower); one wake a hop made each worker wait for the one before
+/// (the i7-12700K's 1-2 MiB one-shots 16-25% slower); a publisher of 8 with
+/// workers paying the rest unbounded let one worker make every owed wake
+/// in a quarter of the i7's 2 MiB jobs (data 2026-10-25/wake-counts).
+pub(crate) const FANOUT: usize = 8;
+
+/// A waker's share of `need` wakes: the ones it makes now, at most
+/// `fanout`, and the ones it leaves owed.
+pub(crate) fn split(need: usize, fanout: usize) -> (usize, usize) {
+    let now = need.min(fanout);
+    (now, need - now)
+}
 
 impl Park {
-    pub(crate) fn new(workers: usize) -> Park {
+    pub(crate) fn new(workers: usize, fanout: usize) -> Park {
+        assert!(fanout >= 1, "a waker makes at least one wake");
         Park {
             parked: (0..workers.div_ceil(64).max(1)).map(|_| Line(AtomicU64::new(0))).collect(),
             handles: (0..workers).map(|_| OnceLock::new()).collect(),
             owed: AtomicUsize::new(0),
+            fanout,
         }
     }
 
@@ -96,34 +110,22 @@ impl Park {
     }
 
     /// Wake workers for `wanted` pieces of new work, given `workers`
-    /// workers in all: one now, and the rest owed, which each woken worker
-    /// pays before it works, so the publisher makes one wake and starts on
-    /// its own pieces while the wakes cascade. The publisher making every
-    /// wake itself put up to 47 system calls before its first piece on a
-    /// 48-thread EPYC 9255: 14 pool cells 4-12% slower (BLAKE3 #119, Sam
-    /// Shackleton, October 24). A publisher's read of `parked` follows its
-    /// publication (a SeqCst store or a fence), as a parking worker's
-    /// re-check follows its bit: one of the two sees the other.
-    pub(crate) fn wake_for(&self, wanted: usize, workers: usize) {
+    /// workers in all: up to `fanout` now, the rest owed, which the woken
+    /// workers pay, `fanout` each, before they work. How many it woke. A
+    /// publisher's read of `parked` follows its publication (a SeqCst store
+    /// or a fence), as a parking worker's re-check follows its bit: one of
+    /// the two sees the other.
+    pub(crate) fn wake_for(&self, wanted: usize, workers: usize) -> usize {
         let parked = self.parked_count();
-        if parked == 0 {
-            return;
-        }
         let awake = workers - parked;
-        if awake < wanted {
-            // The publisher makes up to DIRECT_WAKES wakes itself and owes
-            // the rest, which the woken workers pay.
-            let need = (wanted - awake).min(parked);
-            let direct = need.min(DIRECT_WAKES);
-            if need > direct {
-                self.owed.fetch_add(need - direct, Ordering::SeqCst);
-            }
-            for _ in 0..direct {
-                if !self.wake_one() {
-                    break;
-                }
-            }
+        if parked == 0 || awake >= wanted {
+            return 0;
         }
+        let (now, later) = split((wanted - awake).min(parked), self.fanout);
+        if later > 0 {
+            self.owed.fetch_add(later, Ordering::SeqCst);
+        }
+        (0..now).take_while(|_| self.wake_one()).count()
     }
 
     /// Worker `me` parks unless `visible()` finds work: the bit first,
@@ -155,20 +157,42 @@ impl Park {
         true
     }
 
-    /// A woken worker pays the wakes owed before working: one more worker
-    /// each, until none is owed or none is parked.
-    pub(crate) fn pay_owed(&self) {
-        loop {
+    /// A woken worker pays up to `fanout` of the wakes owed before it
+    /// works, each a worker that pays in turn: how many it woke.
+    pub(crate) fn pay_owed(&self) -> usize {
+        let mut made = 0;
+        while made < self.fanout {
             let owed = self.owed.load(Ordering::SeqCst);
             if owed == 0 {
-                return;
+                break;
             }
             if self.owed.compare_exchange(owed, owed - 1, Ordering::SeqCst, Ordering::SeqCst).is_err() {
                 continue;
             }
             if !self.wake_one() {
                 self.owed.store(0, Ordering::SeqCst);
-                return;
+                break;
+            }
+            made += 1;
+        }
+        made
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::split;
+
+    /// A waker's share: at most its fan-out now, the rest owed, nothing
+    /// lost or added.
+    #[test]
+    fn a_waker_wakes_at_most_its_fanout_and_owes_the_rest() {
+        for need in 0..100 {
+            for fanout in 1..20 {
+                let (now, later) = split(need, fanout);
+                assert!(now <= fanout, "need {need}, fan-out {fanout}");
+                assert_eq!(now + later, need, "need {need}, fan-out {fanout}");
+                assert_eq!(later > 0, need > fanout, "need {need}, fan-out {fanout}");
             }
         }
     }
