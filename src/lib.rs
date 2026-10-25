@@ -224,6 +224,7 @@ mod stream;
 mod tree;
 #[cfg(feature = "std")]
 pub use stream::{Stream, stream};
+mod pair;
 mod self_test;
 
 /// A kind of kernel or path a call ran, for the tests that check which
@@ -709,6 +710,12 @@ fn compress_chunks_parallel(input: &[u8], key: &CVWords, chunk_counter: u64, fla
     let mut chunks_array = ArrayVec::<&[u8; CHUNK_LEN], MAX_SIMD_DEGREE>::new();
     for chunk in &mut chunks_exact {
         chunks_array.push(chunk.try_into().unwrap());
+    }
+    // A whole chunk and a partial one, on AVX2 or AVX-512: their first
+    // blocks side by side (pair.rs).
+    if pair::takes(platform, input.len()) {
+        out[..2 * OUT_LEN].copy_from_slice(&pair::parent(input, key, chunk_counter, flags, platform));
+        return 2;
     }
     // Whole chunks that leave a lane spare, and a partial one: one pass,
     // the partial chunk in the spare lane.
