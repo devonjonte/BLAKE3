@@ -95,7 +95,7 @@ were made so), and the row goes.
 
 CI (`.github/workflows/ci.yml`) runs the suites on Linux x86-64 and arm64
 (without SME2, and without SHA-3 under QEMU), and Windows with MSVC,
-for every pull request from a fork, and by hand for a
+for every pull request, and by hand for a
 candidate that changes code for those targets. The Mac runner
 (`tools/runner/`) runs the Rust suites natively. `sh tools/check-builds.sh`
 runs, in minutes, the builds the suites above leave out: without std, on

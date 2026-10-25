@@ -2,7 +2,7 @@ name: tests
 
 on:
   # Started by hand for a promotion candidate that touches code for other
-  # targets (x86, Windows), and for every fork's pull
+  # targets (x86, Windows), and for every pull
   # request; the AArch64 builds and proofs run on the VM and the Mac
   # (CONTRIBUTING.md: tools/check-builds.sh, tools/verify/long-proofs.sh).
   pull_request:
