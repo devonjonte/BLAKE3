@@ -47,8 +47,11 @@ pub unsafe fn hash_many<const N: usize>(
 
 pub mod ffi {
     unsafe extern "C" {
+        #[link_name = "blake3_servil_compress_in_place_sse41"]
         pub fn blake3_compress_in_place_sse41(cv: *mut u32, block: *const u8, block_len: u8, counter: u64, flags: u8);
+        #[link_name = "blake3_servil_compress_xof_sse41"]
         pub fn blake3_compress_xof_sse41(cv: *const u32, block: *const u8, block_len: u8, counter: u64, flags: u8, out: *mut u8);
+        #[link_name = "blake3_servil_hash_many_sse41"]
         pub fn blake3_hash_many_sse41(
             inputs: *const *const u8,
             num_inputs: usize,

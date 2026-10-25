@@ -5,6 +5,33 @@ use crate::{IncrementCounter, OUT_LEN};
 include!("../tools/require_nextest.rs");
 use arrayvec::ArrayVec;
 
+/// Both crates may live in one program. Their AVX-512 hash-many bodies
+/// differ (our remainder loads stay within each input), so their actual
+/// FFI bindings must resolve to distinct entries. This also co-links
+/// upstream into the binary running our existing guard-page tests.
+#[test]
+#[cfg(blake3_avx512_ffi)]
+fn test_native_kernels_are_private_when_official_is_linked() {
+    unsafe extern "C" {
+        fn blake3_hash_many_avx512(
+            inputs: *const *const u8,
+            num_inputs: usize,
+            blocks: usize,
+            key: *const u32,
+            counter: u64,
+            increment_counter: bool,
+            flags: u8,
+            flags_start: u8,
+            flags_end: u8,
+            out: *mut u8,
+        );
+    }
+    crate::initialize();
+    let input = core::hint::black_box([42u8; 4096]);
+    assert_eq!(crate::hash_serial(&input, crate::IV, 0).as_bytes(), blake3::hash(&input).as_bytes());
+    assert_ne!(crate::avx512::ffi::blake3_hash_many_avx512 as *const (), blake3_hash_many_avx512 as *const (), "servil's FFI bound upstream's native kernel");
+}
+
 // Interesting input lengths to run tests on.
 pub const TEST_CASES: &[usize] = &[
     0,
