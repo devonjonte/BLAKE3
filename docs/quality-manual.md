@@ -277,9 +277,9 @@ these cases:
 - AVX-512 `xof_many`: 1 to 32 blocks, which is how the crate calls it:
   `ffi_avx512.rs` makes one call per 32 blocks of a longer output (#163).
 
-The promotion validation therefore runs 154 direct x86 cases beside the
+The promotion validation therefore runs 214 direct x86 cases beside the
 102 arbitrary-count cases. `prove_x86.py` without `--representative`
-keeps the exhaustive 472-case finite matrix as a longer regression set.
+keeps the exhaustive 524-case finite matrix as a longer regression set.
 Every call the crate makes into an assembly kernel, on x86-64 and on
 AArch64, falls within these cases (each call against its proof: #163).
 Open: counts or shapes outside the harnesses' stated contracts, which
@@ -370,11 +370,11 @@ LLVM's `llvm-ml`; their instruction model is checked against the CPU by
 python3 tools/verify/prove_x86_loop.py --workers 4
                                       # ends "102 of 102 all-count cases proved"
 python3 tools/verify/prove_x86.py --representative
-                                      # ends "154 of 154 cases proved"
+                                      # ends "214 of 214 cases proved"
 ```
 
-The promotion validation runs 711 proof cases (414 hybrid, 41 SME2, 102
-arbitrary-count x86 and 154 representative direct x86), the integrated
+The promotion validation runs 771 proof cases (414 hybrid, 41 SME2, 102
+arbitrary-count x86 and 214 representative direct x86), the integrated
 mutants and the Arm CPU cross-check after a change to a kernel or the
 proof tools; the exhaustive finite x86 matrix remains a longer
 regression set. Each case is proved when Z3 finds no input on which the
