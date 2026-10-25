@@ -194,7 +194,8 @@ fn test_xof_many_every_cpu_platform() {
     let cv = [40, 41, 42, 43, 44, 45, 46, 47];
     let flags = crate::KEYED_HASH;
     for counter in [0, u32::MAX as u64, i32::MAX as u64] {
-        for blocks in [1, 2, 3, 16, 17, 31] {
+        // Past 32, the AVX-512 kernel's proved count, the calls split.
+        for blocks in [1, 2, 3, 16, 17, 31, 32, 33, 64, 65, 100] {
             let want: Vec<u8> = (0..blocks).flat_map(|i| crate::portable::compress_xof(&cv, &block, block_len as u8, counter + i as u64, flags)).collect();
             for platform in every_platform() {
                 let mut got = vec![0u8; blocks * BLOCK_LEN];
