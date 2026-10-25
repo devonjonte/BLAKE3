@@ -190,8 +190,8 @@ class ConcreteCasesTests(unittest.TestCase):
     def test_representative_cases_are_the_declared_promotion_set(self):
         import prove_x86
         got = prove_x86.representative_cases()
-        self.assertEqual(len(got), 154)
-        self.assertEqual(len(set(got)), 154)
+        self.assertEqual(len(got), 186)
+        self.assertEqual(len(set(got)), 186)
         self.assertTrue(all(case in prove_x86.cases(set()) for case in got))
 
 

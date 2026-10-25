@@ -310,6 +310,35 @@ def x86_memory_mutant_jobs():
     return out
 
 
+def chunk_root_mutant_jobs():
+    """Assembled mutants of the chunk-root kernel's SSE4.1 entry (the first
+    of each line's two occurrences, the AVX-512 entry's the second)."""
+    import prove_x86 as p
+    source = Path(p.ROOT_DIR, "c/blake3_chunk_root_x86-64_unix.S").read_text()
+    edits = [
+        ("input stride", 2, "        add rdi, 64\n", "        add rdi, 56\n", "differs from the specification"),
+        ("CHUNK_START never set", 1, "        mov ecx, 1\n", "        mov ecx, 0\n", "differs from the specification"),
+        ("CHUNK_END dropped", 0, "        or eax, 10\n", "        or eax, 8\n", "differs from the specification"),
+        ("half the output unwritten", 0, "        movups xmmword ptr [r8+0x10], xmm1\n", "", "not exactly written"),
+    ]
+    root = Path(tempfile.mkdtemp(prefix="chunk-root-mutants-"))
+    out = []
+    for label, whole, before, after, reason in edits:
+        assert source.count(before) in (1, 2), (label, source.count(before))
+        src, obj = root / (label.replace(" ", "-") + ".S"), root / (label.replace(" ", "-") + ".o")
+        src.write_text(source.replace(before, after, 1))
+        subprocess.run([p.CLANG, "-c", "--target=x86_64-linux-gnu", str(src), "-o", str(obj)], check=True)
+        so = p.x86.link(str(obj))
+        def prove(so=so, whole=whole, reason=reason):
+            try:
+                return p.prove_chunk_root(so, "sse41", whole)
+            except Unproved as error:
+                assert reason in str(error), str(error)
+                raise
+        out.append((f"chunk-root mutant, {label}", None, prove))
+    return out
+
+
 def main():
     import workers
     failures = 0
@@ -328,6 +357,9 @@ def main():
     for result in workers.each(x86_memory_positive, [None], 1):
         print(f"x86 memory-mutant positive controls: proved {result}", flush=True)
     for line, failed in workers.each(run, x86_memory_mutant_jobs(), 2):
+        print(line, flush=True)
+        failures += failed
+    for line, failed in workers.each(run, chunk_root_mutant_jobs(), 2):
         print(line, flush=True)
         failures += failed
     sys.exit(1 if failures else 0)

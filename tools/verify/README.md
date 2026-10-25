@@ -175,7 +175,11 @@ CPU and are reported skipped without one (CI's `x86_model` job).
 `prove_x86.py` proves cases against the same
 Lean specification: `compress_in_place` and `compress_xof` for SSE4.1
 and AVX-512, under the Unix and Windows conventions, and `hash_many` at
-the counts run so far, and AVX-512 `xof_many` at 1 to 32 blocks. From
+the counts run so far, and AVX-512 `xof_many` at 1 to 32 blocks, and the
+chunk-root kernel's SSE4.1 and AVX-512 entries (`c/blake3_chunk_root_x86-64_unix.S`,
+Unix only) at 0 to 15 whole blocks before the last, so every input of a
+chunk or less, for every last-block length and mode flags with
+CHUNK_START clear, the kernel's contract. From
 four blocks its output masks are selects whose condition the path's
 lengths settle; the normal form takes such a select as the arm it
 selects.
@@ -187,7 +191,7 @@ inputs from PR #129. All SME2 group-loop callers use the natural
 `K < groups` bound: the former `K <= 2^39` caps did not close a domain
 allowing `groups <= 2^40`. The source-matched promotion validation at
 the candidate recorded in the maintainers' notes proved all 102
-all-count cases and 154 representative direct cases, with every entry
+all-count cases and 154 representative direct cases (186 with the chunk root's 32), with every entry
 alignment handled by one symbolic stack residue. Hashing machine code
 is unchanged.
 
@@ -251,5 +255,8 @@ Lessons the tools were built on:
   Four assembled x86 memory controls cover a caller-stack write, an aligned
   load of an unaligned buffer, a secret-derived prefetch address and a
   masked store, each beside unmodified positive controls.
+  Four assembled chunk-root controls (its SSE4.1 entry) cover a wrong
+  input stride, CHUNK_START never set, CHUNK_END dropped, and half the
+  output unwritten.
   An internal checker exception stops the run; only `Unproved` counts as
   a mutation rejection.

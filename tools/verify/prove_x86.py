@@ -50,6 +50,7 @@ def assemble(isa, windows):
         OBJS[(isa, windows)] = so
         return so
     obj = os.path.join(d, f"{isa}.o")
+    # "chunk_root": the one file holding both chunk-root entries (sse41, avx512).
     subprocess.run([CLANG, "-c", "--target=x86_64-linux-gnu", os.path.join(ROOT_DIR, f"c/blake3_{isa}_x86-64_unix.S"),
                     "-o", obj], check=True)
     so = x86.link(obj)
@@ -226,6 +227,46 @@ def prove_hash_many(so, isa, windows, n, blocks, increment):
     return m.steps
 
 
+CHUNK_START, CHUNK_END, ROOT = 1, 2, 8
+
+
+def prove_chunk_root(so, isa, whole):
+    """blake3_{isa}_chunk_root(input, key, last, packed, out): the root
+    output of one chunk at counter 0, `whole` whole blocks at input and the
+    last block (64 readable bytes, its length last_len) at last; packed =
+    flags | last_len << 8 | whole << 16; out its 32 bytes. For every key,
+    message byte and last-block length, and mode flags with CHUNK_START
+    clear (the kernel's contract: it sets the chunk flags itself), no
+    alignment promised for any pointer."""
+    key, blocks, last = byte_symbols("key", 32), byte_symbols("in", 64 * whole), byte_symbols("last", 64)
+    last_len, flags = u8("last_len"), u8("flags") & 0xFE
+    packed = ZeroExt(56, flags) | (ZeroExt(56, last_len) << 8) | BitVecVal(whole << 16, 64)
+    regions = {"input": Region("input", 64 * whole, False, lambda o: blocks[o]), "key": Region("key", 32, False, lambda o: key[o]),
+               "last": Region("last", 64, False, lambda o: last[o]), "out": Region("out", 32, True, None)}
+    args = [Ptr("input", 0), Ptr("key", 0), Ptr("last", 0), packed, Ptr("out", 0)]
+    s = Setup(so, f"blake3_{isa}_chunk_root", regions, args, False)
+    # The last block's length and the mode flags are public, as lengths are.
+    s.m.lengths |= {"last_len", "flags"}
+    f = ZeroExt(24, flags)
+    d_row_facts(s.m, BitVecVal(0, 64), 1, [ZeroExt(24, last_len), BitVecVal(64, 32), f | (CHUNK_START | CHUNK_END | ROOT),
+                                           f | CHUNK_START, f, f | (CHUNK_END | ROOT)])
+    m = s.run()
+    cv = spec.words(key)
+    for b in range(whole):
+        cv = spec.compress(cv, spec.words(blocks[64 * b:64 * (b + 1)]), BitVecVal(0, 64), BitVecVal(64, 32),
+                           f | CHUNK_START if b == 0 else f)[:8]
+    want = spec.compress(cv, spec.words(last), BitVecVal(0, 64), ZeroExt(24, last_len),
+                         f | ((CHUNK_START if whole == 0 else 0) | CHUNK_END | ROOT))[:8]
+    out = m.regions["out"]
+    if set(out.bytes) != set(range(32)):
+        raise Unproved("the output is not exactly written")
+    got = spec.words([out.bytes[i] for i in range(32)])
+    for w in range(8):
+        if not same(got[w], want[w]):
+            raise Unproved(f"output word {w} differs from the specification")
+    return m.steps
+
+
 def cases(only):
     out = []
     for windows in (False, True):
@@ -241,6 +282,7 @@ def cases(only):
                 out.append((isa, windows, "hash_many", (WIDTH[isa], blocks, False)))
     for n in range(1, 33):
         out.append(("avx512", False, "xof_many", n))
+    out += [(isa, False, "chunk_root", whole) for isa in ("sse41", "avx512") for whole in range(16)]
     return [c for c in out if not only or c[0] in only or c[2] in only or ("windows" if c[1] else "unix") in only]
 
 
@@ -263,6 +305,7 @@ def representative_cases():
             out += [(isa, windows, "hash_many", (width, blocks, False)) for blocks in range(1, 17)]
             out += [(isa, windows, "hash_many", (n, 16, True)) for n in (1, width, 2 * width)]
     out += [("avx512", False, "xof_many", n) for n in range(1, 33)]
+    out += [(isa, False, "chunk_root", whole) for isa in ("sse41", "avx512") for whole in range(16)]
     return out
 
 
@@ -271,11 +314,14 @@ OBJS = {}
 
 def prove_case(case):
     isa, windows, kind, arg = case
-    if (isa, windows) not in OBJS:
-        OBJS[(isa, windows)] = assemble(isa, windows)
-    so = OBJS[(isa, windows)]
+    obj = ("chunk_root", False) if kind == "chunk_root" else (isa, windows)
+    if obj not in OBJS:
+        OBJS[obj] = assemble(*obj)
+    so = OBJS[obj]
     try:
-        if kind == "xof_many":
+        if kind == "chunk_root":
+            steps, what = prove_chunk_root(so, isa, arg), f"chunk root, {arg} whole blocks and the last"
+        elif kind == "xof_many":
             steps, what = prove_xof_many(so, arg), f"xof_many, {arg} blocks"
         elif kind in ("compress", "xof"):
             steps, what = prove_compress(so, isa, windows, kind == "xof"), kind
@@ -291,7 +337,7 @@ def prove_case(case):
 def main():
     import workers
     todo = representative_cases() if sys.argv[1:] == ["--representative"] else cases(set(sys.argv[1:]))
-    for isa, windows in {(c[0], c[1]) for c in todo}:
+    for isa, windows in {("chunk_root", False) if c[2] == "chunk_root" else (c[0], c[1]) for c in todo}:
         so = assemble(isa, windows)
         x86.symbols(so)
         x86.image(so)
