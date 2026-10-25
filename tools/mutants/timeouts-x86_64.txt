@@ -1,7 +1,6 @@
 # The mutants that time out on x86-64 (an EPYC 9255, AVX-512, October 22): no test fails,
 # nextest's clock stops one (tools/mutants/check.py, TIMEOUTS). Their own outcome: neither caught nor survived.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason. Not yet run on the i7.
-src/lanes.rs	replace % with / in sources::Source::take	1	a hang the test stream::test::test_stream_against_hash_with showed: a task is read from the wrong ring slot; the stream waits for the right one
 src/lanes.rs	replace && with || in Pool::serve	1	a worker spins while any stream is open without looking for work: the workers never park, and the tests that wait for every worker parked (test_idle_workers_park_while_a_stream_is_open, a_caller_looping_on_collect_makes_progress_with_sleeping_workers) wait until the clock, as they are written to; the digests stay right (gate16's logs, October 24)
 src/lanes.rs	replace &= with |= in sources::find	1	find's own loop never empties `active`: even the single-threaded test_find_reaches_every_registered_source never returns (gate16's logs)
 src/lanes.rs	replace + with * in sources::Source::publish	1	a hang the test stream::test::test_stream_against_hash_with showed: the published count runs away; the stream waits for results that never come
