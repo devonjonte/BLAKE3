@@ -5,6 +5,57 @@ x86-64. Every Arm assembly kernel and the x86-64 assembly kernels are
 proved correct within their stated contracts. Everything else is tested,
 and the tests are tested ([QUALITY.md](QUALITY.md)).
 
+## Faster
+
+Each figure is blake3-servil's speed over official BLAKE3 1.8.7's, both
+measured in the same run by [bench-hashes](https://github.com/johnservil/bench-hashes)
+(0.17.0, one run per machine, October 23–24; the release's own runs
+replace these figures):
+
+| | Intel i7-12700K | AMD EPYC 9255 | Apple M4 Max |
+|---|---|---|---|
+| One message of 64 B | 1.0× | 0.9× | 1.5× |
+| One message of 1 KiB | 1.0× | 1.0× | 1.1× |
+| One message of 1 MiB, one thread | 1.0× | 1.0× | 2.5× |
+| One message of 128 MiB, every core | 1.0× | 1.0× | not yet measured |
+| A stream of 64 KiB messages | 7.8× | 7.5× | not yet measured |
+| A batch of 1024 messages, 64 B each | 1.1× | 1.2× | 1.9× |
+| b3sum over 1000 files of mixed sizes | 2.9× | 5.7× | 4.4× |
+
+On 64-bit Arm, new kernels make every size faster: SME2 on the M4 and
+later, and kernels that run the integer and NEON units side by side.
+On x86-64, a single message hashes with official's own assembly (each
+proved below), so it runs at official's speed, and at 64 B on the EPYC
+slower (0.9×). The gains there come from many messages at once: a
+stream that hashes on other cores while the program reads the next
+input, batches of short messages, and b3sum over many files. The
+M4 Max's run measured official's single-threaded form only, so its
+every-core rows wait for the release's run.
+
+## Checked more
+
+Beyond official's tests (published test vectors and a reference
+implementation), this crate adds:
+
+- **Formal proofs of every assembly kernel**, official's own x86-64
+  assembly among them, at every shape this crate calls it: symbolic
+  execution against a specification of BLAKE3, with memory accesses,
+  the calling convention and secret-dependent branches checked too.
+- **Mutation testing**: one small mistake planted at a time, and a test
+  must fail for each; the few that survive are listed with their reason.
+- **A model checker (Shuttle)** for the thread pool's waits, under
+  thousands of thread schedules.
+- **Guard pages**: tests put an inaccessible page beside a kernel's
+  input or output, so a kernel that touches one byte past it crashes
+  the test.
+- **A startup self-test** of the build and the CPU before the first
+  hash.
+
+These found eight bugs before release, among them the AVX2 and AVX-512
+batch kernels reading past an input's end at shapes this crate's batch
+calls use (fixed here; see below). [QUALITY.md](QUALITY.md) says what
+each check covers and what remains unproved.
+
 ## Before you switch
 
 1. Targets: 64-bit Arm on Linux and macOS, x86-64 on Linux and Windows
