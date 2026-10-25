@@ -16,7 +16,7 @@ Here are two reasons you might want to use it:
 
 
 
-   ![b3sum against the sum programs on a tree of 1,000 files, AMD EPYC 9255](docs/images/b3sum-epyc-1000-files.svg)
+   ![b3sum, on every core and on one thread, beside sha256sum, sha1sum and md5sum on a tree of 1,000 files, AMD EPYC 9255](docs/images/b3sum-epyc-1000-files.svg)
 
    Why is it so fast? Three reasons:
 
