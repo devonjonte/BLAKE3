@@ -22,12 +22,22 @@ unset CARGO_TARGET_DIR     # SUPERCOP's Rust build chooses its own
 ./do-part crypto_hash blake3 > ../blake3.log 2>&1 || true
 data=$(ls bench/*/data)
 # A try line: ... try CHECKSUMS ok|fails CYCLES_AT_1536 ... IMPLEMENTATION COMPILER
-awk '$7 == "try" { sums[$8]++; if ($9 != "ok") bad++; if ($13 ~ /rust_servil/) { ours++; printf "rust_servil %s, %s cycles at 1536 bytes (%s)\n", $9, $10, $14 } }
-     $7 == "implementation" { chosen = $8 }
-     END {
-       n = 0; for (s in sums) n++
-       printf "checksums: %d failing, %d distinct value(s) among all builds\n", bad, n
-       printf "SUPERCOP chose: %s\n", chosen
-       if (!ours || bad || n != 1) { print "FAIL: rust_servil missing, a checksum failing, or the implementations disagreeing"; exit 1 }
-     }' "$data"
+python3 - "$data" <<'PY_END'
+import sys
+sums, bad, ours, chosen = set(), 0, 0, None
+for line in open(sys.argv[1]):
+    f = line.split()
+    if len(f) > 13 and f[6] == "try":
+        sums.add(f[7])
+        bad += f[8] != "ok"
+        if "rust_servil" in f[12]:
+            ours += 1
+            print(f"rust_servil {f[8]}, {f[9]} cycles at 1536 bytes ({f[13]})")
+    elif len(f) > 7 and f[6] == "implementation":
+        chosen = f[7]
+print(f"checksums: {bad} failing, {len(sums)} distinct value(s) among all builds")
+print(f"SUPERCOP chose: {chosen}")
+if not ours or bad or len(sums) != 1:
+    sys.exit("FAIL: rust_servil missing, a checksum failing, or the implementations disagreeing")
+PY_END
 echo "logs: $w/init.log, $w/blake3.log; data: $w/supercop-$v/$data"

@@ -6,5 +6,5 @@ static INITIALIZE: std::sync::Once = std::sync::Once::new();
 
 pub fn crypto_hash(out: &mut [u8; 32], m: &[u8]) {
     INITIALIZE.call_once(blake3_servil::initialize);
-    out.copy_from_slice(blake3_servil::hash(m).as_bytes())
+    out.copy_from_slice(blake3_servil::convenience::hash(m).as_bytes())
 }

@@ -11,7 +11,7 @@ static INITIALIZE: std::sync::Once = std::sync::Once::new();
 
 pub fn crypto_hash(out: &mut [u8; 32], m: &[u8]) {
   INITIALIZE.call_once(blake3_servil::initialize);
-  out.copy_from_slice(blake3_servil::hash(m).as_bytes())
+  out.copy_from_slice(blake3_servil::convenience::hash(m).as_bytes())
 }
 ```
 
@@ -30,6 +30,18 @@ SUPERCOP selects rust_servil):
 | 1536 | 3800 | 3200 |
 | 16192 | 23300 | 10400 |
 | 64576 | 84000 | 35000 to 40000 |
+
+SUPERCOP 20261018 on an Intel i7-12700K (Linux, October 25, 2026; the crate at
+devonjonte/BLAKE3 1b72810, the two kinds of call): every build's checksum agrees (GCC and
+Clang, four optimization levels each), and SUPERCOP selects rust_servil at 4283 cycles
+against crypto_hash/blake3/avx2's 5459 at 1536 bytes. Its cycles per call then:
+
+| bytes | 64 | 1024 | 1536 | 2048 | 4096 | 16192 | 64576 |
+|---|---|---|---|---|---|---|---|
+| cycles | 459 | 3818 | 4300 | 4049 | 5465 | 15865 | 59424 |
+
+(1536 bytes costs more than 2048: a whole chunk and a partial one take a longer chain than
+two whole chunks side by side; BLAKE3 #90 has the measurements.)
 
 To try it, copy `crypto_hash/blake3/rust_servil` (or the tarball beside this file) into a
 SUPERCOP tree and run `./do-part init` and `./do-part crypto_hash blake3`; cargo fetches the

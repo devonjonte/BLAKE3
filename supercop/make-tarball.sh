@@ -9,9 +9,11 @@ rev=$(git rev-parse "$1")
 d=crypto_hash/blake3/rust_servil
 sed -i "s/rev = \"[0-9a-f]*\"/rev = \"$rev\"/" $d/Cargo.toml
 rm -f $d/Cargo.lock
-(cd $d && CARGO_TARGET_DIR=/tmp/make-tarball cargo generate-lockfile)
+(cd $d && CARGO_TARGET_DIR=${TMPDIR:-/tmp}/make-tarball cargo generate-lockfile)
 grep -q "rev=$rev" $d/Cargo.lock
 tarball=blake3-servil-$(echo $rev | cut -c1-7).tar.gz
 rm -f blake3-servil-*.tar.gz
-tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='2026-01-01 00:00Z' -czf "$tarball" $d
+# The files git tracks there, and nothing a local build left beside them.
+git add $d/Cargo.toml $d/Cargo.lock
+tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='2026-01-01 00:00Z' -czf "$tarball" $(git ls-files $d)
 echo "$tarball:"; tar -tzf "$tarball"

@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-blake3-servil = { git = "https://github.com/johnservil/BLAKE3", rev = "2b7567f3b9f7dec61f550f879316b5cf6b372060" }
+blake3-servil = { git = "https://github.com/devonjonte/BLAKE3", rev = "1b72810da0c75b05cbc16a70a8f150a2c6cece3a" }
