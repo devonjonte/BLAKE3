@@ -80,8 +80,13 @@ October 25, 2026.
   [`rgw_cksum.h`](https://github.com/ceph/ceph/blob/main/src/rgw/rgw_cksum.h)).
 - **Google TensorStore.** Its OCDBT storage format hashes with BLAKE3
   ([`storage_generation.cc`](https://github.com/google/tensorstore/blob/master/tensorstore/kvstore/ocdbt/non_distributed/storage_generation.cc)).
-- **Hugging Face.** Xet, the storage behind the Hub and its Buckets,
-  chunks and addresses models and datasets by BLAKE3
+- **XET and Hugging Face.** XET is a content-addressable storage
+  protocol specified in an IETF Internet-Draft, whose one defined suite,
+  `XET-BLAKE3-GEARHASH-LZ4`, uses BLAKE3 for all of its hashing
+  ([draft-denis-xet](https://datatracker.ietf.org/doc/draft-denis-xet/),
+  [source](https://github.com/jedisct1/draft-denis-xet)). Hugging Face
+  runs it as the storage behind the Hub and its Buckets, so every model
+  and dataset there is chunked and addressed by BLAKE3
   ([xet-core](https://github.com/huggingface/xet-core/blob/main/Cargo.toml),
   [Xet on the Hub](https://huggingface.co/blog/xet-on-the-hub),
   [Buckets](https://x.com/ClementDelangue/status/2039695447506210905)).

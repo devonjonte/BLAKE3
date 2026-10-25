@@ -32,19 +32,19 @@ Here are three reasons you might want to use `BLAKE3-Servil`:
 
 2. The `BLAKE3` secure hash algorithm is widely used.
 
-   * BLAKE3 has quietly become [the de facto standard secure hash function](docs/who-uses-blake3.md)
-     for systems infrastructure: compilers, linkers, file systems, GPU drivers, build systems,
-     storage back ends, etc. The build-id in Android, Chrome, ChromeOS, and Fuchsia binary is a
-     BLAKE3 hash. It's in Mesa (every Linux GPU driver), Ceph, Hugging Face's Buckets / IETF XET,
-     Meta's new source control tool Sapling/Mononoke, Google's TensorStore, Unreal Engine, OpenZFS,
-     Solana, Nix, Bazel, Buck2, Wasmer, the Swift compiler, rustc, cargo, and iroh. These projects
-     needed a hash function that was both fast and secure, and chose the one that was both. BLAKE3's
-     immediate ancestor, BLAKE2, is used in WireGuard and the Linux kernel.
+   * BLAKE3 has quietly become the de facto standard secure hash function [for systems
+     infrastructure](docs/who-uses-blake3.md): compilers, linkers, file systems, GPU drivers, build
+     systems, storage back ends, etc. The build-id in Android, Chrome, ChromeOS, and Fuchsia
+     binaries is a BLAKE3 hash. It's in Mesa (every Linux GPU driver), Ceph, Hugging Face's Buckets
+     / IETF XET, Meta's new source control tool Sapling/Mononoke, Google's TensorStore, Unreal
+     Engine, OpenZFS, Solana, Nix, Bazel, Buck2, Wasmer, the Swift compiler, rustc, cargo, and
+     iroh. These projects needed a hash function that was both fast and secure, and chose the one
+     that was both. BLAKE3's immediate ancestor, BLAKE2, is used in WireGuard and the Linux kernel.
 
-   * BLAKE3 is a leading contender to become the de facto standard secure hash function in the next
-     generation of post-quantum zero-knowledge proof systems. It is in Plonky3, SP1, stwo, Jolt,
-     WHIR, Miden, Winterfell, Aztec, Binius, Flock. BLAKE2 is used in Zcash and a large number of
-     other systems.
+   * BLAKE3 is a leading contender to become the de facto standard secure hash function [in the next
+     generation of post-quantum zero-knowledge proof systems](docs/who-uses-blake3.md). It is in
+     Plonky3, SP1, stwo, Jolt, WHIR, Miden, Winterfell, Aztec, Binius64, Flock. BLAKE2 is used in
+     Zcash and a large number of other systems.
      
      BLAKE3 has a thicker security margin than SHA256 does. There are no known attacks faster than
      brute force that break more than 2 out of 7 of BLAKE3's rounds. In contrast, there are known
