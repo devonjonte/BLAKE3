@@ -3,7 +3,9 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -62,12 +64,14 @@ class CI(unittest.TestCase):
 
 
 class ReleaseEvidence(unittest.TestCase):
-    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression"):
+    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None):
         jobs = [job(), job()] if ci_jobs is None else ci_jobs
         def git(*args):
             if args[0] == "rev-parse":
                 return HEAD if args[1] == "candidate" else OLD
             if args[0] == "tag":
+                return "v0.3.0+fixture"
+            if args[0] == "describe":
                 return "v0.3.0+fixture"
             if args[0] == "diff":
                 return "README.md\nQUALITY.md\nCHANGELOG.md"
@@ -92,7 +96,7 @@ class ReleaseEvidence(unittest.TestCase):
             (root / "runner/jobs/job.json").write_text(json.dumps(task))
             (root / "runner/results/1/verdict.json").write_text(json.dumps({"job": "job.json", "status": verdict}))
             output = io.StringIO()
-            with patch.object(check, "MAIN", tmp), patch.object(check, "git", git), \
+            with patch.object(check, "MAIN", tmp), patch.object(check, "git", git_override or git), \
                  patch.object(check, "github", github), patch.object(check, "log_ends_with", return_value=True), \
                  patch("sys.argv", ["release-check.py", "candidate"]), contextlib.redirect_stdout(output):
                 with self.assertRaises(SystemExit) as caught:
@@ -125,6 +129,73 @@ class ReleaseEvidence(unittest.TestCase):
                 code, output = self.run_gate(verdict=verdict)
                 self.assertEqual(code, 2)
                 self.assertIn(label + "  Mac check", output)
+
+
+class PreviousRelease(unittest.TestCase):
+    """Real Git histories, with synthetic CI/Mac/log evidence for main()."""
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.repo = Path(temporary.name)
+        self.date = "2020-01-01T00:00:00+00:00"
+        self.git("init", "-q", "--initial-branch=main")
+        self.git("config", "user.name", "Sam Shackleton")
+        self.git("config", "user.email", "samshackleton-tech@users.noreply.github.com")
+        self.git("config", "commit.gpgsign", "false")
+        self.git("config", "core.hooksPath", str(self.repo / "no-hooks"))
+        for page in ["README.md", "QUALITY.md", "CHANGELOG.md"]:
+            (self.repo / page).write_text("old\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "old release")
+        self.old = self.git("rev-parse", "HEAD")
+        self.git("tag", "v0.3.0+fixture")
+        self.date = "2020-01-02T00:00:00+00:00"
+        for page in ["README.md", "QUALITY.md", "CHANGELOG.md"]:
+            (self.repo / page).write_text("new\n")
+        self.git("commit", "-qam", "candidate")
+        self.new = self.git("rev-parse", "HEAD")
+        self.git("branch", "candidate")
+
+    def git(self, *args):
+        env = dict(os.environ, GIT_AUTHOR_DATE=self.date, GIT_COMMITTER_DATE=self.date)
+        return subprocess.check_output(["git", "-C", str(self.repo), *args], text=True, env=env, stderr=subprocess.PIPE).strip()
+
+    def test_tagged_candidate_uses_previous_release(self):
+        self.git("tag", "-a", "v0.8.0+fixture", "-m", "rehearsal tag")
+        code, output = ReleaseEvidence.run_gate(self, new=self.new, old=self.old, git_override=self.git)
+        self.assertEqual(code, 0, output)
+        self.assertIn("rewritten since v0.3.0+fixture", output)
+
+    def test_unrelated_recent_tag_cannot_set_the_baseline(self):
+        self.git("checkout", "-qb", "unrelated", self.old)
+        self.date = "2020-01-03T00:00:00+00:00"
+        (self.repo / "side.txt").write_text("another branch\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "unrelated work")
+        self.git("tag", "v99.0.0+fixture")
+        self.git("checkout", "-q", "candidate")
+        code, output = ReleaseEvidence.run_gate(self, new=self.new, old=self.old, git_override=self.git)
+        self.assertEqual(code, 0, output)
+
+    def test_no_reachable_release_is_open(self):
+        self.git("tag", "-d", "v0.3.0+fixture")
+        self.git("tag", "v0.8.0+fixture")
+        code, output = ReleaseEvidence.run_gate(self, new=self.new, old=self.old, git_override=self.git)
+        self.assertEqual(code, 1)
+        self.assertIn("no previous release tag found", output)
+
+    def test_release_on_second_parent_is_reachable(self):
+        self.git("checkout", "-qb", "release-side", self.old)
+        self.date = "2020-01-03T00:00:00+00:00"
+        (self.repo / "side.txt").write_text("previous release\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "previous release on another parent")
+        self.git("tag", "v0.4.0+fixture")
+        self.git("checkout", "-q", "candidate")
+        self.git("merge", "--no-ff", "-qm", "merge release", "release-side")
+        head = self.git("rev-parse", "HEAD")
+        with patch.object(check, "git", self.git):
+            self.assertEqual(check.previous_release(head), "v0.4.0+fixture")
 
 
 if __name__ == "__main__":

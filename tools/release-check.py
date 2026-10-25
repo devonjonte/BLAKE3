@@ -28,6 +28,10 @@ and the rest timed out or have no verdict.
     `cargo publish --dry-run` in the root and in b3sum/.
 - The pages: README.md, QUALITY.md, CHANGELOG.md changed since the
   previous release (a release rewrites them for its readers).
+
+The previous release is the nearest reachable v* tag, excluding tags on
+this candidate itself. Creating the release's tag must not make the check
+compare the release against itself; tags on other branches are irrelevant.
 """
 
 import glob
@@ -105,10 +109,19 @@ def ci_result(run):
     return all(job["conclusion"] == "success" for job in jobs)
 
 
+def previous_release(commit):
+    """Nearest reachable release tag, excluding tags on the candidate itself."""
+    tags = git("tag", "--list", "v*", "--merged", commit).split()
+    tags = [tag for tag in tags if git("rev-parse", tag + "^{commit}") != commit]
+    if not tags:
+        return None
+    matches = [arg for tag in tags for arg in ("--match", tag)]
+    return git("describe", "--tags", "--abbrev=0", *matches, commit)
+
+
 def main():
     commit = git("rev-parse", sys.argv[1] if len(sys.argv) > 1 else "servil")
-    tags = [t for t in git("tag", "--list", "v*", "--sort=-creatordate").split() if t]
-    previous = tags[0] if tags else None
+    previous = previous_release(commit)
     results = []
 
     def step(name, ok, how):
