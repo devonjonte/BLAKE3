@@ -92,7 +92,7 @@ unsafe fn bad_call(case: &str) {
 fn bad_calls_stop_at_the_guard() {
     if let Ok(case) = std::env::var(CHILD) {
         if case == "list" {
-            println!("B3_CAPI_GUARD_CASES={}", serde_json::to_string(CASES).unwrap());
+            println!("\nB3_CAPI_GUARD_CASES={}", serde_json::to_string(CASES).unwrap());
             return;
         }
         unsafe { bad_call(&case) };
