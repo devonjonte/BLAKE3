@@ -324,7 +324,9 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// stream's own bytes, in pieces of up to 64 KiB, its digest into
     /// `out`: `fill(at, room)` writes the message's bytes from `at` into
     /// all of `room` (a read from a file or socket straight into the
-    /// stream). Each `room` starts on a 64-byte boundary. The stream
+    /// stream). Each `room` starts on a 64-byte boundary. A room's bytes on
+    /// entry are unspecified: they may hold bytes this thread's earlier
+    /// streams hashed, so `fill` reads only what it wrote. The stream
     /// reuses the bytes once `out` is handed back; a stream keeps 2 MiB of
     /// them, and `submit_with` waits for room as `submit` does.
     pub fn submit_with(&mut self, len: usize, mut fill: impl FnMut(usize, &mut [u8]), out: &'env mut Hash) {
@@ -454,7 +456,9 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// `room`, a part of up to 64 KiB at a time, each message at the start
     /// of its slot of whole blocks. The bytes past each message are the
     /// stream's: whatever `fill` leaves there, the stream zeroes them before
-    /// hashing, so a room reused for shorter messages hashes right. As
+    /// hashing, so a room reused for shorter messages hashes right. A room's
+    /// bytes on entry are unspecified, as for
+    /// [`submit_with`](Stream::submit_with). As
     /// [`submit_with`](Stream::submit_with) and [`submit_batch`](Stream::submit_batch).
     pub fn submit_batch_with(&mut self, message_len: usize, mut fill: impl FnMut(usize, &mut [u8]), out: &'env mut [Hash]) {
         let slot = crate::many::slot_len(message_len);
