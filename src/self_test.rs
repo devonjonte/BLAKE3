@@ -665,8 +665,8 @@ mod test {
 }
 
 /// The self-test's stop, in every test build (std or not: the tests use
-/// std in every build).
-#[cfg(test)]
+/// std in every build); a child process, so not under Miri.
+#[cfg(all(test, not(miri), unix))]
 mod stops {
     use super::*;
 
@@ -679,7 +679,6 @@ mod stops {
     /// would catch the panic and exit 0 (the mutation check had the guard
     /// OPEN: no test made the self-test fail).
     #[test]
-    #[cfg(all(not(miri), unix))]
     fn test_a_failing_self_test_stops_the_process() {
         use core::sync::atomic::Ordering::Relaxed;
         const CHILD: &str = "BLAKE3_SERVIL_TEST_PLANTED_FAILURE";
