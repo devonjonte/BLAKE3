@@ -44,160 +44,160 @@
 
 .arch armv8.2-a+sha3
 
-.global blake3_hybrid_p2
-.global _blake3_hybrid_p2
-.global blake3_hybrid_p2_end
-.global _blake3_hybrid_p2_end
-.global blake3_hybrid_p4
-.global _blake3_hybrid_p4
-.global blake3_hybrid_p4_end
-.global _blake3_hybrid_p4_end
-.global blake3_hybrid_p8
-.global _blake3_hybrid_p8
-.global blake3_hybrid_p8_end
-.global _blake3_hybrid_p8_end
-.global blake3_hybrid_p3
-.global _blake3_hybrid_p3
-.global blake3_hybrid_p3_end
-.global _blake3_hybrid_p3_end
-.global blake3_hybrid_p5
-.global _blake3_hybrid_p5
-.global blake3_hybrid_p5_end
-.global _blake3_hybrid_p5_end
-.global blake3_hybrid_p7
-.global _blake3_hybrid_p7
-.global blake3_hybrid_p7_end
-.global _blake3_hybrid_p7_end
-.global blake3_hybrid_p9
-.global _blake3_hybrid_p9
-.global blake3_hybrid_p9_end
-.global _blake3_hybrid_p9_end
-.global blake3_hybrid_k1
-.global _blake3_hybrid_k1
-.global blake3_hybrid_k1_end
-.global _blake3_hybrid_k1_end
-.global blake3_hybrid_k2
-.global _blake3_hybrid_k2
-.global blake3_hybrid_k2_end
-.global _blake3_hybrid_k2_end
-.global blake3_hybrid_k3
-.global _blake3_hybrid_k3
-.global blake3_hybrid_k3_end
-.global _blake3_hybrid_k3_end
-.global blake3_hybrid_k4
-.global _blake3_hybrid_k4
-.global blake3_hybrid_k4_end
-.global _blake3_hybrid_k4_end
-.global blake3_hybrid_k5
-.global _blake3_hybrid_k5
-.global blake3_hybrid_k5_end
-.global _blake3_hybrid_k5_end
-.global blake3_hybrid_k6
-.global _blake3_hybrid_k6
-.global blake3_hybrid_k6_end
-.global _blake3_hybrid_k6_end
-.global blake3_hybrid_k7
-.global _blake3_hybrid_k7
-.global blake3_hybrid_k7_end
-.global _blake3_hybrid_k7_end
-.global blake3_hybrid_k8
-.global _blake3_hybrid_k8
-.global blake3_hybrid_k8_end
-.global _blake3_hybrid_k8_end
-.global blake3_hybrid_k9
-.global _blake3_hybrid_k9
-.global blake3_hybrid_k9_end
-.global _blake3_hybrid_k9_end
-.global blake3_hybrid_k10
-.global _blake3_hybrid_k10
-.global blake3_hybrid_k10_end
-.global _blake3_hybrid_k10_end
-.global blake3_hybrid_q1
-.global _blake3_hybrid_q1
-.global blake3_hybrid_q1_end
-.global _blake3_hybrid_q1_end
-.global blake3_hybrid_q2
-.global _blake3_hybrid_q2
-.global blake3_hybrid_q2_end
-.global _blake3_hybrid_q2_end
-.global blake3_hybrid_q3
-.global _blake3_hybrid_q3
-.global blake3_hybrid_q3_end
-.global _blake3_hybrid_q3_end
-.global blake3_hybrid_q4
-.global _blake3_hybrid_q4
-.global blake3_hybrid_q4_end
-.global _blake3_hybrid_q4_end
-.global blake3_hybrid_q5
-.global _blake3_hybrid_q5
-.global blake3_hybrid_q5_end
-.global _blake3_hybrid_q5_end
-.global blake3_hybrid_q6
-.global _blake3_hybrid_q6
-.global blake3_hybrid_q6_end
-.global _blake3_hybrid_q6_end
-.global blake3_hybrid_q7
-.global _blake3_hybrid_q7
-.global blake3_hybrid_q7_end
-.global _blake3_hybrid_q7_end
-.global blake3_hybrid_q8
-.global _blake3_hybrid_q8
-.global blake3_hybrid_q8_end
-.global _blake3_hybrid_q8_end
-.global blake3_hybrid_q9
-.global _blake3_hybrid_q9
-.global blake3_hybrid_q9_end
-.global _blake3_hybrid_q9_end
-.global blake3_hybrid_kn2
-.global _blake3_hybrid_kn2
-.global blake3_hybrid_kn2_end
-.global _blake3_hybrid_kn2_end
-.global blake3_hybrid_kn4
-.global _blake3_hybrid_kn4
-.global blake3_hybrid_kn4_end
-.global _blake3_hybrid_kn4_end
-.global blake3_hybrid_kn5
-.global _blake3_hybrid_kn5
-.global blake3_hybrid_kn5_end
-.global _blake3_hybrid_kn5_end
-.global blake3_hybrid_kn6
-.global _blake3_hybrid_kn6
-.global blake3_hybrid_kn6_end
-.global _blake3_hybrid_kn6_end
-.global blake3_hybrid_kn8
-.global _blake3_hybrid_kn8
-.global blake3_hybrid_kn8_end
-.global _blake3_hybrid_kn8_end
-.global blake3_hybrid_pn2
-.global _blake3_hybrid_pn2
-.global blake3_hybrid_pn2_end
-.global _blake3_hybrid_pn2_end
-.global blake3_hybrid_pn4
-.global _blake3_hybrid_pn4
-.global blake3_hybrid_pn4_end
-.global _blake3_hybrid_pn4_end
-.global blake3_hybrid_pn5
-.global _blake3_hybrid_pn5
-.global blake3_hybrid_pn5_end
-.global _blake3_hybrid_pn5_end
-.global blake3_hybrid_pn6
-.global _blake3_hybrid_pn6
-.global blake3_hybrid_pn6_end
-.global _blake3_hybrid_pn6_end
-.global blake3_hybrid_pn10
-.global _blake3_hybrid_pn10
-.global blake3_hybrid_pn10_end
-.global _blake3_hybrid_pn10_end
-.global blake3_hybrid_x4
-.global _blake3_hybrid_x4
-.global blake3_hybrid_x4_end
-.global _blake3_hybrid_x4_end
-.global blake3_hybrid_x8
-.global _blake3_hybrid_x8
-.global blake3_hybrid_x8_end
-.global _blake3_hybrid_x8_end
-.global blake3_hybrid_c1
-.global _blake3_hybrid_c1
+.global blake3_servil_hybrid_p2
+.global _blake3_servil_hybrid_p2
+.global blake3_servil_hybrid_p2_end
+.global _blake3_servil_hybrid_p2_end
+.global blake3_servil_hybrid_p4
+.global _blake3_servil_hybrid_p4
+.global blake3_servil_hybrid_p4_end
+.global _blake3_servil_hybrid_p4_end
+.global blake3_servil_hybrid_p8
+.global _blake3_servil_hybrid_p8
+.global blake3_servil_hybrid_p8_end
+.global _blake3_servil_hybrid_p8_end
+.global blake3_servil_hybrid_p3
+.global _blake3_servil_hybrid_p3
+.global blake3_servil_hybrid_p3_end
+.global _blake3_servil_hybrid_p3_end
+.global blake3_servil_hybrid_p5
+.global _blake3_servil_hybrid_p5
+.global blake3_servil_hybrid_p5_end
+.global _blake3_servil_hybrid_p5_end
+.global blake3_servil_hybrid_p7
+.global _blake3_servil_hybrid_p7
+.global blake3_servil_hybrid_p7_end
+.global _blake3_servil_hybrid_p7_end
+.global blake3_servil_hybrid_p9
+.global _blake3_servil_hybrid_p9
+.global blake3_servil_hybrid_p9_end
+.global _blake3_servil_hybrid_p9_end
+.global blake3_servil_hybrid_k1
+.global _blake3_servil_hybrid_k1
+.global blake3_servil_hybrid_k1_end
+.global _blake3_servil_hybrid_k1_end
+.global blake3_servil_hybrid_k2
+.global _blake3_servil_hybrid_k2
+.global blake3_servil_hybrid_k2_end
+.global _blake3_servil_hybrid_k2_end
+.global blake3_servil_hybrid_k3
+.global _blake3_servil_hybrid_k3
+.global blake3_servil_hybrid_k3_end
+.global _blake3_servil_hybrid_k3_end
+.global blake3_servil_hybrid_k4
+.global _blake3_servil_hybrid_k4
+.global blake3_servil_hybrid_k4_end
+.global _blake3_servil_hybrid_k4_end
+.global blake3_servil_hybrid_k5
+.global _blake3_servil_hybrid_k5
+.global blake3_servil_hybrid_k5_end
+.global _blake3_servil_hybrid_k5_end
+.global blake3_servil_hybrid_k6
+.global _blake3_servil_hybrid_k6
+.global blake3_servil_hybrid_k6_end
+.global _blake3_servil_hybrid_k6_end
+.global blake3_servil_hybrid_k7
+.global _blake3_servil_hybrid_k7
+.global blake3_servil_hybrid_k7_end
+.global _blake3_servil_hybrid_k7_end
+.global blake3_servil_hybrid_k8
+.global _blake3_servil_hybrid_k8
+.global blake3_servil_hybrid_k8_end
+.global _blake3_servil_hybrid_k8_end
+.global blake3_servil_hybrid_k9
+.global _blake3_servil_hybrid_k9
+.global blake3_servil_hybrid_k9_end
+.global _blake3_servil_hybrid_k9_end
+.global blake3_servil_hybrid_k10
+.global _blake3_servil_hybrid_k10
+.global blake3_servil_hybrid_k10_end
+.global _blake3_servil_hybrid_k10_end
+.global blake3_servil_hybrid_q1
+.global _blake3_servil_hybrid_q1
+.global blake3_servil_hybrid_q1_end
+.global _blake3_servil_hybrid_q1_end
+.global blake3_servil_hybrid_q2
+.global _blake3_servil_hybrid_q2
+.global blake3_servil_hybrid_q2_end
+.global _blake3_servil_hybrid_q2_end
+.global blake3_servil_hybrid_q3
+.global _blake3_servil_hybrid_q3
+.global blake3_servil_hybrid_q3_end
+.global _blake3_servil_hybrid_q3_end
+.global blake3_servil_hybrid_q4
+.global _blake3_servil_hybrid_q4
+.global blake3_servil_hybrid_q4_end
+.global _blake3_servil_hybrid_q4_end
+.global blake3_servil_hybrid_q5
+.global _blake3_servil_hybrid_q5
+.global blake3_servil_hybrid_q5_end
+.global _blake3_servil_hybrid_q5_end
+.global blake3_servil_hybrid_q6
+.global _blake3_servil_hybrid_q6
+.global blake3_servil_hybrid_q6_end
+.global _blake3_servil_hybrid_q6_end
+.global blake3_servil_hybrid_q7
+.global _blake3_servil_hybrid_q7
+.global blake3_servil_hybrid_q7_end
+.global _blake3_servil_hybrid_q7_end
+.global blake3_servil_hybrid_q8
+.global _blake3_servil_hybrid_q8
+.global blake3_servil_hybrid_q8_end
+.global _blake3_servil_hybrid_q8_end
+.global blake3_servil_hybrid_q9
+.global _blake3_servil_hybrid_q9
+.global blake3_servil_hybrid_q9_end
+.global _blake3_servil_hybrid_q9_end
+.global blake3_servil_hybrid_kn2
+.global _blake3_servil_hybrid_kn2
+.global blake3_servil_hybrid_kn2_end
+.global _blake3_servil_hybrid_kn2_end
+.global blake3_servil_hybrid_kn4
+.global _blake3_servil_hybrid_kn4
+.global blake3_servil_hybrid_kn4_end
+.global _blake3_servil_hybrid_kn4_end
+.global blake3_servil_hybrid_kn5
+.global _blake3_servil_hybrid_kn5
+.global blake3_servil_hybrid_kn5_end
+.global _blake3_servil_hybrid_kn5_end
+.global blake3_servil_hybrid_kn6
+.global _blake3_servil_hybrid_kn6
+.global blake3_servil_hybrid_kn6_end
+.global _blake3_servil_hybrid_kn6_end
+.global blake3_servil_hybrid_kn8
+.global _blake3_servil_hybrid_kn8
+.global blake3_servil_hybrid_kn8_end
+.global _blake3_servil_hybrid_kn8_end
+.global blake3_servil_hybrid_pn2
+.global _blake3_servil_hybrid_pn2
+.global blake3_servil_hybrid_pn2_end
+.global _blake3_servil_hybrid_pn2_end
+.global blake3_servil_hybrid_pn4
+.global _blake3_servil_hybrid_pn4
+.global blake3_servil_hybrid_pn4_end
+.global _blake3_servil_hybrid_pn4_end
+.global blake3_servil_hybrid_pn5
+.global _blake3_servil_hybrid_pn5
+.global blake3_servil_hybrid_pn5_end
+.global _blake3_servil_hybrid_pn5_end
+.global blake3_servil_hybrid_pn6
+.global _blake3_servil_hybrid_pn6
+.global blake3_servil_hybrid_pn6_end
+.global _blake3_servil_hybrid_pn6_end
+.global blake3_servil_hybrid_pn10
+.global _blake3_servil_hybrid_pn10
+.global blake3_servil_hybrid_pn10_end
+.global _blake3_servil_hybrid_pn10_end
+.global blake3_servil_hybrid_x4
+.global _blake3_servil_hybrid_x4
+.global blake3_servil_hybrid_x4_end
+.global _blake3_servil_hybrid_x4_end
+.global blake3_servil_hybrid_x8
+.global _blake3_servil_hybrid_x8
+.global blake3_servil_hybrid_x8_end
+.global _blake3_servil_hybrid_x8_end
+.global blake3_servil_hybrid_c1
+.global _blake3_servil_hybrid_c1
 #ifdef __APPLE__
 .text
 #else
@@ -398,8 +398,8 @@
 .endm
 
         .p2align 6
-_blake3_hybrid_p2:
-blake3_hybrid_p2:
+_blake3_servil_hybrid_p2:
+blake3_servil_hybrid_p2:
         sub sp, sp, #1088
         stp d8, d9, [sp, #96]
         stp d10, d11, [sp, #112]
@@ -473,7 +473,7 @@ blake3_hybrid_p2:
         dup v7.4s, v0.s[0]
         ldr s0, [x2]
         dup v0.4s, v0.s[0]
-blake3_hybrid_p2_loop:
+blake3_servil_hybrid_p2_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -603,7 +603,7 @@ blake3_hybrid_p2_loop:
         add x3, x3, #64
         str x3, [sp, #1000]
         subs x1, x1, #1
-        b.ne blake3_hybrid_p2_loop
+        b.ne blake3_servil_hybrid_p2_loop
         ldr x2, [sp, #176]
         zip1 v8.2d, v0.2d, v1.2d
         zip1 v9.2d, v2.2d, v3.2d
@@ -627,12 +627,12 @@ blake3_hybrid_p2_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_p2_end:
-blake3_hybrid_p2_end:
+_blake3_servil_hybrid_p2_end:
+blake3_servil_hybrid_p2_end:
 
         .p2align 6
-_blake3_hybrid_p4:
-blake3_hybrid_p4:
+_blake3_servil_hybrid_p4:
+blake3_servil_hybrid_p4:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -727,7 +727,7 @@ blake3_hybrid_p4:
         str x1, [sp, #1072]
         ldr x1, [x0, #8]
         ldr x0, [x0, #0]
-blake3_hybrid_p4_loop:
+blake3_servil_hybrid_p4_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -1010,7 +1010,7 @@ blake3_hybrid_p4_loop:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_p4_loop
+        b.ne blake3_servil_hybrid_p4_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -1048,12 +1048,12 @@ blake3_hybrid_p4_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_p4_end:
-blake3_hybrid_p4_end:
+_blake3_servil_hybrid_p4_end:
+blake3_servil_hybrid_p4_end:
 
         .p2align 6
-_blake3_hybrid_p8:
-blake3_hybrid_p8:
+_blake3_servil_hybrid_p8:
+blake3_servil_hybrid_p8:
         sub sp, sp, #1088
         stp d8, d9, [sp, #96]
         stp d10, d11, [sp, #112]
@@ -1167,7 +1167,7 @@ blake3_hybrid_p8:
         dup v23.4s, v0.s[0]
         ldr s0, [x2]
         dup v0.4s, v0.s[0]
-blake3_hybrid_p8_loop:
+blake3_servil_hybrid_p8_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -1505,7 +1505,7 @@ blake3_hybrid_p8_loop:
         add x3, x3, #64
         str x3, [sp, #1048]
         subs x1, x1, #1
-        b.ne blake3_hybrid_p8_loop
+        b.ne blake3_servil_hybrid_p8_loop
         ldr x2, [sp, #176]
         trn1 v8.4s, v0.4s, v1.4s
         trn2 v9.4s, v0.4s, v1.4s
@@ -1561,12 +1561,12 @@ blake3_hybrid_p8_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_p8_end:
-blake3_hybrid_p8_end:
+_blake3_servil_hybrid_p8_end:
+blake3_servil_hybrid_p8_end:
 
         .p2align 6
-_blake3_hybrid_p3:
-blake3_hybrid_p3:
+_blake3_servil_hybrid_p3:
+blake3_servil_hybrid_p3:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -1650,7 +1650,7 @@ blake3_hybrid_p3:
         ldp w12, w13, [x2, #24]
         add x4, x3, #0
         str x4, [sp, #200]
-blake3_hybrid_p3_loop:
+blake3_servil_hybrid_p3_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -1908,7 +1908,7 @@ blake3_hybrid_p3_loop:
         add x3, x3, #64
         str x3, [sp, #1008]
         subs x1, x1, #1
-        b.ne blake3_hybrid_p3_loop
+        b.ne blake3_servil_hybrid_p3_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -1939,12 +1939,12 @@ blake3_hybrid_p3_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_p3_end:
-blake3_hybrid_p3_end:
+_blake3_servil_hybrid_p3_end:
+blake3_servil_hybrid_p3_end:
 
         .p2align 6
-_blake3_hybrid_p5:
-blake3_hybrid_p5:
+_blake3_servil_hybrid_p5:
+blake3_servil_hybrid_p5:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -2052,7 +2052,7 @@ blake3_hybrid_p5:
         ldp w12, w13, [x2, #24]
         add x4, x3, #0
         str x4, [sp, #200]
-blake3_hybrid_p5_loop:
+blake3_servil_hybrid_p5_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -2446,7 +2446,7 @@ blake3_hybrid_p5_loop:
         add x3, x3, #64
         str x3, [sp, #1024]
         subs x1, x1, #1
-        b.ne blake3_hybrid_p5_loop
+        b.ne blake3_servil_hybrid_p5_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -2493,12 +2493,12 @@ blake3_hybrid_p5_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_p5_end:
-blake3_hybrid_p5_end:
+_blake3_servil_hybrid_p5_end:
+blake3_servil_hybrid_p5_end:
 
         .p2align 6
-_blake3_hybrid_p7:
-blake3_hybrid_p7:
+_blake3_servil_hybrid_p7:
+blake3_servil_hybrid_p7:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -2614,7 +2614,7 @@ blake3_hybrid_p7:
         ldp w12, w13, [x2, #24]
         add x4, x3, #0
         str x4, [sp, #200]
-blake3_hybrid_p7_loop:
+blake3_servil_hybrid_p7_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -3044,7 +3044,7 @@ blake3_hybrid_p7_loop:
         add x3, x3, #64
         str x3, [sp, #1040]
         subs x1, x1, #1
-        b.ne blake3_hybrid_p7_loop
+        b.ne blake3_servil_hybrid_p7_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -3099,12 +3099,12 @@ blake3_hybrid_p7_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_p7_end:
-blake3_hybrid_p7_end:
+_blake3_servil_hybrid_p7_end:
+blake3_servil_hybrid_p7_end:
 
         .p2align 6
-_blake3_hybrid_p9:
-blake3_hybrid_p9:
+_blake3_servil_hybrid_p9:
+blake3_servil_hybrid_p9:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -3228,7 +3228,7 @@ blake3_hybrid_p9:
         ldp w12, w13, [x2, #24]
         add x4, x3, #0
         str x4, [sp, #200]
-blake3_hybrid_p9_loop:
+blake3_servil_hybrid_p9_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -3694,7 +3694,7 @@ blake3_hybrid_p9_loop:
         add x3, x3, #64
         str x3, [sp, #1056]
         subs x1, x1, #1
-        b.ne blake3_hybrid_p9_loop
+        b.ne blake3_servil_hybrid_p9_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -3757,17 +3757,17 @@ blake3_hybrid_p9_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_p9_end:
-blake3_hybrid_p9_end:
+_blake3_servil_hybrid_p9_end:
+blake3_servil_hybrid_p9_end:
 
         .p2align 6
-_blake3_hybrid_k1:
-blake3_hybrid_k1:
+_blake3_servil_hybrid_k1:
+blake3_servil_hybrid_k1:
         ldr x0, [x0]
         sub x6, x1, #1
         add x6, x0, x6, lsl #6
-_blake3_hybrid_c1:
-blake3_hybrid_c1:
+_blake3_servil_hybrid_c1:
+blake3_servil_hybrid_c1:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -3793,8 +3793,8 @@ blake3_hybrid_c1:
         mov w5, #64
         cmp x1, #1
         csel w0, w0, w5, eq
-        adr x27, blake3_hybrid_k1_schedule_end
-blake3_hybrid_k1_loop:
+        adr x27, blake3_servil_hybrid_k1_schedule_end
+blake3_servil_hybrid_k1_loop:
         mov w14, #58983
         movk w14, #27145, lsl #16
         mov w15, #44677
@@ -3807,8 +3807,8 @@ blake3_hybrid_k1_loop:
         lsr x20, x3, #32
         mov w21, w0
         mov w22, w2
-        adr x26, blake3_hybrid_k1_schedule
-blake3_hybrid_k1_round:
+        adr x26, blake3_servil_hybrid_k1_schedule
+blake3_servil_hybrid_k1_round:
         ldrb w23, [x26, #0]
         ldrb w0, [x26, #2]
         ldrb w2, [x26, #4]
@@ -3955,7 +3955,7 @@ blake3_hybrid_k1_round:
         ror w10, w10, #7
         add x26, x26, #16
         cmp x26, x27
-        b.ne blake3_hybrid_k1_round
+        b.ne blake3_servil_hybrid_k1_round
         eor w6, w6, w14
         eor w7, w7, w15
         eor w8, w8, w16
@@ -3977,7 +3977,7 @@ blake3_hybrid_k1_round:
         mov w5, #64
         cmp x1, #1
         csel w0, w0, w5, eq
-        cbnz x1, blake3_hybrid_k1_loop
+        cbnz x1, blake3_servil_hybrid_k1_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -3990,7 +3990,7 @@ blake3_hybrid_k1_round:
         ldp x27, x28, [sp, #64]
         add sp, sp, #1088
         ret
-blake3_hybrid_k1_schedule:
+blake3_servil_hybrid_k1_schedule:
         .byte 0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60
         .byte 8, 24, 12, 40, 28, 0, 16, 52, 4, 44, 48, 20, 36, 56, 60, 32
         .byte 12, 16, 40, 48, 52, 8, 28, 56, 24, 20, 36, 0, 44, 60, 32, 4
@@ -3998,13 +3998,13 @@ blake3_hybrid_k1_schedule:
         .byte 48, 52, 36, 44, 60, 40, 56, 32, 28, 8, 20, 12, 0, 4, 24, 16
         .byte 36, 56, 44, 20, 32, 48, 60, 4, 52, 12, 0, 40, 8, 24, 16, 28
         .byte 44, 60, 20, 0, 4, 36, 32, 24, 56, 40, 8, 48, 12, 16, 28, 52
-blake3_hybrid_k1_schedule_end:
-_blake3_hybrid_k1_end:
-blake3_hybrid_k1_end:
+blake3_servil_hybrid_k1_schedule_end:
+_blake3_servil_hybrid_k1_end:
+blake3_servil_hybrid_k1_end:
 
         .p2align 6
-_blake3_hybrid_k2:
-blake3_hybrid_k2:
+_blake3_servil_hybrid_k2:
+blake3_servil_hybrid_k2:
         sub sp, sp, #1088
         stp d8, d9, [sp, #96]
         stp d10, d11, [sp, #112]
@@ -4078,7 +4078,7 @@ blake3_hybrid_k2:
         dup v7.4s, v0.s[0]
         ldr s0, [x2]
         dup v0.4s, v0.s[0]
-blake3_hybrid_k2_loop:
+blake3_servil_hybrid_k2_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -4208,7 +4208,7 @@ blake3_hybrid_k2_loop:
         add x3, x3, #64
         str x3, [sp, #1000]
         subs x1, x1, #1
-        b.ne blake3_hybrid_k2_loop
+        b.ne blake3_servil_hybrid_k2_loop
         ldr x2, [sp, #176]
         zip1 v8.2d, v0.2d, v1.2d
         zip1 v9.2d, v2.2d, v3.2d
@@ -4232,12 +4232,12 @@ blake3_hybrid_k2_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_k2_end:
-blake3_hybrid_k2_end:
+_blake3_servil_hybrid_k2_end:
+blake3_servil_hybrid_k2_end:
 
         .p2align 6
-_blake3_hybrid_k3:
-blake3_hybrid_k3:
+_blake3_servil_hybrid_k3:
+blake3_servil_hybrid_k3:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -4321,7 +4321,7 @@ blake3_hybrid_k3:
         ldp w12, w13, [x2, #24]
         add x4, x3, #0
         str x4, [sp, #200]
-blake3_hybrid_k3_loop:
+blake3_servil_hybrid_k3_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -4579,7 +4579,7 @@ blake3_hybrid_k3_loop:
         add x3, x3, #64
         str x3, [sp, #1008]
         subs x1, x1, #1
-        b.ne blake3_hybrid_k3_loop
+        b.ne blake3_servil_hybrid_k3_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -4610,12 +4610,12 @@ blake3_hybrid_k3_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_k3_end:
-blake3_hybrid_k3_end:
+_blake3_servil_hybrid_k3_end:
+blake3_servil_hybrid_k3_end:
 
         .p2align 6
-_blake3_hybrid_k4:
-blake3_hybrid_k4:
+_blake3_servil_hybrid_k4:
+blake3_servil_hybrid_k4:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -4710,7 +4710,7 @@ blake3_hybrid_k4:
         str x1, [sp, #1072]
         ldr x1, [x0, #8]
         ldr x0, [x0, #0]
-blake3_hybrid_k4_loop:
+blake3_servil_hybrid_k4_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -4993,7 +4993,7 @@ blake3_hybrid_k4_loop:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_k4_loop
+        b.ne blake3_servil_hybrid_k4_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -5031,12 +5031,12 @@ blake3_hybrid_k4_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_k4_end:
-blake3_hybrid_k4_end:
+_blake3_servil_hybrid_k4_end:
+blake3_servil_hybrid_k4_end:
 
         .p2align 6
-_blake3_hybrid_k5:
-blake3_hybrid_k5:
+_blake3_servil_hybrid_k5:
+blake3_servil_hybrid_k5:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -5144,7 +5144,7 @@ blake3_hybrid_k5:
         ldp w12, w13, [x2, #24]
         add x4, x3, #0
         str x4, [sp, #200]
-blake3_hybrid_k5_loop:
+blake3_servil_hybrid_k5_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -5538,7 +5538,7 @@ blake3_hybrid_k5_loop:
         add x3, x3, #64
         str x3, [sp, #1024]
         subs x1, x1, #1
-        b.ne blake3_hybrid_k5_loop
+        b.ne blake3_servil_hybrid_k5_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -5585,12 +5585,12 @@ blake3_hybrid_k5_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_k5_end:
-blake3_hybrid_k5_end:
+_blake3_servil_hybrid_k5_end:
+blake3_servil_hybrid_k5_end:
 
         .p2align 6
-_blake3_hybrid_k6:
-blake3_hybrid_k6:
+_blake3_servil_hybrid_k6:
+blake3_servil_hybrid_k6:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -5709,7 +5709,7 @@ blake3_hybrid_k6:
         str x1, [sp, #1072]
         ldr x1, [x0, #8]
         ldr x0, [x0, #0]
-blake3_hybrid_k6_loop:
+blake3_servil_hybrid_k6_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -6128,7 +6128,7 @@ blake3_hybrid_k6_loop:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_k6_loop
+        b.ne blake3_servil_hybrid_k6_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -6182,12 +6182,12 @@ blake3_hybrid_k6_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_k6_end:
-blake3_hybrid_k6_end:
+_blake3_servil_hybrid_k6_end:
+blake3_servil_hybrid_k6_end:
 
         .p2align 6
-_blake3_hybrid_k7:
-blake3_hybrid_k7:
+_blake3_servil_hybrid_k7:
+blake3_servil_hybrid_k7:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -6303,7 +6303,7 @@ blake3_hybrid_k7:
         ldp w12, w13, [x2, #24]
         add x4, x3, #0
         str x4, [sp, #200]
-blake3_hybrid_k7_loop:
+blake3_servil_hybrid_k7_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -6733,7 +6733,7 @@ blake3_hybrid_k7_loop:
         add x3, x3, #64
         str x3, [sp, #1040]
         subs x1, x1, #1
-        b.ne blake3_hybrid_k7_loop
+        b.ne blake3_servil_hybrid_k7_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -6788,12 +6788,12 @@ blake3_hybrid_k7_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_k7_end:
-blake3_hybrid_k7_end:
+_blake3_servil_hybrid_k7_end:
+blake3_servil_hybrid_k7_end:
 
         .p2align 6
-_blake3_hybrid_k8:
-blake3_hybrid_k8:
+_blake3_servil_hybrid_k8:
+blake3_servil_hybrid_k8:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -6920,7 +6920,7 @@ blake3_hybrid_k8:
         str x1, [sp, #1072]
         ldr x1, [x0, #8]
         ldr x0, [x0, #0]
-blake3_hybrid_k8_loop:
+blake3_servil_hybrid_k8_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -7375,7 +7375,7 @@ blake3_hybrid_k8_loop:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_k8_loop
+        b.ne blake3_servil_hybrid_k8_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -7437,12 +7437,12 @@ blake3_hybrid_k8_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_k8_end:
-blake3_hybrid_k8_end:
+_blake3_servil_hybrid_k8_end:
+blake3_servil_hybrid_k8_end:
 
         .p2align 6
-_blake3_hybrid_k9:
-blake3_hybrid_k9:
+_blake3_servil_hybrid_k9:
+blake3_servil_hybrid_k9:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -7566,7 +7566,7 @@ blake3_hybrid_k9:
         ldp w12, w13, [x2, #24]
         add x4, x3, #0
         str x4, [sp, #200]
-blake3_hybrid_k9_loop:
+blake3_servil_hybrid_k9_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -8032,7 +8032,7 @@ blake3_hybrid_k9_loop:
         add x3, x3, #64
         str x3, [sp, #1056]
         subs x1, x1, #1
-        b.ne blake3_hybrid_k9_loop
+        b.ne blake3_servil_hybrid_k9_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -8095,12 +8095,12 @@ blake3_hybrid_k9_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_k9_end:
-blake3_hybrid_k9_end:
+_blake3_servil_hybrid_k9_end:
+blake3_servil_hybrid_k9_end:
 
         .p2align 6
-_blake3_hybrid_k10:
-blake3_hybrid_k10:
+_blake3_servil_hybrid_k10:
+blake3_servil_hybrid_k10:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -8235,7 +8235,7 @@ blake3_hybrid_k10:
         str x1, [sp, #1072]
         ldr x1, [x0, #8]
         ldr x0, [x0, #0]
-blake3_hybrid_k10_loop:
+blake3_servil_hybrid_k10_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -8726,7 +8726,7 @@ blake3_hybrid_k10_loop:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_k10_loop
+        b.ne blake3_servil_hybrid_k10_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -8796,12 +8796,12 @@ blake3_hybrid_k10_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_k10_end:
-blake3_hybrid_k10_end:
+_blake3_servil_hybrid_k10_end:
+blake3_servil_hybrid_k10_end:
 
         .p2align 6
-_blake3_hybrid_q1:
-blake3_hybrid_q1:
+_blake3_servil_hybrid_q1:
+blake3_servil_hybrid_q1:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -8886,7 +8886,7 @@ blake3_hybrid_q1:
         ldp w12, w13, [x2, #24]
         add x4, x3, #1
         str x4, [sp, #200]
-blake3_hybrid_q1_loop:
+blake3_servil_hybrid_q1_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -9166,14 +9166,14 @@ blake3_hybrid_q1_loop:
         sub x4, x4, x1
         ldrb w5, [sp, #1080]
         cmp x4, x5
-        b.ne blake3_hybrid_q1_loop
+        b.ne blake3_servil_hybrid_q1_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #32]
         stp w8, w9, [x2, #40]
         stp w10, w11, [x2, #48]
         stp w12, w13, [x2, #56]
-        cbz x1, blake3_hybrid_q1_done
-blake3_hybrid_q1_rest:
+        cbz x1, blake3_servil_hybrid_q1_done
+blake3_servil_hybrid_q1_rest:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -9303,8 +9303,8 @@ blake3_hybrid_q1_rest:
         add x3, x3, #64
         str x3, [sp, #1008]
         subs x1, x1, #1
-        b.ne blake3_hybrid_q1_rest
-blake3_hybrid_q1_done:
+        b.ne blake3_servil_hybrid_q1_rest
+blake3_servil_hybrid_q1_done:
         ldr x2, [sp, #176]
         zip1 v8.2d, v0.2d, v1.2d
         zip1 v9.2d, v2.2d, v3.2d
@@ -9331,12 +9331,12 @@ blake3_hybrid_q1_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_q1_end:
-blake3_hybrid_q1_end:
+_blake3_servil_hybrid_q1_end:
+blake3_servil_hybrid_q1_end:
 
         .p2align 6
-_blake3_hybrid_q2:
-blake3_hybrid_q2:
+_blake3_servil_hybrid_q2:
+blake3_servil_hybrid_q2:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -9421,7 +9421,7 @@ blake3_hybrid_q2:
         ldp w12, w13, [x2, #24]
         add x4, x3, #2
         str x4, [sp, #200]
-blake3_hybrid_q2_loop:
+blake3_servil_hybrid_q2_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -9701,14 +9701,14 @@ blake3_hybrid_q2_loop:
         sub x4, x4, x1
         ldrb w5, [sp, #1080]
         cmp x4, x5
-        b.ne blake3_hybrid_q2_loop
+        b.ne blake3_servil_hybrid_q2_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #64]
         stp w8, w9, [x2, #72]
         stp w10, w11, [x2, #80]
         stp w12, w13, [x2, #88]
-        cbz x1, blake3_hybrid_q2_done
-blake3_hybrid_q2_rest:
+        cbz x1, blake3_servil_hybrid_q2_done
+blake3_servil_hybrid_q2_rest:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -9838,8 +9838,8 @@ blake3_hybrid_q2_rest:
         add x3, x3, #64
         str x3, [sp, #1000]
         subs x1, x1, #1
-        b.ne blake3_hybrid_q2_rest
-blake3_hybrid_q2_done:
+        b.ne blake3_servil_hybrid_q2_rest
+blake3_servil_hybrid_q2_done:
         ldr x2, [sp, #176]
         zip1 v8.2d, v0.2d, v1.2d
         zip1 v9.2d, v2.2d, v3.2d
@@ -9866,12 +9866,12 @@ blake3_hybrid_q2_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_q2_end:
-blake3_hybrid_q2_end:
+_blake3_servil_hybrid_q2_end:
+blake3_servil_hybrid_q2_end:
 
         .p2align 6
-_blake3_hybrid_q3:
-blake3_hybrid_q3:
+_blake3_servil_hybrid_q3:
+blake3_servil_hybrid_q3:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -9967,7 +9967,7 @@ blake3_hybrid_q3:
         str x1, [sp, #1072]
         ldr x1, [x0, #24]
         ldr x0, [x0, #0]
-blake3_hybrid_q3_loop:
+blake3_servil_hybrid_q3_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -10273,14 +10273,14 @@ blake3_hybrid_q3_loop:
         sub x4, x4, x3
         ldrb w5, [sp, #1080]
         cmp x4, x5
-        b.ne blake3_hybrid_q3_loop
+        b.ne blake3_servil_hybrid_q3_loop
         ldr x2, [sp, #176]
         stp w19, w20, [x2, #96]
         stp w21, w22, [x2, #104]
         stp w23, w24, [x2, #112]
         stp w25, w26, [x2, #120]
-        cbz x3, blake3_hybrid_q3_done
-blake3_hybrid_q3_rest:
+        cbz x3, blake3_servil_hybrid_q3_done
+blake3_servil_hybrid_q3_rest:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -10488,8 +10488,8 @@ blake3_hybrid_q3_rest:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_q3_rest
-blake3_hybrid_q3_done:
+        b.ne blake3_servil_hybrid_q3_rest
+blake3_servil_hybrid_q3_done:
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -10523,12 +10523,12 @@ blake3_hybrid_q3_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_q3_end:
-blake3_hybrid_q3_end:
+_blake3_servil_hybrid_q3_end:
+blake3_servil_hybrid_q3_end:
 
         .p2align 6
-_blake3_hybrid_q4:
-blake3_hybrid_q4:
+_blake3_servil_hybrid_q4:
+blake3_servil_hybrid_q4:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -10637,7 +10637,7 @@ blake3_hybrid_q4:
         ldp w12, w13, [x2, #24]
         add x4, x3, #4
         str x4, [sp, #200]
-blake3_hybrid_q4_loop:
+blake3_servil_hybrid_q4_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -11053,14 +11053,14 @@ blake3_hybrid_q4_loop:
         sub x4, x4, x1
         ldrb w5, [sp, #1080]
         cmp x4, x5
-        b.ne blake3_hybrid_q4_loop
+        b.ne blake3_servil_hybrid_q4_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #128]
         stp w8, w9, [x2, #136]
         stp w10, w11, [x2, #144]
         stp w12, w13, [x2, #152]
-        cbz x1, blake3_hybrid_q4_done
-blake3_hybrid_q4_rest:
+        cbz x1, blake3_servil_hybrid_q4_done
+blake3_servil_hybrid_q4_rest:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -11326,8 +11326,8 @@ blake3_hybrid_q4_rest:
         add x3, x3, #64
         str x3, [sp, #1016]
         subs x1, x1, #1
-        b.ne blake3_hybrid_q4_rest
-blake3_hybrid_q4_done:
+        b.ne blake3_servil_hybrid_q4_rest
+blake3_servil_hybrid_q4_done:
         ldr x2, [sp, #176]
         zip1 v8.2d, v0.2d, v1.2d
         zip1 v9.2d, v2.2d, v3.2d
@@ -11370,12 +11370,12 @@ blake3_hybrid_q4_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_q4_end:
-blake3_hybrid_q4_end:
+_blake3_servil_hybrid_q4_end:
+blake3_servil_hybrid_q4_end:
 
         .p2align 6
-_blake3_hybrid_q5:
-blake3_hybrid_q5:
+_blake3_servil_hybrid_q5:
+blake3_servil_hybrid_q5:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -11495,7 +11495,7 @@ blake3_hybrid_q5:
         str x1, [sp, #1072]
         ldr x1, [x0, #40]
         ldr x0, [x0, #0]
-blake3_hybrid_q5_loop:
+blake3_servil_hybrid_q5_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -11937,14 +11937,14 @@ blake3_hybrid_q5_loop:
         sub x4, x4, x3
         ldrb w5, [sp, #1080]
         cmp x4, x5
-        b.ne blake3_hybrid_q5_loop
+        b.ne blake3_servil_hybrid_q5_loop
         ldr x2, [sp, #176]
         stp w19, w20, [x2, #160]
         stp w21, w22, [x2, #168]
         stp w23, w24, [x2, #176]
         stp w25, w26, [x2, #184]
-        cbz x3, blake3_hybrid_q5_done
-blake3_hybrid_q5_rest:
+        cbz x3, blake3_servil_hybrid_q5_done
+blake3_servil_hybrid_q5_rest:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -12288,8 +12288,8 @@ blake3_hybrid_q5_rest:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_q5_rest
-blake3_hybrid_q5_done:
+        b.ne blake3_servil_hybrid_q5_rest
+blake3_servil_hybrid_q5_done:
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -12339,12 +12339,12 @@ blake3_hybrid_q5_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_q5_end:
-blake3_hybrid_q5_end:
+_blake3_servil_hybrid_q5_end:
+blake3_servil_hybrid_q5_end:
 
         .p2align 6
-_blake3_hybrid_q6:
-blake3_hybrid_q6:
+_blake3_servil_hybrid_q6:
+blake3_servil_hybrid_q6:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -12461,7 +12461,7 @@ blake3_hybrid_q6:
         ldp w12, w13, [x2, #24]
         add x4, x3, #6
         str x4, [sp, #200]
-blake3_hybrid_q6_loop:
+blake3_servil_hybrid_q6_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -12913,14 +12913,14 @@ blake3_hybrid_q6_loop:
         sub x4, x4, x1
         ldrb w5, [sp, #1080]
         cmp x4, x5
-        b.ne blake3_hybrid_q6_loop
+        b.ne blake3_servil_hybrid_q6_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #192]
         stp w8, w9, [x2, #200]
         stp w10, w11, [x2, #208]
         stp w12, w13, [x2, #216]
-        cbz x1, blake3_hybrid_q6_done
-blake3_hybrid_q6_rest:
+        cbz x1, blake3_servil_hybrid_q6_done
+blake3_servil_hybrid_q6_rest:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -13222,8 +13222,8 @@ blake3_hybrid_q6_rest:
         add x3, x3, #64
         str x3, [sp, #1032]
         subs x1, x1, #1
-        b.ne blake3_hybrid_q6_rest
-blake3_hybrid_q6_done:
+        b.ne blake3_servil_hybrid_q6_rest
+blake3_servil_hybrid_q6_done:
         ldr x2, [sp, #176]
         trn1 v8.4s, v0.4s, v1.4s
         trn2 v9.4s, v0.4s, v1.4s
@@ -13274,12 +13274,12 @@ blake3_hybrid_q6_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_q6_end:
-blake3_hybrid_q6_end:
+_blake3_servil_hybrid_q6_end:
+blake3_servil_hybrid_q6_end:
 
         .p2align 6
-_blake3_hybrid_q7:
-blake3_hybrid_q7:
+_blake3_servil_hybrid_q7:
+blake3_servil_hybrid_q7:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -13407,7 +13407,7 @@ blake3_hybrid_q7:
         str x1, [sp, #1072]
         ldr x1, [x0, #56]
         ldr x0, [x0, #0]
-blake3_hybrid_q7_loop:
+blake3_servil_hybrid_q7_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -13885,14 +13885,14 @@ blake3_hybrid_q7_loop:
         sub x4, x4, x3
         ldrb w5, [sp, #1080]
         cmp x4, x5
-        b.ne blake3_hybrid_q7_loop
+        b.ne blake3_servil_hybrid_q7_loop
         ldr x2, [sp, #176]
         stp w19, w20, [x2, #224]
         stp w21, w22, [x2, #232]
         stp w23, w24, [x2, #240]
         stp w25, w26, [x2, #248]
-        cbz x3, blake3_hybrid_q7_done
-blake3_hybrid_q7_rest:
+        cbz x3, blake3_servil_hybrid_q7_done
+blake3_servil_hybrid_q7_rest:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -14272,8 +14272,8 @@ blake3_hybrid_q7_rest:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_q7_rest
-blake3_hybrid_q7_done:
+        b.ne blake3_servil_hybrid_q7_rest
+blake3_servil_hybrid_q7_done:
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -14331,12 +14331,12 @@ blake3_hybrid_q7_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_q7_end:
-blake3_hybrid_q7_end:
+_blake3_servil_hybrid_q7_end:
+blake3_servil_hybrid_q7_end:
 
         .p2align 6
-_blake3_hybrid_q8:
-blake3_hybrid_q8:
+_blake3_servil_hybrid_q8:
+blake3_servil_hybrid_q8:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -14461,7 +14461,7 @@ blake3_hybrid_q8:
         ldp w12, w13, [x2, #24]
         add x4, x3, #8
         str x4, [sp, #200]
-blake3_hybrid_q8_loop:
+blake3_servil_hybrid_q8_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -14949,15 +14949,15 @@ blake3_hybrid_q8_loop:
         sub x4, x4, x1
         ldrb w5, [sp, #1080]
         cmp x4, x5
-        b.ne blake3_hybrid_q8_loop
+        b.ne blake3_servil_hybrid_q8_loop
         ldr x2, [sp, #176]
         add x4, x2, #256
         stp w6, w7, [x4, #0]
         stp w8, w9, [x4, #8]
         stp w10, w11, [x4, #16]
         stp w12, w13, [x4, #24]
-        cbz x1, blake3_hybrid_q8_done
-blake3_hybrid_q8_rest:
+        cbz x1, blake3_servil_hybrid_q8_done
+blake3_servil_hybrid_q8_rest:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -15295,8 +15295,8 @@ blake3_hybrid_q8_rest:
         add x3, x3, #64
         str x3, [sp, #1048]
         subs x1, x1, #1
-        b.ne blake3_hybrid_q8_rest
-blake3_hybrid_q8_done:
+        b.ne blake3_servil_hybrid_q8_rest
+blake3_servil_hybrid_q8_done:
         ldr x2, [sp, #176]
         trn1 v8.4s, v0.4s, v1.4s
         trn2 v9.4s, v0.4s, v1.4s
@@ -15355,12 +15355,12 @@ blake3_hybrid_q8_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_q8_end:
-blake3_hybrid_q8_end:
+_blake3_servil_hybrid_q8_end:
+blake3_servil_hybrid_q8_end:
 
         .p2align 6
-_blake3_hybrid_q9:
-blake3_hybrid_q9:
+_blake3_servil_hybrid_q9:
+blake3_servil_hybrid_q9:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -15496,7 +15496,7 @@ blake3_hybrid_q9:
         str x1, [sp, #1072]
         ldr x1, [x0, #72]
         ldr x0, [x0, #0]
-blake3_hybrid_q9_loop:
+blake3_servil_hybrid_q9_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -16010,15 +16010,15 @@ blake3_hybrid_q9_loop:
         sub x4, x4, x3
         ldrb w5, [sp, #1080]
         cmp x4, x5
-        b.ne blake3_hybrid_q9_loop
+        b.ne blake3_servil_hybrid_q9_loop
         ldr x2, [sp, #176]
         add x4, x2, #288
         stp w19, w20, [x4, #0]
         stp w21, w22, [x4, #8]
         stp w23, w24, [x4, #16]
         stp w25, w26, [x4, #24]
-        cbz x3, blake3_hybrid_q9_done
-blake3_hybrid_q9_rest:
+        cbz x3, blake3_servil_hybrid_q9_done
+blake3_servil_hybrid_q9_rest:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -16434,8 +16434,8 @@ blake3_hybrid_q9_rest:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_q9_rest
-blake3_hybrid_q9_done:
+        b.ne blake3_servil_hybrid_q9_rest
+blake3_servil_hybrid_q9_done:
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -16501,12 +16501,12 @@ blake3_hybrid_q9_done:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_q9_end:
-blake3_hybrid_q9_end:
+_blake3_servil_hybrid_q9_end:
+blake3_servil_hybrid_q9_end:
 
         .p2align 6
-_blake3_hybrid_kn2:
-blake3_hybrid_kn2:
+_blake3_servil_hybrid_kn2:
+blake3_servil_hybrid_kn2:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -16542,7 +16542,7 @@ blake3_hybrid_kn2:
         str x1, [sp, #1072]
         ldr x1, [x0, #8]
         ldr x0, [x0, #0]
-blake3_hybrid_kn2_loop:
+blake3_servil_hybrid_kn2_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -16713,7 +16713,7 @@ blake3_hybrid_kn2_loop:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_kn2_loop
+        b.ne blake3_servil_hybrid_kn2_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -16731,12 +16731,12 @@ blake3_hybrid_kn2_loop:
         ldp x29, x30, [sp, #80]
         add sp, sp, #1088
         ret
-_blake3_hybrid_kn2_end:
-blake3_hybrid_kn2_end:
+_blake3_servil_hybrid_kn2_end:
+blake3_servil_hybrid_kn2_end:
 
         .p2align 6
-_blake3_hybrid_kn4:
-blake3_hybrid_kn4:
+_blake3_servil_hybrid_kn4:
+blake3_servil_hybrid_kn4:
         sub sp, sp, #1088
         stp d8, d9, [sp, #96]
         stp d10, d11, [sp, #112]
@@ -16818,7 +16818,7 @@ blake3_hybrid_kn4:
         dup v7.4s, v0.s[0]
         ldr s0, [x2]
         dup v0.4s, v0.s[0]
-blake3_hybrid_kn4_loop:
+blake3_servil_hybrid_kn4_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -16992,7 +16992,7 @@ blake3_hybrid_kn4_loop:
         add x3, x3, #64
         str x3, [sp, #1016]
         subs x1, x1, #1
-        b.ne blake3_hybrid_kn4_loop
+        b.ne blake3_servil_hybrid_kn4_loop
         ldr x2, [sp, #176]
         trn1 v8.4s, v0.4s, v1.4s
         trn2 v9.4s, v0.4s, v1.4s
@@ -17024,12 +17024,12 @@ blake3_hybrid_kn4_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_kn4_end:
-blake3_hybrid_kn4_end:
+_blake3_servil_hybrid_kn4_end:
+blake3_servil_hybrid_kn4_end:
 
         .p2align 6
-_blake3_hybrid_kn5:
-blake3_hybrid_kn5:
+_blake3_servil_hybrid_kn5:
+blake3_servil_hybrid_kn5:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -17121,7 +17121,7 @@ blake3_hybrid_kn5:
         ldp w12, w13, [x2, #24]
         add x4, x3, #0
         str x4, [sp, #200]
-blake3_hybrid_kn5_loop:
+blake3_servil_hybrid_kn5_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -17423,7 +17423,7 @@ blake3_hybrid_kn5_loop:
         add x3, x3, #64
         str x3, [sp, #1024]
         subs x1, x1, #1
-        b.ne blake3_hybrid_kn5_loop
+        b.ne blake3_servil_hybrid_kn5_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -17462,12 +17462,12 @@ blake3_hybrid_kn5_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_kn5_end:
-blake3_hybrid_kn5_end:
+_blake3_servil_hybrid_kn5_end:
+blake3_servil_hybrid_kn5_end:
 
         .p2align 6
-_blake3_hybrid_kn6:
-blake3_hybrid_kn6:
+_blake3_servil_hybrid_kn6:
+blake3_servil_hybrid_kn6:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -17570,7 +17570,7 @@ blake3_hybrid_kn6:
         str x1, [sp, #1072]
         ldr x1, [x0, #8]
         ldr x0, [x0, #0]
-blake3_hybrid_kn6_loop:
+blake3_servil_hybrid_kn6_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -17897,7 +17897,7 @@ blake3_hybrid_kn6_loop:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_kn6_loop
+        b.ne blake3_servil_hybrid_kn6_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -17943,12 +17943,12 @@ blake3_hybrid_kn6_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_kn6_end:
-blake3_hybrid_kn6_end:
+_blake3_servil_hybrid_kn6_end:
+blake3_servil_hybrid_kn6_end:
 
         .p2align 6
-_blake3_hybrid_kn8:
-blake3_hybrid_kn8:
+_blake3_servil_hybrid_kn8:
+blake3_servil_hybrid_kn8:
         sub sp, sp, #1088
         stp d8, d9, [sp, #96]
         stp d10, d11, [sp, #112]
@@ -18062,7 +18062,7 @@ blake3_hybrid_kn8:
         dup v23.4s, v0.s[0]
         ldr s0, [x2]
         dup v0.4s, v0.s[0]
-blake3_hybrid_kn8_loop:
+blake3_servil_hybrid_kn8_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -18400,7 +18400,7 @@ blake3_hybrid_kn8_loop:
         add x3, x3, #64
         str x3, [sp, #1048]
         subs x1, x1, #1
-        b.ne blake3_hybrid_kn8_loop
+        b.ne blake3_servil_hybrid_kn8_loop
         ldr x2, [sp, #176]
         trn1 v8.4s, v0.4s, v1.4s
         trn2 v9.4s, v0.4s, v1.4s
@@ -18456,12 +18456,12 @@ blake3_hybrid_kn8_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_kn8_end:
-blake3_hybrid_kn8_end:
+_blake3_servil_hybrid_kn8_end:
+blake3_servil_hybrid_kn8_end:
 
         .p2align 6
-_blake3_hybrid_pn2:
-blake3_hybrid_pn2:
+_blake3_servil_hybrid_pn2:
+blake3_servil_hybrid_pn2:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -18497,7 +18497,7 @@ blake3_hybrid_pn2:
         str x1, [sp, #1072]
         ldr x1, [x0, #8]
         ldr x0, [x0, #0]
-blake3_hybrid_pn2_loop:
+blake3_servil_hybrid_pn2_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -18668,7 +18668,7 @@ blake3_hybrid_pn2_loop:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_pn2_loop
+        b.ne blake3_servil_hybrid_pn2_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -18686,12 +18686,12 @@ blake3_hybrid_pn2_loop:
         ldp x29, x30, [sp, #80]
         add sp, sp, #1088
         ret
-_blake3_hybrid_pn2_end:
-blake3_hybrid_pn2_end:
+_blake3_servil_hybrid_pn2_end:
+blake3_servil_hybrid_pn2_end:
 
         .p2align 6
-_blake3_hybrid_pn4:
-blake3_hybrid_pn4:
+_blake3_servil_hybrid_pn4:
+blake3_servil_hybrid_pn4:
         sub sp, sp, #1088
         stp d8, d9, [sp, #96]
         stp d10, d11, [sp, #112]
@@ -18773,7 +18773,7 @@ blake3_hybrid_pn4:
         dup v7.4s, v0.s[0]
         ldr s0, [x2]
         dup v0.4s, v0.s[0]
-blake3_hybrid_pn4_loop:
+blake3_servil_hybrid_pn4_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -18947,7 +18947,7 @@ blake3_hybrid_pn4_loop:
         add x3, x3, #64
         str x3, [sp, #1016]
         subs x1, x1, #1
-        b.ne blake3_hybrid_pn4_loop
+        b.ne blake3_servil_hybrid_pn4_loop
         ldr x2, [sp, #176]
         trn1 v8.4s, v0.4s, v1.4s
         trn2 v9.4s, v0.4s, v1.4s
@@ -18979,12 +18979,12 @@ blake3_hybrid_pn4_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_pn4_end:
-blake3_hybrid_pn4_end:
+_blake3_servil_hybrid_pn4_end:
+blake3_servil_hybrid_pn4_end:
 
         .p2align 6
-_blake3_hybrid_pn5:
-blake3_hybrid_pn5:
+_blake3_servil_hybrid_pn5:
+blake3_servil_hybrid_pn5:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -19076,7 +19076,7 @@ blake3_hybrid_pn5:
         ldp w12, w13, [x2, #24]
         add x4, x3, #0
         str x4, [sp, #200]
-blake3_hybrid_pn5_loop:
+blake3_servil_hybrid_pn5_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -19378,7 +19378,7 @@ blake3_hybrid_pn5_loop:
         add x3, x3, #64
         str x3, [sp, #1024]
         subs x1, x1, #1
-        b.ne blake3_hybrid_pn5_loop
+        b.ne blake3_servil_hybrid_pn5_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -19417,12 +19417,12 @@ blake3_hybrid_pn5_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_pn5_end:
-blake3_hybrid_pn5_end:
+_blake3_servil_hybrid_pn5_end:
+blake3_servil_hybrid_pn5_end:
 
         .p2align 6
-_blake3_hybrid_pn6:
-blake3_hybrid_pn6:
+_blake3_servil_hybrid_pn6:
+blake3_servil_hybrid_pn6:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -19525,7 +19525,7 @@ blake3_hybrid_pn6:
         str x1, [sp, #1072]
         ldr x1, [x0, #8]
         ldr x0, [x0, #0]
-blake3_hybrid_pn6_loop:
+blake3_servil_hybrid_pn6_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -19852,7 +19852,7 @@ blake3_hybrid_pn6_loop:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_pn6_loop
+        b.ne blake3_servil_hybrid_pn6_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -19898,12 +19898,12 @@ blake3_hybrid_pn6_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_pn6_end:
-blake3_hybrid_pn6_end:
+_blake3_servil_hybrid_pn6_end:
+blake3_servil_hybrid_pn6_end:
 
         .p2align 6
-_blake3_hybrid_pn10:
-blake3_hybrid_pn10:
+_blake3_servil_hybrid_pn10:
+blake3_servil_hybrid_pn10:
         sub sp, sp, #1088
         stp x19, x20, [sp, #0]
         stp x21, x22, [sp, #16]
@@ -20038,7 +20038,7 @@ blake3_hybrid_pn10:
         str x1, [sp, #1072]
         ldr x1, [x0, #8]
         ldr x0, [x0, #0]
-blake3_hybrid_pn10_loop:
+blake3_servil_hybrid_pn10_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         ldr x5, [sp, #1072]
@@ -20529,7 +20529,7 @@ blake3_hybrid_pn10_loop:
         ldr x3, [sp, #1072]
         subs x3, x3, #1
         str x3, [sp, #1072]
-        b.ne blake3_hybrid_pn10_loop
+        b.ne blake3_servil_hybrid_pn10_loop
         ldr x2, [sp, #176]
         stp w6, w7, [x2, #0]
         stp w8, w9, [x2, #8]
@@ -20599,12 +20599,12 @@ blake3_hybrid_pn10_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_pn10_end:
-blake3_hybrid_pn10_end:
+_blake3_servil_hybrid_pn10_end:
+blake3_servil_hybrid_pn10_end:
 
         .p2align 6
-_blake3_hybrid_x4:
-blake3_hybrid_x4:
+_blake3_servil_hybrid_x4:
+blake3_servil_hybrid_x4:
         sub sp, sp, #1088
         stp d8, d9, [sp, #96]
         stp d10, d11, [sp, #112]
@@ -20687,7 +20687,7 @@ blake3_hybrid_x4:
         dup v7.4s, v0.s[0]
         ldr s0, [x2]
         dup v0.4s, v0.s[0]
-blake3_hybrid_x4_loop:
+blake3_servil_hybrid_x4_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -20861,7 +20861,7 @@ blake3_hybrid_x4_loop:
         add x3, x3, #64
         str x3, [sp, #1016]
         subs x1, x1, #1
-        b.ne blake3_hybrid_x4_loop
+        b.ne blake3_servil_hybrid_x4_loop
         ldr x2, [sp, #176]
         ldr x3, [sp, #1080]
         add x4, x3, #0
@@ -20942,12 +20942,12 @@ blake3_hybrid_x4_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_x4_end:
-blake3_hybrid_x4_end:
+_blake3_servil_hybrid_x4_end:
+blake3_servil_hybrid_x4_end:
 
         .p2align 6
-_blake3_hybrid_x8:
-blake3_hybrid_x8:
+_blake3_servil_hybrid_x8:
+blake3_servil_hybrid_x8:
         sub sp, sp, #1088
         stp d8, d9, [sp, #96]
         stp d10, d11, [sp, #112]
@@ -21062,7 +21062,7 @@ blake3_hybrid_x8:
         dup v23.4s, v0.s[0]
         ldr s0, [x2]
         dup v0.4s, v0.s[0]
-blake3_hybrid_x8_loop:
+blake3_servil_hybrid_x8_loop:
         ldr w3, [sp, #160]
         ldr x4, [sp, #168]
         and w2, w3, #0xff
@@ -21400,7 +21400,7 @@ blake3_hybrid_x8_loop:
         add x3, x3, #64
         str x3, [sp, #1048]
         subs x1, x1, #1
-        b.ne blake3_hybrid_x8_loop
+        b.ne blake3_servil_hybrid_x8_loop
         ldr x2, [sp, #176]
         ldr x3, [sp, #1080]
         add x4, x3, #0
@@ -21557,5 +21557,5 @@ blake3_hybrid_x8_loop:
         ldp d14, d15, [sp, #144]
         add sp, sp, #1088
         ret
-_blake3_hybrid_x8_end:
-blake3_hybrid_x8_end:
+_blake3_servil_hybrid_x8_end:
+blake3_servil_hybrid_x8_end:

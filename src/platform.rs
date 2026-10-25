@@ -767,7 +767,7 @@ fn sme2_detect_uncached() -> bool {
 
     // Vector length check: the kernel reports it without doing any work
     // when asked for zero groups.
-    let lanes = unsafe { crate::sme2::ffi::blake3_sme2_hash16_chunks_512(core::ptr::null(), core::ptr::null(), 0, 0, core::ptr::null_mut(), 0) };
+    let lanes = unsafe { crate::sme2::ffi::blake3_servil_sme2_hash16_chunks_512(core::ptr::null(), core::ptr::null(), 0, 0, core::ptr::null_mut(), 0) };
     lanes == crate::sme2::GROUP as u64
 }
 
