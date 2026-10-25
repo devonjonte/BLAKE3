@@ -117,11 +117,8 @@ impl Park {
     /// the two sees the other.
     pub(crate) fn wake_for(&self, wanted: usize, workers: usize) -> usize {
         let parked = self.parked_count();
-        let awake = workers - parked;
-        if parked == 0 || awake >= wanted {
-            return 0;
-        }
-        let (now, later) = split((wanted - awake).min(parked), self.fanout);
+        // Nobody parked, or enough awake: nothing to wake.
+        let (now, later) = split(wanted.saturating_sub(workers - parked).min(parked), self.fanout);
         if later > 0 {
             self.owed.fetch_add(later, Ordering::SeqCst);
         }

@@ -203,38 +203,59 @@ fn two_wakers_wake_two_workers() {
     );
 }
 
-/// The wakes spread as a tree: five workers parked, five pieces published,
-/// a fan-out of two. Every worker is woken, and no waker (the publisher or
-/// a woken worker) makes more than two wakes.
+/// The wakes spread as a tree: five workers parked, then five pieces
+/// published, a fan-out of two. Every worker is woken, no waker (the
+/// publisher or a woken worker) makes more than two wakes, and the wakes
+/// they report add up to the five made.
 #[test]
 fn wakes_fan_out_no_waker_makes_more_than_its_share() {
     shuttle::check_pct(
         || {
             let park = Arc::new(Park::new(5, 2));
-            let published = Arc::new(AtomicUsize::new(0));
             let woken = Arc::new(AtomicUsize::new(0));
             let most = Arc::new(AtomicUsize::new(0));
+            let made = Arc::new(AtomicUsize::new(0));
             let mut threads = Vec::new();
             for me in 0..5 {
-                let (park, published, woken, most) = (park.clone(), published.clone(), woken.clone(), most.clone());
+                let (park, woken, most, made) = (park.clone(), woken.clone(), most.clone(), made.clone());
                 threads.push(thread::spawn(move || {
                     park.register(me);
-                    if park.park_unless(me, || published.load(Ordering::SeqCst) > 0) {
-                        most.fetch_max(park.pay_owed(), Ordering::SeqCst);
+                    // Woken, never by finding the work: the handshake that
+                    // passes a wake on is the other tests'; here every wake
+                    // is one a waker counts.
+                    if park.park_unless(me, || false) {
+                        let paid = park.pay_owed();
+                        most.fetch_max(paid, Ordering::SeqCst);
+                        made.fetch_add(paid, Ordering::SeqCst);
                     }
                     woken.fetch_add(1, Ordering::SeqCst);
                 }));
             }
-            let (p, pub2, most2) = (park.clone(), published.clone(), most.clone());
+            let (p, most2, made2) = (park.clone(), most.clone(), made.clone());
             threads.push(thread::spawn(move || {
-                pub2.store(5, Ordering::SeqCst);
-                most2.fetch_max(p.wake_for(5, 5), Ordering::SeqCst);
+                // All five bits set first, so the publisher counts every
+                // worker parked and wakes for all five.
+                while p.parked_count() < 5 {
+                    thread::yield_now();
+                }
+                let direct = p.wake_for(5, 5);
+                most2.fetch_max(direct, Ordering::SeqCst);
+                made2.fetch_add(direct, Ordering::SeqCst);
             }));
             for t in threads {
                 t.join().unwrap();
             }
             assert_eq!(woken.load(Ordering::SeqCst), 5, "every worker woken");
             assert!(most.load(Ordering::SeqCst) <= 2, "no waker makes more than its fan-out");
+            // Each wake counted once, by the waker that made it: the counts
+            // the share bound reads are the wakes made.
+            assert_eq!(
+                made.load(Ordering::SeqCst),
+                5,
+                "every wake accounted for (most {}, woken {})",
+                most.load(Ordering::SeqCst),
+                woken.load(Ordering::SeqCst)
+            );
         },
         3000,
         3,
