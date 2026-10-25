@@ -27,8 +27,8 @@ Its checks go further than most:
   at a time, and the tests are checked against each one.
 - Digests are checked against the official test vectors and an independent
   implementation, and each process checks its kernels before its first hash.
-- Memory use is checked with sanitizers, Miri, and guard pages that catch a kernel reading
-  one byte too far.
+- Memory use is checked with Miri, and with guard pages that catch a kernel reading one
+  byte too far.
 
 Details: [`QUALITY.md`](QUALITY.md).
 

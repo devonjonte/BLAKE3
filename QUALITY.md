@@ -70,12 +70,6 @@ or a processor that does not execute the code as expected.
 Some performance-critical Rust code is `unsafe`: there the programmer
 keeps Rust's memory rules, which the compiler checks everywhere else.
 
-- **AddressSanitizer** rebuilds the Rust and C code with extra memory
-  checks. It catches reads and writes outside allocated memory and use
-  of memory after it has been released.
-- **ThreadSanitizer** watches access from multiple threads. It catches
-  data races, where threads access the same memory without proper
-  coordination and at least one of them writes.
 - **Miri** runs Rust code in an interpreter that enforces Rust's
   memory rules. It is slow, but it can catch mistakes in `unsafe` code
   that a normal test run may not expose.

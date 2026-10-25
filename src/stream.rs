@@ -337,9 +337,13 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// stream's own bytes, in pieces of up to 64 KiB, its digest into
     /// `out`: `fill(at, room)` writes the message's bytes from `at` into
     /// all of `room` (a read from a file or socket straight into the
-    /// stream). Each `room` starts on a 64-byte boundary. The stream
-    /// reuses the bytes once `out` is handed back; a stream keeps 2 MiB of
-    /// them, and `submit_with` waits for room as `submit` does.
+    /// stream). Each `room` starts on a 64-byte boundary, and its bytes on
+    /// entry are unspecified: the rooms are the process's, reused across
+    /// streams, so a room may hold bytes an earlier message left (a program
+    /// that must keep one caller's secrets from another writes all of
+    /// `room` and reads none of it first). The stream reuses the bytes
+    /// once `out` is handed back; a stream keeps 2 MiB of them, and
+    /// `submit_with` waits for room as `submit` does.
     pub fn submit_with(&mut self, len: usize, mut fill: impl FnMut(usize, &mut [u8]), out: &'env mut Hash) {
         let out: *mut Hash = out;
         let pieces = len.div_ceil(PIECE).max(1);
