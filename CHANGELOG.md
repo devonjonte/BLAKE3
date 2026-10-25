@@ -48,6 +48,9 @@ and the tests are tested ([QUALITY.md](QUALITY.md)).
 
 ## Different
 
+- Every assembly kernel's symbol starts with `blake3_servil_`, so a program
+  can link this crate and official BLAKE3 together, each calling its own
+  kernels.
 - A startup self-test checks the build and the CPU. A wrong digest stops
   the process, uncatchably: with `std` it names the code path and aborts;
   without it, the CPU's trap instruction.

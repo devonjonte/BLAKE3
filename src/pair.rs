@@ -103,10 +103,12 @@ pub(crate) unsafe fn hash_many_blocks(
     let (n, input, key, out) = (inputs.len(), inputs.as_ptr(), key.as_ptr(), out.as_mut_ptr());
     match platform {
         #[cfg(blake3_avx2_ffi)]
-        Platform::AVX2 => unsafe { crate::avx2::ffi::blake3_hash_many_avx2(input, n, blocks, key, counter, increment, flags, flags_start, flags_end, out) },
+        Platform::AVX2 => unsafe {
+            crate::avx2::ffi::blake3_servil_hash_many_avx2(input, n, blocks, key, counter, increment, flags, flags_start, flags_end, out)
+        },
         #[cfg(blake3_avx512_ffi)]
         Platform::AVX512 => unsafe {
-            crate::avx512::ffi::blake3_hash_many_avx512(input, n, blocks, key, counter, increment, flags, flags_start, flags_end, out)
+            crate::avx512::ffi::blake3_servil_hash_many_avx512(input, n, blocks, key, counter, increment, flags, flags_start, flags_end, out)
         },
         _ => unreachable!("takes_platform admitted AVX2 or AVX-512"),
     }

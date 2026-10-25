@@ -70,37 +70,37 @@ mod asm {
         /// k1 entered with the input pointer itself in place of a table,
         /// and the address of the last block as a seventh argument: blocks
         /// 0..blocks-1 come from `input`, the last from `last`.
-        pub fn blake3_hybrid_c1(input: *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, last: *const u8);
-        pub fn blake3_hybrid_k1(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_k2(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_k3(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_k4(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_k5(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_k6(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_k7(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_k8(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_k9(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_k10(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_c1(input: *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, last: *const u8);
+        pub fn blake3_servil_hybrid_k1(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_k2(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_k3(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_k4(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_k5(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_k6(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_k7(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_k8(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_k9(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_k10(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
         /// q<n>: n whole chunks and a partial chunk, `n + 1` inputs. The
         /// partial chunk is the last input, read as `blocks` whole blocks
         /// (zero-padded), its final block recording `last_len` bytes;
         /// `partial` is `blocks | last_len << 8`.
-        pub fn blake3_hybrid_q1(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
-        pub fn blake3_hybrid_q2(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
-        pub fn blake3_hybrid_q3(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
-        pub fn blake3_hybrid_q4(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
-        pub fn blake3_hybrid_q7(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
-        pub fn blake3_hybrid_q5(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
-        pub fn blake3_hybrid_q6(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
-        pub fn blake3_hybrid_q8(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
-        pub fn blake3_hybrid_q9(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
-        pub fn blake3_hybrid_p2(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_p3(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_p5(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_p7(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_p9(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_p4(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
-        pub fn blake3_hybrid_p8(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_q1(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
+        pub fn blake3_servil_hybrid_q2(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
+        pub fn blake3_servil_hybrid_q3(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
+        pub fn blake3_servil_hybrid_q4(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
+        pub fn blake3_servil_hybrid_q7(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
+        pub fn blake3_servil_hybrid_q5(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
+        pub fn blake3_servil_hybrid_q6(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
+        pub fn blake3_servil_hybrid_q8(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
+        pub fn blake3_servil_hybrid_q9(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8, partial: u64);
+        pub fn blake3_servil_hybrid_p2(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_p3(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_p5(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_p7(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_p9(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_p4(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
+        pub fn blake3_servil_hybrid_p8(inputs: *const *const u8, blocks: u64, key: *const u32, counter: u64, packed_flags: u64, out: *mut u8);
     }
     /// The kernels on scalars and quads alone, which need no SHA-3.
     macro_rules! plain {
@@ -110,11 +110,11 @@ mod asm {
             }
         };
     }
-    plain!(blake3_hybrid_kn2, blake3_hybrid_kn4, blake3_hybrid_kn5, blake3_hybrid_kn6, blake3_hybrid_kn8);
-    plain!(blake3_hybrid_pn2, blake3_hybrid_pn4, blake3_hybrid_pn5, blake3_hybrid_pn6, blake3_hybrid_pn10);
+    plain!(blake3_servil_hybrid_kn2, blake3_servil_hybrid_kn4, blake3_servil_hybrid_kn5, blake3_servil_hybrid_kn6, blake3_servil_hybrid_kn8);
+    plain!(blake3_servil_hybrid_pn2, blake3_servil_hybrid_pn4, blake3_servil_hybrid_pn5, blake3_servil_hybrid_pn6, blake3_servil_hybrid_pn10);
     // Extended output, four and eight blocks: (table, 1, cv, counter,
     // packed, out), 64 bytes a block.
-    plain!(blake3_hybrid_x4, blake3_hybrid_x8);
+    plain!(blake3_servil_hybrid_x4, blake3_servil_hybrid_x8);
 }
 
 /// Fill `out`'s whole groups of four 64-byte blocks with extended output
@@ -127,7 +127,8 @@ pub fn xof_many(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, mut counte
     let packed = flags as u64 | (block_len as u64) << 24;
     let mut done = 0;
     while out.len() - done >= 4 * BLOCK_LEN {
-        let (kernel, blocks): (Kernel, usize) = if out.len() - done >= 8 * BLOCK_LEN { (asm::blake3_hybrid_x8, 8) } else { (asm::blake3_hybrid_x4, 4) };
+        let (kernel, blocks): (Kernel, usize) =
+            if out.len() - done >= 8 * BLOCK_LEN { (asm::blake3_servil_hybrid_x8, 8) } else { (asm::blake3_servil_hybrid_x4, 4) };
         crate::ran_kernel(kernel as *const ());
         // Sound: every table entry points at the 64-byte block; the kernel
         // writes 64 bytes a block within `out[done..]`.
@@ -148,16 +149,16 @@ const GROUP: usize = 16;
 /// Chunk kernel per exact input count.
 const CHUNK_KERNELS: [Option<Kernel>; 11] = [
     None,
-    Some(asm::blake3_hybrid_k1),
-    Some(asm::blake3_hybrid_k2),
-    Some(asm::blake3_hybrid_k3),
-    Some(asm::blake3_hybrid_k4),
-    Some(asm::blake3_hybrid_k5),
-    Some(asm::blake3_hybrid_k6),
-    Some(asm::blake3_hybrid_k7),
-    Some(asm::blake3_hybrid_k8),
-    Some(asm::blake3_hybrid_k9),
-    Some(asm::blake3_hybrid_k10),
+    Some(asm::blake3_servil_hybrid_k1),
+    Some(asm::blake3_servil_hybrid_k2),
+    Some(asm::blake3_servil_hybrid_k3),
+    Some(asm::blake3_servil_hybrid_k4),
+    Some(asm::blake3_servil_hybrid_k5),
+    Some(asm::blake3_servil_hybrid_k6),
+    Some(asm::blake3_servil_hybrid_k7),
+    Some(asm::blake3_servil_hybrid_k8),
+    Some(asm::blake3_servil_hybrid_k9),
+    Some(asm::blake3_servil_hybrid_k10),
 ];
 
 /// Kernel sizes per chunk count 1..=16, largest first. Each count's plan is
@@ -173,15 +174,15 @@ const CHUNK_PLANS: [&[usize]; 17] =
 /// Parent kernel per exact input count.
 const PARENT_KERNELS: [Option<Kernel>; 10] = [
     None,
-    Some(asm::blake3_hybrid_k1),
-    Some(asm::blake3_hybrid_p2),
-    Some(asm::blake3_hybrid_p3),
-    Some(asm::blake3_hybrid_p4),
-    Some(asm::blake3_hybrid_p5),
+    Some(asm::blake3_servil_hybrid_k1),
+    Some(asm::blake3_servil_hybrid_p2),
+    Some(asm::blake3_servil_hybrid_p3),
+    Some(asm::blake3_servil_hybrid_p4),
+    Some(asm::blake3_servil_hybrid_p5),
     None,
-    Some(asm::blake3_hybrid_p7),
-    Some(asm::blake3_hybrid_p8),
-    Some(asm::blake3_hybrid_p9),
+    Some(asm::blake3_servil_hybrid_p7),
+    Some(asm::blake3_servil_hybrid_p8),
+    Some(asm::blake3_servil_hybrid_p9),
 ];
 
 /// Kernel sizes per parent count 1..=16. p3, p5, p7, and p9 hash one
@@ -205,30 +206,30 @@ const PARENT_PLANS: [&[usize]; 17] =
 /// alone (k1, k9, k10, p8, and p9 among them).
 const PLAIN_CHUNK_KERNELS: [Option<Kernel>; 11] = [
     None,
-    Some(asm::blake3_hybrid_k1),
-    Some(asm::blake3_hybrid_kn2),
+    Some(asm::blake3_servil_hybrid_k1),
+    Some(asm::blake3_servil_hybrid_kn2),
     None,
-    Some(asm::blake3_hybrid_kn4),
-    Some(asm::blake3_hybrid_kn5),
-    Some(asm::blake3_hybrid_kn6),
+    Some(asm::blake3_servil_hybrid_kn4),
+    Some(asm::blake3_servil_hybrid_kn5),
+    Some(asm::blake3_servil_hybrid_kn6),
     None,
-    Some(asm::blake3_hybrid_kn8),
-    Some(asm::blake3_hybrid_k9),
-    Some(asm::blake3_hybrid_k10),
+    Some(asm::blake3_servil_hybrid_kn8),
+    Some(asm::blake3_servil_hybrid_k9),
+    Some(asm::blake3_servil_hybrid_k10),
 ];
 
 const PLAIN_PARENT_KERNELS: [Option<Kernel>; 11] = [
     None,
-    Some(asm::blake3_hybrid_k1),
-    Some(asm::blake3_hybrid_pn2),
+    Some(asm::blake3_servil_hybrid_k1),
+    Some(asm::blake3_servil_hybrid_pn2),
     None,
-    Some(asm::blake3_hybrid_pn4),
-    Some(asm::blake3_hybrid_pn5),
-    Some(asm::blake3_hybrid_pn6),
+    Some(asm::blake3_servil_hybrid_pn4),
+    Some(asm::blake3_servil_hybrid_pn5),
+    Some(asm::blake3_servil_hybrid_pn6),
     None,
-    Some(asm::blake3_hybrid_p8),
-    Some(asm::blake3_hybrid_p9),
-    Some(asm::blake3_hybrid_pn10),
+    Some(asm::blake3_servil_hybrid_p8),
+    Some(asm::blake3_servil_hybrid_p9),
+    Some(asm::blake3_servil_hybrid_pn10),
 ];
 
 /// Kernel sizes per count 1..=16 without SHA-3, chunks and parents alike:
@@ -258,32 +259,32 @@ fn family() -> &'static Family {
 /// Where each kernel's code ends (labels the generator puts after each).
 mod ends {
     unsafe extern "C" {
-        pub static blake3_hybrid_p2_end: u8;
-        pub static blake3_hybrid_p3_end: u8;
-        pub static blake3_hybrid_p4_end: u8;
-        pub static blake3_hybrid_p5_end: u8;
-        pub static blake3_hybrid_p7_end: u8;
-        pub static blake3_hybrid_p8_end: u8;
-        pub static blake3_hybrid_p9_end: u8;
-        pub static blake3_hybrid_k1_end: u8;
-        pub static blake3_hybrid_k2_end: u8;
-        pub static blake3_hybrid_k3_end: u8;
-        pub static blake3_hybrid_k4_end: u8;
-        pub static blake3_hybrid_k5_end: u8;
-        pub static blake3_hybrid_k6_end: u8;
-        pub static blake3_hybrid_k7_end: u8;
-        pub static blake3_hybrid_k8_end: u8;
-        pub static blake3_hybrid_k9_end: u8;
-        pub static blake3_hybrid_k10_end: u8;
-        pub static blake3_hybrid_q1_end: u8;
-        pub static blake3_hybrid_q2_end: u8;
-        pub static blake3_hybrid_q3_end: u8;
-        pub static blake3_hybrid_q4_end: u8;
-        pub static blake3_hybrid_q5_end: u8;
-        pub static blake3_hybrid_q6_end: u8;
-        pub static blake3_hybrid_q7_end: u8;
-        pub static blake3_hybrid_q8_end: u8;
-        pub static blake3_hybrid_q9_end: u8;
+        pub static blake3_servil_hybrid_p2_end: u8;
+        pub static blake3_servil_hybrid_p3_end: u8;
+        pub static blake3_servil_hybrid_p4_end: u8;
+        pub static blake3_servil_hybrid_p5_end: u8;
+        pub static blake3_servil_hybrid_p7_end: u8;
+        pub static blake3_servil_hybrid_p8_end: u8;
+        pub static blake3_servil_hybrid_p9_end: u8;
+        pub static blake3_servil_hybrid_k1_end: u8;
+        pub static blake3_servil_hybrid_k2_end: u8;
+        pub static blake3_servil_hybrid_k3_end: u8;
+        pub static blake3_servil_hybrid_k4_end: u8;
+        pub static blake3_servil_hybrid_k5_end: u8;
+        pub static blake3_servil_hybrid_k6_end: u8;
+        pub static blake3_servil_hybrid_k7_end: u8;
+        pub static blake3_servil_hybrid_k8_end: u8;
+        pub static blake3_servil_hybrid_k9_end: u8;
+        pub static blake3_servil_hybrid_k10_end: u8;
+        pub static blake3_servil_hybrid_q1_end: u8;
+        pub static blake3_servil_hybrid_q2_end: u8;
+        pub static blake3_servil_hybrid_q3_end: u8;
+        pub static blake3_servil_hybrid_q4_end: u8;
+        pub static blake3_servil_hybrid_q5_end: u8;
+        pub static blake3_servil_hybrid_q6_end: u8;
+        pub static blake3_servil_hybrid_q7_end: u8;
+        pub static blake3_servil_hybrid_q8_end: u8;
+        pub static blake3_servil_hybrid_q9_end: u8;
     }
 }
 
@@ -298,25 +299,25 @@ fn chunk_code(n: usize, partial: bool) -> (usize, usize) {
         };
     }
     match (n, partial) {
-        (1, false) => code!(blake3_hybrid_k1, blake3_hybrid_k1_end),
-        (2, false) => code!(blake3_hybrid_k2, blake3_hybrid_k2_end),
-        (3, false) => code!(blake3_hybrid_k3, blake3_hybrid_k3_end),
-        (4, false) => code!(blake3_hybrid_k4, blake3_hybrid_k4_end),
-        (5, false) => code!(blake3_hybrid_k5, blake3_hybrid_k5_end),
-        (6, false) => code!(blake3_hybrid_k6, blake3_hybrid_k6_end),
-        (7, false) => code!(blake3_hybrid_k7, blake3_hybrid_k7_end),
-        (8, false) => code!(blake3_hybrid_k8, blake3_hybrid_k8_end),
-        (9, false) => code!(blake3_hybrid_k9, blake3_hybrid_k9_end),
-        (10, false) => code!(blake3_hybrid_k10, blake3_hybrid_k10_end),
-        (1, true) => code!(blake3_hybrid_q1, blake3_hybrid_q1_end),
-        (2, true) => code!(blake3_hybrid_q2, blake3_hybrid_q2_end),
-        (3, true) => code!(blake3_hybrid_q3, blake3_hybrid_q3_end),
-        (4, true) => code!(blake3_hybrid_q4, blake3_hybrid_q4_end),
-        (5, true) => code!(blake3_hybrid_q5, blake3_hybrid_q5_end),
-        (6, true) => code!(blake3_hybrid_q6, blake3_hybrid_q6_end),
-        (7, true) => code!(blake3_hybrid_q7, blake3_hybrid_q7_end),
-        (8, true) => code!(blake3_hybrid_q8, blake3_hybrid_q8_end),
-        (9, true) => code!(blake3_hybrid_q9, blake3_hybrid_q9_end),
+        (1, false) => code!(blake3_servil_hybrid_k1, blake3_servil_hybrid_k1_end),
+        (2, false) => code!(blake3_servil_hybrid_k2, blake3_servil_hybrid_k2_end),
+        (3, false) => code!(blake3_servil_hybrid_k3, blake3_servil_hybrid_k3_end),
+        (4, false) => code!(blake3_servil_hybrid_k4, blake3_servil_hybrid_k4_end),
+        (5, false) => code!(blake3_servil_hybrid_k5, blake3_servil_hybrid_k5_end),
+        (6, false) => code!(blake3_servil_hybrid_k6, blake3_servil_hybrid_k6_end),
+        (7, false) => code!(blake3_servil_hybrid_k7, blake3_servil_hybrid_k7_end),
+        (8, false) => code!(blake3_servil_hybrid_k8, blake3_servil_hybrid_k8_end),
+        (9, false) => code!(blake3_servil_hybrid_k9, blake3_servil_hybrid_k9_end),
+        (10, false) => code!(blake3_servil_hybrid_k10, blake3_servil_hybrid_k10_end),
+        (1, true) => code!(blake3_servil_hybrid_q1, blake3_servil_hybrid_q1_end),
+        (2, true) => code!(blake3_servil_hybrid_q2, blake3_servil_hybrid_q2_end),
+        (3, true) => code!(blake3_servil_hybrid_q3, blake3_servil_hybrid_q3_end),
+        (4, true) => code!(blake3_servil_hybrid_q4, blake3_servil_hybrid_q4_end),
+        (5, true) => code!(blake3_servil_hybrid_q5, blake3_servil_hybrid_q5_end),
+        (6, true) => code!(blake3_servil_hybrid_q6, blake3_servil_hybrid_q6_end),
+        (7, true) => code!(blake3_servil_hybrid_q7, blake3_servil_hybrid_q7_end),
+        (8, true) => code!(blake3_servil_hybrid_q8, blake3_servil_hybrid_q8_end),
+        (9, true) => code!(blake3_servil_hybrid_q9, blake3_servil_hybrid_q9_end),
         _ => unreachable!("no kernel for {n} whole chunks (partial: {partial})"),
     }
 }
@@ -330,14 +331,14 @@ fn parent_code(n: usize) -> (usize, usize) {
         };
     }
     match n {
-        1 => code!(blake3_hybrid_k1, blake3_hybrid_k1_end),
-        2 => code!(blake3_hybrid_p2, blake3_hybrid_p2_end),
-        3 => code!(blake3_hybrid_p3, blake3_hybrid_p3_end),
-        4 => code!(blake3_hybrid_p4, blake3_hybrid_p4_end),
-        5 => code!(blake3_hybrid_p5, blake3_hybrid_p5_end),
-        7 => code!(blake3_hybrid_p7, blake3_hybrid_p7_end),
-        8 => code!(blake3_hybrid_p8, blake3_hybrid_p8_end),
-        9 => code!(blake3_hybrid_p9, blake3_hybrid_p9_end),
+        1 => code!(blake3_servil_hybrid_k1, blake3_servil_hybrid_k1_end),
+        2 => code!(blake3_servil_hybrid_p2, blake3_servil_hybrid_p2_end),
+        3 => code!(blake3_servil_hybrid_p3, blake3_servil_hybrid_p3_end),
+        4 => code!(blake3_servil_hybrid_p4, blake3_servil_hybrid_p4_end),
+        5 => code!(blake3_servil_hybrid_p5, blake3_servil_hybrid_p5_end),
+        7 => code!(blake3_servil_hybrid_p7, blake3_servil_hybrid_p7_end),
+        8 => code!(blake3_servil_hybrid_p8, blake3_servil_hybrid_p8_end),
+        9 => code!(blake3_servil_hybrid_p9, blake3_servil_hybrid_p9_end),
         _ => unreachable!("no parent kernel for {n} parents"),
     }
 }
@@ -425,8 +426,8 @@ pub unsafe fn compress_blocks(cv: &mut CVWords, blocks: *const u8, count: usize,
     let cv_ptr = cv.as_mut_ptr();
     unsafe {
         let last = blocks.add((count - 1) * BLOCK_LEN);
-        crate::ran_kernel(asm::blake3_hybrid_c1 as *const ());
-        asm::blake3_hybrid_c1(blocks, count as u64, cv_ptr, counter, packed, cv_ptr as *mut u8, last);
+        crate::ran_kernel(asm::blake3_servil_hybrid_c1 as *const ());
+        asm::blake3_servil_hybrid_c1(blocks, count as u64, cv_ptr, counter, packed, cv_ptr as *mut u8, last);
     }
 }
 
@@ -451,8 +452,8 @@ pub fn compress_in_place(cv: &mut CVWords, block: &[u8; BLOCK_LEN], block_len: u
     // Safe: the block is 64 readable bytes and the count is 1.
     unsafe {
         let block = block.as_ptr();
-        crate::ran_kernel(asm::blake3_hybrid_c1 as *const ());
-        asm::blake3_hybrid_c1(block, 1, cv_ptr, counter, packed, cv_ptr as *mut u8, block);
+        crate::ran_kernel(asm::blake3_servil_hybrid_c1 as *const ());
+        asm::blake3_servil_hybrid_c1(block, 1, cv_ptr, counter, packed, cv_ptr as *mut u8, block);
     }
 }
 
@@ -484,8 +485,8 @@ pub unsafe fn hash_chunk(
     debug_assert!(last_len as usize <= BLOCK_LEN);
     let packed = flags as u64 | (flags_start as u64) << 8 | (flags_end as u64) << 16 | (last_len as u64) << 24;
     unsafe {
-        crate::ran_kernel(asm::blake3_hybrid_c1 as *const ());
-        asm::blake3_hybrid_c1(input, blocks as u64, key.as_ptr(), counter, packed, out.as_mut_ptr(), last.as_ptr());
+        crate::ran_kernel(asm::blake3_servil_hybrid_c1 as *const ());
+        asm::blake3_servil_hybrid_c1(input, blocks as u64, key.as_ptr(), counter, packed, out.as_mut_ptr(), last.as_ptr());
     }
 }
 
@@ -515,22 +516,22 @@ pub(crate) fn entries() -> std::vec::Vec<(std::string::String, *const ())> {
             out.push((std::format!("q{n}"), partial_kernel(n) as *const ()));
         }
     }
-    out.push(("c1".into(), asm::blake3_hybrid_c1 as *const ()));
+    out.push(("c1".into(), asm::blake3_servil_hybrid_c1 as *const ()));
     out
 }
 
 /// The q kernel for `n` whole chunks plus a partial chunk, `n` in 1..=9.
 fn partial_kernel(n: usize) -> PartialKernel {
     match n {
-        1 => asm::blake3_hybrid_q1,
-        2 => asm::blake3_hybrid_q2,
-        3 => asm::blake3_hybrid_q3,
-        4 => asm::blake3_hybrid_q4,
-        5 => asm::blake3_hybrid_q5,
-        6 => asm::blake3_hybrid_q6,
-        7 => asm::blake3_hybrid_q7,
-        8 => asm::blake3_hybrid_q8,
-        9 => asm::blake3_hybrid_q9,
+        1 => asm::blake3_servil_hybrid_q1,
+        2 => asm::blake3_servil_hybrid_q2,
+        3 => asm::blake3_servil_hybrid_q3,
+        4 => asm::blake3_servil_hybrid_q4,
+        5 => asm::blake3_servil_hybrid_q5,
+        6 => asm::blake3_servil_hybrid_q6,
+        7 => asm::blake3_servil_hybrid_q7,
+        8 => asm::blake3_servil_hybrid_q8,
+        9 => asm::blake3_servil_hybrid_q9,
         _ => panic!("no q kernel for {n} whole chunks"),
     }
 }

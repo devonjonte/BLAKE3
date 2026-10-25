@@ -21,7 +21,7 @@
  *
  * Chunk kernel:
  *
- * uint64_t blake3_sme2_hash16_chunks_512(
+ * uint64_t blake3_servil_sme2_hash16_chunks_512(
  *     const uint8_t *const *inputs,
  *     const uint32_t key[8],
  *     uint64_t counter,
@@ -46,7 +46,7 @@
  * Chunk kernel with a counter for each group (separate messages' groups
  * of sixteen chunks, as Hasher::update_each holds them):
  *
- * uint64_t blake3_sme2_hash16_chunks_at_512(
+ * uint64_t blake3_servil_sme2_hash16_chunks_at_512(
  *     const uint8_t *const *inputs,
  *     const uint32_t key[8],
  *     const uint64_t *counters,
@@ -99,19 +99,19 @@
 
 .arch armv9-a+sme2
 
-.global _blake3_sme2_hash16_chunks_512
-.global blake3_sme2_hash16_chunks_512
-.global _blake3_sme2_hash16_chunks_at_512
-.global blake3_sme2_hash16_chunks_at_512
-.global _blake3_sme2_hash16_messages_512
-.global blake3_sme2_hash16_messages_512
-.global _blake3_sme2_hash16_parents_512
-.global blake3_sme2_hash16_parents_512
-.global _blake3_sme2_xof16_512
-.global blake3_sme2_xof16_512
+.global _blake3_servil_sme2_hash16_chunks_512
+.global blake3_servil_sme2_hash16_chunks_512
+.global _blake3_servil_sme2_hash16_chunks_at_512
+.global blake3_servil_sme2_hash16_chunks_at_512
+.global _blake3_servil_sme2_hash16_messages_512
+.global blake3_servil_sme2_hash16_messages_512
+.global _blake3_servil_sme2_hash16_parents_512
+.global blake3_servil_sme2_hash16_parents_512
+.global _blake3_servil_sme2_xof16_512
+.global blake3_servil_sme2_xof16_512
 // Where this file's code ends, for a caller that prefetches it.
-.global _blake3_sme2_text_end
-.global blake3_sme2_text_end
+.global _blake3_servil_sme2_text_end
+.global blake3_servil_sme2_text_end
 
 #ifdef __APPLE__
 .text
@@ -457,22 +457,22 @@
 /*
  * Two entry points share one body. The chunk kernel: sixteen blocks per
  * input, counters counter+lane per group, advanced by sixteen. The message
- * kernel (blake3_sme2_hash16_messages_512, a seventh argument `blocks`, 2
+ * kernel (blake3_servil_sme2_hash16_messages_512, a seventh argument `blocks`, 2
  * to 16): `blocks` blocks per input, every lane's counter `counter`, for
  * many separate messages of whole blocks. x6 holds the last block's index
  * and x17 the counter step per lane.
  */
 .p2align 4
-_blake3_sme2_hash16_chunks_512:
-blake3_sme2_hash16_chunks_512:
+_blake3_servil_sme2_hash16_chunks_512:
+blake3_servil_sme2_hash16_chunks_512:
     mov     x6, #15
     mov     x17, #1
     mov     w3, w3
     b       .Lchunks_body
 
 .p2align 4
-_blake3_sme2_hash16_chunks_at_512:
-blake3_sme2_hash16_chunks_at_512:
+_blake3_servil_sme2_hash16_chunks_at_512:
+blake3_servil_sme2_hash16_chunks_at_512:
     mov     x6, #15
     mov     x17, #1
     mov     w3, w3
@@ -480,8 +480,8 @@ blake3_sme2_hash16_chunks_at_512:
     b       .Lchunks_body
 
 .p2align 4
-_blake3_sme2_hash16_messages_512:
-blake3_sme2_hash16_messages_512:
+_blake3_servil_sme2_hash16_messages_512:
+blake3_servil_sme2_hash16_messages_512:
     sub     x6, x6, #1
     mov     x17, #0
 
@@ -752,7 +752,7 @@ blake3_sme2_hash16_messages_512:
 /*
  * Parent-node kernel: sixteen parent compressions per group.
  *
- * uint64_t blake3_sme2_hash16_parents_512(
+ * uint64_t blake3_servil_sme2_hash16_parents_512(
  *     const uint8_t *pairs,
  *     const uint32_t key[8],
  *     uint64_t counter,
@@ -776,8 +776,8 @@ blake3_sme2_hash16_messages_512:
  * current group's rounds.
  */
 .p2align 4
-_blake3_sme2_hash16_parents_512:
-blake3_sme2_hash16_parents_512:
+_blake3_servil_sme2_hash16_parents_512:
+blake3_servil_sme2_hash16_parents_512:
     sub     sp, sp, #64
     stp     d8,  d9,  [sp, #0]
     stp     d10, d11, [sp, #16]
@@ -917,7 +917,7 @@ blake3_sme2_hash16_parents_512:
 /*
  * Extended-output kernel: sixteen output blocks per group.
  *
- * uint64_t blake3_sme2_xof16_512(
+ * uint64_t blake3_servil_sme2_xof16_512(
  *     const uint32_t cv[8],
  *     const uint8_t block[64],
  *     uint64_t counter,
@@ -944,8 +944,8 @@ blake3_sme2_hash16_parents_512:
 .endm
 
 .p2align 4
-_blake3_sme2_xof16_512:
-blake3_sme2_xof16_512:
+_blake3_servil_sme2_xof16_512:
+blake3_servil_sme2_xof16_512:
     sub     sp, sp, #64
     stp     d8,  d9,  [sp, #0]
     stp     d10, d11, [sp, #16]
@@ -1126,5 +1126,5 @@ blake3_sme2_xof16_512:
     ldp     d14, d15, [sp, #48]
     add     sp, sp, #64
     ret
-_blake3_sme2_text_end:
-blake3_sme2_text_end:
+_blake3_servil_sme2_text_end:
+blake3_servil_sme2_text_end:

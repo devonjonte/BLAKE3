@@ -421,7 +421,7 @@ compute the standard's BLAKE3. The commits that introduced and fixed
 each bug are in `git log`.
 
 1. **The SME2 message kernel mishandled one-block messages**
-   (`blake3_sme2_hash16_messages_512` in `c/blake3_sme2_aarch64.S`).
+   (`blake3_servil_sme2_hash16_messages_512` in `c/blake3_sme2_aarch64.S`).
    A one-block message was compressed twice, the second time without
    the chunk-start flag. A one-block message now starts and ends on
    its last block.

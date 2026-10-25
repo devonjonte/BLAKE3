@@ -143,26 +143,26 @@ def jobs():
     out = []
     obj = prove_hybrid.assemble()
     real = aarch64.disassemble
-    base = real(obj, *[aarch64.symbols(obj)[n] for n in ("blake3_hybrid_c1", "blake3_hybrid_k1_end")])
+    base = real(obj, *[aarch64.symbols(obj)[n] for n in ("blake3_servil_hybrid_c1", "blake3_servil_hybrid_k1_end")])
     for what, code in mutants(base):
         out.append((f"c1 mutant, {what}", code, lambda: prove_hybrid.prove_c1(obj, 3, False)))
     syms = aarch64.symbols(obj)
-    for name, prove in (("k2", lambda: prove_hybrid.prove_table(obj, "blake3_hybrid_k2", 2, 2, True)),
-                        ("k7", lambda: prove_hybrid.prove_table(obj, "blake3_hybrid_k7", 7, 2, True)),
+    for name, prove in (("k2", lambda: prove_hybrid.prove_table(obj, "blake3_servil_hybrid_k2", 2, 2, True)),
+                        ("k7", lambda: prove_hybrid.prove_table(obj, "blake3_servil_hybrid_k7", 7, 2, True)),
                         ("q3", lambda: prove_hybrid.prove_partial(obj, 3, 3))):
-        base = real(obj, syms[f"blake3_hybrid_{name}"], syms[f"blake3_hybrid_{name}_end"])
+        base = real(obj, syms[f"blake3_servil_hybrid_{name}"], syms[f"blake3_servil_hybrid_{name}_end"])
         for what, code in vector_mutants(base):
             out.append((f"{name} mutant, {what}", code, prove))
     import prove_sme2
     sobj = prove_sme2.assemble()
     ssyms = aarch64.symbols(sobj)
-    sbase = real(sobj, ssyms["blake3_sme2_hash16_chunks_512"], ssyms["blake3_sme2_text_end"], llvm=True)
+    sbase = real(sobj, ssyms["blake3_servil_sme2_hash16_chunks_512"], ssyms["blake3_servil_sme2_text_end"], llvm=True)
     for what, code in sme_mutants(sbase):
         out.append((f"SME2 chunks mutant, {what}", code, lambda: both_stored(sobj)))
     # The induction over the SME2 extended-output kernel's group loop
     # (prove_sme2.prove_xof_every): its counter and pointer steps, which only
     # the step from one group to the next sees.
-    xof = (ssyms["blake3_sme2_xof16_512"], min(v for v in ssyms.values() if v > ssyms["blake3_sme2_xof16_512"]))
+    xof = (ssyms["blake3_servil_sme2_xof16_512"], min(v for v in ssyms.values() if v > ssyms["blake3_servil_sme2_xof16_512"]))
     for what, reg, imm, new in (("the group loop's counter step", "x2", "#0x10", "#0x11"),
                                 ("the group loop's pointer step", "x4", "#0x400", "#0x3c0")):
         a = next(a for a, (m, o) in sorted(sbase.items())
@@ -171,7 +171,7 @@ def jobs():
         code[a] = ("add", [reg, reg, new])
         out.append((f"induction mutant, {what} at {a:#x}", code, lambda: prove_sme2.prove_xof_every(sobj)))
     # Independent input bytes make a wrong parent-group stride observable.
-    parents = ssyms["blake3_sme2_hash16_parents_512"]
+    parents = ssyms["blake3_servil_sme2_hash16_parents_512"]
     parents_end = min(v for v in ssyms.values() if v > parents)
     for what, reg, before, after in (("input stride", "x9", 1024, 512), ("output stride", "x4", 512, 256)):
         found = [a for a, (m, o) in sbase.items() if parents <= a < parents_end
@@ -185,7 +185,7 @@ def jobs():
     # offset off by 8, which only the step from one pass to the next sees,
     # and a rotation after the loop, which only the composed proof sees.
     import prove_block_loop
-    msgs = ssyms["blake3_sme2_hash16_messages_512"]
+    msgs = ssyms["blake3_servil_sme2_hash16_messages_512"]
     msgs_end = min(v for v in ssyms.values() if v > msgs)
     step_at = next(a for a, (m, o) in sorted(sbase.items()) if msgs <= a < msgs_end and m == "add" and o == ["x9", "x9", "#0x40"])
     after = [a for a, (m, o) in sorted(sbase.items()) if prove_block_loop.EXIT <= a < msgs_end and m == "xar"]
@@ -203,7 +203,7 @@ def jobs():
     import prove_hybrid_loop as hl
     hobj = prove_sme2.assemble_hybrid()
     hsyms = aarch64.symbols(hobj)
-    hbase = real(hobj, hsyms["blake3_sme2x2_hash_chunks_512"], prove_sme2.text_end(hobj), llvm=True)
+    hbase = real(hobj, hsyms["blake3_servil_sme2x2_hash_chunks_512"], prove_sme2.text_end(hobj), llvm=True)
     def halves():
         gen_a, s1, _ = hl.half_a(hobj)
         return gen_a, hl.half_b(hobj, gen_a, s1)[0]
@@ -273,16 +273,16 @@ def x86_memory_mutant_jobs():
     import prove_x86 as p
     edits = [
         ("caller-stack write", "sse41", "compress",
-         "_blake3_compress_in_place_sse41:\n",
-         "_blake3_compress_in_place_sse41:\n        mov     qword ptr [rsp+120], 0\n",
+         "_blake3_servil_compress_in_place_sse41:\n",
+         "_blake3_servil_compress_in_place_sse41:\n        mov     qword ptr [rsp+120], 0\n",
          "outside"),
         ("aligned load of an unaligned buffer", "sse41", "compress",
-         "_blake3_compress_in_place_sse41:\n        _CET_ENDBR\n        movups  xmm0, xmmword ptr [rdi]\n",
-         "_blake3_compress_in_place_sse41:\n        _CET_ENDBR\n        movaps  xmm0, xmmword ptr [rdi]\n",
+         "_blake3_servil_compress_in_place_sse41:\n        _CET_ENDBR\n        movups  xmm0, xmmword ptr [rdi]\n",
+         "_blake3_servil_compress_in_place_sse41:\n        _CET_ENDBR\n        movaps  xmm0, xmmword ptr [rdi]\n",
          "alignment"),
         ("secret-derived prefetch address", "sse41", "compress",
-         "_blake3_compress_in_place_sse41:\n",
-         "_blake3_compress_in_place_sse41:\n        mov     eax, dword ptr [rdi]\n        prefetcht0 [rax]\n",
+         "_blake3_servil_compress_in_place_sse41:\n",
+         "_blake3_servil_compress_in_place_sse41:\n        mov     eax, dword ptr [rdi]\n        prefetcht0 [rax]\n",
          "no pointer"),
         ("masked store", "avx2", "hash_many",
          "        vmovups ymmword ptr [rbx], ymm12\n",

@@ -21,7 +21,7 @@ from aarch64 import Ptr, Region, Unproved
 from prove_hybrid import byte_symbols
 import lean_spec as spec
 
-HEAD = 0x208   # the block loop's head (blake3_sme2x2_hash_chunks_512_block)
+HEAD = 0x208   # the block loop's head (blake3_servil_sme2x2_hash_chunks_512_block)
 EXIT = 0x2930  # after its last pass in the loop (pass 14): pass 15 follows
 INT = (1, 2, 3, 4, 5, 6, 11, 16)   # the integer chunk's state, words 0-7 (w1-w6, w11, w16)
 

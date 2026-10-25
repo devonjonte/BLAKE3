@@ -10,8 +10,8 @@
 .arch armv9-a+sme2
 
 
-.global _blake3_sme2x2_hash_chunks_512
-.global blake3_sme2x2_hash_chunks_512
+.global _blake3_servil_sme2x2_hash_chunks_512
+.global blake3_servil_sme2x2_hash_chunks_512
 
 #ifdef __APPLE__
 .text
@@ -20,8 +20,8 @@
 #endif
 
 .p2align 4
-_blake3_sme2x2_hash_chunks_512:
-blake3_sme2x2_hash_chunks_512:
+_blake3_servil_sme2x2_hash_chunks_512:
+blake3_servil_sme2x2_hash_chunks_512:
     sub sp, sp, #224
     stp d8, d9, [sp, #0]
     stp d10, d11, [sp, #16]
@@ -50,10 +50,10 @@ blake3_sme2x2_hash_chunks_512:
     smstart za
     cntw x8
     cmp x8, #16
-    b.eq blake3_sme2x2_hash_chunks_512_vl_ok
+    b.eq blake3_servil_sme2x2_hash_chunks_512_vl_ok
     mov x0, x8
-    b blake3_sme2x2_hash_chunks_512_return
-blake3_sme2x2_hash_chunks_512_vl_ok:
+    b blake3_servil_sme2x2_hash_chunks_512_return
+blake3_servil_sme2x2_hash_chunks_512_vl_ok:
     ptrue p0.s
     mov x8, #8
     whilelo p2.s, xzr, x8
@@ -75,8 +75,8 @@ blake3_sme2x2_hash_chunks_512_vl_ok:
     dup z19.s, w8
     mov za2h.s[w12, 0:3], { z16.s - z19.s }
     ldr x8, [sp, #192]
-    cbz x8, blake3_sme2x2_hash_chunks_512_success
-blake3_sme2x2_hash_chunks_512_group:
+    cbz x8, blake3_servil_sme2x2_hash_chunks_512_success
+blake3_servil_sme2x2_hash_chunks_512_group:
     ldr x1, [sp, #160]
     ldr w8, [x1, #0]
     dup z0.s, w8
@@ -154,9 +154,9 @@ blake3_sme2x2_hash_chunks_512_group:
     ld1w    { za0h.s[w15, 3] }, p0/z, [x8]
     mov x7, #0
     mov x9, #64
-blake3_sme2x2_hash_chunks_512_block:
+blake3_servil_sme2x2_hash_chunks_512_block:
     tst x7, #7
-    b.ne blake3_sme2x2_hash_chunks_512_p_nostart
+    b.ne blake3_servil_sme2x2_hash_chunks_512_p_nostart
     lsr x30, x7, #3
     add x30, x30, #16
     ldr x27, [x0, x30, lsl #3]
@@ -167,7 +167,7 @@ blake3_sme2x2_hash_chunks_512_block:
     ldp w3, w4, [x8, #8]
     ldp w5, w6, [x8, #16]
     ldp w11, w16, [x8, #24]
-blake3_sme2x2_hash_chunks_512_p_nostart:
+blake3_servil_sme2x2_hash_chunks_512_p_nostart:
     ldr w10, [sp, #200]
     ldr w8, [sp, #204]
     cmp x7, #0
@@ -2649,7 +2649,7 @@ blake3_sme2x2_hash_chunks_512_p_nostart:
     add x27, x27, #64
     add x8, x7, #1
     tst x8, #7
-    b.ne blake3_sme2x2_hash_chunks_512_p_noend
+    b.ne blake3_servil_sme2x2_hash_chunks_512_p_noend
     lsr x30, x7, #3
     add x30, x30, #16
     ldr x8, [sp, #184]
@@ -2658,13 +2658,13 @@ blake3_sme2x2_hash_chunks_512_p_nostart:
     stp w3, w4, [x8, #8]
     stp w5, w6, [x8, #16]
     stp w11, w16, [x8, #24]
-blake3_sme2x2_hash_chunks_512_p_noend:
+blake3_servil_sme2x2_hash_chunks_512_p_noend:
     add x7, x7, #1
     add x9, x9, #64
     cmp x7, #15
-    b.lo blake3_sme2x2_hash_chunks_512_block
+    b.lo blake3_servil_sme2x2_hash_chunks_512_block
     tst x7, #7
-    b.ne blake3_sme2x2_hash_chunks_512_l_nostart
+    b.ne blake3_servil_sme2x2_hash_chunks_512_l_nostart
     lsr x30, x7, #3
     add x30, x30, #16
     ldr x27, [x0, x30, lsl #3]
@@ -2675,7 +2675,7 @@ blake3_sme2x2_hash_chunks_512_p_noend:
     ldp w3, w4, [x8, #8]
     ldp w5, w6, [x8, #16]
     ldp w11, w16, [x8, #24]
-blake3_sme2x2_hash_chunks_512_l_nostart:
+blake3_servil_sme2x2_hash_chunks_512_l_nostart:
     ldr w10, [sp, #208]
     mov     { z8.s - z11.s }, za2h.s[w12, 0:3]
     mov     { z12.s - z13.s }, za3h.s[w12, 0:1]
@@ -5106,7 +5106,7 @@ blake3_sme2x2_hash_chunks_512_l_nostart:
     add x27, x27, #64
     add x8, x7, #1
     tst x8, #7
-    b.ne blake3_sme2x2_hash_chunks_512_l_noend
+    b.ne blake3_servil_sme2x2_hash_chunks_512_l_noend
     lsr x30, x7, #3
     add x30, x30, #16
     ldr x8, [sp, #184]
@@ -5115,7 +5115,7 @@ blake3_sme2x2_hash_chunks_512_l_nostart:
     stp w3, w4, [x8, #8]
     stp w5, w6, [x8, #16]
     stp w11, w16, [x8, #24]
-blake3_sme2x2_hash_chunks_512_l_noend:
+blake3_servil_sme2x2_hash_chunks_512_l_noend:
     mov za1v.s[w12, 0:3], { z0.s - z3.s }
     mov za1v.s[w13, 0:3], { z4.s - z7.s }
     ldr x4, [sp, #184]
@@ -5160,10 +5160,10 @@ blake3_sme2x2_hash_chunks_512_l_noend:
     ldr x8, [sp, #192]
     subs x8, x8, #1
     str x8, [sp, #192]
-    b.ne blake3_sme2x2_hash_chunks_512_group
-blake3_sme2x2_hash_chunks_512_success:
+    b.ne blake3_servil_sme2x2_hash_chunks_512_group
+blake3_servil_sme2x2_hash_chunks_512_success:
     mov x0, #16
-blake3_sme2x2_hash_chunks_512_return:
+blake3_servil_sme2x2_hash_chunks_512_return:
     smstop za
     smstop sm
     ldp d8, d9, [sp, #0]
