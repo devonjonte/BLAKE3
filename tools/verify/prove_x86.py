@@ -239,6 +239,12 @@ def cases(only):
             # Shape (a): whole blocks at one counter, every block count.
             for blocks in range(2, 17):
                 out.append((isa, windows, "hash_many", (WIDTH[isa], blocks, False)))
+        # pair.rs's shape: a whole chunk and a partial one side by side, two
+        # inputs at consecutive counters, over the partial chunk's blocks
+        # before its last (1 to 15), on AVX2 and AVX-512 (#163).
+        for isa in ("avx2", "avx512"):
+            for blocks in range(3, 16):
+                out.append((isa, windows, "hash_many", (2, blocks, True)))
     for n in range(1, 33):
         out.append(("avx512", False, "xof_many", n))
     return [c for c in out if not only or c[0] in only or c[2] in only or ("windows" if c[1] else "unix") in only]
@@ -262,6 +268,8 @@ def representative_cases():
             width = WIDTH[isa]
             out += [(isa, windows, "hash_many", (width, blocks, False)) for blocks in range(1, 17)]
             out += [(isa, windows, "hash_many", (n, 16, True)) for n in (1, width, 2 * width)]
+        for isa in ("avx2", "avx512"):
+            out += [(isa, windows, "hash_many", (2, blocks, True)) for blocks in range(1, 16)]
     out += [("avx512", False, "xof_many", n) for n in range(1, 33)]
     return out
 
