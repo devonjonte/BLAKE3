@@ -57,11 +57,15 @@ The `--static` flag supplies the system libraries Rust's static library needs.
 ## Choose a call
 
 - `b3_hash`: one message already in memory.
-- `b3_hasher_init`, `b3_hasher_update`, `b3_hasher_finalize`: one message
-  arriving in pieces.
-- `b3_hash_many`: a batch of equal-length messages.
-- `b3_stream_*`: a continuing series of messages, with results delivered
-  to a callback. [`tests/check.c`](tests/check.c) includes a complete example.
+- `b3_hasher_init`, `b3_hasher_update`, `b3_hasher_output`: one message
+  arriving in pieces (`b3_hasher_update_multithreaded` for a large piece).
+- `b3_hash_many`, `b3_hash_many_multithreaded`: a batch of equal-length
+  messages, each at the start of its slot of 64-byte blocks, the batch on
+  a 64-byte boundary.
+- `b3_stream_begin`, `b3_stream_submit`, `b3_stream_submit_batch`,
+  `b3_stream_collect`, `b3_stream_finish`: a continuing series of
+  messages, with results delivered to a callback.
+  [`tests/check.c`](tests/check.c) includes a complete example.
 
 `B3_VERSION` identifies the header; `b3_version()` identifies the linked
 library. Both carry the release's full version string.

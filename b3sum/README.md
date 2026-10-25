@@ -64,8 +64,11 @@ Options:
       --tag                   Output BSD-style checksums: BLAKE3 ([FILE]) = [HASH]
   -c, --check                 Read BLAKE3 sums from the [FILE]s and check them
       --quiet                 Skip printing OK for each checked file
-  -h, --help                  Print help (see more with '--help')
+  -h, --help                  Print help
   -V, --version               Print version
+
+More information: b3sum/README.md at
+https://github.com/johnservil/BLAKE3/blob/servil/b3sum/README.md
 ```
 
 By default b3sum uses every CPU: several files at once, and a large file over several
