@@ -1,10 +1,13 @@
 """Proofs of the x86-64 kernels (c/blake3_{sse41,avx2,avx512}_x86-64_unix.S,
-and their MSVC twins *_windows_msvc.asm under the Windows calling
-convention), as assembled, equal to the compression function of the Lean
-specification (lean_spec.py) for every input, key, counter, and flags
-value, by the x86-64 model (x86.py): one compression (compress_in_place,
-compress_xof), and hash_many at every input count up to two passes of its
-width and every block count from 1 to 16.
+c/blake3_partial_x86-64_unix.S, and their MSVC twins *_windows_msvc.asm
+under the Windows calling convention), as assembled, equal to the
+compression function of the Lean specification (lean_spec.py) for every
+input, key, counter, and flags value, by the x86-64 model (x86.py): one
+compression (compress_in_place, compress_xof), hash_many at every input
+count up to two passes of its width and every block count from 1 to 16,
+and the generated pass of whole chunks with a partial one (each lane's
+16 blocks, every per-lane, per-block length and flags, at every block
+after which its snapshot is taken).
 
     python3 tools/verify/prove_x86.py [CASE...]
     python3 tools/verify/prove_x86.py --representative
@@ -36,6 +39,7 @@ WIN_ARGS = ["rcx", "rdx", "r8", "r9"]
 
 
 def assemble(isa, windows):
+    """`isa`'s file (sse41, avx2, avx512, or partial: the generated pass)."""
     if (isa, windows) in OBJS:
         return OBJS[(isa, windows)]
     d = tempfile.mkdtemp()
@@ -264,6 +268,71 @@ def prove_chunk_root(so, isa, whole):
     for w in range(8):
         if not same(got[w], want[w]):
             raise Unproved(f"output word {w} differs from the specification")
+
+
+def prove_partial(so, kisa, windows, last):
+    """blake3_partial_{sse41,avx2}(params): for every lane j, from the
+    lane's chaining value and counter, the 16 blocks at its pointer, block
+    b with the lane's length and flags for b; H the lane's chaining value
+    after block 15, SNAP after block `last` (tools/gen_x86.py's layout)."""
+    sys.path.insert(0, os.path.join(ROOT_DIR, "tools"))
+    import gen_x86
+    w = gen_x86.W_OF[kisa]
+    off, v = gen_x86.layout(w), 4 * w
+    inputs = [byte_symbols(f"in{j}_", 1024) for j in range(w)]
+    key = [[BitVec(f"key{i}_{j}", 32) for j in range(w)] for i in range(8)]
+    ctr = [[BitVec(f"ctr{h}_{j}", 32) for j in range(w)] for h in range(2)]
+    lens = [[BitVec(f"len{b}_{j}", 32) for j in range(w)] for b in range(16)]
+    flags = [[BitVec(f"flags{b}_{j}", 32) for j in range(w)] for b in range(16)]
+    init = {}
+
+    def put(at, word):
+        for k in range(4):
+            init[at + k] = Extract(8 * k + 7, 8 * k, word)
+
+    for i in range(8):
+        for j in range(w):
+            put(off["KEY"] + v * i + 4 * j, key[i][j])
+    for i in range(4):
+        for j in range(w):
+            put(off["IV"] + v * i + 4 * j, BitVecVal((0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A)[i], 32))
+    for name, r in (("ROT16", 2), ("ROT8", 1)):
+        for j in range(w):
+            base = 4 * (j % 4)
+            put(off[name] + 4 * j, BitVecVal(sum((base + (k + r) % 4) << (8 * k) for k in range(4)), 32))
+    for h in range(2):
+        for j in range(w):
+            put(off["CTR"] + v * h + 4 * j, ctr[h][j])
+    for b in range(16):
+        for j in range(w):
+            put(off["LENS"] + v * b + 4 * j, lens[b][j])
+            put(off["FLAGS"] + v * b + 4 * j, flags[b][j])
+    put(off["LAST"], BitVecVal(64 * last, 32))
+    params = Region("params", off["SIZE"], True, lambda o: init.get(o, BitVecVal(0, 8)))
+    for j in range(w):
+        for k in range(8):
+            params.bytes[off["MSG"] + 8 * j + k] = (Ptr(f"input{j}", 0), k)
+    regions = {f"input{j}": Region(f"input{j}", 1024, False, (lambda b: lambda o: b[o])(inputs[j])) for j in range(w)}
+    regions["params"] = params
+    s = Setup(so, f"blake3_partial_{kisa}", regions, [Ptr("params", 0)], windows)
+    m = s.run()
+    out = m.regions["params"]
+    for j in range(w):
+        cv = [key[i][j] for i in range(8)]
+        counter = Concat(ctr[1][j], ctr[0][j])
+        snap = None
+        for b in range(16):
+            cv = spec.compress(cv, spec.words(inputs[j][64 * b:64 * b + 64]), counter, lens[b][j], flags[b][j])[:8]
+            if b == last:
+                snap = cv
+        for name, want in (("H", cv), ("SNAP", snap)):
+            at = [off[name] + v * i + 4 * j for i in range(8)]
+            if any(a + k not in out.bytes for a in at for k in range(4)):
+                raise Unproved(f"lane {j}'s {name} is not wholly written")
+            for i in range(8):
+                got = spec.words([out.bytes[at[i] + k] for k in range(4)])[0]
+                if not same(got, want[i]):
+                    raise Unproved(f"lane {j}, {name} word {i} differs from the specification")
     return m.steps
 
 
@@ -283,6 +352,10 @@ def cases(only):
     for n in range(1, 33):
         out.append(("avx512", False, "xof_many", n))
     out += [(isa, False, "chunk_root", whole) for isa in ("sse41", "avx512") for whole in range(16)]
+    for windows in (False, True):
+        for kisa in ("sse41", "avx2"):
+            for last in range(16):
+                out.append(("partial", windows, "partial", (kisa, last)))
     return [c for c in out if not only or c[0] in only or c[2] in only or ("windows" if c[1] else "unix") in only]
 
 
@@ -321,6 +394,9 @@ def prove_case(case):
     try:
         if kind == "chunk_root":
             steps, what = prove_chunk_root(so, isa, arg), f"chunk root, {arg} whole blocks and the last"
+        elif kind == "partial":
+            kisa, last = arg
+            steps, what = prove_partial(so, kisa, windows, last), f"{kisa}, snapshot after block {last}"
         elif kind == "xof_many":
             steps, what = prove_xof_many(so, arg), f"xof_many, {arg} blocks"
         elif kind in ("compress", "xof"):

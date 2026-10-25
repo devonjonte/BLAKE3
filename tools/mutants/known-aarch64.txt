@@ -2,7 +2,7 @@
 # SME2 and the SHA-3 extension), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/each.rs src/finish.rs src/park.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/hasher.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/neon_xof.rs src/pair.rs src/platform.rs src/portable.rs src/self_test.rs src/traits.rs src/tree.rs src/convenience.rs src/performance.rs src/incremental.rs src/block.rs
+files: src/block.rs src/convenience.rs src/each.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/performance.rs src/platform.rs src/portable.rs src/self_test.rs src/tree.rs
 model files: src/finish.rs src/park.rs
 src/each.rs	replace < with <= in hash_each_multithreaded	1	speed: moves a threshold between equally correct paths
 src/each.rs	replace < with == in hash_each_multithreaded	1	speed: moves a threshold between equally correct paths
@@ -343,26 +343,6 @@ src/many.rs	replace | with ^ in neon_plans_last_len	1	equivalent: | and ^ agree 
 src/many.rs	replace | with ^ in subtree_across	2	equivalent: | and ^ agree on flag bits that never overlap
 src/many.rs	replace || with && in across_from	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace || with && in sme2_sized	4	speed: moves a threshold between equally correct paths
-src/pair.rs	delete match arm Platform::AVX2 in takes_platform	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	delete match arm Platform::AVX512 in takes_platform	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace * with + in parent	3	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace * with + in takes	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace * with / in parent	3	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace * with / in takes	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace + with * in parent	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace + with * in takes	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace + with - in parent	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace + with - in takes	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace - with + in parent	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace - with / in parent	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace / with % in parent	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace / with * in parent	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace parent -> [u8; BLOCK_LEN] with [0; BLOCK_LEN]	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace parent -> [u8; BLOCK_LEN] with [1; BLOCK_LEN]	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace takes -> bool with false	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace takes_platform -> bool with false	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace | with & in parent	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the two-input path runs on AVX2 and AVX-512 only)
-src/pair.rs	replace | with ^ in parent	1	equivalent: | and ^ agree on flag bits that never overlap
 src/platform.rs	delete ! in Platform::xof_many	1	speed: chooses between equally correct paths
 src/platform.rs	delete ! in sme2_detect_uncached	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	delete match arm 1 in sme2_detected	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)

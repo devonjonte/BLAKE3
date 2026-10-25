@@ -1,9 +1,9 @@
 # blake3-servil 0.8, against official BLAKE3 1.8.7
 
 The same digests. Faster than official BLAKE3 1.8.7 on 64-bit Arm and
-x86-64. Every Arm assembly kernel and the x86-64 assembly kernels are
-proved correct within their stated contracts. Everything else is tested,
-and the tests are tested ([QUALITY.md](QUALITY.md)).
+x86-64. Every kernel is assembly, and every one is proved correct
+within its stated contract. Everything else is tested, and the tests
+are tested ([QUALITY.md](QUALITY.md)).
 
 ## Faster
 
@@ -84,7 +84,9 @@ each check covers and what remains unproved.
 5. Removed: `Hasher::update_mmap` and the `mmap` feature (map the file
    yourself, or use `update_reader`), the `traits-preview` feature, the
    `guts`, `hazmat`, and `platform` modules, and the `no_avx2`,
-   `no_avx512`, `no_neon`, and `no_sme2` features. `pure` stays.
+   `no_avx512`, `no_neon`, and `no_sme2` features. `pure` stays, and means
+   portable Rust alone: no assembly, and no SIMD on x86-64 (official
+   BLAKE3's `pure` keeps its Rust SSE4.1 and AVX2 kernels).
 6. b3sum installs from the package `b3sums` (`cargo install b3sums`);
    crates.io's `b3sum` is official BLAKE3's. The program is still `b3sum`.
    `--num-threads N` means at most N threads in all, and 1 means one

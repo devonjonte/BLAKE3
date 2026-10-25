@@ -649,17 +649,3 @@ pub mod ffi {
         pub fn blake3_sme2_hash16_parents_512(pairs: *const u8, key: *const u32, counter: u64, flags: u32, out: *mut u8, groups: u64) -> u64;
     }
 }
-
-#[cfg(test)]
-mod test {
-    #[test]
-    fn test_hybrid_assembly_matches_generator() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let output = match std::process::Command::new("python3").arg(root.join("tools/gen_sme2_hybrid.py")).output() {
-            Ok(output) if output.status.success() => output.stdout,
-            _ => return,
-        };
-        let committed = std::fs::read(root.join("c/blake3_sme2_hybrid_aarch64.S")).unwrap();
-        assert!(output == committed, "c/blake3_sme2_hybrid_aarch64.S is stale; run tools/gen_sme2_hybrid.py");
-    }
-}

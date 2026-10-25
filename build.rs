@@ -144,14 +144,6 @@ fn c_compiler_support() -> CCompilerSupport {
     }
 }
 
-fn build_sse41_avx2_rust_intrinsics() {
-    // No C code to compile here. Set the cfg flags that enable the Rust
-    // SSE4.1 and AVX2 intrinsics modules. The regular Cargo build will
-    // compile them.
-    println!("cargo::rustc-cfg=blake3_sse41_rust");
-    println!("cargo::rustc-cfg=blake3_avx2_rust");
-}
-
 /// The inherited x86 assembly exports upstream's names. A program linking
 /// both crates must bind each caller to its own kernels, including our
 /// narrower loads. Namespace the build copies; the checked-in assembly
@@ -174,14 +166,17 @@ fn build_sse41_avx2_assembly() {
         assert_msvc_asm();
         private_x86_assembly(&mut build, "c/blake3_sse41_x86-64_windows_msvc.asm");
         private_x86_assembly(&mut build, "c/blake3_avx2_x86-64_windows_msvc.asm");
+        // The fork's own kernel: names of its own, which no other crate defines.
+        build.file("c/blake3_partial_x86-64_windows_msvc.asm");
     } else {
         // All non-Windows implementations are assumed to support
         // Linux-style assembly. These files do contain a small
         // explicit workaround for macOS also.
         private_x86_assembly(&mut build, "c/blake3_sse41_x86-64_unix.S");
         private_x86_assembly(&mut build, "c/blake3_avx2_x86-64_unix.S");
-        // One chunk or less as the root, off the stack (src/ffi_chunk_root.rs):
-        // names of its own, which no other crate defines.
+        // The fork's own kernels (the pass with a partial chunk, the chunk
+        // root in one call): names of their own, which no other crate defines.
+        build.file("c/blake3_partial_x86-64_unix.S");
         build.file("c/blake3_chunk_root_x86-64_unix.S");
     }
     build.compile("blake3_sse41_avx2_assembly");
@@ -298,8 +293,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // As of Rust 1.80, unrecognized config names are warnings. Give Cargo all of our config names.
     // `shuttle` gates tests/shuttle_*.rs (RUSTFLAGS="--cfg shuttle"); the
     // library compiles the same either way.
-    let all_cfgs =
-        ["blake3_sse41_ffi", "blake3_sse41_rust", "blake3_avx2_ffi", "blake3_avx2_rust", "blake3_avx512_ffi", "blake3_neon", "blake3_sme2", "shuttle"];
+    let all_cfgs = ["blake3_sse41_ffi", "blake3_avx2_ffi", "blake3_avx512_ffi", "blake3_neon", "blake3_sme2", "shuttle"];
     for cfg_name in all_cfgs {
         // https://doc.rust-lang.org/cargo/reference/build-scripts.html#outputs-of-the-build-script
         println!("cargo::rustc-check-cfg=cfg({cfg_name}, values(none()))");
@@ -308,11 +302,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // x86-64 (32-bit x86 is unsupported: official BLAKE3 serves it).
     if is_x86_64() {
         let support = c_compiler_support();
-        if is_pure() || support == NoCompiler {
-            build_sse41_avx2_rust_intrinsics();
-        } else {
-            // We assume that all C compilers can assemble SSE4.1 and AVX2. We
-            // don't explicitly check for support.
+        // Without assembly (pure, or no C compiler) x86-64 runs the
+        // portable Rust. We assume that all C compilers can assemble SSE4.1
+        // and AVX2; we don't explicitly check for support.
+        if !(is_pure() || support == NoCompiler) {
             build_sse41_avx2_assembly();
         }
         if !(is_pure() || support == NoCompiler || support == NoAVX512) {
