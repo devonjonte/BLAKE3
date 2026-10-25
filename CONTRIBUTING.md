@@ -23,10 +23,15 @@ The README lists what the fork adds for callers; the code is laid out so:
   is portable Rust alone.
 - `src/`: the Rust around them. `convenience.rs` and `performance.rs`
   (the two kinds of call, their contracts at the top), `incremental.rs`
-  (the `Hasher`), `block.rs` (`Block` and `Batch`, the batch calls' input), `lib.rs` (what the calls share), `platform.rs` (detection and dispatch), `many.rs` (batches),
-  `each.rs` (collections, `update_each`), `lanes.rs` (the thread pool),
-  `stream.rs` (the stream), `self_test.rs` (the startup self-test), `hasher.rs` (the Hasher's
-  stack, loop, and chunk state), and `tree.rs` (the tree walk).
+  (the `Hasher`), `block.rs` (`Block` and `Batch`, the batch calls'
+  input), `lib.rs` (what the calls share), `platform.rs` (detection and
+  dispatch), `ffi_*.rs` (each kernel family's bindings), `portable.rs`
+  (the Rust kernels of a `pure` build), `pair.rs` (a whole chunk and a
+  partial one side by side, x86-64), `many.rs` (batches), `each.rs`
+  (collections, `update_each`), `lanes.rs` (the thread pool), `stream.rs`
+  (the stream), `io.rs` (`update_reader`), `self_test.rs` (the startup
+  self-test), `hasher.rs` (the Hasher's stack, loop, and chunk state),
+  and `tree.rs` (the tree walk).
 - `capi/`: the C API, `b3.h`, a thin layer over the crate
   (`capi/src/lib.rs`), tested from Rust against the official test vectors
   and from C and C++ on Unix (`capi/tests/`).
