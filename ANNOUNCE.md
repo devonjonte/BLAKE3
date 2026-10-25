@@ -5,7 +5,11 @@ By Zooko, 2026-10-25
 *AI content disclosure: no AI-generated content here! Human-generated text all the way. Please read
 it with your human eyeballs! Robots are welcome to read this, too.*
 
-`BLAKE3-Servil` is a new implementation of BLAKE3, a secure hash function, and it is *awesome*.
+`BLAKE3-Servil` is a new fork of the `BLAKE3` codebase, and it is *awesome*.
+
+[`BLAKE3`](https://blake3.io) is a secure hash function. It comes with a high-quality implementation
+by the original authors. Much of the awesomeness of this new fork is actually due to them and to
+that upstream implementation (see [CHANGELOG.md](CHANGELOG.md)).
 
 Here are three reasons you might want to use `BLAKE3-Servil`:
 
@@ -42,10 +46,10 @@ Here are three reasons you might want to use `BLAKE3-Servil`:
      that was both. BLAKE3's immediate ancestor, BLAKE2, is used in WireGuard and the Linux kernel.
 
    * BLAKE3 is a leading contender to become the de facto standard secure hash function [in the next
-     generation of post-quantum zero-knowledge proof systems](docs/who-uses-blake3.md). It is in
+     generation of post-quantum cryptography proof systems](docs/who-uses-blake3.md). It is in
      Plonky3, SP1, stwo, Jolt, WHIR, Miden, Winterfell, Aztec, Binius64, Flock. BLAKE2 is used in
      Zcash and a large number of other systems.
-     
+
      BLAKE3 has a thicker security margin than SHA256 does. There are no known attacks faster than
      brute force that break more than 2 out of 7 of BLAKE3's rounds. In contrast, there are known
      attacks faster than brute force that break up to 39 out of 64 of SHA256's rounds.
@@ -81,6 +85,8 @@ Here are three reasons you might want to use `BLAKE3-Servil`:
    * It has extremely thorough and precise [benchmarks](https://johnservil.github.io/bench-hashes/)
      that exercise many different cases that could practically impact performance for real users.
 
+   * For more information, please read [QUALITY.md](QUALITY.md).
+   
 And here’s one reason you might *not* want to use BLAKE3-Servil right away:
 
 4. It was written by AIs!
