@@ -34,11 +34,11 @@ Here are three reasons you might want to use `BLAKE3-Servil`:
 
    * BLAKE3 has quietly become [the de facto standard secure hash function](docs/who-uses-blake3.md)
      for systems infrastructure: compilers, linkers, file systems, GPU drivers, build systems,
-     storage back ends, etc. The build-id in every Android, Chrome, ChromeOS, and Fuchsia binary is
-     a BLAKE3 hash. It's in Mesa (every Linux GPU driver), Ceph, Hugging Face's Buckets, Meta's new
-     source control tool Sapling/Mononoke, Google's TensorStore, Unreal Engine, OpenZFS, Solana,
-     Nix, Bazel, Buck2, Wasmer, the Swift compiler, rustc, cargo, and Iroh. These projects needed a
-     hash function that was both fast and secure, and chose the one that was both. BLAKE3's
+     storage back ends, etc. The build-id in Android, Chrome, ChromeOS, and Fuchsia binary is a
+     BLAKE3 hash. It's in Mesa (every Linux GPU driver), Ceph, Hugging Face's Buckets / IETF XET,
+     Meta's new source control tool Sapling/Mononoke, Google's TensorStore, Unreal Engine, OpenZFS,
+     Solana, Nix, Bazel, Buck2, Wasmer, the Swift compiler, rustc, cargo, and iroh. These projects
+     needed a hash function that was both fast and secure, and chose the one that was both. BLAKE3's
      immediate ancestor, BLAKE2, is used in WireGuard and the Linux kernel.
 
    * BLAKE3 is the leading contender to become the de facto standard secure hash function in the

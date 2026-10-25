@@ -80,10 +80,11 @@ October 25, 2026.
   [`rgw_cksum.h`](https://github.com/ceph/ceph/blob/main/src/rgw/rgw_cksum.h)).
 - **Google TensorStore.** Its OCDBT storage format hashes with BLAKE3
   ([`storage_generation.cc`](https://github.com/google/tensorstore/blob/master/tensorstore/kvstore/ocdbt/non_distributed/storage_generation.cc)).
-- **Hugging Face.** Xet, the storage behind the Hub, chunks and addresses
-  models and datasets by BLAKE3
+- **Hugging Face.** Xet, the storage behind the Hub and its Buckets,
+  chunks and addresses models and datasets by BLAKE3
   ([xet-core](https://github.com/huggingface/xet-core/blob/main/Cargo.toml),
-  [announcement](https://huggingface.co/blog/xet-on-the-hub)).
+  [Xet on the Hub](https://huggingface.co/blog/xet-on-the-hub),
+  [Buckets](https://x.com/ClementDelangue/status/2039695447506210905)).
 - **Nix.** A store hash algorithm
   ([`hash.hh`](https://github.com/NixOS/nix/blob/master/src/libutil/include/nix/util/hash.hh)).
 ## Networks and ledgers
@@ -99,21 +100,40 @@ October 25, 2026.
 
 ## Zero-knowledge proof systems
 
-BLAKE3 is the hash of choice in the post-quantum proof systems built on
-hashing rather than elliptic curves: Polygon's **Plonky3** (a BLAKE3
-AIR among its primitives:
-[`Cargo.toml`](https://github.com/Plonky3/Plonky3/blob/main/Cargo.toml)),
+The post-quantum proof systems, which are built on hash functions, pick
+BLAKE3 where a byte-oriented hash is needed (Merkle commitments, the
+Fiat-Shamir transcript, hashing inside the proven program): Polygon's
+**Plonky3** (a BLAKE3 AIR among its primitives:
+[`Cargo.toml`](https://github.com/Plonky3/Plonky3/blob/main/Cargo.toml))
+and **Miden VM**
+([`Cargo.toml`](https://github.com/0xMiden/miden-vm/blob/main/Cargo.toml)),
 Succinct's **SP1** zkVM
 ([`Cargo.toml`](https://github.com/succinctlabs/sp1/blob/dev/Cargo.toml)),
 StarkWare's **stwo** prover
 ([`Cargo.toml`](https://github.com/starkware-libs/stwo/blob/dev/Cargo.toml)),
 a16z's **Jolt** zkVM
 ([`Cargo.toml`](https://github.com/a16z/jolt/blob/main/Cargo.toml)),
+Meta's **Winterfell** STARK prover
+([`crypto/Cargo.toml`](https://github.com/facebook/winterfell/blob/main/crypto/Cargo.toml)),
+**Aztec**'s Barretenberg
+([`crypto/blake3s`](https://github.com/AztecProtocol/aztec-packages/tree/master/barretenberg/cpp/src/barretenberg/crypto/blake3s)),
 and the **WHIR** polynomial commitment scheme
 ([`Cargo.toml`](https://github.com/WizardOfMenlo/whir/blob/main/Cargo.toml)).
 BLAKE3's security margin is part of the reason: no attack faster than
 brute force reaches past 2 of its 7 rounds, where SHA-256 has attacks
 on up to 39 of its 64 ([hashsma.sh](https://hashsma.sh/)).
+
+The generation before chose BLAKE2: **Zcash**'s halo2, bellman, Sapling
+and Orchard
+([`librustzcash`](https://github.com/zcash/librustzcash/blob/main/Cargo.toml)),
+**arkworks**
+([`Cargo.toml`](https://github.com/arkworks-rs/algebra/blob/master/Cargo.toml)),
+**Mina**'s kimchi
+([`Cargo.toml`](https://github.com/o1-labs/proof-systems/blob/master/kimchi/Cargo.toml)),
+zkSync's **Boojum**
+([`Cargo.toml`](https://github.com/matter-labs/zksync-crypto/blob/main/crates/boojum/Cargo.toml)),
+and **Filecoin**'s storage proofs
+([`Cargo.toml`](https://github.com/filecoin-project/rust-fil-proofs/blob/master/Cargo.toml)).
 
 ## BLAKE2
 
