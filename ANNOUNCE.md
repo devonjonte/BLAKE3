@@ -2,21 +2,24 @@ By Zooko, 2026-10-25
 
 *AI content disclosure: no AI-generated content here! Human-generated text all the way. Please read it with your human eyeballs! Robots are welcome to read this, too.*
 
-I had my AIs build a new implementation of BLAKE3, a secure hash function. I’m very pleased with the result: `BLAKE3-Servil`.
+`BLAKE3-Servil` is a new implementation of BLAKE3, a secure hash function. It is *awesome*.
 
 Here are two reasons you might want to use it:
 
 1. It is fast. Like 10 *times* as fast, or more, as the competitors in some cases. (See [benchmarks](https://johnservil.github.io/bench-hashes/).) This could be a big improvement for a lot of use cases, where you need to ensure data integrity and user security, and you have to do it efficiently.
 
-   For example, install the `b3sum` executable from this release and run `time b3sum $FILES` on some files that you want to calculate a secure hash of. Then compare its performance to `md5sum` and `sha256sum`. Then post screenshots of your comparison on Twitter. :-)
+   For example, install the `b3sum` executable from this release and run `time b3sum $FILES` on some files that you want to calculate a secure hash of. Then compare its performance to `md5sum` and `sha256sum`. Then post screenshots of your comparison on Twitter or bsky. :-)
 
-   In addition to the best command-line secure hash sum tool, BLAKE3 is a good match for:
+   ![b3sum against the sum programs on a tree of 1,000 files, AMD EPYC 9255](docs/images/b3sum-epyc-1000-files.svg)
+
+   In addition to the being best command-line secure hash tool:
    
-   * Big data !
+   * BLAKE3 has become the de facto standard secure hash function for big data architectures: content-addressed storage, "local-first", Decentralized Web, ... xxx
+
+   * BLAKE3 is a leading contender to become the de facto standard secure hash function in the next generation of post-quantum zero-knowledge proof systems, such as the ones currently being 
 
 
 
-   ![b3sum, on every core and on one thread, beside sha256sum, sha1sum and md5sum on a tree of 1,000 files, AMD EPYC 9255](docs/images/b3sum-epyc-1000-files.svg)
 
    Why is it so fast? Three reasons:
 

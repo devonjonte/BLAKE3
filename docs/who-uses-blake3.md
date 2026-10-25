@@ -10,8 +10,10 @@ users (a `blake3()` function, a hash option) is listed apart, at the end.
 
 - **LLVM: lld, Clang, Windows debug info.** lld computes every ELF
   build-id it is asked for as `md5`, `sha1`, or plain `--build-id` with
-  BLAKE3, truncated to the requested length ("implement them with the
-  more efficient BLAKE3":
+  BLAKE3: the flag names survive only as lengths, 16 and 20 bytes, so
+  a `--build-id=sha1` from lld contains no SHA-1 ("in practice people
+  use 'md5' and 'sha1' just for different lengths. Implement them with
+  the more efficient BLAKE3":
   [`lld/ELF/Writer.cpp`](https://github.com/llvm/llvm-project/blob/main/lld/ELF/Writer.cpp);
   `--build-id` alone means `sha1`:
   [`lld/ELF/Options.td`](https://github.com/llvm/llvm-project/blob/main/lld/ELF/Options.td)).
