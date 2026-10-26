@@ -22,7 +22,10 @@ and the rest timed out or have no verdict.
 - The logs, each named for the commit it ran on (C: the commit's first 12
   hex digits), so an earlier commit's log cannot stand in for it:
   - VM check: tmp/night/check-release-vm-C.log, from
-    `cd bench-hashes && cargo run --release -- check --against <previous tag> --cells all`.
+    `cd bench-hashes && cargo run --release -- check --against <previous tag> --cells all`,
+    with `--old-bench <bench commit>` when the old side predates the
+    bench's calls (0.8: 5be5f236, the old API's bench), as in the Mac
+    job's "old_bench_commit".
   - Full mutation run: tmp/night/mutants-C.log with both final summaries
     matching their survivor and timeout lists, from
     `python3 tools/mutants/check.py` with the commit checked out.
@@ -195,11 +198,11 @@ def main():
     # pass nor a regression.
     step("Mac check against the previous release",
          None if mac is None else TIMED_OUT if mac == "timed out" else NO_VERDICT if mac == "no verdict" else mac == "no regression",
-         f"a check job (cells all) with old_commit {previous or '<the main line before this release>'} and new_commit {commit[:10]}"
+         f"a check job (cells all) with old_commit {previous or '<the main line before this release>'} and new_commit {commit[:10]}, and old_bench_commit when the old side predates the bench's calls"
          + (f" (the last one: {mac})" if mac in ("timed out", "no verdict") else ""))
 
     step("VM check against the previous release", log_ends_with(f"tmp/night/check-release-vm-{commit[:12]}.log", "no cell slower"),
-         f"(cd bench-hashes && cargo run --release -- check --against {previous or '<the main line before this release>'} --cells all) > tmp/night/check-release-vm-{commit[:12]}.log")
+         f"(cd bench-hashes && cargo run --release -- check --against {previous or '<the main line before this release>'} --cells all [--old-bench <bench commit>]) > tmp/night/check-release-vm-{commit[:12]}.log")
     step("full mutation run", mutation_result(f"tmp/night/mutants-{commit[:12]}.log"),
          f"python3 tools/mutants/check.py > tmp/night/mutants-{commit[:12]}.log, the commit checked out (overnight)")
     step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "every build passes"),

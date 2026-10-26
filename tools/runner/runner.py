@@ -18,11 +18,14 @@ at most 7200):
 (bench-hashes before its git dependency on the fork took `--thorough` for
 a full run; later ones run in full by default and take `--quick`.)
     {"type": "check", "old_commit": "...", "new_commit": "...",
-     "bench_commit": "...", "cells": "all", "pairs": N}
+     "bench_commit": "...", "old_bench_commit": "...", "cells": "all", "pairs": N}
 
 (bench-hashes check measures the cells whose code the change touches, or
 every cell with "cells": "all"; "pairs" is the pairs of runs, its default
-check's. Every run's samples file lands in the job's samples/.)
+check's. "old_bench_commit" builds the old side with the bench at that
+commit (check --old-bench), for an old side that predates the bench's
+calls: 0.8 against the main line before the performance API. Every run's
+samples file lands in the job's samples/.)
 
 (Any job may add "powermetrics": true: the chip's CPU, GPU, and ANE power
 every 500 ms beside it, in its results' powermetrics.txt.)
@@ -234,6 +237,8 @@ def check(job, run, work, out):
     if "pairs" in job:
         assert isinstance(job["pairs"], int) and job["pairs"] >= 3, "pairs: 3 or more"
         cmd += ["--pairs", str(job["pairs"])]
+    if "old_bench_commit" in job:
+        cmd += ["--old-bench", hex_commit(job, "old_bench_commit")]
     try:
         run.run(cmd, cwd=fork / "bench-hashes")
         return "no regression"
