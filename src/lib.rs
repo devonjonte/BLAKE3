@@ -939,6 +939,19 @@ pub fn initialize() {
 /// than leaving the call that waits for that worker's piece waiting
 /// forever.
 ///
+/// `None` counts logical CPUs, so on a CPU with SMT (Hyper-Threading) both
+/// threads of each core, and that is the faster default. On an EPYC 9255,
+/// the 16-input kernels leave much of a core waiting on its loads, and a
+/// core's second thread fills that time: two threads hash 1.4-1.7 times
+/// what one does, as with official BLAKE3. The 32-input AVX-512 kernel
+/// (Linux) keeps a core busier on its own, so a second thread adds less
+/// (1.1-1.3 times); even so, on 1 GiB 24 threads, one a core, took 4-14%
+/// longer than 48. A thread slowed by the other thread on its core, by an
+/// efficiency core or by another program takes fewer of a call's pieces,
+/// and the pieces shrink toward the end of the input, so the slowest thread
+/// finishes holding a small one. To leave CPUs to other work, pass fewer
+/// threads.
+///
 /// ```
 /// blake3_servil::initialize_multithreaded(None);
 /// let message = vec![blake3_servil::performance::Block::ZERO; (1 << 20) / 64];
