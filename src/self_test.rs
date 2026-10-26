@@ -486,7 +486,7 @@ fn stop(why: core::fmt::Arguments) -> ! {
 fn trap() -> ! {
     // Sound: each instruction faults where it is executed; nothing after
     // it runs.
-    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    #[cfg(target_arch = "x86_64")]
     unsafe {
         core::arch::asm!("ud2", options(noreturn, nomem, nostack))
     }
@@ -494,10 +494,6 @@ fn trap() -> ! {
     unsafe {
         core::arch::asm!("udf #0", options(noreturn, nomem, nostack))
     }
-    #[cfg(target_arch = "wasm32")]
-    core::arch::wasm32::unreachable();
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "x86", target_arch = "aarch64", target_arch = "wasm32")))]
-    panic!("blake3-servil startup self-test failed: this build or this CPU computes wrong BLAKE3 digests")
 }
 
 /// The self-test's progress in this process. A failed one stops the

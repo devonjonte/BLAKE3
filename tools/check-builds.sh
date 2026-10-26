@@ -5,7 +5,7 @@
 # warnings as errors for the default and pure builds and b3sum;
 # the C API, tested from Rust and from C;
 # compile-only checks for x86-64 (default features: its C and assembly
-# with the clang here); and a Windows build's stop. Each failure stops the
+# with the clang here); and the stop for every other target. Each failure stops the
 # script.
 #
 #     sh tools/check-builds.sh
@@ -31,9 +31,13 @@ RUSTFLAGS="-D warnings" step cargo nextest run --cargo-quiet --release --manifes
 RUSTFLAGS="-D warnings" step cargo check -q --tests --examples --target x86_64-unknown-linux-gnu
 RUSTFLAGS="-D warnings" step cargo check -q --tests --target x86_64-unknown-linux-gnu --no-default-features
 RUSTFLAGS="-D warnings" step cargo check -q --tests --target x86_64-unknown-linux-gnu --features pure
-# A Windows build stops in build.rs, naming official BLAKE3 (#160); the
-# build script runs even where the target's standard library is absent.
-step sh -c 'cargo check -q --keep-going --target x86_64-pc-windows-msvc 2>&1 | grep -q "blake3-servil does not support Windows"'
+# A build for any other target stops in build.rs, naming official BLAKE3
+# (#160, #180): Windows, and WebAssembly for the rest. The build script
+# runs even where the target's standard library is absent; the Linux builds
+# above are the control.
+for target in x86_64-pc-windows-msvc wasm32-unknown-unknown; do
+	step sh -c "cargo check -q --keep-going --target $target 2>&1 | grep -q 'for $target, use official BLAKE3'"
+done
 # Every generated kernel file is its generator's output.
 step sh -c 'python3 tools/gen_neon_hybrid.py | cmp - c/blake3_neon_hybrid_aarch64.S && python3 tools/gen_sme2_hybrid.py | cmp - c/blake3_sme2_hybrid_aarch64.S'
 step sh -c 'python3 tools/gen_x86.py | cmp - c/blake3_partial_x86-64_unix.S'
