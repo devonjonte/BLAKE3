@@ -400,6 +400,10 @@ src/platform.rs	replace Platform::sme2 -> Option<Self> with None	1	a test-only c
 src/platform.rs	replace Platform::sme2 -> Option<Self> with Some(Default::default())	1	a test-only constructor: no x86 test calls it (SME2 platforms are AArch64)
 src/platform.rs	replace avx2_detected -> bool with true	1	[cpu has avx2] equivalent: this CPU has AVX2, so the forced yes is its own answer
 src/platform.rs	replace avx512_detected -> bool with false	1	[cpu lacks avx512f avx512vl] equivalent: this CPU lacks AVX-512, so the forced no is its own answer (a CPU with it catches it: test_detected_degree_is_the_widest_kernel)
+src/platform.rs	replace & with ^ in wide_avx512	1	[cpu has avx512f avx512vl amd_family_ge_1a] equivalent: on AMD Zen 5 and later with AVX-512 the wide kernels run, and every form of the test reads the bit set (any other CPU catches it: test_wide_bit_matches_cpuinfo)
+src/platform.rs	replace & with | in wide_avx512	1	[cpu has avx512f avx512vl amd_family_ge_1a] equivalent: on AMD Zen 5 and later with AVX-512 the wide kernels run, and every form of the test reads the bit set (any other CPU catches it: test_wide_bit_matches_cpuinfo)
+src/platform.rs	replace wide_avx512 -> bool with false	1	[cpu lacks avx512f avx512vl amd_family_ge_1a] equivalent: off AMD Zen 5 and later the forced no is this CPU's answer (a Zen 5 catches it: test_wide_bit_matches_cpuinfo)
+src/platform.rs	replace wide_avx512 -> bool with true	1	[cpu has avx512f avx512vl amd_family_ge_1a] equivalent: on AMD Zen 5 and later with AVX-512 the forced yes is this CPU's answer (any other CPU catches it: test_wide_bit_matches_cpuinfo)
 src/platform.rs	replace avx512_detected -> bool with true	1	[cpu has avx512f avx512vl] equivalent: this CPU has AVX-512, so the forced yes is its own answer
 src/platform.rs	replace counter -> u64 with 0	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/platform.rs	replace counter -> u64 with 1	1	speed: whether and what to prefetch after a pause (no effect on results)
