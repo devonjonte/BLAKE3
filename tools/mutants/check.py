@@ -407,9 +407,44 @@ PLACE_OUTCOMES = {}
 STOPPED = {}
 
 
-def unclassified(name):
-    """A new row's reason until someone writes one: UNCLASSIFIED, and for a
-    time-out the tests the clock stopped."""
+def elsewhere(name, lists=None):
+    """What the other machines' lists say of mutant `name`: one entry per
+    list naming it, "on ARCH: survives|times out (FILE): REASON", in a fixed
+    order. Which mutants exist is the source's alone, so a mutant named on
+    another machine's list is this one; its outcome there is a fact about
+    the code, kept beside this machine's, never in place of it."""
+    here = platform.machine()
+    if lists is None:
+        lists = sorted(glob.glob(os.path.join(ROOT, "tools", "mutants", "known-*.txt")) +
+                       glob.glob(os.path.join(ROOT, "tools", "mutants", "timeouts-*.txt")))
+    out = []
+    for path in lists:
+        base = os.path.basename(path)
+        kind, arch = base[:-4].split("-", 1)
+        if arch == here:
+            continue
+        for line in open(path):
+            if line.startswith("#") or line.startswith(("files:", "model files:")) or not line.strip():
+                continue
+            file, mutant, _, reason = line.rstrip("\n").split("\t", 3)
+            if f"{file}\t{mutant}" == name and not reason.startswith("UNCLASSIFIED"):
+                out.append(f"on {arch}: {'survives' if kind == 'known' else 'times out'} ({base}): {reason}")
+    return out
+
+
+def unclassified(name, outcome=None, lists=None):
+    """A new row's reason. Where another machine's list explains the same
+    mutant, its outcome and reason, each named by machine: the same
+    outcome there makes it this row's reason ("as on ARCH"); a different
+    one makes it an OPEN row naming both, a finding the run reports
+    (MACHINES DIFFER). Where no machine knows, UNCLASSIFIED, and for a
+    time-out the tests the clock stopped, until someone writes one."""
+    known = elsewhere(name, lists)
+    if known and outcome:
+        mine = f"on {platform.machine()}: {outcome}"
+        if all(f": {outcome} (" in k for k in known):
+            return f"as {'; '.join(known)}"
+        return f"OPEN: the machines differ: {mine}; " + "; ".join(known)
     stopped = STOPPED.get(name)
     return "UNCLASSIFIED" + (f" (the clock stopped: {', '.join(sorted(stopped))})" if stopped else "")
 
@@ -710,13 +745,13 @@ def main():
     if "--write" in sys.argv:
         header = [l.rstrip("\n") for l in open(KNOWN) if l.startswith("#") or l.startswith(("files:", "model files:"))]
         # The rows for other CPUs stay as they were: this run cannot see them.
-        rows = sorted([f"{k}\t{n}\t{known.get(k, (0, 'UNCLASSIFIED'))[1]}" for k, n in found.items()] + INACTIVE)
+        rows = sorted([f"{k}\t{n}\t{known[k][1] if k in known else unclassified(k, 'survives')}" for k, n in found.items()] + INACTIVE)
         open(KNOWN, "w").write("\n".join(header + rows) + "\n")
         print(f"{KNOWN}: {sum(found.values())} survivors, {sum(1 for k in found if k not in known)} names new")
         theader = [l.rstrip("\n") for l in open(TIMEOUTS) if l.startswith("#")] if os.path.exists(TIMEOUTS) else \
             [f"# The mutants that time out on {platform.machine()}: no test fails, the clock stops one (tools/mutants/check.py, TIMEOUTS).",
              "# A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason."]
-        trows = sorted([f"{k}\t{n}\t{tknown.get(k, (0, unclassified(k)))[1]}" for k, n in timed.items()] + INACTIVE_TIMEOUTS)
+        trows = sorted([f"{k}\t{n}\t{tknown[k][1] if k in tknown else unclassified(k, 'times out')}" for k, n in timed.items()] + INACTIVE_TIMEOUTS)
         open(TIMEOUTS, "w").write("\n".join(theader + trows) + "\n")
         print(f"{TIMEOUTS}: {sum(timed.values())} time-outs, {sum(1 for k in timed if k not in tknown)} names new")
         return
@@ -743,6 +778,15 @@ def main():
     # The places the suite's clock alone stopped (a model file's place the
     # model catches is caught, and is not listed: with_model).
     model = PLACE_OUTCOMES.get("loom", {})
+    # Where another machine's list judges a mutant otherwise than this run
+    # (survives there, times out here, or the reverse): both facts are the
+    # code's; the run names the difference (a mutant caught here and listed
+    # elsewhere is the other list's to explain, and its run's to report).
+    for k in sorted(set(found) | set(timed)):
+        mine = "survives" if k in found else "times out"
+        for other in elsewhere(k):
+            if f": {mine} (" not in other:
+                print(f"MACHINES DIFFER: {k}: here {mine}; {other}")
     for k in sorted(CLOCK_ONLY):
         n, place = k.rsplit("\t", 1)
         if model.get((n, place)) != "CaughtMutant":

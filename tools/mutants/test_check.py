@@ -1,5 +1,7 @@
 """CPU-conditioned survivor-list controls: python3 -m unittest discover -s tools/mutants."""
+import os
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import mock_open, patch
 
@@ -130,6 +132,27 @@ class Rows(unittest.TestCase):
 
 
 class Leftovers(unittest.TestCase):
+    def test_a_new_row_takes_every_other_machines_outcome(self):
+        with tempfile.TemporaryDirectory() as d:
+            known = os.path.join(d, "known-otherarch.txt")
+            timeouts = os.path.join(d, "timeouts-otherarch.txt")
+            with open(known, "w") as f:
+                f.write("# header\nfiles: src/a.rs\nsrc/a.rs\treplace a with b\t1\tspeed: equally correct paths\n")
+            with open(timeouts, "w") as f:
+                f.write("# header\nsrc/a.rs\treplace c with d\t1\ta hang test_x showed\n"
+                        "src/a.rs\treplace e with f\t1\tUNCLASSIFIED\n")
+            lists = [known, timeouts]
+            # The same outcome there: its reason, named by machine.
+            self.assertEqual(check.unclassified("src/a.rs\treplace a with b", "survives", lists),
+                             "as on otherarch: survives (known-otherarch.txt): speed: equally correct paths")
+            # A different outcome: an OPEN row naming both.
+            self.assertEqual(check.unclassified("src/a.rs\treplace c with d", "survives", lists),
+                             f"OPEN: the machines differ: on {check.platform.machine()}: survives; "
+                             "on otherarch: times out (timeouts-otherarch.txt): a hang test_x showed")
+            # Nobody knows (or the other row is unexplained too): UNCLASSIFIED.
+            self.assertTrue(check.unclassified("src/a.rs\treplace e with f", "times out", lists).startswith("UNCLASSIFIED"))
+            self.assertTrue(check.unclassified("src/a.rs\treplace g with h", "survives", lists).startswith("UNCLASSIFIED"))
+
     def test_only_the_shards_worktrees_go(self):
         listed = "\n".join([
             "worktree /repo", "HEAD a", "",
