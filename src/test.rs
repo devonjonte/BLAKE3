@@ -304,7 +304,7 @@ pub(crate) fn reference_hash(input: &[u8]) -> crate::Hash {
 #[test]
 fn test_xof_seek() {
     let mut out = [0; 533];
-    let mut hasher = crate::Hasher::new();
+    let mut hasher = crate::Hasher::new(crate::Mode::Plain);
     hasher.update(b"foo");
     hasher.finalize_xof().fill(&mut out);
     assert_eq!(hasher.finalize().as_bytes(), &out[0..32]);
@@ -346,21 +346,21 @@ fn test_xof_seek() {
 
 #[test]
 fn test_reset() {
-    let mut hasher = crate::Hasher::new();
+    let mut hasher = crate::Hasher::new(crate::Mode::Plain);
     hasher.update(&[42; 3 * CHUNK_LEN + 7]);
     hasher.reset();
     hasher.update(&[42; CHUNK_LEN + 3]);
     assert_eq!(hasher.finalize(), crate::convenience::hash(&[42; CHUNK_LEN + 3]));
 
     let key = &[99; crate::KEY_LEN];
-    let mut keyed_hasher = crate::Hasher::new_with(crate::Mode::Keyed(key));
+    let mut keyed_hasher = crate::Hasher::new(crate::Mode::Keyed(key));
     keyed_hasher.update(&[42; 3 * CHUNK_LEN + 7]);
     keyed_hasher.reset();
     keyed_hasher.update(&[42; CHUNK_LEN + 3]);
     assert_eq!(keyed_hasher.finalize(), crate::convenience::hash_with(crate::Mode::Keyed(key), &[42; CHUNK_LEN + 3]),);
 
     let context = "BLAKE3 2020-02-12 10:20:58 reset test";
-    let mut kdf = crate::Hasher::new_with(crate::Mode::DeriveKey(context));
+    let mut kdf = crate::Hasher::new(crate::Mode::DeriveKey(context));
     kdf.update(&[42; 3 * CHUNK_LEN + 7]);
     kdf.reset();
     kdf.update(&[42; CHUNK_LEN + 3]);
@@ -370,7 +370,7 @@ fn test_reset() {
     // A reset after the stack holds values (past the stage, which keeps
     // short updates from the core): the stack empty again.
     let long = std::vec![42u8; 5 * crate::STAGE_LEN + 7];
-    let mut hasher = crate::Hasher::new();
+    let mut hasher = crate::Hasher::new(crate::Mode::Plain);
     hasher.update(&long);
     hasher.reset();
     hasher.update(&long[..CHUNK_LEN + 3]);
@@ -380,7 +380,7 @@ fn test_reset() {
 #[test]
 fn test_hex_encoding_decoding() {
     let digest_str = "04e0bb39f30b1a3feb89f536c93be15055482df748674b00d26e5a75777702e9";
-    let mut hasher = crate::Hasher::new();
+    let mut hasher = crate::Hasher::new(crate::Mode::Plain);
     hasher.update(b"foo");
     let digest = hasher.finalize();
     assert_eq!(digest.to_hex().as_str(), digest_str);
@@ -476,7 +476,7 @@ fn test_zeroize() {
     assert_eq!(hash.0, [0u8; 32]);
 
     // A Hasher: its core, and the bytes it has staged.
-    let mut hasher = crate::Hasher::new_with(crate::Mode::Keyed(&[42; 32]));
+    let mut hasher = crate::Hasher::new(crate::Mode::Keyed(&[42; 32]));
     hasher.update(&[42; 3000]);
     assert!(hasher.staged > 0);
     hasher.zeroize();
@@ -559,7 +559,7 @@ fn test_update_reader_keeps_every_byte_across_errors() {
     paint_test_input(&mut input);
     for fail_at in [vec![], vec![1000], vec![65536], vec![70_000, 1 << 20], vec![10, 2_000_000, 3_000_000]] {
         let mut reader = Failing { slice: &input, at: 0, fail_at: fail_at.clone() };
-        let mut hasher = crate::Hasher::new();
+        let mut hasher = crate::Hasher::new(crate::Mode::Plain);
         let mut errors = 0;
         while let Err(e) = hasher.update_reader(&mut reader) {
             assert_eq!(e.kind(), io::ErrorKind::WouldBlock);
@@ -598,7 +598,7 @@ fn test_update_reader_interrupted() -> std::io::Result<()> {
 
     let input = b"hello world";
     let mut reader = InterruptingReader::new(input);
-    let mut hasher = crate::Hasher::new();
+    let mut hasher = crate::Hasher::new(crate::Mode::Plain);
     hasher.update_reader(&mut reader)?;
     assert_eq!(hasher.finalize(), crate::convenience::hash(input));
     Ok(())
@@ -654,7 +654,7 @@ fn test_serde() {
 
 #[test]
 fn test_miri_smoketest() {
-    let mut hasher = crate::Hasher::new_with(crate::Mode::DeriveKey("Miri smoketest"));
+    let mut hasher = crate::Hasher::new(crate::Mode::DeriveKey("Miri smoketest"));
     hasher.update(b"foo");
     #[cfg(feature = "std")]
     hasher.update_reader(&b"bar"[..]).unwrap();
@@ -688,7 +688,7 @@ mod unsafe_paths {
                     message[len..].fill(0);
                 }
                 let mut out = vec![[0u8; OUT_LEN]; count];
-                crate::performance::hash_many(Mode::Hash, &crate::test::blocks(&data), len, &mut out);
+                crate::performance::hash_many(Mode::Plain, &crate::test::blocks(&data), len, &mut out);
                 for (i, digest) in out.iter().enumerate() {
                     assert_eq!(*digest, *crate::convenience::hash(&data[i * slot..][..len]).as_bytes(), "{count} x {len} B, message {i}");
                 }
@@ -703,17 +703,17 @@ mod unsafe_paths {
         let batch = input(1024 * 64, 1);
         let tree = input(65 * 1024 + 3, 2);
         let mut expected = vec![[0u8; OUT_LEN]; 1024];
-        crate::performance::hash_many(Mode::Hash, &crate::test::blocks(&batch), 64, &mut expected);
+        crate::performance::hash_many(Mode::Plain, &crate::test::blocks(&batch), 64, &mut expected);
         let expected_tree = crate::convenience::hash(&tree);
         std::thread::scope(|scope| {
             for caller in 0..2 {
                 let (batch, tree, expected) = (&batch, &tree, &expected);
                 scope.spawn(move || {
                     let mut out = vec![[0u8; OUT_LEN]; 1024];
-                    crate::performance::hash_many_multithreaded(Mode::Hash, &crate::test::blocks(batch), 64, &mut out);
+                    crate::performance::hash_many_multithreaded(Mode::Plain, &crate::test::blocks(batch), 64, &mut out);
                     assert_eq!(&out, expected, "batch, caller {caller}");
                     assert_eq!(
-                        crate::performance::hash_multithreaded(crate::Mode::Hash, &crate::test::message(tree), tree.len()),
+                        crate::performance::hash_multithreaded(crate::Mode::Plain, &crate::test::message(tree), tree.len()),
                         expected_tree,
                         "tree, caller {caller}"
                     );
@@ -882,7 +882,7 @@ mod guard_pages {
                     let mut blocks = filled(len.div_ceil(64) * 64, at_end);
                     let message = blocks.bytes()[..len].to_vec();
                     let input = crate::performance::Block::from_bytes(blocks.bytes()).expect("a page-end region of whole blocks starts aligned");
-                    assert_eq!(crate::performance::hash_multithreaded(crate::Mode::Hash, input, len), crate::convenience::hash(&message), "mt, {len} bytes");
+                    assert_eq!(crate::performance::hash_multithreaded(crate::Mode::Plain, input, len), crate::convenience::hash(&message), "mt, {len} bytes");
                 }
             }
         }
@@ -901,7 +901,7 @@ mod guard_pages {
                     let mut out = Guarded::new(count * OUT_LEN, !at_end);
                     let outputs: &mut [[u8; OUT_LEN]] = unsafe { core::slice::from_raw_parts_mut(out.bytes().as_mut_ptr() as *mut [u8; OUT_LEN], count) };
                     crate::performance::hash_many(
-                        Mode::Hash,
+                        Mode::Plain,
                         crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
                         len,
                         outputs,
@@ -913,7 +913,7 @@ mod guard_pages {
                     if slot * count >= 64 * CHUNK_LEN {
                         let (_page, mt) = digests(count, at_end);
                         crate::performance::hash_many_multithreaded(
-                            Mode::Hash,
+                            Mode::Plain,
                             crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
                             len,
                             mt,
@@ -950,19 +950,19 @@ mod guard_pages {
                         .collect();
                     let want: Vec<[u8; 32]> = items.iter().map(|m| *crate::test::reference_hash(m).as_bytes()).collect();
                     let (_page, got) = digests(count, !at_end);
-                    crate::performance::hash_each(Mode::Hash, &in_blocks, got);
+                    crate::performance::hash_each(Mode::Plain, &in_blocks, got);
                     assert_eq!(got, &want[..], "hash_each_with, {count} x {len} B, at end {at_end}");
                     let (_page, got) = digests(count, at_end);
-                    crate::performance::hash_each_multithreaded(Mode::Hash, &in_blocks, got);
+                    crate::performance::hash_each_multithreaded(Mode::Plain, &in_blocks, got);
                     assert_eq!(got, &want[..], "hash_each_multithreaded_with, {count} x {len} B, at end {at_end}");
-                    let mut hashers: Vec<crate::Hasher> = (0..count).map(|_| crate::Hasher::new()).collect();
+                    let mut hashers: Vec<crate::Hasher> = (0..count).map(|_| crate::Hasher::new(crate::Mode::Plain)).collect();
                     let pieces: Vec<(usize, &[u8])> = items.iter().copied().enumerate().collect();
                     crate::performance::update_each(&mut hashers, &pieces);
                     for (i, h) in hashers.iter().enumerate() {
                         assert_eq!(*h.finalize().as_bytes(), want[i], "update_each, {count} x {len} B, at end {at_end}");
                     }
                     if count == 1 {
-                        let mut h = crate::Hasher::new();
+                        let mut h = crate::Hasher::new(crate::Mode::Plain);
                         for piece in items[0].chunks(1000) {
                             h.update(piece);
                         }
@@ -980,12 +980,12 @@ mod guard_pages {
         // sixteen blocks) writes no byte outside it, from aligned and
         // unaligned positions.
         let mut reference = vec![0u8; 5 * 1024 + 200];
-        crate::Hasher::new().update(b"guarded").finalize_xof().fill(&mut reference);
+        crate::Hasher::new(crate::Mode::Plain).update(b"guarded").finalize_xof().fill(&mut reference);
         for len in [1, 64, 1023, 1024, 1025, 1088, 2048, 3000, 4096, 5 * 1024] {
             for skip in [0usize, 64, 37] {
                 for at_end in [true, false] {
                     let mut out = Guarded::new(len, at_end);
-                    let mut reader = crate::Hasher::new().update(b"guarded").finalize_xof();
+                    let mut reader = crate::Hasher::new(crate::Mode::Plain).update(b"guarded").finalize_xof();
                     reader.set_position(skip as u64);
                     reader.fill(out.bytes());
                     assert_eq!(out.bytes(), &reference[skip..][..len], "{len} B from {skip}, at end {at_end}");
@@ -1015,10 +1015,10 @@ mod guard_pages {
     /// extended output in each mode, for the calls below to match.
     fn reference(mode: Mode, input: &[u8]) -> ([u8; 32], [u8; 100]) {
         let mut hasher = match mode {
-            Mode::Hash => reference_impl::Hasher::new(),
+            Mode::Plain => reference_impl::Hasher::new(),
             Mode::Keyed(key) => reference_impl::Hasher::new_keyed(key),
             Mode::DeriveKey(context) => reference_impl::Hasher::new_derive_key(context),
-            Mode::DeriveKeyMaterial(_) => unreachable!("the context's own mode is DeriveKey"),
+            Mode::DeriveKeyWith(_) => unreachable!("the context's own mode is DeriveKey"),
         };
         hasher.update(input);
         let (mut digest, mut xof) = ([0; 32], [0; 100]);
@@ -1046,8 +1046,8 @@ mod guard_pages {
             let mut context_page = Guarded::new(context_text.len(), at_end);
             context_page.bytes().copy_from_slice(context_text.as_bytes());
             let context = core::str::from_utf8(context_page.bytes()).unwrap();
-            let context_key = crate::performance::hash_derive_key_context(context);
-            for (name, mode) in [("hash", Mode::Hash), ("keyed", Mode::Keyed(key)), ("derive key", Mode::DeriveKey(context))] {
+            let context_key = crate::performance::context_key(context);
+            for (name, mode) in [("hash", Mode::Plain), ("keyed", Mode::Keyed(key)), ("derive key", Mode::DeriveKey(context))] {
                 for len in lens {
                     let mut flush = filled(len, at_end);
                     let message = flush.bytes().to_vec();
@@ -1058,7 +1058,7 @@ mod guard_pages {
                     crate::convenience::hash_xof(mode, flush.bytes()).fill(xof.bytes());
                     assert_eq!(xof.bytes(), &want_xof[..], "hash_xof, {what}");
                     if let Mode::DeriveKey(_) = mode {
-                        let material = Mode::DeriveKeyMaterial(&context_key);
+                        let material = Mode::DeriveKeyWith(&context_key);
                         assert_eq!(*crate::convenience::hash_with(material, flush.bytes()).as_bytes(), want, "hash_with, its context hashed once, {what}");
                     }
                     // The message's whole blocks flush against the page.
@@ -1068,7 +1068,7 @@ mod guard_pages {
                         .expect("a page-end region of whole blocks starts aligned");
                     assert_eq!(*crate::performance::hash(mode, blocks, len).as_bytes(), want, "performance::hash, {what}");
                     assert_eq!(*crate::performance::hash_multithreaded(mode, blocks, len).as_bytes(), want, "hash_multithreaded, {what}");
-                    let mut hasher = crate::Hasher::new_with(mode);
+                    let mut hasher = crate::Hasher::new(mode);
                     hasher.update_multithreaded(flush.bytes());
                     assert_eq!(*hasher.finalize().as_bytes(), want, "update_multithreaded, {what}");
                     let (_out_page, out) = digests(1, !at_end);
@@ -1120,7 +1120,7 @@ fn test_hasher_gathers() {
     paint_test_input(&mut input);
     let pieces = [1, 1448, 4096, 1448, 16384, 31, 16383, 65536, 16385, 7, 1000];
     for start in 0..pieces.len() {
-        let mut hasher = crate::Hasher::new();
+        let mut hasher = crate::Hasher::new(crate::Mode::Plain);
         let mut done = 0;
         let mut k = start;
         while done < input.len() {
@@ -1141,9 +1141,9 @@ fn test_hasher_gathers() {
     }
     // A subtree of 64 chunks at offset 64 KiB, in small pieces, against one update.
     let sub = &input[..64 * CHUNK_LEN];
-    let mut whole = crate::Hasher::new();
+    let mut whole = crate::Hasher::new(crate::Mode::Plain);
     whole.set_input_offset(64 * CHUNK_LEN as u64).update(sub);
-    let mut pieced = crate::Hasher::new();
+    let mut pieced = crate::Hasher::new(crate::Mode::Plain);
     pieced.set_input_offset(64 * CHUNK_LEN as u64);
     for piece in sub.chunks(1448) {
         pieced.update(piece);
@@ -1175,7 +1175,7 @@ fn test_hash_comparisons_and_formats() {
 #[test]
 #[cfg(feature = "std")]
 fn test_debug_leaves_out_the_bytes() {
-    let mut hasher = crate::Hasher::new_with(crate::Mode::Keyed(&[0xab; 32]));
+    let mut hasher = crate::Hasher::new(crate::Mode::Keyed(&[0xab; 32]));
     hasher.update(&[0xab; 70]);
     let shown = std::format!("{hasher:?}");
     assert!(shown.starts_with("Hasher {") && shown.contains("flags: 16") && shown.contains("platform"), "{shown}");
@@ -1190,7 +1190,7 @@ fn test_hasher_io_write() {
     use std::io::Write;
     let mut input = [0u8; 3000];
     paint_test_input(&mut input);
-    let mut hasher = crate::Hasher::new();
+    let mut hasher = crate::Hasher::new(crate::Mode::Plain);
     assert_eq!(hasher.write(&input[..1000]).unwrap(), 1000);
     hasher.write_all(&input[1000..]).unwrap();
     hasher.flush().unwrap();
@@ -1302,9 +1302,9 @@ mod dispatch {
             ran(&|| {
                 let mut out = vec![[0u8; 32]; count];
                 let batch = &input[..crate::many::slot_len(len) * count / crate::BLOCK_LEN];
-                crate::performance::hash_many(crate::Mode::Hash, batch, len, &mut out);
+                crate::performance::hash_many(crate::Mode::Plain, batch, len, &mut out);
                 crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
-                crate::performance::hash_many(crate::Mode::Hash, batch, len, &mut out);
+                crate::performance::hash_many(crate::Mode::Plain, batch, len, &mut out);
             })
         };
         assert_eq!(crate::many::ONE_BLOCK_PAD_MIN, 11);
@@ -1367,37 +1367,37 @@ pub(crate) fn parent(left: &CVBytes, right: &CVBytes, mode: crate::Mode) -> crat
 #[test]
 #[should_panic]
 fn test_empty_subtree_should_panic() {
-    crate::Hasher::new().finalize_non_root();
+    crate::Hasher::new(crate::Mode::Plain).finalize_non_root();
 }
 
 #[test]
 #[should_panic]
 fn test_unaligned_offset_should_panic() {
-    crate::Hasher::new().set_input_offset(1);
+    crate::Hasher::new(crate::Mode::Plain).set_input_offset(1);
 }
 
 #[test]
 #[should_panic]
 fn test_hasher_already_accepted_input_should_panic() {
-    crate::Hasher::new().update(b"x").set_input_offset(0);
+    crate::Hasher::new(crate::Mode::Plain).update(b"x").set_input_offset(0);
 }
 
 #[test]
 #[should_panic]
 fn test_too_much_input_should_panic() {
-    crate::Hasher::new().set_input_offset(CHUNK_LEN as u64).update(&[0; CHUNK_LEN + 1]);
+    crate::Hasher::new(crate::Mode::Plain).set_input_offset(CHUNK_LEN as u64).update(&[0; CHUNK_LEN + 1]);
 }
 
 #[test]
 #[should_panic]
 fn test_set_input_offset_cant_finalize() {
-    crate::Hasher::new().set_input_offset(CHUNK_LEN as u64).finalize();
+    crate::Hasher::new(crate::Mode::Plain).set_input_offset(CHUNK_LEN as u64).finalize();
 }
 
 #[test]
 #[should_panic]
 fn test_set_input_offset_cant_finalize_xof() {
-    crate::Hasher::new().set_input_offset(CHUNK_LEN as u64).finalize_xof();
+    crate::Hasher::new(crate::Mode::Plain).set_input_offset(CHUNK_LEN as u64).finalize_xof();
 }
 
 /// Every test case hashed as subtrees of 1 to 32 chunks, merged layer by
@@ -1419,7 +1419,7 @@ fn test_grouped_hash() {
             let mut subtree_offset = 0;
             while subtree_offset < input.len() {
                 let take = core::cmp::min(subtree_len, input.len() - subtree_offset);
-                let subtree_cv = crate::Hasher::new().set_input_offset(subtree_offset as u64).update(&input[subtree_offset..][..take]).finalize_non_root();
+                let subtree_cv = crate::Hasher::new(crate::Mode::Plain).set_input_offset(subtree_offset as u64).update(&input[subtree_offset..][..take]).finalize_non_root();
                 chaining_values.push(subtree_cv);
                 subtree_offset += take;
             }
@@ -1427,7 +1427,7 @@ fn test_grouped_hash() {
             while chaining_values.len() > 2 {
                 let n = chaining_values.len();
                 for i in 0..(n / 2) {
-                    chaining_values[i] = parent(&chaining_values[2 * i], &chaining_values[2 * i + 1], crate::Mode::Hash).chaining_value();
+                    chaining_values[i] = parent(&chaining_values[2 * i], &chaining_values[2 * i + 1], crate::Mode::Plain).chaining_value();
                 }
                 if n % 2 == 1 {
                     chaining_values[n / 2] = chaining_values[n - 1];
@@ -1437,7 +1437,7 @@ fn test_grouped_hash() {
             assert_eq!(chaining_values.len(), 2);
             assert_eq!(
                 expected_hash,
-                parent(&chaining_values[0], &chaining_values[1], crate::Mode::Hash).root_hash(),
+                parent(&chaining_values[0], &chaining_values[1], crate::Mode::Plain).root_hash(),
                 "{case} bytes in subtrees of {subtree_chunks} chunks"
             );
         }

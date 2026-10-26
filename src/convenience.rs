@@ -13,7 +13,7 @@ use crate::{Hash, IV, Mode, OutputReader};
 /// let hash = blake3_servil::convenience::hash(b"foo");
 /// # let hash1 = hash;
 ///
-/// let hash = blake3_servil::performance::Hasher::new().update(b"foo").finalize();
+/// let hash = blake3_servil::performance::Hasher::new(blake3_servil::Mode::Plain).update(b"foo").finalize();
 /// # let hash2 = hash;
 /// # assert_eq!(hash1, hash2);
 /// ```
@@ -49,7 +49,7 @@ pub fn hash(input: &[u8]) -> Hash {
 /// use blake3_servil::{Mode, convenience};
 /// let key = [7u8; 32];
 /// let mac = convenience::hash_with(Mode::Keyed(&key), b"foo");
-/// assert_eq!(mac, blake3_servil::performance::Hasher::new_with(Mode::Keyed(&key)).update(b"foo").finalize());
+/// assert_eq!(mac, blake3_servil::performance::Hasher::new(Mode::Keyed(&key)).update(b"foo").finalize());
 /// ```
 #[inline]
 pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
@@ -66,9 +66,9 @@ pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
 /// # blake3_servil::initialize();
 /// use blake3_servil::{Mode, convenience};
 /// let mut out = [0u8; 100];
-/// convenience::hash_xof(Mode::Hash, b"foo").fill(&mut out);
+/// convenience::hash_xof(Mode::Plain, b"foo").fill(&mut out);
 /// assert_eq!(&out[..32], convenience::hash(b"foo").as_bytes());
 /// ```
 pub fn hash_xof(mode: Mode, input: &[u8]) -> OutputReader {
-    crate::Hasher::new_with(mode).update(input).finalize_xof()
+    crate::Hasher::new(mode).update(input).finalize_xof()
 }

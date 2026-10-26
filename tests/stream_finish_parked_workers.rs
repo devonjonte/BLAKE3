@@ -33,7 +33,7 @@ fn rounds(finish: bool) {
         let mut place = Hash::from([0; 32]);
         let ended = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             blake3_servil::performance::stream(
-                Mode::Hash,
+                Mode::Plain,
                 |_: &mut [Hash]| {},
                 |s| {
                     s.submit(blocks.blocks(), message.len(), &mut place);

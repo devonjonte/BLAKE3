@@ -13,7 +13,7 @@
 //! let hash1 = blake3_servil::convenience::hash(b"foobarbaz");
 //!
 //! // Hash an input incrementally.
-//! let mut hasher = blake3_servil::performance::Hasher::new();
+//! let mut hasher = blake3_servil::performance::Hasher::new(blake3_servil::Mode::Plain);
 //! hasher.update(b"foo");
 //! hasher.update(b"bar");
 //! hasher.update(b"baz");
@@ -39,7 +39,7 @@
 //!     batch.set(i, &[i as u8; 64]);
 //! }
 //! let mut hashes = [[0u8; 32]; 3];
-//! performance::hash_many(Mode::Hash, batch.blocks(), 64, &mut hashes);
+//! performance::hash_many(Mode::Plain, batch.blocks(), 64, &mut hashes);
 //! assert_eq!(hashes[2], *blake3_servil::convenience::hash(&[2u8; 64]).as_bytes());
 //! # }
 //! # Ok(())
@@ -85,8 +85,8 @@
 //! [`convenience::hash`] calls.
 //!
 //! **Keyed hashing and key derivation** run at the plain hash's speed
-//! through a [`Mode`], passed to every performance call, or to
-//! [`Hasher::new_with`].
+//! through a [`Mode`], which every performance call takes, the
+//! [`Hasher`]'s constructor among them.
 //!
 //! **Hashing now and then** (rather than nonstop) is slower per byte on
 //! every hash function, since its code and data must come back into the
@@ -913,7 +913,7 @@ fn hash_all_at_once(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8, 
 /// ```
 /// blake3_servil::initialize();
 /// let hash = blake3_servil::convenience::hash(b"foo");
-/// # assert_eq!(hash, blake3_servil::performance::Hasher::new().update(b"foo").finalize());
+/// # assert_eq!(hash, blake3_servil::performance::Hasher::new(blake3_servil::Mode::Plain).update(b"foo").finalize());
 /// ```
 pub fn initialize() {
     self_test::ensure();
@@ -955,7 +955,7 @@ pub fn initialize() {
 /// ```
 /// blake3_servil::initialize_multithreaded(None);
 /// let message = vec![blake3_servil::performance::Block::ZERO; (1 << 20) / 64];
-/// let hash = blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Hash, &message, 1 << 20);
+/// let hash = blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Plain, &message, 1 << 20);
 /// assert_eq!(hash, blake3_servil::convenience::hash(&[0u8; 1 << 20]));
 /// ```
 #[cfg(feature = "std")]
@@ -987,7 +987,7 @@ pub fn __all_workers_parked() -> bool {
     lanes::all_workers_parked()
 }
 
-/// An alias to distinguish [`hash_derive_key_context`](performance::hash_derive_key_context) outputs from other keys.
+/// An alias to distinguish [`context_key`](performance::context_key) outputs from other keys.
 pub type ContextKey = [u8; KEY_LEN];
 
 /// The most bytes a subtree starting at byte `input_offset` of a message
@@ -1008,20 +1008,20 @@ pub(crate) fn max_subtree_len(input_offset: u64) -> Option<u64> {
 /// Which of BLAKE3's three functions a call computes: the plain hash
 /// ([`hash`](convenience::hash)), the keyed hash, or key derivation. Every call that takes a mode runs each one at the same
 /// speed, but for `DeriveKey`, which first hashes its context string (once
-/// per call; [`DeriveKeyMaterial`](Mode::DeriveKeyMaterial) takes it hashed
+/// per call; [`DeriveKeyWith`](Mode::DeriveKeyWith) takes it hashed
 /// once for many calls).
 #[derive(Clone, Copy)]
 pub enum Mode<'a> {
-    /// The default hash function, as [`hash`](convenience::hash).
-    Hash,
+    /// The plain hash function, as [`hash`](convenience::hash).
+    Plain,
     /// The keyed hash function with this key.
     Keyed(&'a [u8; KEY_LEN]),
     /// The key derivation function with this context string; the input
     /// is the key material.
     DeriveKey(&'a str),
     /// The key derivation function with its context string already hashed
-    /// ([`hash_derive_key_context`](performance::hash_derive_key_context)); the input is the key material.
-    DeriveKeyMaterial(&'a ContextKey),
+    /// ([`context_key`](performance::context_key)); the input is the key material.
+    DeriveKeyWith(&'a ContextKey),
 }
 
 impl Mode<'_> {
@@ -1033,7 +1033,7 @@ impl Mode<'_> {
     #[inline]
     pub(crate) fn key(self, room: &mut core::mem::MaybeUninit<CVWords>) -> (&CVWords, u8) {
         match self {
-            Mode::Hash => (IV, 0),
+            Mode::Plain => (IV, 0),
             _ => {
                 let (key, flags) = self.key_and_flags();
                 (room.write(key), flags)
@@ -1045,10 +1045,10 @@ impl Mode<'_> {
     #[inline]
     fn key_and_flags(self) -> (CVWords, u8) {
         match self {
-            Mode::Hash => (*IV, 0),
+            Mode::Plain => (*IV, 0),
             Mode::Keyed(key) => (platform::words_from_le_bytes_32(key), KEYED_HASH),
-            Mode::DeriveKey(context) => (platform::words_from_le_bytes_32(&performance::hash_derive_key_context(context)), DERIVE_KEY_MATERIAL),
-            Mode::DeriveKeyMaterial(context_key) => (platform::words_from_le_bytes_32(context_key), DERIVE_KEY_MATERIAL),
+            Mode::DeriveKey(context) => (platform::words_from_le_bytes_32(&performance::context_key(context)), DERIVE_KEY_MATERIAL),
+            Mode::DeriveKeyWith(context_key) => (platform::words_from_le_bytes_32(context_key), DERIVE_KEY_MATERIAL),
         }
     }
 }

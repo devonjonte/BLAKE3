@@ -67,7 +67,7 @@ fn every_call_inside_guard_pages() {
     for at_end in [true, false] {
         let key = Guarded::with(&[7u8; 32], at_end);
         let context = Guarded::with(b"guard pages 2026-10-25 the C calls\0", at_end);
-        let modes = unsafe { [("plain", b3_plain()), ("keyed", b3_keyed(key.ptr())), ("derive key", b3_derive_key(context.ptr() as *const c_char))] };
+        let modes = unsafe { [("plain", b3_mode_plain()), ("keyed", b3_mode_keyed(key.ptr())), ("derive key", b3_mode_derive_key(context.ptr() as *const c_char))] };
         for (name, mode) in &modes {
             for len in lens {
                 let what = format!("{name}, {len} B, at end {at_end}");
@@ -82,17 +82,17 @@ fn every_call_inside_guard_pages() {
                     // A hasher whose state sits flush against a page too.
                     let state = Guarded::new(core::mem::size_of::<B3Hasher>(), at_end);
                     let hasher = state.ptr() as *mut B3Hasher;
-                    b3_hasher_init(hasher, mode);
+                    b3_hasher_new(hasher, mode);
                     b3_hasher_update(hasher, input, len.min(1000));
                     b3_hasher_update_multithreaded(hasher, flush.bytes()[len.min(1000)..].as_ptr() as *const c_void, len - len.min(1000));
                     assert_eq!(b3_hasher_finalize(hasher).bytes, want, "b3_hasher_finalize, {what}");
                     let mut plain: Box<B3Hasher> = Box::new(core::mem::zeroed());
-                    b3_hasher_init(&mut *plain, mode);
+                    b3_hasher_new(&mut *plain, mode);
                     b3_hasher_update(&mut *plain, message.as_ptr() as *const c_void, len);
-                    b3_hasher_output(&*plain, 7, xof_want.as_mut_ptr() as *mut c_void, 100);
+                    b3_hasher_finalize_xof(&*plain, 7, xof_want.as_mut_ptr() as *mut c_void, 100);
                     let mut xof = Guarded::new(100, !at_end);
-                    b3_hasher_output(hasher, 7, xof.ptr() as *mut c_void, 100);
-                    assert_eq!(xof.bytes(), &xof_want[..], "b3_hasher_output, {what}");
+                    b3_hasher_finalize_xof(hasher, 7, xof.ptr() as *mut c_void, 100);
+                    assert_eq!(xof.bytes(), &xof_want[..], "b3_hasher_finalize_xof, {what}");
                     // A batch of three in whole blocks flush against a page,
                     // its digests flush against another.
                     let stride = if len == 0 { 64 } else { len.div_ceil(64) * 64 };

@@ -77,8 +77,9 @@ each check covers and what remains unproved.
    material)` is `convenience::hash_with(Mode::DeriveKey(context),
    material)`, and `convenience::hash_xof(mode, input)` gives extended
    output. `performance`, for power users, has every way to hash fast,
-   the `Hasher` among them (`Hasher::new_with(mode)` replaces
-   `Hasher::new_keyed` and `Hasher::new_derive_key`): the program takes
+   the `Hasher` among them (`Hasher::new(mode)` replaces `Hasher::new()`,
+   `Hasher::new_keyed` and `Hasher::new_derive_key`; the plain hash is
+   `Mode::Plain`, and `Hasher` has no `Default`): the program takes
    on more of the work, with inputs as `Block`s (64 bytes on a 64-byte
    boundary: a message is blocks and a length, a batch messages of one
    length), digests into its places, and a `Mode` in every call.
@@ -109,7 +110,7 @@ each check covers and what remains unproved.
 - `performance::stream()`: inputs one after another, hashed behind the
   caller.
 - A C API in `capi/b3.h`. The library is `libb3_servil`. C11 and C++11.
-- `Mode::DeriveKeyMaterial` with `performance::hash_derive_key_context`: one context
+- `Mode::DeriveKeyWith` with `performance::context_key`: one context
   hashed once for many derivations.
 
 ## Different

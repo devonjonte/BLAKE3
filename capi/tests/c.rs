@@ -91,7 +91,7 @@ fn from_c() {
         let input: Vec<u8> = (0..100000).map(|i| (i % 251) as u8).collect();
         let key = *b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
-        let modes = [blake3_servil::Mode::Hash, blake3_servil::Mode::Keyed(&key), blake3_servil::Mode::DeriveKey(context)];
+        let modes = [blake3_servil::Mode::Plain, blake3_servil::Mode::Keyed(&key), blake3_servil::Mode::DeriveKey(context)];
         let mut expected = Vec::new();
         for mode in modes {
             for len in [0, 1025, 100000] {

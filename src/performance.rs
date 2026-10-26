@@ -15,7 +15,7 @@
 //!   pieces of any length anywhere (it copies short ones into its own
 //!   buffer); an aligned long piece runs fastest.
 //! - **Digests go where the program says**: into its slices and places.
-//! - **Every call takes a [`Mode`]**: `Mode::Hash` for the plain hash.
+//! - **Every call takes a [`Mode`]**: `Mode::Plain` for the plain hash.
 //!
 //! For one call per hash, any slice, the result returned, see the
 //! [`convenience`](crate::convenience) API.
@@ -41,7 +41,7 @@ use crate::{ContextKey, DERIVE_KEY_CONTEXT, Hash, IV, Mode, OUT_LEN};
 /// use blake3_servil::{Mode, convenience, performance::{self, Batch}};
 /// let mut message = Batch::new(100, 1);
 /// message.set(0, &[7u8; 100]);
-/// assert_eq!(performance::hash(Mode::Hash, message.blocks(), 100), convenience::hash(&[7u8; 100]));
+/// assert_eq!(performance::hash(Mode::Plain, message.blocks(), 100), convenience::hash(&[7u8; 100]));
 /// # }
 /// ```
 // Inlined, so a constant mode folds to its constants (as
@@ -74,7 +74,7 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 ///     leaves.set(i, &[7u8; 256]);
 /// }
 /// let mut hashes = vec![[0u8; 32]; 1000];
-/// performance::hash_many(Mode::Hash, leaves.blocks(), 256, &mut hashes);
+/// performance::hash_many(Mode::Plain, leaves.blocks(), 256, &mut hashes);
 /// assert_eq!(hashes[3], *convenience::hash(&[7u8; 256]).as_bytes());
 /// # }
 /// ```
@@ -102,7 +102,7 @@ pub fn hash_many(mode: Mode, input: &[Block], message_len: usize, out: &mut [[u8
 /// let mut leaves = blake3_servil::performance::Batch::new(256, 4096);
 /// (0..4096).for_each(|i| leaves.set(i, &[7u8; 256]));
 /// let mut hashes = vec![[0u8; 32]; 4096];
-/// blake3_servil::performance::hash_many_multithreaded(Mode::Hash, leaves.blocks(), 256, &mut hashes);
+/// blake3_servil::performance::hash_many_multithreaded(Mode::Plain, leaves.blocks(), 256, &mut hashes);
 /// assert!(hashes.iter().all(|h| h == blake3_servil::convenience::hash(&[7u8; 256]).as_bytes()));
 /// ```
 ///
@@ -131,7 +131,7 @@ pub fn hash_many_multithreaded(mode: Mode, input: &[Block], message_len: usize, 
 /// # blake3_servil::initialize_multithreaded(None);
 /// use blake3_servil::{Mode, performance::{self, Block}};
 /// let message = vec![Block::ZERO; 1 << 14];
-/// let hash = performance::hash_multithreaded(Mode::Hash, &message, 1 << 20);
+/// let hash = performance::hash_multithreaded(Mode::Plain, &message, 1 << 20);
 /// assert_eq!(hash, blake3_servil::convenience::hash(&[0u8; 1 << 20]));
 /// ```
 ///
@@ -174,7 +174,7 @@ pub fn hash_multithreaded(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// This has the same security requirement as key derivation. **The context
 /// string should be hardcoded, globally unique, and application-specific.**
 ///
-/// Its one use is [`Mode::DeriveKeyMaterial`]: a program that derives many
+/// Its one use is [`Mode::DeriveKeyWith`]: a program that derives many
 /// keys from one context hashes the context once.
 ///
 /// # Example
@@ -183,10 +183,10 @@ pub fn hash_multithreaded(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// # blake3_servil::initialize();
 /// use blake3_servil::Mode;
 ///
-/// let context_key = blake3_servil::performance::hash_derive_key_context("foo");
-/// let derived = blake3_servil::convenience::hash_with(Mode::DeriveKeyMaterial(&context_key), b"bar");
+/// let context_key = blake3_servil::performance::context_key("foo");
+/// let derived = blake3_servil::convenience::hash_with(Mode::DeriveKeyWith(&context_key), b"bar");
 /// assert_eq!(derived, blake3_servil::convenience::hash_with(Mode::DeriveKey("foo"), b"bar"));
 /// ```
-pub fn hash_derive_key_context(context: &str) -> ContextKey {
+pub fn context_key(context: &str) -> ContextKey {
     crate::hash_serial(context.as_bytes(), IV, DERIVE_KEY_CONTEXT).0
 }

@@ -186,7 +186,7 @@ src/lib.rs	delete ! in prefetch_kernels	1	speed: whether and what to prefetch af
 src/lib.rs	delete ! in prefetch_update_kernels	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	delete match arm (Platform::AVX2, 6..= 7) in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	delete match arm (Platform::SSE41 | Platform::AVX2, 3) in spare_lane	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/lib.rs	delete match arm Mode::Hash in Mode<'_>::key	1	equivalent: without the arm, Mode::Hash takes the general arm, which writes the same IV and flags into the room; the arm saves the copy
+src/lib.rs	delete match arm Mode::Plain in Mode<'_>::key	1	equivalent: without the arm, Mode::Plain takes the general arm, which writes the same IV and flags into the room; the arm saves the copy
 src/lib.rs	replace % with + in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace % with / in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace && with || in batch_after_pause	1	speed: whether and what to prefetch after a pause (no effect on results)

@@ -48,7 +48,7 @@ fn reference(m: usize, data: &[u8]) -> [u8; 32] {
 }
 
 fn modes() -> [Mode<'static>; 3] {
-    [Mode::Hash, Mode::Keyed(KEY), Mode::DeriveKey(CONTEXT)]
+    [Mode::Plain, Mode::Keyed(KEY), Mode::DeriveKey(CONTEXT)]
 }
 
 /// Each one-shot call's full form (every mode), on `data` (its blocks for
@@ -82,7 +82,7 @@ fn one_message_every_form_matches_the_vectors() {
         let data = input(len);
         assert_eq!(blake3_servil::convenience::hash(&data), Hash::from(expected[0]), "hash, {len} bytes");
         assert_eq!(
-            blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Hash, message(&data).blocks(), len),
+            blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Plain, message(&data).blocks(), len),
             Hash::from(expected[0]),
             "hash_multithreaded, {len} bytes"
         );
@@ -105,9 +105,9 @@ fn one_message_every_form_matches_the_vectors() {
 fn a_message_in_pieces_matches_the_reference() {
     blake3_servil::initialize_multithreaded(None);
     let hashers = |m: usize| match m {
-        0 => blake3_servil::performance::Hasher::new(),
-        1 => blake3_servil::performance::Hasher::new_with(Mode::Keyed(KEY)),
-        _ => blake3_servil::performance::Hasher::new_with(Mode::DeriveKey(CONTEXT)),
+        0 => blake3_servil::performance::Hasher::new(blake3_servil::Mode::Plain),
+        1 => blake3_servil::performance::Hasher::new(Mode::Keyed(KEY)),
+        _ => blake3_servil::performance::Hasher::new(Mode::DeriveKey(CONTEXT)),
     };
     let cases: [(usize, usize); 8] = [
         (64 << 10, 64 << 10),
@@ -148,7 +148,7 @@ fn one_message_large_inputs_match_the_reference() {
     for len in LARGE {
         let data = input(len);
         assert_eq!(
-            blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Hash, message(&data).blocks(), len),
+            blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Plain, message(&data).blocks(), len),
             Hash::from(reference(0, &data)),
             "hash_multithreaded, {len} bytes"
         );
@@ -201,10 +201,10 @@ fn batches_every_form_match_the_reference() {
         let (buffer, messages) = padded_batch(count, len);
         let expected: Vec<Vec<[u8; 32]>> = (0..3).map(|m| messages.iter().map(|message| reference(m, message)).collect()).collect();
         let mut out = vec![[0u8; 32]; count];
-        blake3_servil::performance::hash_many(blake3_servil::Mode::Hash, buffer.blocks(), len, &mut out);
+        blake3_servil::performance::hash_many(blake3_servil::Mode::Plain, buffer.blocks(), len, &mut out);
         assert_eq!(out, expected[0], "hash_many, {count} x {len} B");
         out.fill([0; 32]);
-        blake3_servil::performance::hash_many_multithreaded(blake3_servil::Mode::Hash, buffer.blocks(), len, &mut out);
+        blake3_servil::performance::hash_many_multithreaded(blake3_servil::Mode::Plain, buffer.blocks(), len, &mut out);
         assert_eq!(out, expected[0], "hash_many_multithreaded, {count} x {len} B");
         for (m, mode) in modes().into_iter().enumerate() {
             for (name, form) in HASH_MANY_WITH {
@@ -221,7 +221,7 @@ fn batches_every_form_match_the_reference() {
 fn a_batch_whose_buffer_is_short_of_its_messages_is_refused() {
     blake3_servil::initialize_multithreaded(None);
     let mut out = [[0u8; 32]; 2];
-    blake3_servil::performance::hash_many(blake3_servil::Mode::Hash, &[Block::ZERO], 64, &mut out);
+    blake3_servil::performance::hash_many(blake3_servil::Mode::Plain, &[Block::ZERO], 64, &mut out);
 }
 
 // ---------- The stream ----------
@@ -307,7 +307,7 @@ fn bursts_of_large_batches_after_pauses_complete() {
     let mut places = vec![zeros(4096); 4];
     for burst in 0..400 {
         blake3_servil::performance::stream(
-            Mode::Hash,
+            Mode::Plain,
             |_: &mut [Hash]| {},
             |s| {
                 for place in places.iter_mut() {
@@ -335,7 +335,7 @@ fn a_stream_cycles_a_fixed_set_of_places() {
     let free = std::cell::RefCell::new(places.iter_mut().collect::<Vec<_>>());
     let got = std::cell::RefCell::new(Vec::new());
     blake3_servil::performance::stream(
-        Mode::Hash,
+        Mode::Plain,
         |done: &mut [Hash]| {
             got.borrow_mut().push(*done[0].as_bytes());
             free.borrow_mut().push(&mut done[0]);
@@ -400,7 +400,7 @@ fn a_panicking_handler_unwinds_and_the_pool_goes_on() {
     let result = std::panic::catch_unwind(|| {
         let mut places = zeros(8);
         blake3_servil::performance::stream(
-            Mode::Hash,
+            Mode::Plain,
             |_: &mut [Hash]| panic!("a handler's panic"),
             |s| {
                 for place in places.iter_mut() {
@@ -413,7 +413,7 @@ fn a_panicking_handler_unwinds_and_the_pool_goes_on() {
     assert!(result.is_err(), "the handler's panic reaches the caller");
     let mut place = Hash::from_bytes([0; 32]);
     blake3_servil::performance::stream(
-        Mode::Hash,
+        Mode::Plain,
         |_: &mut [Hash]| {},
         |s| {
             s.submit(blocks.blocks(), 100_000, &mut place);
@@ -422,7 +422,7 @@ fn a_panicking_handler_unwinds_and_the_pool_goes_on() {
     );
     assert_eq!(*place.as_bytes(), reference(0, &bytes));
     assert_eq!(
-        *blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Hash, message(&input(3 << 20)).blocks(), 3 << 20).as_bytes(),
+        *blake3_servil::performance::hash_multithreaded(blake3_servil::Mode::Plain, message(&input(3 << 20)).blocks(), 3 << 20).as_bytes(),
         reference(0, &input(3 << 20))
     );
 }

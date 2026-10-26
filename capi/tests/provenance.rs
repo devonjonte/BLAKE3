@@ -25,7 +25,7 @@ unsafe extern "C" fn completed(context: *mut c_void, places: *mut Digest, count:
 #[test]
 fn miri_callback_context_retains_pointer_provenance() {
     let input = Input([42; 64]);
-    let mode = b3_plain();
+    let mode = b3_mode_plain();
     let expected = unsafe { b3_hash(&mode, input.0.as_ptr().cast(), input.0.len()) };
     let context = Box::into_raw(Box::new(Context { expected, calls: 0 }));
     let mut output = Digest { bytes: [0; 32] };

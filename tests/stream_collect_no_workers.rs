@@ -38,7 +38,7 @@ fn a_caller_looping_on_collect_makes_progress_without_workers() {
         let free = std::cell::RefCell::new(places.iter_mut().collect::<Vec<_>>());
         let got = std::cell::RefCell::new(Vec::new());
         blake3_servil::performance::stream(
-            Mode::Hash,
+            Mode::Plain,
             |place: &mut [Hash]| {
                 got.borrow_mut().push(place[0]);
                 free.borrow_mut().push(&mut place[0]);

@@ -23,8 +23,8 @@ use crate::{CHUNK_END, CHUNK_LEN, CHUNK_START, CVBytes, CVWords, ChunkState, Has
 /// let blocks: Vec<Vec<Block>> = (0..100).map(|i| vec![Block([i as u8; 64]); (1000 * i as usize).div_ceil(64)]).collect();
 /// let items: Vec<(&[Block], usize)> = blocks.iter().enumerate().map(|(i, b)| (&b[..], 1000 * i)).collect();
 /// let (mut a, mut b) = (vec![[0u8; 32]; 100], vec![[0u8; 32]; 100]);
-/// performance::hash_each_multithreaded(Mode::Hash, &items, &mut a);
-/// performance::hash_each(Mode::Hash, &items, &mut b);
+/// performance::hash_each_multithreaded(Mode::Plain, &items, &mut a);
+/// performance::hash_each(Mode::Plain, &items, &mut b);
 /// assert_eq!(a, b);
 /// ```
 #[cfg(feature = "std")]
@@ -63,7 +63,7 @@ pub fn hash_each_multithreaded(mode: Mode, items: &[(&[Block], usize)], out: &mu
 /// ```
 /// # blake3_servil::initialize();
 /// use blake3_servil::performance::{self, Hasher};
-/// let mut hashers = vec![Hasher::new(), Hasher::new()];
+/// let mut hashers = vec![Hasher::new(blake3_servil::Mode::Plain), Hasher::new(blake3_servil::Mode::Plain)];
 /// performance::update_each(&mut hashers, &[(0, b"ab"), (1, b"xyz"), (0, b"c")]);
 /// let mut out = [[0u8; 32]; 2];
 /// performance::finalize_each(&hashers, &[0, 1], &mut out);
@@ -234,7 +234,7 @@ const ALONE_CHUNKS: usize = 16;
 /// let blocks: Vec<Vec<Block>> = (0..100).map(|i| vec![Block([i as u8; 64]); (100 * i as usize).div_ceil(64)]).collect();
 /// let items: Vec<(&[Block], usize)> = blocks.iter().enumerate().map(|(i, b)| (&b[..], 100 * i)).collect();
 /// let mut out = vec![[0u8; 32]; items.len()];
-/// performance::hash_each(Mode::Hash, &items, &mut out);
+/// performance::hash_each(Mode::Plain, &items, &mut out);
 /// assert_eq!(&out[42], convenience::hash(&[42u8; 4200]).as_bytes());
 /// ```
 pub fn hash_each(mode: Mode, items: &[(&[Block], usize)], out: &mut [[u8; OUT_LEN]]) {
@@ -354,9 +354,9 @@ mod test {
         let items: Vec<&[u8]> = input.chunks(crate::lanes::MIN_SPLIT_LEN / 40 + 7).collect();
         let (mut a, mut b) = (vec![[0u8; OUT_LEN]; items.len()], vec![[0u8; OUT_LEN]; items.len()]);
         crate::RAN.with(|r| r.set(0));
-        crate::performance::hash_each_multithreaded(Mode::Hash, &crate::test::items(&crate::test::messages(&items), &items), &mut a);
+        crate::performance::hash_each_multithreaded(Mode::Plain, &crate::test::items(&crate::test::messages(&items), &items), &mut a);
         crate::lanes::assert_past_the_split("the items");
-        crate::performance::hash_each(Mode::Hash, &crate::test::items(&crate::test::messages(&items), &items), &mut b);
+        crate::performance::hash_each(Mode::Plain, &crate::test::items(&crate::test::messages(&items), &items), &mut b);
         assert_eq!(a, b);
     }
 
@@ -377,7 +377,7 @@ mod test {
             })
             .collect();
         let key = [9u8; 32];
-        for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("each mt")] {
+        for mode in [Mode::Plain, Mode::Keyed(&key), Mode::DeriveKey("each mt")] {
             let (mut a, mut b) = (vec![[0u8; OUT_LEN]; items.len()], vec![[0u8; OUT_LEN]; items.len()]);
             crate::performance::hash_each_multithreaded(mode, &crate::test::items(&crate::test::messages(&items), &items), &mut a);
             crate::performance::hash_each(mode, &crate::test::items(&crate::test::messages(&items), &items), &mut b);
@@ -421,12 +421,12 @@ mod test {
         let mut hashers: Vec<Hasher> = subtrees
             .iter()
             .map(|&(offset, _)| {
-                let mut h = Hasher::new();
+                let mut h = Hasher::new(crate::Mode::Plain);
                 h.set_input_offset(offset as u64);
                 h
             })
             .collect();
-        hashers.extend(whole.iter().map(|_| Hasher::new()));
+        hashers.extend(whole.iter().map(|_| Hasher::new(crate::Mode::Plain)));
         let lens: Vec<usize> = subtrees.iter().map(|&(_, len)| len).chain(whole).collect();
         let mut done = vec![0usize; lens.len()];
         let pieces = [1448usize, 31, 16384, 4096, 1];
@@ -443,7 +443,7 @@ mod test {
             crate::performance::update_each(&mut hashers, &turn);
         }
         for (i, &(offset, len)) in subtrees.iter().enumerate() {
-            let mut one = Hasher::new();
+            let mut one = Hasher::new(crate::Mode::Plain);
             one.set_input_offset(offset as u64).update(&input[..len]);
             assert_eq!(hashers[i].finalize_non_root(), one.finalize_non_root(), "subtree at {offset}, {len} bytes");
         }
@@ -460,7 +460,7 @@ mod test {
             h.core.chunk_state.platform = platform;
             h
         };
-        let mut hashers: Vec<Hasher> = (0..6).map(|i| on(Hasher::new_with(crate::Mode::Keyed(&keys[i % 2])))).collect();
+        let mut hashers: Vec<Hasher> = (0..6).map(|i| on(Hasher::new(crate::Mode::Keyed(&keys[i % 2])))).collect();
         // Each hasher a group in, its message at a different offset into the
         // input; then one turn of two pieces each, which stage its second
         // group from its start and fill it (held), and 7 bytes more.
@@ -480,7 +480,7 @@ mod test {
         // And each hasher's first group (chunk counter zero, which hands
         // its core the group's two halves), six at once: a first piece
         // longer than a chunk, so it is staged from offset zero.
-        let mut fresh: Vec<Hasher> = (0..6).map(|i| on(Hasher::new_with(crate::Mode::Keyed(&keys[i % 2])))).collect();
+        let mut fresh: Vec<Hasher> = (0..6).map(|i| on(Hasher::new(crate::Mode::Keyed(&keys[i % 2])))).collect();
         let turn: Vec<(usize, &[u8])> =
             (0..6).flat_map(|i| [(i, &input[start(i)..start(i) + 1100]), (i, &input[start(i) + 1100..start(i) + group + 7])]).collect();
         crate::performance::update_each(&mut fresh, &turn);
@@ -503,7 +503,7 @@ mod test {
             let key = [5u8; 32];
             // Every third hasher keyed: a turn's held groups in two kinds.
             let mut hashers: Vec<Hasher> =
-                (0..lens.len()).map(|i| if i % 3 == 1 { Hasher::new_with(crate::Mode::Keyed(&key)) } else { Hasher::new() }).collect();
+                (0..lens.len()).map(|i| if i % 3 == 1 { Hasher::new(crate::Mode::Keyed(&key)) } else { Hasher::new(crate::Mode::Plain) }).collect();
             let mut done = vec![0usize; lens.len()];
             let mut k = 0;
             while done.iter().zip(&lens).any(|(d, l)| d < l) {
@@ -571,7 +571,7 @@ mod test {
         }
         let items: Vec<&[u8]> = lens.iter().enumerate().map(|(j, &l)| &input[j % 3..j % 3 + l.min(input.len() - 2)]).collect();
         let key = [9u8; 32];
-        for mode in [Mode::Hash, Mode::Keyed(&key), Mode::DeriveKey("hash_each test")] {
+        for mode in [Mode::Plain, Mode::Keyed(&key), Mode::DeriveKey("hash_each test")] {
             let mut out = vec![[0u8; OUT_LEN]; items.len()];
             crate::performance::hash_each(mode, &crate::test::items(&crate::test::messages(&items), &items), &mut out);
             for (item, digest) in items.iter().zip(&out) {

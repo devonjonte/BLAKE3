@@ -135,11 +135,11 @@ impl Args {
         let base_hasher = if inner.keyed {
             // In keyed mode, since stdin is used for the key, we can't handle
             // `-` arguments. Input::open handles that case below.
-            blake3::performance::Hasher::new_with(blake3::Mode::Keyed(&read_key_from_stdin()?))
+            blake3::performance::Hasher::new(blake3::Mode::Keyed(&read_key_from_stdin()?))
         } else if let Some(ref context) = inner.derive_key {
-            blake3::performance::Hasher::new_with(blake3::Mode::DeriveKey(context))
+            blake3::performance::Hasher::new(blake3::Mode::DeriveKey(context))
         } else {
-            blake3::performance::Hasher::new()
+            blake3::performance::Hasher::new(blake3::Mode::Plain)
         };
         Ok(Self { inner, file_args, base_hasher })
     }

@@ -15,7 +15,7 @@ fn every_call_against_the_test_vectors() {
     let json: serde_json::Value = serde_json::from_str(include_str!("../../test_vectors/test_vectors.json")).unwrap();
     let key: [u8; 32] = json["key"].as_str().unwrap().as_bytes().try_into().unwrap();
     let context = std::ffi::CString::new(json["context_string"].as_str().unwrap()).unwrap();
-    let modes = unsafe { [("hash", b3_plain()), ("keyed_hash", b3_keyed(key.as_ptr())), ("derive_key", b3_derive_key(context.as_ptr()))] };
+    let modes = unsafe { [("hash", b3_mode_plain()), ("keyed_hash", b3_mode_keyed(key.as_ptr())), ("derive_key", b3_mode_derive_key(context.as_ptr()))] };
     let mut hasher: Box<B3Hasher> = unsafe { Box::new(core::mem::zeroed()) };
     for case in json["cases"].as_array().unwrap() {
         let len = case["input_len"].as_u64().unwrap() as usize;
@@ -43,7 +43,7 @@ fn every_call_against_the_test_vectors() {
                 b3_hash_many_multithreaded(mode, batch.as_ptr() as *const c_void, len, 3, out.as_mut_ptr());
                 assert!(out.iter().all(|d| hex(&d.bytes) == expected[..64]), "b3_hash_many_multithreaded, {what}");
                 // A hasher fed in pieces of 1, 1000, and the rest.
-                b3_hasher_init(&mut *hasher, mode);
+                b3_hasher_new(&mut *hasher, mode);
                 let (a, rest) = input.split_at(len.min(1));
                 let (b, c) = rest.split_at(rest.len().min(1000));
                 b3_hasher_update(&mut *hasher, a.as_ptr() as *const c_void, a.len());
@@ -52,8 +52,8 @@ fn every_call_against_the_test_vectors() {
                 assert_eq!(hex(&b3_hasher_finalize(&*hasher).bytes), expected[..64], "b3_hasher_finalize, {what}");
                 let full = expected.len() / 2;
                 let mut output = vec![0u8; full - 7];
-                b3_hasher_output(&*hasher, 7, output.as_mut_ptr() as *mut c_void, output.len());
-                assert_eq!(hex(&output), expected[14..], "b3_hasher_output from byte 7, {what}");
+                b3_hasher_finalize_xof(&*hasher, 7, output.as_mut_ptr() as *mut c_void, output.len());
+                assert_eq!(hex(&output), expected[14..], "b3_hasher_finalize_xof from byte 7, {what}");
             }
         }
     }
@@ -62,7 +62,7 @@ fn every_call_against_the_test_vectors() {
 /// The empty input through NULL pointers, as the contract allows.
 #[test]
 fn null_with_nothing() {
-    let mode = b3_plain();
+    let mode = b3_mode_plain();
     let empty = unsafe { b3_hash(&mode, core::ptr::null(), 0) };
     assert_eq!(empty.bytes, *blake3_servil::convenience::hash(b"").as_bytes());
     unsafe { b3_hash_many(&mode, core::ptr::null(), 64, 0, core::ptr::null_mut()) };

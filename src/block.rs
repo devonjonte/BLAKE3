@@ -78,12 +78,12 @@ impl core::fmt::Debug for Block {
 ///     batch.set(i, &[i as u8; 100]);
 /// }
 /// let mut out = [[0u8; 32]; 3];
-/// performance::hash_many(Mode::Hash, batch.blocks(), 100, &mut out);
+/// performance::hash_many(Mode::Plain, batch.blocks(), 100, &mut out);
 /// assert_eq!(out[2], *convenience::hash(&[2u8; 100]).as_bytes());
 ///
 /// // Read straight into a message's own bytes.
 /// batch.message_mut(1).copy_from_slice(&[9u8; 100]);
-/// performance::hash_many(Mode::Hash, batch.blocks(), 100, &mut out);
+/// performance::hash_many(Mode::Plain, batch.blocks(), 100, &mut out);
 /// assert_eq!(out[1], *convenience::hash(&[9u8; 100]).as_bytes());
 /// ```
 #[cfg(feature = "std")]
@@ -174,7 +174,7 @@ mod test {
                     assert!(slot[len..].iter().all(|&b| b == 0), "{len} B, message {i}: its padding");
                 }
                 let mut out = [[0u8; 32]; 5];
-                hash_many(Mode::Hash, batch.blocks(), len, &mut out);
+                hash_many(Mode::Plain, batch.blocks(), len, &mut out);
                 for (i, d) in out.iter().enumerate() {
                     assert_eq!(*d, *crate::convenience::hash(&std::vec![round * 16 + i as u8; len]).as_bytes(), "{len} B, message {i}, round {round}");
                 }

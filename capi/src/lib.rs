@@ -44,10 +44,10 @@ const _: () = assert!(size_of::<Hasher>() == HASHER_SIZE && align_of::<Hasher>()
 impl B3Mode {
     fn mode(&self) -> Mode<'_> {
         match self.kind {
-            0 => Mode::Hash,
+            0 => Mode::Plain,
             1 => Mode::Keyed(&self.key),
-            2 => Mode::DeriveKeyMaterial(&self.key),
-            kind => panic!("b3: a b3_mode made by b3_plain, b3_keyed, or b3_derive_key (kind {kind})"),
+            2 => Mode::DeriveKeyWith(&self.key),
+            kind => panic!("b3: a b3_mode made by b3_mode_plain, b3_mode_keyed, or b3_mode_derive_key (kind {kind})"),
         }
     }
 }
@@ -112,14 +112,14 @@ pub extern "C" fn b3_version() -> *const c_char {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn b3_plain() -> B3Mode {
+pub extern "C" fn b3_mode_plain() -> B3Mode {
     B3Mode { kind: 0, key: [0; 32] }
 }
 
 /// # Safety
 /// `key` points at 32 bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn b3_keyed(key: *const u8) -> B3Mode {
+pub unsafe extern "C" fn b3_mode_keyed(key: *const u8) -> B3Mode {
     check_range(key.cast(), 32, "the key");
     B3Mode { kind: 1, key: unsafe { *(key as *const [u8; 32]) } }
 }
@@ -127,11 +127,11 @@ pub unsafe extern "C" fn b3_keyed(key: *const u8) -> B3Mode {
 /// # Safety
 /// `context` is a NUL-terminated string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn b3_derive_key(context: *const c_char) -> B3Mode {
+pub unsafe extern "C" fn b3_mode_derive_key(context: *const c_char) -> B3Mode {
     blake3_servil::initialize();
     assert!(!context.is_null(), "b3: the context is NULL");
     let context = unsafe { CStr::from_ptr(context) }.to_str().expect("b3: the context is UTF-8");
-    B3Mode { kind: 2, key: blake3_servil::performance::hash_derive_key_context(context) }
+    B3Mode { kind: 2, key: blake3_servil::performance::context_key(context) }
 }
 
 /// # Safety
@@ -151,7 +151,7 @@ pub unsafe extern "C" fn b3_hash_multithreaded(mode: *const B3Mode, input: *cons
     let mode = unsafe { self::mode(mode) };
     // Any pointer, as b3_hash takes: the Hasher takes any slice, at the
     // one-shot's speed (the i7, 512 KiB to 1 GiB).
-    digest(Hasher::new_with(mode.mode()).update_multithreaded(unsafe { bytes(input, len, "the input") }).finalize())
+    digest(Hasher::new(mode.mode()).update_multithreaded(unsafe { bytes(input, len, "the input") }).finalize())
 }
 
 /// The batch's input and digests, as slices.
@@ -203,13 +203,13 @@ pub unsafe extern "C" fn b3_hash_many_multithreaded(mode: *const B3Mode, input: 
 /// # Safety
 /// `hasher` points at a `b3_hasher`'s memory; `mode` is a mode.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn b3_hasher_init(hasher: *mut B3Hasher, mode: *const B3Mode) {
+pub unsafe extern "C" fn b3_hasher_new(hasher: *mut B3Hasher, mode: *const B3Mode) {
     blake3_servil::initialize();
     check_hasher(hasher);
     check_disjoint(hasher.cast(), size_of::<B3Hasher>(), mode.cast(), size_of::<B3Mode>());
     let mode = unsafe { self::mode(mode) };
     let new = match mode.mode() {
-        _ => Hasher::new_with(mode.mode()),
+        _ => Hasher::new(mode.mode()),
     };
     // Sound: the memory is the caller's, sized and aligned for a Hasher,
     // which owns nothing to drop.
@@ -217,7 +217,7 @@ pub unsafe extern "C" fn b3_hasher_init(hasher: *mut B3Hasher, mode: *const B3Mo
 }
 
 /// # Safety
-/// `hasher` was initialized by `b3_hasher_init`; `input` holds `len`
+/// `hasher` was initialized by `b3_hasher_new`; `input` holds `len`
 /// bytes (NULL only with `len` 0).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn b3_hasher_update(hasher: *mut B3Hasher, input: *const c_void, len: usize) {
@@ -237,17 +237,17 @@ pub unsafe extern "C" fn b3_hasher_update_multithreaded(hasher: *mut B3Hasher, i
 }
 
 /// # Safety
-/// `hasher` was initialized by `b3_hasher_init`.
+/// `hasher` was initialized by `b3_hasher_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn b3_hasher_finalize(hasher: *const B3Hasher) -> Digest {
     digest(unsafe { self::hasher(hasher) }.finalize())
 }
 
 /// # Safety
-/// `hasher` was initialized by `b3_hasher_init`; `out` has room for `len`
+/// `hasher` was initialized by `b3_hasher_new`; `out` has room for `len`
 /// bytes (NULL only with `len` 0).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn b3_hasher_output(hasher: *const B3Hasher, offset: u64, out: *mut c_void, len: usize) {
+pub unsafe extern "C" fn b3_hasher_finalize_xof(hasher: *const B3Hasher, offset: u64, out: *mut c_void, len: usize) {
     check_range(out, len, "the output");
     check_disjoint(hasher.cast(), size_of::<B3Hasher>(), out, len);
     let hasher = unsafe { self::hasher(hasher) };

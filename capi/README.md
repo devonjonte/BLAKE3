@@ -32,7 +32,7 @@ Save this as `example.c`:
 #include <stdio.h>
 
 int main(void) {
-    b3_mode mode = b3_plain();
+    b3_mode mode = b3_mode_plain();
     b3_digest digest = b3_hash(&mode, "hello", 5);
     for (unsigned i = 0; i < 32; ++i) printf("%02x", digest.bytes[i]);
     puts("");
@@ -57,7 +57,7 @@ The `--static` flag supplies the system libraries Rust's static library needs.
 ## Choose a call
 
 - `b3_hash`: one message already in memory.
-- `b3_hasher_init`, `b3_hasher_update`, `b3_hasher_output`: one message
+- `b3_hasher_new`, `b3_hasher_update`, `b3_hasher_finalize_xof`: one message
   arriving in pieces (`b3_hasher_update_multithreaded` for a large piece).
 - `b3_hash_many`, `b3_hash_many_multithreaded`: a batch of equal-length
   messages, each at the start of its slot of 64-byte blocks, the batch on

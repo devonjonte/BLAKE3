@@ -29,7 +29,7 @@ struct Arena([u8; size_of::<B3Hasher>() + 64]);
 unsafe extern "C" fn done(_: *mut c_void, _: *mut Digest, _: usize) {}
 
 unsafe fn bad_call(case: &str) {
-    let mode = b3_plain();
+    let mode = b3_mode_plain();
     let mut arena = Arena([42; size_of::<B3Hasher>() + 64]);
     let pointer = arena.0.as_mut_ptr();
     let mut output = [Digest { bytes: [0; 32] }; 2];
@@ -39,14 +39,14 @@ unsafe fn bad_call(case: &str) {
             "callback-null" => {
                 b3_stream_begin(&mode, None, core::ptr::null_mut());
             }
-            "hasher-init-alignment" => b3_hasher_init(pointer.add(1).cast(), &mode),
+            "hasher-init-alignment" => b3_hasher_new(pointer.add(1).cast(), &mode),
             "hasher-read-alignment" => {
-                b3_hasher_init(pointer.cast(), &mode);
+                b3_hasher_new(pointer.cast(), &mode);
                 b3_hasher_finalize(pointer.add(1).cast());
             }
             "hasher-mode-overlap" => {
                 pointer.cast::<B3Mode>().write(mode);
-                b3_hasher_init(pointer.cast(), pointer.cast());
+                b3_hasher_new(pointer.cast(), pointer.cast());
             }
             "input-null" => {
                 b3_hash(&mode, core::ptr::null(), 1);
@@ -62,16 +62,16 @@ unsafe fn bad_call(case: &str) {
             "batch-overlap" => b3_hash_many(&mode, pointer.cast(), 64, 2, pointer.add(32).cast()),
             "batch-overlap-reverse" => b3_hash_many(&mode, pointer.add(64).cast(), 64, 2, pointer.add(32).cast()),
             "hasher-update-overlap" => {
-                b3_hasher_init(hasher.as_mut_ptr(), &mode);
+                b3_hasher_new(hasher.as_mut_ptr(), &mode);
                 b3_hasher_update(hasher.as_mut_ptr(), hasher.as_ptr().cast(), 1);
             }
             "hasher-output-overlap" => {
-                b3_hasher_init(hasher.as_mut_ptr(), &mode);
-                b3_hasher_output(hasher.as_ptr(), 0, hasher.as_mut_ptr().cast(), 32);
+                b3_hasher_new(hasher.as_mut_ptr(), &mode);
+                b3_hasher_finalize_xof(hasher.as_ptr(), 0, hasher.as_mut_ptr().cast(), 32);
             }
             "output-length" => {
-                b3_hasher_init(hasher.as_mut_ptr(), &mode);
-                b3_hasher_output(hasher.as_ptr(), 0, output.as_mut_ptr().cast(), isize::MAX as usize + 1);
+                b3_hasher_new(hasher.as_mut_ptr(), &mode);
+                b3_hasher_finalize_xof(hasher.as_ptr(), 0, output.as_mut_ptr().cast(), isize::MAX as usize + 1);
             }
             "stream-overlap" => {
                 let stream = b3_stream_begin(&mode, Some(done), core::ptr::null_mut());
@@ -119,7 +119,7 @@ fn bad_calls_stop_at_the_guard() {
 
 #[test]
 fn miri_adjacent_ranges_and_empty_null_ranges_are_allowed() {
-    let mode = b3_plain();
+    let mode = b3_mode_plain();
     unsafe {
         // Exactly adjacent in both address orders, with initialized storage.
         for (input_at, out_at) in [(0, 128), (64, 0)] {
@@ -136,9 +136,9 @@ fn miri_adjacent_ranges_and_empty_null_ranges_are_allowed() {
             b3_hash_many(&mode, core::ptr::null(), len, 0, core::ptr::null_mut());
         }
         let mut hasher = MaybeUninit::<B3Hasher>::uninit();
-        b3_hasher_init(hasher.as_mut_ptr(), &mode);
+        b3_hasher_new(hasher.as_mut_ptr(), &mode);
         b3_hasher_update(hasher.as_mut_ptr(), core::ptr::null(), 0);
-        b3_hasher_output(hasher.as_ptr(), 0, core::ptr::null_mut(), 0);
+        b3_hasher_finalize_xof(hasher.as_ptr(), 0, core::ptr::null_mut(), 0);
         let mut out = Digest { bytes: [0; 32] };
         let stream = b3_stream_begin(&mode, Some(done), core::ptr::null_mut());
         b3_stream_submit(stream, core::ptr::null(), 0, &mut out);

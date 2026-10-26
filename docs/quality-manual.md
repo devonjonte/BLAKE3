@@ -206,7 +206,7 @@ unrolled kernel code.
   context string sit against pages too. The C API has its own
   (`capi/tests/guard_pages.rs`), with the hasher's state in guarded
   memory as well. A byte planted past an input (in `performance::hash`)
-  or past an output (in `b3_hasher_output`) crashes them. They found
+  or past an output (in `b3_hasher_finalize_xof`) crashes them. They found
   bug 8 below as a crash.
 - **On the Mac**: every suite in debug builds (overflow checks and
   debug assertions over the SME2 paths): all clean.

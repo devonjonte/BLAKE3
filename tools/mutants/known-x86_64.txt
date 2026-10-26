@@ -136,7 +136,7 @@ src/lib.rs	delete ! in prefetch_kernels	1	speed: whether and what to prefetch af
 src/lib.rs	delete ! in prefetch_update_kernels	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	delete match arm (Platform::AVX2, 6..= 7) in spare_lane	1	equally correct paths: any lane can be the spare, or none (the partial chunk then runs serially); speed, measured: with it off, 7935 B +29% and +53% after a pause (data 2026-10-24/shortcuts)
 src/lib.rs	delete match arm (Platform::SSE41 | Platform::AVX2, 3) in spare_lane	1	equally correct paths: any lane can be the spare, or none (the partial chunk then runs serially); speed, measured: with it off, 7935 B +29% and +53% after a pause (data 2026-10-24/shortcuts)
-src/lib.rs	delete match arm Mode::Hash in Mode<'_>::key	1	equivalent: without the arm, Mode::Hash takes the general arm, which writes the same IV and flags into the room; the arm saves the copy
+src/lib.rs	delete match arm Mode::Plain in Mode<'_>::key	1	equivalent: without the arm, Mode::Plain takes the general arm, which writes the same IV and flags into the room; the arm saves the copy
 src/lib.rs	replace % with + in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace % with / in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/incremental.rs	replace && with || in <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv	2	equally correct paths: the flat subtree value where the kernels have one (SME2); without it the walk computes the same value

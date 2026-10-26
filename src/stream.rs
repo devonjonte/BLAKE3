@@ -140,7 +140,7 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// let messages: Vec<Block> = (0..1000u32).map(|i| Block(i.to_le_bytes().repeat(16).try_into().unwrap())).collect();
 /// let mut digests = vec![Hash::from_bytes([0; 32]); messages.len()];
 /// let mut handed_back = 0;
-/// blake3_servil::performance::stream(Mode::Hash, |done: &mut [Hash]| handed_back += done.len(), |s| {
+/// blake3_servil::performance::stream(Mode::Plain, |done: &mut [Hash]| handed_back += done.len(), |s| {
 ///     for (message, digest) in messages.iter().zip(&mut digests) {
 ///         s.submit(core::slice::from_ref(message), 64, digest);
 ///     }
@@ -775,7 +775,7 @@ mod test {
         // Borrowed messages start their blocks: 0, 1 or 2 blocks in.
         let blocks = crate::test::message(&input);
         let message = |i: usize| &input[64 * (i % 3)..][..lens[i]];
-        for (mode, ways) in [(Mode::Hash, 0), (Mode::Keyed(&key), 1), (Mode::DeriveKey("stream test"), 2)] {
+        for (mode, ways) in [(Mode::Plain, 0), (Mode::Keyed(&key), 1), (Mode::DeriveKey("stream test"), 2)] {
             let mut got = places(lens.len());
             let want_handed: std::vec::Vec<(usize, usize)> = got.iter().map(|h| (h as *const Hash as usize, 1)).collect();
             let mut handed = std::vec::Vec::new();
@@ -822,7 +822,7 @@ mod test {
             let count = 5;
             let mut got = places(count);
             stream(
-                Mode::Hash,
+                Mode::Plain,
                 |_| {},
                 |s| {
                     s.submit_batch_with(len, |_, room| room.fill(0xAB), &mut got);
@@ -844,7 +844,7 @@ mod test {
             let result = std::panic::catch_unwind(|| {
                 let mut got = places(4);
                 stream(
-                    Mode::Hash,
+                    Mode::Plain,
                     |_: &mut [Hash]| {},
                     |s| {
                         for (len, out) in [10, 100_000, 64, 300_000].into_iter().zip(&mut got) {
@@ -897,7 +897,7 @@ mod test {
         let mut got = places(2 * lens.len() + 2 + 7);
         let mut handed = std::vec::Vec::new();
         let mut rest: &mut [Hash] = &mut got;
-        stream(Mode::Hash, record(&mut handed), |s| {
+        stream(Mode::Plain, record(&mut handed), |s| {
             for len in lens {
                 s.submit(&blocks, len, &mut take(&mut rest, 1)[0]);
                 s.submit_with(

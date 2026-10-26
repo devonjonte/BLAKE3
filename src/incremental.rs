@@ -16,7 +16,7 @@ use super::*;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # blake3_servil::initialize();
 /// // Hash an input incrementally.
-/// let mut hasher = blake3_servil::performance::Hasher::new();
+/// let mut hasher = blake3_servil::performance::Hasher::new(blake3_servil::Mode::Plain);
 /// hasher.update(b"foo");
 /// hasher.update(b"bar");
 /// hasher.update(b"baz");
@@ -229,14 +229,9 @@ impl Hasher {
         core.final_output()
     }
 
-    /// Construct a new `Hasher` for the regular hash function.
-    pub fn new() -> Self {
-        Self::from_core(HasherCore::new_internal(IV, 0))
-    }
-
-    /// Construct a new `Hasher` in a [`Mode`]: the keyed hash, or key
-    /// derivation with a context string or a context hashed once.
-    pub fn new_with(mode: Mode) -> Self {
+    /// Construct a new `Hasher` in a [`Mode`]: the plain hash, the keyed
+    /// hash, or key derivation with a context string or a context key.
+    pub fn new(mode: Mode) -> Self {
         let (key, flags) = mode.key_and_flags();
         Self::from_core(HasherCore::new_internal(&key, flags))
     }
@@ -282,7 +277,7 @@ impl Hasher {
     /// ```
     /// # blake3_servil::initialize_multithreaded(None);
     /// let input = vec![7u8; 3 << 20];
-    /// let mut hasher = blake3_servil::performance::Hasher::new();
+    /// let mut hasher = blake3_servil::performance::Hasher::new(blake3_servil::Mode::Plain);
     /// for piece in input.chunks(64 * 1024) {
     ///     hasher.update_multithreaded(piece);
     /// }
@@ -351,7 +346,7 @@ impl Hasher {
     /// # fn main() -> io::Result<()> {
     /// # blake3_servil::initialize();
     /// // Hash standard input.
-    /// let mut hasher = blake3_servil::performance::Hasher::new();
+    /// let mut hasher = blake3_servil::performance::Hasher::new(blake3_servil::Mode::Plain);
     /// hasher.update_reader(std::io::stdin().lock())?;
     /// println!("{}", hasher.finalize());
     /// # Ok(())
@@ -544,13 +539,6 @@ impl HasherCore {
 impl fmt::Debug for Hasher {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Hasher").field("flags", &self.core.chunk_state.flags).field("platform", &self.core.chunk_state.platform).finish()
-    }
-}
-
-impl Default for Hasher {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
     }
 }
 

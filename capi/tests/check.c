@@ -49,7 +49,7 @@ int main(void) {
   for (size_t i = 0; i < sizeof input; i++) input[i] = (uint8_t)(i % 251);
   uint8_t key[32];
   memcpy(key, "whats the Elvish word for friend", 32);
-  b3_mode modes[3] = {b3_plain(), b3_keyed(key), b3_derive_key("BLAKE3 2019-12-27 16:29:52 test vectors context")};
+  b3_mode modes[3] = {b3_mode_plain(), b3_mode_keyed(key), b3_mode_derive_key("BLAKE3 2019-12-27 16:29:52 test vectors context")};
   const char *names[3] = {"hash", "keyed_hash", "derive_key"};
   size_t lens[3] = {0, 1025, 100000};
   for (int m = 0; m < 3; m++) {
@@ -61,7 +61,7 @@ int main(void) {
       d = b3_hash_multithreaded(&modes[m], input, lens[l]);
       print(what, d.bytes, 32);
       static b3_hasher hasher;
-      b3_hasher_init(&hasher, &modes[m]);
+      b3_hasher_new(&hasher, &modes[m]);
       b3_hasher_update(&hasher, input, lens[l] / 2);
       b3_hasher_update(&hasher, input + lens[l] / 2, lens[l] - lens[l] / 2);
       d = b3_hasher_finalize(&hasher);

@@ -53,7 +53,7 @@ typedef struct {
 } b3_digest;
 
 /* A mode: which of BLAKE3's three functions a call computes. Make one with
- * b3_plain, b3_keyed, or b3_derive_key, and pass it to as many calls as
+ * b3_mode_plain, b3_mode_keyed, or b3_mode_derive_key, and pass it to as many calls as
  * you like; its fields are the library's. */
 typedef struct {
   uint8_t kind;
@@ -61,16 +61,16 @@ typedef struct {
 } b3_mode;
 
 /* The plain hash function. */
-b3_mode b3_plain(void);
+b3_mode b3_mode_plain(void);
 
 /* The keyed hash function (a MAC) with this 32-byte key. */
-b3_mode b3_keyed(const uint8_t key[32]);
+b3_mode b3_mode_keyed(const uint8_t key[32]);
 
 /* Key derivation (a KDF) with this context: a NUL-terminated UTF-8 string,
  * hardcoded, globally unique, and application-specific, such as
  * "example.com 2026-10-16 session keys". The context is hashed here, once;
  * the calls' inputs are then the key material. */
-b3_mode b3_derive_key(const char *context);
+b3_mode b3_mode_derive_key(const char *context);
 
 /* The digest of `len` bytes at `input` (`input` may be NULL when `len` is
  * 0), on the calling thread. */
@@ -102,7 +102,7 @@ void b3_hash_many_multithreaded(const b3_mode *mode, const void *input, size_t m
 
 /* One message fed in pieces. A b3_hasher is your memory (18 KiB; on the
  * stack, in a struct, or allocated). It needs no library destructor; the
- * caller frees any heap storage it supplied. b3_hasher_init starts a
+ * caller frees any heap storage it supplied. b3_hasher_new starts a
  * message, and starts one over. Heap storage must also be 64-byte aligned;
  * ordinary malloc does not guarantee this over-alignment. Use a
  * platform-appropriate aligned allocator and its matching deallocator.
@@ -117,7 +117,7 @@ typedef struct {
   B3_ALIGN64 uint8_t opaque[B3_HASHER_SIZE];
 } b3_hasher;
 
-void b3_hasher_init(b3_hasher *hasher, const b3_mode *mode);
+void b3_hasher_new(b3_hasher *hasher, const b3_mode *mode);
 
 /* Add the message's next `len` bytes. */
 void b3_hasher_update(b3_hasher *hasher, const void *input, size_t len);
@@ -130,7 +130,7 @@ b3_digest b3_hasher_finalize(const b3_hasher *hasher);
 
 /* Extended output: `len` bytes of the output from byte `offset` on, into
  * `out`. Its first 32 bytes are the digest. */
-void b3_hasher_output(const b3_hasher *hasher, uint64_t offset, void *out, size_t len);
+void b3_hasher_finalize_xof(const b3_hasher *hasher, uint64_t offset, void *out, size_t len);
 
 /* A stream: messages one after another, hashed on other CPU cores while
  * your program reads or makes the next ones; the fastest way to hash many
