@@ -21,7 +21,7 @@ logs=$root/tmp/long-proofs/$commit
 tree=/tmp/long-proofs-$commit
 status() {
 	python3 -c 'import json, sys; print(json.dumps({"state": sys.argv[1], "context": "long proofs", "description": sys.argv[2]}))' "$1" "$2" |
-		curl -sSf -o /dev/null -X POST -H "Authorization: token $token" -d @- \
+		curl -sSf --retry 5 --retry-all-errors --retry-delay 10 -o /dev/null -X POST -H "Authorization: token $token" -d @- \
 			"https://api.github.com/repos/johnservil/BLAKE3/statuses/$commit"
 }
 # A status attaches to a commit GitHub has: an unpushed one fails at the
