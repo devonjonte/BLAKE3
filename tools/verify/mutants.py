@@ -340,26 +340,30 @@ def chunk_root_mutant_jobs():
 
 
 def main():
+    import multiprocessing
     import workers
-    failures = 0
     # Forked workers inherit each job (its code and its proof's closure);
-    # only the line comes back.
-    for line, failed in workers.each(run, jobs(), 16):
+    # only the line comes back. The jobs are closures, which a spawning
+    # start method cannot send, so the context says fork: Python 3.14's
+    # default on Linux is forkserver.
+    fork = multiprocessing.get_context("fork")
+    failures = 0
+    for line, failed in workers.each(run, jobs(), 16, fork):
         print(line, flush=True)
         failures += failed
     # Fresh workers release each proof's memo tables. Keep the x86 pool
     # at two processes, as in the all-count matrix.
-    for result in workers.each(x86_positive, [None], 1):
+    for result in workers.each(x86_positive, [None], 1, fork):
         print(f"AVX2 mutant-domain positive control: proved {result}", flush=True)
-    for line, failed in workers.each(run, x86_mutant_jobs(), 2):
+    for line, failed in workers.each(run, x86_mutant_jobs(), 2, fork):
         print(line, flush=True)
         failures += failed
-    for result in workers.each(x86_memory_positive, [None], 1):
+    for result in workers.each(x86_memory_positive, [None], 1, fork):
         print(f"x86 memory-mutant positive controls: proved {result}", flush=True)
-    for line, failed in workers.each(run, x86_memory_mutant_jobs(), 2):
+    for line, failed in workers.each(run, x86_memory_mutant_jobs(), 2, fork):
         print(line, flush=True)
         failures += failed
-    for line, failed in workers.each(run, chunk_root_mutant_jobs(), 2):
+    for line, failed in workers.each(run, chunk_root_mutant_jobs(), 2, fork):
         print(line, flush=True)
         failures += failed
     sys.exit(1 if failures else 0)
