@@ -25,8 +25,12 @@ nothing of what they would have found (a loop that never ends, a wait
 that never returns; or a test the load made slow). Time-outs have their
 own list, tools/mutants/timeouts-<arch>.txt, in KNOWN's form, and are
 checked against it the same way (NEW TIME-OUT, NO LONGER TIMES OUT).
+Before anything runs, every row of every architecture's lists must name a
+mutant the source holds now (cargo mutants --list, which any machine reads
+for every target): a row a run on older code left stops the check, named.
 Exit status: 0 both lists match; 1 a survivor differs from its list (or a
-reason is missing); 2 only the time-outs differ (no verdict on those).
+reason is missing, or a row is stale); 2 only the time-outs differ (no
+verdict on those).
 
 The tests run under cargo-nextest (.config/nextest.toml), each in its own
 process, a test killed at 30 s as a hang; a mutant's tests stop at the
@@ -52,6 +56,7 @@ tests/'s own items), or one with no such map, runs the whole check.
 """
 
 import collections
+import glob
 import json
 import os
 import platform
@@ -467,6 +472,46 @@ def weigh(rows, path):
         print(f"  caught only by tests of 100 ms or more: {n} mutants in {function}")
 
 
+def list_rows(paths):
+    """Every row of the lists at `paths`, as (list, file, mutant)."""
+    rows = []
+    for path in paths:
+        for line in open(path):
+            if line.strip() and not line.startswith(("#", "files:", "model files:")):
+                file, mutant = line.split("\t")[:2]
+                rows.append((os.path.basename(path), file, mutant))
+    return rows
+
+
+def stale_rows(rows, listed):
+    """The rows naming a mutant that `listed` (cargo mutants --list's
+    lines, "file:line:column: mutant") lacks."""
+    exist = {(m.group(1), m.group(2)) for m in (re.match(r"(\S+?):\d+:\d+: (.*)$", l) for l in listed) if m}
+    return [r for r in rows if (r[1], r[2]) not in exist]
+
+
+def check_rows_exist():
+    """Every row of every architecture's lists names a mutant the source
+    holds now. Which mutants exist is the source's alone: cargo mutants
+    --list reads it unbuilt, every target's files alike, so any machine
+    checks every list. The outcomes and reasons are the runs' and people's.
+    A list a run on other code wrote stops the check here, by row (26 of
+    the AArch64 list's rows named mutants gone, unnoticed: October 26)."""
+    paths = sorted(glob.glob(os.path.join(ROOT, "tools", "mutants", "known-*.txt"))
+                   + glob.glob(os.path.join(ROOT, "tools", "mutants", "timeouts-*.txt")))
+    rows = list_rows(paths)
+    files = sorted({f for _, f, _ in rows})
+    args = ["cargo", "mutants", "--list", "--profile", "mutants", "--features", "serde,zeroize"]
+    for f in files:
+        args += ["--file", f]
+    listed = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()
+    stale = stale_rows(rows, listed)
+    for name, file, mutant in stale:
+        print(f"STALE ROW: {name}: {file}\t{mutant}")
+    if stale:
+        sys.exit(f"mutants: {len(stale)} rows name mutants the source no longer has; remove them")
+
+
 def confirm(found, known, timed, tknown, differ=None):
     """`found` (survivors) and `timed` (time-outs) with every name whose
     count of either differs from its list run again, alone: a test that
@@ -599,6 +644,7 @@ def main():
     changed = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, check=True).stdout.strip()
     print(f"mutants: the fork at {commit}{', with uncommitted changes' if changed else ''}", flush=True)
     remove_leftovers()
+    check_rows_exist()
     files, known = read_known()
     _, tknown = read_known(TIMEOUTS, INACTIVE_TIMEOUTS)
     # A test known to be missing is work to do now, not a survivor to keep:
