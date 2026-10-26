@@ -28,10 +28,11 @@ output would not match the specification, and the proof would fail.
 
 The Intel and AMD assembly kernels are checked the same way. The
 fork's own kernels there, generated, which hash whole chunks and a
-partial one in one pass, are proved for every input. Single
+partial one in one pass, or a message of one chunk or less to its root
+in one call, are proved for every input. Single
 compressions and extended output at 1 to 32 blocks are proved. For
 batch hashing, an induction proof covers every input count in the
-stated range for each instruction set and calling convention, at block
+stated range for each instruction set, at block
 lengths 1 to 16 with a fixed counter and at 16 blocks with an
 incrementing counter. Each proof uses one symbolic entry-stack
 alignment covering the four legal ABI alignments.
