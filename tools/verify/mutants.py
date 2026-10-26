@@ -252,7 +252,7 @@ def x86_mutant_jobs():
         so = p.x86.link(str(obj))
         def prove(so=so, label=label):
             try:
-                return loop.prove(so, "avx2", False, 1, True)
+                return loop.prove(so, "avx2", 1, True)
             except Unproved as error:
                 if label == "nonterminating":
                     assert str(error).startswith("back edge leaves the next iteration"), str(error)
@@ -301,8 +301,8 @@ def x86_memory_mutant_jobs():
         def prove(so=so, isa=isa, kind=kind, reason=reason):
             try:
                 if kind == "compress":
-                    return p.prove_compress(so, isa, False, False)
-                return p.prove_hash_many(so, isa, False, 8, 1, True)
+                    return p.prove_compress(so, isa, False)
+                return p.prove_hash_many(so, isa, 8, 1, True)
             except Unproved as error:
                 assert reason in str(error), str(error)
                 raise
