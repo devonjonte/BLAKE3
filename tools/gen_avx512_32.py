@@ -47,7 +47,8 @@ It has no input prefetches; production use is being tested for parents only.
 Start/end flags apply only to the first/last block (both for one block),
 and last_len only to the final block. The 32-input prefetches look three blocks ahead,
 as in the existing 16-way kernel; these hints perform no architectural
-reads. Proof tooling is unchanged: the above is a contract, not a proof.
+reads. The contract above is what tools/verify/prove_x86.py proves (its
+"wide" cases: each kernel at 1 to 16 blocks, for every input).
 
     python3 tools/gen_avx512_32.py > c/blake3_avx512_32.S
 """

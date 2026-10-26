@@ -572,6 +572,11 @@ def step(m, pc, mnem, ops, nxt):
         return nxt
     if mnem in ("add", "sub", "and", "or", "xor", "cmp", "test"):
         bits = opbits(m, ops[0])
+        if mnem == "xor" and ops[0] == ops[1]:
+            # The idiom that zeroes a register, whatever it held (a pointer too).
+            m.gwrite(ops[0], BitVecVal(0, bits))
+            m.flags = ("logic", BitVecVal(0, bits))
+            return nxt
         a = gval(m, ops[0], bits)
         b = gval(m, ops[1], bits)
         if mnem in ("add", "sub", "cmp"):

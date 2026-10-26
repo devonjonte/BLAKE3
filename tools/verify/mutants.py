@@ -339,6 +339,36 @@ def chunk_root_mutant_jobs():
     return out
 
 
+def wide_mutant_jobs():
+    """Assembled mutants of the wide AVX-512 kernels (c/blake3_avx512_32.S),
+    proved through k32 at two blocks (the start flag's block and the end's)
+    and p16 at one block."""
+    import prove_x86 as p
+    source = Path(p.ROOT_DIR, "c/blake3_avx512_32.S").read_text()
+    edits = [
+        ("k32", 2, "a rotation one bit off", "    vprord zmm20, zmm20, 16\n", "    vprord zmm20, zmm20, 15\n", "differs from the specification"),
+        ("k32", 2, "the message stride", "    add rdi, 64\n", "    add rdi, 60\n", None),
+        ("k32", 2, "the start flag on every block but the first", "    test r14, r14\n    jnz .Lstart32\n", "    test r14, r14\n    jz .Lstart32\n", "differs from the specification"),
+        ("k32", 1, "the first output vector unwritten", "    vmovdqu32 ZMMWORD PTR [r15 + 0], zmm4\n", "", "not exactly written"),
+    ]
+    root = Path(tempfile.mkdtemp(prefix="wide-mutants-"))
+    out = []
+    for kernel, blocks, label, before, after, reason in edits:
+        assert source.count(before) >= 1, (label, source.count(before))
+        src, obj = root / (label.replace(" ", "-") + ".S"), root / (label.replace(" ", "-") + ".o")
+        src.write_text(source.replace(before, after, 1))
+        subprocess.run([p.CLANG, "-c", "--target=x86_64-linux-gnu", str(src), "-o", str(obj)], check=True)
+        so = p.x86.link(str(obj))
+        def prove(so=so, kernel=kernel, blocks=blocks, reason=reason):
+            try:
+                return p.prove_wide(so, kernel, blocks)
+            except Unproved as error:
+                assert reason is None or reason in str(error), str(error)
+                raise
+        out.append((f"wide-kernel mutant, {label}", None, prove))
+    return out
+
+
 def main():
     import workers
     failures = 0
@@ -360,6 +390,8 @@ def main():
         print(line, flush=True)
         failures += failed
     for line, failed in workers.each(run, chunk_root_mutant_jobs(), 2):
+        print(line, flush=True)
+    for line, failed in workers.each(run, wide_mutant_jobs(), 1):
         print(line, flush=True)
         failures += failed
     sys.exit(1 if failures else 0)

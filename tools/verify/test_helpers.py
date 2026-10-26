@@ -190,8 +190,8 @@ class ConcreteCasesTests(unittest.TestCase):
     def test_representative_cases_are_the_declared_promotion_set(self):
         import prove_x86
         got = prove_x86.representative_cases()
-        self.assertEqual(len(got), 155)
-        self.assertEqual(len(set(got)), 155)
+        self.assertEqual(len(got), 203)
+        self.assertEqual(len(set(got)), 203)
         self.assertTrue(all(case in prove_x86.cases(set()) for case in got))
         # pair.rs's shape: two inputs at consecutive counters, 1 to 15
         # blocks, AVX2 and AVX-512 (#163).
