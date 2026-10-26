@@ -30,12 +30,14 @@ pub unsafe fn hash_many<const N: usize>(
         // array, but the C implementations don't. Even though this is an unsafe
         // function, assert the bounds here.
         assert!(out.len() >= inputs.len() * OUT_LEN);
-        // Linux: groups of 32 whole chunks take the 32-input kernel, and
-        // groups of 16 parent nodes the 16-input one; the rest, and every
-        // other shape, the older kernel (experiment, BLAKE3 #119/#125).
+        // Linux, on a CPU where they pay (platform::wide_avx512): groups of
+        // 32 whole chunks take the 32-input kernel, and groups of 16 parent
+        // nodes the 16-input one; the rest, every other shape, and every
+        // other CPU, the older kernel (BLAKE3 #119/#125).
         #[cfg(target_os = "linux")]
         let (inputs, counter, out) = {
-            let done = if N == crate::CHUNK_LEN {
+            let wide = crate::platform::wide_avx512();
+            let done = if wide && N == crate::CHUNK_LEN {
                 // Bounded iterators own progress, rather than a mutable
                 // arithmetic cursor. Every call gets exactly one output group.
                 for (group, (batch, outputs)) in inputs.chunks_exact(32).zip(out.chunks_exact_mut(32 * OUT_LEN)).enumerate() {
@@ -59,7 +61,7 @@ pub unsafe fn hash_many<const N: usize>(
                     return;
                 }
                 done
-            } else if N == BLOCK_LEN && !increment_counter.yes() && flags & crate::PARENT != 0 {
+            } else if wide && N == BLOCK_LEN && !increment_counter.yes() && flags & crate::PARENT != 0 {
                 // Parent nodes only, not batches of short roots.
                 for (batch, outputs) in inputs.chunks_exact(16).zip(out.chunks_exact_mut(16 * OUT_LEN)) {
                     crate::avx512_32::hash16(batch, key, counter, flags, flags_start, flags_end, outputs);
@@ -147,17 +149,18 @@ mod test {
         let counter = u64::MAX - 15;
         let key = crate::IV;
         let legacy = ffi::blake3_servil_hash_many_avx512 as *const () as usize;
+        let wide = crate::platform::wide_avx512();
         for increment in [IncrementCounter::No, IncrementCounter::Yes] {
             for n in [0, 1, 16, 31, 32, 33, 64, 65] {
                 let mut out = std::vec![0xa5u8; n * OUT_LEN + 1];
                 crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
                 unsafe { hash_many(&inputs[..n], key, counter, increment, crate::KEYED_HASH, crate::CHUNK_START, crate::CHUNK_END, &mut out) };
                 let mut expected_entries = std::collections::BTreeSet::new();
-                if n >= 32 {
+                if wide && n >= 32 {
                     let entry = crate::avx512_32::entries()[if increment.yes() { 0 } else { 1 }].1;
                     expected_entries.insert(entry as usize);
                 }
-                if n % 32 != 0 {
+                if !wide || n % 32 != 0 {
                     expected_entries.insert(legacy);
                 }
                 assert_eq!(crate::RAN_ENTRIES.with(|r| r.borrow().clone()), expected_entries, "dispatch for {n} inputs");
@@ -214,6 +217,7 @@ mod test {
         let parent = crate::avx512_32::parent_entry() as usize;
         let counter = u64::MAX - 7;
         let flags = crate::PARENT | crate::KEYED_HASH;
+        let wide = crate::platform::wide_avx512();
         for increment in [IncrementCounter::No, IncrementCounter::Yes] {
             for n in [0, 1, 15, 16, 17, 32, 33] {
                 let mut out = std::vec![0xa5u8; n * OUT_LEN + 1];
@@ -223,10 +227,10 @@ mod test {
                 if increment.yes() {
                     expected_entries.insert(legacy);
                 } else {
-                    if n >= 16 {
+                    if wide && n >= 16 {
                         expected_entries.insert(parent);
                     }
-                    if n % 16 != 0 {
+                    if !wide || n % 16 != 0 {
                         expected_entries.insert(legacy);
                     }
                 }

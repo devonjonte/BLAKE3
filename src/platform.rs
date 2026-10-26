@@ -531,6 +531,8 @@ mod x86_bits {
     pub const SSE41: u8 = 2;
     pub const AVX2: u8 = 4;
     pub const AVX512: u8 = 8;
+    /// AVX-512 on a CPU where the 32-input kernels pay ([`super::wide_cpu`]).
+    pub const WIDE: u8 = 16;
     pub const READ: u8 = 128;
 }
 
@@ -584,9 +586,46 @@ fn read_x86_features() -> u8 {
         let f_vl = (1 << 16) | (1 << 31);
         if xcr0 & zmm == zmm && leaf7.ebx & f_vl == f_vl {
             features |= AVX512;
+            // Sound: as leaf 1; leaf 0 names the vendor.
+            #[allow(unused_unsafe)]
+            let leaf0 = unsafe { arch::__cpuid(0) };
+            let amd = (leaf0.ebx, leaf0.edx, leaf0.ecx) == (0x6874_7541, 0x6974_6e65, 0x444d_4163); // "AuthenticAMD"
+            if wide_cpu(amd, family(leaf1.eax)) {
+                features |= WIDE;
+            }
         }
     }
     features
+}
+
+/// The display family of CPUID leaf 1's EAX: the base family, plus the
+/// extended family where the base is 0xF.
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
+fn family(eax: u32) -> u32 {
+    let base = (eax >> 8) & 0xF;
+    if base == 0xF { base + ((eax >> 20) & 0xFF) } else { base }
+}
+
+/// Whether the 32-input AVX-512 kernels pay on this CPU: AMD from family
+/// 0x1A (Zen 5). Measured against the 16-input kernel for one thread on
+/// inputs of 32 KiB and more (BLAKE3 #125): about 20% less time on Zen 5
+/// (EPYC 9255), but on Zen 4 (EPYC 9124, family 0x19) 4-5% more from
+/// memory, and on Intel Ice Lake (Xeon Gold 6330) 3-4.5% more. Other
+/// CPUs join the list when measured.
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
+fn wide_cpu(amd: bool, family: u32) -> bool {
+    amd && family >= 0x1A
+}
+
+/// Whether `hash_many` dispatches to the 32-input AVX-512 kernels
+/// (Linux): AVX-512 on a CPU where they pay ([`wide_cpu`]).
+#[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+pub fn wide_avx512() -> bool {
+    avx512_detected() && x86_features() & x86_bits::WIDE != 0
 }
 
 #[cfg(blake3_avx512_ffi)]
@@ -834,6 +873,33 @@ mod x86_features_test {
         assert_eq!(features & SSE41 != 0, std::is_x86_feature_detected!("sse4.1"));
         assert_eq!(features & AVX2 != 0, std::is_x86_feature_detected!("avx2"));
         assert_eq!(features & AVX512 != 0, std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl"));
+    }
+
+    /// The wide kernels' CPUs: AMD from family 0x1A (Zen 5), from leaf 1's
+    /// family fields as CPUID packs them.
+    #[test]
+    fn test_wide_cpu_and_family() {
+        let eax = |base: u32, ext: u32| (ext << 20) | (base << 8);
+        assert_eq!(super::family(eax(0xF, 0x0B)), 0x1A, "Zen 5");
+        assert_eq!(super::family(eax(0xF, 0x0A)), 0x19, "Zen 4");
+        assert_eq!(super::family(eax(0x6, 0x0F)), 0x6, "Intel: the extended family counts only with base 0xF");
+        for (amd, family, wide) in [(true, 0x1A, true), (true, 0x1B, true), (true, 0x19, false), (true, 0x17, false), (false, 0x1A, false), (false, 0x6, false)] {
+            assert_eq!(super::wide_cpu(amd, family), wide, "amd {amd}, family {family:#x}");
+        }
+    }
+
+    /// The wide bit agrees with the kernel's own reading of this CPU
+    /// (/proc/cpuinfo's vendor and family), and comes only with AVX-512.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_wide_bit_matches_cpuinfo() {
+        use super::x86_bits::*;
+        let features = super::read_x86_features();
+        let info = std::fs::read_to_string("/proc/cpuinfo").expect("/proc/cpuinfo");
+        let field = |name: &str| info.lines().find(|l| l.starts_with(name)).and_then(|l| l.split(':').nth(1)).map(|v| v.trim().to_string()).expect(name);
+        let amd = field("vendor_id") == "AuthenticAMD";
+        let family: u32 = field("cpu family").parse().expect("cpu family");
+        assert_eq!(features & WIDE != 0, features & AVX512 != 0 && amd && family >= 0x1A, "vendor {amd}, family {family:#x}");
     }
 
     /// The detection functions answer as the standard library does, each

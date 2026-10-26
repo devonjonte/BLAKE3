@@ -422,8 +422,9 @@ fn run() -> usize {
         },
     );
     #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
-    if matches!(platform, Platform::AVX512) {
-        // Sound: the detected platform has the wide kernels' ISA. Their
+    if matches!(platform, Platform::AVX512) && crate::platform::wide_avx512() {
+        // Sound: the detected platform has the wide kernels' ISA, and
+        // hash_many dispatches to them (only then does startup check them). Their
         // wrapper checks its bounds, and builds all arguments on the stack.
         checked += unsafe { crate::avx512_32::self_test(&previous) };
     }
@@ -571,7 +572,7 @@ mod test {
         let checked = run();
         let expected = CASES.len();
         #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
-        let expected = if crate::platform::avx512_detected() {
+        let expected = if crate::platform::wide_avx512() {
             for (name, entry) in crate::avx512_32::entries() {
                 assert!(crate::RAN_ENTRIES.with(|r| r.borrow().contains(&(entry as usize))), "startup left out {name}");
             }

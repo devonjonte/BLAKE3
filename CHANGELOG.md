@@ -26,10 +26,13 @@ On 64-bit Arm, new kernels make every size faster: SME2 on the M4 and
 later, and kernels that run the integer and NEON units side by side.
 On x86-64 with SSE4.1 or AVX2, a single message hashes with official's
 own assembly (each proved below), so it runs at official's speed, and
-at 64 B on the EPYC slower (0.9×). On Linux with AVX-512, new kernels
-hash 32 whole chunks or 16 parent nodes at once (proved too): on the
-EPYC 9255, one thread hashing 32 KiB or more takes about 20% less time
-than with upstream's 16-input AVX-512 kernel. The other gains on x86-64 come
+at 64 B on the EPYC slower (0.9×). On Linux on AMD Zen 5 and later,
+new kernels hash 32 whole chunks or 16 parent nodes at once with AVX-512
+(proved too): on the EPYC 9255, one thread hashing 32 KiB or more takes
+about 20% less time than with upstream's 16-input AVX-512 kernel. Other
+AVX-512 CPUs keep the 16-input kernel, which measured faster there (Zen 4:
+the wide kernels 4-5% slower from memory; Intel Ice Lake: 3-4.5% slower
+throughout). The other gains on x86-64 come
 from many messages at once: a stream that hashes on other cores while
 the program reads the next input, batches of short messages, and b3sum
 over many files. The
