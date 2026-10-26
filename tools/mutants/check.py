@@ -407,6 +407,13 @@ PLACE_OUTCOMES = {}
 STOPPED = {}
 
 
+def open_pool(name, reason):
+    """A row whose outcome the pool's schedules decide, run by run (its
+    reason begins OPEN: the pool's scheduling): a run that catches it is
+    one draw, so the row stays."""
+    return name.startswith("src/lanes.rs") and reason.startswith("OPEN: the pool's scheduling")
+
+
 def elsewhere(name, lists=None):
     """What the other machines' lists say of mutant `name`: one entry per
     list naming it, "on ARCH: survives|times out (FILE): REASON", in a fixed
@@ -745,12 +752,19 @@ def main():
     if "--write" in sys.argv:
         header = [l.rstrip("\n") for l in open(KNOWN) if l.startswith("#") or l.startswith(("files:", "model files:"))]
         # The rows for other CPUs stay as they were: this run cannot see them.
+        # An OPEN pool row (its outcome left to the schedules) stays at its
+        # most places when this run's schedules caught it: the run is one
+        # draw, and the row is what the draws have shown (October 26).
+        found = {**{k: c for k, (c, r) in known.items() if open_pool(k, r)}, **found}
+        found = {k: max(n, known[k][0]) if k in known and open_pool(k, known[k][1]) else n for k, n in found.items()}
         rows = sorted([f"{k}\t{n}\t{known[k][1] if k in known else unclassified(k, 'survives')}" for k, n in found.items()] + INACTIVE)
         open(KNOWN, "w").write("\n".join(header + rows) + "\n")
         print(f"{KNOWN}: {sum(found.values())} survivors, {sum(1 for k in found if k not in known)} names new")
         theader = [l.rstrip("\n") for l in open(TIMEOUTS) if l.startswith("#")] if os.path.exists(TIMEOUTS) else \
             [f"# The mutants that time out on {platform.machine()}: no test fails, the clock stops one (tools/mutants/check.py, TIMEOUTS).",
              "# A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason."]
+        timed = {**{k: c for k, (c, r) in tknown.items() if open_pool(k, r)}, **timed}
+        timed = {k: max(n, tknown[k][0]) if k in tknown and open_pool(k, tknown[k][1]) else n for k, n in timed.items()}
         trows = sorted([f"{k}\t{n}\t{tknown[k][1] if k in tknown else unclassified(k, 'times out')}" for k, n in timed.items()] + INACTIVE_TIMEOUTS)
         open(TIMEOUTS, "w").write("\n".join(theader + trows) + "\n")
         print(f"{TIMEOUTS}: {sum(timed.values())} time-outs, {sum(1 for k in timed if k not in tknown)} names new")
@@ -762,7 +776,7 @@ def main():
     # An OPEN pool entry is caught or not as the run's scheduling falls
     # (the list says why): its count is the most that survive, and a run
     # that catches more of them is no change to the list.
-    stale = {k: c for k, (c, reason) in known.items() if found.get(k, 0) < c and not (k.startswith("src/lanes.rs") and reason.startswith("OPEN: the pool's scheduling"))}
+    stale = {k: c for k, (c, reason) in known.items() if found.get(k, 0) < c and not open_pool(k, reason)}
     for k, n in sorted(new.items()):
         print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
     for k, c in sorted(stale.items()):
@@ -770,7 +784,7 @@ def main():
     # The time-outs against their list, alike (an OPEN pool row's count is
     # the most that time out, as for survivors).
     new_timed = {k: n for k, n in timed.items() if n > tknown.get(k, (0, ""))[0]}
-    stale_timed = {k: c for k, (c, reason) in tknown.items() if timed.get(k, 0) < c and not (k.startswith("src/lanes.rs") and reason.startswith("OPEN: the pool's scheduling"))}
+    stale_timed = {k: c for k, (c, reason) in tknown.items() if timed.get(k, 0) < c and not open_pool(k, reason)}
     for k, n in sorted(new_timed.items()):
         print(f"NEW TIME-OUT ({n - tknown.get(k, (0, ''))[0]}): {k}")
     for k, c in sorted(stale_timed.items()):
