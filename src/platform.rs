@@ -883,7 +883,8 @@ mod x86_features_test {
         assert_eq!(super::family(eax(0xF, 0x0B)), 0x1A, "Zen 5");
         assert_eq!(super::family(eax(0xF, 0x0A)), 0x19, "Zen 4");
         assert_eq!(super::family(eax(0x6, 0x0F)), 0x6, "Intel: the extended family counts only with base 0xF");
-        for (amd, family, wide) in [(true, 0x1A, true), (true, 0x1B, true), (true, 0x19, false), (true, 0x17, false), (false, 0x1A, false), (false, 0x6, false)] {
+        for (amd, family, wide) in [(true, 0x1A, true), (true, 0x1B, true), (true, 0x19, false), (true, 0x17, false), (false, 0x1A, false), (false, 0x6, false)]
+        {
             assert_eq!(super::wide_cpu(amd, family), wide, "amd {amd}, family {family:#x}");
         }
     }
@@ -891,7 +892,7 @@ mod x86_features_test {
     /// The wide bit agrees with the kernel's own reading of this CPU
     /// (/proc/cpuinfo's vendor and family), and comes only with AVX-512.
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "std"))]
     fn test_wide_bit_matches_cpuinfo() {
         use super::x86_bits::*;
         let features = super::read_x86_features();
