@@ -7,7 +7,8 @@
  * library's threads at their first use; they last for the process.
  *
  * Memory: pointers cover live, correctly aligned storage of the stated
- * sizes, readable for inputs and writable for outputs. Read-only ranges
+ * sizes, readable for inputs and writable for outputs. Output storage may
+ * hold anything, uninitialized too: every call writes all of it. Read-only ranges
  * may overlap; a written range is disjoint from every other range a call
  * uses. Inputs stay unchanged, and outputs are not accessed concurrently
  * by the caller. The stream's longer access/lifetime rules are below.

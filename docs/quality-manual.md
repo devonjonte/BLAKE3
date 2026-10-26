@@ -381,12 +381,12 @@ LLVM's `ld.lld`; their instruction model is checked against the CPU by
 ```sh
 python3 tools/verify/prove_x86_loop.py --workers 4
                                       # ends "51 of 51 all-count cases proved"
-python3 tools/verify/prove_x86.py     # ends "342 of 342 cases proved"
-python3 tools/verify/prove_x86.py --representative   # 155 of them, in minutes
+python3 tools/verify/prove_x86.py     # ends "390 of 390 cases proved"
+python3 tools/verify/prove_x86.py --representative   # 203 of them
 ```
 
 `sh tools/verify/long-proofs.sh` runs all of it after a change to a
-kernel or the proof tools: 848 cases (414 hybrid, 41 SME2, 342 x86 and
+kernel or the proof tools: 896 cases (414 hybrid, 41 SME2, 390 x86 and
 51 all-count x86), the planted-error controls, and the Arm CPU
 cross-check. Each case is proved when Z3 finds no input on which the
 code and the definition differ; one that fails prints `NOT PROVED` with

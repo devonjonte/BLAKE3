@@ -171,7 +171,10 @@ unsafe fn batch<'a>(input: *const c_void, message_len: usize, count: usize, out:
         return (input, &mut []);
     }
     // Sound by the contract: room for `count` digests at `out`, checked
-    // above; a Digest is 32 bytes, as [u8; 32] is.
+    // above; a Digest is 32 bytes, as [u8; 32] is. The caller's storage may
+    // hold anything, uninitialized too (C's habit): zeroed before Rust
+    // makes it a reference, which needs initialized bytes (#155).
+    unsafe { core::ptr::write_bytes(out.cast::<u8>(), 0, out_bytes) };
     (input, unsafe { core::slice::from_raw_parts_mut(out as *mut [u8; OUT_LEN], count) })
 }
 
@@ -253,7 +256,9 @@ pub unsafe extern "C" fn b3_hasher_output(hasher: *const B3Hasher, offset: u64, 
     }
     let mut reader = hasher.finalize_xof();
     reader.set_position(offset);
-    // Sound by the contract: room for `len` bytes at `out`.
+    // Sound by the contract: room for `len` bytes at `out`, zeroed first,
+    // since the caller's storage may be uninitialized (#155).
+    unsafe { core::ptr::write_bytes(out.cast::<u8>(), 0, len) };
     reader.fill(unsafe { core::slice::from_raw_parts_mut(out as *mut u8, len) });
 }
 
@@ -322,6 +327,9 @@ pub unsafe extern "C" fn b3_stream_submit(stream: *mut B3Stream, input: *const c
             .expect("b3: a submitted message starts at a 64-byte boundary (aligned_alloc(64, n))")
     };
     let input: &'static [Block] = unsafe { core::slice::from_raw_parts(input.as_ptr(), input.len()) };
+    // The caller's place may be uninitialized (#155): zeroed before it is
+    // a reference.
+    unsafe { core::ptr::write_bytes(out.cast::<u8>(), 0, OUT_LEN) };
     s.stream.submit(input, len, unsafe { &mut *(out as *mut Hash) });
 }
 
