@@ -220,6 +220,7 @@ def prove_hash_many(so, isa, n, blocks, increment):
 
 
 WIDE = {"k32": (32, True), "p32": (32, False), "p16": (16, False)}
+WIDE_WORKERS = 3  # their memory: at most three wide cases at once (main)
 
 
 def prove_wide(so, kernel, blocks):
@@ -472,10 +473,13 @@ def main():
             return WIDE[arg[0]][0] * arg[1] * 2  # 16-lane vectors twice over: the heaviest cases
         return (arg or 0) + 1
     todo.sort(key=lambda c: -work(c))
+    # A 32-input wide case holds up to 22 GB (k32 at 16 blocks, the VM,
+    # October 26): those run WIDE_WORKERS at a time, the rest `count`.
     failed = 0
-    for (isa, kind, arg), verdict in workers.each(prove_case, todo, count):
-        print(f"{isa} {kind} {arg or ''}: {verdict}", flush=True)
-        failed += verdict.startswith("NOT")
+    for batch, n in (([c for c in todo if c[1] == "wide"], min(count, WIDE_WORKERS)), ([c for c in todo if c[1] != "wide"], count)):
+        for (isa, kind, arg), verdict in workers.each(prove_case, batch, n):
+            print(f"{isa} {kind} {arg or ''}: {verdict}", flush=True)
+            failed += verdict.startswith("NOT")
     print(f"{len(todo) - failed} of {len(todo)} cases proved")
     sys.exit(1 if failed else 0)
 
