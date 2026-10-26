@@ -81,6 +81,7 @@ src/lanes.rs	delete match arm 128 in Task::run_members	1	speed: chooses between 
 src/lanes.rs	delete match arm 256 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	delete match arm 512 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	delete match arm CHUNK_LEN in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
+src/lanes.rs	delete match arm Work::Tree{input, ..} in Pool::run_job	1	x86-64 only in effect: the arm asks tree_threads for the wake budget, which here is the whole pool, as the general arm's is
 src/lanes.rs	delete match arm crate::BLOCK_LEN in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	replace && with || in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace && with || in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
@@ -103,14 +104,14 @@ src/lanes.rs	replace + with - in Pool::run_job	1	speed: how many workers a job w
 src/lanes.rs	replace + with - in sources::Source::publish	1	speed: whether a published task wakes a worker (the caller and the SME2 thread take it otherwise)
 src/lanes.rs	replace += with *= in hash_each	1	a scheduling choice: bytes stays 0, so every item goes into one piece; the digests are the same, the speed gate's business (one piece hashes on one worker)
 src/lanes.rs	replace += with -= in hash_each	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
-src/lanes.rs	replace - with + in Pool::run_job	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
+src/lanes.rs	replace - with + in Pool::run_job	4	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace - with + in Pool::wake_for	4	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace - with + in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in cut_with_prefix	3	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in initialize	1	equivalent: Park::new's count only sizes its tables; slots beyond the workers hurt nothing
 src/lanes.rs	replace - with + in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in sources::Source::publish	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace - with / in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
+src/lanes.rs	replace - with / in Pool::run_job	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace - with / in Pool::wake_for	3	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace - with / in initialize	1	equivalent: Park::new's count only sizes its tables; slots beyond the workers hurt nothing
 src/lanes.rs	replace - with / in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
@@ -157,6 +158,7 @@ src/lanes.rs	replace >= with < in sme2_prefix	1	speed: how the work is cut among
 src/lanes.rs	replace >= with < in sources::Source::publish	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace >= with < in sources::run_one	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace >= with < in spin_for_work	1	speed: how long an idle worker spins before it parks (no effect on results)
+src/lanes.rs	replace >= with < in tree_threads	1	x86-64 only in effect: tree_threads cuts the budget only on x86-64 Linux with a 16-lane kernel (cfg! in its body); here it returns `available` whatever the comparison
 src/lanes.rs	replace Pool::any_parked -> bool with false	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103). On x86-64 the clock stops it (a hang the test tests/stream_collect_one_worker.rs showed: no parked worker is ever seen; a waiting task wakes nobody); here the run's schedules never met the missing wake
 src/lanes.rs	replace Pool::any_parked -> bool with true	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace Pool::wake_for with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
@@ -220,14 +222,14 @@ src/lib.rs	replace << with >>	1	equivalent: 1 << 0 and 1 >> 0 are both 1
 src/lib.rs	replace == with != in compress_chunks_parallel	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/lib.rs	replace == with != in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with < in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace > with < in spare_lane	2	x86-64 only: spare_lane is cfg(blake3_sse41_ffi), the pair kernel's path; this machine never compiles it
+src/lib.rs	replace > with < in spare_lane	3	x86-64 only: spare_lane is cfg(blake3_sse41_ffi), the pair kernel's path; this machine never compiles it
 src/lib.rs	replace > with == in code_may_be_cold	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with == in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace > with == in spare_lane	2	x86-64 only: spare_lane is cfg(blake3_sse41_ffi), the pair kernel's path; this machine never compiles it
+src/lib.rs	replace > with == in spare_lane	3	x86-64 only: spare_lane is cfg(blake3_sse41_ffi), the pair kernel's path; this machine never compiles it
 src/lib.rs	replace > with >= in OutputReader::fill	1	equivalent: xof_many of no whole block returns at once
 src/lib.rs	replace > with >= in code_may_be_cold	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with >= in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace > with >= in spare_lane	2	x86-64 only: spare_lane is cfg(blake3_sse41_ffi), the pair kernel's path; this machine never compiles it
+src/lib.rs	replace > with >= in spare_lane	3	x86-64 only: spare_lane is cfg(blake3_sse41_ffi), the pair kernel's path; this machine never compiles it
 src/lib.rs	replace >= with < in batch_after_pause	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace >= with < in hash_serial_from	1	speed: moves a threshold between equally correct paths
 src/lib.rs	replace >= with < in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
@@ -455,12 +457,17 @@ src/self_test.rs	replace & with | in compiled_features_present	2	x86 only: compi
 src/self_test.rs	replace && with || in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace * with +	5	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
 src/self_test.rs	replace * with + in chain	1	equivalent: the case has one message, so its length scales only message 0's offset, 0
+src/self_test.rs	replace * with + in test::wide_reference	1	x86-64 only: the wide kernels' reference in the self-test's tests runs where AVX-512 does; here no test reaches it
 src/self_test.rs	replace * with /	5	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
+src/self_test.rs	replace * with / in test::wide_reference	1	x86-64 only: the wide kernels' reference in the self-test's tests runs where AVX-512 does; here no test reaches it
 src/self_test.rs	replace + with *	7	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
 src/self_test.rs	replace + with -	6	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
+src/self_test.rs	replace += with *= in run	1	x86-64 only: the wide kernels' count of checked cases (checked += self_test, under cfg(all(blake3_avx512_ffi, target_os = "linux"))); this machine never compiles it
+src/self_test.rs	replace += with -= in run	1	x86-64 only: the wide kernels' count of checked cases (checked += self_test, under cfg(all(blake3_avx512_ffi, target_os = "linux"))); this machine never compiles it
 src/self_test.rs	replace << with >> in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace == with != in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace compiled_features_present with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
+src/self_test.rs	replace test::wide_reference with ()	1	x86-64 only: the wide kernels' reference in the self-test's tests runs where AVX-512 does; here no test reaches it
 src/self_test.rs	replace | with ^ in chunk_values	2	equivalent: | and ^ agree on flag bits that never overlap
 src/tree.rs	delete match arm crate::platform::Platform::AVX512 in <impl Kernels for PlatformKernels<'_>>::chunk_root	1	x86-64 only: the chunk-root dispatch is cfg(not(blake3_neon)); this machine's NEON kernels take every chunk root
 src/tree.rs	delete match arm crate::platform::Platform::SSE41 | crate::platform::Platform::AVX2 in <impl Kernels for PlatformKernels<'_>>::chunk_root	1	x86-64 only: the chunk-root dispatch is cfg(not(blake3_neon)); this machine's NEON kernels take every chunk root
