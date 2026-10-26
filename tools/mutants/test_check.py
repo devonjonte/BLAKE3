@@ -110,6 +110,25 @@ class Limits(unittest.TestCase):
         with patch.object(check, "memory_cap", lambda shards: 8 * gib):
             self.assertEqual(check.test_limits(6, 4, 15 * gib)[0], 1, "at least one test thread")
 
+class Rows(unittest.TestCase):
+    def test_a_row_naming_a_mutant_the_source_lacks_is_stale(self):
+        listed = ["src/park.rs:97:9: replace Park::wake_one -> bool with false",
+                  "src/lanes.rs:130:60: replace * with +"]
+        rows = [("known-aarch64.txt", "src/park.rs", "replace Park::wake_one -> bool with false"),
+                ("known-x86_64.txt", "src/lanes.rs", "replace * with +"),
+                # The control: a mutant no line names.
+                ("timeouts-aarch64.txt", "src/lanes.rs", "replace Pool::any_parked -> bool with false")]
+        self.assertEqual(check.stale_rows(rows, listed), rows[2:])
+        self.assertEqual(check.stale_rows(rows[:2], listed), [])
+
+    def test_rows_are_read_from_every_list_but_headers(self):
+        text = ("# a comment\nfiles: src/park.rs\nmodel files: src/park.rs\n"
+                "src/park.rs\treplace Park::wake_one -> bool with false\t1\tspeed: a reason\n\n")
+        with patch("builtins.open", mock_open(read_data=text)):
+            self.assertEqual(check.list_rows(["/x/known-x86_64.txt"]),
+                             [("known-x86_64.txt", "src/park.rs", "replace Park::wake_one -> bool with false")])
+
+
 class Leftovers(unittest.TestCase):
     def test_only_the_shards_worktrees_go(self):
         listed = "\n".join([
