@@ -705,61 +705,33 @@ pub(crate) fn prefetch_code((start, end): (usize, usize)) {
     }
 }
 
+// The little-endian words of a block or a key, and back: 4-byte chunks
+// (as_chunks), with no index arithmetic to get wrong (each unrolled form's
+// 16 lines of `bytes[i * 4..]` were 16 places for a mutant; October 26).
 #[inline(always)]
 pub fn words_from_le_bytes_32(bytes: &[u8; 32]) -> [u32; 8] {
     let mut out = [0; 8];
-    out[0] = u32::from_le_bytes(bytes[0 * 4..][..4].try_into().unwrap());
-    out[1] = u32::from_le_bytes(bytes[1 * 4..][..4].try_into().unwrap());
-    out[2] = u32::from_le_bytes(bytes[2 * 4..][..4].try_into().unwrap());
-    out[3] = u32::from_le_bytes(bytes[3 * 4..][..4].try_into().unwrap());
-    out[4] = u32::from_le_bytes(bytes[4 * 4..][..4].try_into().unwrap());
-    out[5] = u32::from_le_bytes(bytes[5 * 4..][..4].try_into().unwrap());
-    out[6] = u32::from_le_bytes(bytes[6 * 4..][..4].try_into().unwrap());
-    out[7] = u32::from_le_bytes(bytes[7 * 4..][..4].try_into().unwrap());
+    for (word, chunk) in out.iter_mut().zip(bytes.as_chunks::<4>().0) {
+        *word = u32::from_le_bytes(*chunk);
+    }
     out
 }
 
 #[inline(always)]
 pub fn words_from_le_bytes_64(bytes: &[u8; 64]) -> [u32; 16] {
     let mut out = [0; 16];
-    out[0] = u32::from_le_bytes(bytes[0 * 4..][..4].try_into().unwrap());
-    out[1] = u32::from_le_bytes(bytes[1 * 4..][..4].try_into().unwrap());
-    out[2] = u32::from_le_bytes(bytes[2 * 4..][..4].try_into().unwrap());
-    out[3] = u32::from_le_bytes(bytes[3 * 4..][..4].try_into().unwrap());
-    out[4] = u32::from_le_bytes(bytes[4 * 4..][..4].try_into().unwrap());
-    out[5] = u32::from_le_bytes(bytes[5 * 4..][..4].try_into().unwrap());
-    out[6] = u32::from_le_bytes(bytes[6 * 4..][..4].try_into().unwrap());
-    out[7] = u32::from_le_bytes(bytes[7 * 4..][..4].try_into().unwrap());
-    out[8] = u32::from_le_bytes(bytes[8 * 4..][..4].try_into().unwrap());
-    out[9] = u32::from_le_bytes(bytes[9 * 4..][..4].try_into().unwrap());
-    out[10] = u32::from_le_bytes(bytes[10 * 4..][..4].try_into().unwrap());
-    out[11] = u32::from_le_bytes(bytes[11 * 4..][..4].try_into().unwrap());
-    out[12] = u32::from_le_bytes(bytes[12 * 4..][..4].try_into().unwrap());
-    out[13] = u32::from_le_bytes(bytes[13 * 4..][..4].try_into().unwrap());
-    out[14] = u32::from_le_bytes(bytes[14 * 4..][..4].try_into().unwrap());
-    out[15] = u32::from_le_bytes(bytes[15 * 4..][..4].try_into().unwrap());
+    for (word, chunk) in out.iter_mut().zip(bytes.as_chunks::<4>().0) {
+        *word = u32::from_le_bytes(*chunk);
+    }
     out
 }
 
 #[inline(always)]
 pub fn le_bytes_from_words_64(words: &[u32; 16]) -> [u8; 64] {
     let mut out = [0; 64];
-    *<&mut [u8; 4]>::try_from(&mut out[0 * 4..][..4]).unwrap() = words[0].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[1 * 4..][..4]).unwrap() = words[1].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[2 * 4..][..4]).unwrap() = words[2].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[3 * 4..][..4]).unwrap() = words[3].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[4 * 4..][..4]).unwrap() = words[4].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[5 * 4..][..4]).unwrap() = words[5].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[6 * 4..][..4]).unwrap() = words[6].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[7 * 4..][..4]).unwrap() = words[7].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[8 * 4..][..4]).unwrap() = words[8].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[9 * 4..][..4]).unwrap() = words[9].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[10 * 4..][..4]).unwrap() = words[10].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[11 * 4..][..4]).unwrap() = words[11].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[12 * 4..][..4]).unwrap() = words[12].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[13 * 4..][..4]).unwrap() = words[13].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[14 * 4..][..4]).unwrap() = words[14].to_le_bytes();
-    *<&mut [u8; 4]>::try_from(&mut out[15 * 4..][..4]).unwrap() = words[15].to_le_bytes();
+    for (chunk, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(words) {
+        *chunk = word.to_le_bytes();
+    }
     out
 }
 
