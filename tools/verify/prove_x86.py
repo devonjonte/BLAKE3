@@ -5,9 +5,11 @@ compression function of the Lean specification (lean_spec.py) for every
 input, key, counter, and flags value, by the x86-64 model (x86.py): one
 compression (compress_in_place, compress_xof), hash_many at every input
 count up to two passes of its width and every block count from 1 to 16,
-and the generated pass of whole chunks with a partial one (each lane's
+the generated pass of whole chunks with a partial one (each lane's
 16 blocks, every per-lane, per-block length and flags, at every block
-after which its snapshot is taken).
+after which its snapshot is taken), and the generated wide AVX-512
+kernels (c/blake3_avx512_32.S: 32 inputs, counters incrementing or fixed,
+and 16 inputs, at 1 to 16 blocks).
 
     python3 tools/verify/prove_x86.py [--workers N] [CASE...]
     python3 tools/verify/prove_x86.py [--workers N] --representative
@@ -46,9 +48,10 @@ def assemble(isa):
         return OBJS[isa]
     d = tempfile.mkdtemp()
     obj = os.path.join(d, f"{isa}.o")
-    # "chunk_root": the one file holding both chunk-root entries (sse41, avx512).
-    subprocess.run([CLANG, "-c", "--target=x86_64-linux-gnu", os.path.join(ROOT_DIR, f"c/blake3_{isa}_x86-64_unix.S"),
-                    "-o", obj], check=True)
+    # "chunk_root": the one file holding both chunk-root entries (sse41, avx512);
+    # "wide": the generated 32- and 16-input AVX-512 kernels (k32, p32, p16).
+    src = "c/blake3_avx512_32.S" if isa == "wide" else f"c/blake3_{isa}_x86-64_unix.S"
+    subprocess.run([CLANG, "-c", "--target=x86_64-linux-gnu", os.path.join(ROOT_DIR, src), "-o", obj], check=True)
     so = x86.link(obj)
     OBJS[isa] = so
     return so
@@ -216,6 +219,48 @@ def prove_hash_many(so, isa, n, blocks, increment):
     return m.steps
 
 
+WIDE = {"k32": (32, True), "p32": (32, False), "p16": (16, False)}
+
+
+def prove_wide(so, kernel, blocks):
+    """blake3_servil_avx512_{k32,p32,p16}(inputs, blocks, key, counter,
+    packed, out), the AArch64 kernel family's ABI (tools/gen_avx512_32.py):
+    input i, at inputs[i], is `blocks` blocks hashed from key at counter + i
+    (k32) or counter (p32, p16), the first block with flags | start, the
+    last with flags | end and block length last_len; its chaining value to
+    out[32 i..]. For every input byte, key, counter, flags and last_len."""
+    n, increment = WIDE[kernel]
+    inputs = [byte_symbols(f"in{i}_", 64 * blocks) for i in range(n)]
+    key = byte_symbols("key", 32)
+    regions = {f"input{i}": Region(f"input{i}", 64 * blocks, False, (lambda b: lambda o: b[o])(inputs[i])) for i in range(n)}
+    regions["key"] = Region("key", 32, False, lambda o: key[o])
+    regions["out"] = Region("out", 32 * n, True, None)
+    table = Region("table", 8 * n, False, None)
+    for i in range(n):
+        for j in range(8):
+            table.bytes[8 * i + j] = (Ptr(f"input{i}", 0), j)
+    regions["table"] = table
+    counter = BitVec("counter", 64)
+    flags, start, end, last_len = u8("flags"), u8("start"), u8("end"), u8("last_len")
+    packed = ZeroExt(32, Concat(last_len, end, start, flags))
+    args = [Ptr("table", 0), BitVecVal(blocks, 64), Ptr("key", 0), counter, packed, Ptr("out", 0)]
+    s = Setup(so, f"blake3_servil_avx512_{kernel}", regions, args)
+    d_row_facts(s.m, counter, n if increment else 1,
+                [ZeroExt(24, flags | start | end), ZeroExt(24, flags | start), ZeroExt(24, flags | end), ZeroExt(24, flags),
+                 ZeroExt(24, last_len), BitVecVal(64, 32)])
+    m = s.run()
+    out = m.regions["out"]
+    if set(out.bytes) != set(range(32 * n)):
+        raise Unproved("the output is not exactly written")
+    cvs = table_cvs(inputs, key, [counter + i if increment else counter for i in range(n)], flags, start, end, last_len, blocks)
+    for i in range(n):
+        got = spec.words([out.bytes[32 * i + j] for j in range(32)])
+        for w in range(8):
+            if not same(got[w], cvs[i][w]):
+                raise Unproved(f"input {i}, output word {w} differs from the specification")
+    return m.steps
+
+
 CHUNK_START, CHUNK_END, ROOT = 1, 2, 8
 
 
@@ -342,6 +387,7 @@ def cases(only):
     for n in range(1, 33):
         out.append(("avx512", "xof_many", n))
     out += [(isa, "chunk_root", whole) for isa in ("sse41", "avx512") for whole in range(16)]
+    out += [("wide", "wide", (kernel, blocks)) for kernel in WIDE for blocks in range(1, 17)]
     for kisa in ("sse41", "avx2"):
         for last in range(16):
             out.append(("partial", "partial", (kisa, last)))
@@ -369,6 +415,7 @@ def representative_cases():
         out += [(isa, "hash_many", (2, blocks, True)) for blocks in range(1, 16)]
     out += [("avx512", "xof_many", n) for n in range(1, 33)]
     out += [(isa, "chunk_root", whole) for isa in ("sse41", "avx512") for whole in range(16)]
+    out += [("wide", "wide", (kernel, blocks)) for kernel in WIDE for blocks in range(1, 17)]
     return out
 
 
@@ -384,6 +431,9 @@ def prove_case(case):
         elif kind == "partial":
             kisa, last = arg
             steps, what = prove_partial(so, kisa, last), f"{kisa}, snapshot after block {last}"
+        elif kind == "wide":
+            kernel, blocks = arg
+            steps, what = prove_wide(so, kernel, blocks), f"{kernel}, {WIDE[kernel][0]} inputs of {blocks} blocks"
         elif kind == "xof_many":
             steps, what = prove_xof_many(so, arg), f"xof_many, {arg} blocks"
         elif kind in ("compress", "xof"):
@@ -418,6 +468,8 @@ def main():
             return arg[0] * arg[1]
         if kind == "partial":
             return WIDTH[arg[0]] * 16
+        if kind == "wide":
+            return WIDE[arg[0]][0] * arg[1] * 2  # 16-lane vectors twice over: the heaviest cases
         return (arg or 0) + 1
     todo.sort(key=lambda c: -work(c))
     failed = 0

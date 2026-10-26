@@ -4,7 +4,7 @@ cfg_if::cfg_if! {
     if #[cfg(target_arch = "x86_64")] {
         cfg_if::cfg_if! {
             if #[cfg(blake3_avx512_ffi)] {
-                pub const MAX_SIMD_DEGREE: usize = 16;
+                pub const MAX_SIMD_DEGREE: usize = if cfg!(target_os = "linux") { 32 } else { 16 };
             } else {
                 pub const MAX_SIMD_DEGREE: usize = 8;
             }
@@ -28,7 +28,7 @@ cfg_if::cfg_if! {
     if #[cfg(target_arch = "x86_64")] {
         cfg_if::cfg_if! {
             if #[cfg(blake3_avx512_ffi)] {
-                pub const MAX_SIMD_DEGREE_OR_2: usize = 16;
+                pub const MAX_SIMD_DEGREE_OR_2: usize = if cfg!(target_os = "linux") { 32 } else { 16 };
             } else {
                 pub const MAX_SIMD_DEGREE_OR_2: usize = 8;
             }
@@ -272,7 +272,7 @@ impl Platform {
             Platform::AVX2 => "AVX2 hash_many (8-way)",
             #[cfg(blake3_avx512_ffi)]
             #[cfg(target_arch = "x86_64")]
-            Platform::AVX512 => "AVX-512 hash_many (16-way)",
+            Platform::AVX512 => if cfg!(target_os = "linux") { "AVX-512 hash_many (32-way chunks, 16-way tails)" } else { "AVX-512 hash_many (16-way)" },
             #[cfg(blake3_neon)]
             Platform::NEON => "integer + NEON hybrid kernels (16 chunks per call)",
             #[cfg(blake3_sme2)]
@@ -289,7 +289,7 @@ impl Platform {
             Platform::AVX2 => 8,
             #[cfg(blake3_avx512_ffi)]
             #[cfg(target_arch = "x86_64")]
-            Platform::AVX512 => 16,
+            Platform::AVX512 => if cfg!(target_os = "linux") { 32 } else { 16 },
             // Sixteen chunks per call reach the k10 kernel (see
             // neon_hybrid), in both its families.
             #[cfg(blake3_neon)]
@@ -825,7 +825,7 @@ mod x86_degree_test {
     #[test]
     fn test_detected_degree_is_the_widest_kernel() {
         let expected = if cfg!(blake3_avx512_ffi) && std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl") {
-            16
+            if cfg!(target_os = "linux") { 32 } else { 16 }
         } else if cfg!(blake3_avx2_ffi) && std::is_x86_feature_detected!("avx2") {
             8
         } else if cfg!(blake3_sse41_ffi) && std::is_x86_feature_detected!("sse4.1") {
