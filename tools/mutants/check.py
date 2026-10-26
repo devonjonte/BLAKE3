@@ -740,8 +740,13 @@ def main():
         print(f"NEW TIME-OUT ({n - tknown.get(k, (0, ''))[0]}): {k}")
     for k, c in sorted(stale_timed.items()):
         print(f"NO LONGER TIMES OUT ({c - timed.get(k, 0)}): {k}")
+    # The places the suite's clock alone stopped (a model file's place the
+    # model catches is caught, and is not listed: with_model).
+    model = PLACE_OUTCOMES.get("loom", {})
     for k in sorted(CLOCK_ONLY):
-        print(f"TIMED OUT (place): {k}")
+        n, place = k.rsplit("\t", 1)
+        if model.get((n, place)) != "CaughtMutant":
+            print(f"TIMED OUT (place): {k}")
     ok = not new and not stale and not unexplained
     ok_timed = not new_timed and not stale_timed
     print(f"mutants: {sum(found.values())} survive, each known and explained" if ok else "mutants: the list and this run differ, or a listed mutant has no reason")
