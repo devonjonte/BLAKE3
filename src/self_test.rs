@@ -422,7 +422,7 @@ fn run() -> usize {
         },
     );
     #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
-    if matches!(platform, Platform::AVX512) && crate::platform::wide_avx512() {
+    if crate::platform::wide_avx512() {
         // Sound: the detected platform has the wide kernels' ISA, and
         // hash_many dispatches to them (only then does startup check them). Their
         // wrapper checks its bounds, and builds all arguments on the stack.

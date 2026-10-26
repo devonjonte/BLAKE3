@@ -85,8 +85,19 @@ def cpu_flags():
             for line in info:
                 key, sep, value = line.partition(":")
                 if sep and key.strip() in ("flags", "Features"):
-                    return set(value.split())
-        raise ValueError("/proc/cpuinfo has no flags or Features line")
+                    flags = set(value.split())
+                    break
+            else:
+                raise ValueError("/proc/cpuinfo has no flags or Features line")
+        # One fact cpuinfo has as fields, not a flag: an AMD CPU of family
+        # 0x1A (Zen 5) or later, where the wide AVX-512 kernels run
+        # (platform::wide_cpu); the rows for their dispatch depend on it.
+        with open("/proc/cpuinfo") as info:
+            fields = dict(line.partition(":")[::2] for line in info if ":" in line)
+        fields = {k.strip(): v.strip() for k, v in fields.items()}
+        if fields.get("vendor_id") == "AuthenticAMD" and fields.get("cpu family", "").isdigit() and int(fields["cpu family"]) >= 0x1A:
+            flags.add("amd_family_ge_1a")
+        return flags
     if sys.platform == "darwin":
         out = subprocess.run(["sysctl", "hw.optional"], capture_output=True, text=True, check=True).stdout
         rows = [line.partition(":") for line in out.splitlines()]

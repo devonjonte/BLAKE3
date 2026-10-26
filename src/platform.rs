@@ -625,7 +625,8 @@ fn wide_cpu(amd: bool, family: u32) -> bool {
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 pub fn wide_avx512() -> bool {
-    avx512_detected() && x86_features() & x86_bits::WIDE != 0
+    // The bit comes only with AVX-512 (read_x86_features).
+    x86_features() & x86_bits::WIDE != 0
 }
 
 #[cfg(blake3_avx512_ffi)]
@@ -900,7 +901,11 @@ mod x86_features_test {
         let field = |name: &str| info.lines().find(|l| l.starts_with(name)).and_then(|l| l.split(':').nth(1)).map(|v| v.trim().to_string()).expect(name);
         let amd = field("vendor_id") == "AuthenticAMD";
         let family: u32 = field("cpu family").parse().expect("cpu family");
-        assert_eq!(features & WIDE != 0, features & AVX512 != 0 && amd && family >= 0x1A, "vendor {amd}, family {family:#x}");
+        let want = features & AVX512 != 0 && amd && family >= 0x1A;
+        assert_eq!(features & WIDE != 0, want, "vendor {amd}, family {family:#x}");
+        // What the dispatch reads, against the same independent reading.
+        #[cfg(blake3_avx512_ffi)]
+        assert_eq!(super::wide_avx512(), want, "wide_avx512 on vendor {amd}, family {family:#x}");
     }
 
     /// The detection functions answer as the standard library does, each
