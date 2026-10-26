@@ -36,6 +36,7 @@ src/lanes.rs	delete match arm 128 in Task::run_members	1	speed: chooses between 
 src/lanes.rs	delete match arm 256 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	delete match arm 512 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	delete match arm CHUNK_LEN in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
+src/lanes.rs	delete match arm Work::Tree{input, ..} in Pool::run_job	1	speed: without the arm a tree's wakes follow its pieces, not the wide kernel's budget (tree_threads); every count hashes alike, the caller taking what no worker took. Without AVX-512, tree_threads is the pool's size and Park::wake_for caps the wakes at the workers: the same wakes
 src/lanes.rs	delete match arm crate::BLOCK_LEN in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	replace && with || in Pool::run_job	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace && with || in hash_each	1	speed: the cut's piece sizes; any cut of the items into consecutive pieces of one or more hashes every item alike (the cut, not the digests, is what changes)
@@ -57,14 +58,14 @@ src/lanes.rs	replace + with - in sources::Source::publish	1	the pool's schedulin
 src/lanes.rs	replace + with - in sources::Source::publish_job	1	another architecture's: `own`, the caller's own pieces, is nonzero only where the SME2 thread takes a prefix (cut_with_prefix on AArch64); on x86 own is 0 and base - 0 is base, so claimed is where it was. On AArch64 the change strands the job (the old hangs.txt had it)
 src/lanes.rs	replace += with *= in hash_each	1	a scheduling choice: bytes stays 0, so every item goes into one piece; the digests are the same, the speed gate's business (one piece hashes on one worker)
 src/lanes.rs	replace += with -= in hash_each	1	speed: how the work is cut among threads (every cut tiles the items; `remaining` feeds the piece length alone)
-src/lanes.rs	replace - with + in Pool::run_job	2	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
+src/lanes.rs	replace - with + in Pool::run_job	4	speed: how many workers are woken for a job's pieces (the wide kernel's tree budget, tree_threads, among them); the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace - with + in Pool::wake_for	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace - with + in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in cut_with_prefix	3	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in initialize	1	equivalent: Park::new's count only sizes its tables; slots beyond the workers hurt nothing
 src/lanes.rs	replace - with + in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in sources::Source::publish	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
-src/lanes.rs	replace - with / in Pool::run_job	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
+src/lanes.rs	replace - with / in Pool::run_job	2	speed: how many workers are woken for a job's pieces (the wide kernel's tree budget, tree_threads, among them); the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace - with / in Pool::wake_for	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace - with / in initialize	1	equivalent: Park::new's count only sizes its tables; slots beyond the workers hurt nothing
 src/lanes.rs	replace - with / in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
@@ -108,7 +109,7 @@ src/lanes.rs	replace >= with < in poll_pause	1	speed: how a caller polls before 
 src/lanes.rs	replace >= with < in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace >= with < in sources::Source::publish	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
 src/lanes.rs	replace >= with < in sources::run_one	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
-src/lanes.rs	replace >= with < in spin_for_work	1	speed: with the spin's sense inverted a worker spins while idle or parks while a stream is open; the digests are the same (it has also timed out, on the EPYC: #140)
+src/lanes.rs	replace >= with < in spin_for_work	1	OPEN: the pool's scheduling under interleavings the tests leave to chance: with the spin's sense inverted a worker spins while idle or parks while a stream is open; the digests are the same, and a test waiting for every worker parked can outlast the clock (on the i7, October 26; the EPYC: #140)
 src/lanes.rs	replace Pool::wake_for with ()	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace all_workers_parked -> bool with true	1	a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before
 src/lanes.rs	replace poll_pause with ()	1	speed: how a caller polls before it sleeps; the sleep and its wake are the finish handshake's, under Shuttle (tests/shuttle_finish.rs)
@@ -434,6 +435,8 @@ src/self_test.rs	replace * with / in outputs	1	AArch64 only: the AArch64 CASES t
 src/self_test.rs	replace * with / in test::reference	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace + with *	10	the self-test's case lengths: a changed length tests another length, and every length's expected digest comes from the reference implementation
 src/self_test.rs	replace + with -	10	the self-test's case lengths: a changed length tests another length, and every length's expected digest comes from the reference implementation
+src/self_test.rs	replace += with *= in run	1	[cpu lacks avx512f avx512vl] AVX-512 only: the wide kernels' self-test cases join the count only where the platform is AVX512 (test_self_test_run_checks_every_case checks the sum there)
+src/self_test.rs	replace += with -= in run	1	[cpu lacks avx512f avx512vl] AVX-512 only: the wide kernels' self-test cases join the count only where the platform is AVX512 (test_self_test_run_checks_every_case checks the sum there)
 src/self_test.rs	replace - with +	3	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace - with /	3	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace / with % in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
