@@ -1419,7 +1419,8 @@ fn test_grouped_hash() {
             let mut subtree_offset = 0;
             while subtree_offset < input.len() {
                 let take = core::cmp::min(subtree_len, input.len() - subtree_offset);
-                let subtree_cv = crate::Hasher::new(crate::Mode::Plain).set_input_offset(subtree_offset as u64).update(&input[subtree_offset..][..take]).finalize_non_root();
+                let subtree_cv =
+                    crate::Hasher::new(crate::Mode::Plain).set_input_offset(subtree_offset as u64).update(&input[subtree_offset..][..take]).finalize_non_root();
                 chaining_values.push(subtree_cv);
                 subtree_offset += take;
             }

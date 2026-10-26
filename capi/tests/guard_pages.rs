@@ -67,7 +67,8 @@ fn every_call_inside_guard_pages() {
     for at_end in [true, false] {
         let key = Guarded::with(&[7u8; 32], at_end);
         let context = Guarded::with(b"guard pages 2026-10-25 the C calls\0", at_end);
-        let modes = unsafe { [("plain", b3_mode_plain()), ("keyed", b3_mode_keyed(key.ptr())), ("derive key", b3_mode_derive_key(context.ptr() as *const c_char))] };
+        let modes =
+            unsafe { [("plain", b3_mode_plain()), ("keyed", b3_mode_keyed(key.ptr())), ("derive key", b3_mode_derive_key(context.ptr() as *const c_char))] };
         for (name, mode) in &modes {
             for len in lens {
                 let what = format!("{name}, {len} B, at end {at_end}");
