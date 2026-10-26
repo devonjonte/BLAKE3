@@ -82,17 +82,13 @@ impl Park {
         (&self.parked[me / 64], 1u64.wrapping_shl(me as u32))
     }
 
-    /// Whether any worker is parked (one load a word).
-    pub(crate) fn any_parked(&self) -> bool {
-        self.parked.iter().any(|w| w.load(Ordering::SeqCst) != 0)
-    }
-
     /// How many workers are parked.
     pub(crate) fn parked_count(&self) -> usize {
         self.parked.iter().map(|w| w.load(Ordering::SeqCst).count_ones() as usize).sum()
     }
 
-    /// Wake one parked worker, if any: whether one was.
+    /// Wake one parked worker, if any: whether one was. With none parked,
+    /// one load a word.
     pub(crate) fn wake_one(&self) -> bool {
         for (word, handles) in self.parked.iter().zip(self.handles.chunks(64)) {
             let mut bits = word.load(Ordering::SeqCst);

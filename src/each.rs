@@ -364,7 +364,7 @@ mod test {
     /// split's own length, a few of 512 KiB and more), every mode: the
     /// multithreaded form gives hash_each_with's digests.
     /// Keep: it detects, by hanging, mutants the clock then stops
-    /// (tools/mutants/timeouts-x86_64.txt: hash_each, initialize, Source::take, Source::finished, Source::wait, slot_len, hash_many_on, hash_run).
+    /// (tools/mutants/timeouts-x86_64.txt).
     #[test]
     fn test_hash_each_multithreaded() {
         let mut input = vec![0u8; 3 << 20];
@@ -538,7 +538,7 @@ mod test {
     /// Every length around chunk and lane boundaries, in every mode, mixed in
     /// one call, against `hash_with` on each.
     /// Keep: it detects, by hanging, mutants the clock then stops
-    /// (tools/mutants/timeouts-x86_64.txt: Hasher::from_core, Hasher::gather).
+    /// (tools/mutants/timeouts-x86_64.txt).
     #[test]
     fn test_hash_each_matches_hash_with() {
         let mut input = vec![0u8; 40 * CHUNK_LEN];

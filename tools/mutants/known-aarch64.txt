@@ -85,9 +85,6 @@ src/lanes.rs	delete match arm Work::Tree{input, ..} in Pool::run_job	1	x86-64 on
 src/lanes.rs	delete match arm crate::BLOCK_LEN in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	replace && with || in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace && with || in hash_each	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace && with || in sources::Source::publish	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace && with || in sources::Source::wake_for_waiting	1	another machine: the wake a caller looping on collect() needs where no SME2 thread takes stream tasks (CI's x86 jobs run stream_collect_with_workers; here the SME2 thread takes the task)
-src/lanes.rs	replace && with || in sources::run_one	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace * with +	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace * with + in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with + in merge_to_children	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
@@ -159,11 +156,7 @@ src/lanes.rs	replace >= with < in sources::Source::publish	1	OPEN: the pool's sc
 src/lanes.rs	replace >= with < in sources::run_one	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace >= with < in spin_for_work	1	speed: how long an idle worker spins before it parks (no effect on results)
 src/lanes.rs	replace >= with < in tree_threads	1	x86-64 only in effect: tree_threads cuts the budget only on x86-64 Linux with a 16-lane kernel (cfg! in its body); here it returns `available` whatever the comparison
-src/lanes.rs	replace Pool::any_parked -> bool with false	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103). On x86-64 the clock stops it (a hang the test tests/stream_collect_one_worker.rs showed: no parked worker is ever seen; a waiting task wakes nobody); here the run's schedules never met the missing wake
-src/lanes.rs	replace Pool::any_parked -> bool with true	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace Pool::wake_for with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace Pool::wake_one -> bool with false	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103). On x86-64 the clock stops it (a hang the test tests/api_plan.rs showed: no worker is woken; the pieces wait); here the run's schedules never met the missing wake
-src/lanes.rs	replace Pool::wake_one -> bool with true	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103). On x86-64 the clock stops it (a hang the test tests/api_plan.rs showed: a worker is reported woken that was not; its piece waits); here the run's schedules never met the missing wake
 src/lanes.rs	replace all_workers_parked -> bool with true	1	a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before
 src/lanes.rs	replace poll_pause with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace prefix_for -> usize with 0	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
@@ -375,7 +368,6 @@ src/pair.rs	replace | with ^ in parent	1	equivalent: | and ^ agree on flag bits 
 src/park.rs	replace - with + in Park::pay_owed	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
 src/park.rs	replace - with / in Park::pay_owed	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
 src/park.rs	replace > with >= in Park::wake_for	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
-src/park.rs	replace Park::any_parked -> bool with true	1	speed: a publisher tries a wake with nobody parked; wake_one finds no bit
 src/platform.rs	delete ! in Platform::xof_many	1	speed: chooses between equally correct paths
 src/platform.rs	delete ! in sme2_detect_uncached	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	delete match arm 1 in sme2_detected	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
