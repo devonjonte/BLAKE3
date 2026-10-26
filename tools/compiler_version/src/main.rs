@@ -13,9 +13,6 @@ fn main() {
     // in build.rs, which sets the COMPILER_PATH variable.
     let compiler_path = env!("COMPILER_PATH");
     let mut compiler_command = Command::new(compiler_path);
-    // Use the --version flag on everything other than MSVC.
-    if !cfg!(target_env = "msvc") {
-        compiler_command.arg("--version");
-    }
+    compiler_command.arg("--version");
     let _ = compiler_command.status().unwrap();
 }

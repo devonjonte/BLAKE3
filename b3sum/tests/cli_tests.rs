@@ -85,18 +85,11 @@ fn test_hash_many() {
     let output = cmd!(b3sum_exe(), &file1, &file2).read().unwrap();
     let foo_hash = blake3::convenience::hash(b"foo");
     let bar_hash = blake3::convenience::hash(b"bar");
-    let expected = format!(
-        "{}  {}\n{}  {}",
-        foo_hash.to_hex(),
-        // account for slash normalization on Windows
-        file1.to_string_lossy().replace("\\", "/"),
-        bar_hash.to_hex(),
-        file2.to_string_lossy().replace("\\", "/"),
-    );
+    let expected = format!("{}  {}\n{}  {}", foo_hash.to_hex(), file1.to_string_lossy(), bar_hash.to_hex(), file2.to_string_lossy());
     assert_eq!(expected, output);
 
     let output_no_names = cmd!(b3sum_exe(), "--no-names", &file1, &file2).read().unwrap();
-    let expected_no_names = format!("{}\n{}", foo_hash.to_hex(), bar_hash.to_hex(),);
+    let expected_no_names = format!("{}\n{}", foo_hash.to_hex(), bar_hash.to_hex());
     assert_eq!(expected_no_names, output_no_names);
 }
 
@@ -139,14 +132,7 @@ fn test_hash_many_tag() {
     let output = cmd!(b3sum_exe(), "--tag", &file1, &file2).read().unwrap();
     let foo_hash = blake3::convenience::hash(b"foo");
     let bar_hash = blake3::convenience::hash(b"bar");
-    let expected = format!(
-        "BLAKE3 ({}) = {}\nBLAKE3 ({}) = {}",
-        // account for slash normalization on Windows
-        file1.to_string_lossy().replace("\\", "/"),
-        foo_hash.to_hex(),
-        file2.to_string_lossy().replace("\\", "/"),
-        bar_hash.to_hex(),
-    );
+    let expected = format!("BLAKE3 ({}) = {}\nBLAKE3 ({}) = {}", file1.to_string_lossy(), foo_hash.to_hex(), file2.to_string_lossy(), bar_hash.to_hex());
     assert_eq!(expected, output);
 }
 
@@ -164,7 +150,7 @@ fn test_missing_files() {
 
     let foo_hash = blake3::convenience::hash(b"foo");
     let bar_hash = blake3::convenience::hash(b"bar");
-    let expected_stdout = format!("{}  file1\n{}  file2\n", foo_hash.to_hex(), bar_hash.to_hex(),);
+    let expected_stdout = format!("{}  file1\n{}  file2\n", foo_hash.to_hex(), bar_hash.to_hex());
     assert_eq!(expected_stdout.as_bytes(), &output.stdout[..]);
 
     let bing_error = fs::File::open(dir.path().join("missing_file")).unwrap_err();
@@ -238,17 +224,6 @@ fn test_no_mmap() {
 }
 
 #[test]
-#[cfg(windows)]
-fn test_null_device_on_windows() {
-    blake3::initialize();
-    let expected = blake3::convenience::hash(b"").to_hex();
-    let output = cmd!(b3sum_exe(), "--no-names", "NUL").read().unwrap();
-    assert_eq!(&*expected, output);
-    let output = cmd!(b3sum_exe(), "--no-names", "--no-mmap", "NUL").read().unwrap();
-    assert_eq!(&*expected, output);
-}
-
-#[test]
 fn test_length_without_value_is_an_error() {
     blake3::initialize();
     let result = cmd!(b3sum_exe(), "--length").stdin_bytes("foo").stderr_capture().run();
@@ -308,43 +283,6 @@ fn test_newline_and_backslash_escaping_on_unix() {
 }
 
 #[test]
-#[cfg(windows)]
-fn test_slash_normalization_on_windows() {
-    blake3::initialize();
-    let empty_hash = blake3::convenience::hash(b"").to_hex();
-    let dir = tempfile::tempdir().unwrap();
-    fs::create_dir(dir.path().join("subdir")).unwrap();
-    // Note that filenames can't contain newlines or backslashes on Windows, so
-    // we don't test escaping here. We only test forward slash and backslash as
-    // directory separators.
-    let names = ["abcdef", "subdir/foo", "subdir\\bar"];
-    let mut paths = Vec::new();
-    for name in &names {
-        let path = dir.path().join(name);
-        println!("creating file at {:?}", path);
-        fs::write(&path, b"").unwrap();
-        paths.push(path);
-    }
-    let output = cmd(b3sum_exe(), &names).dir(dir.path()).read().unwrap();
-    let expected = format!(
-        "\
-{0}  abcdef
-{0}  subdir/foo
-{0}  subdir/bar",
-        empty_hash,
-    );
-    println!("output");
-    println!("======");
-    println!("{}", output);
-    println!();
-    println!("expected");
-    println!("========");
-    println!("{}", expected);
-    println!();
-    assert_eq!(expected, output);
-}
-
-#[test]
 #[cfg(unix)]
 fn test_invalid_unicode_on_unix() {
     blake3::initialize();
@@ -367,43 +305,6 @@ fn test_invalid_unicode_on_unix() {
         } else if write_result.is_err() {
             return;
         }
-        paths.push(path);
-    }
-    let output = cmd(b3sum_exe(), &names).dir(dir.path()).read().unwrap();
-    let expected = format!(
-        "\
-{0}  abcdef
-{0}  abc�def",
-        empty_hash,
-    );
-    println!("output");
-    println!("======");
-    println!("{}", output);
-    println!();
-    println!("expected");
-    println!("========");
-    println!("{}", expected);
-    println!();
-    assert_eq!(expected, output);
-}
-
-#[test]
-#[cfg(windows)]
-fn test_invalid_unicode_on_windows() {
-    blake3::initialize();
-    use std::os::windows::ffi::OsStringExt;
-
-    let empty_hash = blake3::convenience::hash(b"").to_hex();
-    let dir = tempfile::tempdir().unwrap();
-    let surrogate_char = 0xDC00;
-    let bad_unicode_wchars = ['a' as u16, 'b' as u16, 'c' as u16, surrogate_char, 'd' as u16, 'e' as u16, 'f' as u16];
-    let bad_osstring = OsString::from_wide(&bad_unicode_wchars);
-    let names = ["abcdef".into(), bad_osstring];
-    let mut paths = Vec::new();
-    for name in &names {
-        let path = dir.path().join(name);
-        println!("creating file at {:?}", path);
-        fs::write(&path, b"").unwrap();
         paths.push(path);
     }
     let output = cmd(b3sum_exe(), &names).dir(dir.path()).read().unwrap();
@@ -593,33 +494,12 @@ fn test_check_invalid_characters() {
     assert!(!output.status.success());
     assert_eq!("", stdout);
     assert_eq!(expected_stderr, stderr);
-
-    // Windows also forbids literal backslashes. Check for that if and only if
-    // we're on Windows.
-    if cfg!(windows) {
-        let output = cmd!(b3sum_exe(), "--check")
-            .stdin_bytes("0000000000000000000000000000000000000000000000000000000000000000  \\")
-            .stdout_capture()
-            .stderr_capture()
-            .unchecked()
-            .run()
-            .unwrap();
-        let stdout = std::str::from_utf8(&output.stdout).unwrap();
-        let stderr = std::str::from_utf8(&output.stderr).unwrap();
-        let expected_stderr = "\
-            b3sum: Backslash in path\n\
-            b3sum: WARNING: 1 computed checksum did NOT match\n";
-        assert!(!output.status.success());
-        assert_eq!("", stdout);
-        assert_eq!(expected_stderr, stderr);
-    }
 }
 
 #[test]
 fn test_globbing() {
     blake3::initialize();
-    // On Unix, globbing is provided by the shell. On Windows, globbing is
-    // provided by us, using the `wild` crate.
+    // Globbing is the shell's.
     let dir = tempfile::tempdir().unwrap();
     let file1 = dir.path().join("file1");
     fs::write(&file1, b"foo").unwrap();
@@ -630,8 +510,7 @@ fn test_globbing() {
     let bar_hash = blake3::convenience::hash(b"bar");
     // NOTE: This assumes that the glob will be expanded in alphabetical order,
     //       to "file1 file2" rather than "file2 file1". So far, this seems to
-    //       be true (guaranteed?) of Unix shell behavior, and true in practice
-    //       with the `wild` crate on Windows. It's possible that this could
+    //       be true (guaranteed?) of Unix shell behavior. It's possible that this could
     //       start failing in the future, though, or on some unknown platform.
     //       If that ever happens, we'll need to relax this test somehow,
     //       probably by just testing for both possible outputs. I'm not
@@ -640,8 +519,7 @@ fn test_globbing() {
     let expected = format!("{}  file1\n{}  file2", foo_hash.to_hex(), bar_hash.to_hex());
 
     let star_command = format!("{} *", b3sum_exe().to_str().unwrap());
-    let (exe, c_flag) = if cfg!(windows) { ("cmd.exe", "/C") } else { ("/bin/sh", "-c") };
-    let output = cmd!(exe, c_flag, star_command).dir(dir.path()).read().unwrap();
+    let output = cmd!("/bin/sh", "-c", star_command).dir(dir.path()).read().unwrap();
     assert_eq!(expected, output);
 }
 

@@ -1,6 +1,6 @@
 """Proofs of the x86-64 kernels (c/blake3_{sse41,avx2,avx512}_x86-64_unix.S,
-c/blake3_partial_x86-64_unix.S, and their MSVC twins *_windows_msvc.asm
-under the Windows calling convention), as assembled, equal to the
+c/blake3_partial_x86-64_unix.S and c/blake3_chunk_root_x86-64_unix.S, under
+the System V calling convention of Linux and macOS), as assembled, equal to the
 compression function of the Lean specification (lean_spec.py) for every
 input, key, counter, and flags value, by the x86-64 model (x86.py): one
 compression (compress_in_place, compress_xof), hash_many at every input
@@ -9,8 +9,11 @@ and the generated pass of whole chunks with a partial one (each lane's
 16 blocks, every per-lane, per-block length and flags, at every block
 after which its snapshot is taken).
 
-    python3 tools/verify/prove_x86.py [CASE...]
-    python3 tools/verify/prove_x86.py --representative
+    python3 tools/verify/prove_x86.py [--workers N] [CASE...]
+    python3 tools/verify/prove_x86.py [--workers N] --representative
+
+--workers (default 16) bounds the prover processes at once: the 16-input
+AVX-512 cases take gigabytes each, so choose it from the host's memory.
 """
 
 import os
@@ -29,36 +32,25 @@ import lean_spec as spec
 
 ROOT_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
 CLANG = x86.tool("clang")
-LLVM_ML = x86.tool("llvm-ml")
 STACK = 1 << 16
-# A 64-byte-aligned region origin; both ABIs enter with rsp == 8 mod 16.
+# A 64-byte-aligned region origin; the ABI enters with rsp == 8 mod 16.
 ENTRY_STACKS = tuple(STACK + residue for residue in (8, 24, 40, 56))
 WIDTH = {"sse41": 4, "avx2": 8, "avx512": 16}
 SYSV_ARGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
-WIN_ARGS = ["rcx", "rdx", "r8", "r9"]
 
 
-def assemble(isa, windows):
-    """`isa`'s file (sse41, avx2, avx512, or partial: the generated pass)."""
-    if (isa, windows) in OBJS:
-        return OBJS[(isa, windows)]
+def assemble(isa):
+    """`isa`'s file (sse41, avx2, avx512, partial: the generated pass, or
+    chunk_root)."""
+    if isa in OBJS:
+        return OBJS[isa]
     d = tempfile.mkdtemp()
-    if windows:
-        obj = os.path.join(d, f"{isa}.obj")
-        src = os.path.join(ROOT_DIR, f"c/blake3_{isa}_x86-64_windows_msvc.asm")
-        subprocess.run([LLVM_ML, "-m64", "-c", src, f"-Fo{obj}"], check=True, stdout=subprocess.DEVNULL)
-        # llvm-ml writes COFF; lld links it as a Windows DLL image.
-        so = os.path.join(d, f"{isa}.dll")
-        subprocess.run([x86.tool("lld-link"), "/dll", "/noentry", "/force:unresolved", "/debug:symtab", f"/out:{so}", obj],
-                       check=True, stdout=subprocess.DEVNULL)
-        OBJS[(isa, windows)] = so
-        return so
     obj = os.path.join(d, f"{isa}.o")
     # "chunk_root": the one file holding both chunk-root entries (sse41, avx512).
     subprocess.run([CLANG, "-c", "--target=x86_64-linux-gnu", os.path.join(ROOT_DIR, f"c/blake3_{isa}_x86-64_unix.S"),
                     "-o", obj], check=True)
     so = x86.link(obj)
-    OBJS[(isa, windows)] = so
+    OBJS[isa] = so
     return so
 
 
@@ -66,7 +58,7 @@ class Setup:
     """A machine at a kernel's entry: junk in every register, the return
     address on the stack, the arguments placed by the convention.
     The block/output counter is public; each harness adds its count symbols."""
-    def __init__(self, so, entry, regions, args, windows, stack=None):
+    def __init__(self, so, entry, regions, args, stack=None):
         # The default proves every legal entry alignment at once: the
         # region origin is 64-byte aligned and rsp == 8 (mod 16) at entry.
         # A concrete stack remains available to the boundary unit tests.
@@ -84,15 +76,14 @@ class Setup:
         img = x86.image(so)
         regions = dict(regions)
         regions["image"] = Region("image", max(img) + 1, False, lambda o: BitVecVal(img[o], 8), alignment=4096)
-        regs = WIN_ARGS if windows else SYSV_ARGS
-        first_stack = 8 + (32 if windows else 0)
+        regs = SYSV_ARGS
+        first_stack = 8
         end = entry_stack + first_stack + 8 * max(0, len(args) - len(regs))
         regions["stack"] = Region("stack", end, True, None, alignment=64)
         self.m = m = x86.Machine(code, regions)
         m.lengths = {"counter", "len_stack"}
         m.assumptions = entry_assumptions
-        m.red_zone = 0 if windows else 128
-        self.windows = windows
+        m.red_zone = 128
         for r in x86.GPR:
             m.x[r] = BitVec(f"{r}_in", 64)
         for i in range(32):
@@ -103,8 +94,7 @@ class Setup:
         m.entry_residue = residue if stack is None else None
         m.x["rsp"] = Ptr("stack", entry_stack)
         m.store(m.x["rsp"], Ptr("return", 0), 8)
-        # Stack arguments above the return address (and Windows's 32-byte
-        # shadow space).
+        # Stack arguments above the return address.
         for i, a in enumerate(args):
             if i < len(regs):
                 m.x[regs[i]] = a
@@ -114,21 +104,16 @@ class Setup:
 
     def run(self):
         m = x86.run(self.m, self.entry)
-        check_abi(m, self.windows)
+        check_abi(m)
         return m
 
 
-def check_abi(m, windows):
+def check_abi(m):
     if not (isinstance(m.x["rsp"], Ptr) and m.x["rsp"].region == "stack" and aarch64.holds(m, aarch64.as_bv(m.x["rsp"].offset) == m.entry_stack + 8)):
         raise Unproved(f"rsp not restored: {m.x['rsp']}")
-    saved = ["rbx", "rbp", "r12", "r13", "r14", "r15"] + (["rdi", "rsi"] if windows else [])
-    for r in saved:
+    for r in ["rbx", "rbp", "r12", "r13", "r14", "r15"]:
         if isinstance(m.x[r], Ptr) or not same(m.x[r], BitVec(f"{r}_in", 64)):
             raise Unproved(f"callee-saved {r} changed")
-    if windows:
-        for i in range(6, 16):
-            if not all(same(m.v[i][l], BitVec(f"v{i}_{l}_in", 32)) for l in range(4)):
-                raise Unproved(f"callee-saved xmm{i} changed")
 
 
 def u8(name):
@@ -146,7 +131,7 @@ def d_row_facts(m, counter, n, words):
     m.fact_symbols |= {"counter"} | {s for w in words for s in aarch64.term_symbols(w)}
 
 
-def prove_compress(so, isa, windows, xof):
+def prove_compress(so, isa, xof):
     """compress_in_place(cv, block, block_len, counter, flags): cv becomes
     the chaining value; compress_xof(cv, block, block_len, counter, flags,
     out): out the whole 64-byte output, cv left as it was."""
@@ -157,7 +142,7 @@ def prove_compress(so, isa, windows, xof):
         regions["out"] = Region("out", 64, True, None)
     args = [Ptr("cv", 0), Ptr("block", 0), ZeroExt(56, block_len), counter, ZeroExt(56, flags)] + ([Ptr("out", 0)] if xof else [])
     name = f"blake3_servil_compress_{'xof' if xof else 'in_place'}_{isa}"
-    s = Setup(so, name, regions, args, windows)
+    s = Setup(so, name, regions, args)
     d_row_facts(s.m, counter, 1, [ZeroExt(24, block_len), ZeroExt(24, flags)])
     m = s.run()
     want = spec.compress(spec.words(cv), spec.words(block), counter, ZeroExt(24, block_len), ZeroExt(24, flags))
@@ -179,7 +164,7 @@ def prove_xof_many(so, n):
     regions = {"cv": Region("cv", 32, False, lambda o: cv[o]), "block": Region("block", 64, False, lambda o: block[o]),
                "out": Region("out", 64 * n, True, None)}
     args = [Ptr("cv", 0), Ptr("block", 0), ZeroExt(56, block_len), counter, ZeroExt(56, flags), Ptr("out", 0), BitVecVal(n, 64)]
-    s = Setup(so, "blake3_servil_xof_many_avx512", regions, args, False)
+    s = Setup(so, "blake3_servil_xof_many_avx512", regions, args)
     d_row_facts(s.m, counter, n, [ZeroExt(24, block_len), ZeroExt(24, flags)])
     m = s.run()
     out = m.regions["out"]
@@ -195,7 +180,7 @@ def prove_xof_many(so, n):
     return m.steps
 
 
-def prove_hash_many(so, isa, windows, n, blocks, increment):
+def prove_hash_many(so, isa, n, blocks, increment):
     """hash_many(inputs, n, blocks, key, counter, increment, flags,
     flags_start, flags_end, out): input i hashed from key over `blocks`
     blocks at counter + i (increment) or counter, the first block with
@@ -215,7 +200,7 @@ def prove_hash_many(so, isa, windows, n, blocks, increment):
     flags, start, end = u8("flags"), u8("start"), u8("end")
     args = [Ptr("table", 0), BitVecVal(n, 64), BitVecVal(blocks, 64), Ptr("key", 0), counter,
             BitVecVal(1 if increment else 0, 64), ZeroExt(56, flags), ZeroExt(56, start), ZeroExt(56, end), Ptr("out", 0)]
-    s = Setup(so, f"blake3_servil_hash_many_{isa}", regions, args, windows)
+    s = Setup(so, f"blake3_servil_hash_many_{isa}", regions, args)
     d_row_facts(s.m, counter, n if increment else 1, [ZeroExt(24, flags | start | end), ZeroExt(24, flags | start), ZeroExt(24, flags | end), ZeroExt(24, flags), BitVecVal(64, 32)])
     m = s.run()
     out = m.regions["out"]
@@ -248,7 +233,7 @@ def prove_chunk_root(so, isa, whole):
     regions = {"input": Region("input", 64 * whole, False, lambda o: blocks[o]), "key": Region("key", 32, False, lambda o: key[o]),
                "last": Region("last", 64, False, lambda o: last[o]), "out": Region("out", 32, True, None)}
     args = [Ptr("input", 0), Ptr("key", 0), Ptr("last", 0), packed, Ptr("out", 0)]
-    s = Setup(so, f"blake3_servil_{isa}_chunk_root", regions, args, False)
+    s = Setup(so, f"blake3_servil_{isa}_chunk_root", regions, args)
     # The last block's length and the mode flags are public, as lengths are.
     s.m.lengths |= {"last_len", "flags"}
     f = ZeroExt(24, flags)
@@ -270,7 +255,7 @@ def prove_chunk_root(so, isa, whole):
             raise Unproved(f"output word {w} differs from the specification")
 
 
-def prove_partial(so, kisa, windows, last):
+def prove_partial(so, kisa, last):
     """blake3_partial_{sse41,avx2}(params): for every lane j, from the
     lane's chaining value and counter, the 16 blocks at its pointer, block
     b with the lane's length and flags for b; H the lane's chaining value
@@ -314,7 +299,7 @@ def prove_partial(so, kisa, windows, last):
             params.bytes[off["MSG"] + 8 * j + k] = (Ptr(f"input{j}", 0), k)
     regions = {f"input{j}": Region(f"input{j}", 1024, False, (lambda b: lambda o: b[o])(inputs[j])) for j in range(w)}
     regions["params"] = params
-    s = Setup(so, f"blake3_servil_partial_{kisa}", regions, [Ptr("params", 0)], windows)
+    s = Setup(so, f"blake3_servil_partial_{kisa}", regions, [Ptr("params", 0)])
     m = s.run()
     out = m.regions["params"]
     for j in range(w):
@@ -338,31 +323,29 @@ def prove_partial(so, kisa, windows, last):
 
 def cases(only):
     out = []
-    for windows in (False, True):
-        for isa in ("sse41", "avx512"):
-            out += [(isa, windows, "compress", None), (isa, windows, "xof", None)]
-        for isa in ("sse41", "avx2", "avx512"):
-            for n in range(1, 2 * WIDTH[isa] + 1):
-                for blocks in (1, 2, 16):
-                    out.append((isa, windows, "hash_many", (n, blocks, True)))
-            out.append((isa, windows, "hash_many", (WIDTH[isa], 1, False)))
-            # Shape (a): whole blocks at one counter, every block count.
-            for blocks in range(2, 17):
-                out.append((isa, windows, "hash_many", (WIDTH[isa], blocks, False)))
-        # pair.rs's shape: a whole chunk and a partial one side by side, two
-        # inputs at consecutive counters, over the partial chunk's blocks
-        # before its last (1 to 15), on AVX2 and AVX-512 (#163).
-        for isa in ("avx2", "avx512"):
-            for blocks in range(3, 16):
-                out.append((isa, windows, "hash_many", (2, blocks, True)))
+    for isa in ("sse41", "avx512"):
+        out += [(isa, "compress", None), (isa, "xof", None)]
+    for isa in ("sse41", "avx2", "avx512"):
+        for n in range(1, 2 * WIDTH[isa] + 1):
+            for blocks in (1, 2, 16):
+                out.append((isa, "hash_many", (n, blocks, True)))
+        out.append((isa, "hash_many", (WIDTH[isa], 1, False)))
+        # Shape (a): whole blocks at one counter, every block count.
+        for blocks in range(2, 17):
+            out.append((isa, "hash_many", (WIDTH[isa], blocks, False)))
+    # pair.rs's shape: a whole chunk and a partial one side by side, two
+    # inputs at consecutive counters, over the partial chunk's blocks
+    # before its last (1 to 15), on AVX2 and AVX-512 (#163).
+    for isa in ("avx2", "avx512"):
+        for blocks in range(3, 16):
+            out.append((isa, "hash_many", (2, blocks, True)))
     for n in range(1, 33):
-        out.append(("avx512", False, "xof_many", n))
-    out += [(isa, False, "chunk_root", whole) for isa in ("sse41", "avx512") for whole in range(16)]
-    for windows in (False, True):
-        for kisa in ("sse41", "avx2"):
-            for last in range(16):
-                out.append(("partial", windows, "partial", (kisa, last)))
-    return [c for c in out if not only or c[0] in only or c[2] in only or ("windows" if c[1] else "unix") in only]
+        out.append(("avx512", "xof_many", n))
+    out += [(isa, "chunk_root", whole) for isa in ("sse41", "avx512") for whole in range(16)]
+    for kisa in ("sse41", "avx2"):
+        for last in range(16):
+            out.append(("partial", "partial", (kisa, last)))
+    return [c for c in out if not only or c[0] in only or c[1] in only]
 
 
 def representative_cases():
@@ -371,22 +354,21 @@ def representative_cases():
     The all-count proof covers hash_many for every count. These direct
     cases independently exercise the finite harness at every block length
     for one full-width fixed-counter pass, and at the first/full/two-pass
-    counts for 16-block incrementing counters, for every ISA and ABI.
+    counts for 16-block incrementing counters, for every ISA.
     Compression, XOF and every xof_many count have no all-count substitute
     and are all included.
     """
     out = []
-    for windows in (False, True):
-        for isa in ("sse41", "avx512"):
-            out += [(isa, windows, "compress", None), (isa, windows, "xof", None)]
-        for isa in ("sse41", "avx2", "avx512"):
-            width = WIDTH[isa]
-            out += [(isa, windows, "hash_many", (width, blocks, False)) for blocks in range(1, 17)]
-            out += [(isa, windows, "hash_many", (n, 16, True)) for n in (1, width, 2 * width)]
-        for isa in ("avx2", "avx512"):
-            out += [(isa, windows, "hash_many", (2, blocks, True)) for blocks in range(1, 16)]
-    out += [("avx512", False, "xof_many", n) for n in range(1, 33)]
-    out += [(isa, False, "chunk_root", whole) for isa in ("sse41", "avx512") for whole in range(16)]
+    for isa in ("sse41", "avx512"):
+        out += [(isa, "compress", None), (isa, "xof", None)]
+    for isa in ("sse41", "avx2", "avx512"):
+        width = WIDTH[isa]
+        out += [(isa, "hash_many", (width, blocks, False)) for blocks in range(1, 17)]
+        out += [(isa, "hash_many", (n, 16, True)) for n in (1, width, 2 * width)]
+    for isa in ("avx2", "avx512"):
+        out += [(isa, "hash_many", (2, blocks, True)) for blocks in range(1, 16)]
+    out += [("avx512", "xof_many", n) for n in range(1, 33)]
+    out += [(isa, "chunk_root", whole) for isa in ("sse41", "avx512") for whole in range(16)]
     return out
 
 
@@ -394,24 +376,21 @@ OBJS = {}
 
 
 def prove_case(case):
-    isa, windows, kind, arg = case
-    obj = ("chunk_root", False) if kind == "chunk_root" else (isa, windows)
-    if obj not in OBJS:
-        OBJS[obj] = assemble(*obj)
-    so = OBJS[obj]
+    isa, kind, arg = case
+    so = assemble("chunk_root" if kind == "chunk_root" else isa)
     try:
         if kind == "chunk_root":
             steps, what = prove_chunk_root(so, isa, arg), f"chunk root, {arg} whole blocks and the last"
         elif kind == "partial":
             kisa, last = arg
-            steps, what = prove_partial(so, kisa, windows, last), f"{kisa}, snapshot after block {last}"
+            steps, what = prove_partial(so, kisa, last), f"{kisa}, snapshot after block {last}"
         elif kind == "xof_many":
             steps, what = prove_xof_many(so, arg), f"xof_many, {arg} blocks"
         elif kind in ("compress", "xof"):
-            steps, what = prove_compress(so, isa, windows, kind == "xof"), kind
+            steps, what = prove_compress(so, isa, kind == "xof"), kind
         else:
             n, blocks, inc = arg
-            steps = prove_hash_many(so, isa, windows, n, blocks, inc)
+            steps = prove_hash_many(so, isa, n, blocks, inc)
             what = f"hash_many, {n} inputs of {blocks} blocks{'' if inc else ', one counter'}"
     except Unproved as e:
         return case, f"NOT PROVED: {e}"
@@ -420,16 +399,21 @@ def prove_case(case):
 
 def main():
     import workers
-    todo = representative_cases() if sys.argv[1:] == ["--representative"] else cases(set(sys.argv[1:]))
-    for isa, windows in {("chunk_root", False) if c[2] == "chunk_root" else (c[0], c[1]) for c in todo}:
-        so = assemble(isa, windows)
+    args = sys.argv[1:]
+    count = 16
+    if args[:1] == ["--workers"]:
+        assert len(args) >= 2 and args[1].isdigit() and int(args[1]) >= 1, "--workers takes a count of at least 1"
+        count, args = int(args[1]), args[2:]
+    todo = representative_cases() if args == ["--representative"] else cases(set(args))
+    for isa in {"chunk_root" if c[1] == "chunk_root" else c[0] for c in todo}:
+        so = assemble(isa)
         x86.symbols(so)
         x86.image(so)
     # The largest cases first, so the pool's tail is short: a case's work,
     # by kind (hash_many's inputs times blocks; a partial pass's lanes
     # times 16 blocks; a chunk root's blocks; xof_many's blocks).
     def work(c):
-        kind, arg = c[2], c[3]
+        kind, arg = c[1], c[2]
         if kind == "hash_many":
             return arg[0] * arg[1]
         if kind == "partial":
@@ -437,8 +421,8 @@ def main():
         return (arg or 0) + 1
     todo.sort(key=lambda c: -work(c))
     failed = 0
-    for (isa, windows, kind, arg), verdict in workers.each(prove_case, todo, 16):
-        print(f"{isa} {'windows' if windows else 'unix'} {kind} {arg or ''}: {verdict}", flush=True)
+    for (isa, kind, arg), verdict in workers.each(prove_case, todo, count):
+        print(f"{isa} {kind} {arg or ''}: {verdict}", flush=True)
         failed += verdict.startswith("NOT")
     print(f"{len(todo) - failed} of {len(todo)} cases proved")
     sys.exit(1 if failed else 0)

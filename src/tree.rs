@@ -202,7 +202,7 @@ impl Kernels for PlatformKernels<'_> {
         {
             // One kernel call that keeps off the stack (src/ffi_chunk_root.rs):
             // a caller's just-written message has none of our loads to hold back.
-            #[cfg(all(blake3_sse41_ffi, not(target_os = "windows")))]
+            #[cfg(blake3_sse41_ffi)]
             match self.platform {
                 #[cfg(blake3_avx512_ffi)]
                 crate::platform::Platform::AVX512 => return unsafe { crate::chunk_root::chunk_root(true, input, self.key, self.flags) },

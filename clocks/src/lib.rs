@@ -3,8 +3,8 @@
 //!
 //! - **Wall time**, what a caller waits for: the platform's hardware
 //!   counter through `std::time::Instant` ([`now`], [`since_ns`]):
-//!   `CLOCK_UPTIME_RAW` on Darwin, `CLOCK_MONOTONIC` on Linux,
-//!   `QueryPerformanceCounter` on Windows. A counter read can only
+//!   `CLOCK_UPTIME_RAW` on Darwin, `CLOCK_MONOTONIC` on Linux. A counter
+//!   read can only
 //!   over-count, when the thread is interrupted.
 //! - **The thread's counts per core kind** ([`Counts`]): cycles,
 //!   instructions, and time on performance and efficiency cores, from
@@ -53,6 +53,10 @@
 
 use std::time::Instant;
 
+// Unix's clocks (Linux and macOS); Windows is not supported (BLAKE3 #160).
+#[cfg(not(unix))]
+compile_error!("clocks reads Unix's clocks (Linux and macOS); Windows is not supported (https://github.com/johnservil/BLAKE3/issues/160)");
+
 pub mod child;
 pub mod energy;
 pub mod load;
@@ -65,10 +69,6 @@ pub mod threads;
 pub const WALL_CLOCK: &str = "std::time::Instant → CLOCK_UPTIME_RAW (mach_absolute_time; stops during sleep, no NTP slew)";
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub const WALL_CLOCK: &str = "std::time::Instant → CLOCK_MONOTONIC (stops during suspend, NTP slew only)";
-#[cfg(windows)]
-pub const WALL_CLOCK: &str = "std::time::Instant → QueryPerformanceCounter";
-#[cfg(not(any(unix, windows)))]
-pub const WALL_CLOCK: &str = "std::time::Instant";
 
 /// A point on the wall clock. Only differences are meaningful.
 #[inline(always)]
@@ -200,7 +200,7 @@ pub fn measure(batches: usize, batch_ns: u64, mut f: impl FnMut()) -> Vec<Batch>
                 f();
             }
             let wall_ns = since_ns(t);
-            let cpu_ns = cpu.zip(process_cpu_ns()).map(|(before, after)| after - before);
+            let cpu_ns = Some(process_cpu_ns() - cpu);
             let counts = before.zip(Counts::read()).map(|(before, after)| after.since(before));
             Batch { calls, wall_ns, cpu_ns, counts, started_ns }
         })
@@ -330,9 +330,8 @@ pub fn busy_work(ns: u64) {
 /// running, in nanoseconds: a sample's CPU time is the difference of two
 /// reads around it, and [`load`] tells this process's share of the
 /// machine's busy time from other programs' with it (a launcher counts
-/// what it runs as its own). `None` where the platform has no such clock.
-pub fn process_cpu_ns() -> Option<u64> {
-    #[cfg(unix)]
+/// what it runs as its own).
+pub fn process_cpu_ns() -> u64 {
     {
         #[repr(C)]
         struct Timespec {
@@ -352,11 +351,7 @@ pub fn process_cpu_ns() -> Option<u64> {
         let mut children = [0i64; 18];
         // Sound: `children` is writable and as long as a struct rusage.
         assert_eq!(unsafe { getrusage(RUSAGE_CHILDREN, children.as_mut_ptr()) }, 0, "getrusage(RUSAGE_CHILDREN)");
-        Some(ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64 + child::rusage_cpu_ns(&children) + child::running_cpu_ns())
-    }
-    #[cfg(not(unix))]
-    {
-        None
+        ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64 + child::rusage_cpu_ns(&children) + child::running_cpu_ns()
     }
 }
 
@@ -465,7 +460,7 @@ mod tests {
             std::hint::black_box((0..100u64).sum::<u64>());
             completed += 1;
         });
-        let total_cpu = before.zip(process_cpu_ns()).map(|(before, after)| after - before);
+        let total_cpu = Some(process_cpu_ns() - before);
         assert_eq!(batches.len(), 3);
         assert_eq!(completed, 4 * batches[0].calls, "calibration and three measured batches");
         for b in &batches {

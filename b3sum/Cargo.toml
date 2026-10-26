@@ -22,7 +22,6 @@ anyhow = "1.0.25"
 blake3 = { version = "0.3.0", path = "..", package = "blake3-servil" }
 clap = { version = "4.0.8", features = ["derive", "wrap_help"] }
 hex = "0.4.0"
-wild = "2.0.3"
 
 # A file already in the page cache is mapped and hashed in place.
 [target.'cfg(unix)'.dependencies]

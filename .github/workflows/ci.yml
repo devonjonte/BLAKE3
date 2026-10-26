@@ -2,7 +2,7 @@ name: tests
 
 on:
   # Started by hand for a promotion candidate that touches code for other
-  # targets (x86, Windows), and for every pull
+  # targets (x86), and for every pull
   # request; the AArch64 builds and proofs run on the VM and the Mac
   # (CONTRIBUTING.md: tools/check-builds.sh, tools/verify/long-proofs.sh).
   pull_request:
@@ -39,8 +39,6 @@ jobs:
     name: ${{ matrix.target.name }} ${{ matrix.channel }}
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
-    # Windows is unsupported (BLAKE3 #160): its jobs inform and never gate.
-    continue-on-error: ${{ matrix.target.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -48,8 +46,7 @@ jobs:
         # (tools/check-builds.sh and the suites), where the x86 feature
         # flags below would build the same code each time.
         target: [
-          { "os": "ubuntu-latest",    "toolchain": "x86_64-unknown-linux-gnu",  "name": "Linux GNU" },
-          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-msvc",    "name": "Windows MSVC" }
+          { "os": "ubuntu-latest",    "toolchain": "x86_64-unknown-linux-gnu",  "name": "Linux GNU" }
         ]
         channel: ["stable", "nightly"]
 
@@ -80,7 +77,6 @@ jobs:
     - run: cargo nextest run --no-default-features
     - name: Make sure enabling LTO via CFLAGS doesn't break the build.
       run: cargo build --tests
-      if: matrix.target.toolchain != 'x86_64-pc-windows-msvc'
       env:
         CFLAGS: -flto
 
@@ -108,10 +104,6 @@ jobs:
     - name: C API
       run: cargo nextest run --release
       working-directory: ./capi
-    - name: C libraries (Windows MSVC)
-      if: runner.os == 'Windows'
-      run: cargo cbuild --release
-      working-directory: ./capi
     # Reference impl doc test.
     - name: reference impl doc test
       run: cargo test --doc
@@ -121,7 +113,6 @@ jobs:
     name: b3sum ${{ matrix.target.name }} ${{ matrix.channel }}
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
-    continue-on-error: ${{ matrix.target.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -129,8 +120,7 @@ jobs:
         # (tools/check-builds.sh and the suites), where the x86 feature
         # flags below would build the same code each time.
         target: [
-          { "os": "ubuntu-latest",    "toolchain": "x86_64-unknown-linux-gnu",  "name": "Linux GNU" },
-          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-msvc",    "name": "Windows MSVC" }
+          { "os": "ubuntu-latest",    "toolchain": "x86_64-unknown-linux-gnu",  "name": "Linux GNU" }
         ]
         channel: ["stable", "nightly"]
 
@@ -149,7 +139,6 @@ jobs:
       working-directory: ./b3sum
     - name: Make sure enabling LTO via CFLAGS doesn't break the build.
       run: cargo build
-      if: matrix.target.toolchain != 'x86_64-pc-windows-msvc'
       env:
         CFLAGS: -flto
       working-directory: ./b3sum
@@ -207,40 +196,6 @@ jobs:
     # installations, pkg-config flags, C11 and C++11 callers.
     - name: C API
       run: cargo nextest run --release --manifest-path capi/Cargo.toml
-
-  capi_windows_consumer:
-    name: "C API consumer on Windows MSVC"
-    runs-on: windows-latest
-    continue-on-error: true
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - uses: taiki-e/install-action@v2
-      with:
-        tool: cargo-c@0.10.26
-    - uses: ilammy/msvc-dev-cmd@v1
-    - name: install the C library
-      run: cargo cinstall --release --manifest-path capi/Cargo.toml --destdir=${{ runner.temp }}/b3-stage --prefix=/b3-capi-test --libdir=lib
-    - name: build and run C and C++ consumers (static, then shared)
-      shell: pwsh
-      run: |
-        $inc = "${{ runner.temp }}/b3-stage/b3-capi-test/include"
-        $lib = "${{ runner.temp }}/b3-stage/b3-capi-test/lib"
-        cl /nologo /std:c11 /W4 /WX /I $inc capi/tests/check.c /link /LIBPATH:$lib b3_servil.lib ws2_32.lib ntdll.lib userenv.lib /OUT:${{ runner.temp }}/check-static.exe
-        if ($LASTEXITCODE -ne 0) { exit 1 }
-        cl /nologo /std:c11 /W4 /WX /I $inc capi/tests/check.c /link /LIBPATH:$lib b3_servil.dll.lib /OUT:${{ runner.temp }}/check-shared.exe
-        if ($LASTEXITCODE -ne 0) { exit 1 }
-        cl /nologo /EHsc /W4 /WX /I $inc capi/tests/check.cpp /link /LIBPATH:$lib b3_servil.lib ws2_32.lib ntdll.lib userenv.lib /OUT:${{ runner.temp }}/check-cpp.exe
-        if ($LASTEXITCODE -ne 0) { exit 1 }
-        $env:PATH = "$lib;${{ runner.temp }}/b3-stage/b3-capi-test/bin;$env:PATH"
-        foreach ($exe in @("check-static", "check-shared", "check-cpp")) {
-          $out = & "${{ runner.temp }}/$exe.exe" 2>&1
-          $code = $LASTEXITCODE
-          Write-Host "$exe exit $code"
-          Write-Host "$out"
-          if ($code -ne 0) { exit 1 }
-          if ($exe -ne "check-cpp" -and "$out" -notmatch "stream ok") { Write-Error "$exe did not print stream ok"; exit 1 }
-        }
 
   # The oldest GCC supported (CONTRIBUTING.md): Debian 12's, the oldest in a
   # supported distribution (Debian 11's support ended in August 2026). Older compilers are unsupported (GCC 5.4's

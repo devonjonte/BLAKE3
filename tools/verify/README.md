@@ -15,8 +15,8 @@ Commands:
     python3 tools/verify/mutants.py                     # wrong kernels are rejected
     python3 -m unittest discover -s tools/verify -p 'test_*.py'  # proof helpers and fail-stop worker controls
     python3 tools/verify/isla_check.py                  # the NEON and integer models against Arm's specification (needs Isla)
-    python3 tools/verify/prove_x86.py [CASE...]         # the x86-64 kernels: compressions, hash_many at fixed counts, xof_many, the chunk root and the partial pass (620 cases; --representative: 246 of them)
-    python3 tools/verify/prove_x86_loop.py              # hash_many at every input count, by induction (102 cases)
+    python3 tools/verify/prove_x86.py [CASE...]         # the x86-64 kernels: compressions, hash_many at fixed counts, xof_many, the chunk root and the partial pass (342 cases; --representative: 155 of them)
+    python3 tools/verify/prove_x86_loop.py              # hash_many at every input count, by induction (51 cases)
     python3 tools/verify/cross_check_x86.py             # the x86-64 model against the CPU (needs an x86-64 CPU; AVX-512 forms need one with AVX-512)
     sh tools/verify/long-proofs.sh [COMMIT]             # the proofs, the Arm CPU cross-check and the controls together (Isla and the x86 CPU check apart); posts the commit's "long proofs" status, from an earlier run when the proofs' inputs (c/, c2sp/, tools/verify/, the NEON generator) are the same
 
@@ -25,7 +25,7 @@ machine with the SHA-3 extension, and Clang and llvm-objdump 17 or later
 (for SME2). The project's VM runs them (`long-proofs.sh`); the SME2
 cross-check needs an SME2 CPU (Apple M4, or the VM on it). The x86-64
 proofs run on any machine with Python 3, `python3-z3`, Clang and LLVM's
-`llvm-ml`.
+`ld.lld`.
 
 **Coverage.** The hybrid kernels at every block count they take (1 to
 16; the q kernels' partial chunk at every block count), those without
@@ -163,30 +163,30 @@ Hasher, the threads), which the tests cover.
 
 `x86.py` models the instructions the x86-64 kernels use, on the same
 executor as the AArch64 model (a fault on an access outside a region, the
-calling convention checked). The writable stack ends at the return slot,
-Windows shadow space and actual stack arguments. Each proof uses one
+calling convention checked). The writable stack ends at the return slot
+and the actual stack arguments. Each proof uses one
 symbolic entry-stack residue: 8, 24, 40 or 56 modulo 64, the four legal
 ABI alignments. Vector memory forms enforce the alignment their encoding
 requires; buffer bases carry the alignment their contract promises.
 Addresses and memory masks use declared public parameters, prefetch
 addresses included. `cross_check_x86.py` runs every vector form from the
-Unix and Windows kernels on the CPU and by the model, on random states;
+kernels on the CPU and by the model, on random states;
 memory forms also compare the whole buffer, and aligned forms get a
 bounded unaligned-address fault control. AVX-512 forms need an AVX-512
 CPU and are reported skipped without one (CI's `x86_model` job).
 
 `prove_x86.py` proves these cases against the same Lean specification,
-620 in all (`--representative` runs 246 of them in minutes: every block
+342 in all (`--representative` runs 155 of them in minutes: every block
 length, the first, full-width and two-pass counts, and the pair shape):
 
 - `compress_in_place` and `compress_xof` for SSE4.1 and AVX-512, under
-  the Unix and Windows conventions;
+  the System V convention of Linux and macOS, as every case below;
 - `hash_many` at every count up to two passes of the kernel's width at
   1, 2 and 16 blocks with an incrementing counter, and at every block
   length at one full-width pass with one counter, for each instruction
-  set and convention;
+  set;
 - `hash_many` with two inputs at consecutive counters over 1 to 15
-  blocks, on AVX2 and AVX-512, both conventions: `pair.rs`'s shape, a
+  blocks, on AVX2 and AVX-512: `pair.rs`'s shape, a
   whole chunk and a partial one side by side;
 - AVX-512 `xof_many` at 1 to 32 blocks, the count per call the crate
   makes;
@@ -197,20 +197,20 @@ length, the first, full-width and two-pass counts, and the pair shape):
   From four blocks its output masks are selects whose condition the
   path's lengths settle; the normal form takes such a select as the arm
   it selects;
-- the partial pass (`c/blake3_partial_x86-64_*`, SSE4.1 and AVX2, both
-  conventions) at every block after which its snapshot is taken: each
+- the partial pass (`c/blake3_partial_x86-64_unix.S`, SSE4.1 and AVX2)
+  at every block after which its snapshot is taken: each
   lane's sixteen blocks from its chaining value and counter, with every
   per-lane, per-block length and flags.
 
 `prove_x86_loop.py` proves `hash_many` at every input count, with the
-same executor and induction helper: 102 cases, fixed counters at block
+same executor and induction helper: 51 cases, fixed counters at block
 lengths 1 to 16 and incrementing counters at 16 blocks, each on SSE4.1,
-AVX2 and AVX-512, Unix and Windows (the shapes the crate calls). Each
+AVX2 and AVX-512 (the shapes the crate calls). Each
 case covers zero inputs, every full-width pass and every remainder, up to
 the largest count whose output and pointer table fit 64-bit regions.
 Every input has its own read-only region and independent words; keys,
 counters and flags stay arbitrary, and counters keep their carries.
-Windows cases assemble the MSVC source. A case can take gigabytes; set
+A case can take gigabytes; set
 the process's memory limit (`ulimit -v 6291456`) and choose `--workers`
 from the host's memory. `--help` describes the command; with no case list
 it runs the whole matrix, which `cases()` enumerates in one place.
