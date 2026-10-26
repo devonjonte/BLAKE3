@@ -118,8 +118,9 @@ mutant cannot take the machine.
 CI (`.github/workflows/ci.yml`) runs the suites on Linux x86-64 and arm64
 (without SME2, and without SHA-3 under QEMU), and macOS's C API, for
 every pull request, and by hand for a candidate that changes code for
-those targets. Windows is unsupported: a Windows build stops with a
-message naming official BLAKE3, and
+those targets. A build for any other target (Windows, 32-bit,
+big-endian, WebAssembly and the rest) stops with a message naming
+official BLAKE3, which supports them, and
 [#160](https://github.com/johnservil/BLAKE3/issues/160) holds what full
 support takes (dedicated hardware of ours to benchmark, optimize and
 test on, then the kernels and the gates). The Mac runner

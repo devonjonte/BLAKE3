@@ -36,16 +36,6 @@ fn is_aarch64() -> bool {
     target_components()[0] == "aarch64"
 }
 
-fn endianness() -> String {
-    let endianness = env::var("CARGO_CFG_TARGET_ENDIAN").unwrap();
-    assert!(endianness == "little" || endianness == "big");
-    endianness
-}
-
-fn is_little_endian() -> bool {
-    endianness() == "little"
-}
-
 fn new_build() -> cc::Build {
     let mut build = cc::Build::new();
     build.flag("-std=c11");
@@ -194,12 +184,21 @@ fn build_neon_hybrid_assembly() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Windows is not supported (BLAKE3 #160): one clear stop, before
-    // anything is built, rather than a build that half works.
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    // The supported targets, and every other one stopped here, before
+    // anything is built: a build elsewhere would run code no machine of
+    // ours tests, where official BLAKE3 supports it (#160, #180).
+    let var = |name: &str| env::var(name).unwrap_or_default();
+    let (arch, os) = (var("CARGO_CFG_TARGET_ARCH"), var("CARGO_CFG_TARGET_OS"));
+    let supported = var("CARGO_CFG_TARGET_ENDIAN") == "little"
+        && match arch.as_str() {
+            "x86_64" => os == "linux",
+            "aarch64" => os == "linux" || os == "macos",
+            _ => false,
+        };
     assert!(
-        target_os != "windows",
-        "blake3-servil does not support Windows (https://github.com/johnservil/BLAKE3/issues/160); use official BLAKE3 there (https://github.com/BLAKE3-team/BLAKE3)"
+        supported,
+        "blake3-servil runs on x86-64 Linux and on 64-bit Arm Linux and macOS; for {}, use official BLAKE3 (https://github.com/BLAKE3-team/BLAKE3)",
+        var("TARGET")
     );
     // If CFLAGS is set, make sure LTO is disabled by appending -fno-lto. (We can't do this with
     // .flag() later on, because CFLAGS takes precedence.) Any mismatch between the C compiler and
@@ -236,9 +235,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Little-endian AArch64 (32-bit ARM is unsupported: official BLAKE3
-    // serves it).
-    if !is_pure() && is_aarch64() && is_little_endian() {
+    if !is_pure() && is_aarch64() {
         println!("cargo::rustc-cfg=blake3_neon");
         assert_assembles_sha3();
         build_neon_hybrid_assembly();

@@ -517,7 +517,7 @@ fn neon_plans_last_len<const N: usize>(lanes: &[&[u8; N]], key: &CVWords, flags:
 ///   kernels runs in the SME unit's slow state on the VM: 17 x 256 B, 68
 ///   ns per message after, 44 before).
 /// - The integer + NEON plans (no SME2, or fewer messages): all at once.
-/// - Elsewhere (`plans` false: x86-64, WebAssembly), whole last blocks:
+/// - Elsewhere (`plans` false: x86-64), whole last blocks:
 ///   four at a time, a fourth, spare lane for three left over, one call
 ///   each for one or two; with a short last block, one call each.
 #[inline(never)]
@@ -918,7 +918,7 @@ mod test {
     }
 
     /// The arrangement for whole blocks where the NEON plans are absent
-    /// (x86-64, WebAssembly: groups of four, a spare fourth lane for three
+    /// (x86-64: groups of four, a spare fourth lane for three
     /// left over, one call each for one or two), run here with `plans`
     /// false on every platform this CPU has, so the AArch64 tests and
     /// mutants reach it too.
