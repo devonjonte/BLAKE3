@@ -151,6 +151,10 @@
 //! [`Zeroize`](https://docs.rs/zeroize/latest/zeroize/trait.Zeroize.html) for
 //! this crate's types.
 //!
+//! The `pure` feature (off by default) builds the portable Rust alone,
+//! with no assembly, several times slower: for a machine whose C compiler
+//! cannot assemble the kernels (the build stops and says so otherwise).
+//!
 //! The `serde` feature (off by default, on for [docs.rs]) implements
 //! [`serde::Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html) and
 //! [`serde::Deserialize`](https://docs.rs/serde/latest/serde/trait.Deserialize.html)
@@ -951,6 +955,12 @@ pub fn initialize() {
 /// and the pieces shrink toward the end of the input, so the slowest thread
 /// finishes holding a small one. To leave CPUs to other work, pass fewer
 /// threads.
+///
+/// The threads are this process's: after `fork()`, the child has none. Its
+/// multithreaded calls then hash on the calling thread, but a stream whose
+/// body waits by looping on [`Stream::collect`](performance::Stream::collect)
+/// never gets its digests back (its `finish` does). A child that hashes
+/// should `exec` first, as `b3.h` says for C.
 ///
 /// ```
 /// blake3_servil::initialize_multithreaded(None);

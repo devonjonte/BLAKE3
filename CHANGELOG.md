@@ -128,7 +128,8 @@ each check covers and what remains unproved.
   own threads before it hashes (the quality manual, "Timing and secrets":
   [docs/quality-manual.md](docs/quality-manual.md)).
 - Building the Arm kernels needs an assembler that knows armv8.2-a+sha3,
-  GNU as 2.30 or LLVM 7. Without one, the build stops and says so; the
-  `pure` feature builds without assembly. The SME2 kernels need Clang 17
+  GNU as 2.30 or LLVM 7; building the x86-64 kernels needs a C compiler
+  that takes the AVX-512 flags, GCC 12 or Clang. Without one, the build
+  stops and says so; the `pure` feature builds without assembly. The SME2 kernels need Clang 17
   or GCC 14 with binutils 2.41; without those the build warns and leaves
   them out.
