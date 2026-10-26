@@ -86,7 +86,7 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// same hashes over several cores, see [`hash_many_multithreaded`].
 // Inlined, so a constant mode folds to its constants (as
 // convenience::hash is: no mode stored for the call to read).
-#[inline]
+#[inline(never)]
 pub fn hash_many(mode: Mode, input: &[Block], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
     let mut room = core::mem::MaybeUninit::uninit();
     let (key, flags) = mode.key(&mut room);
@@ -113,7 +113,7 @@ pub fn hash_many(mode: Mode, input: &[Block], message_len: usize, out: &mut [[u8
 #[cfg(feature = "std")]
 // Inlined, so a constant mode folds to its constants (as
 // convenience::hash is: no mode stored for the call to read).
-#[inline]
+#[inline(never)]
 pub fn hash_many_multithreaded(mode: Mode, input: &[Block], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
     crate::lanes::require();
     let mut room = core::mem::MaybeUninit::uninit();
