@@ -272,7 +272,13 @@ impl Platform {
             Platform::AVX2 => "AVX2 hash_many (8-way)",
             #[cfg(blake3_avx512_ffi)]
             #[cfg(target_arch = "x86_64")]
-            Platform::AVX512 => if cfg!(target_os = "linux") { "AVX-512 hash_many (32-way chunks, 16-way tails)" } else { "AVX-512 hash_many (16-way)" },
+            Platform::AVX512 => {
+                if cfg!(target_os = "linux") {
+                    "AVX-512 hash_many (32-way chunks, 16-way tails)"
+                } else {
+                    "AVX-512 hash_many (16-way)"
+                }
+            }
             #[cfg(blake3_neon)]
             Platform::NEON => "integer + NEON hybrid kernels (16 chunks per call)",
             #[cfg(blake3_sme2)]
@@ -289,7 +295,13 @@ impl Platform {
             Platform::AVX2 => 8,
             #[cfg(blake3_avx512_ffi)]
             #[cfg(target_arch = "x86_64")]
-            Platform::AVX512 => if cfg!(target_os = "linux") { 32 } else { 16 },
+            Platform::AVX512 => {
+                if cfg!(target_os = "linux") {
+                    32
+                } else {
+                    16
+                }
+            }
             // Sixteen chunks per call reach the k10 kernel (see
             // neon_hybrid), in both its families.
             #[cfg(blake3_neon)]

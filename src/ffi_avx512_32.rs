@@ -114,7 +114,11 @@ pub(crate) fn parent_entry() -> *const () {
 
 #[cfg(all(test, feature = "std"))]
 pub(crate) fn entries() -> [(&'static str, *const ()); 3] {
-    [("AVX-512 k32", blake3_servil_avx512_k32 as *const ()), ("AVX-512 p32", blake3_servil_avx512_p32 as *const ()), ("AVX-512 p16", blake3_servil_avx512_p16 as *const ())]
+    [
+        ("AVX-512 k32", blake3_servil_avx512_k32 as *const ()),
+        ("AVX-512 p32", blake3_servil_avx512_p32 as *const ()),
+        ("AVX-512 p16", blake3_servil_avx512_p16 as *const ()),
+    ]
 }
 
 #[cfg(test)]
@@ -224,7 +228,14 @@ mod tests {
             }
             let pointers: [*const u8; 16] = core::array::from_fn(|i| input[1 + i * n..].as_ptr());
             unsafe {
-                blake3_servil_avx512_p16(pointers.as_ptr(), blocks as u64, key.as_ptr(), counter, 16 | (1 << 8) | (2 << 16) | (64 << 24), input.as_mut_ptr().add(1))
+                blake3_servil_avx512_p16(
+                    pointers.as_ptr(),
+                    blocks as u64,
+                    key.as_ptr(),
+                    counter,
+                    16 | (1 << 8) | (2 << 16) | (64 << 24),
+                    input.as_mut_ptr().add(1),
+                )
             };
             assert_eq!(&input[1..1 + 16 * OUT_LEN], &want);
             assert_eq!(input[0], original[0]);

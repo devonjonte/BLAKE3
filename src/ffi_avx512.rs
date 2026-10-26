@@ -241,7 +241,6 @@ mod test {
         }
     }
 
-
     #[test]
     fn test_xof_many() {
         if !crate::platform::avx512_detected() {
