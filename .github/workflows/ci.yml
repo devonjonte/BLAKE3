@@ -39,6 +39,8 @@ jobs:
     name: ${{ matrix.target.name }} ${{ matrix.channel }}
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
+    # Windows is unsupported (BLAKE3 #160): its jobs inform and never gate.
+    continue-on-error: ${{ matrix.target.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -119,6 +121,7 @@ jobs:
     name: b3sum ${{ matrix.target.name }} ${{ matrix.channel }}
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
+    continue-on-error: ${{ matrix.target.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -208,6 +211,7 @@ jobs:
   capi_windows_consumer:
     name: "C API consumer on Windows MSVC"
     runs-on: windows-latest
+    continue-on-error: true
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable

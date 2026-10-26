@@ -57,7 +57,7 @@ The [crate documentation](https://johnservil.github.io/BLAKE3/blake3_servil/) co
 calls for programs that hash a lot, and the C library in [`capi/`](capi/).
 [`b3sum/README.md`](b3sum/README.md) covers the command-line tool.
 
-It runs on 64-bit Arm (Linux, macOS) and x86-64 (Linux, Windows) with the latest stable
+It runs on 64-bit Arm (Linux, macOS) and x86-64 (Linux) with the latest stable
 Rust; [official BLAKE3](https://github.com/BLAKE3-team/BLAKE3) serves other platforms.
 
 ## About BLAKE3

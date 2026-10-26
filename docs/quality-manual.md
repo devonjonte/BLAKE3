@@ -11,7 +11,7 @@ overview, read [QUALITY.md](../QUALITY.md) first.
 | Platform | Its kernels | Checked |
 |---|---|---|
 | 64-bit Arm: Apple Silicon, Linux and macOS | generated assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved** at every block and group count, and tested |
-| x86-64: Linux, Windows (MSVC) | the fork's generated assembly: whole chunks with a partial one, and the chunk root | **proved** for every input, and tested |
+| x86-64: Linux | the fork's generated assembly: whole chunks with a partial one, and the chunk root | **proved** for every input, and tested |
 | | upstream's assembly, its symbols renamed and its batch kernels' loads kept within each input (bug 8, below) | **proved** at every shape the crate calls (below), and tested |
 
 ## What is new, and so where the risk is
@@ -208,8 +208,7 @@ unrolled kernel code.
 - **On the Mac**: every suite in debug builds (overflow checks and
   debug assertions over the SME2 paths): all clean.
 - **CI on other targets** (GitHub Actions): the suites on Linux x86-64
-  and arm64 (without SME2, and without SHA-3 under QEMU), macOS, Windows
-  with MSVC.
+  and arm64 (without SME2, and without SHA-3 under QEMU) and macOS.
 - **Miri**, which interprets Rust and stops at undefined behaviour, over
   small versions of the unsafe paths in the `pure` build (Miri cannot run
   assembly or SIMD intrinsics): `test::unsafe_paths` (batches, the pool

@@ -152,6 +152,10 @@ fn build_sse41_avx2_assembly() {
     let mut build = new_build();
     if is_windows_target() {
         assert_msvc_asm();
+        // Unsupported in this release: it builds, with MSVC, and says so once
+        // (BLAKE3 #160 holds its state and what support takes). A plain
+        // warning, so CI's informative Windows jobs still build.
+        println!("cargo::warning=blake3-servil: Windows is unsupported in this release; it builds, untested on any machine of ours (https://github.com/johnservil/BLAKE3/issues/160)");
         build.file("c/blake3_sse41_x86-64_windows_msvc.asm");
         build.file("c/blake3_avx2_x86-64_windows_msvc.asm");
         // The fork's own kernel: names of its own, which no other crate defines.

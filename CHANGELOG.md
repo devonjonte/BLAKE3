@@ -59,10 +59,9 @@ each check covers and what remains unproved.
 
 ## Before you switch
 
-1. Targets: 64-bit Arm on Linux and macOS, x86-64 on Linux and Windows
-   with MSVC. Latest stable Rust and a C compiler, GCC 12 or Clang.
-   Official BLAKE3 keeps 32-bit CPUs, big-endian CPUs, WebAssembly, MinGW
-   and older compilers.
+1. Targets: 64-bit Arm on Linux and macOS, x86-64 on Linux. Latest
+   stable Rust and a C compiler, GCC 12 or Clang. Official BLAKE3 keeps
+   Windows, 32-bit CPUs, big-endian CPUs, WebAssembly and older compilers.
 2. Call `blake3_servil::initialize()` once before any other call. A
    program that makes multithreaded calls or uses a stream calls
    `initialize_multithreaded(None)` instead. A call before it panics.
