@@ -6,7 +6,7 @@
 //! expected answer with this crate.
 //!
 //! Keep: it detects, by hanging, mutants the clock then stops
-//! (tools/mutants/timeouts-x86_64.txt: register, unregister, wake_one, find, run_one).
+//! (tools/mutants/timeouts-x86_64.txt).
 
 use blake3_servil::performance::{Batch, Block};
 use blake3_servil::{Hash, Mode};

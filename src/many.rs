@@ -923,7 +923,7 @@ mod test {
     /// false on every platform this CPU has, so the AArch64 tests and
     /// mutants reach it too.
     /// Keep: it detects, by hanging, mutants the clock then stops
-    /// (tools/mutants/timeouts-x86_64.txt: hash_four_at_a_time).
+    /// (tools/mutants/timeouts-x86_64.txt).
     #[test]
     fn test_hash_blocks_without_plans() {
         #[allow(unused_mut)]

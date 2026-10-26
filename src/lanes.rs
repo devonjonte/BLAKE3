@@ -711,16 +711,6 @@ impl Pool {
         self.park.wake_for(wanted, self.threads - 1);
     }
 
-    /// Wake one parked worker, if any: whether one was.
-    pub(crate) fn wake_one(&self) -> bool {
-        self.park.wake_one()
-    }
-
-    /// Whether any worker is parked.
-    pub(crate) fn any_parked(&self) -> bool {
-        self.park.any_parked()
-    }
-
     /// Worker `me`'s loop: the sources' tasks and pieces; spinning a while
     /// when a stream is open (more is coming), else parked, whenever it
     /// finds nothing.
@@ -858,8 +848,8 @@ pub(crate) mod sources {
             if pool.sme2 {
                 wake_sme2();
             }
-            if pool.any_parked() && p + 1 - self.claimed.load(Ordering::Relaxed) >= 2 {
-                pool.wake_one();
+            if p + 1 - self.claimed.load(Ordering::Relaxed) >= 2 {
+                pool.park.wake_one();
             }
         }
 
@@ -924,8 +914,8 @@ pub(crate) mod sources {
         /// 4-CPU runners; Devon Jonte, #99).
         pub(crate) fn wake_for_waiting(&self) {
             let pool = pool();
-            if self.waiting() > 0 && pool.any_parked() {
-                pool.wake_one();
+            if self.waiting() > 0 {
+                pool.park.wake_one();
             }
         }
 
@@ -1009,8 +999,8 @@ pub(crate) mod sources {
     pub(crate) fn run_one() -> bool {
         find(|source| {
             let Some(item) = source.take() else { return false };
-            if source.waiting() >= 2 && pool().any_parked() {
-                pool().wake_one();
+            if source.waiting() >= 2 {
+                pool().park.wake_one();
             }
             match item {
                 Item::Task(task) => task.run(pool_platform()),
@@ -1416,7 +1406,7 @@ mod test {
     /// worker finishing that piece wakes it (the pool's pieces shrink
     /// toward the end, so a job's own wait rarely parks; this one must).
     /// Keep: it detects, by hanging, mutants the clock then stops
-    /// (tools/mutants/timeouts-x86_64.txt: Source::finished).
+    /// (tools/mutants/timeouts-x86_64.txt).
     #[test]
     fn test_a_parked_caller_is_woken_by_the_last_piece() {
         // The pool, and with it the startup self-test, on this thread
@@ -1448,7 +1438,7 @@ mod test {
     /// equal and mixed lengths, unaligned inputs; the slots beside the
     /// outputs untouched.
     /// Keep: it detects, by hanging, mutants the clock then stops
-    /// (tools/mutants/timeouts-x86_64.txt: Task::run).
+    /// (tools/mutants/timeouts-x86_64.txt).
     #[test]
     fn equal_members_match_the_reference() {
         #[allow(unused_mut)]
@@ -1624,8 +1614,6 @@ mod test {
     /// `Hasher::update_multithreaded` against `hash`, fed in pieces of
     /// several sizes after a first piece that leaves the counter unaligned
     /// (so `update` shrinks the subtrees it hands the pool), keyed too.
-    /// Keep: it detects, by hanging, mutants the clock then stops
-    /// (tools/mutants/timeouts-x86_64.txt: wake_one).
     #[test]
     fn test_update_multithreaded_matches_hash() {
         let mut input = vec![0u8; (5 * MIN_SPLIT_LEN + 1025).max(3 << 20) + 12345];
@@ -1695,7 +1683,7 @@ mod test {
     /// The pool gives the single-threaded digests, for one-block
     /// messages, whole-block messages, and messages longer than a chunk.
     /// Keep: it detects, by hanging, mutants the clock then stops
-    /// (tools/mutants/timeouts-x86_64.txt: publish_job, take, wake_one).
+    /// (tools/mutants/timeouts-x86_64.txt).
     #[test]
     fn test_hash_many_pool_agrees() {
         let mut buffer = vec![0u8; 4 * MIN_SPLIT_LEN];

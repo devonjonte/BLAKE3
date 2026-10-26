@@ -40,9 +40,6 @@ src/lanes.rs	delete match arm crate::BLOCK_LEN in Task::run_members	1	speed: cho
 src/lanes.rs	replace && with || in Pool::run_job	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace && with || in hash_each	1	speed: the cut's piece sizes; any cut of the items into consecutive pieces of one or more hashes every item alike (the cut, not the digests, is what changes)
 src/lanes.rs	replace && with || in initialize	2	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
-src/lanes.rs	replace && with || in sources::Source::publish	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
-src/lanes.rs	replace && with || in sources::Source::wake_for_waiting	1	the pool's scheduling: whether a waiting task wakes a parked worker; the caller takes what waits meanwhile
-src/lanes.rs	replace && with || in sources::run_one	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
 src/lanes.rs	replace * with +	1	speed: MIN_SPLIT_LEN, the length from which the pool splits a message (1536 B or 0 with the mutant); every split hashes alike
 src/lanes.rs	replace * with + in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with + in merge_to_children	1	array capacity: 2 + MAX children a call instead of 2 * MAX, the same tree in more calls
@@ -112,7 +109,6 @@ src/lanes.rs	replace >= with < in sme2_prefix	1	speed: how the work is cut among
 src/lanes.rs	replace >= with < in sources::Source::publish	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
 src/lanes.rs	replace >= with < in sources::run_one	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
 src/lanes.rs	replace >= with < in spin_for_work	1	speed: with the spin's sense inverted a worker spins while idle or parks while a stream is open; the digests are the same (it has also timed out, on the EPYC: #140)
-src/lanes.rs	replace Pool::any_parked -> bool with true	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
 src/lanes.rs	replace Pool::wake_for with ()	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace all_workers_parked -> bool with true	1	a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before
 src/lanes.rs	replace poll_pause with ()	1	speed: how a caller polls before it sleeps; the sleep and its wake are the finish handshake's, under Shuttle (tests/shuttle_finish.rs)
@@ -350,7 +346,6 @@ src/pair.rs	replace | with ^ in parent	1	equivalent: | and ^ agree on flag bits 
 src/park.rs	replace - with + in Park::pay_owed	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
 src/park.rs	replace - with / in Park::pay_owed	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
 src/park.rs	replace > with >= in Park::wake_for	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
-src/park.rs	replace Park::any_parked -> bool with true	1	speed: a publisher tries a wake with nobody parked; wake_one finds no bit
 src/platform.rs	delete ! in Platform::xof_many	1	speed: chooses between equally correct paths
 src/platform.rs	delete ! in Sme2Turn::take	1	SME2 only: on x86 no SME2 turn is held; take returns the platform unchanged and drop releases nothing
 src/platform.rs	delete ! in sme2_detect_uncached	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)

@@ -95,10 +95,8 @@ fn run(workers: usize, publishers: usize, each: usize) {
                 threads.push(thread::spawn(move || {
                     for _ in 0..each {
                         published.fetch_add(1, Ordering::SeqCst);
-                        // As the pool's publishers: a wake where any worker is parked.
-                        if park.any_parked() {
-                            park.wake_one();
-                        }
+                        // As the pool's publishers: a wake, if any worker is parked.
+                        park.wake_one();
                     }
                 }));
             }
