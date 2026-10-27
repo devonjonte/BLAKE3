@@ -80,13 +80,13 @@ each check covers and what remains unproved.
    `convenience::hash_with(Mode::Keyed(key), input)`, `derive_key(context,
    material)` is `convenience::hash_with(Mode::DeriveKey(context),
    material)`, and `convenience::hash_xof(mode, input)` gives extended
-   output. `performance`, for power users, has every way to hash fast,
-   the `Hasher` among them (`Hasher::new(mode)` replaces `Hasher::new()`,
-   `Hasher::new_keyed` and `Hasher::new_derive_key`; the plain hash is
-   `Mode::Plain`, and `Hasher` has no `Default`): the program takes
-   on more of the work, with inputs as `Block`s (64 bytes on a 64-byte
-   boundary: a message is blocks and a length, a batch messages of one
-   length), digests into its places, and a `Mode` in every call.
+   output. `performance`, for power users, has every way to hash fast.
+   There the program takes on more of the work: inputs as `Block`s (64
+   bytes on a 64-byte boundary: a message is blocks and a length, a
+   batch messages of one length), digests into its places, and a `Mode`
+   in every call. The `Hasher` is there too: `Hasher::new(mode)` replaces
+   `Hasher::new()`, `Hasher::new_keyed` and `Hasher::new_derive_key`, the
+   plain hash is `Mode::Plain`, and `Hasher` has no `Default`.
 4. Threads are the crate's own. `Hasher::update_rayon` is now
    `update_multithreaded`. `performance::hash_multithreaded(mode, input)`
    hashes one message over the threads. There is no `rayon` feature.
