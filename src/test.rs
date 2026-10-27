@@ -1342,6 +1342,28 @@ mod dispatch {
         assert!(ran.is_disjoint(&sme2), "NEON's extended output ran an SME2 kernel");
     }
 
+    /// Extended output on NEON, by block count: eight blocks a call on
+    /// x8, four on x4, and the tail of one or two blocks on x1, of three
+    /// on x4 (neon_hybrid::xof_tail).
+    #[test]
+    fn test_xof_dispatch() {
+        if !crate::platform::sme2_detected() {
+            return;
+        }
+        let neon = crate::platform::Platform::neon().expect("NEON on AArch64");
+        let at = |blocks: usize| {
+            ran(&|| {
+                let mut out = vec![0u8; blocks * crate::BLOCK_LEN];
+                neon.xof_many(&[0; 8], &[0; crate::BLOCK_LEN], 64, 0, 0, &mut out);
+            })
+        };
+        let cases: [(usize, &[&str]); 8] =
+            [(1, &["x1"]), (2, &["x1"]), (3, &["x4"]), (4, &["x4"]), (5, &["x1", "x4"]), (7, &["x4"]), (8, &["x8"]), (11, &["x4", "x8"])];
+        for (blocks, want) in cases {
+            assert_eq!(at(blocks), names(want), "extended output of {blocks} blocks");
+        }
+    }
+
     fn names(list: &[&str]) -> BTreeSet<String> {
         list.iter().map(|s| s.to_string()).collect()
     }
