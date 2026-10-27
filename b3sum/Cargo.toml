@@ -15,7 +15,6 @@ name = "b3sum"
 path = "src/main.rs"
 
 [features]
-pure = ["blake3/pure"]
 
 [dependencies]
 anyhow = "1.0.25"

@@ -151,9 +151,9 @@
 //! [`Zeroize`](https://docs.rs/zeroize/latest/zeroize/trait.Zeroize.html) for
 //! this crate's types.
 //!
-//! The `pure` feature (off by default) builds the portable Rust alone,
-//! with no assembly, several times slower: for a machine whose C compiler
-//! cannot assemble the kernels (the build stops and says so otherwise).
+//! The build needs a C compiler that assembles the kernels (GCC 12 or
+//! later, or Clang); without one it stops and says so. This crate runs its
+//! assembly or not at all: for portable Rust, use official BLAKE3.
 //!
 //! The `serde` feature (off by default, on for [docs.rs]) implements
 //! [`serde::Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html) and

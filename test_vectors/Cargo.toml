@@ -4,7 +4,6 @@ version = "0.0.0"
 edition = "2024"
 
 [features]
-pure = ["blake3/pure"]
 
 [dependencies]
 # If you ever change these path dependencies, you'll probably need to update

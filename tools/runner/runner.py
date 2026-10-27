@@ -41,7 +41,7 @@ and map land in the job's benchmark-results/. "quick" runs the small set.)
     {"type": "test", "fork_commit": "..."}
 
 (A test job runs the fork's suites natively, under cargo-nextest: the
-library tests in the default and pure builds, the doc tests, the
+library tests, the doc tests, the
 integration tests in tests/ (the planned API's contract), and the
 official vectors.)
 
@@ -86,7 +86,7 @@ PATCH = 'patch."https://github.com/johnservil/BLAKE3".blake3-servil.path=".."'
 CONTENDERS = {"blake3-official", "blake3-official-mt", "blake3", "blake3-servil-st", "blake3-servil", "blake3-servil-mt", "blake3-mt",
               "sha256", "sha256-ring", "sha256-cc", "sha1dc", "sha3-256", "blake3-commonware"}
 EXAMPLES = {"host_lab", "energy_probe", "job_trace", "sme_units"}
-FEATURES = {"pure", "job-trace"}
+FEATURES = {"job-trace"}
 DEFAULT_LIMIT = 1800
 MAX_LIMIT = 7200
 
@@ -271,8 +271,7 @@ def test(job, run, work, out):
     fork = run.checkouts(hex_commit(job, "fork_commit"), None)
     # Under cargo-nextest, each test in its own process; the doc examples
     # under cargo test --doc.
-    for features in [[], ["--features", "pure"]]:
-        run.run(["cargo", "nextest", "run", "--release", "--lib", *features], cwd=fork)
+    run.run(["cargo", "nextest", "run", "--release", "--lib"], cwd=fork)
     run.run(["cargo", "test", "--release", "--doc"], cwd=fork)
     run.run(["cargo", "nextest", "run", "--release", "--tests"], cwd=fork)
     run.run(["cargo", "nextest", "run", "--release", "--manifest-path", "test_vectors/Cargo.toml"], cwd=fork)

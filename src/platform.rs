@@ -42,7 +42,7 @@ cfg_if::cfg_if! {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 /// Each platform's discriminant is fixed, the same in every build (0 means
 /// "not yet recorded" to [`Platform::detect`]); tools/verify's whole-call
@@ -158,6 +158,21 @@ fn not_initialized() -> u8 {
     panic!("blake3-servil: call blake3_servil::initialize() once, before any other call: it runs the startup self-test and detects the CPU")
 }
 
+/// x86-64's kernels for a CPU with the given features: the widest it
+/// runs, or None for a CPU without SSE4.1, which is not supported.
+#[cfg(all(target_arch = "x86_64", blake3_sse41_ffi, blake3_avx2_ffi, blake3_avx512_ffi))]
+const fn x86_platform(avx512: bool, avx2: bool, sse41: bool) -> Option<Platform> {
+    if avx512 {
+        Some(Platform::AVX512)
+    } else if avx2 {
+        Some(Platform::AVX2)
+    } else if sse41 {
+        Some(Platform::SSE41)
+    } else {
+        None
+    }
+}
+
 impl Platform {
     /// The platform [`initialize`](crate::initialize) detected for this
     /// process. The caller must have called `initialize` (or
@@ -181,6 +196,9 @@ impl Platform {
     }
 
     /// [`Platform::detect`] without the startup self-test.
+    ///
+    /// The portable kernels run under Miri alone: on every supported
+    /// machine an assembly platform is detected, or the process stops.
     #[allow(unreachable_code)]
     pub(crate) fn detect_unchecked() -> Self {
         #[cfg(miri)]
@@ -188,22 +206,16 @@ impl Platform {
             return Platform::Portable;
         }
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            #[cfg(blake3_avx512_ffi)]
-            {
-                if avx512_detected() {
-                    return Platform::AVX512;
-                }
-            }
-            #[cfg(blake3_avx2_ffi)]
-            if avx2_detected() {
-                return Platform::AVX2;
-            }
-            #[cfg(blake3_sse41_ffi)]
-            if sse41_detected() {
-                return Platform::SSE41;
-            }
+        // Every x86-64 build assembles every kernel (build.rs), so a CPU
+        // runs the widest it has; one without SSE4.1 is not supported, and
+        // the process stops here, in the startup self-test, as a build for
+        // an unsupported target stops (official BLAKE3 runs there).
+        #[cfg(all(target_arch = "x86_64", blake3_sse41_ffi, blake3_avx2_ffi, blake3_avx512_ffi))]
+        match x86_platform(avx512_detected(), avx2_detected(), sse41_detected()) {
+            Some(platform) => return platform,
+            None => crate::self_test::unsupported(format_args!(
+                "blake3-servil runs on x86-64 CPUs with SSE4.1 (Intel since 2008, AMD since 2011); this CPU lacks it: use official BLAKE3 (https://github.com/BLAKE3-team/BLAKE3)"
+            )),
         }
         // SME2 is detected at runtime; the kernels also require a 512-bit
         // streaming vector length, which sme2_detected() checks. Without
@@ -366,11 +378,12 @@ impl Platform {
             #[cfg(blake3_avx512_ffi)]
             #[cfg(target_arch = "x86_64")]
             Platform::AVX512 => unsafe { crate::avx512::compress_xof(cv, block, block_len, counter, flags) },
-            // No NEON compress_xof() implementation yet.
+            // The extended-output kernel's first block (no single-block
+            // kernel exists; neon_hybrid::xof_block).
             #[cfg(blake3_neon)]
-            Platform::NEON => portable::compress_xof(cv, block, block_len, counter, flags),
+            Platform::NEON => crate::neon_hybrid::xof_block(cv, block, block_len, counter, flags),
             #[cfg(blake3_sme2)]
-            Platform::SME2 => portable::compress_xof(cv, block, block_len, counter, flags),
+            Platform::SME2 => crate::neon_hybrid::xof_block(cv, block, block_len, counter, flags),
         }
     }
 
@@ -455,14 +468,15 @@ impl Platform {
                 };
                 // Then four at a time on NEON (AArch64), where the platform
                 // has it: CPUs without SME2, and SME2's leftovers.
+                // and the last one to three blocks on the same kernel.
                 #[cfg(all(blake3_neon, target_arch = "aarch64"))]
-                let out = if !matches!(self, Platform::Portable) {
+                if !matches!(self, Platform::Portable) {
                     let done = crate::neon_hybrid::xof_many(cv, block, block_len, counter, flags, out);
-                    counter += (done / BLOCK_LEN) as u64;
-                    &mut out[done..]
-                } else {
-                    out
-                };
+                    if done < out.len() {
+                        crate::neon_hybrid::xof_tail(cv, block, block_len, counter.wrapping_add((done / BLOCK_LEN) as u64), flags, &mut out[done..]);
+                    }
+                    return;
+                }
                 // For platforms without an optimized xof_many, fall back to a loop over
                 // compress_xof. This is still faster than portable code.
                 for out_block in out.chunks_exact_mut(BLOCK_LEN) {
@@ -536,8 +550,8 @@ mod x86_bits {
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-// Read by the x86 kernels' dispatch and the tests; a build without the
-// assembly (pure) dispatches to none.
+// Read by the x86 kernels' dispatch and the tests (every x86-64 build has
+// the assembly; Miri dispatches to none).
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
 fn x86_features() -> u8 {
     use core::sync::atomic::{AtomicU8, Ordering};
@@ -556,8 +570,8 @@ fn x86_features() -> u8 {
 /// CPU with AVX has leaf 7.
 #[cfg(target_arch = "x86_64")]
 #[cold]
-// Read by the x86 kernels' dispatch and the tests; a build without the
-// assembly (pure) dispatches to none.
+// Read by the x86 kernels' dispatch and the tests (every x86-64 build has
+// the assembly; Miri dispatches to none).
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
 fn read_x86_features() -> u8 {
     use core::arch::x86_64 as arch;
@@ -609,8 +623,8 @@ pub fn avx512_detected() -> bool {
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-// Read by the x86 kernels' dispatch and the tests; a build without the
-// assembly (pure) dispatches to none.
+// Read by the x86 kernels' dispatch and the tests (every x86-64 build has
+// the assembly; Miri dispatches to none).
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
 pub fn avx2_detected() -> bool {
     if cfg!(miri) {
@@ -629,8 +643,8 @@ pub fn avx2_detected() -> bool {
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-// Read by the x86 kernels' dispatch and the tests; a build without the
-// assembly (pure) dispatches to none.
+// Read by the x86 kernels' dispatch and the tests (every x86-64 build has
+// the assembly; Miri dispatches to none).
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
 pub fn sse41_detected() -> bool {
     if cfg!(miri) {
@@ -804,7 +818,7 @@ mod x86_degree_test {
 
     /// The detected platform hashes as many chunks at once as the widest
     /// kernel this build and CPU have (the standard library's detection, an
-    /// independent reading, says which the CPU has; a pure build has none):
+    /// independent reading, says which the CPU has):
     /// a degree of 1 would hash correctly, one chunk at a time.
     #[test]
     fn test_detected_degree_is_the_widest_kernel() {
@@ -847,5 +861,21 @@ mod x86_features_test {
         assert_eq!(super::avx2_detected(), std::is_x86_feature_detected!("avx2"), "avx2_detected");
         #[cfg(blake3_avx512_ffi)]
         assert_eq!(super::avx512_detected(), std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl"), "avx512_detected");
+    }
+    /// Each CPU runs the widest kernel it has; a CPU without SSE4.1 gets
+    /// none, and the process stops (the stop itself: unsupported).
+    #[test]
+    fn test_a_cpu_runs_its_widest_kernel_and_one_without_sse41_none() {
+        use super::{Platform, x86_platform};
+        for (avx512, avx2, sse41, want) in [
+            (true, true, true, Some(Platform::AVX512)),
+            (true, false, false, Some(Platform::AVX512)),
+            (false, true, true, Some(Platform::AVX2)),
+            (false, true, false, Some(Platform::AVX2)),
+            (false, false, true, Some(Platform::SSE41)),
+            (false, false, false, None),
+        ] {
+            assert_eq!(x86_platform(avx512, avx2, sse41), want, "avx512 {avx512}, avx2 {avx2}, sse41 {sse41}");
+        }
     }
 }

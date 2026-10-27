@@ -88,9 +88,9 @@ each check covers and what remains unproved.
 5. Removed: `Hasher::update_mmap` and the `mmap` feature (map the file
    yourself, or use `update_reader`), the `traits-preview` feature, the
    `guts`, `hazmat`, and `platform` modules, and the `no_avx2`,
-   `no_avx512`, `no_neon`, and `no_sme2` features. `pure` stays, and means
-   portable Rust alone: no assembly, and no SIMD on x86-64 (official
-   BLAKE3's `pure` keeps its Rust SSE4.1 and AVX2 kernels).
+   `no_avx512`, `no_neon`, and `no_sme2` features, and `pure`: this crate
+   runs its assembly or not at all. For portable Rust, or an x86-64 CPU
+   without SSE4.1 (which stops at `initialize`), use official BLAKE3.
 6. b3sum installs from the package `b3sums` (`cargo install b3sums`);
    crates.io's `b3sum` is official BLAKE3's. The program is still `b3sum`.
    `--num-threads N` means at most N threads in all, and 1 means one
@@ -130,6 +130,6 @@ each check covers and what remains unproved.
 - Building the Arm kernels needs an assembler that knows armv8.2-a+sha3,
   GNU as 2.30 or LLVM 7; building the x86-64 kernels needs a C compiler
   that takes the AVX-512 flags, GCC 12 or Clang. Without one, the build
-  stops and says so; the `pure` feature builds without assembly. The SME2 kernels need Clang 17
+  stops and says so; official BLAKE3 builds without assembly. The SME2 kernels need Clang 17
   or GCC 14 with binutils 2.41; without those the build warns and leaves
   them out.

@@ -6,10 +6,6 @@ fn defined(var: &str) -> bool {
     env::var_os(var).is_some()
 }
 
-fn is_pure() -> bool {
-    defined("CARGO_FEATURE_PURE")
-}
-
 fn is_ci() -> bool {
     defined("BLAKE3_CI")
 }
@@ -60,7 +56,7 @@ fn assert_assembles_x86() {
     assert!(
         takes("-mavx512f") && takes("-mavx512vl"),
         "blake3-servil: {compiler:?} is not a C compiler that assembles the x86-64 kernels \
-         (GCC 12 or later, or Clang); the `pure` feature builds without assembly"
+         (GCC 12 or later, or Clang); use official BLAKE3 for a build without assembly (https://github.com/BLAKE3-team/BLAKE3)"
     );
 }
 
@@ -147,14 +143,13 @@ fn build_sme2_assembly() {
 }
 
 // The integer + NEON kernels need an assembler that knows armv8.2-a+sha3
-// (GNU as 2.30+, LLVM 7+). With an older one the build stops and says so:
-// the `pure` feature is the build without assembly.
+// (GNU as 2.30+, LLVM 7+). With an older one the build stops and says so.
 fn assert_assembles_sha3() {
     let compiler = new_build().get_compiler().path().to_owned();
     assert!(
         assembles("sha3", "-march=armv8.2-a+sha3", ".arch armv8.2-a+sha3\nxar v0.2d, v1.2d, v2.2d, #1\n"),
         "blake3-servil: {compiler:?} cannot assemble armv8.2-a+sha3, which the AArch64 kernels need \
-         (GNU as 2.30 or later, or Clang/LLVM 7 or later); the `pure` feature builds without assembly"
+         (GNU as 2.30 or later, or Clang/LLVM 7 or later); use official BLAKE3 for a build without assembly (https://github.com/BLAKE3-team/BLAKE3)"
     );
 }
 
@@ -207,13 +202,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo::rustc-check-cfg=cfg({cfg_name}, values(none()))");
     }
 
-    if !is_pure() && is_x86_64() {
+    if is_x86_64() {
         assert_assembles_x86();
         build_sse41_avx2_assembly();
         build_avx512_assembly();
     }
 
-    if !is_pure() && is_aarch64() {
+    if is_aarch64() {
         println!("cargo::rustc-cfg=blake3_neon");
         assert_assembles_sha3();
         build_neon_hybrid_assembly();

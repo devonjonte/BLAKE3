@@ -139,6 +139,25 @@ pub fn xof_many(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, mut counte
     done
 }
 
+/// One block of extended output, block `counter`: the x4 kernel's first,
+/// its other three discarded. No single-block kernel exists, and the four
+/// lanes run side by side, so the call costs about one compression; the
+/// portable Rust, which no supported machine runs, stays out of it.
+pub fn xof_block(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8) -> [u8; BLOCK_LEN] {
+    let mut four = [0u8; 4 * BLOCK_LEN];
+    xof_many(cv, block, block_len, counter, flags, &mut four);
+    four[..BLOCK_LEN].try_into().unwrap()
+}
+
+/// The last one to three blocks of extended output into `out`, from block
+/// `counter`, on the x4 kernel (the blocks past `out` discarded).
+pub fn xof_tail(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8, out: &mut [u8]) {
+    assert!(out.len() < 4 * BLOCK_LEN && out.len() % BLOCK_LEN == 0, "a tail of one to three blocks");
+    let mut four = [0u8; 4 * BLOCK_LEN];
+    xof_many(cv, block, block_len, counter, flags, &mut four);
+    out.copy_from_slice(&four[..out.len()]);
+}
+
 /// Every kernel shares one signature: `(inputs, blocks, key, counter,
 /// packed_flags, out)`. See the contract in that file.
 type Kernel = unsafe extern "C" fn(*const *const u8, u64, *const u32, u64, u64, *mut u8);

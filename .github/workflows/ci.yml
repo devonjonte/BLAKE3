@@ -80,25 +80,15 @@ jobs:
       env:
         CFLAGS: -flto
 
-    # Each level of SIMD support, with assembly and with pure Rust
-    # intrinsics, in the test profile (optimized, its assertions
-    # and overflow checks on: Cargo.toml); the release profile once, at full
-    # support, for the optimizer's own behavior.
-    #
-    # Full SIMD support.
+    # The test profile (optimized, its assertions and overflow checks on:
+    # Cargo.toml), and the release profile, for the optimizer's own
+    # behavior.
     - run: cargo nextest run --features=
-    - run: cargo nextest run --features=pure
     - run: cargo nextest run --features= --release
-    - run: cargo nextest run --features=pure --release
-    # No AVX-512.
-    # No AVX2.
 
     # Test vectors.
     - name: test vectors
       run: cargo nextest run
-      working-directory: ./test_vectors
-    - name: test vectors pure
-      run: cargo nextest run --features=pure
       working-directory: ./test_vectors
     # The C API (capi/: b3.h over the crate).
     - name: C API

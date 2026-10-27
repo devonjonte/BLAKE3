@@ -27,11 +27,6 @@ std = ["constant_time_eq/std"]
 # Implement the zeroize::Zeroize trait for types in this crate.
 zeroize = ["dep:zeroize", "arrayvec/zeroize"]
 
-# Portable Rust alone: no assembly kernels, and no SIMD, several times
-# slower. A build whose C compiler cannot assemble the kernels stops, and
-# this feature is the way past it.
-pure = []
-
 [package.metadata.docs.rs]
 # Document the Serialize/Deserialize/Zeroize impls on docs.rs.
 features = ["serde", "zeroize"]

@@ -161,9 +161,7 @@ one-shot hash from one to seventeen chunks, against the reference
 implementation; every platform's batch kernel at every input shape (1 to
 16 blocks, keyed flags, a counter whose low word overflows mid-batch,
 pointer tables forward, reversed, and strided), against the portable one;
-the pool's cuts and merges, its thread caps, and 32 callers at once; and
-the same suites in the builds without any
-SIMD (`pure`).
+the pool's cuts and merges, its thread caps, and 32 callers at once.
 
 **Every process checks itself before its first hash.** The tests prove
 the code on our machines; a user's machine may have a compiler that
@@ -213,8 +211,8 @@ unrolled kernel code.
 - **CI on other targets** (GitHub Actions): the suites on Linux x86-64
   and arm64 (without SME2, and without SHA-3 under QEMU), and macOS.
 - **Miri**, which interprets Rust and stops at undefined behaviour, over
-  small versions of the unsafe paths in the `pure` build (Miri cannot run
-  assembly or SIMD intrinsics): `test::unsafe_paths` (batches, the pool
+  small versions of the unsafe paths, on the portable kernels Miri selects
+  (it cannot run assembly): `test::unsafe_paths` (batches, the pool
   with two callers), and the `test_miri_*` tests CI's Miri step runs on
   every change: the stream (`stream::test::test_miri_stream`), the
   pool's collections, and x86's whole-
@@ -400,7 +398,6 @@ SME2 (clang 17 or later; set `CC=clang-19` or similar):
 ```sh
 git clone -b servil https://github.com/johnservil/BLAKE3 && cd BLAKE3
 cargo nextest run --release --lib --tests         # 103 tests, each in its own process
-cargo nextest run --release --lib --features pure # 75
 cargo test --release --doc                        # 19 doc examples
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API, 8
@@ -410,7 +407,7 @@ The tests need [cargo-nextest](https://nexte.st); Miri also needs
 nightly Rust (`rustup toolchain install nightly --component miri`):
 
 ```sh
-MIRIFLAGS="-Zmiri-num-cpus=4 -Zmiri-ignore-leaks" cargo +nightly miri nextest run --features pure --lib unsafe_paths miri
+MIRIFLAGS="-Zmiri-num-cpus=4 -Zmiri-ignore-leaks" cargo +nightly miri nextest run --lib unsafe_paths miri
 ```
 
 The crate is crash-only software: what still exists as a process ends (a

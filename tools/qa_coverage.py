@@ -173,7 +173,7 @@ def main():
     print("qa_coverage: running the suites with coverage (a few minutes)", file=sys.stderr)
     tests, compiled = coverage("tests", ["--lib", "--tests"])
     guard, _ = coverage("guard", ["--lib"], ["guard"])
-    miri, _ = coverage("miri-paths", ["--lib", "--features", "pure"], ["unsafe_paths", "miri"])
+    miri, _ = coverage("miri-paths", ["--lib"], ["unsafe_paths", "miri"])
     vectors, _ = coverage("vectors", ["--manifest-path", "test_vectors/Cargo.toml"])
     # Everything compiled on this machine: a line the tests' binaries hold.
     mutants, mutant_count, survivors = mutated()
@@ -184,7 +184,7 @@ def main():
         (f"Test suites ({platform.machine()} here)", tally(tests), "every line run once or more by the library's and integration tests"),
         ("Official test vectors", tally(vectors), "lines run while checking the published vectors"),
         ("Guard pages", tally(guard), "lines run with inputs and outputs against unmapped pages; assembly reached, not counted"),
-        ("Miri's paths (pure build)", tally(miri), "the lines the tests Miri runs execute natively; Miri checks Rust only"),
+        ("Miri's paths", tally(miri), "the lines the tests Miri runs execute natively; Miri checks Rust only"),
         ("AddressSanitizer", tally(tests, lambda f: not is_asm(f)), "the suites' lines, assembly excepted"),
         ("ThreadSanitizer", tally(tests, lambda f: f in SHARED), "the suites' lines in files threads share memory in"),
         (f"Mutation testing ({mutant_count} mutants, {mutant_count - survivors} caught on AArch64)", tally(mutants), "lines in functions with a planted bug"),

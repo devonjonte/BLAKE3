@@ -466,6 +466,14 @@ fn compiled_features_present() {
 /// instruction (an illegal-instruction fault, SIGILL where there are
 /// signals): stable Rust, no library. On an architecture with no trap
 /// named here, a panic, to the program's panic handler.
+/// The stop for a CPU this crate does not support: the same as a failed
+/// self-test's, uncatchable, the reason first.
+#[cfg(target_arch = "x86_64")]
+#[cold]
+pub(crate) fn unsupported(why: core::fmt::Arguments) -> ! {
+    stop(why)
+}
+
 #[cold]
 fn stop(why: core::fmt::Arguments) -> ! {
     #[cfg(feature = "std")]
