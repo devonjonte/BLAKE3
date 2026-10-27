@@ -52,9 +52,9 @@ the caller's buffers.
 
 **Fixed answers.** The tests compare digests with answers that come
 from official BLAKE3: its published test vectors (`test_vectors/`), and
-for every other sweep a fixed value in the test, the fold of the
-sweep's outputs (`tests/common/golden.rs`), which official BLAKE3 1.8.7
-generated. Regenerating them is a reviewed step, run by hand:
+for every other sweep a fixed value in the test, a 64-bit fingerprint
+of all the sweep's outputs (their fold under the self-test's FNV-1a,
+`tests/common/golden.rs`), which official BLAKE3 1.8.7 generated. Regenerating them is a reviewed step, run by hand:
 `BLAKE3_GOLDEN=1 cargo nextest run --no-capture` computes every case with
 official BLAKE3 too, stops at the first that differs, and prints each
 fold (`golden NAME: 0x...`) to write in. The folds hold the same on
@@ -190,9 +190,10 @@ unrolled kernel code.
 ## Memory safety
 
 - **Guard pages** (`test::guard_pages`), on AArch64 and x86-64, Linux and
-  macOS. These tests put each kernel's input, then its output, flush against an inaccessible
-  page (after the buffer, then before it). A kernel that reads or writes
-  a single byte outside its buffers crashes the test. They cover `hash`
+  macOS. These tests put each kernel's input, then its output, flush
+  against an inaccessible page (after the buffer, then before it). A
+  kernel that reads or writes a single byte outside its buffers crashes
+  the test. They cover `hash`
   at every length to 2 KiB + 70 and around chunk counts up to 1025,
   `hash_many` at 15 message lengths and 20 counts, every input of a batch
   against a guard page of its own on every kernel the build and CPU have

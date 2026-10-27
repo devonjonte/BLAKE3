@@ -104,8 +104,11 @@ project has audited the code. The proofs trust the written
 specification, the instruction models, the automated prover (Z3),
 and each kernel's stated
 memory and calling convention. Tests cover the Rust code around the
-assembly. These checks reduce risk, but they
-cannot guarantee that no bug remains.
+assembly. Nothing checks that the `unsafe` Rust keeps Rust's rules on
+shared memory (aliasing) under every thread interleaving. Miri
+checked this until 0.8, on Rust kernels users never ran, and found one
+such bug. These checks reduce risk, but they cannot guarantee that no bug
+remains.
 
 ## Run the checks
 
