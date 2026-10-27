@@ -88,16 +88,10 @@ unsafe fn bad_call(case: &str) {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "select an individual B3_CAPI_GUARD_CASE with --run-ignored only")]
 fn bad_calls_stop_at_the_guard() {
     if let Ok(case) = std::env::var(CHILD) {
-        if case == "list" {
-            println!("\nB3_CAPI_GUARD_CASES={}", serde_json::to_string(CASES).unwrap());
-            return;
-        }
         unsafe { bad_call(&case) };
     }
-    assert!(!cfg!(miri), "select an individual guard case under Miri");
     for &(case, message) in CASES {
         let result = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "bad_calls_stop_at_the_guard", "--nocapture", "--test-threads", "1"])
@@ -118,7 +112,7 @@ fn bad_calls_stop_at_the_guard() {
 }
 
 #[test]
-fn miri_adjacent_ranges_and_empty_null_ranges_are_allowed() {
+fn adjacent_ranges_and_empty_null_ranges_are_allowed() {
     let mode = b3_mode_plain();
     unsafe {
         // Exactly adjacent in both address orders, with initialized storage.

@@ -2,7 +2,7 @@
 # AVX2 without AVX-512), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/block.rs src/convenience.rs src/each.rs src/ffi_avx2.rs src/ffi_partial.rs src/ffi_sse41.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/performance.rs src/platform.rs src/portable.rs src/self_test.rs src/tree.rs src/pair.rs
+files: src/block.rs src/convenience.rs src/each.rs src/ffi_avx2.rs src/ffi_partial.rs src/ffi_sse41.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/performance.rs src/platform.rs src/self_test.rs src/tree.rs src/pair.rs
 model files: src/finish.rs src/park.rs
 src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace < with <= in hash_each_multithreaded	1	speed: moves a threshold between equally correct paths
@@ -41,12 +41,10 @@ src/lanes.rs	delete match arm crate::BLOCK_LEN in Task::run_members	1	speed: cho
 src/lanes.rs	replace && with || in Pool::run_job	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace && with || in hash_each	1	speed: the cut's piece sizes; any cut of the items into consecutive pieces of one or more hashes every item alike (the cut, not the digests, is what changes)
 src/lanes.rs	replace && with || in initialize	2	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
-src/lanes.rs	replace * with +	1	speed: MIN_SPLIT_LEN, the length from which the pool splits a message (1536 B or 0 with the mutant); every split hashes alike
 src/lanes.rs	replace * with + in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with + in merge_to_children	1	array capacity: 2 + MAX children a call instead of 2 * MAX, the same tree in more calls
 src/lanes.rs	replace * with + in sme2_prefix	2	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with + in sources::Source::take	1	the pool's scheduling: how many of a job's pieces one claim takes (the claimed range stays consistent)
-src/lanes.rs	replace * with /	1	speed: MIN_SPLIT_LEN, the length from which the pool splits a message (1536 B or 0 with the mutant); every split hashes alike
 src/lanes.rs	replace * with / in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with / in cut_with_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with / in sme2_prefix	1	speed: how much of a message the SME2 thread takes first; on x86 there is no SME2 thread
@@ -347,7 +345,6 @@ src/pair.rs	replace | with ^ in parent	1	equivalent: | and ^ agree on flag bits 
 src/park.rs	replace - with + in Park::pay_owed	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
 src/park.rs	replace - with / in Park::pay_owed	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
 src/park.rs	replace > with >= in Park::wake_for	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
-src/platform.rs	delete ! in Platform::xof_many	1	speed: chooses between equally correct paths
 src/platform.rs	delete ! in Sme2Turn::take	1	SME2 only: on x86 no SME2 turn is held; take returns the platform unchanged and drop releases nothing
 src/platform.rs	delete ! in sme2_detect_uncached	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	delete match arm 1 in sme2_detected	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
@@ -372,9 +369,9 @@ src/platform.rs	replace && with || in read_x86_features	2	on this CPU every test
 src/platform.rs	replace && with || in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace * with + in Platform::xof_many	1	speed: moves a threshold between equally correct paths
 src/platform.rs	replace * with / in Platform::xof_many	1	speed: moves a threshold between equally correct paths
-src/platform.rs	replace += with *= in Platform::xof_many	2	code for another machine: the SME2 and NEON blocks in xof_many are compiled out on x86
+src/platform.rs	replace += with *= in Platform::xof_many	1	code for another machine: the SME2 block in xof_many is compiled out on x86
 src/platform.rs	replace += with *= in prefetch_code	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/platform.rs	replace += with -= in Platform::xof_many	2	code for another machine: the SME2 and NEON blocks in xof_many are compiled out on x86
+src/platform.rs	replace += with -= in Platform::xof_many	1	code for another machine: the SME2 block in xof_many is compiled out on x86
 src/platform.rs	replace += with -= in prefetch_code	1	AArch64 only: prefetch_code is cfg(blake3_neon), compiled out on x86; prefetching changes no result
 src/platform.rs	replace / with % in Platform::xof_many	2	code for another machine: the SME2 and NEON blocks in xof_many are compiled out on x86
 src/platform.rs	replace / with % in ticks_in_100_us	1	AArch64 only: ticks_in_100_us is cfg(blake3_neon), compiled out on x86
@@ -389,14 +386,10 @@ src/platform.rs	replace < with > in prefetch_code	1	speed: whether and what to p
 src/platform.rs	replace << with >> in read_x86_features	5	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace << with >> in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace <impl Drop for Sme2Turn>::drop with ()	1	SME2 only: on x86 no SME2 turn is held; take returns the platform unchanged and drop releases nothing
-src/platform.rs	replace == with != in read_x86_features	2	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
+src/platform.rs	replace == with != in read_x86_features	3	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace == with != in sme2_detect_uncached	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace == with != in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace >= with < in Platform::xof_many	1	speed: moves a threshold between equally correct paths
-src/platform.rs	replace Platform::compress_name -> &'static str with ""	1	a name for the kernel report and legends (no test pins the names)
-src/platform.rs	replace Platform::compress_name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
-src/platform.rs	replace Platform::hash_many_name -> &'static str with ""	1	a name for the kernel report and legends (no test pins the names)
-src/platform.rs	replace Platform::hash_many_name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
 src/platform.rs	replace Platform::name -> &'static str with ""	1	a name for reports and legends, with no reader since the kernel reports went
 src/platform.rs	replace Platform::name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
 src/platform.rs	replace Platform::sme2 -> Option<Self> with None	1	a test-only constructor: on x86 sme2_detected() is false, so it returns None already
@@ -423,8 +416,7 @@ src/platform.rs	replace ticks_in_100_us -> u64 with 1	1	AArch64 only: ticks_in_1
 src/platform.rs	replace | with & in read_x86_features	3	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace | with ^ in Platform::compress_blocks	1	equivalent: | and ^ agree on flag bits that never overlap
 src/platform.rs	replace | with ^ in read_x86_features	3	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
-src/platform.rs	replace |= with &= in read_x86_features	1	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
-src/portable.rs	replace | with ^ in hash1	1	equivalent: | and ^ agree on flag bits that never overlap
+src/platform.rs	replace |= with &= in read_x86_features	2	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/self_test.rs	replace % with + in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace % with / in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace & with ^ in compiled_features_present	2	this CPU has LZCNT and BMI1: every form of the check reads them present; the case it guards is a CPU without them
@@ -457,8 +449,6 @@ src/self_test.rs	replace chunk_values -> usize with 1	1	AArch64 only: the AArch6
 src/self_test.rs	replace compiled_features_present with ()	1	this CPU has LZCNT and BMI1: every form of the check reads them present; the case it guards is a CPU without them
 src/self_test.rs	replace | with & in chunk_values	2	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace | with ^ in chunk_values	2	equivalent: | and ^ agree on flag bits that never overlap
-src/tree.rs	delete match arm crate::platform::Platform::AVX512 in <impl Kernels for PlatformKernels<'_>>::chunk_root	1	equally correct paths: #141's one-call chunk-root kernel and chunk_root_by_state agree (test_chunk_root_against_a_guard_page runs both); speed: #141 measured the kernel 2.5-4% faster on the i7 at every placement
-src/tree.rs	delete match arm crate::platform::Platform::SSE41 | crate::platform::Platform::AVX2 in <impl Kernels for PlatformKernels<'_>>::chunk_root	1	equally correct paths: #141's one-call chunk-root kernel and chunk_root_by_state agree (test_chunk_root_against_a_guard_page runs both); speed: #141 measured the kernel 2.5-4% faster on the i7 at every placement
 src/tree.rs	replace && with || in <impl Kernels for PlatformKernels<'_>>::children	1	SME2 only: the block is cfg(blake3_sme2), compiled out on x86
 src/tree.rs	replace && with || in <impl Kernels for PlatformKernels<'_>>::subtree	1	SME2 only: the block is cfg(blake3_sme2), compiled out on x86
 src/tree.rs	replace * with + in root_children	1	speed: the arrays' size (each choice holds the values; only the stack frame changes)
@@ -467,8 +457,6 @@ src/tree.rs	replace * with / in root_children	1	speed: the arrays' size (each ch
 src/tree.rs	replace + with * in wide	1	SME2 only: the argument is `ahead`, consumed by the SME2 subtree path; on x86 subtree() returns None and serial calls pass 0
 src/tree.rs	replace + with - in wide	1	SME2 only: the argument is `ahead`, consumed by the SME2 subtree path; on x86 subtree() returns None and serial calls pass 0
 src/tree.rs	replace / with * in root_children	2	speed: the arrays' size (each choice holds the values; only the stack frame changes)
-src/tree.rs	replace < with <= in wide	1	equivalent: degrees are powers of two, and at degree 2 both arms give 2
 src/tree.rs	replace <= with > in root_children	1	[cpu lacks avx512f avx512vl] equivalent: the SMALL and MAX arrays are capacities; children() fills either, the small one in more rounds. On AVX-512 one call of the 32-input kernel writes 32 values, more than SMALL (16) holds, so a machine with it catches the mutant (the EPYC 9255, October 26)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::children -> Option<[Cv; 2]> with None	1	equivalent on x86: PlatformKernels::children returns None already (its SME2 block is compiled out)
-src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::degree -> usize with 1	1	speed: moves a threshold between equally correct paths (a degree of 1 hashes one chunk at a time; simd_degree itself has its test)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::subtree -> Option<usize> with None	1	speed: subtrees then hash on the walk's one-chunk path, the same digests

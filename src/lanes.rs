@@ -124,10 +124,7 @@ use std::sync::{Mutex, OnceLock};
 /// with the workers awake (256 KiB x0.81); a rule splitting from 256 KiB
 /// when workers are awake never triggered (calls that do not split wake
 /// none), so it went.
-// Under Miri, which interprets every instruction about a million times
-// slower, 16 KiB, so its tests reach the same pool code on inputs 32 times
-// smaller (512 KiB: about 40 minutes a test in CI).
-pub(crate) const MIN_SPLIT_LEN: usize = if cfg!(miri) { 16 * 1024 } else { 512 * 1024 };
+pub(crate) const MIN_SPLIT_LEN: usize = 512 * 1024;
 
 /// The shortest piece: eight chunks, a hybrid kernel's worth.
 const MIN_PIECE_LEN: usize = 8 * CHUNK_LEN;
@@ -195,11 +192,7 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
 /// available; the same budget cuts the pieces and asks for the wakes.
 /// Other kernels and work kinds keep their policy (experiment, #125).
 fn tree_threads(len: usize, available: usize, degree: usize) -> usize {
-    if cfg!(all(target_arch = "x86_64", target_os = "linux", not(miri))) && degree >= 16 {
-        len.div_ceil(MAX_PIECE_LEN).max(2).min(available)
-    } else {
-        available
-    }
+    if cfg!(all(target_arch = "x86_64", target_os = "linux")) && degree >= 16 { len.div_ceil(MAX_PIECE_LEN).max(2).min(available) } else { available }
 }
 
 fn spare_pool() -> Option<(&'static Pool, Caller<'static>)> {
@@ -518,14 +511,14 @@ fn merge_to_children(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::C
     let platform = pool_platform();
     let mut count = cvs.len();
     let mut width = MIN_PIECE_LEN;
-    let mut out = [0u8; crate::MAX_SIMD_DEGREE_OR_2 * crate::OUT_LEN];
+    let mut out = [0u8; crate::MAX_SIMD_DEGREE * crate::OUT_LEN];
     while count > 2 {
         let prefix = pieces.partition_point(|p| p.len > width);
         debug_assert!(prefix < count);
         let mut read = prefix;
         let mut write = prefix;
         while read + 1 < count {
-            let children = (count - read).min(2 * crate::MAX_SIMD_DEGREE_OR_2);
+            let children = (count - read).min(2 * crate::MAX_SIMD_DEGREE);
             // The inner loop's variant: each call merges at least one pair.
             assert!(children >= 2, "a parents call with under two children");
             let parents = crate::compress_parents_parallel(cvs[read..read + children].as_flattened(), key, flags, platform, &mut out);
@@ -1400,7 +1393,7 @@ mod test {
     /// later calls, which would then hash alone, right and slower).
     /// Arbitrary CVs isolate the merge's tree shape from chunk hashing:
     /// a cut of a few pieces, and one whose first level holds more
-    /// children than one parents call takes (2 x MAX_SIMD_DEGREE_OR_2),
+    /// children than one parents call takes (2 x MAX_SIMD_DEGREE),
     /// one left over to carry up.
     #[test]
     fn test_simd_merge_matches_recursive() {
@@ -1461,8 +1454,8 @@ mod test {
         worker.join().unwrap();
     }
 
-    /// Members of one length side by side, against the reference
-    /// implementation: every platform this machine runs, the three modes,
+    /// Members of one length side by side, against fixed values (official
+    /// BLAKE3's digests): every platform this machine runs, the three modes,
     /// equal and mixed lengths, unaligned inputs; the slots beside the
     /// outputs untouched.
     /// Keep: it detects, by hanging, mutants the clock then stops
@@ -1470,7 +1463,7 @@ mod test {
     #[test]
     fn equal_members_match_the_reference() {
         #[allow(unused_mut)]
-        let mut platforms: Vec<_> = [Some(Platform::Portable)].into_iter().flatten().collect();
+        let mut platforms: Vec<Platform> = std::vec::Vec::new();
         #[cfg(target_arch = "x86_64")]
         platforms.extend([Platform::sse41(), Platform::avx2()].into_iter().flatten());
         #[cfg(blake3_avx512_ffi)]
@@ -1484,8 +1477,10 @@ mod test {
             (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
             (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL),
         ];
-        let counts: &[usize] = if cfg!(miri) { &[2, 3] } else { &[2, 3, 4, 7, 8, 15, 16, 17, 63, MEMBERS] };
-        let offsets: &[usize] = if cfg!(miri) { &[0, 1] } else { &[0, 1, 7, 63] };
+        let counts: &[usize] = &[2, 3, 4, 7, 8, 15, 16, 17, 63, MEMBERS];
+        let offsets: &[usize] = &[0, 1, 7, 63];
+        let api_modes = [crate::Mode::Plain, crate::Mode::Keyed(&key), crate::Mode::DeriveKey(context)];
+        let mut golden = crate::test::Golden::new("equal_members");
         for len in [64, 128, 192, 256, 512, 1024] {
             for &count in counts {
                 for mixed in [false, true] {
@@ -1497,20 +1492,12 @@ mod test {
                             })
                             .collect();
                         for (mode, (words, flags)) in modes.iter().enumerate() {
-                            let expected: Vec<[u8; crate::OUT_LEN]> = inputs
-                                .iter()
-                                .map(|input| {
-                                    let mut h = match mode {
-                                        0 => reference_impl::Hasher::new(),
-                                        1 => reference_impl::Hasher::new_keyed(&key),
-                                        _ => reference_impl::Hasher::new_derive_key(context),
-                                    };
-                                    h.update(&input[offset..]);
-                                    let mut digest = [0; crate::OUT_LEN];
-                                    h.finalize(&mut digest);
-                                    digest
-                                })
-                                .collect();
+                            let api_mode = api_modes[mode];
+                            let expected: Vec<[u8; crate::OUT_LEN]> =
+                                inputs.iter().map(|input| *crate::convenience::hash_with(api_mode, &input[offset..]).as_bytes()).collect();
+                            golden.add(expected.as_flattened(), || {
+                                inputs.iter().flat_map(|input| crate::test::official::hash(api_mode, &input[offset..])).collect()
+                            });
                             for &platform in &platforms {
                                 let done = AtomicUsize::new(count);
                                 let mut out = vec![[0xAA; crate::OUT_LEN]; count + 2];
@@ -1534,11 +1521,12 @@ mod test {
                 }
             }
         }
+        golden.check(0xd9842e3410d3c4ae);
     }
 
     #[test]
     fn test_tree_thread_budget() {
-        let enabled = cfg!(all(target_arch = "x86_64", target_os = "linux", not(miri)));
+        let enabled = cfg!(all(target_arch = "x86_64", target_os = "linux"));
         for degree in [1, 8, 16, 32] {
             for (len, available, budget) in [
                 (512 * CHUNK_LEN, 48, 4),

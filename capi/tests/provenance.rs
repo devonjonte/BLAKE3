@@ -1,5 +1,5 @@
-//! The C callback's opaque context retains pointer provenance.
-//! Run this under Miri with -Zmiri-strict-provenance as well as natively.
+//! The C callback's opaque context arrives intact: the callback reads
+//! and writes through the caller's own pointer.
 use b3_servil::*;
 use core::ffi::c_void;
 
@@ -23,7 +23,7 @@ unsafe extern "C" fn completed(context: *mut c_void, places: *mut Digest, count:
 }
 
 #[test]
-fn miri_callback_context_retains_pointer_provenance() {
+fn callback_context_reaches_the_callback() {
     let input = Input([42; 64]);
     let mode = b3_mode_plain();
     let expected = unsafe { b3_hash(&mode, input.0.as_ptr().cast(), input.0.len()) };

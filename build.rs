@@ -45,8 +45,8 @@ fn new_build() -> cc::Build {
 
 /// The x86-64 kernels' assembler: a C compiler that takes the AVX-512
 /// flags, as GCC 12 and Clang do. Without one the build stops, as on
-/// AArch64: a build that fell back to the portable Rust would run several
-/// times slower and say so only in a warning Cargo hides for dependencies.
+/// AArch64, pointing to official BLAKE3: this crate runs its assembly or
+/// nothing.
 fn assert_assembles_x86() {
     let build = new_build();
     let compiler = build.get_compiler().path().to_owned();

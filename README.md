@@ -24,12 +24,11 @@ Its checks go further than most:
 
 - Assembly kernels are checked against BLAKE3's specification with **symbolic proofs**.
   [QUALITY.md](QUALITY.md) explains the proof coverage and its scope.
-- **The tests are tested:** about 2,500 small mistakes are planted in the Rust code, one
-  at a time, and the tests are checked against each one.
-- Digests are checked against the official test vectors and an independent
-  implementation, and each process checks its kernels before its first hash.
-- Memory use is checked with Miri, and with guard pages that catch a kernel reading one
-  byte too far.
+- **The tests are tested:** more than 2,000 small mistakes are planted in the Rust code,
+  one at a time, and the tests are checked against each one.
+- Digests are checked against the official test vectors and fixed answers from official
+  BLAKE3, and each process checks its kernels before its first hash.
+- Memory use is checked with guard pages that catch a kernel reading one byte too far.
 
 Details: [`QUALITY.md`](QUALITY.md).
 
@@ -58,8 +57,9 @@ The [crate documentation](https://johnservil.github.io/BLAKE3/blake3_servil/) co
 calls for programs that hash a lot, and the C library in [`capi/`](capi/).
 [`b3sum/README.md`](b3sum/README.md) covers the command-line tool.
 
-It runs on 64-bit Arm (Linux, macOS) and x86-64 (Linux) with the latest stable
-Rust; [official BLAKE3](https://github.com/BLAKE3-team/BLAKE3) serves other platforms.
+It runs on 64-bit Arm (Linux, macOS) and x86-64 (Linux, a CPU with SSE4.1: Intel since
+2008, AMD since 2011) with the latest stable Rust; [official BLAKE3](https://github.com/BLAKE3-team/BLAKE3)
+serves other platforms.
 
 ## About BLAKE3
 
@@ -70,7 +70,7 @@ gives the design and [C2SP](https://c2sp.org/BLAKE3) the specification. It is no
 password hash; for passwords, use [Argon2](https://github.com/P-H-C/phc-winner-argon2).
 
 Other implementations: [official BLAKE3](https://github.com/BLAKE3-team/BLAKE3) in Rust
-and C, and this repository's [reference implementation](reference_impl/reference_impl.rs),
+and C, and its [reference implementation](https://github.com/BLAKE3-team/BLAKE3/blob/master/reference_impl/reference_impl.rs),
 the clearest place to see how BLAKE3 works.
 
 ## What comes from official BLAKE3
@@ -80,8 +80,8 @@ x86-64, compression runs Samuel Neves' SSE4.1, AVX2 and AVX-512 assembly, rename
 with one fix, except where the fork's own kernels below take over; the speed of a single
 message there is his, except on AMD Zen 5 and later. The API (`Hasher`, `update`,
 `finalize`, `finalize_xof`, `OutputReader`, `Hash`, key derivation) and the crate's architecture are
-Jack O'Connor's, kept and rebuilt around. `b3sum`'s command line and checkfiles, the test
-vectors and the reference implementation are the BLAKE3 team's. What this fork adds: the
+Jack O'Connor's, kept and rebuilt around. `b3sum`'s command line and checkfiles and the test
+vectors are the BLAKE3 team's. What this fork adds: the
 64-bit Arm kernels (NEON with integer lanes, and SME2), the x86-64 kernels for whole
 chunks with a partial one, for the chunk root and, on AMD Zen 5 and later, for 32 chunks
 or 16 parent nodes at once, the thread pool, the stream and batch calls, the C API, the

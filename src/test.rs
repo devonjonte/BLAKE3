@@ -1,4 +1,4 @@
-use crate::{BLOCK_LEN, CHUNK_LEN, CVBytes, CVWords};
+use crate::{BLOCK_LEN, CHUNK_LEN, CVBytes};
 
 include!("../tools/require_nextest.rs");
 use arrayvec::ArrayVec;
@@ -149,7 +149,67 @@ pub const TEST_CASES_MAX: usize = 100 * CHUNK_LEN;
 // unlikely to swapping any two adjacent input blocks or chunks will give the
 // same answer.
 
-/// Every platform this CPU can run, portable first, not only detect()'s:
+// Golden, the fixed values' check, shared with the integration tests.
+#[cfg(feature = "std")]
+#[path = "../tests/common/golden.rs"]
+mod golden;
+#[cfg(feature = "std")]
+pub(crate) use golden::Golden;
+
+/// Official BLAKE3 1.8.7, the generator of the fixed values: its public
+/// calls, and its hidden portable kernels (`blake3::platform`) for the
+/// compression-level sweeps.
+#[cfg(feature = "std")]
+pub(crate) mod official {
+    use std::vec::Vec;
+    fn portable() -> blake3::platform::Platform {
+        blake3::platform::Platform::portable()
+    }
+    pub(crate) fn hash(mode: crate::Mode, input: &[u8]) -> [u8; 32] {
+        match mode {
+            crate::Mode::Plain => *blake3::hash(input).as_bytes(),
+            crate::Mode::Keyed(key) => *blake3::keyed_hash(key, input).as_bytes(),
+            crate::Mode::DeriveKey(context) => blake3::derive_key(context, input),
+            crate::Mode::DeriveKeyWith(_) => unreachable!("a context key's own mode is DeriveKey"),
+        }
+    }
+    /// `len` bytes of extended output from byte `skip`.
+    pub(crate) fn xof(mode: crate::Mode, input: &[u8], skip: u64, len: usize) -> Vec<u8> {
+        let mut hasher = match mode {
+            crate::Mode::Plain => blake3::Hasher::new(),
+            crate::Mode::Keyed(key) => blake3::Hasher::new_keyed(key),
+            crate::Mode::DeriveKey(context) => blake3::Hasher::new_derive_key(context),
+            crate::Mode::DeriveKeyWith(_) => unreachable!("a context key's own mode is DeriveKey"),
+        };
+        hasher.update(input);
+        let mut reader = hasher.finalize_xof();
+        reader.set_position(skip);
+        let mut out = std::vec![0u8; len];
+        reader.fill(&mut out);
+        out
+    }
+    pub(crate) fn compress_xof(cv: &[u32; 8], block: &[u8; 64], block_len: u8, counter: u64, flags: u8) -> [u8; 64] {
+        portable().compress_xof(cv, block, block_len, counter, flags)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn hash_many<const N: usize>(inputs: &[&[u8; N]], key: &[u32; 8], counter: u64, increment: bool, flags: u8, start: u8, end: u8, out: &mut [u8]) {
+        let increment = if increment { blake3::IncrementCounter::Yes } else { blake3::IncrementCounter::No };
+        portable().hash_many::<N>(inputs, key, counter, increment, flags, start, end, out)
+    }
+    /// Each chunk's chaining value (a chunk of the plain hash, not the root).
+    pub(crate) fn chunk_cvs(input: &[u8], counter: u64) -> Vec<u8> {
+        input
+            .chunks(crate::CHUNK_LEN)
+            .enumerate()
+            .flat_map(|(i, c)| {
+                use blake3::hazmat::HasherExt;
+                blake3::Hasher::new().set_input_offset((counter + i as u64) * crate::CHUNK_LEN as u64).update(c).finalize_non_root()
+            })
+            .collect()
+    }
+}
+
+/// Every platform this CPU can run, not only detect()'s:
 /// the code paths of a platform narrower than detect()'s (SSE4.1's and
 /// AVX2's on an AVX-512 machine) run on the machines that lack the wider
 /// one, and a test on detect()'s alone never reaches them (an EPYC 9255,
@@ -159,7 +219,7 @@ pub const TEST_CASES_MAX: usize = 100 * CHUNK_LEN;
 pub(crate) fn every_platform() -> Vec<crate::platform::Platform> {
     use crate::platform::Platform;
     #[allow(unused_mut)]
-    let mut all = vec![Platform::Portable];
+    let mut all = std::vec::Vec::new();
     #[cfg(target_arch = "x86_64")]
     all.extend([Platform::sse41(), Platform::avx2()].into_iter().flatten());
     #[cfg(blake3_avx512_ffi)]
@@ -171,16 +231,18 @@ pub(crate) fn every_platform() -> Vec<crate::platform::Platform> {
     all
 }
 
-/// compress_chunks_parallel on every platform the CPU runs, against the
-/// portable platform's (hash_many, then the partial chunk on its own): every
-/// count of whole chunks it takes, with no partial chunk and with partial
-/// ones on each side of the thresholds spare_lane and pair choose by.
+/// compress_chunks_parallel on every platform the CPU runs, against fixed
+/// values (official BLAKE3's chunk chaining values): every count of whole
+/// chunks it takes, with no partial chunk and with partial ones on each
+/// side of the thresholds spare_lane and pair choose by.
 #[test]
 #[cfg(feature = "std")]
 fn test_compress_chunks_parallel_every_cpu_platform() {
-    use crate::platform::{MAX_SIMD_DEGREE, Platform};
+    use crate::platform::MAX_SIMD_DEGREE;
     let mut input = vec![0u8; MAX_SIMD_DEGREE * CHUNK_LEN];
     paint_test_input(&mut input);
+    let platforms = every_platform();
+    let mut golden = Golden::new("compress_chunks_parallel");
     for whole in 0..=MAX_SIMD_DEGREE {
         for partial in [0, 1, BLOCK_LEN, BLOCK_LEN + 1, 5 * BLOCK_LEN, 5 * BLOCK_LEN + 1, CHUNK_LEN - 1] {
             let len = whole * CHUNK_LEN + partial;
@@ -188,24 +250,27 @@ fn test_compress_chunks_parallel_every_cpu_platform() {
                 continue;
             }
             for counter in [0, u32::MAX as u64] {
-                let mut want = vec![0u8; (MAX_SIMD_DEGREE + 1) * crate::OUT_LEN];
-                let n_want = crate::compress_chunks_parallel(&input[..len], crate::IV, counter, 0, Platform::Portable, &mut want);
-                for platform in every_platform() {
-                    let mut got = vec![0u8; want.len()];
-                    let n = crate::compress_chunks_parallel(&input[..len], crate::IV, counter, 0, platform, &mut got);
-                    assert_eq!(
-                        (n, &got[..n * crate::OUT_LEN]),
-                        (n_want, &want[..n_want * crate::OUT_LEN]),
-                        "{platform:?}: {whole} whole chunks and {partial} bytes, counter {counter}"
-                    );
+                let run = |platform| {
+                    let mut out = vec![0u8; (MAX_SIMD_DEGREE + 1) * crate::OUT_LEN];
+                    let n = crate::compress_chunks_parallel(&input[..len], crate::IV, counter, 0, platform, &mut out);
+                    out.truncate(n * crate::OUT_LEN);
+                    out
+                };
+                let first = run(platforms[0]);
+                for &platform in &platforms[1..] {
+                    assert!(run(platform) == first, "{platform:?}: {whole} whole chunks and {partial} bytes, counter {counter}");
                 }
+                golden.add(&first, || official::chunk_cvs(&input[..len], counter));
             }
         }
     }
+    // The counts end at MAX_SIMD_DEGREE, 32 on x86-64 and 128 on AArch64,
+    // so each architecture's sweep has its own value.
+    golden.check(if cfg!(target_arch = "x86_64") { 0x17d8ef758412b936 } else { 0x3b1aa2a01ca807a4 });
 }
 
-/// Platform::xof_many on every platform the CPU runs, against portable
-/// compress_xof block by block: the platforms without a kernel of their
+/// Platform::xof_many on every platform the CPU runs, against fixed values
+/// (official BLAKE3's compress_xof, block by block): the platforms without a kernel of their
 /// own take its loop over compress_xof (SSE4.1 and AVX2 on x86), which a
 /// test of detect()'s platform alone leaves out on an AVX-512 machine.
 #[test]
@@ -216,17 +281,64 @@ fn test_xof_many_every_cpu_platform() {
     paint_test_input(&mut block[..block_len]);
     let cv = [40, 41, 42, 43, 44, 45, 46, 47];
     let flags = crate::KEYED_HASH;
+    let platforms = every_platform();
+    let mut golden = Golden::new("xof_many_every_cpu_platform");
     for counter in [0, u32::MAX as u64, i32::MAX as u64] {
         // Past 32, the AVX-512 kernel's proved count, the calls split.
         for blocks in [1, 2, 3, 16, 17, 31, 32, 33, 64, 65, 100] {
-            let want: Vec<u8> = (0..blocks).flat_map(|i| crate::portable::compress_xof(&cv, &block, block_len as u8, counter + i as u64, flags)).collect();
-            for platform in every_platform() {
+            let run = |platform: crate::platform::Platform| {
                 let mut got = vec![0u8; blocks * BLOCK_LEN];
                 platform.xof_many(&cv, &block, block_len as u8, counter, flags, &mut got);
-                assert!(got == want, "{platform:?}: {blocks} blocks from counter {counter}");
+                got
+            };
+            let first = run(platforms[0]);
+            for &platform in &platforms[1..] {
+                assert!(run(platform) == first, "{platform:?}: {blocks} blocks from counter {counter}");
+            }
+            golden.add(&first, || (0..blocks).flat_map(|i| official::compress_xof(&cv, &block, block_len as u8, counter + i as u64, flags)).collect());
+        }
+    }
+    golden.check(0xce209f7b4d1fa413);
+}
+
+/// The extended-output sweep of NEON's groups of four (ffi_neon_hybrid's
+/// test) against its fixed fold: counters whose low word wraps inside a
+/// group, flag sets every mode uses, short and full blocks, lengths that
+/// leave blocks past the groups (which `xof` leaves untouched). `xof` fills
+/// `out`'s whole groups of four blocks and returns the bytes filled. Every
+/// machine runs it (x86-64 on its own kernels), so the constant is
+/// generated and checked on any of them.
+#[cfg(feature = "std")]
+pub(crate) fn xof_groups_sweep(xof: &mut dyn FnMut(&crate::CVWords, &[u8; BLOCK_LEN], u8, u64, u8, &mut [u8]) -> usize) {
+    let cv: crate::CVWords = core::array::from_fn(|i| 0x9E37_79B9u32.wrapping_mul(i as u32 + 3));
+    let mut block = [0u8; BLOCK_LEN];
+    paint_test_input(&mut block);
+    let mut golden = Golden::new("xof_groups");
+    for counter in [0u64, 7, 0xFFFF_FFFE, 0x1_FFFF_FFFE] {
+        for (block_len, flags) in [(64u8, crate::ROOT), (21, crate::ROOT | crate::CHUNK_END), (0, crate::ROOT | crate::KEYED_HASH | crate::PARENT)] {
+            for blocks in [4usize, 5, 8, 11, 12, 16, 20] {
+                let mut out = std::vec![0u8; blocks * BLOCK_LEN];
+                let done = xof(&cv, &block, block_len, counter, flags, &mut out);
+                assert_eq!(done, blocks / 4 * 4 * BLOCK_LEN);
+                assert!(out[done..].iter().all(|&b| b == 0), "nothing past the groups");
+                golden.add(&out[..done], || {
+                    (0..done / BLOCK_LEN).flat_map(|i| official::compress_xof(&cv, &block, block_len, counter.wrapping_add(i as u64), flags)).collect()
+                });
             }
         }
     }
+    golden.check(0x7fb1a8bd9825109c);
+}
+
+/// The groups' sweep on x86-64's kernels, so the constant is checked here.
+#[test]
+#[cfg(all(feature = "std", target_arch = "x86_64"))]
+fn test_xof_groups_sweep_on_this_cpu() {
+    xof_groups_sweep(&mut |cv, block, block_len, counter, flags, out| {
+        let done = out.len() / (4 * BLOCK_LEN) * 4 * BLOCK_LEN;
+        crate::platform::Platform::detect().xof_many(cv, block, block_len, counter, flags, &mut out[..done]);
+        done
+    });
 }
 
 pub fn paint_test_input(buf: &mut [u8]) {
@@ -235,11 +347,11 @@ pub fn paint_test_input(buf: &mut [u8]) {
     }
 }
 
-#[allow(unused)]
-type XofManyFunction = unsafe fn(cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8, out: &mut [u8]);
+#[cfg(blake3_avx512_ffi)]
+type XofManyFunction = unsafe fn(cv: &crate::CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8, out: &mut [u8]);
 
-// A shared helper function for platform-specific tests.
-#[allow(unused)]
+/// An extended-output kernel (AVX-512's) against SSE4.1's.
+#[cfg(blake3_avx512_ffi)]
 pub fn test_xof_many_fn(xof_many_function: XofManyFunction) {
     let mut block = [0; BLOCK_LEN];
     let block_len = 42;
@@ -252,25 +364,19 @@ pub fn test_xof_many_fn(xof_many_function: XofManyFunction) {
     // - u32::MAX: The low word of the counter overflows for all inputs except the first.
     // - i32::MAX: *No* overflow. But carry bugs in tricky SIMD code can screw this up, if you XOR
     //   when you're supposed to ANDNOT...
+    // Against SSE4.1's extended output (every x86-64 CPU this runs on has
+    // it; the sweeps above hold SSE4.1 to fixed values).
     let initial_counters = [0, u32::MAX as u64, i32::MAX as u64];
     for counter in initial_counters {
-        #[cfg(feature = "std")]
-        dbg!(counter);
-
         // 31 (16 + 8 + 4 + 2 + 1) outputs
         const OUTPUT_SIZE: usize = 31 * BLOCK_LEN;
-
-        let mut portable_out = [0u8; OUTPUT_SIZE];
-        for (i, out_block) in portable_out.chunks_exact_mut(64).enumerate() {
-            out_block.copy_from_slice(&crate::portable::compress_xof(&cv, &block, block_len as u8, counter + i as u64, flags));
-        }
-
+        let mut want = [0u8; OUTPUT_SIZE];
+        crate::platform::Platform::SSE41.xof_many(&cv, &block, block_len as u8, counter, flags, &mut want);
         let mut test_out = [0u8; OUTPUT_SIZE];
         unsafe {
             xof_many_function(&cv, &block, block_len as u8, counter, flags, &mut test_out);
         }
-
-        assert_eq!(portable_out, test_out);
+        assert_eq!(want, test_out, "counter {counter}");
     }
 
     // Test that xof_many doesn't write more blocks than requested. Note that the current assembly
@@ -290,15 +396,6 @@ pub fn test_xof_many_fn(xof_many_function: XofManyFunction) {
             }
         }
     }
-}
-
-#[cfg(all(feature = "std", any(target_arch = "aarch64", target_arch = "x86_64"), any(target_vendor = "apple", target_os = "linux")))]
-pub(crate) fn reference_hash(input: &[u8]) -> crate::Hash {
-    let mut hasher = reference_impl::Hasher::new();
-    hasher.update(input);
-    let mut bytes = [0; 32];
-    hasher.finalize(&mut bytes);
-    bytes.into()
 }
 
 #[test]
@@ -492,7 +589,7 @@ fn test_zeroize() {
             buf_len: 42,
             blocks_compressed: 42,
             flags: 42,
-            platform: crate::Platform::Portable,
+            platform: crate::Platform::detect_unchecked(),
         },
         initial_chunk_counter: 42,
         key: [42; 8],
@@ -508,14 +605,21 @@ fn test_zeroize() {
     assert_eq!(hasher.chunk_state.buf_len, 0);
     assert_eq!(hasher.chunk_state.blocks_compressed, 0);
     assert_eq!(hasher.chunk_state.flags, 0);
-    assert!(matches!(hasher.chunk_state.platform, crate::Platform::Portable));
+    assert_eq!(hasher.chunk_state.platform, crate::Platform::detect_unchecked(), "zeroize leaves the platform");
     assert_eq!(hasher.initial_chunk_counter, 0);
     assert_eq!(hasher.key, [0; 8]);
     assert_eq!(hasher.cv_stack.len(), 0);
     assert_eq!(hasher.cv_stack.array(), Some(&[[0u8; 32]; crate::MAX_DEPTH + 1]));
 
     let mut output_reader = crate::OutputReader {
-        inner: crate::Output { input_chaining_value: [42; 8], block: [42; 64], counter: 42, block_len: 42, flags: 42, platform: crate::Platform::Portable },
+        inner: crate::Output {
+            input_chaining_value: [42; 8],
+            block: [42; 64],
+            counter: 42,
+            block_len: 42,
+            flags: 42,
+            platform: crate::Platform::detect_unchecked(),
+        },
         position_within_block: 42,
     };
 
@@ -525,7 +629,7 @@ fn test_zeroize() {
     assert_eq!(output_reader.inner.counter, 0);
     assert_eq!(output_reader.inner.block_len, 0);
     assert_eq!(output_reader.inner.flags, 0);
-    assert!(matches!(output_reader.inner.platform, crate::Platform::Portable));
+    assert_eq!(output_reader.inner.platform, crate::Platform::detect_unchecked(), "zeroize leaves the platform");
     assert_eq!(output_reader.position_within_block, 0);
 }
 
@@ -604,12 +708,6 @@ fn test_update_reader_interrupted() -> std::io::Result<()> {
     Ok(())
 }
 
-// `cargo +nightly miri test` currently works, but it takes forever, because some of our test
-// inputs are quite large. Most of our unsafe code is platform specific and incompatible with Miri
-// anyway, but we'd like it to be possible for callers to run their own tests under Miri, assuming
-// they don't use incompatible features like Rayon or mmap. This test should get reasonable
-// coverage of our public API without using any large inputs, so we can run it in CI and catch
-// obvious breaks. (For example, constant_time_eq is not compatible with Miri.)
 /// Hash's wire format: an array of 32 bytes in JSON and CBOR, and a CBOR
 /// bytestring still read. The format comes from a derive no mutant touches,
 /// so this test is its one check.
@@ -652,24 +750,9 @@ fn test_serde() {
     assert_eq!(hash_from_bytestring_cbor, hash);
 }
 
-#[test]
-fn test_miri_smoketest() {
-    let mut hasher = crate::Hasher::new(crate::Mode::DeriveKey("Miri smoketest"));
-    hasher.update(b"foo");
-    #[cfg(feature = "std")]
-    hasher.update_reader(&b"bar"[..]).unwrap();
-    assert_eq!(hasher.finalize(), hasher.finalize());
-    let mut reader = hasher.finalize_xof();
-    reader.set_position(999999);
-    reader.fill(&mut [0]);
-}
-
-// The fork's unsafe paths at sizes Miri can run in minutes (on the
-// portable kernels Miri selects, where no assembly takes part): the batch tables and
-// padded lanes of many.rs, the pool's jobs from concurrent callers (Miri
-// with -Zmiri-num-cpus=4 spawns three workers), and a stream past one
-// buffer. Each against crate::convenience::hash() or the reference implementation. Also run
-// natively, where they are quick.
+// The fork's unsafe paths on small inputs: the batch tables and padded
+// lanes of many.rs, and the pool's jobs from concurrent callers. Each
+// against crate::convenience::hash().
 #[cfg(feature = "std")]
 mod unsafe_paths {
     use crate::*;
@@ -788,16 +871,19 @@ mod guard_pages {
         if platform::Platform::avx512().is_some() {
             variants.push(true);
         }
+        let mut golden = crate::test::Golden::new("chunk_root_against_a_guard_page");
         for at_end in [true, false] {
             for len in [0, 1, 63, 64, 65, 127, 128, 960, 1023, 1024] {
                 let mut g = filled(len, at_end);
                 let input = g.bytes();
-                let want = ChunkState::new(IV, 0, 0, platform::Platform::Portable).update(input).output().root_bytes();
-                for &avx512 in &variants {
-                    assert_eq!(unsafe { crate::chunk_root::chunk_root(avx512, input, IV, 0) }, want, "avx512={avx512} len={len} at_end={at_end}");
+                let first = unsafe { crate::chunk_root::chunk_root(variants[0], input, IV, 0) };
+                for &avx512 in &variants[1..] {
+                    assert_eq!(unsafe { crate::chunk_root::chunk_root(avx512, input, IV, 0) }, first, "avx512={avx512} len={len} at_end={at_end}");
                 }
+                golden.add(&first, || crate::test::official::hash(crate::Mode::Plain, input).to_vec());
             }
         }
+        golden.check(0x5372bd18346a3525);
     }
 
     /// Every platform's `hash_many` with each input in its own pages,
@@ -810,18 +896,27 @@ mod guard_pages {
     /// kernel this CPU runs.
     #[test]
     fn test_hash_many_each_input_against_a_guard_page() {
-        fn check<const N: usize>(platforms: &[platform::Platform], increment: IncrementCounter) {
+        fn check<const N: usize>(platforms: &[platform::Platform], increment: IncrementCounter, name: &'static str, want: u64) {
+            let mut golden = crate::test::Golden::new(name);
             for count in 1..=17 {
                 let mut pages: Vec<Guarded> = (0..count).map(|_| filled(N, true)).collect();
                 let inputs: Vec<&[u8; N]> = pages.iter_mut().map(|g| -> &[u8; N] { unsafe { &*(g.bytes().as_ptr() as *const [u8; N]) } }).collect();
-                let mut want = vec![0u8; count * OUT_LEN];
-                platform::Platform::Portable.hash_many::<N>(&inputs, IV, 0, increment, 0, CHUNK_START, CHUNK_END, &mut want);
-                for &platform in platforms {
+                let run = |platform: platform::Platform| {
                     let mut got = vec![0u8; count * OUT_LEN];
                     platform.hash_many::<N>(&inputs, IV, 0, increment, 0, CHUNK_START, CHUNK_END, &mut got);
-                    assert!(got == want, "{platform:?}, {count} inputs of {N} bytes");
+                    got
+                };
+                let first = run(platforms[0]);
+                for &platform in &platforms[1..] {
+                    assert!(run(platform) == first, "{platform:?}, {count} inputs of {N} bytes");
                 }
+                golden.add(&first, || {
+                    let mut theirs = vec![0u8; count * OUT_LEN];
+                    crate::test::official::hash_many::<N>(&inputs, IV, 0, matches!(increment, IncrementCounter::Yes), 0, CHUNK_START, CHUNK_END, &mut theirs);
+                    theirs
+                });
             }
+            golden.check(want);
         }
         #[allow(unused_mut)]
         let mut platforms: Vec<platform::Platform> = Vec::new();
@@ -857,10 +952,10 @@ mod guard_pages {
                 "AVX-512 checked where the build and the CPU have it: {platforms:?}"
             );
         }
-        check::<BLOCK_LEN>(&platforms, IncrementCounter::No);
-        check::<{ 2 * BLOCK_LEN }>(&platforms, IncrementCounter::No);
-        check::<CHUNK_LEN>(&platforms, IncrementCounter::No);
-        check::<CHUNK_LEN>(&platforms, IncrementCounter::Yes);
+        check::<BLOCK_LEN>(&platforms, IncrementCounter::No, "hash_many_guard_64", 0x6127895af4d255cf);
+        check::<{ 2 * BLOCK_LEN }>(&platforms, IncrementCounter::No, "hash_many_guard_128", 0xebfbfdda86c4864b);
+        check::<CHUNK_LEN>(&platforms, IncrementCounter::No, "hash_many_guard_1024", 0xe3228fd868305079);
+        check::<CHUNK_LEN>(&platforms, IncrementCounter::Yes, "hash_many_guard_1024_inc", 0x5fc8b871ccbb233c);
     }
 
     #[test]
@@ -871,11 +966,12 @@ mod guard_pages {
                 lens.push(((chunks * CHUNK_LEN) as i64 + delta) as usize);
             }
         }
+        let mut golden = crate::test::Golden::new("hash_inside_guard_pages");
         for len in lens {
             for at_end in [true, false] {
                 let mut g = filled(len, at_end);
                 let data = g.bytes().to_vec();
-                assert_eq!(crate::convenience::hash(g.bytes()), crate::test::reference_hash(&data), "{len} bytes, at end {at_end}");
+                golden.add(crate::convenience::hash(g.bytes()).as_bytes(), || crate::test::official::hash(crate::Mode::Plain, &data).to_vec());
                 if len >= 64 * CHUNK_LEN && len % 7 == 0 {
                     // The message's whole blocks flush against the page: the
                     // performance call may read to their end, no further.
@@ -886,6 +982,7 @@ mod guard_pages {
                 }
             }
         }
+        golden.check(0x477cad8a62ac89d1);
     }
 
     #[test]
@@ -934,6 +1031,7 @@ mod guard_pages {
         use crate::Mode;
         let mut lens: Vec<usize> = (0..=130).collect();
         lens.extend([255, 256, 1000, 1023, 1024, 1025, 1089, 1500, 2047, 2048, 3072, 3839, 4096, 7935, 8191, 16383, 16384, 16385, 65536 + 7]);
+        let mut golden = crate::test::Golden::new("each_item_against_a_guard_page");
         for count in [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 33] {
             for &len in &lens {
                 for at_end in [true, false] {
@@ -948,7 +1046,8 @@ mod guard_pages {
                         .zip(&lens)
                         .map(|(r, &l)| (crate::performance::Block::from_bytes(r).expect("a page-end region of whole blocks starts aligned"), l))
                         .collect();
-                    let want: Vec<[u8; 32]> = items.iter().map(|m| *crate::test::reference_hash(m).as_bytes()).collect();
+                    let want: Vec<[u8; 32]> = items.iter().map(|m| *crate::convenience::hash(m).as_bytes()).collect();
+                    golden.add(want.as_flattened(), || items.iter().flat_map(|m| crate::test::official::hash(Mode::Plain, m)).collect());
                     let (_page, got) = digests(count, !at_end);
                     crate::performance::hash_each(Mode::Plain, &in_blocks, got);
                     assert_eq!(got, &want[..], "hash_each_with, {count} x {len} B, at end {at_end}");
@@ -971,6 +1070,7 @@ mod guard_pages {
                 }
             }
         }
+        golden.check(0x4cef5685667ec43d);
     }
 
     #[test]
@@ -1011,22 +1111,6 @@ mod guard_pages {
         (g, out)
     }
 
-    /// The reference implementation's digest and first 100 bytes of
-    /// extended output in each mode, for the calls below to match.
-    fn reference(mode: Mode, input: &[u8]) -> ([u8; 32], [u8; 100]) {
-        let mut hasher = match mode {
-            Mode::Plain => reference_impl::Hasher::new(),
-            Mode::Keyed(key) => reference_impl::Hasher::new_keyed(key),
-            Mode::DeriveKey(context) => reference_impl::Hasher::new_derive_key(context),
-            Mode::DeriveKeyWith(_) => unreachable!("the context's own mode is DeriveKey"),
-        };
-        hasher.update(input);
-        let (mut digest, mut xof) = ([0; 32], [0; 100]);
-        hasher.finalize(&mut digest);
-        hasher.finalize(&mut xof);
-        (digest, xof)
-    }
-
     /// Every public call that reads a caller's bytes or writes into a
     /// caller's places, in every mode, its inputs and outputs each flush
     /// against a guard page, after them and then before: the convenience
@@ -1038,6 +1122,7 @@ mod guard_pages {
     fn test_every_call_inside_guard_pages() {
         let lens =
             [0, 1, 63, 64, 65, 127, 128, 1023, 1024, 1025, 2047, 2048, 2049, 3839, 4470, 7935, 8192, 16383, 16384, 16385, 65543, 131073, 524291, (1 << 20) + 5];
+        let mut golden = crate::test::Golden::new("every_call_inside_guard_pages");
         for at_end in [true, false] {
             let mut key_page = filled(KEY_LEN, at_end);
             // Sound: the page holds KEY_LEN bytes and outlives the modes.
@@ -1051,12 +1136,15 @@ mod guard_pages {
                 for len in lens {
                     let mut flush = filled(len, at_end);
                     let message = flush.bytes().to_vec();
-                    let (want, want_xof) = reference(mode, &message);
                     let what = format!("{name}, {len} B, at end {at_end}");
-                    assert_eq!(*crate::convenience::hash_with(mode, flush.bytes()).as_bytes(), want, "hash_with, {what}");
+                    // hash_with's digest and hash_xof's first 100 bytes, against
+                    // the fixed values; every other call against these.
+                    let want = *crate::convenience::hash_with(mode, flush.bytes()).as_bytes();
                     let mut xof = Guarded::new(100, !at_end);
                     crate::convenience::hash_xof(mode, flush.bytes()).fill(xof.bytes());
-                    assert_eq!(xof.bytes(), &want_xof[..], "hash_xof, {what}");
+                    golden.add(&[&want[..], xof.bytes()].concat(), || {
+                        [crate::test::official::hash(mode, &message).to_vec(), crate::test::official::xof(mode, &message, 0, 100)].concat()
+                    });
                     if let Mode::DeriveKey(_) = mode {
                         let material = Mode::DeriveKeyWith(&context_key);
                         assert_eq!(*crate::convenience::hash_with(material, flush.bytes()).as_bytes(), want, "hash_with, its context hashed once, {what}");
@@ -1107,6 +1195,7 @@ mod guard_pages {
                 }
             }
         }
+        golden.check(0x9bfe90db92a75d95);
     }
 }
 

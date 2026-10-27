@@ -1,8 +1,8 @@
 //! A stream on a process with one CPU (a container's quota, a pinned
 //! process): the pool then has no worker, and on a CPU without SME2 no
 //! thread at all to take tasks, so the caller's thread hashes every task
-//! while it waits. Each kind of message completes with the reference
-//! implementation's digests. The test pins its process to one CPU
+//! while it waits. Each kind of message completes with the one-message
+//! digests. The test pins its process to one CPU
 //! before the pool starts, so it is a binary of its own, with one test
 //! (Linux, where the pool counts the process's affinity).
 #![cfg(target_os = "linux")]
@@ -18,12 +18,10 @@ fn input(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i % 251) as u8).collect()
 }
 
+/// The one-message digest, which the official vectors and the library's
+/// fixed values hold to official BLAKE3's.
 fn reference(data: &[u8]) -> Hash {
-    let mut hasher = reference_impl::Hasher::new();
-    hasher.update(data);
-    let mut out = [0u8; 32];
-    hasher.finalize(&mut out);
-    Hash::from(out)
+    blake3_servil::convenience::hash(data)
 }
 
 #[test]

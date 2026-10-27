@@ -1,17 +1,17 @@
 //! The single-thread tree walk, in safe Rust over its kernels.
 
-use crate::platform::{MAX_SIMD_DEGREE_OR_2, Platform};
+use crate::platform::{MAX_SIMD_DEGREE, Platform};
 use crate::{CHUNK_LEN, CVWords, OUT_LEN};
 
 /// A chaining value.
 pub(crate) type Cv = [u8; OUT_LEN];
 
 /// The most values a walk returns: the largest degree, at least 2.
-const MAX: usize = MAX_SIMD_DEGREE_OR_2;
+const MAX: usize = MAX_SIMD_DEGREE;
 
 /// The kernels the walk calls.
 pub trait Kernels {
-    /// The chunks hashed per call: a power of two, at most MAX.
+    /// The chunks hashed per call: a power of two, 2 to MAX.
     fn degree(&self) -> usize;
     /// The chaining values of the chunks of `input` (1 to degree() chunks:
     /// whole ones, then perhaps a shorter last one), the first numbered
@@ -46,7 +46,7 @@ pub fn left_len(len: usize) -> usize {
 
 /// The chaining values of a cut through the subtree over `input` (at least
 /// one byte), its first chunk numbered `counter`, into `out[..n]`; returns
-/// n, between 1 and max(degree, 2). `out` holds at least that many.
+/// n, between 1 and degree. `out` holds at least that many.
 /// `ahead` bytes of the caller's input follow `input`.
 pub fn wide<K: Kernels>(k: &K, input: &[u8], ahead: usize, counter: u64, out: &mut [Cv]) -> usize {
     if input.len() <= k.degree() * CHUNK_LEN {
@@ -57,30 +57,19 @@ pub fn wide<K: Kernels>(k: &K, input: &[u8], ahead: usize, counter: u64, out: &m
     }
     let l = left_len(input.len());
     let (a, b) = input.split_at(l);
+    // More than degree chunks (2 or more), so the left half holds two
+    // chunks or more, and gives two values or more (up to degree).
     let mut cvs = [[0u8; OUT_LEN]; 2 * MAX];
-    // The left half's values: one when it is a single chunk (degree 1).
-    let left_cap = if l == CHUNK_LEN {
-        1
-    } else if k.degree() < 2 {
-        2
-    } else {
-        k.degree()
-    };
-    let (lo, hi) = cvs.split_at_mut(left_cap);
+    let (lo, hi) = cvs.split_at_mut(k.degree());
     let ln = wide(k, a, b.len() + ahead, counter, lo);
     let rn = wide(k, b, ahead, counter + (l / CHUNK_LEN) as u64, hi);
-    if ln == 1 {
-        out[0] = lo[0];
-        out[1] = hi[0];
-        return 2;
-    }
     k.parents(&cvs[..ln + rn], out)
 }
 
 /// The chaining values of the root's two children, for `input` of more
 /// than one chunk, its first chunk numbered `counter`: the walk's values,
 /// condensed a layer of parents at a time. `cvs` holds at least
-/// max(degree, 2) values and `next` half that. `ahead` bytes of the
+/// degree values and `next` half that. `ahead` bytes of the
 /// caller's input follow `input`.
 pub fn children<K: Kernels>(k: &K, input: &[u8], ahead: usize, counter: u64, cvs: &mut [Cv], next: &mut [Cv]) -> [Cv; 2] {
     let mut n = wide(k, input, ahead, counter, cvs);
@@ -131,15 +120,6 @@ pub fn hash<K: Kernels>(k: &K, input: &[u8]) -> Cv {
 #[inline(never)]
 fn hash_tree<K: Kernels>(k: &K, input: &[u8]) -> Cv {
     k.parent_root(&root_children(k, input, 0, 0))
-}
-
-/// A chunk or less through ChunkState, for platforms without a one-call
-/// kernel; out of line, so that its 64-byte-aligned block buffer does not
-/// realign the stack of every caller of `hash`, on platforms with one.
-#[cfg(not(blake3_neon))]
-#[inline(never)]
-fn chunk_root_by_state(k: &PlatformKernels<'_>, input: &[u8]) -> Cv {
-    crate::ChunkState::new(k.key, 0, k.flags, k.platform).update(input).output().root_bytes()
 }
 
 /// The library's kernels for one key and flags on one platform.
@@ -198,20 +178,13 @@ impl Kernels for PlatformKernels<'_> {
         // The scalar kernel, on every AArch64 core (crate::hash_one_chunk_root).
         #[cfg(blake3_neon)]
         return crate::hash_one_chunk_root(input, self.key, self.flags).0;
-        #[cfg(not(blake3_neon))]
-        {
-            // One kernel call that keeps off the stack (src/ffi_chunk_root.rs):
-            // a caller's just-written message has none of our loads to hold back.
-            #[cfg(blake3_sse41_ffi)]
-            match self.platform {
-                #[cfg(blake3_avx512_ffi)]
-                crate::platform::Platform::AVX512 => return unsafe { crate::chunk_root::chunk_root(true, input, self.key, self.flags) },
-                crate::platform::Platform::SSE41 | crate::platform::Platform::AVX2 => {
-                    return unsafe { crate::chunk_root::chunk_root(false, input, self.key, self.flags) };
-                }
-                _ => {}
-            }
-            chunk_root_by_state(self, input)
+        // One kernel call that keeps off the stack (src/ffi_chunk_root.rs):
+        // a caller's just-written message has none of our loads to hold back.
+        // Sound: detect() found the platform's instructions.
+        #[cfg(target_arch = "x86_64")]
+        match self.platform {
+            crate::platform::Platform::AVX512 => unsafe { crate::chunk_root::chunk_root(true, input, self.key, self.flags) },
+            crate::platform::Platform::SSE41 | crate::platform::Platform::AVX2 => unsafe { crate::chunk_root::chunk_root(false, input, self.key, self.flags) },
         }
     }
 

@@ -35,8 +35,7 @@ Here are two reasons you might want to use it:
    * In addition to all of that, we use several other quality-assurance tools:  
      * Guard pages,  
      * A self-test on startup,  
-     * `Shuttle`, which uses a clever method of randomized thread scheduling to uncover concurrency bugs,  
-     * `Miri`, which is a Rust interpreter that verifies that the program obeys Rust safety semantics.
+     * `Shuttle`, which uses a clever method of randomized thread scheduling to uncover concurrency bugs.
 
    And here’s one reason you might *not* want to use BLAKE3-Servil right away:
 

@@ -133,64 +133,6 @@ mod tests {
     include!("../../tools/require_nextest.rs");
     use super::*;
 
-    fn test_reference_impl_all_at_once(
-        key: &[u8; blake3::KEY_LEN],
-        input: &[u8],
-        expected_hash: &[u8],
-        expected_keyed_hash: &[u8],
-        expected_derive_key: &[u8],
-    ) {
-        let mut out = vec![0; expected_hash.len()];
-        let mut hasher = reference_impl::Hasher::new();
-        hasher.update(input);
-        hasher.finalize(&mut out);
-        assert_eq!(expected_hash, &out[..]);
-
-        let mut out = vec![0; expected_keyed_hash.len()];
-        let mut hasher = reference_impl::Hasher::new_keyed(key);
-        hasher.update(input);
-        hasher.finalize(&mut out);
-        assert_eq!(expected_keyed_hash, &out[..]);
-
-        let mut out = vec![0; expected_derive_key.len()];
-        let mut hasher = reference_impl::Hasher::new_derive_key(TEST_CONTEXT);
-        hasher.update(input);
-        hasher.finalize(&mut out);
-        assert_eq!(expected_derive_key, &out[..]);
-    }
-
-    fn test_reference_impl_one_at_a_time(
-        key: &[u8; blake3::KEY_LEN],
-        input: &[u8],
-        expected_hash: &[u8],
-        expected_keyed_hash: &[u8],
-        expected_derive_key: &[u8],
-    ) {
-        let mut out = vec![0; expected_hash.len()];
-        let mut hasher = reference_impl::Hasher::new();
-        for &b in input {
-            hasher.update(&[b]);
-        }
-        hasher.finalize(&mut out);
-        assert_eq!(expected_hash, &out[..]);
-
-        let mut out = vec![0; expected_keyed_hash.len()];
-        let mut hasher = reference_impl::Hasher::new_keyed(key);
-        for &b in input {
-            hasher.update(&[b]);
-        }
-        hasher.finalize(&mut out);
-        assert_eq!(expected_keyed_hash, &out[..]);
-
-        let mut out = vec![0; expected_derive_key.len()];
-        let mut hasher = reference_impl::Hasher::new_derive_key(TEST_CONTEXT);
-        for &b in input {
-            hasher.update(&[b]);
-        }
-        hasher.finalize(&mut out);
-        assert_eq!(expected_derive_key, &out[..]);
-    }
-
     fn test_incremental_all_at_once(key: &[u8; blake3::KEY_LEN], input: &[u8], expected_hash: &[u8], expected_keyed_hash: &[u8], expected_derive_key: &[u8]) {
         let mut out = vec![0; expected_hash.len()];
         let mut hasher = blake3::performance::Hasher::new(blake3::Mode::Plain);
@@ -264,10 +206,6 @@ mod tests {
             let expected_hash = hex::decode(&case.hash).unwrap();
             let expected_keyed_hash = hex::decode(&case.keyed_hash).unwrap();
             let expected_derive_key = hex::decode(&case.derive_key).unwrap();
-
-            test_reference_impl_all_at_once(key, &input, &expected_hash, &expected_keyed_hash, &expected_derive_key);
-
-            test_reference_impl_one_at_a_time(key, &input, &expected_hash, &expected_keyed_hash, &expected_derive_key);
 
             test_incremental_all_at_once(key, &input, &expected_hash, &expected_keyed_hash, &expected_derive_key);
 

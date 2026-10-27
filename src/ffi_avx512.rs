@@ -166,10 +166,11 @@ mod test {
                 assert_eq!(crate::RAN_ENTRIES.with(|r| r.borrow().clone()), expected_entries, "dispatch for {n} inputs");
                 for (i, &input) in inputs[..n].iter().enumerate() {
                     let mut expected = [0u8; OUT_LEN];
-                    crate::portable::hash1(
-                        input,
+                    crate::platform::Platform::SSE41.hash_many(
+                        &[input],
                         key,
                         counter.wrapping_add(if increment.yes() { i as u64 } else { 0 }),
+                        crate::IncrementCounter::No,
                         crate::KEYED_HASH,
                         crate::CHUNK_START,
                         crate::CHUNK_END,
@@ -200,7 +201,16 @@ mod test {
         unsafe { hash_many(&refs, key, 0, IncrementCounter::No, 0, crate::CHUNK_START, crate::CHUNK_END | crate::ROOT, &mut out) };
         assert_eq!(crate::RAN_ENTRIES.with(|r| r.borrow().clone()), [legacy].into_iter().collect());
         let mut expected = [0u8; OUT_LEN];
-        crate::portable::hash1(&blocks[0], key, 0, 0, crate::CHUNK_START, crate::CHUNK_END | crate::ROOT, &mut expected);
+        crate::platform::Platform::SSE41.hash_many(
+            &[&blocks[0]],
+            key,
+            0,
+            crate::IncrementCounter::No,
+            0,
+            crate::CHUNK_START,
+            crate::CHUNK_END | crate::ROOT,
+            &mut expected,
+        );
         assert!(out.chunks_exact(OUT_LEN).all(|bytes| bytes == expected));
     }
 
@@ -237,7 +247,16 @@ mod test {
                 assert_eq!(crate::RAN_ENTRIES.with(|r| r.borrow().clone()), expected_entries);
                 for (i, &input) in inputs[..n].iter().enumerate() {
                     let mut expected = [0u8; OUT_LEN];
-                    crate::portable::hash1(input, crate::IV, counter.wrapping_add(if increment.yes() { i as u64 } else { 0 }), flags, 0, 0, &mut expected);
+                    crate::platform::Platform::SSE41.hash_many(
+                        &[input],
+                        crate::IV,
+                        counter.wrapping_add(if increment.yes() { i as u64 } else { 0 }),
+                        crate::IncrementCounter::No,
+                        flags,
+                        0,
+                        0,
+                        &mut expected,
+                    );
                     assert_eq!(&out[i * OUT_LEN..][..OUT_LEN], &expected);
                 }
                 assert_eq!(out[n * OUT_LEN], 0xa5);

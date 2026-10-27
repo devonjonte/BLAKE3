@@ -52,7 +52,7 @@ combines results is covered by tests.
 Everything else is tested.
 
 The test suites compare outputs with published BLAKE3 examples, called
-test vectors, and with a separate, simpler reference implementation.
+test vectors, and with fixed answers that official BLAKE3 generated.
 They run these checks on the operating systems and processor types the
 project supports.
 
@@ -71,9 +71,6 @@ or a processor that does not execute the code as expected.
 Some performance-critical Rust code is `unsafe`: there the programmer
 keeps Rust's memory rules, which the compiler checks everywhere else.
 
-- **Miri** runs Rust code in an interpreter that enforces Rust's
-  memory rules. It is slow, but it can catch mistakes in `unsafe` code
-  that a normal test run may not expose.
 - **A model checker (Shuttle)** runs the small pieces of threaded code
   where one thread waits for another under thousands of thread
   schedules. A wait that could hang shows up immediately as a deadlock
@@ -107,8 +104,11 @@ project has audited the code. The proofs trust the written
 specification, the instruction models, the automated prover (Z3),
 and each kernel's stated
 memory and calling convention. Tests cover the Rust code around the
-assembly. These checks reduce risk, but they
-cannot guarantee that no bug remains.
+assembly. Nothing checks that the `unsafe` Rust keeps Rust's rules on
+shared memory (aliasing) under every thread interleaving. Miri
+checked this until 0.8, on Rust kernels users never ran, and found one
+such bug. These checks reduce risk, but they cannot guarantee that no bug
+remains.
 
 ## Run the checks
 

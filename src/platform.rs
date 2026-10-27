@@ -1,44 +1,17 @@
-use crate::{BLOCK_LEN, CHUNK_LEN, CVWords, IncrementCounter, portable};
+use crate::{BLOCK_LEN, CHUNK_LEN, CVWords, IncrementCounter};
 
+// The most chunks one call hashes: AVX-512's 32 (16 off Linux), SME2's,
+// NEON's 16. Every platform hashes at least four, so the walk's arrays
+// (src/tree.rs) hold two values or more.
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "x86_64")] {
-        cfg_if::cfg_if! {
-            if #[cfg(blake3_avx512_ffi)] {
-                pub const MAX_SIMD_DEGREE: usize = if cfg!(target_os = "linux") { 32 } else { 16 };
-            } else {
-                pub const MAX_SIMD_DEGREE: usize = 8;
-            }
-        }
+        pub const MAX_SIMD_DEGREE: usize = if cfg!(target_os = "linux") { 32 } else { 16 };
     } else if #[cfg(blake3_sme2)] {
         // See sme2::DEGREE.
         pub const MAX_SIMD_DEGREE: usize = crate::sme2::DEGREE;
-    } else if #[cfg(blake3_neon)] {
+    } else {
         // See neon_hybrid::GROUP.
         pub const MAX_SIMD_DEGREE: usize = 16;
-    } else {
-        pub const MAX_SIMD_DEGREE: usize = 1;
-    }
-}
-
-// There are some places where we want a static size that's equal to the
-// MAX_SIMD_DEGREE, but also at least 2. Constant contexts aren't currently
-// allowed to use cmp::max, so we have to hardcode this additional constant
-// value. Get rid of this once cmp::max is a const fn.
-cfg_if::cfg_if! {
-    if #[cfg(target_arch = "x86_64")] {
-        cfg_if::cfg_if! {
-            if #[cfg(blake3_avx512_ffi)] {
-                pub const MAX_SIMD_DEGREE_OR_2: usize = if cfg!(target_os = "linux") { 32 } else { 16 };
-            } else {
-                pub const MAX_SIMD_DEGREE_OR_2: usize = 8;
-            }
-        }
-    } else if #[cfg(blake3_sme2)] {
-        pub const MAX_SIMD_DEGREE_OR_2: usize = crate::sme2::DEGREE;
-    } else if #[cfg(blake3_neon)] {
-        pub const MAX_SIMD_DEGREE_OR_2: usize = 16;
-    } else {
-        pub const MAX_SIMD_DEGREE_OR_2: usize = 2;
     }
 }
 
@@ -48,7 +21,6 @@ cfg_if::cfg_if! {
 /// "not yet recorded" to [`Platform::detect`]); tools/verify's whole-call
 /// proofs start from the value `initialize` records.
 pub enum Platform {
-    Portable = 1,
     #[cfg(blake3_sse41_ffi)]
     SSE41 = 3,
     #[cfg(blake3_avx2_ffi)]
@@ -195,17 +167,10 @@ impl Platform {
         DETECTED.store(self as u8, core::sync::atomic::Ordering::Relaxed);
     }
 
-    /// [`Platform::detect`] without the startup self-test.
-    ///
-    /// The portable kernels run under Miri alone: on every supported
-    /// machine an assembly platform is detected, or the process stops.
+    /// [`Platform::detect`] without the startup self-test: an assembly
+    /// platform on every supported machine, or the process stops.
     #[allow(unreachable_code)]
     pub(crate) fn detect_unchecked() -> Self {
-        #[cfg(miri)]
-        {
-            return Platform::Portable;
-        }
-
         // Every x86-64 build assembles every kernel (build.rs), so a CPU
         // runs the widest it has; one without SSE4.1 is not supported, and
         // the process stops here, in the startup self-test, as a build for
@@ -234,13 +199,12 @@ impl Platform {
         {
             return Platform::NEON;
         }
-        Platform::Portable
+        unreachable!("build.rs builds for x86-64 and AArch64 alone")
     }
 
     /// The selection's name, for reports.
     pub fn name(&self) -> &'static str {
         match self {
-            Platform::Portable => "portable",
             #[cfg(blake3_sse41_ffi)]
             Platform::SSE41 => "SSE4.1",
             #[cfg(blake3_avx2_ffi)]
@@ -255,52 +219,8 @@ impl Platform {
         }
     }
 
-    /// The single-block compress kernel's name, for reports on platforms
-    /// without the scalar c1 kernel.
-    #[allow(dead_code)]
-    pub fn compress_name(&self) -> &'static str {
-        match self {
-            Platform::Portable => "portable compression",
-            #[cfg(blake3_sse41_ffi)]
-            Platform::SSE41 | Platform::AVX2 => "SSE4.1 compression",
-            #[cfg(blake3_avx512_ffi)]
-            #[cfg(target_arch = "x86_64")]
-            Platform::AVX512 => "AVX-512 compression",
-            #[cfg(blake3_neon)]
-            Platform::NEON => "portable compression",
-            #[cfg(blake3_sme2)]
-            Platform::SME2 => "portable compression",
-        }
-    }
-
-    /// The many-chunk kernel's name with its degree, for reports.
-    #[allow(dead_code)]
-    pub fn hash_many_name(&self) -> &'static str {
-        match self {
-            Platform::Portable => "portable hash_many",
-            #[cfg(blake3_sse41_ffi)]
-            Platform::SSE41 => "SSE4.1 hash_many (4-way)",
-            #[cfg(blake3_avx2_ffi)]
-            Platform::AVX2 => "AVX2 hash_many (8-way)",
-            #[cfg(blake3_avx512_ffi)]
-            #[cfg(target_arch = "x86_64")]
-            Platform::AVX512 => {
-                if cfg!(target_os = "linux") {
-                    "AVX-512 hash_many (32-way chunks, 16-way tails)"
-                } else {
-                    "AVX-512 hash_many (16-way)"
-                }
-            }
-            #[cfg(blake3_neon)]
-            Platform::NEON => "integer + NEON hybrid kernels (16 chunks per call)",
-            #[cfg(blake3_sme2)]
-            Platform::SME2 => "SME2 hash_many",
-        }
-    }
-
     pub fn simd_degree(&self) -> usize {
         let degree = match self {
-            Platform::Portable => 1,
             #[cfg(blake3_sse41_ffi)]
             Platform::SSE41 => 4,
             #[cfg(blake3_avx2_ffi)]
@@ -321,13 +241,12 @@ impl Platform {
             #[cfg(blake3_sme2)]
             Platform::SME2 => crate::sme2::DEGREE,
         };
-        debug_assert!(degree <= MAX_SIMD_DEGREE);
+        debug_assert!((2..=MAX_SIMD_DEGREE).contains(&degree), "the walk (src/tree.rs) takes 2 to MAX_SIMD_DEGREE chunks a call");
         degree
     }
 
     pub fn compress_in_place(&self, cv: &mut CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8) {
         match self {
-            Platform::Portable => portable::compress_in_place(cv, block, block_len, counter, flags),
             // Safe because detect() checked for platform support.
             #[cfg(blake3_sse41_ffi)]
             Platform::SSE41 | Platform::AVX2 => unsafe { crate::sse41::compress_in_place(cv, block, block_len, counter, flags) },
@@ -370,7 +289,6 @@ impl Platform {
 
     pub fn compress_xof(&self, cv: &CVWords, block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8) -> [u8; 64] {
         match self {
-            Platform::Portable => portable::compress_xof(cv, block, block_len, counter, flags),
             // Safe because detect() checked for platform support.
             #[cfg(blake3_sse41_ffi)]
             Platform::SSE41 | Platform::AVX2 => unsafe { crate::sse41::compress_xof(cv, block, block_len, counter, flags) },
@@ -418,7 +336,6 @@ impl Platform {
             "hash_many takes whole chunks at incrementing counters, or 1 to 16 blocks at one counter"
         );
         match self {
-            Platform::Portable => portable::hash_many(inputs, key, counter, increment_counter, flags, flags_start, flags_end, out),
             // Safe because detect() checked for platform support.
             #[cfg(blake3_sse41_ffi)]
             Platform::SSE41 => unsafe { crate::sse41::hash_many(inputs, key, counter, increment_counter, flags, flags_start, flags_end, out) },
@@ -466,19 +383,18 @@ impl Platform {
                     counter += (done / BLOCK_LEN) as u64;
                     &mut out[done..]
                 };
-                // Then four at a time on NEON (AArch64), where the platform
-                // has it: CPUs without SME2, and SME2's leftovers.
-                // and the last one to three blocks on the same kernel.
-                #[cfg(all(blake3_neon, target_arch = "aarch64"))]
-                if !matches!(self, Platform::Portable) {
+                // Then four at a time on NEON (AArch64): CPUs without SME2,
+                // and SME2's leftovers; the last one to three blocks on the
+                // same kernel.
+                #[cfg(blake3_neon)]
+                {
                     let done = crate::neon_hybrid::xof_many(cv, block, block_len, counter, flags, out);
                     if done < out.len() {
                         crate::neon_hybrid::xof_tail(cv, block, block_len, counter.wrapping_add((done / BLOCK_LEN) as u64), flags, &mut out[done..]);
                     }
-                    return;
                 }
-                // For platforms without an optimized xof_many, fall back to a loop over
-                // compress_xof. This is still faster than portable code.
+                // SSE4.1 and AVX2, without an xof_many kernel: block by block.
+                #[cfg(target_arch = "x86_64")]
                 for out_block in out.chunks_exact_mut(BLOCK_LEN) {
                     // TODO: Use array_chunks_mut here once that's stable.
                     let out_array: &mut [u8; BLOCK_LEN] = out_block.try_into().unwrap();
@@ -489,11 +405,12 @@ impl Platform {
         }
     }
 
-    // Explicit platform constructors, for benchmarks.
+    // Explicit platform constructors, for the tests (std).
 
     /// The SSE41 platform where this build has its kernels and the CPU its
     /// instructions.
-    #[cfg(all(test, target_arch = "x86_64"))]
+    #[cfg(test)]
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     pub fn sse41() -> Option<Self> {
         #[cfg(blake3_sse41_ffi)]
         if sse41_detected() {
@@ -504,7 +421,8 @@ impl Platform {
 
     /// The AVX2 platform where this build has its kernels and the CPU its
     /// instructions.
-    #[cfg(all(test, target_arch = "x86_64"))]
+    #[cfg(test)]
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     pub fn avx2() -> Option<Self> {
         #[cfg(blake3_avx2_ffi)]
         if avx2_detected() {
@@ -516,6 +434,7 @@ impl Platform {
     #[cfg(blake3_avx512_ffi)]
     #[cfg(target_arch = "x86_64")]
     #[cfg(test)]
+    #[cfg(feature = "std")]
     pub fn avx512() -> Option<Self> {
         if avx512_detected() { Some(Self::AVX512) } else { None }
     }
@@ -552,8 +471,7 @@ mod x86_bits {
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-// Read by the x86 kernels' dispatch and the tests (every x86-64 build has
-// the assembly; Miri dispatches to none).
+// Read by the x86 kernels' dispatch and the tests.
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
 fn x86_features() -> u8 {
     use core::sync::atomic::{AtomicU8, Ordering};
@@ -572,8 +490,7 @@ fn x86_features() -> u8 {
 /// CPU with AVX has leaf 7.
 #[cfg(target_arch = "x86_64")]
 #[cold]
-// Read by the x86 kernels' dispatch and the tests (every x86-64 build has
-// the assembly; Miri dispatches to none).
+// Read by the x86 kernels' dispatch and the tests.
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
 fn read_x86_features() -> u8 {
     use core::arch::x86_64 as arch;
@@ -647,10 +564,6 @@ pub fn wide_avx512() -> bool {
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 pub fn avx512_detected() -> bool {
-    if cfg!(miri) {
-        return false;
-    }
-
     // A build for CPUs that have it (`-C target-cpu=...` or
     // `-C target-feature=...`) needs no check: run elsewhere, it stops
     // at its first such instruction (SIGILL), in the startup self-test.
@@ -663,14 +576,9 @@ pub fn avx512_detected() -> bool {
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-// Read by the x86 kernels' dispatch and the tests (every x86-64 build has
-// the assembly; Miri dispatches to none).
+// Read by the x86 kernels' dispatch and the tests.
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
 pub fn avx2_detected() -> bool {
-    if cfg!(miri) {
-        return false;
-    }
-
     // A build for CPUs that have it (`-C target-cpu=...` or
     // `-C target-feature=...`) needs no check: run elsewhere, it stops
     // at its first such instruction (SIGILL), in the startup self-test.
@@ -683,14 +591,9 @@ pub fn avx2_detected() -> bool {
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-// Read by the x86 kernels' dispatch and the tests (every x86-64 build has
-// the assembly; Miri dispatches to none).
+// Read by the x86 kernels' dispatch and the tests.
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
 pub fn sse41_detected() -> bool {
-    if cfg!(miri) {
-        return false;
-    }
-
     // A build for CPUs that have it (`-C target-cpu=...` or
     // `-C target-feature=...`) needs no check: run elsewhere, it stops
     // at its first such instruction (SIGILL), in the startup self-test.
@@ -771,24 +674,6 @@ pub fn words_from_le_bytes_32(bytes: &[u8; 32]) -> [u32; 8] {
     out
 }
 
-#[inline(always)]
-pub fn words_from_le_bytes_64(bytes: &[u8; 64]) -> [u32; 16] {
-    let mut out = [0; 16];
-    for (word, chunk) in out.iter_mut().zip(bytes.as_chunks::<4>().0) {
-        *word = u32::from_le_bytes(*chunk);
-    }
-    out
-}
-
-#[inline(always)]
-pub fn le_bytes_from_words_64(words: &[u32; 16]) -> [u8; 64] {
-    let mut out = [0; 64];
-    for (chunk, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(words) {
-        *chunk = word.to_le_bytes();
-    }
-    out
-}
-
 /// True when the CPU reports SME2 and the streaming vector length is 512
 /// bits, the only length the SME2 kernels support. Detection is per
 /// platform: `hw.optional.arm.FEAT_SME2` on Apple systems and
@@ -819,10 +704,6 @@ pub fn sme2_detected() -> bool {
 
 #[cfg(blake3_sme2)]
 fn sme2_detect_uncached() -> bool {
-    if cfg!(miri) {
-        return false;
-    }
-
     if !sme2_reported() {
         return false;
     }
@@ -852,31 +733,28 @@ fn sme2_reported() -> bool {
     hwcap2 & HWCAP2_SME2 != 0
 }
 
-#[cfg(all(test, target_arch = "x86_64", not(miri)))]
+#[cfg(all(test, target_arch = "x86_64"))]
 mod x86_degree_test {
     use super::*;
 
     /// The detected platform hashes as many chunks at once as the widest
     /// kernel this build and CPU have (the standard library's detection, an
-    /// independent reading, says which the CPU has):
-    /// a degree of 1 would hash correctly, one chunk at a time.
+    /// independent reading, says which the CPU has): a narrower one would
+    /// hash correctly, more slowly.
     #[test]
     fn test_detected_degree_is_the_widest_kernel() {
-        let expected = if cfg!(blake3_avx512_ffi) && std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl") {
+        let expected = if std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl") {
             if cfg!(target_os = "linux") { 32 } else { 16 }
-        } else if cfg!(blake3_avx2_ffi) && std::is_x86_feature_detected!("avx2") {
+        } else if std::is_x86_feature_detected!("avx2") {
             8
-        } else if cfg!(blake3_sse41_ffi) && std::is_x86_feature_detected!("sse4.1") {
-            4
         } else {
-            1
+            4
         };
         assert_eq!(Platform::detect().simd_degree(), expected);
-        assert_eq!(Platform::Portable.simd_degree(), 1);
     }
 }
 
-#[cfg(all(test, target_arch = "x86_64", not(miri)))]
+#[cfg(all(test, target_arch = "x86_64"))]
 mod x86_features_test {
     /// The CPUID read finds what the standard library's detection, an
     /// independent reading, finds.

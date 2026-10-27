@@ -156,7 +156,7 @@ mod tests {
                         let mut cv = key;
                         let c = counter.wrapping_add(if inc.yes() { i as u64 } else { 0 });
                         for (b, block) in input.chunks_exact(BLOCK_LEN).enumerate() {
-                            crate::portable::compress_in_place(
+                            crate::platform::Platform::SSE41.compress_in_place(
                                 &mut cv,
                                 block.try_into().unwrap(),
                                 BLOCK_LEN as u8,
@@ -214,7 +214,7 @@ mod tests {
                 let mut cv = key;
                 for b in 0..blocks {
                     let at = 1 + i * n + b * BLOCK_LEN;
-                    crate::portable::compress_in_place(
+                    crate::platform::Platform::SSE41.compress_in_place(
                         &mut cv,
                         input[at..at + BLOCK_LEN].try_into().unwrap(),
                         BLOCK_LEN as u8,
@@ -269,7 +269,7 @@ mod tests {
                         let mut cv = key;
                         for b in 0..blocks {
                             let at = 1 + i * n + b * BLOCK_LEN;
-                            crate::portable::compress_in_place(
+                            crate::platform::Platform::SSE41.compress_in_place(
                                 &mut cv,
                                 input[at..at + BLOCK_LEN].try_into().unwrap(),
                                 if b + 1 == blocks { last_len as u8 } else { BLOCK_LEN as u8 },

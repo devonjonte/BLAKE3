@@ -51,10 +51,14 @@ the caller's buffers.
 ## Correctness: every answer checked against an independent one
 
 **Fixed answers.** The tests compare digests with answers that come
-from outside this implementation's optimized code: the published
-BLAKE3 test vectors (`test_vectors/`) and the reference implementation
-(`reference_impl/`, a separate, simple Rust implementation), and tests
-never regenerate their own expected answers. (The benchmark checks no
+from official BLAKE3: its published test vectors (`test_vectors/`), and
+for every other sweep a fixed value in the test, a 64-bit fingerprint
+of all the sweep's outputs (their fold under the self-test's FNV-1a,
+`tests/common/golden.rs`), which official BLAKE3 1.8.7 generated. Regenerating them is a reviewed step, run by hand:
+`BLAKE3_GOLDEN=1 cargo nextest run --no-capture` computes every case with
+official BLAKE3 too, stops at the first that differs, and prints each
+fold (`golden NAME: 0x...`) to write in. The folds hold the same on
+every machine, so one run generates them all. (The benchmark checks no
 digests; correctness is these tests' business.)
 
 **How a test chooses its inputs.** Each test checks the cases its code
@@ -158,19 +162,19 @@ keeping.
 
 **The suites** (`src/test.rs` and each module's tests), among
 them: every case of `hash_many` on every platform the CPU has, and of the
-one-shot hash from one to seventeen chunks, against the reference
-implementation; every platform's batch kernel at every input shape (1 to
-16 blocks, keyed flags, a counter whose low word overflows mid-batch,
-pointer tables forward, reversed, and strided), against the portable one;
+one-shot hash from one to seventeen chunks, against fixed values; every
+platform's batch kernel at every input shape (1 to 16 blocks, keyed
+flags, a counter whose low word overflows mid-batch, pointer tables
+forward, reversed, and strided), against fixed values;
 the pool's cuts and merges, its thread caps, and 32 callers at once.
 
 **Every process checks itself before its first hash.** The tests prove
 the code on our machines; a user's machine may have a compiler that
 miscompiles, a linker that mislinks, or a CPU with a faulty vector or
 matrix unit. So the first call in a process (or `initialize()`) hashes 42
-fixed inputs and compares each result with the reference implementation's
-answer, checked into the source (`src/self_test.rs`) and verified there
-by a unit test. The inputs are chosen so that together they run every one
+fixed inputs and compares each result with official BLAKE3's answer,
+checked into the source (`src/self_test.rs`) and generated there by a
+unit test. The inputs are chosen so that together they run every one
 of the AArch64 assembly kernels, every entry point, which a unit test
 checks on every run (`test_self_test_runs_every_kernel`, from the code's
 own kernel tables), along with the batch,
@@ -186,10 +190,10 @@ unrolled kernel code.
 ## Memory safety
 
 - **Guard pages** (`test::guard_pages`), on AArch64 and x86-64, Linux and
-  macOS. Miri cannot see inside assembly, so these tests put
-  each kernel's input, then its output, flush against an inaccessible
-  page (after the buffer, then before it). A kernel that reads or writes
-  a single byte outside its buffers crashes the test. They cover `hash`
+  macOS. These tests put each kernel's input, then its output, flush
+  against an inaccessible page (after the buffer, then before it). A
+  kernel that reads or writes a single byte outside its buffers crashes
+  the test. They cover `hash`
   at every length to 2 KiB + 70 and around chunk counts up to 1025,
   `hash_many` at 15 message lengths and 20 counts, every input of a batch
   against a guard page of its own on every kernel the build and CPU have
@@ -211,17 +215,6 @@ unrolled kernel code.
   debug assertions over the SME2 paths): all clean.
 - **CI on other targets** (GitHub Actions): the suites on Linux x86-64
   and arm64 (without SME2, and without SHA-3 under QEMU), and macOS.
-- **Miri**, which interprets Rust and stops at undefined behaviour, over
-  small versions of the unsafe paths, on the portable kernels Miri selects
-  (it cannot run assembly): `test::unsafe_paths` (batches, the pool
-  with two callers), and the `test_miri_*` tests CI's Miri step runs on
-  every change: the stream (`stream::test::test_miri_stream`), the
-  pool's collections, and x86's whole-
-  and-partial-chunk passes. Under Miri the pool splits work from 16 KiB
-  (512 KiB elsewhere), so these tests reach the same pool code on small
-  inputs, and each asserts it got there; CI's Miri step takes about three
-  minutes. All pass. Miri found bug 7 below. The pool's threads live for
-  the whole process by design, and `-Zmiri-ignore-leaks` accepts that.
 - **Coverage.** LLVM's source coverage over the library tests reaches
   93% of lines. The unexercised paths it showed became new tests (the
   guard-page tests among them). The rest is code for platforms the test
@@ -404,17 +397,11 @@ cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API, 8
 ```
 
-The tests need [cargo-nextest](https://nexte.st); Miri also needs
-nightly Rust (`rustup toolchain install nightly --component miri`):
-
-```sh
-MIRIFLAGS="-Zmiri-num-cpus=4 -Zmiri-ignore-leaks" cargo +nightly miri nextest run --lib unsafe_paths miri
-```
+The tests need [cargo-nextest](https://nexte.st).
 
 The crate is crash-only software: what still exists as a process ends (a
 pool's threads, a recycled source, a test's buffers) is no fault, and no
-code frees it for a checker's sake, so Miri's leak check is off
-(`-Zmiri-ignore-leaks`).
+code frees it for a checker's sake.
 
 Timing claims are checked the same way: [bench-hashes](https://github.com/johnservil/bench-hashes)
 measures this implementation against the official crate and others on your machine.
@@ -423,7 +410,7 @@ measures this implementation against the official crate and others on your machi
 
 Eight, all fixed. Three could have given wrong digests (1, 2, and 6),
 and one could crash a program from a safe call (8). Tests, coverage,
-review, CI, Miri, and the x86 proofs' model found them. The proofs have
+review, CI, Miri (before 0.8), and the x86 proofs' model found them. The proofs have
 found none in the Arm kernels: what they found were faults in the
 checking itself (an addition's carry flag modelled wrongly in the
 executor, the machine-code proofs run on a build without the standard
@@ -463,8 +450,8 @@ each bug are in `git log`.
 7. **A data race by Rust's aliasing rules** (the stream's chain in
    `src/lanes.rs`). A submitter held a reference to a whole slot while
    another thread could take that slot's buffer. Only the field is now
-   touched, through the raw pointer. Miri found it; a small test in
-   CI's Miri step keeps it covered.
+   touched, through the raw pointer. Miri found it, back when the crate
+   had portable Rust kernels for Miri to run.
 8. **The AVX2 and AVX-512 batch kernels read past an input's end**
    (`c/blake3_avx2_x86-64_unix.S`, `c/blake3_avx512_x86-64_unix.S`). Their two- and four-input paths loaded a whole
    vector from each block's quarters and kept the first 16 bytes: on an
@@ -479,9 +466,9 @@ each bug are in `git log`.
 | Machine-code proofs of the kernels | within completed cases: a wrong result, an access outside the declared buffers, a broken calling convention, or a path depending on secret data | planted errors (a rotation off by one, an add made an xor, a read past a buffer, a loop's wrong step) are rejected (`mutants.py`); the group-induction repairs need their own controls | faults in the proof checker or instruction models; unproved cases; CPU faults |
 | Instruction models against the CPU and Arm's specification | a wrong model of an instruction the proofs rely on | the CPU check found the carry-flag error; Isla rejects planted model errors | loads, branches, and calls by contract, which the executor's run of the official vectors checks |
 | Mutation testing | a test suite that misses a likely bug: an operator, a bound, or a condition changed, a call or a result dropped | it found missing cases in `Hash`, the `Hasher`, `OutputReader`, `update_each`, and the self-test, and dead code, each fixed or removed; a mutant every test survives is either caught by a new test or listed with its reason | bugs unlike its changes; thread interleavings the tests leave to chance |
-| Test vectors and the reference implementation | any wrong digest at the lengths and shapes tested, on any platform | found bugs 1 and 2 below | untested lengths and shapes |
+| Test vectors and official BLAKE3's fixed values | any wrong digest at the lengths and shapes tested, on any platform | found bugs 1 and 2 below | untested lengths and shapes |
 | Startup self-test | a miscompiled, mislinked, or faulty-hardware kernel on the user's machine | its inputs run every kernel entry point (a unit test checks it each run), and each case's output feeds the next, so one wrong result changes every later one | faults that appear only after startup |
-| Miri and guard pages | out-of-bounds access, use after free, data races, undefined behaviour in the paths tested | Miri found bug 7; a byte planted past a buffer crashes the guard-page tests | paths not exercised |
+| Guard pages | out-of-bounds access in the paths tested, assembly included | a byte planted past a buffer crashes the guard-page tests | paths not exercised; data races |
 
 ## Formal verification: what we tried and considered
 
@@ -490,17 +477,17 @@ each bug are in `git log`.
   and the tree walk and the Hasher (Aeneas, with machine-code proofs of
   whole calls beside them), then set aside: they
   took most of the proofs' hours and tools, and mutation testing,
-  coverage, and Miri test that Rust well. The proofs keep to the
+  coverage, and guard pages test that Rust well. The proofs keep to the
   assembly, where tests reach least.
-- **Miri**: used (above). It checks the executions it runs, which falls
-  short of a proof, and it cannot run assembly or intrinsics.
+- **Miri**: used until 0.8, on the portable Rust kernels, which users
+  never ran; it cannot run assembly, so it went with them. It found
+  bug 7 below.
 - **Verus, Prusti, Creusot**: considered, not tried. They could
   prove the pool and the batch paths for every thread interleaving; the
   cost is annotating or restructuring the code (atomics, raw pointers,
   uninitialised memory).
 - **hax to F\* or Rocq** (as used for libcrux): considered, not tried
-  yet. It suits proving the portable Rust equal to BLAKE3's
-  specification. That code follows the published design closely.
+  yet. It suits proving Rust equal to BLAKE3's specification.
 - **SAW with a Cryptol specification**: considered, not tried yet. It
   proves C or LLVM code equal to a specification, and could cover the C
   NEON kernel. It does not model SME2.
@@ -564,7 +551,7 @@ among them, and however often the hash is timed.
 No human has reviewed the code line by line, and nobody has audited it.
 The test suites have run on an Apple M4 Max, under macOS and in a
 Debian 12 AArch64 VM on it (whose SME2 unit the VM exposes), and on
-CI's hosted machines; Miri in the VM and in CI.
+CI's hosted machines.
 
 Not yet proved: that the Rust around the kernels (the dispatch, the tree,
 the `Hasher`) keeps secrets from steering a whole call, which is
