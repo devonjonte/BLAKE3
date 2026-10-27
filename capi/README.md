@@ -57,8 +57,9 @@ The `--static` flag supplies the system libraries Rust's static library needs.
 ## Choose a call
 
 - `b3_hash`: one message already in memory.
-- `b3_hasher_new`, `b3_hasher_update`, `b3_hasher_finalize_xof`: one message
-  arriving in pieces (`b3_hasher_update_multithreaded` for a large piece).
+- `b3_hasher_new`, `b3_hasher_update`, `b3_hasher_finalize`: one message
+  arriving in pieces (`b3_hasher_update_multithreaded` for a large piece;
+  `b3_hasher_finalize_xof` for output of any length).
 - `b3_hash_many`, `b3_hash_many_multithreaded`: a batch of equal-length
   messages, each at the start of its slot of 64-byte blocks, the batch on
   a 64-byte boundary.

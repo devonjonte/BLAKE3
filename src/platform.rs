@@ -368,8 +368,7 @@ impl Platform {
             Platform::AVX512 => unsafe { crate::avx512::xof_many(cv, block, block_len, counter, flags, out) },
             _ => {
                 // On SME2, whole groups of sixteen blocks on the extended-
-                // output kernel, under the process's turn (M4 Max: 0.70 ns/B
-                // block by block on the portable code); the rest below.
+                // output kernel, under the process's turn; the rest below.
                 #[cfg(blake3_sme2)]
                 let out = {
                     let turn = Sme2Turn::take(*self, out.len() >= 16 * BLOCK_LEN);

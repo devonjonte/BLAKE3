@@ -48,8 +48,9 @@ implementation), this crate adds:
   assembly among them, at every shape this crate calls it: symbolic
   execution against a specification of BLAKE3, with memory accesses,
   the calling convention and secret-dependent branches checked too.
-- **Mutation testing**: one small mistake planted at a time, and a test
-  must fail for each; the few that survive are listed with their reason.
+- **Mutation testing**: one small mistake planted at a time, more than
+  2,000 in all, and a test must fail for each; every one that survives
+  is listed with its reason.
 - **A model checker (Shuttle)** for the thread pool's waits, under
   thousands of thread schedules.
 - **Guard pages**: tests put an inaccessible page beside every input,
@@ -123,6 +124,10 @@ each check covers and what remains unproved.
   without it, the CPU's trap instruction.
 - A panic on one of the crate's threads, or in a caller during a
   multithreaded call, ends the process.
+- The threads are the process's: in a child forked after they started,
+  every multithreaded call and stream panics, saying so. A program that
+  forks calls `initialize_multithreaded` in the process that hashes,
+  after any fork; single-threaded calls work anywhere.
 - A `Hasher` is about 18 KiB. It gathers short updates and hashes them
   side by side, so a message arriving in small pieces hashes as fast as
   one in a buffer.

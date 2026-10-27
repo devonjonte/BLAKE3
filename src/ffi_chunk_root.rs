@@ -89,9 +89,9 @@ mod test {
     }
 
     /// Every length of 0 to 1024 bytes, at four alignments, in the three
-    /// modes, on each kernel this CPU runs, against the portable code.
+    /// modes, on each kernel this CPU runs, against `ChunkState` on SSE4.1.
     #[test]
-    fn test_chunk_root_matches_portable() {
+    fn test_chunk_root_matches_chunk_state() {
         let variants = variants();
         // SSE4.1 itself, not merely some kernel: on AVX-512 machines the AVX-512
         // variant alone would keep the list nonempty (a mutant hiding SSE4.1
