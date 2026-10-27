@@ -1,4 +1,4 @@
-By Zooko, 2026-10-25
+By Zooko, 2026-10-26
 
 # Announcing BLAKE3-Servil, v0.8
 
@@ -11,10 +11,42 @@ it with your human eyeballs! Robots are welcome to read this, too.*
 by the original authors. Much of the awesomeness of this new fork is actually due to them and to
 that upstream implementation (see [README.md](README.md#what-comes-from-official-blake3)).
 
-Here are three reasons you might want to use `BLAKE3-Servil`:
+Secure hash functions are a critical linchpin of digital infrastructure. They are embedded into
+every piece of our infrastructure—every operating system, network protocol, and cryptographic
+algorithm—and the security of each piece depends on the security of its secure hash function.
+
+Secure hash functions are also the primary tool for building cryptographic systems that can survive
+attack by quantum computers. The recent advances in quantum computation have intensified attention
+on secure hash functions.
+
+`BLAKE3` has quietly become the de facto standard secure hash function [for systems
+infrastructure](docs/who-uses-blake3.md): compilers, linkers, file systems, GPU drivers, build
+systems, storage back ends, etc. The build-id in Android, Chrome, ChromeOS, and Fuchsia binaries is
+a BLAKE3 hash. It's in Mesa (every Linux GPU driver), Ceph, Hugging Face's Buckets / IETF XET,
+Meta's new source control tool Sapling/Mononoke, Google's TensorStore, Unreal Engine, OpenZFS,
+Solana, Nix, Bazel, Buck2, Wasmer, the Swift compiler, rustc, cargo, and iroh. These projects needed
+a hash function that was both fast and secure, and chose the one that was both. BLAKE3's immediate
+ancestor, BLAKE2, is used in WireGuard and the Linux kernel.
+
+BLAKE3 is a leading contender to become the de facto standard secure hash function [in the next
+generation of post-quantum zero-knowledge proofs](docs/who-uses-blake3.md). It is in Plonky3, SP1,
+stwo, Jolt, WHIR, Miden, Winterfell, Aztec, Binius64, Flock. BLAKE2 is used in Zcash and a large
+number of other systems.
+
+BLAKE3 has a thicker security margin than SHA256 does. There are no known attacks faster than brute
+force that break more than 2 out of 7 of BLAKE3's rounds. In contrast, there are known attacks
+faster than brute force that break up to 39 out of 64 of SHA256's rounds.
+
+<img src="docs/images/blake3-security-margin.png" alt="BLAKE3 security margin" width="720">
+
+<img src="docs/images/sha256-security-margin.png" alt="SHA256 security margin" width="720">
+
+(Source: [https://hashsma.sh](https://hashsma.sh), screenshotted 2026-10-25.)
+
+Here are two reasons you might want to use `BLAKE3-Servil`:
 
 1. It is fast. Like 10 *times* as fast, or more, as the competitors in many cases. (See
-   [benchmarks](https://johnservil.github.io/bench-hashes/).) This could be a big improvement for a
+   [benchmarks](https://johnservil.github.io/bench-hashes).) This could be a big improvement for a
    lot of use cases, where you need to ensure data integrity and user security, and you have to do
    it efficiently.
 
@@ -25,7 +57,7 @@ Here are three reasons you might want to use `BLAKE3-Servil`:
 
    <img src="docs/images/b3sum-epyc-1000-files.svg" alt="b3sum beside sha256sum, sha1sum and md5sum on a tree of 1,000 files" width="720">
 
-   Why is it so fast? Three reasons:
+   How is it so fast? Three ways:
 
    * It takes advantage of multithreading, which it can do because it is a Merkle Tree under the
      hood, unlike other secure hash functions, which are a linear chain.
@@ -34,33 +66,7 @@ Here are three reasons you might want to use `BLAKE3-Servil`:
 
    * It is implemented in assembly language! Well, not all of it, but all of the inner loops are.
 
-2. The `BLAKE3` secure hash algorithm is widely used.
-
-   * BLAKE3 has quietly become the de facto standard secure hash function [for systems
-     infrastructure](docs/who-uses-blake3.md): compilers, linkers, file systems, GPU drivers, build
-     systems, storage back ends, etc. The build-id in Android, Chrome, ChromeOS, and Fuchsia
-     binaries is a BLAKE3 hash. It's in Mesa (every Linux GPU driver), Ceph, Hugging Face's Buckets
-     / IETF XET, Meta's new source control tool Sapling/Mononoke, Google's TensorStore, Unreal
-     Engine, OpenZFS, Solana, Nix, Bazel, Buck2, Wasmer, the Swift compiler, rustc, cargo, and
-     iroh. These projects needed a hash function that was both fast and secure, and chose the one
-     that was both. BLAKE3's immediate ancestor, BLAKE2, is used in WireGuard and the Linux kernel.
-
-   * BLAKE3 is a leading contender to become the de facto standard secure hash function [in the next
-     generation of post-quantum zero-knowledge proofs](docs/who-uses-blake3.md). It is in Plonky3,
-     SP1, stwo, Jolt, WHIR, Miden, Winterfell, Aztec, Binius64, Flock. BLAKE2 is used in Zcash and a
-     large number of other systems.
-
-     BLAKE3 has a thicker security margin than SHA256 does. There are no known attacks faster than
-     brute force that break more than 2 out of 7 of BLAKE3's rounds. In contrast, there are known
-     attacks faster than brute force that break up to 39 out of 64 of SHA256's rounds.
-
-     <img src="docs/images/blake3-security-margin.png" alt="BLAKE3 security margin" width="720">
-
-     <img src="docs/images/sha256-security-margin.png" alt="SHA256 security margin" width="720">
-
-     (Source: [https://hashsma.sh](https://hashsma.sh), screenshotted 2026-10-25.)
-
-3. The `BLAKE3-Servil` code comes with excellent quality assurance:
+2. The `BLAKE3-Servil` code comes with excellent quality assurance:
 
    * All of the assembly language parts are *proven correct*. They come with a proof that they
      calculate their part of the BLAKE3 algorithm, correctly access memory, and also that they are
@@ -76,11 +82,9 @@ Here are three reasons you might want to use `BLAKE3-Servil`:
      each line of the code.
 
    * In addition to all of that, we use several other quality-assurance tools:
-     * Guard pages,
-     * A self-test on startup,
-     * `Shuttle`, which uses a clever method of randomized thread scheduling to uncover concurrency bugs,
-     * `Miri`, which is a Rust interpreter that verifies that the program obeys Rust safety
-       semantics.
+     * Guard pages
+     * A self-test on startup
+     * `Shuttle`, which uses a clever method of randomized thread scheduling to uncover concurrency bugs
 
    * It has extremely thorough and precise [benchmarks](https://johnservil.github.io/bench-hashes/)
      that exercise many different cases that could practically impact performance for real users.
