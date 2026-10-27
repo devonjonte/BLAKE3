@@ -25,7 +25,7 @@ import os
 import re
 import subprocess
 
-from z3 import (BitVec, BitVecVal, Concat, Extract, LShR, RotateRight, ZeroExt, If, ULT, UGT, ULE,
+from z3 import (BitVec, BitVecVal, Concat, Extract, LShR, RotateLeft, RotateRight, ZeroExt, If, ULT, UGT, ULE,
                 UGE, Not, Solver, simplify, substitute, is_bv_value, unsat, Z3_OP_EXTRACT)
 
 import aarch64
@@ -211,7 +211,7 @@ class Machine(aarch64.Machine):
             return v
         if isinstance(v, Ptr):
             raise Unproved(f"a {bits}-bit read of a pointer in {name}")
-        return Extract(bits - 1, 0, v)
+        return tidy(Extract(bits - 1, 0, v))
 
     def gwrite(self, name, v):
         base, bits = SUB[name]
@@ -220,14 +220,14 @@ class Machine(aarch64.Machine):
             return
         if isinstance(v, Ptr):
             raise Unproved(f"a pointer written to {name}")
-        v = simplify(v)
+        v = tidy(v)
         if bits == 32:
             self.x[base] = ZeroExt(32, v)
         else:
             old = self.x[base]
             if isinstance(old, Ptr):
                 raise Unproved(f"a partial write of a pointer in {name}")
-            self.x[base] = simplify(Concat(Extract(63, bits, old), v))
+            self.x[base] = tidy(Concat(Extract(63, bits, old), v))
 
     # Vector registers.
     def lanes(self, name):
@@ -237,6 +237,8 @@ class Machine(aarch64.Machine):
         """Write `new` (its width's lanes) to a vector register: VEX and
         EVEX forms zero the lanes above; legacy SSE keeps them."""
         n = int(re.match(r"[xyz]mm(\d+)", name).group(1))
+        # Any write forgets a pointer parked there (park, below).
+        self.__dict__.setdefault("parked", {}).pop(n, None)
         new = [self.normal(x) for x in new]
         if vex:
             self.v[n] = new + [BitVecVal(0, 32)] * (16 - len(new))
@@ -420,7 +422,7 @@ def ptr_add(a, b, sub=False):
     if isinstance(a, Ptr):
         nb = num(b)
         return a + ((-nb if isinstance(nb, int) else simplify(-as_bv(nb))) if sub else nb)
-    return simplify(a - b if sub else a + b)
+    return tidy(a - b if sub else a + b)
 
 
 def cond(m, cc):
@@ -456,6 +458,15 @@ def flag_operands(a, b):
             raise Unproved("a comparison of a pointer with a number")
         return as_bv(a.offset), as_bv(b.offset)
     return a, b
+
+
+def tidy(t):
+    """`t` simplified, unless it holds round arithmetic: Z3's simplify
+    rewrites a rotation into shifts and concatenations, and sums into
+    products, forms canon does not read; canon normalizes those itself.
+    (A kernel computing its rounds in general registers met this first:
+    BLAKE3 #150.)"""
+    return t if canon.has_arith(t) else simplify(t)
 
 
 def lanes128(x):
@@ -570,6 +581,15 @@ def step(m, pc, mnem, ops, nxt):
         _, addr, _ = address(m, ops[1])
         m.gwrite(ops[0], addr)
         return nxt
+    if mnem in ("xor", "sub") and ops[0] == ops[1] and ops[0] in SUB:
+        # The zeroing idiom: zero whatever the register held, a pointer too.
+        bits = SUB[ops[0]][1]
+        if bits == 64 or bits == 32:
+            m.x[SUB[ops[0]][0]] = BitVecVal(0, 64)
+        else:
+            m.gwrite(ops[0], BitVecVal(0, bits))
+        m.flags = ("logic", BitVecVal(0, bits))
+        return nxt
     if mnem in ("add", "sub", "and", "or", "xor", "cmp", "test"):
         bits = opbits(m, ops[0])
         if mnem == "xor" and ops[0] == ops[1]:
@@ -617,12 +637,12 @@ def step(m, pc, mnem, ops, nxt):
             return nxt
         if isinstance(a, Ptr) or isinstance(b, Ptr):
             raise Unproved(f"{mnem} on a pointer")
-        r = simplify({"and": a & b, "or": a | b, "xor": a ^ b, "test": a & b}[mnem])
+        r = tidy({"and": a & b, "or": a | b, "xor": a ^ b, "test": a & b}[mnem])
         m.flags = ("logic", r)
         if mnem != "test":
             m.gwrite(ops[0], r)
         return nxt
-    if mnem in ("shl", "shr", "neg", "dec", "inc"):
+    if mnem in ("shl", "shr", "ror", "rol", "neg", "dec", "inc"):
         bits = opbits(m, ops[0])
         a = gval(m, ops[0], bits)
         if isinstance(a, Ptr):
@@ -631,11 +651,15 @@ def step(m, pc, mnem, ops, nxt):
             r = a << imm(ops[1])
         elif mnem == "shr":
             r = LShR(a, imm(ops[1]))
+        elif mnem == "ror":
+            r = RotateRight(a, imm(ops[1]) % bits)
+        elif mnem == "rol":
+            r = RotateLeft(a, imm(ops[1]) % bits)
         elif mnem == "neg":
             r = -a
         else:
             r = a - 1 if mnem == "dec" else a + 1
-        r = simplify(r)
+        r = tidy(r)
         m.flags = ("dec", r) if mnem in ("dec", "inc") else None
         m.gwrite(ops[0], r)
         return nxt
@@ -705,7 +729,12 @@ def vector(m, mnem, base, vex, ops, nxt):
         m.store(addr, Concat(*reversed(val)) if len(val) > 1 else val[0], 4 * len(val))
         return nxt
     if dst in SUB:
-        # movd / movq to a general register.
+        # movd / movq to a general register: a pointer parked by movq
+        # comes back as itself (park, below).
+        parked = m.__dict__.get("parked", {}).get(int(re.match(r"[xyz]mm(\d+)", ops[1]).group(1)))
+        if base == "movq" and parked is not None:
+            m.gwrite(dst, parked)
+            return nxt
         src = m.lanes(ops[1])
         if base == "movd":
             m.gwrite(dst, src[0])
@@ -743,6 +772,19 @@ def vector(m, mnem, base, vex, ops, nxt):
         s = ops[1]
         if s in SUB:
             val = gval(m, s, SUB[s][1])
+            if isinstance(val, Ptr):
+                # Park: a kernel short of general registers keeps a pointer
+                # in a vector register (movq xmm, r64) and takes it back
+                # (movq r64, xmm). The lanes become unknowns, so no vector
+                # operation on a pointer proves anything; any other write
+                # to the register forgets it.
+                if base != "movq":
+                    raise Unproved(f"{mnem} of a pointer")
+                count = m.__dict__.setdefault("park_count", [0])
+                count[0] += 1
+                m.vwrite(dst, [BitVec(f"parked{count[0]}_{i}", 32) for i in range(2)] + [BitVecVal(0, 32)] * 2, vex)
+                m.parked[int(re.match(r"[xyz]mm(\d+)", dst).group(1))] = val
+                return nxt
             parts = [val] if base == "movd" else [Extract(31, 0, val), Extract(63, 32, val)]
         else:
             parts = load_lanes(m, s, 1 if base == "movd" else 2)
