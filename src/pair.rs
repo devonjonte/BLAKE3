@@ -72,6 +72,11 @@ pub(crate) fn parent(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8,
 /// (AVX2 and AVX-512; elsewhere each input in turn). Unsafe: each of `inputs` reaches `blocks`
 /// blocks, and the CPU has the platform.
 #[allow(clippy::too_many_arguments)]
+// Out of line: inlined into Platform::hash_many once its portable arm went,
+// batches of one to three 64 B messages after other work ran 5-12% slower on
+// the i7, and level with it out of line (24 pairs each; data
+// 2026-10-27/no-portable-i7). Warm, both forms run the same instructions.
+#[inline(never)]
 pub(crate) unsafe fn hash_many_blocks(
     platform: Platform,
     inputs: &[*const u8],
