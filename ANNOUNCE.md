@@ -43,7 +43,7 @@ faster than brute force that break up to 39 out of 64 of SHA256's rounds.
 
 (Source: [https://hashsma.sh](https://hashsma.sh), screenshotted 2026-10-25.)
 
-Here are two reasons you might want to use `BLAKE3-Servil`:
+Here are three reasons you might want to use `BLAKE3-Servil`:
 
 1. It is fast. Like 10 *times* as fast, or more, as the competitors in many cases. (See
    [benchmarks](https://johnservil.github.io/bench-hashes).) This could be a big improvement for a
@@ -66,7 +66,7 @@ Here are two reasons you might want to use `BLAKE3-Servil`:
 
    * It is implemented in assembly language! Well, not all of it, but all of the inner loops are.
 
-2. The `BLAKE3-Servil` code comes with excellent quality assurance:
+2. It comes with excellent quality assurance:
 
    * All of the assembly language parts are *proven correct*. They come with a proof that they
      calculate their part of the BLAKE3 algorithm, correctly access memory, and also that they are
@@ -93,7 +93,7 @@ Here are two reasons you might want to use `BLAKE3-Servil`:
 
 And here’s one reason you might *not* want to use BLAKE3-Servil right away:
 
-4. It was written by AIs!
+3. It was written by AIs!
 
    I have been intimately involved every step of the way with the requirements, architecture,
    strategy, quality assurance processes, API design, and managing the AIs, but I haven’t written or
