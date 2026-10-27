@@ -41,12 +41,10 @@ src/lanes.rs	delete match arm crate::BLOCK_LEN in Task::run_members	1	speed: cho
 src/lanes.rs	replace && with || in Pool::run_job	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace && with || in hash_each	1	speed: the cut's piece sizes; any cut of the items into consecutive pieces of one or more hashes every item alike (the cut, not the digests, is what changes)
 src/lanes.rs	replace && with || in initialize	2	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
-src/lanes.rs	replace * with +	1	speed: MIN_SPLIT_LEN, the length from which the pool splits a message (1536 B or 0 with the mutant); every split hashes alike
 src/lanes.rs	replace * with + in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with + in merge_to_children	1	array capacity: 2 + MAX children a call instead of 2 * MAX, the same tree in more calls
 src/lanes.rs	replace * with + in sme2_prefix	2	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with + in sources::Source::take	1	the pool's scheduling: how many of a job's pieces one claim takes (the claimed range stays consistent)
-src/lanes.rs	replace * with /	1	speed: MIN_SPLIT_LEN, the length from which the pool splits a message (1536 B or 0 with the mutant); every split hashes alike
 src/lanes.rs	replace * with / in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with / in cut_with_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace * with / in sme2_prefix	1	speed: how much of a message the SME2 thread takes first; on x86 there is no SME2 thread
@@ -371,9 +369,9 @@ src/platform.rs	replace && with || in read_x86_features	2	on this CPU every test
 src/platform.rs	replace && with || in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace * with + in Platform::xof_many	1	speed: moves a threshold between equally correct paths
 src/platform.rs	replace * with / in Platform::xof_many	1	speed: moves a threshold between equally correct paths
-src/platform.rs	replace += with *= in Platform::xof_many	2	code for another machine: the SME2 and NEON blocks in xof_many are compiled out on x86
+src/platform.rs	replace += with *= in Platform::xof_many	1	code for another machine: the SME2 block in xof_many is compiled out on x86
 src/platform.rs	replace += with *= in prefetch_code	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/platform.rs	replace += with -= in Platform::xof_many	2	code for another machine: the SME2 and NEON blocks in xof_many are compiled out on x86
+src/platform.rs	replace += with -= in Platform::xof_many	1	code for another machine: the SME2 block in xof_many is compiled out on x86
 src/platform.rs	replace += with -= in prefetch_code	1	AArch64 only: prefetch_code is cfg(blake3_neon), compiled out on x86; prefetching changes no result
 src/platform.rs	replace / with % in Platform::xof_many	2	code for another machine: the SME2 and NEON blocks in xof_many are compiled out on x86
 src/platform.rs	replace / with % in ticks_in_100_us	1	AArch64 only: ticks_in_100_us is cfg(blake3_neon), compiled out on x86
@@ -461,5 +459,4 @@ src/tree.rs	replace + with - in wide	1	SME2 only: the argument is `ahead`, consu
 src/tree.rs	replace / with * in root_children	2	speed: the arrays' size (each choice holds the values; only the stack frame changes)
 src/tree.rs	replace <= with > in root_children	1	[cpu lacks avx512f avx512vl] equivalent: the SMALL and MAX arrays are capacities; children() fills either, the small one in more rounds. On AVX-512 one call of the 32-input kernel writes 32 values, more than SMALL (16) holds, so a machine with it catches the mutant (the EPYC 9255, October 26)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::children -> Option<[Cv; 2]> with None	1	equivalent on x86: PlatformKernels::children returns None already (its SME2 block is compiled out)
-src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::degree -> usize with 1	1	speed: moves a threshold between equally correct paths (a degree of 1 hashes one chunk at a time; simd_degree itself has its test)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::subtree -> Option<usize> with None	1	speed: subtrees then hash on the walk's one-chunk path, the same digests
