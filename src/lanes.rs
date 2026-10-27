@@ -594,11 +594,19 @@ pub(crate) fn initialize(threads: usize) {
     let sme2 = threads > 1 && cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect()));
     let pool = Pool { callers: AtomicUsize::new(0), threads, sme2, park: crate::park::Park::new(threads - 1, crate::park::FANOUT) };
     assert!(POOL.set(pool).is_ok(), "initialize_multithreaded creates the pool once");
-    if sme2 {
-        std::thread::Builder::new().name("blake3-sme2".into()).spawn(sme2_main).expect("spawning the SME2 thread");
-    }
     if threads == 1 {
         return;
+    }
+    // Before any thread starts: a child forked from here on has none of
+    // them, and its multithreaded calls stop at `pool` (FORKED).
+    unsafe extern "C" {
+        fn pthread_atfork(prepare: Option<extern "C" fn()>, parent: Option<extern "C" fn()>, child: Option<extern "C" fn()>) -> i32;
+    }
+    // Sound: the handler only stores to an atomic, which a forked child
+    // may do.
+    assert_eq!(unsafe { pthread_atfork(None, None, Some(mark_forked)) }, 0, "registering the fork handler");
+    if sme2 {
+        std::thread::Builder::new().name("blake3-sme2".into()).spawn(sme2_main).expect("spawning the SME2 thread");
     }
     std::thread::Builder::new()
         .name("blake3-worker-1".into())
@@ -628,6 +636,25 @@ pub(crate) fn splits() -> bool {
 /// The pool, once [`initialize`] has created it.
 static POOL: OnceLock<Pool> = OnceLock::new();
 
+/// Set in a child forked after the pool started its threads (the fork
+/// handler, `pthread_atfork`'s child): the child has none of them.
+static FORKED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn mark_forked() {
+    FORKED.store(true, Ordering::Relaxed);
+}
+
+/// A multithreaded call or stream in a forked child: the threads it would
+/// use stayed in the parent.
+#[cold]
+#[inline(never)]
+fn forked() -> ! {
+    panic!(
+        "blake3-servil: this process was forked after initialize_multithreaded started its threads, and a forked child has none: \
+         initialize the pool in the process that hashes, after any fork (single-threaded calls work anywhere)"
+    )
+}
+
 /// Whether every worker is parked: false before the pool exists
 /// ([`crate::__all_workers_parked`], for tests).
 pub(crate) fn all_workers_parked() -> bool {
@@ -640,6 +667,7 @@ pub(crate) fn all_workers_parked() -> bool {
 #[inline]
 fn pool() -> &'static Pool {
     match POOL.get() {
+        Some(_) if FORKED.load(Ordering::Relaxed) => forked(),
         Some(pool) => pool,
         None => no_pool(),
     }

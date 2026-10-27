@@ -664,8 +664,8 @@ fn test_miri_smoketest() {
     reader.fill(&mut [0]);
 }
 
-// The fork's unsafe paths at sizes Miri can run in minutes (under the
-// `pure` feature, where no assembly takes part): the batch tables and
+// The fork's unsafe paths at sizes Miri can run in minutes (on the
+// portable kernels Miri selects, where no assembly takes part): the batch tables and
 // padded lanes of many.rs, the pool's jobs from concurrent callers (Miri
 // with -Zmiri-num-cpus=4 spawns three workers), and a stream past one
 // buffer. Each against crate::convenience::hash() or the reference implementation. Also run

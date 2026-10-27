@@ -151,6 +151,10 @@
 //! [`Zeroize`](https://docs.rs/zeroize/latest/zeroize/trait.Zeroize.html) for
 //! this crate's types.
 //!
+//! The build needs a C compiler that assembles the kernels (GCC 12 or
+//! later, or Clang); without one it stops and says so. This crate runs its
+//! assembly or not at all: for portable Rust, use official BLAKE3.
+//!
 //! The `serde` feature (off by default, on for [docs.rs]) implements
 //! [`serde::Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html) and
 //! [`serde::Deserialize`](https://docs.rs/serde/latest/serde/trait.Deserialize.html)
@@ -951,6 +955,11 @@ pub fn initialize() {
 /// and the pieces shrink toward the end of the input, so the slowest thread
 /// finishes holding a small one. To leave CPUs to other work, pass fewer
 /// threads.
+///
+/// The threads are this process's: in a child forked after they started,
+/// every multithreaded call and stream panics, saying so (the child has
+/// none of them). A program that forks initializes the pool in the process
+/// that hashes, after any fork; its single-threaded calls work anywhere.
 ///
 /// ```
 /// blake3_servil::initialize_multithreaded(None);

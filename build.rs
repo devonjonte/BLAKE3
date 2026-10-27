@@ -6,10 +6,6 @@ fn defined(var: &str) -> bool {
     env::var_os(var).is_some()
 }
 
-fn is_pure() -> bool {
-    defined("CARGO_FEATURE_PURE")
-}
-
 fn is_ci() -> bool {
     defined("BLAKE3_CI")
 }
@@ -47,35 +43,21 @@ fn new_build() -> cc::Build {
     build
 }
 
-#[derive(PartialEq)]
-enum CCompilerSupport {
-    NoCompiler,
-    NoAVX512,
-    YesAVX512,
-}
-use CCompilerSupport::*;
-
-fn c_compiler_support() -> CCompilerSupport {
+/// The x86-64 kernels' assembler: a C compiler that takes the AVX-512
+/// flags, as GCC 12 and Clang do. Without one the build stops, as on
+/// AArch64: a build that fell back to the portable Rust would run several
+/// times slower and say so only in a warning Cargo hides for dependencies.
+fn assert_assembles_x86() {
     let build = new_build();
-    // Check for both of the flags we use. If -mavx512f works, then -mavx512vl
-    // will probably always work too, but we might as well be thorough.
-    let flags_checked = "-mavx512f and -mavx512vl";
-    let support_result: Result<bool, _> = match build.is_flag_supported("-mavx512f") {
-        Ok(true) => build.is_flag_supported("-mavx512vl"),
-        false_or_error => false_or_error,
-    };
-    match support_result {
-        Ok(true) => YesAVX512,
-        Ok(false) => {
-            warn(&format!("The C compiler {:?} does not support {}.", build.get_compiler().path(), flags_checked,));
-            NoAVX512
-        }
-        Err(e) => {
-            println!("{:?}", e);
-            warn(&format!("No C compiler {:?} detected.", build.get_compiler().path()));
-            NoCompiler
-        }
-    }
+    let compiler = build.get_compiler().path().to_owned();
+    // Both flags we use. If -mavx512f works, then -mavx512vl will probably
+    // always work too, but we might as well be thorough.
+    let takes = |flag| build.is_flag_supported(flag).unwrap_or(false);
+    assert!(
+        takes("-mavx512f") && takes("-mavx512vl"),
+        "blake3-servil: {compiler:?} is not a C compiler that assembles the x86-64 kernels \
+         (GCC 12 or later, or Clang); use official BLAKE3 for a build without assembly (https://github.com/BLAKE3-team/BLAKE3)"
+    );
 }
 
 fn build_sse41_avx2_assembly() {
@@ -161,14 +143,13 @@ fn build_sme2_assembly() {
 }
 
 // The integer + NEON kernels need an assembler that knows armv8.2-a+sha3
-// (GNU as 2.30+, LLVM 7+). With an older one the build stops and says so:
-// the `pure` feature is the build without assembly.
+// (GNU as 2.30+, LLVM 7+). With an older one the build stops and says so.
 fn assert_assembles_sha3() {
     let compiler = new_build().get_compiler().path().to_owned();
     assert!(
         assembles("sha3", "-march=armv8.2-a+sha3", ".arch armv8.2-a+sha3\nxar v0.2d, v1.2d, v2.2d, #1\n"),
         "blake3-servil: {compiler:?} cannot assemble armv8.2-a+sha3, which the AArch64 kernels need \
-         (GNU as 2.30 or later, or Clang/LLVM 7 or later); the `pure` feature builds without assembly"
+         (GNU as 2.30 or later, or Clang/LLVM 7 or later); use official BLAKE3 for a build without assembly (https://github.com/BLAKE3-team/BLAKE3)"
     );
 }
 
@@ -221,21 +202,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo::rustc-check-cfg=cfg({cfg_name}, values(none()))");
     }
 
-    // x86-64 (32-bit x86 is unsupported: official BLAKE3 serves it).
     if is_x86_64() {
-        let support = c_compiler_support();
-        // Without assembly (pure, or no C compiler) x86-64 runs the
-        // portable Rust. We assume that all C compilers can assemble SSE4.1
-        // and AVX2; we don't explicitly check for support.
-        if !(is_pure() || support == NoCompiler) {
-            build_sse41_avx2_assembly();
-        }
-        if !(is_pure() || support == NoCompiler || support == NoAVX512) {
-            build_avx512_assembly();
-        }
+        assert_assembles_x86();
+        build_sse41_avx2_assembly();
+        build_avx512_assembly();
     }
 
-    if !is_pure() && is_aarch64() {
+    if is_aarch64() {
         println!("cargo::rustc-cfg=blake3_neon");
         assert_assembles_sha3();
         build_neon_hybrid_assembly();
