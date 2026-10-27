@@ -292,7 +292,7 @@ pub(crate) fn ran_kernel(entry: *const ()) {
 use arrayvec::{ArrayString, ArrayVec};
 use core::cmp;
 use core::fmt;
-use platform::{MAX_SIMD_DEGREE, MAX_SIMD_DEGREE_OR_2, Platform};
+use platform::{MAX_SIMD_DEGREE, Platform};
 #[cfg(feature = "zeroize")]
 use zeroize::Zeroize;
 
@@ -771,12 +771,10 @@ fn compress_parents_parallel(child_chaining_values: &[u8], key: &CVWords, flags:
     debug_assert_eq!(child_chaining_values.len() % OUT_LEN, 0, "wacky hash bytes");
     let num_children = child_chaining_values.len() / OUT_LEN;
     debug_assert!(num_children >= 2, "not enough children");
-    debug_assert!(num_children <= 2 * MAX_SIMD_DEGREE_OR_2, "too many");
+    debug_assert!(num_children <= 2 * MAX_SIMD_DEGREE, "too many");
 
     let mut parents_exact = child_chaining_values.chunks_exact(BLOCK_LEN);
-    // Use MAX_SIMD_DEGREE_OR_2 rather than MAX_SIMD_DEGREE here: the walk
-    // (src/tree.rs) returns at least 2 values.
-    let mut parents_array = ArrayVec::<&[u8; BLOCK_LEN], MAX_SIMD_DEGREE_OR_2>::new();
+    let mut parents_array = ArrayVec::<&[u8; BLOCK_LEN], MAX_SIMD_DEGREE>::new();
     for parent in &mut parents_exact {
         parents_array.push(parent.try_into().unwrap());
     }

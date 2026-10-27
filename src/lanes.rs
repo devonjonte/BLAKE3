@@ -511,14 +511,14 @@ fn merge_to_children(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::C
     let platform = pool_platform();
     let mut count = cvs.len();
     let mut width = MIN_PIECE_LEN;
-    let mut out = [0u8; crate::MAX_SIMD_DEGREE_OR_2 * crate::OUT_LEN];
+    let mut out = [0u8; crate::MAX_SIMD_DEGREE * crate::OUT_LEN];
     while count > 2 {
         let prefix = pieces.partition_point(|p| p.len > width);
         debug_assert!(prefix < count);
         let mut read = prefix;
         let mut write = prefix;
         while read + 1 < count {
-            let children = (count - read).min(2 * crate::MAX_SIMD_DEGREE_OR_2);
+            let children = (count - read).min(2 * crate::MAX_SIMD_DEGREE);
             // The inner loop's variant: each call merges at least one pair.
             assert!(children >= 2, "a parents call with under two children");
             let parents = crate::compress_parents_parallel(cvs[read..read + children].as_flattened(), key, flags, platform, &mut out);
@@ -1393,7 +1393,7 @@ mod test {
     /// later calls, which would then hash alone, right and slower).
     /// Arbitrary CVs isolate the merge's tree shape from chunk hashing:
     /// a cut of a few pieces, and one whose first level holds more
-    /// children than one parents call takes (2 x MAX_SIMD_DEGREE_OR_2),
+    /// children than one parents call takes (2 x MAX_SIMD_DEGREE),
     /// one left over to carry up.
     #[test]
     fn test_simd_merge_matches_recursive() {

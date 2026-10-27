@@ -1,44 +1,17 @@
 use crate::{BLOCK_LEN, CHUNK_LEN, CVWords, IncrementCounter};
 
+// The most chunks one call hashes: AVX-512's 32 (16 off Linux), SME2's,
+// NEON's 16. Every platform hashes at least four, so the walk's arrays
+// (src/tree.rs) hold two values or more.
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "x86_64")] {
-        cfg_if::cfg_if! {
-            if #[cfg(blake3_avx512_ffi)] {
-                pub const MAX_SIMD_DEGREE: usize = if cfg!(target_os = "linux") { 32 } else { 16 };
-            } else {
-                pub const MAX_SIMD_DEGREE: usize = 8;
-            }
-        }
+        pub const MAX_SIMD_DEGREE: usize = if cfg!(target_os = "linux") { 32 } else { 16 };
     } else if #[cfg(blake3_sme2)] {
         // See sme2::DEGREE.
         pub const MAX_SIMD_DEGREE: usize = crate::sme2::DEGREE;
-    } else if #[cfg(blake3_neon)] {
+    } else {
         // See neon_hybrid::GROUP.
         pub const MAX_SIMD_DEGREE: usize = 16;
-    } else {
-        pub const MAX_SIMD_DEGREE: usize = 1;
-    }
-}
-
-// There are some places where we want a static size that's equal to the
-// MAX_SIMD_DEGREE, but also at least 2. Constant contexts aren't currently
-// allowed to use cmp::max, so we have to hardcode this additional constant
-// value. Get rid of this once cmp::max is a const fn.
-cfg_if::cfg_if! {
-    if #[cfg(target_arch = "x86_64")] {
-        cfg_if::cfg_if! {
-            if #[cfg(blake3_avx512_ffi)] {
-                pub const MAX_SIMD_DEGREE_OR_2: usize = if cfg!(target_os = "linux") { 32 } else { 16 };
-            } else {
-                pub const MAX_SIMD_DEGREE_OR_2: usize = 8;
-            }
-        }
-    } else if #[cfg(blake3_sme2)] {
-        pub const MAX_SIMD_DEGREE_OR_2: usize = crate::sme2::DEGREE;
-    } else if #[cfg(blake3_neon)] {
-        pub const MAX_SIMD_DEGREE_OR_2: usize = 16;
-    } else {
-        pub const MAX_SIMD_DEGREE_OR_2: usize = 2;
     }
 }
 
@@ -268,7 +241,7 @@ impl Platform {
             #[cfg(blake3_sme2)]
             Platform::SME2 => crate::sme2::DEGREE,
         };
-        debug_assert!(degree <= MAX_SIMD_DEGREE);
+        debug_assert!((2..=MAX_SIMD_DEGREE).contains(&degree), "the walk (src/tree.rs) takes 2 to MAX_SIMD_DEGREE chunks a call");
         degree
     }
 
@@ -436,7 +409,8 @@ impl Platform {
 
     /// The SSE41 platform where this build has its kernels and the CPU its
     /// instructions.
-    #[cfg(all(test, feature = "std", target_arch = "x86_64"))]
+    #[cfg(test)]
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     pub fn sse41() -> Option<Self> {
         #[cfg(blake3_sse41_ffi)]
         if sse41_detected() {
@@ -447,7 +421,8 @@ impl Platform {
 
     /// The AVX2 platform where this build has its kernels and the CPU its
     /// instructions.
-    #[cfg(all(test, feature = "std", target_arch = "x86_64"))]
+    #[cfg(test)]
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     pub fn avx2() -> Option<Self> {
         #[cfg(blake3_avx2_ffi)]
         if avx2_detected() {
@@ -458,7 +433,8 @@ impl Platform {
 
     #[cfg(blake3_avx512_ffi)]
     #[cfg(target_arch = "x86_64")]
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(test)]
+    #[cfg(feature = "std")]
     pub fn avx512() -> Option<Self> {
         if avx512_detected() { Some(Self::AVX512) } else { None }
     }
@@ -763,18 +739,16 @@ mod x86_degree_test {
 
     /// The detected platform hashes as many chunks at once as the widest
     /// kernel this build and CPU have (the standard library's detection, an
-    /// independent reading, says which the CPU has):
-    /// a degree of 1 would hash correctly, one chunk at a time.
+    /// independent reading, says which the CPU has): a narrower one would
+    /// hash correctly, more slowly.
     #[test]
     fn test_detected_degree_is_the_widest_kernel() {
-        let expected = if cfg!(blake3_avx512_ffi) && std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl") {
+        let expected = if std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl") {
             if cfg!(target_os = "linux") { 32 } else { 16 }
-        } else if cfg!(blake3_avx2_ffi) && std::is_x86_feature_detected!("avx2") {
+        } else if std::is_x86_feature_detected!("avx2") {
             8
-        } else if cfg!(blake3_sse41_ffi) && std::is_x86_feature_detected!("sse4.1") {
-            4
         } else {
-            1
+            4
         };
         assert_eq!(Platform::detect().simd_degree(), expected);
     }

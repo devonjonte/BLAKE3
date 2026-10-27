@@ -227,8 +227,8 @@ pub(crate) fn chain(mut outputs: impl FnMut(Case, &[u8], &[u8; 32], &mut [u8]) -
 }
 
 /// Each case's fold, from official BLAKE3 1.8.7 (the unit test
-/// `self_test_matches_official_blake3`, run with `BLAKE3_GOLDEN=1`, checks
-/// them and prints this table when it differs).
+/// `self_test_matches_official_blake3` checks them, and prints this table
+/// when it differs).
 #[cfg(target_arch = "aarch64")]
 const EXPECTED: [u64; 42] = [
     0x90e4e563714f7c48,
@@ -750,12 +750,6 @@ mod test {
     /// it in is a reviewed change.
     #[test]
     fn self_test_matches_official_blake3() {
-        // Official BLAKE3 generates EXPECTED: the reviewed regeneration step
-        // (BLAKE3_GOLDEN=1) runs it; every process checks its kernels
-        // against EXPECTED at startup.
-        if std::env::var_os("BLAKE3_GOLDEN").is_none() {
-            return;
-        }
         let mut folds = std::vec::Vec::new();
         chain(into(reference), |_, folded| folds.push(folded));
         let table: std::string::String = folds.iter().map(|f| std::format!("    0x{f:016x},\n")).collect();
