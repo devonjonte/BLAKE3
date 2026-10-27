@@ -43,7 +43,7 @@ faster than brute force that break up to 39 out of 64 of SHA256's rounds.
 
 (Source: [https://hashsma.sh](https://hashsma.sh), screenshotted 2026-10-25.)
 
-Here are three reasons you might want to use `BLAKE3-Servil`:
+Here are two reasons you might want to use `BLAKE3-Servil`:
 
 1. It is fast. Like 10 *times* as fast, or more, as the competitors in many cases. (See
    [benchmarks](https://johnservil.github.io/bench-hashes).) This could be a big improvement for a
