@@ -23,7 +23,9 @@
  * may be shared and read by any number of threads at once. Calls using the
  * same b3_hasher or b3_stream handle are serialized by the caller. After
  * fork() from a process with other threads, the child must exec before
- * using this API; no recovery of inherited library state is promised.
+ * using this API; no recovery of inherited library state is promised. (A
+ * multithreaded call or stream in a child forked after the pool started
+ * stops the program with a message.)
  *
  * Link with -lb3_servil (libb3_servil.a, or libb3_servil.so /
  * libb3_servil.dylib). Build and install with `cargo cinstall --release`

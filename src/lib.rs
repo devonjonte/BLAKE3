@@ -956,11 +956,10 @@ pub fn initialize() {
 /// finishes holding a small one. To leave CPUs to other work, pass fewer
 /// threads.
 ///
-/// The threads are this process's: after `fork()`, the child has none. Its
-/// multithreaded calls then hash on the calling thread, but a stream whose
-/// body waits by looping on [`Stream::collect`](performance::Stream::collect)
-/// never gets its digests back (its `finish` does). A child that hashes
-/// should `exec` first, as `b3.h` says for C.
+/// The threads are this process's: in a child forked after they started,
+/// every multithreaded call and stream panics, saying so (the child has
+/// none of them). A program that forks initializes the pool in the process
+/// that hashes, after any fork; its single-threaded calls work anywhere.
 ///
 /// ```
 /// blake3_servil::initialize_multithreaded(None);
