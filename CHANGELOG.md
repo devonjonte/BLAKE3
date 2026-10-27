@@ -10,8 +10,7 @@ are tested ([QUALITY.md](QUALITY.md)).
 Each figure is blake3-servil's speed over official BLAKE3 1.8.7's, both
 measured in the same run by [bench-hashes](https://github.com/johnservil/bench-hashes)
 0.18.1 at this release's commit (one run per machine, October 27).
-Official BLAKE3 is called as a program normally calls it: on one thread,
-except for one large message, where it uses its thread pool:
+On the every-core rows each uses its multithreaded function:
 
 | | Intel i7-12700K | AMD EPYC 9255 | Apple M4 Max | Linux VM on the M4 Max |
 |---|---|---|---|---|
@@ -19,7 +18,7 @@ except for one large message, where it uses its thread pool:
 | One message of 1 KiB | 1.1× | 1.1× | 1.2× | 1.2× |
 | One message of 1 MiB, one thread | 1.0× | 1.2× | 2.5× | 2.5× |
 | One message of 128 MiB, every core | 1.1× | 1.0× | 1.3× | 1.3× |
-| A stream of 64 KiB messages, every core | 4.8× | 1.2× | 13× | 9.5× |
+| A stream of 64 KiB messages, every core | 8.0× | 7.2× | 33× | 156× |
 | A batch of 1024 messages, 64 B each | 1.1× | 1.1× | 1.9× | 1.8× |
 | b3sum over 1000 files of mixed sizes | 3.4× | 5.8× | 4.6× | 26× |
 
