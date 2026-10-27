@@ -4,7 +4,9 @@ BLAKE3 is load-bearing in software most people run every day. Each entry below n
 project does with BLAKE3 and links the source or document that shows it. Every link was read on
 October 25, 2026.
 
-## Compilers, linkers and build systems
+## Systems infrastructure
+
+### Compilers, linkers and build systems
 
 - **LLVM: lld, Clang, Windows debug info.** lld computes every ELF
   build-id it is asked for as `md5`, `sha1`, or plain `--build-id` with
@@ -56,7 +58,7 @@ October 25, 2026.
   ([`remote_execution.proto`](https://github.com/bazelbuild/remote-apis/blob/main/build/bazel/remote/execution/v2/remote_execution.proto))
   and Bazel's implementation
   ([`Blake3HashFunction.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/vfs/bazel/Blake3HashFunction.java)).
-## Graphics
+### Graphics
 
 - **Mesa.** The shader disk cache is keyed by BLAKE3
   ([`src/util/disk_cache.c`](https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/util/disk_cache.c),
@@ -69,7 +71,7 @@ October 25, 2026.
   (`Engine/Source/Runtime/Core/Public/IO/IoHash.h`; the engine's
   repository needs an Epic account, and public mirrors show the file).
 
-## Storage and file systems
+### Storage and file systems
 
 - **OpenZFS.** `checksum=blake3` is an on-disk checksum since 2.2
   ([`zfsprops.7`](https://github.com/openzfs/zfs/blob/master/man/man7/zfsprops.7),
@@ -92,7 +94,7 @@ October 25, 2026.
   [Buckets](https://x.com/ClementDelangue/status/2039695447506210905)).
 - **Nix.** A store hash algorithm
   ([`hash.hh`](https://github.com/NixOS/nix/blob/master/src/libutil/include/nix/util/hash.hh)).
-## Networks and ledgers
+### Networks and ledgers
 
 - **Solana.** The accounts hash, and a BLAKE3 syscall for on-chain
   programs
@@ -103,7 +105,7 @@ October 25, 2026.
 - **Wasmer** keys its module cache with BLAKE3
   ([`lib/cache/Cargo.toml`](https://github.com/wasmerio/wasmer/blob/main/lib/cache/Cargo.toml)).
 
-## Zero-knowledge proof systems
+## Post-quantum zero-knowledge proofs
 
 The post-quantum proof systems, which are built on hash functions, pick
 BLAKE3 where a byte-oriented hash is needed (Merkle commitments, the

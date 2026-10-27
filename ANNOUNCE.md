@@ -7,7 +7,7 @@ it with your human eyeballs! Robots are welcome to read this, too.*
 
 `BLAKE3-Servil` is a new fork of the `BLAKE3` codebase, and it is *awesome*.
 
-[`BLAKE3`](https://blake3.io) is a secure hash function. It comes with a high-quality implementation
+`BLAKE3` is a secure hash function. It comes with [a high-quality implementation](https://blake3.io)
 by the original authors. Much of the awesomeness of this new fork is actually due to them and to
 that upstream implementation (see [README.md](README.md#what-comes-from-official-blake3)).
 
@@ -20,7 +20,7 @@ attack by quantum computers. The recent advances in quantum computation have int
 on secure hash functions.
 
 `BLAKE3` has quietly become the de facto standard secure hash function [for systems
-infrastructure](docs/who-uses-blake3.md): compilers, linkers, file systems, GPU drivers, build
+infrastructure](docs/who-uses-blake3.md#systems-infrastructure): compilers, linkers, file systems, GPU drivers, build
 systems, storage back ends, etc. The build-id in Android, Chrome, ChromeOS, and Fuchsia binaries is
 a BLAKE3 hash. It's in Mesa (every Linux GPU driver), Ceph, Hugging Face's Buckets / IETF XET,
 Meta's new source control tool Sapling/Mononoke, Google's TensorStore, Unreal Engine, OpenZFS,
@@ -29,7 +29,7 @@ a hash function that was both fast and secure, and chose the one that was both. 
 ancestor, BLAKE2, is used in WireGuard and the Linux kernel.
 
 BLAKE3 is a leading contender to become the de facto standard secure hash function [in the next
-generation of post-quantum zero-knowledge proofs](docs/who-uses-blake3.md). It is in Plonky3, SP1,
+generation of post-quantum zero-knowledge proofs](docs/who-uses-blake3.md#post-quantum-zero-knowledge-proofs). It is in Plonky3, SP1,
 stwo, Jolt, WHIR, Miden, Winterfell, Aztec, Binius64, Flock. BLAKE2 is used in Zcash and a large
 number of other systems.
 
@@ -78,7 +78,7 @@ Here are two reasons you might want to use `BLAKE3-Servil`:
      thorough as in “100% code coverage”, but even *more* thorough than that. We use a technique
      called “mutation testing” (using `cargo-mutants`) where during the tests, we *insert* a bug
      into the code and then run the tests to see if they catch the bug, and then automatically do
-     that about 2500 more times, each time trying a different possible bug that could be added to
+     that more than 2000 times, each time trying a different possible bug that could be added to
      each line of the code.
 
    * In addition to all of that, we use several other quality-assurance tools:
