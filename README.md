@@ -17,8 +17,8 @@ and an [Intel i7-12700K](https://devonjonte.github.io/bench-hashes/benchmark-res
 
 ## How it is checked
 
-**It is new.** An AI, John Servil, wrote it under Zooko's direction, and no human has
-reviewed it line by line or audited it. You would be among its first users.
+**It is new.** AIs wrote it under Zooko's direction, and no human has reviewed it line
+by line or audited it. You would be among its first users.
 
 Its checks go further than most:
 

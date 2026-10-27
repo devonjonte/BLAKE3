@@ -27,9 +27,11 @@ are separate symbols. So if a kernel read the wrong group's bytes, its
 output would not match the specification, and the proof would fail.
 
 The Intel and AMD assembly kernels are checked the same way. The
-fork's own kernels there, generated, which hash whole chunks and a
-partial one in one pass, or a message of one chunk or less to its root
-in one call, are proved for every input. Single
+fork's own kernels there are generated and proved for every input. One
+hashes whole chunks and a partial one in one pass, and one hashes a
+message of one chunk or less to its root in one call. On AMD Zen 5 and
+later, the wide AVX-512 kernels hash 32 chunks or 16 parent nodes at
+once, proved at every block count from 1 to 16. Single
 compressions and extended output at 1 to 32 blocks are proved. For
 batch hashing, an induction proof covers every input count in the
 stated range for each instruction set, at block
