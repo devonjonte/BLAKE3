@@ -264,7 +264,9 @@ fn test_compress_chunks_parallel_every_cpu_platform() {
             }
         }
     }
-    golden.check(0x17d8ef758412b936);
+    // The counts end at MAX_SIMD_DEGREE, 32 on x86-64 and 128 on AArch64,
+    // so each architecture's sweep has its own value.
+    golden.check(if cfg!(target_arch = "x86_64") { 0x17d8ef758412b936 } else { 0x3b1aa2a01ca807a4 });
 }
 
 /// Platform::xof_many on every platform the CPU runs, against fixed values
