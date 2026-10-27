@@ -386,7 +386,7 @@ src/platform.rs	replace < with > in prefetch_code	1	speed: whether and what to p
 src/platform.rs	replace << with >> in read_x86_features	5	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace << with >> in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace <impl Drop for Sme2Turn>::drop with ()	1	SME2 only: on x86 no SME2 turn is held; take returns the platform unchanged and drop releases nothing
-src/platform.rs	replace == with != in read_x86_features	2	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
+src/platform.rs	replace == with != in read_x86_features	3	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace == with != in sme2_detect_uncached	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace == with != in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace >= with < in Platform::xof_many	1	speed: moves a threshold between equally correct paths
@@ -416,7 +416,7 @@ src/platform.rs	replace ticks_in_100_us -> u64 with 1	1	AArch64 only: ticks_in_1
 src/platform.rs	replace | with & in read_x86_features	3	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace | with ^ in Platform::compress_blocks	1	equivalent: | and ^ agree on flag bits that never overlap
 src/platform.rs	replace | with ^ in read_x86_features	3	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
-src/platform.rs	replace |= with &= in read_x86_features	1	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
+src/platform.rs	replace |= with &= in read_x86_features	2	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/self_test.rs	replace % with + in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace % with / in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace & with ^ in compiled_features_present	2	this CPU has LZCNT and BMI1: every form of the check reads them present; the case it guards is a CPU without them
