@@ -106,17 +106,17 @@ line of this code. I just told my AIs to write correctness proofs and thorough m
 to review one another’s work. I employed three of them for this, and I've been actively working
 together with them on this, day and night for the last month.
 
-People have been using AIs to make source code since last December. Less than year!
+People have been using AIs to make source code since last December. Less than a year!
 
 And a problem is that the AIs can produce slop code.
 
 So, in this project I had the AIs make three different things: benchmarks that measure the
-performance of the code, *security proofs* that prove that the code has no bugs, and then the code
-itself. The code itself can then be written in assembly language! Assembly language is faster that
-modern "high-level" programming languages like Rust and Python, but it isn't much used because most
-human programmers don't know how to write it, and it is easy to write bugs in assembly language. But
-AIs can write assembly language, and the correctness proofs allow us to verify that there are no
-bugs!
+performance of the code, *correctness proofs* that prove that the code has no bugs, and then the
+code itself. The code itself can then be written in assembly language! Assembly language is faster
+than modern "high-level" programming languages like Rust and Python, but it isn't much used because
+most human programmers don't know how to write it, and it is easy to write bugs in assembly
+language. But AIs can write assembly language, and the correctness proofs allow us to verify that
+there are no bugs!
 
 So in addition to being the best implementation of the best secure hash function, this is also a
 demonstration of a better way to make software!
