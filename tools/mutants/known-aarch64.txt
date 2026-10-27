@@ -406,12 +406,8 @@ src/platform.rs	replace == with != in read_x86_features	4	x86 only: never called
 src/platform.rs	replace == with != in sme2_detect_uncached	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace == with != in sme2_reported	1	detection, on a machine with SME2: a wrong no runs NEON (equally correct), a wrong yes is this machine's answer (a machine without SME2 would stop on it)
 src/platform.rs	replace >= with < in Platform::xof_many	1	speed: moves a threshold between equally correct paths
-src/platform.rs	replace Platform::avx2 -> Option<Self> with None	1	x86-64 only: a test helper under cfg(all(test, target_arch = "x86_64")); this machine never compiles it
-src/platform.rs	replace Platform::avx2 -> Option<Self> with Some(Default::default())	1	x86-64 only: a test helper under cfg(all(test, target_arch = "x86_64")); this machine never compiles it
 src/platform.rs	replace Platform::name -> &'static str with ""	1	a name for reports and legends, with no reader since the kernel reports went
 src/platform.rs	replace Platform::name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
-src/platform.rs	replace Platform::sse41 -> Option<Self> with None	1	x86-64 only: a test helper under cfg(all(test, target_arch = "x86_64")); this machine never compiles it
-src/platform.rs	replace Platform::sse41 -> Option<Self> with Some(Default::default())	1	x86-64 only: a test helper under cfg(all(test, target_arch = "x86_64")); this machine never compiles it
 src/platform.rs	replace avx2_detected -> bool with false	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
 src/platform.rs	replace avx2_detected -> bool with true	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
 src/platform.rs	replace avx512_detected -> bool with false	1	another architecture's: compiled for AArch64 as a stub (x86, wasm32)
@@ -458,5 +454,4 @@ src/tree.rs	replace * with / in root_children	1	speed: the arrays' size (each ch
 src/tree.rs	replace + with * in wide	1	speed: how far past its input a subtree prefetches (a prefetch never faults)
 src/tree.rs	replace + with - in wide	1	speed: how far past its input a subtree prefetches (a prefetch never faults)
 src/tree.rs	replace / with * in root_children	2	speed: the arrays' size (each choice holds the values; only the stack frame changes)
-src/tree.rs	replace < with <= in wide	1	equivalent: degrees are powers of two, and at degree 2 both arms give 2
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::subtree -> Option<usize> with None	1	speed: subtrees then hash on the walk's one-chunk path, the same digests

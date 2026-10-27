@@ -459,7 +459,6 @@ src/tree.rs	replace * with / in root_children	1	speed: the arrays' size (each ch
 src/tree.rs	replace + with * in wide	1	SME2 only: the argument is `ahead`, consumed by the SME2 subtree path; on x86 subtree() returns None and serial calls pass 0
 src/tree.rs	replace + with - in wide	1	SME2 only: the argument is `ahead`, consumed by the SME2 subtree path; on x86 subtree() returns None and serial calls pass 0
 src/tree.rs	replace / with * in root_children	2	speed: the arrays' size (each choice holds the values; only the stack frame changes)
-src/tree.rs	replace < with <= in wide	1	equivalent: degrees are powers of two, and at degree 2 both arms give 2
 src/tree.rs	replace <= with > in root_children	1	[cpu lacks avx512f avx512vl] equivalent: the SMALL and MAX arrays are capacities; children() fills either, the small one in more rounds. On AVX-512 one call of the 32-input kernel writes 32 values, more than SMALL (16) holds, so a machine with it catches the mutant (the EPYC 9255, October 26)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::children -> Option<[Cv; 2]> with None	1	equivalent on x86: PlatformKernels::children returns None already (its SME2 block is compiled out)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::degree -> usize with 1	1	speed: moves a threshold between equally correct paths (a degree of 1 hashes one chunk at a time; simd_degree itself has its test)
