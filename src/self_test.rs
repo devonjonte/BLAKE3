@@ -31,10 +31,7 @@
 //! the entry points' bodies from the undetected platform
 //! (`hash_serial_from` and its like), just past Platform::detect(), which
 //! panics until `initialize` has recorded the platform. It allocates nothing: its buffers (about 44 KiB) live on the
-//! calling thread's stack while it runs. Miri skips it (too slow there).
-
-// Under Miri nothing runs the cases.
-#![cfg_attr(miri, allow(dead_code))]
+//! calling thread's stack while it runs.
 
 use crate::platform::Platform;
 
@@ -229,9 +226,9 @@ pub(crate) fn chain(mut outputs: impl FnMut(Case, &[u8], &[u8; 32], &mut [u8]) -
     previous
 }
 
-/// Each case's fold, from the reference implementation (the unit test
-/// `self_test_matches_the_reference` checks them, and prints this table
-/// when it differs).
+/// Each case's fold, from official BLAKE3 1.8.7 (the unit test
+/// `self_test_matches_official_blake3`, run with `BLAKE3_GOLDEN=1`, checks
+/// them and prints this table when it differs).
 #[cfg(target_arch = "aarch64")]
 const EXPECTED: [u64; 42] = [
     0x90e4e563714f7c48,
@@ -528,13 +525,11 @@ static PLANTED_FAILURE: core::sync::atomic::AtomicBool = core::sync::atomic::Ato
 /// relaxed load suffices on the fast path.
 #[inline]
 pub(crate) fn ensure() {
-    #[cfg(not(miri))]
     if STATE.load(core::sync::atomic::Ordering::Relaxed) != PASSED {
         ensure_slow();
     }
 }
 
-#[cfg(not(miri))]
 #[cold]
 #[inline(never)]
 fn ensure_slow() {
@@ -602,7 +597,6 @@ mod test {
     /// verdict would spin, and nextest's one clock would end it: a time-out
     /// (tools/mutants/timeouts-<arch>.txt), not a failure.
     #[test]
-    #[cfg(not(miri))]
     fn test_a_waiting_thread_takes_the_verdict() {
         use core::sync::atomic::Ordering::Relaxed;
         crate::initialize();
@@ -652,31 +646,35 @@ mod test {
         }
     }
 
-    /// A case's outputs from the reference implementation.
+    /// A case's outputs from official BLAKE3 1.8.7, which shares no code
+    /// with this crate's assembly: the generator of EXPECTED.
     fn reference(case: Case, input: &[u8], previous: &[u8; 32]) -> std::vec::Vec<u8> {
-        let digest = |mut hasher: reference_impl::Hasher, bytes: &[u8], skip: usize, out: usize| {
-            hasher.update(bytes);
-            let mut output = std::vec![0u8; skip + out];
-            hasher.finalize(&mut output);
-            output.split_off(skip)
-        };
+        use crate::Mode;
+        use crate::test::official;
         match case {
-            Hash { offset, len } => digest(reference_impl::Hasher::new(), &input[offset..][..len], 0, 32),
-            Many { len, count, .. } => (0..count).flat_map(|i| digest(reference_impl::Hasher::new(), &input[i * len..][..len], 0, 32)).collect(),
+            Hash { offset, len } => official::hash(Mode::Plain, &input[offset..][..len]).to_vec(),
+            Many { len, count, .. } => (0..count).flat_map(|i| official::hash(Mode::Plain, &input[i * len..][..len])).collect(),
             ChunkValues { chunks } => {
-                // The portable Rust kernel, which shares no code with the assembly.
                 let key = crate::platform::words_from_le_bytes_32(previous);
                 let table: std::vec::Vec<&[u8; crate::CHUNK_LEN]> =
                     input[..chunks * crate::CHUNK_LEN].chunks_exact(crate::CHUNK_LEN).map(|c| c.try_into().unwrap()).collect();
                 let mut out = std::vec![0u8; chunks * crate::OUT_LEN];
-                crate::portable::hash_many(&table, &key, 1, crate::IncrementCounter::Yes, crate::KEYED_HASH, crate::CHUNK_START, crate::CHUNK_END, &mut out);
+                official::hash_many(&table, &key, 1, true, crate::KEYED_HASH, crate::CHUNK_START, crate::CHUNK_END, &mut out);
                 out
             }
-            Keyed { len } => digest(reference_impl::Hasher::new_keyed(previous), &input[..len], 0, 32),
-            Derive { len } => digest(reference_impl::Hasher::new_derive_key(CONTEXT), &input[..len], 0, 32),
-            Incremental { len, .. } => digest(reference_impl::Hasher::new(), &input[..len], 0, 32),
-            Xof { len, skip, out } => digest(reference_impl::Hasher::new(), &input[..len], skip as usize, out),
+            Keyed { len } => official::hash(Mode::Keyed(previous), &input[..len]).to_vec(),
+            Derive { len } => official::hash(Mode::DeriveKey(CONTEXT), &input[..len]).to_vec(),
+            Incremental { len, .. } => official::hash(Mode::Plain, &input[..len]).to_vec(),
+            Xof { len, skip, out } => official::xof(Mode::Plain, &input[..len], skip as u64, out),
         }
+    }
+
+    #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
+    /// The chain's outputs from this crate's own kernels (the production
+    /// self-test's), for the tests that need a correct chain to start from:
+    /// every process checks those kernels against EXPECTED at startup.
+    fn ours(case: Case, input: &[u8], previous: &[u8; 32], out: &mut [u8]) -> usize {
+        outputs(Platform::detect_unchecked(), case, input, previous, out)
     }
 
     #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
@@ -685,38 +683,41 @@ mod test {
             // hash_many's increment is not wrapping; exercise the
             // explicitly wrapping raw ABI with individual calls.
             let c = counter.wrapping_add(if increment.yes() { i as u64 } else { 0 });
-            crate::portable::hash1(
-                input,
+            // SSE4.1's kernel, which every AVX-512 CPU has (and the
+            // production self-test checks).
+            crate::platform::Platform::SSE41.hash_many(
+                &[input],
                 key,
                 c,
+                crate::IncrementCounter::No,
                 crate::KEYED_HASH,
                 crate::CHUNK_START,
                 crate::CHUNK_END,
-                (&mut out[i * crate::OUT_LEN..][..crate::OUT_LEN]).try_into().unwrap(),
+                &mut out[i * crate::OUT_LEN..][..crate::OUT_LEN],
             );
         }
     }
 
-    /// The wide entries' constants come from the reference chain's seed
-    /// and the portable compression code, not the new assembly. A changed
-    /// table is printed for review, never accepted automatically.
+    /// The wide entries' constants come from the chain's seed and SSE4.1's
+    /// kernel, not the new assembly. A changed table is printed for review,
+    /// never accepted automatically.
     #[test]
     #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
     fn wide_self_test_matches_reference() {
-        let previous = chain(into(reference), |i, folded| assert_eq!(folded, EXPECTED[i], "shared reference chain changed"));
+        let previous = chain(ours, |i, folded| assert_eq!(folded, EXPECTED[i], "shared chain changed"));
         let mut folds = std::vec::Vec::new();
         crate::avx512_32::self_test_chain(&previous, wide_reference, |_, folded| folds.push(folded));
         let table: std::string::String = folds.iter().map(|f| std::format!("    0x{f:016x},\n")).collect();
-        assert!(folds == crate::avx512_32::SELF_TEST_EXPECTED, "wide EXPECTED differs from the portable reference; its table:\n{table}");
+        assert!(folds == crate::avx512_32::SELF_TEST_EXPECTED, "wide EXPECTED differs from SSE4.1's; its table:\n{table}");
     }
 
     /// Each new case detects corruption in its last output byte, not
     /// merely the first CV used as the next seed, and stops before any
-    /// later case. Use the production checker with a portable callback.
+    /// later case. Use the production checker with SSE4.1's callback.
     #[test]
     #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
     fn wide_self_test_rejects_corruption() {
-        let previous = chain(into(reference), |i, folded| assert_eq!(folded, EXPECTED[i]));
+        let previous = chain(ours, |i, folded| assert_eq!(folded, EXPECTED[i]));
         for bad in 0..crate::avx512_32::SELF_TEST_EXPECTED.len() {
             let mut calls = 0;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -744,21 +745,27 @@ mod test {
         }
     }
 
-    /// EXPECTED is the reference implementation's answer for every case.
-    /// On a difference the test prints the table the reference gives;
-    /// pasting it in is a reviewed change.
+    /// EXPECTED is official BLAKE3's answer for every case. On a
+    /// difference the test prints the table official BLAKE3 gives; pasting
+    /// it in is a reviewed change.
     #[test]
-    fn self_test_matches_the_reference() {
+    fn self_test_matches_official_blake3() {
+        // Official BLAKE3 generates EXPECTED: the reviewed regeneration step
+        // (BLAKE3_GOLDEN=1) runs it; every process checks its kernels
+        // against EXPECTED at startup.
+        if std::env::var_os("BLAKE3_GOLDEN").is_none() {
+            return;
+        }
         let mut folds = std::vec::Vec::new();
         chain(into(reference), |_, folded| folds.push(folded));
         let table: std::string::String = folds.iter().map(|f| std::format!("    0x{f:016x},\n")).collect();
-        assert!(folds == EXPECTED, "EXPECTED differs from the reference implementation; its table:\n{table}");
+        assert!(folds == EXPECTED, "EXPECTED differs from official BLAKE3's; its table:\n{table}");
     }
 }
 
 /// The self-test's stop, in every test build (std or not: the tests use
-/// std in every build); a child process, so not under Miri.
-#[cfg(all(test, not(miri), unix))]
+/// std in every build); a child process.
+#[cfg(all(test, unix))]
 mod stops {
     use super::*;
 

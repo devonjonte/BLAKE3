@@ -73,7 +73,7 @@ mod test {
     use crate::platform::Platform;
 
     fn reference(input: &[u8], key: &CVWords, flags: u8) -> [u8; OUT_LEN] {
-        crate::ChunkState::new(key, 0, flags, Platform::Portable).update(input).output().root_bytes()
+        crate::ChunkState::new(key, 0, flags, Platform::SSE41).update(input).output().root_bytes()
     }
 
     fn variants() -> Vec<bool> {

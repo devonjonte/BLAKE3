@@ -810,12 +810,11 @@ pub unsafe fn hash_messages_raw(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod test {
     use super::*;
 
     #[test]
-    #[cfg(feature = "std")]
     fn test_kernel_code_ranges() {
         // Each kernel's code runs from its symbol to its end label: present,
         // in order, and under a kernel's size (the largest, q6, is 20 KB).
@@ -837,27 +836,9 @@ mod test {
         }
     }
 
-    /// Against the portable compressor, block by block: counters whose low
-    /// word wraps inside a group, flag sets every mode uses, short and full
-    /// blocks, lengths that leave blocks past the groups (left untouched).
+    /// The groups of four against fixed values (crate::test::xof_groups_sweep).
     #[test]
-    fn test_xof_many_matches_portable() {
-        let cv: CVWords = core::array::from_fn(|i| 0x9E37_79B9u32.wrapping_mul(i as u32 + 3));
-        let mut block = [0u8; BLOCK_LEN];
-        crate::test::paint_test_input(&mut block);
-        for counter in [0u64, 7, 0xFFFF_FFFE, u64::MAX - 5] {
-            for (block_len, flags) in [(64u8, crate::ROOT), (21, crate::ROOT | crate::CHUNK_END), (0, crate::ROOT | crate::KEYED_HASH | crate::PARENT)] {
-                for blocks in [4usize, 5, 8, 11, 12, 16, 20] {
-                    let mut out = std::vec![0u8; blocks * BLOCK_LEN];
-                    let done = xof_many(&cv, &block, block_len, counter, flags, &mut out);
-                    assert_eq!(done, blocks / 4 * 4 * BLOCK_LEN);
-                    for (i, got) in out[..done].chunks_exact(BLOCK_LEN).enumerate() {
-                        let want = crate::portable::compress_xof(&cv, &block, block_len, counter.wrapping_add(i as u64), flags);
-                        assert_eq!(got, &want[..], "counter {counter} + {i}, block_len {block_len}, flags {flags:#x}");
-                    }
-                    assert!(out[done..].iter().all(|&b| b == 0), "nothing past the groups");
-                }
-            }
-        }
+    fn test_xof_many_groups() {
+        crate::test::xof_groups_sweep(&mut |cv, block, block_len, counter, flags, out| xof_many(cv, block, block_len, counter, flags, out));
     }
 }

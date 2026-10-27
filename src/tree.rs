@@ -133,15 +133,6 @@ fn hash_tree<K: Kernels>(k: &K, input: &[u8]) -> Cv {
     k.parent_root(&root_children(k, input, 0, 0))
 }
 
-/// A chunk or less through ChunkState, for platforms without a one-call
-/// kernel; out of line, so that its 64-byte-aligned block buffer does not
-/// realign the stack of every caller of `hash`, on platforms with one.
-#[cfg(not(blake3_neon))]
-#[inline(never)]
-fn chunk_root_by_state(k: &PlatformKernels<'_>, input: &[u8]) -> Cv {
-    crate::ChunkState::new(k.key, 0, k.flags, k.platform).update(input).output().root_bytes()
-}
-
 /// The library's kernels for one key and flags on one platform.
 pub(crate) struct PlatformKernels<'a> {
     pub key: &'a CVWords,
@@ -198,20 +189,13 @@ impl Kernels for PlatformKernels<'_> {
         // The scalar kernel, on every AArch64 core (crate::hash_one_chunk_root).
         #[cfg(blake3_neon)]
         return crate::hash_one_chunk_root(input, self.key, self.flags).0;
-        #[cfg(not(blake3_neon))]
-        {
-            // One kernel call that keeps off the stack (src/ffi_chunk_root.rs):
-            // a caller's just-written message has none of our loads to hold back.
-            #[cfg(blake3_sse41_ffi)]
-            match self.platform {
-                #[cfg(blake3_avx512_ffi)]
-                crate::platform::Platform::AVX512 => return unsafe { crate::chunk_root::chunk_root(true, input, self.key, self.flags) },
-                crate::platform::Platform::SSE41 | crate::platform::Platform::AVX2 => {
-                    return unsafe { crate::chunk_root::chunk_root(false, input, self.key, self.flags) };
-                }
-                _ => {}
-            }
-            chunk_root_by_state(self, input)
+        // One kernel call that keeps off the stack (src/ffi_chunk_root.rs):
+        // a caller's just-written message has none of our loads to hold back.
+        // Sound: detect() found the platform's instructions.
+        #[cfg(target_arch = "x86_64")]
+        match self.platform {
+            crate::platform::Platform::AVX512 => unsafe { crate::chunk_root::chunk_root(true, input, self.key, self.flags) },
+            crate::platform::Platform::SSE41 | crate::platform::Platform::AVX2 => unsafe { crate::chunk_root::chunk_root(false, input, self.key, self.flags) },
         }
     }
 

@@ -24,8 +24,7 @@ The README lists what the fork adds for callers; the code is laid out so:
   (the two kinds of call, their contracts at the top), `incremental.rs`
   (the `Hasher`), `block.rs` (`Block` and `Batch`, the batch calls'
   input), `lib.rs` (what the calls share), `platform.rs` (detection and
-  dispatch), `ffi_*.rs` (each kernel family's bindings), `portable.rs`
-  (the Rust kernels Miri runs, and the tests' second opinion), `pair.rs` (a whole chunk and a
+  dispatch), `ffi_*.rs` (each kernel family's bindings), `pair.rs` (a whole chunk and a
   partial one side by side, x86-64), `many.rs` (batches), `each.rs`
   (collections, `update_each`), `lanes.rs` (the thread pool), `stream.rs`
   (the stream), `io.rs` (`update_reader`), `self_test.rs` (the startup

@@ -98,7 +98,7 @@ fn guarded_kernel_bounds(width: usize) {
                         let mut cv = *crate::IV;
                         let c = counter.wrapping_add(if inc { i as u64 } else { 0 });
                         for (b, block) in input.bytes().chunks_exact(BLOCK_LEN).enumerate() {
-                            crate::portable::compress_in_place(
+                            crate::platform::Platform::SSE41.compress_in_place(
                                 &mut cv,
                                 block.try_into().unwrap(),
                                 if b + 1 == blocks { last_len as u8 } else { BLOCK_LEN as u8 },

@@ -2,7 +2,7 @@
 # SME2 and the SHA-3 extension), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/block.rs src/convenience.rs src/each.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/performance.rs src/platform.rs src/portable.rs src/self_test.rs src/tree.rs src/pair.rs
+files: src/block.rs src/convenience.rs src/each.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/performance.rs src/platform.rs src/self_test.rs src/tree.rs src/pair.rs
 model files: src/finish.rs src/park.rs
 src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace < with <= in hash_each_multithreaded	1	speed: moves a threshold between equally correct paths
@@ -409,10 +409,6 @@ src/platform.rs	replace == with != in sme2_reported	1	detection, on a machine wi
 src/platform.rs	replace >= with < in Platform::xof_many	1	speed: moves a threshold between equally correct paths
 src/platform.rs	replace Platform::avx2 -> Option<Self> with None	1	x86-64 only: a test helper under cfg(all(test, target_arch = "x86_64")); this machine never compiles it
 src/platform.rs	replace Platform::avx2 -> Option<Self> with Some(Default::default())	1	x86-64 only: a test helper under cfg(all(test, target_arch = "x86_64")); this machine never compiles it
-src/platform.rs	replace Platform::compress_name -> &'static str with ""	1	a name for the kernel report and legends (no test pins the names)
-src/platform.rs	replace Platform::compress_name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
-src/platform.rs	replace Platform::hash_many_name -> &'static str with ""	1	a name for the kernel report and legends (no test pins the names)
-src/platform.rs	replace Platform::hash_many_name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
 src/platform.rs	replace Platform::name -> &'static str with ""	1	a name for reports and legends, with no reader since the kernel reports went
 src/platform.rs	replace Platform::name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
 src/platform.rs	replace Platform::sse41 -> Option<Self> with None	1	x86-64 only: a test helper under cfg(all(test, target_arch = "x86_64")); this machine never compiles it
@@ -441,7 +437,6 @@ src/platform.rs	replace | with & in read_x86_features	3	x86 only: never called o
 src/platform.rs	replace | with ^ in Platform::compress_blocks	1	equivalent: | and ^ agree on flag bits that never overlap
 src/platform.rs	replace | with ^ in read_x86_features	3	x86 only: never called on AArch64 (CI's x86 tests reach it)
 src/platform.rs	replace |= with &= in read_x86_features	3	x86 only: never called on AArch64 (CI's x86 tests reach it)
-src/portable.rs	replace | with ^ in hash1	1	equivalent: | and ^ agree on flag bits that never overlap
 src/self_test.rs	replace & with ^ in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace & with | in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace && with || in compiled_features_present	2	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
@@ -459,8 +454,6 @@ src/self_test.rs	replace == with != in compiled_features_present	2	x86 only: com
 src/self_test.rs	replace compiled_features_present with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/self_test.rs	replace test::wide_reference with ()	1	x86-64 only: the wide kernels' reference in the self-test's tests runs where AVX-512 does; here no test reaches it
 src/self_test.rs	replace | with ^ in chunk_values	2	equivalent: | and ^ agree on flag bits that never overlap
-src/tree.rs	delete match arm crate::platform::Platform::AVX512 in <impl Kernels for PlatformKernels<'_>>::chunk_root	1	x86-64 only: the chunk-root dispatch is cfg(not(blake3_neon)); this machine's NEON kernels take every chunk root
-src/tree.rs	delete match arm crate::platform::Platform::SSE41 | crate::platform::Platform::AVX2 in <impl Kernels for PlatformKernels<'_>>::chunk_root	1	x86-64 only: the chunk-root dispatch is cfg(not(blake3_neon)); this machine's NEON kernels take every chunk root
 src/tree.rs	replace * with + in root_children	1	speed: the arrays' size (each choice holds the values; only the stack frame changes)
 src/tree.rs	replace * with / in root_children	1	speed: the arrays' size (each choice holds the values; only the stack frame changes)
 src/tree.rs	replace + with * in wide	1	speed: how far past its input a subtree prefetches (a prefetch never faults)
@@ -468,4 +461,3 @@ src/tree.rs	replace + with - in wide	1	speed: how far past its input a subtree p
 src/tree.rs	replace / with * in root_children	2	speed: the arrays' size (each choice holds the values; only the stack frame changes)
 src/tree.rs	replace < with <= in wide	1	equivalent: degrees are powers of two, and at degree 2 both arms give 2
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::subtree -> Option<usize> with None	1	speed: subtrees then hash on the walk's one-chunk path, the same digests
-src/tree.rs	replace chunk_root_by_state -> Cv with Default::default()	1	x86-64 only: cfg(not(blake3_neon)); this machine's NEON kernels take every chunk root

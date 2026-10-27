@@ -735,13 +735,13 @@ mod test {
     }
 
     /// Whole-block x86 batches on every available SIMD implementation,
-    /// including tails and table boundaries, with independent reference
-    /// digests in all three modes and output sentinels.
-    #[cfg(target_arch = "x86_64")]
+    /// including tails and table boundaries, against fixed values (official
+    /// BLAKE3's digests) in all three modes, with output sentinels.
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     #[test]
     fn test_whole_blocks_x86_full_width() {
         #[allow(unused_mut)]
-        let mut platforms: Vec<_> = [Some(Platform::Portable), Platform::sse41(), Platform::avx2()].into_iter().flatten().collect();
+        let mut platforms: Vec<_> = [Platform::sse41(), Platform::avx2()].into_iter().flatten().collect();
         #[cfg(blake3_avx512_ffi)]
         platforms.extend(Platform::avx512());
         let key = [0x5Au8; crate::KEY_LEN];
@@ -752,31 +752,21 @@ mod test {
             (crate::platform::words_from_le_bytes_32(&key), crate::KEYED_HASH),
             (crate::platform::words_from_le_bytes_32(&context_key), crate::DERIVE_KEY_MATERIAL),
         ];
+        let api_modes = [crate::Mode::Plain, crate::Mode::Keyed(&key), crate::Mode::DeriveKey(context)];
+        let mut golden = crate::test::Golden::new("whole_blocks_x86_full_width");
         for len in [128, 256, 512, CHUNK_LEN, 2047, 2048, 2049, 4095, 4096, 4097] {
             for count in (0..=33).chain([63, 64, 127, 128, 129, 255]) {
                 let bytes = messages(len, count);
-                // The reference digests, once per mode: the input's
-                // alignment below changes nothing about them.
-                let wants: Vec<Vec<_>> = modes
+                // The digests, once per mode, one message at a time, against
+                // the fixed values: the input's alignment below changes
+                // nothing about them.
+                let wants: Vec<Vec<[u8; OUT_LEN]>> = api_modes
                     .iter()
-                    .map(|&(_, flags)| {
-                        (0..count)
-                            .map(|i| {
-                                let mut h = if flags == 0 {
-                                    reference_impl::Hasher::new()
-                                } else if flags == crate::KEYED_HASH {
-                                    reference_impl::Hasher::new_keyed(&key)
-                                } else {
-                                    reference_impl::Hasher::new_derive_key(context)
-                                };
-                                h.update(message(&bytes, len, i));
-                                let mut digest = [0; OUT_LEN];
-                                h.finalize(&mut digest);
-                                digest
-                            })
-                            .collect()
-                    })
+                    .map(|&mode| (0..count).map(|i| *crate::convenience::hash_with(mode, message(&bytes, len, i)).as_bytes()).collect())
                     .collect();
+                for (&mode, want) in api_modes.iter().zip(&wants) {
+                    golden.add(want.as_flattened(), || (0..count).flat_map(|i| crate::test::official::hash(mode, message(&bytes, len, i))).collect());
+                }
                 // Four alignments of the input (a wrong pointer step shows
                 // at any of them): 64 took the suite from 2 s to 16 s.
                 for offset in [0, 1, 7, 63] {
@@ -794,16 +784,17 @@ mod test {
                 }
             }
         }
+        golden.check(0xba67a57a036242e7);
     }
 
     /// hash_across with partial chunks (1025, 3073, 7169 bytes: one whole
-    /// chunk and a byte, three and a byte, seven and a byte), on the
-    /// portable platform (so Miri runs it), against the published vectors
+    /// chunk and a byte, three and a byte, seven and a byte), on every
+    /// platform, against the published vectors
     /// (test_vectors/test_vectors.json, byte i = i % 251), each message in
     /// its zero-padded slot.
     #[cfg(all(feature = "std", target_arch = "x86_64"))]
     #[test]
-    fn portable_across_partial_chunks_matches_published_vectors() {
+    fn across_partial_chunks_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
         let context_key = crate::performance::context_key(context);
@@ -840,7 +831,7 @@ mod test {
         ];
         for (len, anchors) in cases {
             let slot = slot_len(len);
-            for count in if cfg!(miri) { &[2usize][..] } else { &[4usize, 17][..] } {
+            for count in &[4usize, 17] {
                 let mut input = vec![0u8; slot * count];
                 for m in 0..*count {
                     for (i, b) in input[m * slot..][..len].iter_mut().enumerate() {
@@ -849,19 +840,20 @@ mod test {
                 }
                 for ((words, flags), anchor) in modes.iter().zip(anchors) {
                     let expected: [u8; OUT_LEN] = hex::decode(anchor).unwrap().try_into().unwrap();
-                    let mut out = vec![[0u8; OUT_LEN]; *count];
-                    hash_across(&input, len, words, *flags, &mut out, Platform::Portable);
-                    assert!(out.iter().all(|digest| *digest == expected), "{count} x {len} B");
+                    for platform in crate::test::every_platform() {
+                        let mut out = vec![[0u8; OUT_LEN]; *count];
+                        hash_across(&input, len, words, *flags, &mut out, platform);
+                        assert!(out.iter().all(|digest| *digest == expected), "{platform:?}: {count} x {len} B");
+                    }
                 }
             }
         }
     }
 
-    /// Published anchors exercise the two-chunk helper independently of
-    /// SIMD availability, including under Miri on the portable platform.
+    /// Published anchors exercise the two-chunk helper on every platform.
     #[cfg(all(feature = "std", target_arch = "x86_64"))]
     #[test]
-    fn portable_two_chunk_batch_matches_published_vectors() {
+    fn two_chunk_batch_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
         let context_key = crate::performance::context_key(context);
@@ -881,16 +873,18 @@ mod test {
             let input = message.repeat(count);
             for ((words, flags), anchor) in modes.iter().zip(anchors) {
                 let expected: [u8; OUT_LEN] = hex::decode(anchor).unwrap().try_into().unwrap();
-                let mut out = vec![[0u8; OUT_LEN]; count];
-                hash_across(&input, 2 * CHUNK_LEN, words, *flags, &mut out, Platform::Portable);
-                assert!(out.iter().all(|digest| *digest == expected));
+                for platform in crate::test::every_platform() {
+                    let mut out = vec![[0u8; OUT_LEN]; count];
+                    hash_across(&input, 2 * CHUNK_LEN, words, *flags, &mut out, platform);
+                    assert!(out.iter().all(|digest| *digest == expected), "{platform:?}");
+                }
             }
         }
     }
 
     #[cfg(all(feature = "std", target_arch = "x86_64"))]
     #[test]
-    fn portable_four_chunk_batch_matches_published_vectors() {
+    fn four_chunk_batch_matches_published_vectors() {
         let key = b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
         let context_key = crate::performance::context_key(context);
@@ -910,9 +904,11 @@ mod test {
             let input = message.repeat(count);
             for ((words, flags), anchor) in modes.iter().zip(anchors) {
                 let expected: [u8; OUT_LEN] = hex::decode(anchor).unwrap().try_into().unwrap();
-                let mut out = vec![[0u8; OUT_LEN]; count];
-                hash_across(&input, 4 * CHUNK_LEN, words, *flags, &mut out, Platform::Portable);
-                assert!(out.iter().all(|digest| *digest == expected));
+                for platform in crate::test::every_platform() {
+                    let mut out = vec![[0u8; OUT_LEN]; count];
+                    hash_across(&input, 4 * CHUNK_LEN, words, *flags, &mut out, platform);
+                    assert!(out.iter().all(|digest| *digest == expected), "{platform:?}");
+                }
             }
         }
     }
@@ -927,7 +923,7 @@ mod test {
     #[test]
     fn test_hash_blocks_without_plans() {
         #[allow(unused_mut)]
-        let mut platforms = vec![Platform::detect(), Platform::Portable];
+        let mut platforms = vec![Platform::detect()];
         #[cfg(blake3_neon)]
         platforms.push(Platform::neon().expect("NEON on AArch64"));
         for count in 0..=40 {
@@ -950,7 +946,7 @@ mod test {
     #[test]
     fn test_hash_many_modes_every_platform() {
         #[allow(unused_mut)]
-        let mut platforms = vec![Platform::detect(), Platform::Portable];
+        let mut platforms = vec![Platform::detect()];
         #[cfg(blake3_neon)]
         platforms.push(Platform::neon().expect("NEON on AArch64"));
         let key = [0x5Au8; crate::KEY_LEN];

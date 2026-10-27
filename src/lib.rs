@@ -133,8 +133,8 @@
 //!
 //! `initialize` checks the build and the CPU before the process first
 //! hashes, in well under a millisecond. It runs every assembly kernel built
-//! for this machine on fixed inputs and compares the outputs with the
-//! reference implementation's. A mismatch stops the process, which no
+//! for this machine on fixed inputs and compares the outputs with fixed
+//! values official BLAKE3 generated. A mismatch stops the process, which no
 //! caller can catch: with `std` it names the code path on stderr and
 //! aborts; without it, the CPU's trap instruction stops it. Other threads
 //! that call `initialize` meanwhile wait for it.
@@ -201,7 +201,6 @@ mod chunk_root;
 #[cfg(blake3_neon)]
 #[path = "ffi_neon_hybrid.rs"]
 mod neon_hybrid;
-mod portable;
 #[cfg(blake3_sme2)]
 #[path = "ffi_sme2.rs"]
 mod sme2;
@@ -318,25 +317,13 @@ pub const CHUNK_LEN: usize = 1024;
 
 const MAX_DEPTH: usize = 54; // 2^54 * CHUNK_LEN = 2^64
 
-// While iterating the compression function within a chunk, the CV is
-// represented as words, to avoid doing two extra endianness conversions for
-// each compression in the portable implementation. But the hash_many interface
-// needs to hash both input bytes and parent nodes, so it's better for its
-// output CVs to be represented as bytes.
+// A chunk's CV is words while its blocks compress (the kernels' form); the
+// hash_many interface hashes input bytes and parent nodes alike, so its
+// output CVs are bytes.
 type CVWords = [u32; 8];
 type CVBytes = [u8; 32]; // little-endian
 
 const IV: &CVWords = &[0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19];
-
-const MSG_SCHEDULE: [[usize; 16]; 7] = [
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-    [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8],
-    [3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1],
-    [10, 7, 12, 9, 14, 3, 13, 15, 4, 0, 11, 2, 5, 8, 1, 6],
-    [12, 13, 9, 11, 15, 10, 14, 8, 7, 2, 5, 3, 0, 1, 6, 4],
-    [9, 14, 11, 5, 8, 12, 15, 1, 13, 3, 0, 10, 2, 6, 4, 7],
-    [11, 15, 5, 0, 1, 9, 8, 6, 14, 10, 2, 12, 3, 4, 7, 13],
-];
 
 // These are the internal flags that we use to domain separate root/non-root,
 // chunk/parent, and chunk beginning/middle/end. These get set at the high end
@@ -349,16 +336,6 @@ const ROOT: u8 = 1 << 3;
 const KEYED_HASH: u8 = 1 << 4;
 const DERIVE_KEY_CONTEXT: u8 = 1 << 5;
 const DERIVE_KEY_MATERIAL: u8 = 1 << 6;
-
-#[inline]
-fn counter_low(counter: u64) -> u32 {
-    counter as u32
-}
-
-#[inline]
-fn counter_high(counter: u64) -> u32 {
-    (counter >> 32) as u32
-}
 
 /// An output of the default size, 32 bytes, which provides constant-time
 /// equality checking.

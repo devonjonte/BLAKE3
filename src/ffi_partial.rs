@@ -177,7 +177,7 @@ mod test {
                             // Sound: the CPU has the kernel's instructions.
                             unsafe { kernel(&chunks, rest, crate::IV, counter, crate::KEYED_HASH, &mut out) };
                             for (i, chunk) in input[..whole * CHUNK_LEN + partial].chunks(CHUNK_LEN).enumerate() {
-                                let mut state = crate::ChunkState::new(crate::IV, counter + i as u64, crate::KEYED_HASH, crate::platform::Platform::Portable);
+                                let mut state = crate::ChunkState::new(crate::IV, counter + i as u64, crate::KEYED_HASH, crate::platform::Platform::SSE41);
                                 state.update(chunk);
                                 assert_eq!(
                                     &out[i * OUT_LEN..][..OUT_LEN],

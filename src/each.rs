@@ -345,10 +345,9 @@ mod test {
     use super::*;
 
     /// The pool's ranges of items (lanes::Work::Each), just past where the
-    /// pool takes them, against the calling thread's: small enough for
-    /// Miri (the CI's smoketest runs it).
+    /// pool takes them, against the calling thread's.
     #[test]
-    fn test_miri_hash_each_multithreaded() {
+    fn test_hash_each_multithreaded_past_the_split() {
         let mut input = vec![0u8; crate::lanes::MIN_SPLIT_LEN + 8 * 1024];
         crate::test::paint_test_input(&mut input);
         let items: Vec<&[u8]> = input.chunks(crate::lanes::MIN_SPLIT_LEN / 40 + 7).collect();

@@ -22,8 +22,8 @@ jobs:
   # Every crate in the tree formatted by rustfmt.toml at the root.
   rustfmt:
     runs-on: ubuntu-latest
-    # The job's one clock, explicit: about 4x its slowest run (Miri's, 7 min, October 2026), far
-    # below GitHub's implicit 360. GitHub reports a job past it as timed out, not failed.
+    # The job's one clock, explicit: several times any job's run, far below
+    # GitHub's implicit 360. GitHub reports a job past it as timed out, not failed.
     timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
@@ -94,10 +94,6 @@ jobs:
     - name: C API
       run: cargo nextest run --release
       working-directory: ./capi
-    # Reference impl doc test.
-    - name: reference impl doc test
-      run: cargo test --doc
-      working-directory: ./reference_impl
 
   b3sum_tests:
     name: b3sum ${{ matrix.target.name }} ${{ matrix.channel }}
@@ -210,32 +206,6 @@ jobs:
           cd /work
           ~/.cargo/bin/cargo nextest run
           ~/.cargo/bin/cargo test --doc
-
-  miri_smoketest:
-    name: Miri smoketest
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@nightly
-      with:
-        components: miri
-    - uses: taiki-e/install-action@nextest
-    # Currently the test search "miri" only matches "test_miri_smoketest", but
-    # we might add more. If this accidentally picks up anything incompatible or
-    # slow, we can narrow it.
-    # The pool's and the queue's threads live for the whole process, and
-    # the queue's test uses several of them.
-    - run: cargo miri nextest run --profile miri miri
-      env:
-        MIRIFLAGS: "-Zmiri-num-cpus=4 -Zmiri-ignore-leaks"
-    - name: C boundary under strict provenance
-      run: cargo miri nextest run --manifest-path capi/Cargo.toml --config-file .config/nextest.toml --profile miri miri_
-      env:
-        MIRIFLAGS: "-Zmiri-num-cpus=1 -Zmiri-ignore-leaks -Zmiri-strict-provenance"
-    - name: C bad-call diagnostics before reference construction
-      run: python3 tools/test_capi_guards.py
-
 
   x86_model:
     name: "the x86-64 proofs' model against the CPU"

@@ -9,8 +9,7 @@ assembly (c/), splits the Rust into unsafe code (inside an `unsafe`
 block, function, or impl) and safe code, and asks of each technique
 which of those lines it exercises on this machine:
 
-- the test suites, the guard-page tests, the paths Miri runs, and the
-  official test vectors: LLVM source coverage (-C instrument-coverage,
+- the test suites, the guard-page tests, and the official test vectors: LLVM source coverage (-C instrument-coverage,
   nightly) of each run, the lines it executed;
 - AddressSanitizer: the lines the test suites execute, assembly excepted
   (it instruments compiled Rust and C, never assembly);
@@ -173,7 +172,6 @@ def main():
     print("qa_coverage: running the suites with coverage (a few minutes)", file=sys.stderr)
     tests, compiled = coverage("tests", ["--lib", "--tests"])
     guard, _ = coverage("guard", ["--lib"], ["guard"])
-    miri, _ = coverage("miri-paths", ["--lib"], ["unsafe_paths", "miri"])
     vectors, _ = coverage("vectors", ["--manifest-path", "test_vectors/Cargo.toml"])
     # Everything compiled on this machine: a line the tests' binaries hold.
     mutants, mutant_count, survivors = mutated()
@@ -184,7 +182,6 @@ def main():
         (f"Test suites ({platform.machine()} here)", tally(tests), "every line run once or more by the library's and integration tests"),
         ("Official test vectors", tally(vectors), "lines run while checking the published vectors"),
         ("Guard pages", tally(guard), "lines run with inputs and outputs against unmapped pages; assembly reached, not counted"),
-        ("Miri's paths", tally(miri), "the lines the tests Miri runs execute natively; Miri checks Rust only"),
         ("AddressSanitizer", tally(tests, lambda f: not is_asm(f)), "the suites' lines, assembly excepted"),
         ("ThreadSanitizer", tally(tests, lambda f: f in SHARED), "the suites' lines in files threads share memory in"),
         (f"Mutation testing ({mutant_count} mutants, {mutant_count - survivors} caught on AArch64)", tally(mutants), "lines in functions with a planted bug"),

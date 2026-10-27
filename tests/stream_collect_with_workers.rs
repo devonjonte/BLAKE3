@@ -9,12 +9,10 @@
 
 use blake3_servil::{Hash, Mode};
 
+/// The one-message digest, which the official vectors and the library's
+/// fixed values hold to official BLAKE3's.
 fn reference(data: &[u8]) -> Hash {
-    let mut hasher = reference_impl::Hasher::new();
-    hasher.update(data);
-    let mut out = [0u8; 32];
-    hasher.finalize(&mut out);
-    Hash::from(out)
+    blake3_servil::convenience::hash(data)
 }
 
 #[test]

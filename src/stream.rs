@@ -884,12 +884,12 @@ mod test {
         }
     }
 
-    /// A few messages through a stream, small enough for Miri: the handover
-    /// of entries to the pool's threads and back, checked for data races.
+    /// A few messages through a stream: the handover of entries to the
+    /// pool's threads and back.
     /// Keep: it detects, by hanging, mutants the clock then stops
     /// (tools/mutants/timeouts-x86_64.txt).
     #[test]
-    fn test_miri_stream() {
+    fn test_small_stream() {
         let input = std::vec![3u8; 3 * PIECE + 5];
         let batch = crate::test::blocks(&input[..4 * 64]);
         let blocks = crate::test::message(&input);

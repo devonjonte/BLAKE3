@@ -55,8 +55,8 @@ pub(crate) struct HasherCore {
     // The stack size is MAX_DEPTH + 1 because we do lazy merging. For example,
     // with 7 chunks, we have 3 entries in the stack. Adding an 8th chunk
     // requires a 4th entry, rather than merging everything down to 1, because
-    // we don't know whether more input is coming. This is different from how
-    // the reference implementation does things.
+    // we don't know whether more input is coming (official BLAKE3's
+    // reference implementation merges eagerly instead).
     pub(crate) cv_stack: CvStack,
 }
 
@@ -378,8 +378,8 @@ impl HasherCore {
     }
 
     // As described in push_cv() below, we do "lazy merging", delaying merges
-    // until right before the next CV is about to be added. This is different
-    // from the reference implementation. Another difference is that we aren't
+    // until right before the next CV is about to be added (official BLAKE3's
+    // reference implementation merges eagerly). Also, we aren't
     // always merging 1 chunk at a time. Instead, each CV might represent any
     // power-of-two number of chunks, as long as the smaller-above-larger stack
     // order is maintained. Instead of the "count the trailing 0-bits"
@@ -404,9 +404,9 @@ impl HasherCore {
         kernels_on(&self.key, &self.chunk_state, platform, pooled)
     }
 
-    // In reference_impl.rs, we merge the new CV with existing CVs from the
-    // stack before pushing it. We can do that because we know more input is
-    // coming, so we know none of the merges are root.
+    // Official BLAKE3's reference implementation (reference_impl.rs) merges
+    // the new CV with existing CVs from the stack before pushing it. It can,
+    // because it knows more input is coming, so none of the merges are root.
     //
     // This setting is different. We want to feed as much input as possible to
     // the walk (`tree::wide`), without setting aside anything for the
@@ -426,7 +426,7 @@ impl HasherCore {
     //
     // The second problem is solved with "lazy merging". That is, when we're
     // about to add a CV to the stack, we don't merge it with anything first,
-    // as the reference impl does. Instead we do merges using the *previous* CV
+    // as the reference implementation does. Instead we do merges using the *previous* CV
     // that was added, which is sitting on top of the stack, and we put the new
     // CV (unmerged) on top of the stack afterwards. This guarantees that we
     // never merge the root node until finalize().
