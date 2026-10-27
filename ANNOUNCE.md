@@ -19,20 +19,6 @@ Secure hash functions are also the primary tool for building cryptographic syste
 attack by quantum computers. The recent advances in quantum computation have intensified attention
 on secure hash functions.
 
-`BLAKE3` has quietly become the de facto standard secure hash function [for systems
-infrastructure](docs/who-uses-blake3.md#systems-infrastructure): compilers, linkers, file systems, GPU drivers, build
-systems, storage back ends, etc. The build-id in Android, Chrome, ChromeOS, and Fuchsia binaries is
-a BLAKE3 hash. It's in Mesa (every Linux GPU driver), Ceph, Hugging Face's Buckets / IETF XET,
-Meta's new source control tool Sapling/Mononoke, Google's TensorStore, Unreal Engine, OpenZFS,
-Solana, Nix, Bazel, Buck2, Wasmer, the Swift compiler, rustc, cargo, and iroh. These projects needed
-a hash function that was both fast and secure, and chose the one that was both. BLAKE3's immediate
-ancestor, BLAKE2, is used in WireGuard and the Linux kernel.
-
-BLAKE3 is a leading contender to become the de facto standard secure hash function [in the next
-generation of post-quantum zero-knowledge proofs](docs/who-uses-blake3.md#post-quantum-zero-knowledge-proofs). It is in Plonky3, SP1,
-stwo, Jolt, WHIR, Miden, Winterfell, Aztec, Binius64, Flock. BLAKE2 is used in Zcash and a large
-number of other systems.
-
 BLAKE3 has a thicker security margin than SHA256 does. There are no known attacks faster than brute
 force that break more than 2 out of 7 of BLAKE3's rounds. In contrast, there are known attacks
 faster than brute force that break up to 39 out of 64 of SHA256's rounds.
@@ -43,7 +29,22 @@ faster than brute force that break up to 39 out of 64 of SHA256's rounds.
 
 (Source: [https://hashsma.sh](https://hashsma.sh), screenshotted 2026-10-25.)
 
-Here are two reasons reasons to use `BLAKE3-Servil`:
+## Standard
+
+`BLAKE3` has quietly become the de facto standard secure hash function [for systems
+infrastructure](docs/who-uses-blake3.md#systems-infrastructure): compilers, linkers, file systems,
+GPU drivers, build systems, storage back ends, etc. The build-id in Android, Chrome, ChromeOS, and
+Fuchsia binaries is a BLAKE3 hash. It's in Mesa (every Linux GPU driver), Ceph, Hugging Face's
+Buckets / IETF XET, Meta's new source control tool Sapling/Mononoke, Google's TensorStore, Unreal
+Engine, OpenZFS, Solana, Nix, Bazel, Buck2, Wasmer, the Swift compiler, rustc, cargo, and
+iroh. These projects needed a hash function that was both fast and secure, and chose the one that
+was both. BLAKE3's immediate ancestor, BLAKE2, is used in WireGuard and the Linux kernel.
+
+BLAKE3 is a leading contender to become the de facto standard secure hash function [in the next
+generation of post-quantum zero-knowledge
+proofs](docs/who-uses-blake3.md#post-quantum-zero-knowledge-proofs). It is in Plonky3, SP1, stwo,
+Jolt, WHIR, Miden, Winterfell, Aztec, Binius64, Flock. BLAKE2 is used in Zcash and a large number of
+other systems.
 
 ## Fast
 
@@ -114,8 +115,8 @@ performance of the code, *security proofs* that prove that the code has no bugs,
 itself. The code itself can then be written in assembly language! Assembly language is faster that
 modern "high-level" programming languages like Rust and Python, but it isn't much used because most
 human programmers don't know how to write it, and it is easy to write bugs in assembly language. But
-AIs can write assembly language easily, and the correctness proofs allow us to verify that there are
-no bugs!
+AIs can write assembly language, and the correctness proofs allow us to verify that there are no
+bugs!
 
 So in addition to being the best implementation of the best secure hash function, this is also a
 demonstration of a better way to make software!
