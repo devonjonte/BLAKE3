@@ -43,63 +43,82 @@ faster than brute force that break up to 39 out of 64 of SHA256's rounds.
 
 (Source: [https://hashsma.sh](https://hashsma.sh), screenshotted 2026-10-25.)
 
-Here are two reasons you might want to use `BLAKE3-Servil`:
+Here are two reasons reasons to use `BLAKE3-Servil`:
 
-1. It is fast. Like 10 *times* as fast, or more, as the competitors in many cases. (See
-   [benchmarks](https://johnservil.github.io/bench-hashes).) This could be a big improvement for a
-   lot of use cases, where you need to ensure data integrity and user security, and you have to do
-   it efficiently.
+## Fast
 
-   For example, [install the `b3sum` executable from this release](b3sum/README.md#installation) and
-   run `time b3sum $FILES` on some files that you want to calculate a secure hash of. Then compare
-   its performance to `md5sum` and `sha256sum`. Then post screenshots of your comparison on Twitter
-   or bsky. :-)
+It is fast. Like 10 *times* as fast, or more, as the competitors in many cases. (See
+[benchmarks](https://johnservil.github.io/bench-hashes).) This could be a big improvement for a lot
+of use cases, where you need to ensure data integrity and user security, and you have to do it
+efficiently.
 
-   <img src="docs/images/b3sum-epyc-1000-files.svg" alt="b3sum beside sha256sum, sha1sum and md5sum on a tree of 1,000 files" width="720">
+For example, [install the `b3sum` executable from this release](b3sum/README.md#installation) and
+run `time b3sum $FILES` on some files that you want to calculate a secure hash of. Then compare its
+performance to `md5sum` and `sha256sum`. Then post screenshots of your comparison on Twitter or
+bsky. :-)
 
-   How is it so fast? Three ways:
+<img src="docs/images/b3sum-epyc-1000-files.svg" alt="b3sum beside sha256sum, sha1sum and md5sum on a tree of 1,000 files" width="720">
 
-   * It takes advantage of multithreading, which it can do because it is a Merkle Tree under the
-     hood, unlike other secure hash functions, which are a linear chain.
+How is it so fast? Three ways:
 
-   * It takes advantage of Single Instruction Multiple Data (SIMD) vector computation.
+ * It takes advantage of multithreading, which it can do because it is a Merkle Tree under the hood,
+   unlike other secure hash functions, which are a linear chain.
 
-   * It is implemented in assembly language! Well, not all of it, but all of the inner loops are.
+ * It takes advantage of Single Instruction Multiple Data (SIMD) vector computation.
 
-2. It comes with excellent quality assurance:
+ * It is implemented in assembly language! Well, not all of it, but all of the inner loops are.
 
-   * All of the assembly language parts are *proven correct*. They come with a proof that they
-     calculate their part of the BLAKE3 algorithm, correctly access memory, and also that they are
-     constant-time. I am super excited that it is now practical to *prove* that substantial
-     programs—like these assembly kernels—are bug-free! This is a fundamental improvement in
-     software engineering, after 75 years of endlessly battling against bugs.
+## Secure
 
-   * The parts that aren’t covered by correctness proofs are thoroughly tested. And not *just*
-     thorough as in “100% code coverage”, but even *more* thorough than that. We use a technique
-     called “mutation testing” (using `cargo-mutants`) where during the tests, we *insert* a bug
-     into the code and then run the tests to see if they catch the bug, and then automatically do
-     that more than 2000 times, each time trying a different possible bug that could be added to
-     each line of the code.
+It comes with excellent quality assurance:
 
-   * In addition to all of that, we use several other quality-assurance tools:
-     * Guard pages
-     * A self-test on startup
-     * `Shuttle`, which uses a clever method of randomized thread scheduling to uncover concurrency bugs
+ * All of the assembly language parts are *proven correct*. They come with a proof that they
+   calculate their part of the BLAKE3 algorithm, correctly access memory, and also that they are
+   constant-time. I am super excited that it is now practical to *prove* that substantial
+   programs—like these assembly kernels—are bug-free! This is a fundamental improvement in software
+   engineering, after 75 years of endlessly battling against bugs.
 
-   * It has extremely thorough and precise [benchmarks](https://johnservil.github.io/bench-hashes/)
-     that exercise many different cases that could practically impact performance for real users.
+ * The parts that aren’t covered by correctness proofs are thoroughly tested. And not *just*
+   thorough as in “100% code coverage”, but even *more* thorough than that. We use a technique
+   called “mutation testing” (using `cargo-mutants`) where during the tests, we *insert* a bug into
+   the code and then run the tests to see if they catch the bug, and then automatically do that more
+   than 2000 times, each time trying a different possible bug that could be added to each line of
+   the code.
 
-   * For more information, please read [QUALITY.md](QUALITY.md).
+ * In addition to all of that, we use several other quality-assurance tools:
+   * Guard pages
+   * A self-test on startup
+   * `Shuttle`, which uses a clever method of randomized thread scheduling to uncover concurrency bugs
+
+ * It has extremely thorough and precise [benchmarks](https://johnservil.github.io/bench-hashes/)
+   that exercise many different cases that could practically impact performance for real users.
+
+ * For more information, please read [QUALITY.md](QUALITY.md).
 
 And here’s one reason you might *not* want to use BLAKE3-Servil right away:
 
-3. It was written by AIs!
+## Written By AI
 
-   I have been intimately involved every step of the way with the requirements, architecture,
-   strategy, quality assurance processes, API design, and managing the AIs, but I haven’t written or
-   read one line of this code. I just told my AIs to write correctness proofs and thorough mutation
-   tests, and to review one another’s work. I employed three of them for this, and I've been
-   actively working together with them on this, day and night for the last month.
+I have been intimately involved every step of the way with the requirements, architecture, strategy,
+quality assurance processes, API design, and managing the AIs, but I haven’t written or read one
+line of this code. I just told my AIs to write correctness proofs and thorough mutation tests, and
+to review one another’s work. I employed three of them for this, and I've been actively working
+together with them on this, day and night for the last month.
+
+People have been using AIs to make source code since last December. Less than year!
+
+And a problem is that the AIs can produce slop code.
+
+So, in this project I had the AIs make three different things: benchmarks that measure the
+performance of the code, *security proofs* that prove that the code has no bugs, and then the code
+itself. The code itself can then be written in assembly language! Assembly language is faster that
+modern "high-level" programming languages like Rust and Python, but it isn't much used because most
+human programmers don't know how to write it, and it is easy to write bugs in assembly language. But
+AIs can write assembly language easily, and the correctness proofs allow us to verify that there are
+no bugs!
+
+So in addition to being the best implementation of the best secure hash function, this is also a
+demonstration of a better way to make software!
 
 ## Future Work
 
