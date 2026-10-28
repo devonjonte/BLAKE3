@@ -327,7 +327,6 @@ src/many.rs	replace >= with < in sme2_sized	6	speed: moves a threshold between e
 src/many.rs	replace across_from -> Option<usize> with None	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace across_from -> Option<usize> with Some(0)	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace across_from -> Option<usize> with Some(1)	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
-src/many.rs	replace assert_slots with ()	1	equivalent in a release build: assert_slots holds debug checks alone (its body compiles out); the replacement moves the file's later lines, so only their panic locations differ, and same code cannot see it
 src/many.rs	replace hash_across with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace hash_group_across with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
 src/many.rs	replace hash_long_or_single with ()	1	x86 only: compiled out on AArch64 (CI's x86 tests reach it)
