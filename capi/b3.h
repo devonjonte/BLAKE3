@@ -34,7 +34,7 @@
  * B3_VERSION names the header's version; b3_version() the library's, so a
  * program can check that the two agree.
  */
-#define B3_VERSION "0.8.0+302bae1534161c0339937669ab7067f12788597a"
+#define B3_VERSION "0.8.0+8abaf0c77871cd40d64a82fa3bd6b1468f79967d"
 #ifndef B3_H
 #define B3_H
 

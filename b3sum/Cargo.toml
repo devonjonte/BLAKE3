@@ -2,7 +2,7 @@
 # program it installs is b3sum.
 [package]
 name = "b3sums"
-version = "0.8.0+302bae1534161c0339937669ab7067f12788597a"
+version = "0.8.0+8abaf0c77871cd40d64a82fa3bd6b1468f79967d"
 authors = ["Jack O'Connor <oconnor663@gmail.com>", "John Servil"]
 description = "b3sum, the BLAKE3 command-line hasher, on blake3-servil: the same digests, faster"
 repository = "https://github.com/johnservil/BLAKE3"
@@ -18,7 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.25"
-blake3 = { version = "=0.8.0+302bae1534161c0339937669ab7067f12788597a", path = "..", package = "blake3-servil" }
+blake3 = { version = "=0.8.0+8abaf0c77871cd40d64a82fa3bd6b1468f79967d", path = "..", package = "blake3-servil" }
 clap = { version = "4.0.8", features = ["derive", "wrap_help"] }
 hex = "0.4.0"
 
