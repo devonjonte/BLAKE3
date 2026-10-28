@@ -39,8 +39,22 @@ pub(crate) fn slot_len(len: usize) -> usize {
 pub(crate) fn assert_slots(input: &[u8], len: usize, count: usize) {
     let slot = slot_len(len);
     assert_eq!(Some(input.len()), slot.checked_mul(count), "input holds one slot of whole blocks per output");
-    // An OR over each padding, folded without a branch per byte.
-    assert!(len % BLOCK_LEN == 0 || input.chunks_exact(slot).all(|s| s[len..].iter().fold(0u8, |a, &b| a | b) == 0), "every slot's bytes past its message are zero");
+    // The padding is in each slot's last block, from byte `len % 64`: that
+    // block as eight words, the message's bytes masked off, ORed.
+    let tail = len % BLOCK_LEN;
+    if tail != 0 {
+        let mask: [u64; 8] = core::array::from_fn(|w| match (tail as u32).saturating_sub(8 * w as u32) {
+            0 => !0,
+            k if k >= 8 => 0,
+            k => !0 << (8 * k),
+        });
+        let dirty = input.chunks_exact(slot).fold(0u64, |acc, s| {
+            let last: &[u8; BLOCK_LEN] = s[slot - BLOCK_LEN..].try_into().unwrap();
+            let (words, _) = last.as_chunks::<8>();
+            words.iter().zip(&mask).fold(acc, |a, (w, m)| a | (u64::from_le_bytes(*w) & m))
+        });
+        assert!(dirty == 0, "every slot's bytes past its message are zero");
+    }
 }
 
 /// `outputs[i] = hash(input[i * slot..][..len])` for every message, with
@@ -1007,6 +1021,32 @@ mod test {
     #[should_panic(expected = "input holds one slot of whole blocks per output")]
     fn test_hash_many_needs_the_input_it_names() {
         crate::performance::hash_many(crate::Mode::Plain, &[crate::performance::Block::ZERO], 64, &mut [[0u8; OUT_LEN]; 2]);
+    }
+
+    /// Every length a slot's last block can end at, and every byte of its
+    /// padding, in the first and the last of three slots: a nonzero byte
+    /// there is refused; message bytes of 0xFF with zero padding are not.
+    #[test]
+    fn test_padding_checked_at_every_byte() {
+        for len in (1..BLOCK_LEN).chain([BLOCK_LEN + 1, 2 * BLOCK_LEN - 1, 5 * BLOCK_LEN + 17]) {
+            let slot = slot_len(len);
+            let clean = || {
+                let mut input = std::vec![0u8; 3 * slot];
+                for m in 0..3 {
+                    input[m * slot..][..len].fill(0xFF);
+                }
+                input
+            };
+            assert_slots(&clean(), len, 3);
+            for m in [0, 2] {
+                for at in len..slot {
+                    let mut input = clean();
+                    input[m * slot + at] = 1;
+                    let refused = std::panic::catch_unwind(|| assert_slots(&input, len, 3)).is_err();
+                    assert!(refused, "len {len}: a nonzero padding byte at {at} of slot {m} went unseen");
+                }
+            }
+        }
     }
 
     #[test]
