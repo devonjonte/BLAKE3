@@ -3,37 +3,33 @@
 # each test process may hold MUTANTS_TEST_DATA_KIB of data (RLIMIT_DATA),
 # its own cap, well under the builds' (check.py, test_limits).
 ulimit -d "$MUTANTS_TEST_DATA_KIB" || exit 101
-# Same code (check.py, SAME_CODE): nextest lists every test binary before
-# it runs a test, each through this runner (twice: its tests, then its
-# ignored ones). The shard's first build is the unmutated one, and its
-# listing records each binary's file (inode, mtime, size) and hash
-# (code_hash.py: every byte the loader maps); a later build's listing of
-# a relinked binary records whether it still hashes so, and the
-# baseline's own file is the baseline still. When every binary hashes as
-# before, the mutant changed nothing this machine runs: its first test
-# exits at once with MARKER, which check.py reads in the mutant's log,
-# and no test runs. Any binary that differs, or was not relinked, runs
-# the tests as ever.
+# Same code (check.py, SAME_CODE): nextest lists every test binary, each
+# through this runner, before it runs a test; the listing records each
+# binary's path and file (inode, mtime, size). A build's first test then
+# asks code_hash.py --verdict once, under the state's lock: the shard's
+# first build is the unmutated one, whose hashes it records ("baseline");
+# a later one is "same" when every binary hashes as that build's. The
+# build's files name the verdict, so the build's other tests reuse it.
+# On "same" the mutant changed nothing this machine runs: the test exits
+# at once with MARKER, which check.py reads in the mutant's log, and no
+# test runs. Anything else runs the tests as ever.
 state=$MUTANTS_SAME_CODE
 if [ -n "$state" ]; then
+	name=$(basename "$1")
 	case " $* " in
 	*" --list "*)
-		name=$(basename "$1")
-		file=$(stat -c '%i %.9Y %s' "$1") || exit 101
-		if [ ! -f "$state/$name.base" ]; then
-			hash=$(python3 "$MUTANTS_CODE_HASH" "$1") || exit 101
-			echo "$file $hash" > "$state/$name.base"
-			echo baseline > "$state/$name.now"
-		elif [ "$file" = "$(cut -d' ' -f1-3 "$state/$name.base")" ]; then
-			echo baseline > "$state/$name.now"
-		elif [ "$(python3 "$MUTANTS_CODE_HASH" "$1")" = "$(cut -d' ' -f4 "$state/$name.base")" ]; then
-			echo same > "$state/$name.now"
-		else
-			echo differs > "$state/$name.now"
-		fi
+		echo "$1" > "$state/$name.path"
+		stat -c '%i %.9Y %s' "$1" > "$state/$name.stat" || exit 101
 		;;
 	*)
-		if ls "$state" | grep -q '\.now$' && ! cat "$state"/*.now | grep -qvx same; then
+		key=$(cat "$state"/*.stat | cksum) || exit 101
+		verdict=$(flock "$state/lock" sh -c '
+			if [ "$(cat "$1/verdict.key" 2>/dev/null)" != "$2" ]; then
+				python3 "$MUTANTS_CODE_HASH" --verdict "$1" > "$1/verdict" || exit 101
+				echo "$2" > "$1/verdict.key"
+			fi
+			cat "$1/verdict"' sh "$state" "$key") || exit 101
+		if [ "$verdict" = same ]; then
 			echo "$MUTANTS_SAME_CODE_MARKER" >&2
 			exit 99
 		fi

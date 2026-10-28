@@ -33,7 +33,8 @@ def sections(path):
     return out
 
 
-@unittest.skipUnless(sys.platform == "linux" and ELF, "an ELF executable to read")
+@unittest.skipUnless(sys.platform == "linux" and ELF and os.environ.get("MUTANTS_B3SUM"),
+                     "an ELF executable to read, and MUTANTS_B3SUM: official b3sum 1.8.7 (check.py's official_b3sum installs it)")
 class CodeHash(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()

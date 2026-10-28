@@ -261,6 +261,20 @@ def with_loom(found, timed, functions, loom_functions):
     return found, timed, {**functions, **loom_functions}
 
 
+def official_b3sum():
+    """Official BLAKE3's b3sum 1.8.7, the hash code_hash.py identifies a
+    test binary's code by: installed once into this machine's target
+    directory, so the identity of the code under test never rests on that
+    code's own hashing."""
+    root = os.path.join(TARGET_DIR, "b3sum-official-1.8.7")
+    path = os.path.join(root, "bin", "b3sum")
+    if not os.path.exists(path):
+        subprocess.run(["cargo", "install", "b3sum", "--version", "=1.8.7", "--locked", "--root", root], check=True)
+    version = subprocess.run([path, "--version"], capture_output=True, text=True, check=True).stdout.strip()
+    assert version == "b3sum 1.8.7", f"{path} is {version!r}, not official b3sum 1.8.7"
+    return path
+
+
 def scratch_dir():
     """tmp/ in the repository (git ignores it), made if absent."""
     path = os.path.join(ROOT, "tmp")
@@ -336,6 +350,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
             env["MUTANTS_SAME_CODE"] = os.path.join(target, "same-code")
             os.makedirs(env["MUTANTS_SAME_CODE"])
             env["MUTANTS_CODE_HASH"] = os.path.join(ROOT, "tools", "mutants", "code_hash.py")
+            env["MUTANTS_B3SUM"] = official_b3sum()
             env["MUTANTS_SAME_CODE_MARKER"] = SAME_CODE_MARKER
         if loom:
             # The model checker's build of the same files (tests/shuttle_*.rs
@@ -829,6 +844,14 @@ def main():
     drifted = sorted(k for k, (c, reason) in known.items() if reason == SAME_REASON and same[k] != found.get(k, 0))
     for k in drifted:
         print(f"NO LONGER SAME CODE ({found.get(k, 0) - same[k]} of {found.get(k, 0)} places build to other code): {k}")
+    # Same code on this machine and on every other whose list has the
+    # mutant: not code for another machine, but a change every build
+    # erases, or code that does nothing. A finding to act on (an
+    # equivalent mutant to note, or code to remove), not a failure.
+    for k in sorted(k for k, n in found.items() if same[k] == n):
+        others = elsewhere(k)
+        if others and all(SAME_REASON in o for o in others):
+            print(f"SAME CODE EVERYWHERE: {k} ({'; '.join(o.split(':', 1)[0] for o in others)} too)")
     for k, c in sorted(stale.items()):
         print(f"{'NOW TIMES OUT' if timed.get(k) else 'NOW CAUGHT'} ({c - found.get(k, 0)}): {k}")
     # The time-outs against their list, alike (an OPEN pool row's count is
