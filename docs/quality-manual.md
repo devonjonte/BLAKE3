@@ -91,14 +91,18 @@ coverage; the tests also check calls into them and the other platforms.
 breaks a precondition, a debug build stops. A release build omits the
 check and pays nothing for it.
 
-Some checks use plain `assert!` in every build. Two kinds guard what a
-user would otherwise never see. Some guard progress in loops: without
-them, bad internal state could make a loop repeat forever, with no
-result and no error. Others guard a caller's mistake that would give a
-wrong digest with no error: nonzero bytes past a message in a batch, and
-a stream's `fill` that ends before its message's length. Each of those
-costs a comparison, or a read of at most 63 bytes beside a hash that
-reads them anyway.
+A mistake that would give a wrong digest with no error is made
+impossible where a type can: the batch calls take a `Batch`, which lets
+the program write only its messages' bytes, so the bytes past each
+message, which the AArch64 kernels hash as they stand, stay zero. A
+stream's `fill` has `Read::read`'s contract, so a short write is
+continued, never hashed with stale bytes.
+
+Some checks use plain `assert!` in every build, guarding what a user
+would otherwise never see. Some guard progress in loops: without them,
+bad internal state could make a loop repeat forever, with no result and
+no error. One guards a stream's `fill` that ends before its message's
+length. Each costs one comparison.
 
 Most of these checks are loop variants. Meyer used that term in Design by
 Contract for a quantity that decreases on every pass and cannot decrease
