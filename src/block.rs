@@ -92,6 +92,7 @@ pub struct Batch<'a> {
 
 /// The blocks each message of `message_len` bytes takes: its bytes in
 /// whole blocks, one for an empty message.
+#[inline]
 fn blocks_per(message_len: usize) -> usize {
     message_len.div_ceil(BLOCK_LEN).max(1)
 }
@@ -101,6 +102,7 @@ impl Batch<'static> {
     /// `count` messages of `message_len` bytes, every byte zero. The zeros
     /// are written now, so all of a `Batch`'s memory is resident from its
     /// making, not as its pages are first touched: make one and refill it.
+    #[inline]
     pub fn new(message_len: usize, count: usize) -> Self {
         Batch { blocks: std::vec![Block::ZERO; blocks_per(message_len) * count].into(), message_len, count }
     }
@@ -112,6 +114,7 @@ impl<'a> Batch<'a> {
     /// multiple of 64 (no byte past a message's end to keep zero; an empty
     /// message's block, which nothing reads, counts as one), and `blocks`
     /// whole messages.
+    #[inline]
     pub fn from_blocks(blocks: &'a [Block], message_len: usize) -> Self {
         assert!(
             message_len % BLOCK_LEN == 0,
@@ -139,22 +142,26 @@ impl<'a> Batch<'a> {
     }
 
     /// The messages' length.
+    #[inline]
     pub fn message_len(&self) -> usize {
         self.message_len
     }
 
     /// How many messages it holds.
+    #[inline]
     pub fn len(&self) -> usize {
         self.count
     }
 
     /// Whether it holds no messages.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.count == 0
     }
 
     /// Its blocks, as the kernels read them: each message at the start of
     /// its blocks, every byte past its end zero.
+    #[inline]
     pub fn blocks(&self) -> &[Block] {
         &self.blocks
     }
