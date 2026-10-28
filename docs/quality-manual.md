@@ -91,9 +91,14 @@ coverage; the tests also check calls into them and the other platforms.
 breaks a precondition, a debug build stops. A release build omits the
 check and pays nothing for it.
 
-Some checks use plain `assert!` in every build. They guard progress in
-loops. Without them, bad internal state could make a loop repeat forever.
-The user would get no result and no error.
+Some checks use plain `assert!` in every build. Two kinds guard what a
+user would otherwise never see. Some guard progress in loops: without
+them, bad internal state could make a loop repeat forever, with no
+result and no error. Others guard a caller's mistake that would give a
+wrong digest with no error: nonzero bytes past a message in a batch, and
+a stream's `fill` that ends before its message's length. Each of those
+costs a comparison, or a read of at most 63 bytes beside a hash that
+reads them anyway.
 
 Most of these checks are loop variants. Meyer used that term in Design by
 Contract for a quantity that decreases on every pass and cannot decrease
@@ -132,7 +137,12 @@ the mutants the map records that test catching. The weighing guides
 judgment: a test's worth can go beyond the mutants it catches (a
 contract's `should_panic`, a hang, a shape no mutant models).
 
-**What mutation testing finds.** Every mutant a test survives is
+**What mutation testing finds.** A mutant whose build is byte for byte
+the unmutated one, every test binary alike, cannot change what runs:
+the check compares each binary's loaded bytes (`code_hash.py`), decides
+it without a test, and lists it as "same code". That covers code for
+another architecture and changes the optimizer erases. Every other
+mutant a test survives is
 listed with its reason in `tools/mutants/known-aarch64.txt`: code for
 another machine (x86, a CPU without SME2 or the SHA-3 extension, one
 CPU), a choice between equally correct paths (what to prefetch, a speed
