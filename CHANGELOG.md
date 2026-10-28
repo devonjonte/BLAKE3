@@ -106,9 +106,12 @@ each check covers and what remains unproved.
 
 ## New
 
-- `performance::hash_many` and `hash_many_multithreaded`: messages of
-  one length in `Block`s (64 bytes on a 64-byte boundary), which a
-  `Batch` builds with every byte past each message zero.
+- `performance::hash_many` and `hash_many_multithreaded`: a `Batch` of
+  messages of one length, each in `Block`s (64 bytes on a 64-byte
+  boundary). A `Batch` lets the program write only its messages' bytes,
+  so the bytes past each message, which the batch kernels read in place,
+  stay zero; a Merkle layer writes its digests straight into the next
+  layer's `Batch`.
 - `performance::hash_each` and `hash_each_multithreaded`: a collection of
   any lengths.
 - `performance::update_each` and `finalize_each`: many messages in

@@ -34,17 +34,11 @@ static void done(void *ctxp, b3_digest *d, size_t count) {
   }
 }
 
-static void batch_done(void *ctxp, b3_digest *d, size_t count) {
-  (void)d;
-  *(int *)ctxp += (int)count;
-}
-
 static b3_digest c_places[4];
 
 int main(void) {
   if (strcmp(b3_version(), B3_VERSION) != 0) return 2; /* the header and the library disagree */
   printf("hasher %zu %zu\n", sizeof(b3_hasher), _Alignof(b3_hasher));
-  /* 64-byte aligned: the batch calls below take it as a batch. */
   static B3_ALIGN64 uint8_t input[100032]; /* whole 64-byte blocks */
   for (size_t i = 0; i < sizeof input; i++) input[i] = (uint8_t)(i % 251);
   uint8_t key[32];
@@ -67,18 +61,10 @@ int main(void) {
       d = b3_hasher_finalize(&hasher);
       print(what, d.bytes, 32);
     }
-    /* A batch: four 64-byte messages back to back. */
-    b3_digest batch[4];
-    b3_hash_many(&modes[m], input, 64, 4, batch);
-    for (int i = 0; i < 4; i++) {
-      char what[64];
-      snprintf(what, sizeof what, "%s/batch%d", names[m], i);
-      print(what, batch[i].bytes, 32);
-    }
   }
   /* A stream: 300 messages of lengths cycling through 7 values, through 4
-   * places cycled by collect; then a batch of 16 64-byte messages in one
-   * place. Every digest is checked against b3_hash; "stream ok" says so. */
+   * places cycled by collect. Every digest is checked against b3_hash;
+   * "stream ok" says so. */
   {
     struct stream_ctx c = {{&c_places[0], &c_places[1], &c_places[2], &c_places[3]}, 4, 0, {0, 1, 64, 1025, 4096, 65536, 100000}, input, &modes[0], 0};
     b3_stream *s = b3_stream_begin(&modes[0], done, &c);
@@ -89,16 +75,6 @@ int main(void) {
     }
     b3_stream_finish(s);
     if (c.next_check != 300 || c.bad) return 3;
-    b3_digest bplaces[16];
-    int batch_back = 0;
-    s = b3_stream_begin(&modes[1], batch_done, &batch_back);
-    b3_stream_submit_batch(s, input, 64, 16, bplaces);
-    b3_stream_finish(s);
-    if (batch_back != 16) return 4;
-    for (int i = 0; i < 16; i++) {
-      b3_digest want = b3_hash(&modes[1], input + 64 * i, 64);
-      if (memcmp(want.bytes, bplaces[i].bytes, 32) != 0) return 5;
-    }
     printf("stream ok\n");
   }
   return 0;

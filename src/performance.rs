@@ -6,12 +6,13 @@
 //! - **Inputs are [`Block`]s**: 64 bytes each on a 64-byte boundary, so
 //!   every message starts a cache line and no block straddles two; the
 //!   type holds it. A message is blocks and a length (`&[Block], len`),
-//!   and a batch is messages of one length, each in its own whole blocks.
-//!   The bytes past a message's end are ignored; in a batch they are zero,
-//!   since the batch kernels read every message's blocks in place, side by
-//!   side (the caller's to keep, checked in every build), and a [`Batch`]
-//!   keeps them zero by construction. Bytes already in place become blocks
-//!   with no copy through [`Block::from_bytes`]. The [`Hasher`] alone takes
+//!   the bytes past its end ignored. A batch is a [`Batch`]: messages of
+//!   one length, each in its own whole blocks, every byte past each one
+//!   zero, which the batch kernels read in place, side by side; a `Batch`
+//!   lets the program write only its messages' bytes, so those zeros
+//!   cannot go wrong. Bytes already in place become blocks with no copy
+//!   through [`Block::from_bytes`], and a batch through
+//!   [`Batch::from_blocks`] where its messages fill their blocks. The [`Hasher`] alone takes
 //!   pieces of any length anywhere (it copies short ones into its own
 //!   buffer); an aligned long piece runs fastest.
 //! - **Digests go where the program says**: into its slices and places.
@@ -20,9 +21,7 @@
 //! For one call per hash, any slice, the result returned, see the
 //! [`convenience`](crate::convenience) API.
 
-#[cfg(feature = "std")]
-pub use crate::block::Batch;
-pub use crate::block::Block;
+pub use crate::block::{Batch, Block};
 #[cfg(feature = "std")]
 pub use crate::each::{finalize_each, hash_each, hash_each_multithreaded, update_each, update_each_multithreaded};
 pub use crate::incremental::Hasher;
@@ -53,17 +52,11 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
     crate::hash_serial(&Block::bytes(input)[..len], key, flags)
 }
 
-/// The hashes of many messages of one length, in `mode`, on the calling
-/// thread: `out[i]` becomes the [`hash`] of message `i`.
-///
-/// `input` holds the messages in [`Block`]s: each starts a block and takes
-/// `message_len` rounded up to whole blocks (one block for an empty
-/// message), `out.len()` of them in all. The bytes past each message's
-/// end, to its last block's end, are zero: the caller's to keep, and
-/// checked in every build (a nonzero byte stops the program, naming its
-/// message). A [`Batch`] keeps them zero by construction. This is the shape of a
-/// Merkle tree's layer: leaves of one size, or nodes of two 32-byte
-/// children (`message_len` 64, [`Block::digests_mut`]).
+/// The hashes of a [`Batch`]'s messages, in `mode`, on the calling thread:
+/// `out[i]` becomes the [`hash`] of message `i`, one digest a message. This
+/// is the shape of a Merkle tree's layer: leaves of one size, or nodes of
+/// two 32-byte children, which the layer below writes straight into the
+/// next layer's batch ([`Batch::digests_mut`]).
 ///
 /// ```
 /// # blake3_servil::initialize();
@@ -74,7 +67,7 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 ///     leaves.set(i, &[7u8; 256]);
 /// }
 /// let mut hashes = vec![[0u8; 32]; 1000];
-/// performance::hash_many(Mode::Plain, leaves.blocks(), 256, &mut hashes);
+/// performance::hash_many(Mode::Plain, &leaves, &mut hashes);
 /// assert_eq!(hashes[3], *convenience::hash(&[7u8; 256]).as_bytes());
 /// # }
 /// ```
@@ -87,10 +80,11 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 // Inlined, so a constant mode folds to its constants (as
 // convenience::hash is: no mode stored for the call to read).
 #[inline]
-pub fn hash_many(mode: Mode, input: &[Block], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
+pub fn hash_many(mode: Mode, batch: &Batch, out: &mut [[u8; OUT_LEN]]) {
     let mut room = core::mem::MaybeUninit::uninit();
     let (key, flags) = mode.key(&mut room);
-    crate::hash_many_serial(Block::bytes(input), message_len, key, flags, out);
+    assert_eq!(out.len(), batch.len(), "one digest a message");
+    crate::hash_many_serial(Block::bytes(batch.blocks()), batch.message_len(), key, flags, out);
 }
 
 /// [`hash_many`], using other CPU cores where that is faster: the same
@@ -102,7 +96,7 @@ pub fn hash_many(mode: Mode, input: &[Block], message_len: usize, out: &mut [[u8
 /// let mut leaves = blake3_servil::performance::Batch::new(256, 4096);
 /// (0..4096).for_each(|i| leaves.set(i, &[7u8; 256]));
 /// let mut hashes = vec![[0u8; 32]; 4096];
-/// blake3_servil::performance::hash_many_multithreaded(Mode::Plain, leaves.blocks(), 256, &mut hashes);
+/// blake3_servil::performance::hash_many_multithreaded(Mode::Plain, &leaves, &mut hashes);
 /// assert!(hashes.iter().all(|h| h == blake3_servil::convenience::hash(&[7u8; 256]).as_bytes()));
 /// ```
 ///
@@ -114,11 +108,12 @@ pub fn hash_many(mode: Mode, input: &[Block], message_len: usize, out: &mut [[u8
 // Inlined, so a constant mode folds to its constants (as
 // convenience::hash is: no mode stored for the call to read).
 #[inline]
-pub fn hash_many_multithreaded(mode: Mode, input: &[Block], message_len: usize, out: &mut [[u8; OUT_LEN]]) {
+pub fn hash_many_multithreaded(mode: Mode, batch: &Batch, out: &mut [[u8; OUT_LEN]]) {
     crate::lanes::require();
     let mut room = core::mem::MaybeUninit::uninit();
     let (key, flags) = mode.key(&mut room);
-    crate::lanes::hash_many(Block::bytes(input), message_len, key, flags, out);
+    assert_eq!(out.len(), batch.len(), "one digest a message");
+    crate::lanes::hash_many(Block::bytes(batch.blocks()), batch.message_len(), key, flags, out);
 }
 
 /// [`hash`], using other CPU cores where that is faster: the same

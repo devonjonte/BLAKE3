@@ -33,23 +33,15 @@ pub(crate) fn slot_len(len: usize) -> usize {
 
 /// hash_many's contract on its input: `count` slots of whole blocks for
 /// messages of `len` bytes, each slot's bytes past its message zero
-/// (checked in every build).
+/// (checked in debug builds: a Batch keeps them so).
 #[inline]
 pub(crate) fn assert_slots(input: &[u8], len: usize, count: usize) {
     let slot = slot_len(len);
     assert_eq!(Some(input.len()), slot.checked_mul(count), "input holds one slot of whole blocks per output");
-    // In every build: a nonzero byte past a message would change its
-    // digest with no error (BLAKE3 #205). At most 63 bytes a message,
-    // beside the hash that reads its last block; none when the length is
-    // a multiple of 64 (an empty message's slot is never read).
-    if len % BLOCK_LEN != 0 {
-        let dirty = input.chunks_exact(slot).position(|s| s[len..].iter().fold(0, |a, &b| a | b) != 0);
-        assert!(
-            dirty.is_none(),
-            "message {} of the batch has a nonzero byte past its {len} bytes: a slot's bytes past its message must be zero (a Batch keeps them so)",
-            dirty.unwrap_or(0)
-        );
-    }
+    // Every caller's slots come from a Batch (performance's calls, the
+    // stream's batches) or from the crate's own buffers, which keep them
+    // zero (BLAKE3 #205).
+    debug_assert!(len % BLOCK_LEN == 0 || input.chunks_exact(slot).all(|s| s[len..].iter().all(|&b| b == 0)), "every slot's bytes past its message are zero");
 }
 
 /// `outputs[i] = hash(input[i * slot..][..len])` for every message, with
@@ -57,8 +49,8 @@ pub(crate) fn assert_slots(input: &[u8], len: usize, count: usize) {
 /// plain hashing), on `platform`: messages of up to a chunk go to
 /// the kernels TABLE at a time, 2 to 15 chunks side by side on SME2, others
 /// through the one-message path. Requires `input.len() == slot *
-/// outputs.len()` and every slot's bytes past `len` zero (assert_slots,
-/// in every build).
+/// outputs.len()` and every slot's bytes past `len` zero (a Batch's, or
+/// the crate's own).
 pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
     // One-block messages first, on the path they took before slots (a
     // shared entry cost 64 B x 3 7% in the regression check).
@@ -722,14 +714,14 @@ mod test {
     fn check(len: usize, count: usize) {
         let input = messages(len, count);
         let mut out = vec![[0u8; OUT_LEN]; count];
-        crate::performance::hash_many(crate::Mode::Plain, &crate::test::blocks(&input), len, &mut out);
+        crate::performance::hash_many(crate::Mode::Plain, &crate::performance::Batch::in_place(&crate::test::blocks(&input), len), &mut out);
         for (i, digest) in out.iter().enumerate() {
             assert_eq!(*digest, *crate::convenience::hash(message(&input, len, i)).as_bytes(), "message {i} of {count}, {len} bytes");
         }
         #[cfg(feature = "std")]
         {
             let mut mt = vec![[0u8; OUT_LEN]; count];
-            crate::performance::hash_many_multithreaded(crate::Mode::Plain, &crate::test::blocks(&input), len, &mut mt);
+            crate::performance::hash_many_multithreaded(crate::Mode::Plain, &crate::performance::Batch::in_place(&crate::test::blocks(&input), len), &mut mt);
             assert_eq!(mt, out, "multithreaded, {count} messages of {len} bytes");
         }
     }
@@ -1003,7 +995,7 @@ mod test {
                     }
                     std::thread::sleep(std::time::Duration::from_micros(300));
                     let mut out = vec![[0u8; OUT_LEN]; count];
-                    crate::performance::hash_many(mode, &crate::test::blocks(&input), len, &mut out);
+                    crate::performance::hash_many(mode, &crate::performance::Batch::in_place(&crate::test::blocks(&input), len), &mut out);
                     for (k, digest) in out.iter().enumerate() {
                         assert_eq!(digest, crate::convenience::hash_with(mode, &input[k * slot..][..len]).as_bytes(), "len {len} count {count} message {k}");
                     }
@@ -1013,20 +1005,12 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "input holds one slot of whole blocks per output")]
+    #[should_panic(expected = "one digest a message")]
     fn test_hash_many_needs_the_input_it_names() {
-        crate::performance::hash_many(crate::Mode::Plain, &[crate::performance::Block::ZERO], 64, &mut [[0u8; OUT_LEN]; 2]);
-    }
-
-    /// In every build, with or without std (BLAKE3 #205).
-    #[test]
-    #[should_panic(expected = "message 0 of the batch has a nonzero byte past its 100 bytes")]
-    fn test_hash_many_needs_zero_padding() {
-        // Two equal nonzero bytes: a check that combined them by xor, not
-        // or, would read zero.
-        let mut input = [crate::performance::Block::ZERO; 4];
-        input[1].0[120 - 64] = 1;
-        input[1].0[121 - 64] = 1;
-        crate::performance::hash_many(crate::Mode::Plain, &input, 100, &mut [[0u8; OUT_LEN]; 2]);
+        crate::performance::hash_many(
+            crate::Mode::Plain,
+            &crate::performance::Batch::from_blocks(&[crate::performance::Block::ZERO], 64),
+            &mut [[0u8; OUT_LEN]; 2],
+        );
     }
 }

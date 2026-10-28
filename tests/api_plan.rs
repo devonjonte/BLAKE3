@@ -79,12 +79,12 @@ const HASH_WITH: [(&str, fn(Mode, &[u8]) -> Hash); 3] = [
 ];
 
 /// `data` as a message in blocks: a batch of one.
-fn message(data: &[u8]) -> Batch {
+fn message(data: &[u8]) -> Batch<'static> {
     let mut batch = Batch::new(data.len(), 1);
     batch.set(0, data);
     batch
 }
-const HASH_MANY_WITH: [(&str, fn(Mode, &[Block], usize, &mut [[u8; 32]])); 2] = [
+const HASH_MANY_WITH: [(&str, fn(Mode, &Batch, &mut [[u8; 32]])); 2] = [
     ("performance::hash_many", blake3_servil::performance::hash_many),
     ("performance::hash_many_multithreaded", blake3_servil::performance::hash_many_multithreaded),
 ];
@@ -189,7 +189,7 @@ fn one_message_large_inputs_match_the_fixed_values() {
 /// pattern starting at i (so messages differ), laid out by the padded batch
 /// contract: slot i at i x stride, stride len rounded up to 64 (64 for 0),
 /// zeros between a message's end and the next slot.
-fn padded_batch(count: usize, len: usize) -> (Batch, Vec<Vec<u8>>) {
+fn padded_batch(count: usize, len: usize) -> (Batch<'static>, Vec<Vec<u8>>) {
     let mut batch = Batch::new(len, count);
     let messages: Vec<Vec<u8>> = (0..count).map(|i| (0..len).map(|j| ((i + j) % 251) as u8).collect()).collect();
     for (i, message) in messages.iter().enumerate() {
@@ -225,15 +225,15 @@ fn batches_every_form_match_the_fixed_values() {
         let (buffer, messages) = padded_batch(count, len);
         let expected: Vec<Vec<[u8; 32]>> = (0..3).map(|m| messages.iter().map(|message| fixed.want(m, message)).collect()).collect();
         let mut out = vec![[0u8; 32]; count];
-        blake3_servil::performance::hash_many(blake3_servil::Mode::Plain, buffer.blocks(), len, &mut out);
+        blake3_servil::performance::hash_many(blake3_servil::Mode::Plain, &buffer, &mut out);
         assert_eq!(out, expected[0], "hash_many, {count} x {len} B");
         out.fill([0; 32]);
-        blake3_servil::performance::hash_many_multithreaded(blake3_servil::Mode::Plain, buffer.blocks(), len, &mut out);
+        blake3_servil::performance::hash_many_multithreaded(blake3_servil::Mode::Plain, &buffer, &mut out);
         assert_eq!(out, expected[0], "hash_many_multithreaded, {count} x {len} B");
         for (m, mode) in modes().into_iter().enumerate() {
             for (name, form) in HASH_MANY_WITH {
                 out.fill([0; 32]);
-                form(mode, buffer.blocks(), len, &mut out);
+                form(mode, &buffer, &mut out);
                 assert_eq!(out, expected[m], "{name} mode {m}, {count} x {len} B");
             }
         }
@@ -246,7 +246,7 @@ fn batches_every_form_match_the_fixed_values() {
 fn a_batch_whose_buffer_is_short_of_its_messages_is_refused() {
     blake3_servil::initialize_multithreaded(None);
     let mut out = [[0u8; 32]; 2];
-    blake3_servil::performance::hash_many(blake3_servil::Mode::Plain, &[Block::ZERO], 64, &mut out);
+    blake3_servil::performance::hash_many(blake3_servil::Mode::Plain, &Batch::from_blocks(&[Block::ZERO], 64), &mut out);
 }
 
 // ---------- The stream ----------
@@ -315,7 +315,7 @@ fn a_streams_batches_fill_the_callers_places() {
             |s| {
                 for (k, ((&(len, _), (buffer, _)), place)) in cases.iter().zip(&batches).zip(&mut places).enumerate() {
                     if k % 2 == 0 {
-                        s.submit_batch(buffer.blocks(), len, place);
+                        s.submit_batch(buffer, place);
                     } else {
                         s.submit_batch_with(
                             len,
@@ -355,7 +355,7 @@ fn bursts_of_large_batches_after_pauses_complete() {
             |_: &mut [Hash]| {},
             |s| {
                 for place in places.iter_mut() {
-                    s.submit_batch(buffer.blocks(), 64, place);
+                    s.submit_batch(&buffer, place);
                 }
                 s.finish();
             },

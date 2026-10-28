@@ -1,18 +1,16 @@
-//! The batch calls' input: [`Block`]s, 64 bytes each on a 64-byte boundary,
-//! and [`Batch`], which holds messages of one length in them with every
-//! byte past each message zero (BLAKE3 #146, John Servil's proposal; the
-//! owning builder, Zooko's choice of October 24).
+//! The calls' input: [`Block`]s, 64 bytes each on a 64-byte boundary, and
+//! [`Batch`], the batch calls' only input, which holds messages of one
+//! length in them with every byte past each message zero (BLAKE3 #146,
+//! John Servil's proposal; the owning builder, Zooko's choice of October
+//! 24; the batch calls taking it, so that a nonzero byte there cannot be
+//! written, Zooko's of October 28, BLAKE3 #205).
 
 use crate::BLOCK_LEN;
 
-/// 64 bytes on a 64-byte boundary: the unit the batch calls read. A batch
-/// is `&[Block]`, each message starting a block and taking whole blocks
-/// (one for an empty message), so every message starts on a cache line.
-///
-/// The bytes past each message's end, to its last block's end, are zero:
-/// the caller's to write, and checked in every build (a nonzero byte
-/// there stops the program, naming its message). [`Batch`] keeps them
-/// zero by construction.
+/// 64 bytes on a 64-byte boundary: the unit the calls read, so every
+/// message starts on a cache line. A [`Batch`] holds its messages in
+/// blocks, each message starting a block and taking whole blocks (one for
+/// an empty message).
 #[repr(C, align(64))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Block(pub [u8; BLOCK_LEN]);
@@ -31,15 +29,6 @@ impl Block {
     pub fn bytes_mut(blocks: &mut [Block]) -> &mut [u8] {
         // Sound: as in bytes, and the borrow is exclusive.
         unsafe { core::slice::from_raw_parts_mut(blocks.as_mut_ptr().cast(), blocks.len() * BLOCK_LEN) }
-    }
-
-    /// The blocks as 32-byte digests, two a block: a Merkle layer's digests
-    /// written straight into the next layer's input (its 64-byte messages,
-    /// two children each). A layer of an odd count leaves a slot to spare:
-    /// slice it, `&mut Block::digests_mut(blocks)[..count]`.
-    pub fn digests_mut(blocks: &mut [Block]) -> &mut [[u8; 32]] {
-        // Sound: a [u8; 32] is 32 bytes with alignment 1; two fill a Block.
-        unsafe { core::slice::from_raw_parts_mut(blocks.as_mut_ptr().cast(), blocks.len() * 2) }
     }
 
     /// `bytes` as blocks, without a copy, when they start on a 64-byte
@@ -64,50 +53,89 @@ impl core::fmt::Debug for Block {
     }
 }
 
-/// Messages of one length in [`Block`]s, ready for the batch calls: each
-/// message starts a block, and every byte past each message's end stays
-/// zero, since the only bytes a `Batch` lets the program write are the
-/// messages' own. The zeros are written once, when it is made, so refilling
-/// a `Batch` with new messages costs only their bytes.
+/// Messages of one length in [`Block`]s, the batch calls' input: each
+/// message starts a block, and every byte past each message's end is zero,
+/// since a `Batch` lets the program write only the messages' own bytes (so
+/// the bytes the batch kernels read in place, past a message, can never be
+/// wrong). It owns its blocks ([`Batch::new`]), or borrows blocks already in
+/// place whose messages fill them, with no bytes past their ends
+/// ([`Batch::from_blocks`]: a Merkle layer's 64-byte nodes, a mapped file's
+/// records).
 ///
 /// ```
 /// # blake3_servil::initialize();
+/// # #[cfg(feature = "std")] {
 /// use blake3_servil::{Mode, convenience, performance::{self, Batch}};
 /// let mut batch = Batch::new(100, 3);
 /// for i in 0..3 {
 ///     batch.set(i, &[i as u8; 100]);
 /// }
 /// let mut out = [[0u8; 32]; 3];
-/// performance::hash_many(Mode::Plain, batch.blocks(), 100, &mut out);
+/// performance::hash_many(Mode::Plain, &batch, &mut out);
 /// assert_eq!(out[2], *convenience::hash(&[2u8; 100]).as_bytes());
 ///
 /// // Read straight into a message's own bytes.
 /// batch.message_mut(1).copy_from_slice(&[9u8; 100]);
-/// performance::hash_many(Mode::Plain, batch.blocks(), 100, &mut out);
+/// performance::hash_many(Mode::Plain, &batch, &mut out);
 /// assert_eq!(out[1], *convenience::hash(&[9u8; 100]).as_bytes());
+/// # }
 /// ```
-#[cfg(feature = "std")]
 #[derive(Clone)]
-pub struct Batch {
-    blocks: std::vec::Vec<Block>,
+pub struct Batch<'a> {
+    #[cfg(feature = "std")]
+    blocks: std::borrow::Cow<'a, [Block]>,
+    #[cfg(not(feature = "std"))]
+    blocks: &'a [Block],
     message_len: usize,
     count: usize,
 }
 
+/// The blocks each message of `message_len` bytes takes: its bytes in
+/// whole blocks, one for an empty message.
+fn blocks_per(message_len: usize) -> usize {
+    message_len.div_ceil(BLOCK_LEN).max(1)
+}
+
 #[cfg(feature = "std")]
-impl Batch {
+impl Batch<'static> {
     /// `count` messages of `message_len` bytes, every byte zero. The zeros
     /// are written now, so all of a `Batch`'s memory is resident from its
     /// making, not as its pages are first touched: make one and refill it.
     pub fn new(message_len: usize, count: usize) -> Self {
-        let per = Self::blocks_per(message_len);
-        Batch { blocks: std::vec![Block::ZERO; per * count], message_len, count }
+        Batch { blocks: std::vec![Block::ZERO; blocks_per(message_len) * count].into(), message_len, count }
+    }
+}
+
+impl<'a> Batch<'a> {
+    /// The messages of `message_len` bytes that `blocks` holds, borrowed
+    /// with no copy, where they fill their blocks: `message_len` a
+    /// multiple of 64 (no byte past a message's end to keep zero; an empty
+    /// message's block, which nothing reads, counts as one), and `blocks`
+    /// whole messages.
+    pub fn from_blocks(blocks: &'a [Block], message_len: usize) -> Self {
+        assert!(
+            message_len % BLOCK_LEN == 0,
+            "Batch::from_blocks takes messages that fill their blocks, not {message_len} B (Batch::new makes one for any length)"
+        );
+        let per = blocks_per(message_len);
+        assert!(blocks.len() % per == 0, "{} blocks hold no whole number of {message_len}-byte messages", blocks.len());
+        Batch { blocks: blocks.into(), message_len, count: blocks.len() / per }
     }
 
-    /// The blocks each message of `message_len` bytes takes: its bytes in
-    /// whole blocks, one for an empty message.
-    fn blocks_per(message_len: usize) -> usize {
-        message_len.div_ceil(BLOCK_LEN).max(1)
+    /// For the crate's own tests: `blocks` as a batch of `message_len`-byte
+    /// messages in place, whatever their length, each at the start of its
+    /// blocks and every byte past it zero (checked): the tests' layouts,
+    /// batches beside guard pages among them.
+    #[cfg(test)]
+    pub(crate) fn in_place(blocks: &'a [Block], message_len: usize) -> Self {
+        let per = blocks_per(message_len);
+        assert!(blocks.len() % per == 0, "{} blocks hold no whole number of {message_len}-byte messages", blocks.len());
+        let slot = per * BLOCK_LEN;
+        assert!(
+            Block::bytes(blocks).chunks_exact(slot).all(|s| message_len == 0 || s[message_len..].iter().all(|&b| b == 0)),
+            "a test's batch has a nonzero byte past a message"
+        );
+        Batch { blocks: blocks.into(), message_len, count: blocks.len() / per }
     }
 
     /// The messages' length.
@@ -125,11 +153,22 @@ impl Batch {
         self.count == 0
     }
 
-    /// Message `i`'s bytes, for writing: `message_len` of them, no more.
+    /// Its blocks, as the kernels read them: each message at the start of
+    /// its blocks, every byte past its end zero.
+    pub fn blocks(&self) -> &[Block] {
+        &self.blocks
+    }
+}
+
+#[cfg(feature = "std")]
+impl Batch<'_> {
+    /// Message `i`'s bytes, for writing: `message_len` of them, no more (a
+    /// borrowed batch copies its blocks first).
     pub fn message_mut(&mut self, i: usize) -> &mut [u8] {
         assert!(i < self.count, "message {i} of a batch of {}", self.count);
-        let per = Self::blocks_per(self.message_len);
-        &mut Block::bytes_mut(&mut self.blocks[i * per..][..per])[..self.message_len]
+        let per = blocks_per(self.message_len);
+        let len = self.message_len;
+        &mut Block::bytes_mut(&mut self.blocks.to_mut()[i * per..][..per])[..len]
     }
 
     /// Message `i` becomes `message`, `message_len` bytes.
@@ -137,17 +176,22 @@ impl Batch {
         self.message_mut(i).copy_from_slice(message);
     }
 
-    /// The batch as the batch calls take it.
-    pub fn blocks(&self) -> &[Block] {
-        &self.blocks
-    }
-
     /// Every byte for writing, where no message has bytes past its end to
-    /// keep zero: `message_len` a multiple of 64 (a Merkle layer's parents,
-    /// 64 bytes each, whose digests [`Block::digests_mut`] writes in place).
+    /// keep zero: `message_len` a multiple of 64 and not 0.
     pub fn blocks_mut(&mut self) -> &mut [Block] {
         assert!(self.message_len % BLOCK_LEN == 0 && self.message_len > 0, "a batch whose messages leave no bytes past their ends ({} B)", self.message_len);
-        &mut self.blocks
+        self.blocks.to_mut()
+    }
+
+    /// Its 64-byte messages as 32-byte digests, two a message: a Merkle
+    /// layer's digests written straight into the next layer, whose
+    /// messages are pairs of children. A layer of an odd count leaves a
+    /// digest to spare: slice it, `&mut batch.digests_mut()[..count]`.
+    pub fn digests_mut(&mut self) -> &mut [[u8; 32]] {
+        assert!(self.message_len == 2 * 32, "digests_mut takes a batch of 64-byte messages, two digests each, not {} B", self.message_len);
+        let blocks = self.blocks.to_mut();
+        // Sound: a [u8; 32] is 32 bytes with alignment 1; two fill a Block.
+        unsafe { core::slice::from_raw_parts_mut(blocks.as_mut_ptr().cast(), blocks.len() * 2) }
     }
 }
 
@@ -174,7 +218,7 @@ mod test {
                     assert!(slot[len..].iter().all(|&b| b == 0), "{len} B, message {i}: its padding");
                 }
                 let mut out = [[0u8; 32]; 5];
-                hash_many(Mode::Plain, batch.blocks(), len, &mut out);
+                hash_many(Mode::Plain, &batch, &mut out);
                 for (i, d) in out.iter().enumerate() {
                     assert_eq!(*d, *crate::convenience::hash(&std::vec![round * 16 + i as u8; len]).as_bytes(), "{len} B, message {i}, round {round}");
                 }
@@ -191,6 +235,29 @@ mod test {
         assert!(Block::from_bytes(&bytes[16..80]).is_none(), "16 bytes into a line");
         assert!(Block::from_bytes(&bytes[..100]).is_none(), "a partial block");
         assert_eq!(Block::from_bytes(&[]).map(<[Block]>::len), Some(0));
+    }
+
+    /// Blocks already in place, borrowed with no copy where the messages
+    /// fill them; a length that leaves bytes past a message is refused (only
+    /// Batch::new makes one), and so are blocks of no whole message count.
+    #[test]
+    fn test_from_blocks_borrows_messages_that_fill_their_blocks() {
+        crate::initialize();
+        let blocks: std::vec::Vec<Block> = (0..4).map(|i| Block([i as u8; 64])).collect();
+        let batch = Batch::from_blocks(&blocks, 128);
+        assert_eq!((batch.len(), batch.blocks().as_ptr()), (2, blocks.as_ptr()), "borrowed, not copied");
+        let mut out = [[0u8; 32]; 2];
+        hash_many(Mode::Plain, &batch, &mut out);
+        assert_eq!(out[1], *crate::convenience::hash(Block::bytes(&blocks[2..])).as_bytes());
+        for (blocks, len) in [(&blocks[..], 100), (&blocks[..3], 128)] {
+            assert!(std::panic::catch_unwind(|| Batch::from_blocks(blocks, len)).is_err(), "{} blocks of {len}-byte messages", blocks.len());
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "digests_mut takes a batch of 64-byte messages")]
+    fn test_digests_mut_takes_64_byte_messages() {
+        Batch::new(128, 2).digests_mut();
     }
 
     #[test]
@@ -210,9 +277,9 @@ mod test {
         let mut leaves = Batch::new(256, 4);
         (0..4).for_each(|i| leaves.set(i, &[i as u8; 256]));
         let mut parents = Batch::new(64, 2);
-        hash_many(Mode::Keyed(&key), leaves.blocks(), 256, Block::digests_mut(parents.blocks_mut()));
+        hash_many(Mode::Keyed(&key), &leaves, parents.digests_mut());
         let mut root = [[0u8; 32]; 2];
-        hash_many(Mode::Keyed(&key), parents.blocks(), 64, &mut root);
+        hash_many(Mode::Keyed(&key), &parents, &mut root);
         let leaf = |i: u8| *crate::convenience::hash_with(Mode::Keyed(&key), &[i; 256]).as_bytes();
         let parent = |a: [u8; 32], b: [u8; 32]| *crate::convenience::hash_with(Mode::Keyed(&key), &[a, b].concat()).as_bytes();
         assert_eq!(root[0], parent(leaf(0), leaf(1)));
@@ -220,7 +287,7 @@ mod test {
     }
 
     /// What a Batch says of itself: its message length and count, empty at
-    /// zero messages; two digests a block from digests_mut, each landing on
+    /// zero messages; two digests a 64-byte message from digests_mut, each landing on
     /// its own 32 bytes; a Block's Debug form names its bytes.
     #[test]
     fn test_a_batch_describes_itself() {
@@ -229,12 +296,12 @@ mod test {
         assert_eq!(batch.blocks().len(), 6, "two blocks a 100-byte message");
         let none = Batch::new(100, 0);
         assert_eq!((none.len(), none.is_empty()), (0, true));
-        let mut blocks = [Block::ZERO; 3];
-        let digests = Block::digests_mut(&mut blocks);
+        let mut parents = Batch::new(64, 3);
+        let digests = parents.digests_mut();
         assert_eq!(digests.len(), 6);
         digests[5] = [7; 32];
-        assert_eq!(&blocks[2].0[32..], &[7u8; 32][..], "the sixth digest is block 2's second half");
-        assert_eq!(&blocks[2].0[..32], &[0u8; 32][..]);
+        assert_eq!(&parents.blocks()[2].0[32..], &[7u8; 32][..], "the sixth digest is block 2's second half");
+        assert_eq!(&parents.blocks()[2].0[..32], &[0u8; 32][..]);
         assert!(std::format!("{:?}", Block::ZERO).starts_with("Block([00, 00"));
     }
 }

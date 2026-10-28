@@ -1,6 +1,6 @@
 # BLAKE3 servil for C and C++
 
-`libb3_servil` exposes `blake3-servil`'s one-shot, incremental, batch, and
+`libb3_servil` exposes `blake3-servil`'s one-shot, incremental and
 streaming hashing through [`b3.h`](b3.h). The header documents each call's
 contract. It works with C11 and C++11.
 
@@ -60,11 +60,8 @@ The `--static` flag supplies the system libraries Rust's static library needs.
 - `b3_hasher_new`, `b3_hasher_update`, `b3_hasher_finalize`: one message
   arriving in pieces (`b3_hasher_update_multithreaded` for a large piece;
   `b3_hasher_finalize_xof` for output of any length).
-- `b3_hash_many`, `b3_hash_many_multithreaded`: a batch of equal-length
-  messages, each at the start of its slot of 64-byte blocks, the batch on
-  a 64-byte boundary.
-- `b3_stream_begin`, `b3_stream_submit`, `b3_stream_submit_batch`,
-  `b3_stream_collect`, `b3_stream_finish`: a continuing series of
+- `b3_stream_begin`, `b3_stream_submit`, `b3_stream_collect`,
+  `b3_stream_finish`: a continuing series of
   messages, with results delivered to a callback.
   [`tests/check.c`](tests/check.c) includes a complete example.
 

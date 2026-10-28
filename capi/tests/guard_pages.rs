@@ -94,32 +94,15 @@ fn every_call_inside_guard_pages() {
                     let mut xof = Guarded::new(100, !at_end);
                     b3_hasher_finalize_xof(hasher, 7, xof.ptr() as *mut c_void, 100);
                     assert_eq!(xof.bytes(), &xof_want[..], "b3_hasher_finalize_xof, {what}");
-                    // A batch of three in whole blocks flush against a page,
-                    // its digests flush against another.
+                    // A stream: one message in its whole blocks.
                     let stride = if len == 0 { 64 } else { len.div_ceil(64) * 64 };
-                    let mut batch = Guarded::new(3 * stride, at_end);
-                    for m in 0..3 {
-                        let slot = &mut batch.bytes()[m * stride..][..stride];
-                        slot[..len].copy_from_slice(&message);
-                        slot[len..].fill(0);
-                    }
-                    let out = Guarded::new(3 * 32, !at_end);
-                    b3_hash_many(mode, batch.ptr() as *const c_void, len, 3, out.ptr() as *mut Digest);
-                    assert!(out.digests().iter().all(|d| d.bytes == want), "b3_hash_many, {what}");
-                    let out = Guarded::new(3 * 32, at_end);
-                    b3_hash_many_multithreaded(mode, batch.ptr() as *const c_void, len, 3, out.ptr() as *mut Digest);
-                    assert!(out.digests().iter().all(|d| d.bytes == want), "b3_hash_many_multithreaded, {what}");
-                    // A stream: one message in its whole blocks, then the batch.
                     let mut blocks = Guarded::new(stride, at_end);
                     blocks.bytes()[..len].copy_from_slice(&message);
                     let one = Guarded::new(32, !at_end);
-                    let three = Guarded::new(3 * 32, at_end);
                     let stream = b3_stream_begin(mode, Some(ignore), core::ptr::null_mut());
                     b3_stream_submit(stream, blocks.ptr() as *const c_void, len, one.ptr() as *mut Digest);
-                    b3_stream_submit_batch(stream, batch.ptr() as *const c_void, len, 3, three.ptr() as *mut Digest);
                     b3_stream_finish(stream);
                     assert_eq!(one.digests()[0].bytes, want, "b3_stream_submit, {what}");
-                    assert!(three.digests().iter().all(|d| d.bytes == want), "b3_stream_submit_batch, {what}");
                 }
             }
         }

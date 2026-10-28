@@ -459,15 +459,14 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
         (at, end, n, Ok(()))
     }
 
-    /// Hash a batch of messages of `message_len` bytes where it is, in
-    /// [`Block`](crate::performance::Block)s as
-    /// [`hash_many`](crate::performance::hash_many) takes them (each in whole
-    /// blocks, zero after its bytes; a [`Batch`](crate::performance::Batch)
-    /// keeps them so), a digest per message into `out`, in
-    /// the messages' order: `out` holds one per message. The batch goes in
-    /// parts of up to 64 KiB, each one entry; `out` comes back whole.
-    pub fn submit_batch(&mut self, batch: &'env [crate::performance::Block], message_len: usize, out: &'env mut [Hash]) {
-        let batch = crate::performance::Block::bytes(batch);
+    /// Hash a [`Batch`](crate::performance::Batch) where it is, as
+    /// [`hash_many`](crate::performance::hash_many) takes it, a digest per
+    /// message into `out`, in the messages' order: `out` holds one per
+    /// message. The batch goes in parts of up to 64 KiB, each one entry;
+    /// `out` comes back whole.
+    pub fn submit_batch(&mut self, batch: &'env crate::performance::Batch<'_>, out: &'env mut [Hash]) {
+        let message_len = batch.message_len();
+        let batch = crate::performance::Block::bytes(batch.blocks());
         let slot = crate::many::slot_len(message_len);
         assert_eq!(Some(batch.len()), slot.checked_mul(out.len()), "a batch's digest space holds one digest per message");
         crate::many::assert_slots(batch, message_len, out.len());
@@ -991,7 +990,8 @@ mod test {
     #[test]
     fn test_small_stream() {
         let input = std::vec![3u8; 3 * PIECE + 5];
-        let batch = crate::test::blocks(&input[..4 * 64]);
+        let batch_blocks = crate::test::blocks(&input[..4 * 64]);
+        let batch = crate::performance::Batch::from_blocks(&batch_blocks, 64);
         let blocks = crate::test::message(&input);
         let lens = [0, 64, 64, 1000, PIECE + 1, 3 * PIECE + 5];
         let mut got = places(2 * lens.len() + 2 + 7);
@@ -1012,7 +1012,7 @@ mod test {
             }
             assert_eq!(s.submit_reader(&input[..2 * PIECE + 1], None, &mut take(&mut rest, 1)[0]).unwrap(), 2 * PIECE as u64 + 1);
             assert!(s.submit_reader(Uneven { data: &input, at: 0, calls: 0, fail_at: Some(PIECE + 1) }, None, &mut take(&mut rest, 1)[0]).is_err());
-            s.submit_batch(&batch, 64, take(&mut rest, 4));
+            s.submit_batch(&batch, take(&mut rest, 4));
             s.submit_batch_with(
                 64,
                 |at, room| {

@@ -776,7 +776,7 @@ mod unsafe_paths {
                     message[len..].fill(0);
                 }
                 let mut out = vec![[0u8; OUT_LEN]; count];
-                crate::performance::hash_many(Mode::Plain, &crate::test::blocks(&data), len, &mut out);
+                crate::performance::hash_many(Mode::Plain, &crate::performance::Batch::in_place(&crate::test::blocks(&data), len), &mut out);
                 for (i, digest) in out.iter().enumerate() {
                     assert_eq!(*digest, *crate::convenience::hash(&data[i * slot..][..len]).as_bytes(), "{count} x {len} B, message {i}");
                 }
@@ -791,14 +791,14 @@ mod unsafe_paths {
         let batch = input(1024 * 64, 1);
         let tree = input(65 * 1024 + 3, 2);
         let mut expected = vec![[0u8; OUT_LEN]; 1024];
-        crate::performance::hash_many(Mode::Plain, &crate::test::blocks(&batch), 64, &mut expected);
+        crate::performance::hash_many(Mode::Plain, &crate::performance::Batch::in_place(&crate::test::blocks(&batch), 64), &mut expected);
         let expected_tree = crate::convenience::hash(&tree);
         std::thread::scope(|scope| {
             for caller in 0..2 {
                 let (batch, tree, expected) = (&batch, &tree, &expected);
                 scope.spawn(move || {
                     let mut out = vec![[0u8; OUT_LEN]; 1024];
-                    crate::performance::hash_many_multithreaded(Mode::Plain, &crate::test::blocks(batch), 64, &mut out);
+                    crate::performance::hash_many_multithreaded(Mode::Plain, &crate::performance::Batch::in_place(&crate::test::blocks(batch), 64), &mut out);
                     assert_eq!(&out, expected, "batch, caller {caller}");
                     assert_eq!(
                         crate::performance::hash_multithreaded(crate::Mode::Plain, &crate::test::message(tree), tree.len()),
@@ -1004,8 +1004,10 @@ mod guard_pages {
                     let outputs: &mut [[u8; OUT_LEN]] = unsafe { core::slice::from_raw_parts_mut(out.bytes().as_mut_ptr() as *mut [u8; OUT_LEN], count) };
                     crate::performance::hash_many(
                         Mode::Plain,
-                        crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
-                        len,
+                        &crate::performance::Batch::in_place(
+                            crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
+                            len,
+                        ),
                         outputs,
                     );
                     let data = input.bytes().to_vec();
@@ -1016,8 +1018,10 @@ mod guard_pages {
                         let (_page, mt) = digests(count, at_end);
                         crate::performance::hash_many_multithreaded(
                             Mode::Plain,
-                            crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
-                            len,
+                            &crate::performance::Batch::in_place(
+                                crate::performance::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
+                                len,
+                            ),
                             mt,
                         );
                         assert_eq!(&mt[..], &outputs[..], "mt, {count} x {len} B");
@@ -1180,6 +1184,7 @@ mod guard_pages {
                     }
                     let batch_blocks = crate::performance::Block::from_bytes(unsafe { core::slice::from_raw_parts(batch.base.add(batch.start), batch.len) })
                         .expect("a page-end batch starts aligned");
+                    let batch_in_place = crate::performance::Batch::in_place(batch_blocks, len);
                     let (_page_one, one) = places(1, !at_end);
                     let (_page_with, with) = places(1, at_end);
                     let (_page_batch, batched) = places(count, !at_end);
@@ -1197,7 +1202,7 @@ mod guard_pages {
                                 },
                                 &mut with[0],
                             );
-                            s.submit_batch(batch_blocks, len, batched);
+                            s.submit_batch(&batch_in_place, batched);
                             s.finish();
                         },
                     );
@@ -1424,10 +1429,10 @@ mod dispatch {
         let at = |len: usize, count: usize| {
             ran(&|| {
                 let mut out = vec![[0u8; 32]; count];
-                let batch = &input[..crate::many::slot_len(len) * count / crate::BLOCK_LEN];
-                crate::performance::hash_many(crate::Mode::Plain, batch, len, &mut out);
+                let batch = crate::performance::Batch::from_blocks(&input[..crate::many::slot_len(len) * count / crate::BLOCK_LEN], len);
+                crate::performance::hash_many(crate::Mode::Plain, &batch, &mut out);
                 crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
-                crate::performance::hash_many(crate::Mode::Plain, batch, len, &mut out);
+                crate::performance::hash_many(crate::Mode::Plain, &batch, &mut out);
             })
         };
         assert_eq!(crate::many::ONE_BLOCK_PAD_MIN, 11);
@@ -1585,54 +1590,4 @@ fn test_prefetches_after_a_pause_every_length() {
     for count in 0..=4 * crate::PREFETCH_BATCH_BELOW {
         crate::neon_hybrid::prefetch_message_code(count);
     }
-}
-
-/// A nonzero byte past a message in a batch stops every batch call, in
-/// every build, naming the message (BLAKE3 #205): it would otherwise
-/// change that message's digest with no error. A length that fills its
-/// blocks has nothing past it, and an empty message's block is never read.
-#[test]
-#[cfg(feature = "std")]
-#[cfg_attr(not(panic = "unwind"), ignore = "catches panics, which this target aborts on")]
-fn test_nonzero_padding_stops_every_batch_call() {
-    crate::initialize_multithreaded(None);
-    let blocks = |len: usize, dirty: Option<usize>| {
-        let mut blocks = crate::performance::Batch::new(len, 6).blocks().to_vec();
-        if let Some(m) = dirty {
-            // The message's last byte of padding, as a reused buffer leaves it.
-            let slot = len.div_ceil(BLOCK_LEN).max(1) * BLOCK_LEN;
-            crate::performance::Block::bytes_mut(&mut blocks)[m * slot + slot - 1] = 7;
-        }
-        blocks
-    };
-    let calls: [(&str, fn(&[crate::performance::Block], usize)); 3] = [
-        ("hash_many", |b, len| crate::performance::hash_many(crate::Mode::Plain, b, len, &mut vec![[0; 32]; 6])),
-        ("hash_many_multithreaded", |b, len| crate::performance::hash_many_multithreaded(crate::Mode::Plain, b, len, &mut vec![[0; 32]; 6])),
-        ("submit_batch", |b, len| {
-            let mut out = vec![crate::Hash::from([0; 32]); 6];
-            crate::performance::stream(
-                crate::Mode::Plain,
-                |_| {},
-                |s| {
-                    s.submit_batch(b, len, &mut out);
-                    s.finish();
-                },
-            )
-        }),
-    ];
-    for (name, call) in calls {
-        for len in [1, 63, 100] {
-            let result = std::panic::catch_unwind(|| call(&blocks(len, Some(4)), len));
-            let message = result.expect_err(name);
-            let text = message.downcast_ref::<String>().map(|s| s.as_str()).unwrap_or("");
-            assert!(text.contains("message 4 of the batch has a nonzero byte past its"), "{name}, {len} B: {text}");
-        }
-        for len in [0, 64, 128] {
-            call(&blocks(len, None), len);
-        }
-    }
-    // An empty message's block may hold anything: nothing reads it.
-    let mut empty = blocks(0, None);
-    empty[2].0[5] = 1;
-    crate::performance::hash_many(crate::Mode::Plain, &empty, 0, &mut vec![[0; 32]; 6]);
 }

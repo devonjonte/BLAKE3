@@ -13,7 +13,7 @@
  * uses. Inputs stay unchanged, and outputs are not accessed concurrently
  * by the caller. The stream's longer access/lifetime rules are below.
  * Simple guards reject null callbacks, misaligned handles, unrepresentable
- * sized ranges, and immediate batch/hasher data overlaps before borrowing
+ * sized ranges, and immediate hasher data overlaps before borrowing
  * them. Detected invalid arguments stop the program with a message.
  * These checks do not establish allocation ownership or lifetime and do
  * not track overlaps between outstanding stream submissions. The remaining
@@ -82,28 +82,6 @@ b3_digest b3_hash(const b3_mode *mode, const void *input, size_t len);
  * outweigh parallel work near the split threshold; b3_hash stays serial. */
 b3_digest b3_hash_multithreaded(const b3_mode *mode, const void *input, size_t len);
 
-/* The distance between messages in a batch: `message_len` rounded up to a
- * multiple of 64 (64 for empty messages). */
-#define B3_STRIDE(message_len) ((message_len) == 0 ? (size_t)64 : ((size_t)(message_len) + 63) / 64 * 64)
-
-/* The digests of `count` messages of `message_len` bytes each, into
- * `out[0..count]`, on the calling thread. `input` starts at a 64-byte
- * boundary (aligned_alloc(64, n) gives one; a misplaced batch stops the
- * program). Message i starts at byte i * B3_STRIDE(message_len) of
- * `input`, and the bytes between a message's end and the next stride are
- * zero: aligned_alloc leaves them as it finds them, so memset the batch
- * to zero first. A nonzero byte there stops the program, naming its
- * message. Messages whose length is a multiple of
- * 64 sit back to back: a Merkle tree's layer of leaves, or of 64-byte
- * pairs of child digests. Short messages hash fastest this way: 1024
- * messages of 64 bytes take about a fifth of the time of 1024 b3_hash
- * calls (an Apple M4 Max). */
-void b3_hash_many(const b3_mode *mode, const void *input, size_t message_len, size_t count, b3_digest *out);
-
-/* b3_hash_many, using other CPU cores where that is faster. */
-void b3_hash_many_multithreaded(const b3_mode *mode, const void *input, size_t message_len, size_t count,
-                                b3_digest *out);
-
 /* One message fed in pieces. A b3_hasher is your memory (18 KiB; on the
  * stack, in a struct, or allocated). It needs no library destructor; the
  * caller frees any heap storage it supplied. b3_hasher_new starts a
@@ -157,17 +135,12 @@ void b3_hasher_finalize_xof(const b3_hasher *hasher, uint64_t offset, void *out,
  * it. After b3_stream_finish returns, the stream handle is invalid.
  * A message stays unhashed in a task still open until the task fills or you
  * call collect or finish, so call one of them when you need a digest soon.
- *
- * A batch (b3_stream_submit_batch) is laid out as for b3_hash_many and
- * comes back as one place of `count` digests: for many short messages of
- * one length, batches hash several at a time and are faster than one
- * submit each. `ctx` goes to `done` unread. */
+ * `ctx` goes to `done` unread. */
 typedef struct b3_stream b3_stream;
 typedef void (*b3_done)(void *ctx, b3_digest *places, size_t count);
 
 b3_stream *b3_stream_begin(const b3_mode *mode, b3_done done, void *ctx);
 void b3_stream_submit(b3_stream *stream, const void *input, size_t len, b3_digest *out);
-void b3_stream_submit_batch(b3_stream *stream, const void *input, size_t message_len, size_t count, b3_digest *out);
 void b3_stream_collect(b3_stream *stream);
 void b3_stream_finish(b3_stream *stream);
 

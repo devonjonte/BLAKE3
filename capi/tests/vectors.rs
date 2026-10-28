@@ -26,22 +26,6 @@ fn every_call_against_the_test_vectors() {
             unsafe {
                 assert_eq!(hex(&b3_hash(mode, input.as_ptr() as *const c_void, len).bytes), expected[..64], "b3_hash, {what}");
                 assert_eq!(hex(&b3_hash_multithreaded(mode, input.as_ptr() as *const c_void, len).bytes), expected[..64], "b3_hash_multithreaded, {what}");
-                // A batch of three copies of the message, each in its stride.
-                let stride = if len == 0 { 64 } else { len.div_ceil(64) * 64 }; // B3_STRIDE
-                // In 64-byte-aligned blocks, as the batch calls require.
-                #[repr(C, align(64))]
-                #[derive(Clone, Copy)]
-                struct Block([u8; 64]);
-                let mut blocks = vec![Block([0; 64]); 3 * stride / 64];
-                let batch = core::slice::from_raw_parts_mut(blocks.as_mut_ptr() as *mut u8, 3 * stride);
-                for m in 0..3 {
-                    batch[m * stride..][..len].copy_from_slice(&input);
-                }
-                let mut out = [Digest { bytes: [0; 32] }; 3];
-                b3_hash_many(mode, batch.as_ptr() as *const c_void, len, 3, out.as_mut_ptr());
-                assert!(out.iter().all(|d| hex(&d.bytes) == expected[..64]), "b3_hash_many, {what}");
-                b3_hash_many_multithreaded(mode, batch.as_ptr() as *const c_void, len, 3, out.as_mut_ptr());
-                assert!(out.iter().all(|d| hex(&d.bytes) == expected[..64]), "b3_hash_many_multithreaded, {what}");
                 // A hasher fed in pieces of 1, 1000, and the rest.
                 b3_hasher_new(&mut *hasher, mode);
                 let (a, rest) = input.split_at(len.min(1));
@@ -65,5 +49,4 @@ fn null_with_nothing() {
     let mode = b3_mode_plain();
     let empty = unsafe { b3_hash(&mode, core::ptr::null(), 0) };
     assert_eq!(empty.bytes, *blake3_servil::convenience::hash(b"").as_bytes());
-    unsafe { b3_hash_many(&mode, core::ptr::null(), 64, 0, core::ptr::null_mut()) };
 }

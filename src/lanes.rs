@@ -1713,7 +1713,7 @@ mod test {
             }
             let input = &owned[..];
             let mut want = vec![[0u8; crate::OUT_LEN]; count];
-            crate::performance::hash_many(crate::Mode::Plain, &crate::test::blocks(input), message_len, &mut want);
+            crate::performance::hash_many(crate::Mode::Plain, &crate::performance::Batch::in_place(&crate::test::blocks(input), message_len), &mut want);
             for (i, digest) in want.iter().enumerate().take(200) {
                 assert_eq!(*digest, *crate::convenience::hash(&input[i * slot..][..message_len]).as_bytes(), "message {i}");
             }
@@ -1730,7 +1730,7 @@ mod test {
         crate::test::paint_test_input(&mut buffer);
         let count = buffer.len() / crate::BLOCK_LEN;
         let mut want = vec![[0u8; crate::OUT_LEN]; count];
-        crate::performance::hash_many(crate::Mode::Plain, &crate::test::blocks(&buffer), crate::BLOCK_LEN, &mut want);
+        crate::performance::hash_many(crate::Mode::Plain, &crate::performance::Batch::in_place(&crate::test::blocks(&buffer), crate::BLOCK_LEN), &mut want);
         let tree_want = crate::convenience::hash(&buffer);
         let (want, buffer) = (&want[..], &buffer[..]);
         let barrier = std::sync::Barrier::new(16);

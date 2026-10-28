@@ -100,9 +100,6 @@ fn from_c() {
                     expected.push(d.to_string());
                 }
             }
-            for i in 0..4 {
-                expected.push(blake3_servil::convenience::hash_with(mode, &input[i * 64..(i + 1) * 64]).to_hex().to_string());
-            }
         }
         // b3.h's b3_hasher holds the crate's Hasher.
         let first = out.lines().next().unwrap();

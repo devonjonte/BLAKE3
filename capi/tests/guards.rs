@@ -12,10 +12,6 @@ const CASES: &[(&str, &str)] = &[
     ("input-null", "the input is NULL"),
     ("input-length", "the input length exceeds isize::MAX"),
     ("input-wrap", "the input address range overflows"),
-    ("batch-stride", "batch stride overflows size_t"),
-    ("batch-count", "the batch's length fits a size_t"),
-    ("batch-overlap", "input and output ranges overlap"),
-    ("batch-overlap-reverse", "input and output ranges overlap"),
     ("hasher-update-overlap", "input and output ranges overlap"),
     ("hasher-output-overlap", "input and output ranges overlap"),
     ("output-length", "the output length exceeds isize::MAX"),
@@ -57,10 +53,6 @@ unsafe fn bad_call(case: &str) {
             "input-wrap" => {
                 b3_hash(&mode, core::ptr::without_provenance(usize::MAX - 7), 16);
             }
-            "batch-stride" => b3_hash_many(&mode, pointer.cast(), usize::MAX, 1, output.as_mut_ptr()),
-            "batch-count" => b3_hash_many(&mode, pointer.cast(), 64, usize::MAX, output.as_mut_ptr()),
-            "batch-overlap" => b3_hash_many(&mode, pointer.cast(), 64, 2, pointer.add(32).cast()),
-            "batch-overlap-reverse" => b3_hash_many(&mode, pointer.add(64).cast(), 64, 2, pointer.add(32).cast()),
             "hasher-update-overlap" => {
                 b3_hasher_new(hasher.as_mut_ptr(), &mode);
                 b3_hasher_update(hasher.as_mut_ptr(), hasher.as_ptr().cast(), 1);
@@ -115,19 +107,16 @@ fn bad_calls_stop_at_the_guard() {
 fn adjacent_ranges_and_empty_null_ranges_are_allowed() {
     let mode = b3_mode_plain();
     unsafe {
-        // Exactly adjacent in both address orders, with initialized storage.
-        for (input_at, out_at) in [(0, 128), (64, 0)] {
+        // A hasher's state and its input exactly adjacent, in both address
+        // orders, with initialized storage.
+        for (hasher_at, input_at) in [(0, size_of::<B3Hasher>()), (64, 0)] {
             let mut arena = Arena([42; size_of::<B3Hasher>() + 64]);
             let pointer = arena.0.as_mut_ptr();
+            let hasher = pointer.add(hasher_at).cast::<B3Hasher>();
             let input = pointer.add(input_at);
-            let out = pointer.add(out_at).cast::<Digest>();
-            b3_hash_many(&mode, input.cast(), 64, 2, out);
-            let expected = b3_hash(&mode, input.cast(), 64);
-            assert_eq!(*out, expected);
-            assert_eq!(*out.add(1), expected);
-        }
-        for len in [0, 64] {
-            b3_hash_many(&mode, core::ptr::null(), len, 0, core::ptr::null_mut());
+            b3_hasher_new(hasher, &mode);
+            b3_hasher_update(hasher, input.cast(), 64);
+            assert_eq!(b3_hasher_finalize(hasher), b3_hash(&mode, input.cast(), 64));
         }
         let mut hasher = MaybeUninit::<B3Hasher>::uninit();
         b3_hasher_new(hasher.as_mut_ptr(), &mode);

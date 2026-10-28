@@ -39,7 +39,7 @@
 //!     batch.set(i, &[i as u8; 64]);
 //! }
 //! let mut hashes = [[0u8; 32]; 3];
-//! performance::hash_many(Mode::Plain, batch.blocks(), 64, &mut hashes);
+//! performance::hash_many(Mode::Plain, &batch, &mut hashes);
 //! assert_eq!(hashes[2], *blake3_servil::convenience::hash(&[2u8; 64]).as_bytes());
 //! # }
 //! # Ok(())

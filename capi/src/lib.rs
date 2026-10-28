@@ -154,52 +154,6 @@ pub unsafe extern "C" fn b3_hash_multithreaded(mode: *const B3Mode, input: *cons
     digest(Hasher::new(mode.mode()).update_multithreaded(unsafe { bytes(input, len, "the input") }).finalize())
 }
 
-/// The batch's input and digests, as slices.
-unsafe fn batch<'a>(input: *const c_void, message_len: usize, count: usize, out: *mut Digest) -> (&'a [Block], &'a mut [[u8; OUT_LEN]]) {
-    let stride = message_len.div_ceil(64).max(1).checked_mul(64).expect("b3: batch stride overflows size_t");
-    let total = stride.checked_mul(count).expect("b3: the batch's length fits a size_t");
-    // stride >= OUT_LEN, so the checked total also bounds this product.
-    let out_bytes = count * OUT_LEN;
-    check_range(input, total, "the batch");
-    check_range(out.cast(), out_bytes, "the digests");
-    check_disjoint(input, total, out.cast(), out_bytes);
-    // The Rust calls take blocks, which a misaligned pointer cannot be made
-    // into soundly: this stop is Rust's soundness, the one check the batch
-    // calls keep (BLAKE3 #146), at C's door.
-    let input = Block::from_bytes(unsafe { bytes(input, total, "the batch") }).expect("b3: a batch starts at a 64-byte boundary (aligned_alloc(64, n))");
-    if count == 0 {
-        return (input, &mut []);
-    }
-    // Sound by the contract: room for `count` digests at `out`, checked
-    // above; a Digest is 32 bytes, as [u8; 32] is. The caller's storage may
-    // hold anything, uninitialized too (C's habit): zeroed before Rust
-    // makes it a reference, which needs initialized bytes (#155).
-    unsafe { core::ptr::write_bytes(out.cast::<u8>(), 0, out_bytes) };
-    (input, unsafe { core::slice::from_raw_parts_mut(out as *mut [u8; OUT_LEN], count) })
-}
-
-/// # Safety
-/// `mode` is a mode; `input` holds `count` strides of `message_len`
-/// (NULL only with `count` 0), the bytes past each message zero; `out`
-/// has room for `count` digests.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn b3_hash_many(mode: *const B3Mode, input: *const c_void, message_len: usize, count: usize, out: *mut Digest) {
-    blake3_servil::initialize();
-    let mode = unsafe { self::mode(mode) };
-    let (input, out) = unsafe { batch(input, message_len, count, out) };
-    blake3_servil::performance::hash_many(mode.mode(), input, message_len, out);
-}
-
-/// # Safety
-/// As `b3_hash_many`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn b3_hash_many_multithreaded(mode: *const B3Mode, input: *const c_void, message_len: usize, count: usize, out: *mut Digest) {
-    blake3_servil::initialize_multithreaded(None);
-    let mode = unsafe { self::mode(mode) };
-    let (input, out) = unsafe { batch(input, message_len, count, out) };
-    blake3_servil::performance::hash_many_multithreaded(mode.mode(), input, message_len, out);
-}
-
 /// # Safety
 /// `hasher` points at a `b3_hasher`'s memory; `mode` is a mode.
 #[unsafe(no_mangle)]
@@ -318,7 +272,7 @@ pub unsafe extern "C" fn b3_stream_submit(stream: *mut B3Stream, input: *const c
     // the stream; a Digest is a Hash.
     let blocks = len.div_ceil(64).max(1);
     // The message's blocks: a misaligned pointer cannot soundly become a
-    // &[Block], the stop Rust's soundness needs (as for a batch).
+    // &[Block], the stop Rust's soundness needs.
     let input = if input.is_null() {
         assert_eq!(len, 0, "b3: the input is NULL with a length of {len}");
         &[Block::ZERO][..]
@@ -331,20 +285,6 @@ pub unsafe extern "C" fn b3_stream_submit(stream: *mut B3Stream, input: *const c
     // a reference.
     unsafe { core::ptr::write_bytes(out.cast::<u8>(), 0, OUT_LEN) };
     s.stream.submit(input, len, unsafe { &mut *(out as *mut Hash) });
-}
-
-/// # Safety
-/// As `b3_stream_submit`, with `input` holding `count` strides of
-/// `message_len` (NULL only with `count` 0) and `out` room for `count`
-/// digests.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn b3_stream_submit_batch(stream: *mut B3Stream, input: *const c_void, message_len: usize, count: usize, out: *mut Digest) {
-    let s = unsafe { stream_mut(stream) };
-    let (input, places) = unsafe { batch(input, message_len, count, out) };
-    // Sound: the batch and its places live until finish; a [u8; 32] is a Hash.
-    let input: &'static [Block] = unsafe { core::slice::from_raw_parts(input.as_ptr(), input.len()) };
-    let places: &'static mut [Hash] = unsafe { core::slice::from_raw_parts_mut(places.as_mut_ptr() as *mut Hash, places.len()) };
-    s.stream.submit_batch(input, message_len, places);
 }
 
 /// # Safety
