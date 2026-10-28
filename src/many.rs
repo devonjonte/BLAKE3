@@ -32,18 +32,19 @@ pub(crate) fn slot_len(len: usize) -> usize {
 }
 
 /// hash_many's contract on its input: `count` slots of whole blocks for
-/// messages of `len` bytes, each slot's bytes past its message zero
-/// (checked in debug builds: a Batch keeps them so, and its call checks
-/// its length).
+/// messages of `len` bytes (checked in every build: the kernels read
+/// them), each slot's bytes past its message zero (checked in debug
+/// builds: a Batch keeps them so).
 #[inline]
 pub(crate) fn assert_slots(input: &[u8], len: usize, count: usize) {
     let slot = slot_len(len);
+    // In every build: the kernels read `slot * count` bytes from `input`,
+    // so a wrong length would be read past its end (AGENTS: a check of a
+    // mistake that would mismanage memory, at the cost of a comparison).
+    assert_eq!(Some(input.len()), slot.checked_mul(count), "input holds one slot of whole blocks per output");
     // Every caller's slots come from a Batch (performance's calls, the
-    // stream's batches, whose length the call checks against its digests)
-    // or from the crate's own buffers, which keep them whole and zero past
-    // each message (BLAKE3 #205): the crate's own contract, checked in
-    // debug builds.
-    debug_assert_eq!(Some(input.len()), slot.checked_mul(count), "input holds one slot of whole blocks per output");
+    // stream's batches) or from the crate's own buffers, which keep them
+    // zero past each message (BLAKE3 #205): checked in debug builds.
     debug_assert!(len % BLOCK_LEN == 0 || input.chunks_exact(slot).all(|s| s[len..].iter().all(|&b| b == 0)), "every slot's bytes past its message are zero");
 }
 
@@ -1005,6 +1006,16 @@ mod test {
                 }
             }
         }
+    }
+
+    /// The length check holds in every build, inside the crate too: it
+    /// stands before the kernels, which would read a short input past its
+    /// end.
+    #[test]
+    #[should_panic(expected = "input holds one slot of whole blocks per output")]
+    fn test_a_short_input_is_refused_before_the_kernels() {
+        crate::initialize();
+        hash_many_on(&[0u8; 64], 64, crate::IV, 0, &mut [[0u8; OUT_LEN]; 2], crate::platform::Platform::detect());
     }
 
     #[test]
