@@ -33,14 +33,17 @@ pub(crate) fn slot_len(len: usize) -> usize {
 
 /// hash_many's contract on its input: `count` slots of whole blocks for
 /// messages of `len` bytes, each slot's bytes past its message zero
-/// (checked in debug builds: a Batch keeps them so).
+/// (checked in debug builds: a Batch keeps them so, and its call checks
+/// its length).
 #[inline]
 pub(crate) fn assert_slots(input: &[u8], len: usize, count: usize) {
     let slot = slot_len(len);
-    assert_eq!(Some(input.len()), slot.checked_mul(count), "input holds one slot of whole blocks per output");
     // Every caller's slots come from a Batch (performance's calls, the
-    // stream's batches) or from the crate's own buffers, which keep them
-    // zero (BLAKE3 #205).
+    // stream's batches, whose length the call checks against its digests)
+    // or from the crate's own buffers, which keep them whole and zero past
+    // each message (BLAKE3 #205): the crate's own contract, checked in
+    // debug builds.
+    debug_assert_eq!(Some(input.len()), slot.checked_mul(count), "input holds one slot of whole blocks per output");
     debug_assert!(len % BLOCK_LEN == 0 || input.chunks_exact(slot).all(|s| s[len..].iter().all(|&b| b == 0)), "every slot's bytes past its message are zero");
 }
 
