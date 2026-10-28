@@ -33,12 +33,14 @@ pub(crate) fn slot_len(len: usize) -> usize {
 
 /// hash_many's contract on its input: `count` slots of whole blocks for
 /// messages of `len` bytes, each slot's bytes past its message zero
-/// (checked in debug builds).
+/// (checked in every build: a nonzero byte there would change that
+/// message's digest with no error, #205).
 #[inline]
 pub(crate) fn assert_slots(input: &[u8], len: usize, count: usize) {
     let slot = slot_len(len);
     assert_eq!(Some(input.len()), slot.checked_mul(count), "input holds one slot of whole blocks per output");
-    debug_assert!(len % BLOCK_LEN == 0 || input.chunks_exact(slot).all(|s| s[len..].iter().all(|&b| b == 0)), "every slot's bytes past its message are zero");
+    // An OR over each padding, folded without a branch per byte.
+    assert!(len % BLOCK_LEN == 0 || input.chunks_exact(slot).all(|s| s[len..].iter().fold(0u8, |a, &b| a | b) == 0), "every slot's bytes past its message are zero");
 }
 
 /// `outputs[i] = hash(input[i * slot..][..len])` for every message, with
@@ -1007,7 +1009,6 @@ mod test {
         crate::performance::hash_many(crate::Mode::Plain, &[crate::performance::Block::ZERO], 64, &mut [[0u8; OUT_LEN]; 2]);
     }
 
-    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "every slot's bytes past its message are zero")]
     fn test_hash_many_needs_zero_padding() {
