@@ -1022,8 +1022,11 @@ mod test {
     #[test]
     #[should_panic(expected = "message 0 of the batch has a nonzero byte past its 100 bytes")]
     fn test_hash_many_needs_zero_padding() {
+        // Two equal nonzero bytes: a check that combined them by xor, not
+        // or, would read zero.
         let mut input = [crate::performance::Block::ZERO; 4];
         input[1].0[120 - 64] = 1;
+        input[1].0[121 - 64] = 1;
         crate::performance::hash_many(crate::Mode::Plain, &input, 100, &mut [[0u8; OUT_LEN]; 2]);
     }
 }
