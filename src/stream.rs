@@ -156,6 +156,21 @@ pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: im
     result
 }
 
+/// `room` filled by `fill`, as a read loop fills a buffer: `fill(at,
+/// rest)` writes the bytes from `at` to the start of `rest` and returns
+/// their count, and is called again until `room` is full. A count of 0 (the
+/// message ended early) or past `rest` stops the program, so no byte left
+/// unwritten is ever hashed (#204).
+fn fill_all(fill: &mut impl FnMut(usize, &mut [u8]) -> usize, at: usize, room: &mut [u8]) {
+    let mut done = 0;
+    while done < room.len() {
+        let n = fill(at + done, &mut room[done..]);
+        assert!(n != 0, "a stream's fill wrote no byte before the message's end: the message ended early");
+        assert!(n <= room.len() - done, "a stream's fill returned more bytes than its room holds");
+        done += n;
+    }
+}
+
 impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// A stream outside [`stream`]'s scope, for the C API (`capi/`): the
     /// same contract, with the program holding the stream and ending it
@@ -335,16 +350,20 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
 
     /// Hash a message of `len` bytes that `fill` writes in place, into the
     /// stream's own bytes, in pieces of up to 64 KiB, its digest into
-    /// `out`: `fill(at, room)` writes the message's bytes from `at` into
-    /// all of `room` (a read from a file or socket straight into the
-    /// stream). Each `room` starts on a 64-byte boundary, and its bytes on
+    /// `out`: `fill(at, room)` writes the message's next bytes, from byte
+    /// `at`, to the start of `room` and returns how many it wrote, as
+    /// [`Read::read`](std::io::Read::read) does: a short count is fine, and
+    /// the stream calls it again until each piece is full. A `fill` that
+    /// writes no byte before the message's end panics (the message ended
+    /// early). To hash what a reader yields, interruptions and errors
+    /// handled, [`submit_reader`](Stream::submit_reader) does it all. Each `room` starts on a 64-byte boundary, and its bytes on
     /// entry are unspecified: the rooms are the process's, reused across
     /// streams, so a room may hold bytes an earlier message left (a program
     /// that must keep one caller's secrets from another writes all of
     /// `room` and reads none of it first). The stream reuses the bytes
     /// once `out` is handed back; a stream keeps 2 MiB of them, and
     /// `submit_with` waits for room as `submit` does.
-    pub fn submit_with(&mut self, len: usize, mut fill: impl FnMut(usize, &mut [u8]), out: &'env mut Hash) {
+    pub fn submit_with(&mut self, len: usize, mut fill: impl FnMut(usize, &mut [u8]) -> usize, out: &'env mut Hash) {
         let out: *mut Hash = out;
         let pieces = len.div_ceil(PIECE).max(1);
         for i in 0..pieces {
@@ -353,7 +372,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
             // Sound: [at, at + part_len) is reserved and free (no entry in
             // flight holds it), and `&mut self` keeps every other writer out.
             let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring_at(at), part_len) };
-            fill(i * PIECE, room);
+            fill_all(&mut fill, i * PIECE, room);
             let end = self.head;
             self.add_part(room.as_ptr(), part_len, part_kind(i, pieces, out), end, out as *mut u8);
         }
@@ -467,13 +486,14 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
 
     /// Hash a batch of `out.len()` messages of `message_len` bytes that
     /// `fill` writes in place, laid out as [`hash_many`](crate::performance::hash_many)
-    /// takes them: `fill(at, room)` writes the batch's bytes from `at` into
-    /// `room`, a part of up to 64 KiB at a time, each message at the start
-    /// of its slot of whole blocks. The bytes past each message are the
+    /// takes them: `fill(at, room)` writes the batch's next bytes, from byte
+    /// `at` of that layout, to the start of `room` (a part of up to 64 KiB)
+    /// and returns how many, as [`submit_with`](Stream::submit_with)'s does;
+    /// each message sits at the start of its slot of whole blocks. The bytes past each message are the
     /// stream's: whatever `fill` leaves there, the stream zeroes them before
     /// hashing, so a room reused for shorter messages hashes right. As
     /// [`submit_with`](Stream::submit_with) and [`submit_batch`](Stream::submit_batch).
-    pub fn submit_batch_with(&mut self, message_len: usize, mut fill: impl FnMut(usize, &mut [u8]), out: &'env mut [Hash]) {
+    pub fn submit_batch_with(&mut self, message_len: usize, mut fill: impl FnMut(usize, &mut [u8]) -> usize, out: &'env mut [Hash]) {
         let slot = crate::many::slot_len(message_len);
         let whole = (out.as_mut_ptr(), out.len());
         let per_part = (TASK_LEN / slot).max(1);
@@ -484,7 +504,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
             let at = self.reserve(count * slot);
             // Sound: as in submit_with.
             let room = unsafe { core::slice::from_raw_parts_mut(self.s.ring_at(at), count * slot) };
-            fill(first * slot, room);
+            fill_all(&mut fill, first * slot, room);
             // The bytes past each message, zero (none when the length is a
             // multiple of 64): a reused room holds an earlier batch's bytes.
             if message_len % 64 != 0 || message_len == 0 {
@@ -785,17 +805,17 @@ mod test {
                 // every task on the caller: right, and slower).
                 assert_eq!(s.slot.is_some(), std::thread::available_parallelism().map_or(1, |n| n.get()) > 1);
                 for (i, out) in got.iter_mut().enumerate() {
-                    // Borrowed, written in place (in reads of up to 1000
-                    // bytes), or each in turn.
+                    // Borrowed, written in place (in short reads of up to
+                    // 1000 bytes each, the stream calling again), or each in turn.
                     if ways == 0 || (ways == 2 && i % 3 == 0) {
                         s.submit(&blocks[i % 3..], lens[i], out);
                     } else {
                         s.submit_with(
                             lens[i],
                             |at, room| {
-                                for (j, part) in room.chunks_mut(1000).enumerate() {
-                                    part.copy_from_slice(&message(i)[at + j * 1000..][..part.len()]);
-                                }
+                                let n = room.len().min(1000);
+                                room[..n].copy_from_slice(&message(i)[at..][..n]);
+                                n
                             },
                             out,
                         );
@@ -825,7 +845,14 @@ mod test {
                 Mode::Plain,
                 |_| {},
                 |s| {
-                    s.submit_batch_with(len, |_, room| room.fill(0xAB), &mut got);
+                    s.submit_batch_with(
+                        len,
+                        |_, room| {
+                            room.fill(0xAB);
+                            room.len()
+                        },
+                        &mut got,
+                    );
                     s.finish();
                 },
             );
@@ -860,6 +887,62 @@ mod test {
 
     /// A reader that yields `data` in reads of varying sizes (1 byte to
     /// 9000), interrupted now and then, failing after `fail_at` bytes.
+    /// A fill that writes fewer bytes than its room, as a plain read does,
+    /// gives the right digest: the stream calls it again (#204).
+    #[test]
+    fn test_a_short_fill_is_called_again() {
+        crate::initialize_multithreaded(None);
+        let input: std::vec::Vec<u8> = (0..3 * PIECE + 77).map(|i| (i % 251) as u8).collect();
+        let mut got = places(2);
+        let mut rest: &mut [Hash] = &mut got;
+        let mut calls = 0;
+        stream(
+            Mode::Plain,
+            |_: &mut [Hash]| {},
+            |s| {
+                s.submit_with(
+                    input.len(),
+                    |at, room| {
+                        calls += 1;
+                        let n = room.len().min([1, 333, 4096, 9000][calls % 4]);
+                        room[..n].copy_from_slice(&input[at..][..n]);
+                        n
+                    },
+                    &mut take(&mut rest, 1)[0],
+                );
+                s.submit_batch_with(
+                    100,
+                    |at, room| {
+                        let n = room.len().min(77);
+                        room[..n].fill(at as u8);
+                        n
+                    },
+                    take(&mut rest, 1),
+                );
+                s.finish();
+            },
+        );
+        assert_eq!(got[0], crate::convenience::hash(&input));
+        assert!(calls > 4, "the fill was called again");
+    }
+
+    /// A fill that writes nothing before the message's end stops the
+    /// program: its unwritten bytes are never hashed (#204).
+    #[test]
+    #[should_panic(expected = "the message ended early")]
+    fn test_a_fill_that_ends_early_panics() {
+        crate::initialize_multithreaded(None);
+        let mut got = places(1);
+        stream(
+            Mode::Plain,
+            |_: &mut [Hash]| {},
+            |s| {
+                s.submit_with(1000, |at, room| if at < 500 { room.len().min(500 - at) } else { 0 }, &mut got[0]);
+                s.finish();
+            },
+        );
+    }
+
     struct Uneven<'a> {
         data: &'a [u8],
         at: usize,
@@ -904,7 +987,8 @@ mod test {
                     len,
                     |at, room| {
                         assert_eq!(room.as_ptr() as usize % 64, 0, "a room starts a cache line");
-                        room.copy_from_slice(&input[at..][..room.len()])
+                        room.copy_from_slice(&input[at..][..room.len()]);
+                        room.len()
                     },
                     &mut take(&mut rest, 1)[0],
                 );
@@ -916,7 +1000,8 @@ mod test {
                 64,
                 |at, room| {
                     assert_eq!(room.as_ptr() as usize % 64, 0, "a room starts a cache line");
-                    room.copy_from_slice(&input[at..][..room.len()])
+                    room.copy_from_slice(&input[at..][..room.len()]);
+                    room.len()
                 },
                 take(&mut rest, 3),
             );

@@ -1189,7 +1189,14 @@ mod guard_pages {
                         |_| {},
                         |s| {
                             s.submit(blocks, len, &mut one[0]);
-                            s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), &mut with[0]);
+                            s.submit_with(
+                                len,
+                                |at, room| {
+                                    room.copy_from_slice(&input[at..][..room.len()]);
+                                    room.len()
+                                },
+                                &mut with[0],
+                            );
                             s.submit_batch(batch_blocks, len, batched);
                             s.finish();
                         },
