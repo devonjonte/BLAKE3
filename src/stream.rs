@@ -336,9 +336,12 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// Hash a message of `len` bytes that `fill` writes in place, into the
     /// stream's own bytes, in pieces of up to 64 KiB, its digest into
     /// `out`: `fill(at, room)` writes the message's bytes from `at` into
-    /// all of `room` (a read from a file or socket straight into the
-    /// stream). Each `room` starts on a 64-byte boundary, and its bytes on
-    /// entry are unspecified: the rooms are the process's, reused across
+    /// all of `room`. **Every byte of `room` must be written**: a byte left
+    /// unwritten is hashed as it is, and the digest is wrong, with no error.
+    /// So a read into `room` is `read_exact`, never a plain `read`, which may
+    /// return fewer bytes; to hash what a file or socket yields, use
+    /// [`submit_reader`](Stream::submit_reader). Each `room` starts on a
+    /// 64-byte boundary, and its bytes on entry are unspecified: the rooms are the process's, reused across
     /// streams, so a room may hold bytes an earlier message left (a program
     /// that must keep one caller's secrets from another writes all of
     /// `room` and reads none of it first). The stream reuses the bytes
