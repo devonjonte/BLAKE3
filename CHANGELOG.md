@@ -22,6 +22,10 @@ On the every-core rows each uses its multithreaded function:
 | A batch of 1024 messages, 64 B each | 1.1× | 1.1× | 1.9× | 1.8× |
 | b3sum over 1000 files of mixed sizes | 3.4× | 5.8× | 4.6× | 26× |
 
+On the M4 Max and in the VM, official's multithreaded call on each 64 KiB
+message takes longer than its one-thread call (1.08 and 7.13 ns per byte,
+against 0.42 and 0.43), so the stream row's figures there are large.
+
 On 64-bit Arm, new kernels make every size faster: SME2 on the M4 and
 later, and kernels that run the integer and NEON units side by side.
 On x86-64 with SSE4.1 or AVX2, a single message hashes with official's
