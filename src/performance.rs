@@ -79,11 +79,10 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// same hashes over several cores, see [`hash_many_multithreaded`].
 // Inlined, so a constant mode folds to its constants (as
 // convenience::hash is: no mode stored for the call to read).
-#[inline]
+#[inline(always)]
 pub fn hash_many(mode: Mode, batch: &Batch, out: &mut [[u8; OUT_LEN]]) {
     let mut room = core::mem::MaybeUninit::uninit();
     let (key, flags) = mode.key(&mut room);
-    assert_eq!(out.len(), batch.len(), "one digest a message");
     crate::hash_many_serial(Block::bytes(batch.blocks()), batch.message_len(), key, flags, out);
 }
 
@@ -107,12 +106,14 @@ pub fn hash_many(mode: Mode, batch: &Batch, out: &mut [[u8; OUT_LEN]]) {
 #[cfg(feature = "std")]
 // Inlined, so a constant mode folds to its constants (as
 // convenience::hash is: no mode stored for the call to read).
-#[inline]
+#[inline(always)]
 pub fn hash_many_multithreaded(mode: Mode, batch: &Batch, out: &mut [[u8; OUT_LEN]]) {
     crate::lanes::require();
     let mut room = core::mem::MaybeUninit::uninit();
     let (key, flags) = mode.key(&mut room);
-    assert_eq!(out.len(), batch.len(), "one digest a message");
+    // Its length against the digests here, on the caller's thread, as
+    // hash_many's kernels check it: a multiplication.
+    crate::many::assert_slots(Block::bytes(batch.blocks()), batch.message_len(), out.len());
     crate::lanes::hash_many(Block::bytes(batch.blocks()), batch.message_len(), key, flags, out);
 }
 

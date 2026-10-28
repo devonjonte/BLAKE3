@@ -87,7 +87,6 @@ pub struct Batch<'a> {
     #[cfg(not(feature = "std"))]
     blocks: &'a [Block],
     message_len: usize,
-    count: usize,
 }
 
 /// The blocks each message of `message_len` bytes takes: its bytes in
@@ -104,7 +103,7 @@ impl Batch<'static> {
     /// making, not as its pages are first touched: make one and refill it.
     #[inline]
     pub fn new(message_len: usize, count: usize) -> Self {
-        Batch { blocks: std::vec![Block::ZERO; blocks_per(message_len) * count].into(), message_len, count }
+        Batch { blocks: std::vec![Block::ZERO; blocks_per(message_len) * count].into(), message_len }
     }
 }
 
@@ -113,16 +112,15 @@ impl<'a> Batch<'a> {
     /// with no copy, where they fill their blocks: `message_len` a
     /// multiple of 64 (no byte past a message's end to keep zero; an empty
     /// message's block, which nothing reads, counts as one), and `blocks`
-    /// whole messages.
+    /// whole messages, which each call that hashes it checks against its
+    /// digests by a multiplication: a borrow costs a bit test.
     #[inline]
     pub fn from_blocks(blocks: &'a [Block], message_len: usize) -> Self {
         assert!(
             message_len % BLOCK_LEN == 0,
             "Batch::from_blocks takes messages that fill their blocks, not {message_len} B (Batch::new makes one for any length)"
         );
-        let per = blocks_per(message_len);
-        assert!(blocks.len() % per == 0, "{} blocks hold no whole number of {message_len}-byte messages", blocks.len());
-        Batch { blocks: blocks.into(), message_len, count: blocks.len() / per }
+        Batch { blocks: blocks.into(), message_len }
     }
 
     /// For the crate's own tests: `blocks` as a batch of `message_len`-byte
@@ -138,7 +136,7 @@ impl<'a> Batch<'a> {
             Block::bytes(blocks).chunks_exact(slot).all(|s| message_len == 0 || s[message_len..].iter().all(|&b| b == 0)),
             "a test's batch has a nonzero byte past a message"
         );
-        Batch { blocks: blocks.into(), message_len, count: blocks.len() / per }
+        Batch { blocks: blocks.into(), message_len }
     }
 
     /// The messages' length.
@@ -147,16 +145,16 @@ impl<'a> Batch<'a> {
         self.message_len
     }
 
-    /// How many messages it holds.
+    /// How many whole messages it holds.
     #[inline]
     pub fn len(&self) -> usize {
-        self.count
+        self.blocks.len() / blocks_per(self.message_len)
     }
 
     /// Whether it holds no messages.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.count == 0
+        self.blocks.is_empty()
     }
 
     /// Its blocks, as the kernels read them: each message at the start of
@@ -172,8 +170,8 @@ impl Batch<'_> {
     /// Message `i`'s bytes, for writing: `message_len` of them, no more (a
     /// borrowed batch copies its blocks first).
     pub fn message_mut(&mut self, i: usize) -> &mut [u8] {
-        assert!(i < self.count, "message {i} of a batch of {}", self.count);
         let per = blocks_per(self.message_len);
+        assert!((i + 1) * per <= self.blocks.len(), "message {i} of a batch of {}", self.len());
         let len = self.message_len;
         &mut Block::bytes_mut(&mut self.blocks.to_mut()[i * per..][..per])[..len]
     }
@@ -246,7 +244,8 @@ mod test {
 
     /// Blocks already in place, borrowed with no copy where the messages
     /// fill them; a length that leaves bytes past a message is refused (only
-    /// Batch::new makes one), and so are blocks of no whole message count.
+    /// Batch::new makes one), and blocks of no whole message count are
+    /// refused when hashed, against the digests.
     #[test]
     fn test_from_blocks_borrows_messages_that_fill_their_blocks() {
         crate::initialize();
@@ -256,9 +255,9 @@ mod test {
         let mut out = [[0u8; 32]; 2];
         hash_many(Mode::Plain, &batch, &mut out);
         assert_eq!(out[1], *crate::convenience::hash(Block::bytes(&blocks[2..])).as_bytes());
-        for (blocks, len) in [(&blocks[..], 100), (&blocks[..3], 128)] {
-            assert!(std::panic::catch_unwind(|| Batch::from_blocks(blocks, len)).is_err(), "{} blocks of {len}-byte messages", blocks.len());
-        }
+        assert!(std::panic::catch_unwind(|| Batch::from_blocks(&blocks, 100)).is_err(), "100-byte messages");
+        let partial = Batch::from_blocks(&blocks[..3], 128);
+        assert!(std::panic::catch_unwind(move || hash_many(Mode::Plain, &partial, &mut [[0u8; 32]; 1])).is_err(), "three blocks of 128-byte messages");
     }
 
     #[test]

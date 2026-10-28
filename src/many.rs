@@ -1019,7 +1019,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "one digest a message")]
+    #[should_panic(expected = "input holds one slot of whole blocks per output")]
     fn test_hash_many_needs_the_input_it_names() {
         crate::performance::hash_many(
             crate::Mode::Plain,
