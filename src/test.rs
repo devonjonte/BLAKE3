@@ -1189,7 +1189,14 @@ mod guard_pages {
                         |_| {},
                         |s| {
                             s.submit(blocks, len, &mut one[0]);
-                            s.submit_with(len, |at, room| room.copy_from_slice(&input[at..][..room.len()]), &mut with[0]);
+                            s.submit_with(
+                                len,
+                                |at, room| {
+                                    room.copy_from_slice(&input[at..][..room.len()]);
+                                    room.len()
+                                },
+                                &mut with[0],
+                            );
                             s.submit_batch(batch_blocks, len, batched);
                             s.finish();
                         },
@@ -1578,4 +1585,54 @@ fn test_prefetches_after_a_pause_every_length() {
     for count in 0..=4 * crate::PREFETCH_BATCH_BELOW {
         crate::neon_hybrid::prefetch_message_code(count);
     }
+}
+
+/// A nonzero byte past a message in a batch stops every batch call, in
+/// every build, naming the message (BLAKE3 #205): it would otherwise
+/// change that message's digest with no error. A length that fills its
+/// blocks has nothing past it, and an empty message's block is never read.
+#[test]
+#[cfg(feature = "std")]
+#[cfg_attr(not(panic = "unwind"), ignore = "catches panics, which this target aborts on")]
+fn test_nonzero_padding_stops_every_batch_call() {
+    crate::initialize_multithreaded(None);
+    let blocks = |len: usize, dirty: Option<usize>| {
+        let mut blocks = crate::performance::Batch::new(len, 6).blocks().to_vec();
+        if let Some(m) = dirty {
+            // The message's last byte of padding, as a reused buffer leaves it.
+            let slot = len.div_ceil(BLOCK_LEN).max(1) * BLOCK_LEN;
+            crate::performance::Block::bytes_mut(&mut blocks)[m * slot + slot - 1] = 7;
+        }
+        blocks
+    };
+    let calls: [(&str, fn(&[crate::performance::Block], usize)); 3] = [
+        ("hash_many", |b, len| crate::performance::hash_many(crate::Mode::Plain, b, len, &mut vec![[0; 32]; 6])),
+        ("hash_many_multithreaded", |b, len| crate::performance::hash_many_multithreaded(crate::Mode::Plain, b, len, &mut vec![[0; 32]; 6])),
+        ("submit_batch", |b, len| {
+            let mut out = vec![crate::Hash::from([0; 32]); 6];
+            crate::performance::stream(
+                crate::Mode::Plain,
+                |_| {},
+                |s| {
+                    s.submit_batch(b, len, &mut out);
+                    s.finish();
+                },
+            )
+        }),
+    ];
+    for (name, call) in calls {
+        for len in [1, 63, 100] {
+            let result = std::panic::catch_unwind(|| call(&blocks(len, Some(4)), len));
+            let message = result.expect_err(name);
+            let text = message.downcast_ref::<String>().map(|s| s.as_str()).unwrap_or("");
+            assert!(text.contains("message 4 of the batch has a nonzero byte past its"), "{name}, {len} B: {text}");
+        }
+        for len in [0, 64, 128] {
+            call(&blocks(len, None), len);
+        }
+    }
+    // An empty message's block may hold anything: nothing reads it.
+    let mut empty = blocks(0, None);
+    empty[2].0[5] = 1;
+    crate::performance::hash_many(crate::Mode::Plain, &empty, 0, &mut vec![[0; 32]; 6]);
 }

@@ -60,7 +60,14 @@ fn every_stream_completes_on_one_cpu() {
         |s| {
             for (message, blocks) in messages.iter().zip(&in_blocks) {
                 s.submit(blocks, message.len(), singles.next().unwrap());
-                s.submit_with(message.len(), |at, room| room.copy_from_slice(&message[at..][..room.len()]), singles.next().unwrap());
+                s.submit_with(
+                    message.len(),
+                    |at, room| {
+                        room.copy_from_slice(&message[at..][..room.len()]);
+                        room.len()
+                    },
+                    singles.next().unwrap(),
+                );
                 s.submit_reader(&message[..], None, singles.next().unwrap()).unwrap();
                 want.extend([reference(message); 3]);
             }

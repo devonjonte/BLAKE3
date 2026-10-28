@@ -9,7 +9,7 @@
 //!   and a batch is messages of one length, each in its own whole blocks.
 //!   The bytes past a message's end are ignored; in a batch they are zero,
 //!   since the batch kernels read every message's blocks in place, side by
-//!   side (the caller's to keep, checked in debug builds), and a [`Batch`]
+//!   side (the caller's to keep, checked in every build), and a [`Batch`]
 //!   keeps them zero by construction. Bytes already in place become blocks
 //!   with no copy through [`Block::from_bytes`]. The [`Hasher`] alone takes
 //!   pieces of any length anywhere (it copies short ones into its own
@@ -59,9 +59,9 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// `input` holds the messages in [`Block`]s: each starts a block and takes
 /// `message_len` rounded up to whole blocks (one block for an empty
 /// message), `out.len()` of them in all. The bytes past each message's
-/// end, to its last block's end, are zero (the caller's to keep; debug
-/// builds check, and another byte there changes that message's hash). A
-/// [`Batch`] keeps them zero by construction. This is the shape of a
+/// end, to its last block's end, are zero: the caller's to keep, and
+/// checked in every build (a nonzero byte stops the program, naming its
+/// message). A [`Batch`] keeps them zero by construction. This is the shape of a
 /// Merkle tree's layer: leaves of one size, or nodes of two 32-byte
 /// children (`message_len` 64, [`Block::digests_mut`]).
 ///

@@ -10,9 +10,9 @@ use crate::BLOCK_LEN;
 /// (one for an empty message), so every message starts on a cache line.
 ///
 /// The bytes past each message's end, to its last block's end, are zero:
-/// the caller's to write, checked in debug builds (another byte there
-/// changes that message's hash). [`Batch`] keeps them zero by
-/// construction.
+/// the caller's to write, and checked in every build (a nonzero byte
+/// there stops the program, naming its message). [`Batch`] keeps them
+/// zero by construction.
 #[repr(C, align(64))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Block(pub [u8; BLOCK_LEN]);

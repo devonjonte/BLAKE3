@@ -276,7 +276,14 @@ fn a_stream_puts_every_digest_in_its_place_and_hands_the_places_back_in_order() 
                 for (i, (message, place)) in messages.iter().zip(&mut places).enumerate() {
                     match i % 3 {
                         0 => s.submit(in_blocks[i].blocks(), message.len(), place),
-                        1 => s.submit_with(message.len(), |at, room| room.copy_from_slice(&message[at..][..room.len()]), place),
+                        1 => s.submit_with(
+                            message.len(),
+                            |at, room| {
+                                room.copy_from_slice(&message[at..][..room.len()]);
+                                room.len()
+                            },
+                            place,
+                        ),
                         _ => assert_eq!(s.submit_reader(&message[..], Some(message.len() as u64), place).unwrap(), message.len() as u64),
                     }
                 }
@@ -310,7 +317,14 @@ fn a_streams_batches_fill_the_callers_places() {
                     if k % 2 == 0 {
                         s.submit_batch(buffer.blocks(), len, place);
                     } else {
-                        s.submit_batch_with(len, |at, room| room.copy_from_slice(&Block::bytes(buffer.blocks())[at..][..room.len()]), place);
+                        s.submit_batch_with(
+                            len,
+                            |at, room| {
+                                room.copy_from_slice(&Block::bytes(buffer.blocks())[at..][..room.len()]);
+                                room.len()
+                            },
+                            place,
+                        );
                     }
                 }
                 s.finish();

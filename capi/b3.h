@@ -91,7 +91,9 @@ b3_digest b3_hash_multithreaded(const b3_mode *mode, const void *input, size_t l
  * boundary (aligned_alloc(64, n) gives one; a misplaced batch stops the
  * program). Message i starts at byte i * B3_STRIDE(message_len) of
  * `input`, and the bytes between a message's end and the next stride are
- * zero. Messages whose length is a multiple of
+ * zero: aligned_alloc leaves them as it finds them, so memset the batch
+ * to zero first. A nonzero byte there stops the program, naming its
+ * message. Messages whose length is a multiple of
  * 64 sit back to back: a Merkle tree's layer of leaves, or of 64-byte
  * pairs of child digests. Short messages hash fastest this way: 1024
  * messages of 64 bytes take about a fifth of the time of 1024 b3_hash
