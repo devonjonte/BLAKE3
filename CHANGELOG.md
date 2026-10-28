@@ -1,4 +1,4 @@
-# blake3-servil 0.8.0+2aa17489537c922634b53035ab0a635682ba4a1c, against official BLAKE3 1.8.7
+# blake3-servil 0.8.0+302bae1534161c0339937669ab7067f12788597a, against official BLAKE3 1.8.7
 
 The same digests. Faster than official BLAKE3 1.8.7 on 64-bit Arm and
 x86-64. Every kernel is assembly, and every one is proved correct
