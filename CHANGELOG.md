@@ -9,24 +9,28 @@ are tested ([QUALITY.md](QUALITY.md)).
 
 Each figure is blake3-servil's speed over official BLAKE3 1.8.7's, both
 measured in the same run by [bench-hashes](https://github.com/johnservil/bench-hashes)
-(0.17.0, one run per machine, October 23–24; the release's own runs
-replace these figures):
+0.18.1 at this release's commit (one run per machine, October 27).
+On the every-core rows each uses its multithreaded function:
 
-| | Intel i7-12700K | AMD EPYC 9255 | Apple M4 Max |
-|---|---|---|---|
-| One message of 64 B | 1.0× | 0.9× | 1.5× |
-| One message of 1 KiB | 1.0× | 1.0× | 1.1× |
-| One message of 1 MiB, one thread | 1.0× | 1.0× | 2.5× |
-| One message of 128 MiB, every core | 1.0× | 1.0× | not yet measured |
-| A stream of 64 KiB messages | 7.8× | 7.5× | not yet measured |
-| A batch of 1024 messages, 64 B each | 1.1× | 1.2× | 1.9× |
-| b3sum over 1000 files of mixed sizes | 2.9× | 5.7× | 4.4× |
+| | Intel i7-12700K | AMD EPYC 9255 | Apple M4 Max | Linux VM on the M4 Max |
+|---|---|---|---|---|
+| One message of 64 B | 0.8× | 1.1× | 1.5× | 1.1× |
+| One message of 1 KiB | 1.1× | 1.1× | 1.2× | 1.2× |
+| One message of 1 MiB, one thread | 1.0× | 1.2× | 2.5× | 2.5× |
+| One message of 128 MiB, every core | 1.1× | 1.0× | 1.3× | 1.3× |
+| A stream of 64 KiB messages, every core | 8.0× | 7.2× | 33× | 156× |
+| A batch of 1024 messages, 64 B each | 1.1× | 1.1× | 1.9× | 1.8× |
+| b3sum over 1000 files of mixed sizes | 3.4× | 5.8× | 4.6× | 26× |
+
+On the M4 Max and in the VM, official's multithreaded call on each 64 KiB
+message takes longer than its one-thread call (1.08 and 7.13 ns per byte,
+against 0.42 and 0.43), so the stream row's figures there are large.
 
 On 64-bit Arm, new kernels make every size faster: SME2 on the M4 and
 later, and kernels that run the integer and NEON units side by side.
 On x86-64 with SSE4.1 or AVX2, a single message hashes with official's
-own assembly (each proved below), so it runs at official's speed, and
-at 64 B on the EPYC slower (0.9×). On Linux on AMD Zen 5 and later,
+own assembly (each proved below), so it runs at official's speed (one
+message of 64 B varies from run to run: 0.8× to 1.9× on the i7). On Linux on AMD Zen 5 and later,
 new kernels hash 32 whole chunks or 16 parent nodes at once with AVX-512
 (proved too): on the EPYC 9255, one thread hashing 32 KiB or more takes
 about 20% less time than with upstream's 16-input AVX-512 kernel. Other
@@ -35,9 +39,7 @@ the wide kernels 4-5% slower from memory; Intel Ice Lake: 3-4.5% slower
 throughout). The other gains on x86-64 come
 from many messages at once: a stream that hashes on other cores while
 the program reads the next input, batches of short messages, and b3sum
-over many files. The
-M4 Max's run measured official's single-threaded form only, so its
-every-core rows wait for the release's run.
+over many files.
 
 ## Checked more
 
