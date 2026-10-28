@@ -4,23 +4,29 @@
 # its own cap, well under the builds' (check.py, test_limits).
 ulimit -d "$MUTANTS_TEST_DATA_KIB" || exit 101
 # Same code (check.py, SAME_CODE): nextest lists every test binary before
-# it runs a test, each through this runner. The shard's first build is
-# the unmutated one, and its listing records each binary's hash
-# (code_hash.py: every byte the loader maps); each later build's listing
-# records whether the binary still hashes so. When all of them do, the
-# mutant changed nothing this machine runs: its first test exits at once
-# with MARKER, which check.py reads in the mutant's log, and no test
-# runs. Any binary that differs runs the tests as ever.
+# it runs a test, each through this runner (twice: its tests, then its
+# ignored ones). The shard's first build is the unmutated one, and its
+# listing records each binary's file (inode, mtime, size) and hash
+# (code_hash.py: every byte the loader maps); a later build's listing of
+# a relinked binary records whether it still hashes so, and the
+# baseline's own file is the baseline still. When every binary hashes as
+# before, the mutant changed nothing this machine runs: its first test
+# exits at once with MARKER, which check.py reads in the mutant's log,
+# and no test runs. Any binary that differs, or was not relinked, runs
+# the tests as ever.
 state=$MUTANTS_SAME_CODE
 if [ -n "$state" ]; then
 	case " $* " in
 	*" --list "*)
-		hash=$(python3 "$MUTANTS_CODE_HASH" "$1") || exit 101
 		name=$(basename "$1")
+		file=$(stat -c '%i %.9Y %s' "$1") || exit 101
 		if [ ! -f "$state/$name.base" ]; then
-			echo "$hash" > "$state/$name.base"
+			hash=$(python3 "$MUTANTS_CODE_HASH" "$1") || exit 101
+			echo "$file $hash" > "$state/$name.base"
 			echo baseline > "$state/$name.now"
-		elif [ "$hash" = "$(cat "$state/$name.base")" ]; then
+		elif [ "$file" = "$(cut -d' ' -f1-3 "$state/$name.base")" ]; then
+			echo baseline > "$state/$name.now"
+		elif [ "$(python3 "$MUTANTS_CODE_HASH" "$1")" = "$(cut -d' ' -f4 "$state/$name.base")" ]; then
 			echo same > "$state/$name.now"
 		else
 			echo differs > "$state/$name.now"
