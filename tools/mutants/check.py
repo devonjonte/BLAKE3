@@ -18,6 +18,15 @@ the pool's handshakes, thousands of schedules in seconds): a wait that
 never ends is a deadlock it reports, not a time-out. With --write, the list is rewritten from this run, each
 new mutant's reason UNCLASSIFIED and the others' kept.
 
+A mutant whose build hashes as the unmutated build's, every test binary
+alike (code_hash.py: every byte the loader maps), changes nothing this
+machine runs: code for another architecture, or one the optimizer erases.
+On Linux the test runner (test-runner) sees it while nextest lists the
+binaries, and its first test stops at once, so it costs a build and no
+test. It is a survivor of its own kind, "same code": --write gives its
+row the reason SAME_REASON, and a run fails (NO LONGER SAME CODE) on a
+row with that reason whose mutant now builds to other code.
+
 A mutant whose tests no test fails, but the clock stops (nextest's, or
 cargo-mutants' backstop), has an outcome of its own: it timed out. That
 is neither caught nor survived: the tests did not finish, which says
@@ -323,6 +332,11 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
         env["MUTANTS_TEST_DATA_KIB"] = str(test_cap >> 10)
         # Through sh: a checkout's files may sit where nothing executes.
         env[f"CARGO_TARGET_{HOST.upper().replace('-', '_')}_RUNNER"] = "sh " + os.path.join(ROOT, "tools", "mutants", "test-runner")
+        if sys.platform == "linux":  # code_hash.py reads ELF
+            env["MUTANTS_SAME_CODE"] = os.path.join(target, "same-code")
+            os.makedirs(env["MUTANTS_SAME_CODE"])
+            env["MUTANTS_CODE_HASH"] = os.path.join(ROOT, "tools", "mutants", "code_hash.py")
+            env["MUTANTS_SAME_CODE_MARKER"] = SAME_CODE_MARKER
         if loom:
             # The model checker's build of the same files (tests/shuttle_*.rs
             # compile them beside Shuttle's primitives): every schedule it
@@ -377,10 +391,18 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
                 # first. Still a time-out, never an error or a catch.
                 print(f"BACKSTOP: the {BACKSTOP} s limit ended {mutant['name']}'s tests, not nextest's clock (.config/nextest.toml)")
                 timed[name] += 1
+            place = mutant["name"].split(": ", 1)[0].split(":", 1)[1]
+            if summary == "CaughtMutant" and SAME_CODE_MARKER in open(log, errors="replace").read():
+                # Its build hashes as the unmutated one: it changes nothing
+                # here, a survivor no test ran on (test-runner).
+                names[name] += 1
+                SAME[label][name] += 1
+                PLACE_OUTCOMES.setdefault(label, {})[(name, place)] = "MissedMutant"
+                functions[(mutant["file"], function)].append(("MissedMutant", name))
+                continue
             if summary in ("CaughtMutant", "MissedMutant", "Timeout"):
                 # The mutant's place too: one name can be several places,
                 # each caught (or not) by tests of its own.
-                place = mutant["name"].split(": ", 1)[0].split(":", 1)[1]
                 tests = read_tests(log)
                 rows += [(f"{name}\t{place}", f"{mutant['file']} {function}", *t) for t in tests]
                 failed = [o for _, o, _ in tests if o != "PASS"]
@@ -406,6 +428,13 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
     return names, functions, timed
 
 
+# Same code: a mutant whose every test binary hashes as the unmutated
+# build's (test-runner) exits its first test at once with the marker.
+SAME_CODE_MARKER = "mutants: same code: every test binary hashes as the unmutated build's"
+SAME_REASON = "same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)"
+# The places a name had of it, by run label; confirm() replaces a
+# rerun name's "run" count with its "confirm" one, as it does survivors'.
+SAME = collections.defaultdict(collections.Counter)
 # The places that no test failed, but the clock stopped (listed by name in
 # TIMEOUTS): a hang, or a test made slow by the mutant, or by the machine's
 # load (a mutant compiled out of the build was stopped so once, at 5 s).
@@ -582,6 +611,7 @@ def confirm(found, known, timed, tknown, differ=None):
     confirmed, confirmed_timed = collections.Counter(found), collections.Counter(timed)
     for k in differ:
         confirmed[k], confirmed_timed[k] = again.get(k, 0), again_timed.get(k, 0)
+        SAME["run"][k] = SAME["confirm"][k]
     print(f"confirmed alone: {len(differ)} names whose count differed from a list")
     return +confirmed, +confirmed_timed
 
@@ -768,7 +798,11 @@ def main():
         # draw, and the row is what the draws have shown (October 26).
         found = {**{k: c for k, (c, r) in known.items() if open_pool(k, r)}, **found}
         found = {k: max(n, known[k][0]) if k in known and open_pool(k, known[k][1]) else n for k, n in found.items()}
-        rows = sorted([f"{k}\t{n}\t{known[k][1] if k in known else unclassified(k, 'survives')}" for k, n in found.items()] + INACTIVE)
+        def reason(k, n):
+            if SAME["run"][k] == n:
+                return SAME_REASON
+            return known[k][1] if k in known and known[k][1] != SAME_REASON else unclassified(k, 'survives')
+        rows = sorted([f"{k}\t{n}\t{reason(k, n)}" for k, n in found.items()] + INACTIVE)
         open(KNOWN, "w").write("\n".join(header + rows) + "\n")
         print(f"{KNOWN}: {sum(found.values())} survivors, {sum(1 for k in found if k not in known)} names new")
         theader = [l.rstrip("\n") for l in open(TIMEOUTS) if l.startswith("#")] if os.path.exists(TIMEOUTS) else \
@@ -790,6 +824,11 @@ def main():
     stale = {k: c for k, (c, reason) in known.items() if found.get(k, 0) < c and not open_pool(k, reason)}
     for k, n in sorted(new.items()):
         print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
+    # A row the tool explained as same code holds only while it is.
+    same = SAME["run"]
+    drifted = sorted(k for k, (c, reason) in known.items() if reason == SAME_REASON and same[k] != found.get(k, 0))
+    for k in drifted:
+        print(f"NO LONGER SAME CODE ({found.get(k, 0) - same[k]} of {found.get(k, 0)} places build to other code): {k}")
     for k, c in sorted(stale.items()):
         print(f"{'NOW TIMES OUT' if timed.get(k) else 'NOW CAUGHT'} ({c - found.get(k, 0)}): {k}")
     # The time-outs against their list, alike (an OPEN pool row's count is
@@ -816,7 +855,7 @@ def main():
         n, place = k.rsplit("\t", 1)
         if model.get((n, place)) != "CaughtMutant":
             print(f"TIMED OUT (place): {k}")
-    ok = not new and not stale and not unexplained
+    ok = not new and not stale and not unexplained and not drifted
     ok_timed = not new_timed and not stale_timed
     print(f"mutants: {sum(found.values())} survive, each known and explained" if ok else "mutants: the list and this run differ, or a listed mutant has no reason")
     print(f"mutants: {sum(timed.values())} time out, each known ({os.path.basename(TIMEOUTS)})" if ok_timed
