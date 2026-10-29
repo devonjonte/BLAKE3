@@ -315,7 +315,9 @@ mentions no implementation, so the proofs compare the kernels with the
 standard itself. Its compression function (sections 2.2 to 3.3) is
 generated from the standard's pseudocode, one rule per construct;
 `check.py` confirms the generated text and reproduces every value in the
-standard's appendix and the official test vectors.
+standard's appendix and the official test vectors. The same files are
+proposed to C2SP as the standard's definitive Lean specification
+([C2SP #393](https://github.com/C2SP/C2SP/pull/393)).
 
 | Part | Statement | Checked by |
 |---|---|---|
