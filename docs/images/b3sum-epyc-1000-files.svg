@@ -1,21 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="286" viewBox="0 0 760 286" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14">
-<rect width="760" height="286" fill="white"/>
-<text x="16" y="26" font-size="17" font-weight="bold">A tree of 1,000 files, 74 MiB, hashed from the page cache</text>
-<text x="16" y="46" fill="#555">AMD EPYC 9255, 48 CPUs, Linux. Longer is faster.</text>
-<text x="190" y="86" text-anchor="end">b3sum, every core</text>
-<rect x="200" y="72" width="470.0" height="22" fill="#4c1d95" rx="2"/>
-<text x="678.0" y="88" fill="#222">19.1 GB/s</text>
-<text x="190" y="120" text-anchor="end">b3sum, one thread</text>
-<rect x="200" y="106" width="110.2" height="22" fill="#7c3aed" rx="2"/>
-<text x="318.2" y="122" fill="#222">4.48 GB/s</text>
-<text x="190" y="154" text-anchor="end">sha256sum</text>
-<rect x="200" y="140" width="41.3" height="22" fill="#e07a45" rx="2"/>
-<text x="249.3" y="156" fill="#222">1.68 GB/s</text>
-<text x="190" y="188" text-anchor="end">sha1sum</text>
-<rect x="200" y="174" width="42.8" height="22" fill="#b4b0a8" rx="2"/>
-<text x="250.8" y="190" fill="#222">1.74 GB/s</text>
-<text x="190" y="222" text-anchor="end">md5sum</text>
-<rect x="200" y="208" width="16.6" height="22" fill="#cfcbc3" rx="2"/>
-<text x="224.6" y="224" fill="#222">0.68 GB/s</text>
-<text x="16" y="264" fill="#555" font-size="12">bench-hashes 0.17.0, 15 rounds; sha256sum, sha1sum and md5sum from uutils coreutils 0.10.0.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="288" viewBox="0 0 720 288" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<rect width="720" height="288" fill="#ffffff"/>
+<text x="170" y="28" font-size="17" font-weight="600" fill="#111827">Hashing a tree of 1000 files</text>
+<text x="170" y="50" font-size="13" fill="#4b5563">faster →</text>
+<text x="160" y="95.7" font-size="13" fill="#111827" text-anchor="end" font-weight="600">b3sum</text>
+<rect x="170" y="78" width="450.0" height="26" rx="3" fill="#7c3aed"/>
+<text x="626.0" y="95.7" font-size="13" fill="#111827" font-weight="600">19 GB/s</text>
+<text x="160" y="131.7" font-size="13" fill="#111827" text-anchor="end" font-weight="600">b3sum, one thread</text>
+<rect x="170" y="114" width="117.5" height="26" rx="3" fill="#7c3aed"/>
+<text x="293.5" y="131.7" font-size="13" fill="#111827" font-weight="600">5.05 GB/s</text>
+<text x="160" y="167.7" font-size="13" fill="#111827" text-anchor="end">sha1sum</text>
+<rect x="170" y="150" width="40.7" height="26" rx="3" fill="#8a7a1e"/>
+<text x="216.7" y="167.7" font-size="13" fill="#111827">1.75 GB/s</text>
+<text x="160" y="203.7" font-size="13" fill="#111827" text-anchor="end">sha256sum</text>
+<rect x="170" y="186" width="39.1" height="26" rx="3" fill="#c2410c"/>
+<text x="215.1" y="203.7" font-size="13" fill="#111827">1.68 GB/s</text>
+<text x="160" y="239.7" font-size="13" fill="#111827" text-anchor="end">md5sum</text>
+<rect x="170" y="222" width="15.8" height="26" rx="3" fill="#2563eb"/>
+<text x="191.8" y="239.7" font-size="13" fill="#111827">0.68 GB/s</text>
+<text x="170" y="276.0" font-size="11" fill="#9a9a9a">AMD EPYC 9255 24-Core Processor, 48 CPUs · bench-hashes 0.18.0 on 2026-10-27</text>
 </svg>

@@ -4,9 +4,7 @@ A fast [BLAKE3](https://blake3.io) implementation for 64-bit Arm and x86-64.
 
 ## How fast
 
-<img src="https://johnservil.github.io/bench-hashes/benchmark-results/AMDEPYC925524CoreProcessor.linux70038generic/bench-hashes.chart.svg" alt="Hashing one 128 MiB message after a pause on an AMD EPYC 9255: BLAKE3 on every core and on one core beside SHA-256, SHA-1 and SHA3-256, in GB/s" width="720">
-
-<img src="https://johnservil.github.io/bench-hashes/benchmark-results/AMDEPYC925524CoreProcessor.linux70038generic/b3sum.chart.svg" alt="Hashing a tree of 1000 files on an AMD EPYC 9255: b3sum on every core and on one thread, beside sha1sum, sha256sum and md5sum, in GB/s" width="720">
+<img src="docs/images/hash-epyc-128mib.svg" alt="Hashing one 128 MiB message on an AMD EPYC 9255: BLAKE3 on every core and on one core, beside SHA-256, SHA-1 and SHA3-256, in GB/s" width="720">
 
 Speed depends on your machine and on how your program hashes.
 [bench-hashes](https://github.com/johnservil/bench-hashes) measures both on your own
