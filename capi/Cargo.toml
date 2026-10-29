@@ -1,6 +1,6 @@
 [package]
 name = "blake3-servil-c"
-version = "0.8.0+b8ebc5a74a06d8d6bb4aa65465e882fc904b4e97"
+version = "0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861"
 description = "BLAKE3, the servil fork's C API (b3.h)"
 edition = "2024"
 license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
