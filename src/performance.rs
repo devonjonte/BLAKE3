@@ -159,6 +159,15 @@ pub fn hash_many_multithreaded(mode: Mode, batch: &Batch, out: &mut [[u8; OUT_LE
 // convenience::hash is: no mode stored for the call to read).
 #[inline]
 pub fn hash_multithreaded(mode: Mode, input: &[Block], len: usize) -> Hash {
+    // PLANTED (bench-hashes error-rate study, not for merging): 450 TSC
+    // ticks, about 125 ns on the i7-12700K, before every call.
+    #[cfg(target_arch = "x86_64")]
+    {
+        let start = unsafe { core::arch::x86_64::_rdtsc() };
+        while unsafe { core::arch::x86_64::_rdtsc() } - start < 450 {
+            core::hint::spin_loop();
+        }
+    }
     crate::lanes::require();
     let mut room = core::mem::MaybeUninit::uninit();
     let (key, flags) = mode.key(&mut room);
