@@ -170,6 +170,7 @@ fn join_tail(state: &mut State, start: Reading, reading: Reading) {
     state.windows.pop();
     push(state, between(start, reading));
     state.last = Some(reading);
+    DUE_NS.store(reading.at_ns + WINDOW_NS, Ordering::Relaxed);
 }
 
 /// How long until the next tick reads the machine, in ns (0: now; u64::MAX
@@ -424,6 +425,21 @@ mod tests {
         let state = tail_fixture(20, 0, 160, 0);
         assert!(state.windows[0].busy());
         assert_eq!(state.windows[0].end_ns, 1_400_000_000);
+    }
+
+    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    #[test]
+    fn extending_a_window_delays_the_next_poll() {
+        let _turn = exclusive();
+        let mut start = Reading::take().expect("CPU counters are available");
+        start.at_ns = 0;
+        let last = Reading { at_ns: WINDOW_NS, ..start };
+        let tail = Reading { at_ns: WINDOW_NS + WINDOW_NS / 4, ..start };
+        let mut state = State { last: Some(last), last_start: Some(start), windows: vec![between(start, last)] };
+        DUE_NS.store(last.at_ns + WINDOW_NS, Ordering::Relaxed);
+        join_tail(&mut state, start, tail);
+        assert_eq!(DUE_NS.load(Ordering::Relaxed), tail.at_ns + WINDOW_NS,
+            "the watcher waits a full window after the new counter baseline");
     }
 
     #[cfg(target_os = "linux")]
