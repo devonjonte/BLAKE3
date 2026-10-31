@@ -160,13 +160,18 @@ pub fn hash_many_multithreaded(mode: Mode, batch: &Batch, out: &mut [[u8; OUT_LE
 #[inline]
 pub fn hash_multithreaded(mode: Mode, input: &[Block], len: usize) -> Hash {
     // PLANTED (bench-hashes error-rate study, not for merging): 450 TSC
-    // ticks, about 125 ns on the i7-12700K, before every call.
+    // ticks, about 125 ns on the i7-12700K, before a cold call only: one
+    // more than 360,000 ticks (100 us) after this thread's previous call.
     #[cfg(target_arch = "x86_64")]
     {
+        std::thread_local!(static LAST: core::cell::Cell<u64> = const { core::cell::Cell::new(0) });
         let start = unsafe { core::arch::x86_64::_rdtsc() };
-        while unsafe { core::arch::x86_64::_rdtsc() } - start < 450 {
-            core::hint::spin_loop();
+        if start - LAST.with(|l| l.get()) > 360_000 {
+            while unsafe { core::arch::x86_64::_rdtsc() } - start < 450 {
+                core::hint::spin_loop();
+            }
         }
+        LAST.with(|l| l.set(unsafe { core::arch::x86_64::_rdtsc() }));
     }
     crate::lanes::require();
     let mut room = core::mem::MaybeUninit::uninit();
