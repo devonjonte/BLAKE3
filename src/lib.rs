@@ -935,8 +935,8 @@ pub fn initialize() {
 /// trouble, and unevenly. On an i7-12700K (20 CPUs), N programs each
 /// streaming 64 KiB messages hashed 26 GB/s alone, 37-41 together at 2
 /// to 10, and 21-28 at 20 to 80 (400 to 1600 threads): the machine's
-/// total holds, and oversubscription costs it about 45% at one program a
-/// core and beyond. What each program gets is the OS's choice among
+/// total holds, and oversubscription costs it 31% at one program a core
+/// and 48% at four. What each program gets is the OS's choice among
 /// equal threads: at 20 programs the luckiest got 2.6 times the
 /// unluckiest, at 80, 8 times (bench-hashes #116, November 2026). A
 /// program that needs a predictable share beside others sizes its pool
