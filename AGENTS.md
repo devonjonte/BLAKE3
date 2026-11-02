@@ -24,7 +24,7 @@ Use one clear mechanism wherever it serves. When approaches perform similarly, c
 
 **Revisit complexity as you learn** Complexity is a large cost that never stops being paid, so its benefit is never settled: whenever new information shows a piece of complexity doing less than it was built for, weigh removing it, since its cost may now exceed its benefit. Above all, when you find yourself building a second solution to a problem that an earlier solution already addresses, stop: you are very likely making a mistake. Go back and either make the first solution good enough, or remove it entirely; say which, and why, before building anything. Between pieces of work, make a clean-up pass over the whole repository (code, documents, tests, generated files) for whatever is stale, inconsistent, duplicated, or vestigial, and commit it on its own before the next piece begins: work grown by accretion hides its second solutions and its leftovers, and a pass with fresh eyes is when they show.
 
-**An unexplained cause is an orange flag.** When you contemplate adding a mechanism to solve a problem whose exact cause you have yet to establish, pause. Trace the cause, then decide whether to improve or remove the existing mechanism. A diagnostic experiment earns its place by distinguishing possible causes.
+**An unexplained cause is an orange flag.** When you contemplate adding a mechanism to solve a problem whose exact cause you have yet to establish, pause. Trace the cause, then decide whether to improve or remove the existing mechanism. A diagnostic experiment earns its place by distinguishing possible causes. An experiment, test or comparison counts once it has shown it can fail: its inputs are seen to differ (a build's provenance, a planted change), and its result moves when they do.
 
 ## Communication
 
@@ -121,7 +121,7 @@ We never write "defensive code" — code that complicates a contract to ease the
 
 **A broken contract stops the program, loudly and at once** No slower, partial, or "safe" mode for a caller's mistake. The caller may be a person and what they hand the program: a tool's contract covers the code, tests, files, and environment its user gives it, and retrying, repeating, or voting to tolerate a broken assumption there is a degraded mode. A stop is loud and immediate, points at its cause, and is fixed in the first test run; a degraded mode hides the bug, ships it, charges every user and every benchmark the slowdown, and doubles the cases every reader and test must cover. "Safe" means no undefined behavior and no silently wrong result, and a silently slow result is a wrong one. A fallback for misuse is defensive code. What the contract itself provides for is specified behavior, not a fallback: a CPU without AVX2 runs the SSE4.1 kernels, documented and tested, that caller's by right.
 
-**Contracts change everywhere at once** When we improve a contract (a function's signature, a data structure, a file format, a tool's output), the same change updates every caller and every reader, in both repositories. Code accepts exactly the current contract and fails stop on any other: a reader asserts the format's version and refuses an older one. Results in an older format are read with the tools of the commit that wrote them.
+**Contracts change everywhere at once** When we improve a contract (a function's signature, a data structure, a file format, a tool's output), the same change updates every caller and every reader, in both repositories. Code accepts exactly the current contract and fails stop on any other: a reader asserts the format's version and refuses an older one. A format's reader accepts exactly what its specification defines, and its writer emits one canonical form: whatever a reader tolerates becomes part of the format the day someone relies on it. Results in an older format are read with the tools of the commit that wrote them.
 
 ## Interfaces: fewest new concepts
 
@@ -132,6 +132,7 @@ A highly desirable property of an interface and its contract: the user learns th
 The part above (Philosophy, Strategy, Style) reads the same in the `AGENTS.md` of the fork, of bench-hashes, and of Ode; a change goes into all three. This part, the rules of the fork and its benchmark, reads the same in the fork's and bench-hashes'.
 
 - Name Zooko as "Zooko" alone, in every document, commit, issue, pull request, and message (his wish, September 26, 2026).
+- Stage the paths a commit is about, by name, and read `git status` before committing: a checkout may hold someone's work in progress.
 
 **Generated text is computed from what the page shows.** A sentence about the page's own contents is built from the same data as the page, so it names only what is on the page, whatever options produced it.
 
