@@ -290,22 +290,20 @@ pub fn measure_after_gaps_prepared<T: ?Sized>(
             f(input);
             continue;
         }
-        std::hint::black_box(Counts::read());
-        std::hint::black_box(since_ns(now()));
-
-        let before = Counts::read();
+        // EXPERIMENT (bench-hashes #106): nothing between the gap and the
+        // call but the input's write and one clock read; the counts are
+        // read after the call alone (their differences are not taken, so
+        // the counts fields stay None).
         let t = now();
         prepare(input);
-        measured.preparation.wall_ns += since_ns(t);
-        let counts = before.zip(Counts::read()).map(|(before, after)| after.since(before));
-        measured.preparation.counts = measured.preparation.counts.zip(counts).map(|(sum, call)| sum.plus(call));
-
-        let before = Counts::read();
-        let t = now();
+        let t2 = now();
         f(input);
-        measured.calls.wall_ns += since_ns(t);
-        let counts = before.zip(Counts::read()).map(|(before, after)| after.since(before));
-        measured.calls.counts = measured.calls.counts.zip(counts).map(|(sum, call)| sum.plus(call));
+        let t3 = now();
+        measured.preparation.wall_ns += t2.duration_since(t).as_nanos() as u64;
+        measured.calls.wall_ns += t3.duration_since(t2).as_nanos() as u64;
+        std::hint::black_box(Counts::read());
+        measured.preparation.counts = None;
+        measured.calls.counts = None;
     }
     measured
 }
