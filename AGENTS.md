@@ -51,7 +51,7 @@ Sixteen actions that improve writing:
 15. Name responsibility
 16. Trim metadiscourse
 
-The fork's `tools/claudish.py` warns on a few patterns that sound like a language model or work against these rules: contrasts built on a negation, prohibitions, stock vocabulary, filler, mid-sentence dashes, and sentences too long or too chained to hold in mind. Run it on what you write, a page or a draft commit message or comment (`python3 tools/claudish.py FILE...`, or `-` to read a draft from stdin). Each warning marks a sentence to reread; your judgment, guided by the aims above, decides what changes. Often the sentence stands, and sometimes the whole paragraph wants rewriting.
+The fork's `tools/claudish.py` warns on a few patterns that sound like a language model or work against these rules: contrasts built on a negation, prohibitions, stock vocabulary, filler, mid-sentence dashes, and sentences too long or too chained to hold in mind. Run it on what you write, a page or a draft commit message or comment (`python3 tools/claudish.py [--kind commit|comment|pr|doc] FILE...`, or `-` to read a draft from stdin; the kind sets a length budget). Each warning marks a sentence to reread; your judgment, guided by the aims above, decides what changes. Often the sentence stands, and sometimes the whole paragraph wants rewriting.
 
 ## Presentation: every item costs the reader
 
