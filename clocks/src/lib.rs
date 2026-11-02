@@ -296,6 +296,15 @@ pub fn measure_after_gaps_prepared<T: ?Sized>(
         // the counts fields stay None).
         let t = now();
         prepare(input);
+        // VARIANT (env PRECALL): what runs between the write and the call.
+        //   none: nothing (variant B); perf: one Counts::read (a perf
+        //   syscall); clock: one Instant::now; spin: 2 us of integer work.
+        match precall() {
+            "perf" => { std::hint::black_box(Counts::read()); }
+            "clock" => { std::hint::black_box(since_ns(now())); }
+            "spin" => busy_work(2_000),
+            _ => {}
+        }
         let t2 = now();
         f(input);
         let t3 = now();
@@ -306,6 +315,12 @@ pub fn measure_after_gaps_prepared<T: ?Sized>(
         measured.calls.counts = None;
     }
     measured
+}
+
+/// EXPERIMENT: the PRECALL variant, read once.
+fn precall() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    V.get_or_init(|| std::env::var("PRECALL").unwrap_or_default()).as_str()
 }
 
 /// Keep the calling thread busy for `ns` of wall time with integer
