@@ -53,7 +53,7 @@ crate = re.search(r'^name = "(.*)"$', open("Cargo.toml").read(), re.M).group(1)
 edit("Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
 files = ["Cargo.toml"]
 if os.path.exists("CHANGELOG.md"):
-    edit("CHANGELOG.md", rf"^# {crate} [^ ,]+", f"# {crate} {full}")
+    edit("CHANGELOG.md", rf"^# {crate} [^\s,]+", f"# {crate} {full}")
     files.append("CHANGELOG.md")
 if os.path.exists("b3sum/Cargo.toml"):
     edit("b3sum/Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
