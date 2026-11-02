@@ -47,7 +47,7 @@ first); wait with `python3 tools/runner/wait_for.py NNN-name`; results land
 in `runner/results/`. A job runs once per file name, so a changed job
 takes a new number.
 
-While a job that times runs (`benchmark`, `b3sum`, `example`, `check`),
+While a job that times runs (`benchmark`, `b3sum`, `crowd`, `example`, `check`),
 nothing else should run on the Mac, the VM included, and Activity
 Monitor stays closed (it keeps `sysmond` near a whole CPU busy: with it
 open, 170 of 219 load windows of a run read busy, closed 5 of 214). The

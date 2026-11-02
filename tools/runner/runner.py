@@ -36,6 +36,11 @@ at the fork commit: official BLAKE3's b3sum, the fork's as b3sum and
 b3sum-1-thread, the system's sum programs; and runs bench-hashes b3sum on
 the files in ~/b3sum-bench-files, made there once. The report, samples
 and map land in the job's benchmark-results/. "quick" runs the small set.)
+    {"type": "crowd", "fork_commit": "...", "bench_commit": "..."}
+
+(A crowd job runs `bench-hashes crowd` with its defaults, built against the
+fork commit: many programs at once, one a CPU, each with its own pool. Its
+samples and report land in the job's benchmark-results/.)
     {"type": "example", "example": "scaling" | "host_lab" | "energy_probe" | "job_trace",
      "fork_commit": "...", "args": ["message", "1048576"]}
     {"type": "test", "fork_commit": "..."}
@@ -294,7 +299,15 @@ def test(job, run, work, out):
     return "passed"
 
 
-HANDLERS = {"benchmark": benchmark, "b3sum": b3sum, "check": check, "example": example, "test": test}
+def crowd(job, run, work, out):
+    fork, bench = run.checkouts(hex_commit(job, "fork_commit"), hex_commit(job, "bench_commit"))
+    exe = run.run(["cargo", "run", "--release", "--quiet", "--", "build-against", str(fork)],
+                  cwd=bench, capture=True).strip().splitlines()[-1]
+    run.run([exe, "crowd"], cwd=out)
+    return "ok"
+
+
+HANDLERS = {"benchmark": benchmark, "b3sum": b3sum, "check": check, "crowd": crowd, "example": example, "test": test}
 
 
 def power():
