@@ -294,6 +294,13 @@ pub fn measure_after_gaps_prepared<T: ?Sized>(
         // call but the input's write and one clock read; the counts are
         // read after the call alone (their differences are not taken, so
         // the counts fields stay None).
+        // VARIANT "warm": the timing path's warm-up before the write, as
+        // the bench does (a counts read and a clock read), and nothing
+        // between the write and the call.
+        if precall() == "warm" {
+            std::hint::black_box(Counts::read());
+            std::hint::black_box(since_ns(now()));
+        }
         let t = now();
         prepare(input);
         // VARIANT (env PRECALL): what runs between the write and the call.
