@@ -75,6 +75,7 @@ dependencies = [
  "hex",
  "libc",
  "memmap2",
+ "sigilcode",
  "tempfile",
 ]
 
@@ -340,6 +341,11 @@ dependencies = [
  "os_pipe",
  "signal-hook",
 ]
+
+[[package]]
+name = "sigilcode"
+version = "0.1.0"
+source = "git+https://github.com/johnservil/sigil?rev=8bd993a459cdb9c44a358b1e6636b7be2b339c91#8bd993a459cdb9c44a358b1e6636b7be2b339c91"
 
 [[package]]
 name = "signal-hook"

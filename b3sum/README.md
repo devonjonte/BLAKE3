@@ -21,6 +21,9 @@ sha256sum -c b3sum-VERSION-TARGET.sha256
 chmod +x b3sum-VERSION-TARGET && ./b3sum-VERSION-TARGET -c b3sum-VERSION-TARGET.b3
 ```
 
+The `.b3` file gives the BLAKE3 digest as a sigil, 26 characters where
+hex takes 64 (below).
+
 To build it yourself on Linux, with [Rust and Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html),
 link it statically too, giving your machine's target
 (`aarch64-unknown-linux-gnu` on 64-bit Arm):
@@ -64,12 +67,15 @@ Arguments:
 Options:
       --keyed                 Use the keyed mode, reading the 32-byte key from stdin
       --derive-key <CONTEXT>  Use the key derivation mode, with the given context string
-  -l, --length <LEN>          The number of output bytes, before hex encoding [default: 32]
-      --seek <SEEK>           The starting output byte offset, before hex encoding [default: 0]
+  -l, --length <LEN>          The number of output bytes, before hex or sigil encoding [default: 32]
+      --seek <SEEK>           The starting output byte offset, before hex or sigil encoding
+                              [default: 0]
       --num-threads <NUM>     The most threads hashing at once [default: as fast as b3sum can]
       --no-mmap               No effect: b3sum chooses between reading and mapping each file
       --no-names              Omit filenames in the output
       --raw                   Write raw output bytes to stdout, rather than hex
+      --sigilcode             Write each hash as a sigil (26 characters for 32 bytes; see
+                              johnservil/sigil), rather than hex. --check reads either form
       --tag                   Output BSD-style checksums: BLAKE3 ([FILE]) = [HASH]
   -c, --check                 Read BLAKE3 sums from the [FILE]s and check them
       --quiet                 Skip printing OK for each checked file
@@ -86,3 +92,21 @@ other work (or to other b3sums). On Linux, `taskset -c LIST b3sum ...` runs it o
 CPUs.
 
 [What `--check` does](what_does_check_do.md) explains checkfiles.
+
+## Hashes as sigils
+
+`--sigilcode` writes each hash as a [sigil](https://github.com/johnservil/sigil),
+one word of 26 characters for a 32-byte hash. A double-click selects it
+whole, and no two of its characters look alike. `--check` reads each line's
+digest in either form, with no flag, so a checkfile may mix the two:
+
+```
+$ b3sum --sigilcode empty
+ᕖᣇጎʗƾኖᣊⷈeᑭɨᣫѯᖣቀⷃᣡᗯᕜᑡᔮᣥዲᑮᘜᒬ  empty
+$ b3sum --sigilcode empty > sums.b3 && b3sum --check sums.b3
+empty: OK
+```
+
+A sigil carries its own check. A changed character, or two neighbours
+swapped, makes its line fail to read before the file is hashed.
+`--sigilcode` takes `--length` from 1 to 64 bytes.
