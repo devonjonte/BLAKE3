@@ -55,11 +55,6 @@ const TAG_ARG: &str = "tag";
 const CHECK_ARG: &str = "check";
 const SIGILCODE_ARG: &str = "sigilcode";
 
-/// The longest output --sigilcode writes: one BLAKE3 block. A sigil is for
-/// a value a person copies and compares, and its arithmetic grows with the
-/// square of the length.
-const SIGIL_MAX_LEN: u64 = blake3::BLOCK_LEN as u64;
-
 #[derive(Parser)]
 #[command(version, max_term_width(100), after_help = "More information: b3sum/README.md at https://github.com/johnservil/BLAKE3/blob/servil/b3sum/README.md")]
 struct Inner {
@@ -103,9 +98,10 @@ struct Inner {
     #[arg(long)]
     raw: bool,
 
-    /// Write each hash as a sigil (26 characters for 32 bytes; see
-    /// johnservil/sigil), rather than hex. --check reads either form.
-    #[arg(long, conflicts_with(RAW_ARG), conflicts_with(CHECK_ARG))]
+    /// Write each hash as a sigil (25 characters for 32 bytes; see
+    /// johnservil/sigil), rather than hex; with --check, read sigils as
+    /// well as hex
+    #[arg(long, conflicts_with(RAW_ARG))]
     sigilcode: bool,
 
     /// Output BSD-style checksums: BLAKE3 ([FILE]) = [HASH]
@@ -121,8 +117,7 @@ struct Inner {
         conflicts_with(LENGTH_ARG),
         conflicts_with(RAW_ARG),
         conflicts_with(TAG_ARG),
-        conflicts_with(NO_NAMES_ARG),
-        conflicts_with(SIGILCODE_ARG)
+        conflicts_with(NO_NAMES_ARG)
     )]
     check: bool,
 
@@ -144,8 +139,8 @@ impl Args {
         if inner.raw && file_args.len() > 1 {
             bail!("Only one filename can be provided when using --raw");
         }
-        if inner.sigilcode && !(1..=SIGIL_MAX_LEN).contains(&inner.length) {
-            bail!("--sigilcode writes 1 to {SIGIL_MAX_LEN} output bytes; --length is {}", inner.length);
+        if inner.sigilcode && inner.length == 0 && !inner.check {
+            bail!("--sigilcode writes at least one output byte; --length is 0");
         }
         let base_hasher = if inner.keyed {
             // In keyed mode, since stdin is used for the key, we can't handle
@@ -441,7 +436,7 @@ fn write_hex_output(mut output: blake3::OutputReader, args: &Args) -> anyhow::Re
     Ok(())
 }
 
-/// The output as one sigil: Args::parse holds --length to 1..=SIGIL_MAX_LEN.
+/// The output as one sigil: Args::parse holds --length to one byte or more.
 fn write_sigil_output(mut output: blake3::OutputReader, args: &Args) -> anyhow::Result<()> {
     let mut bytes = vec![0; args.len() as usize];
     output.fill(&mut bytes);
@@ -566,7 +561,9 @@ fn split_tagged_check_line(line_after_slash: &str) -> Option<(&str, &str)> {
     line_after_slash[prefix.len()..].rsplit_once(") = ")
 }
 
-fn parse_check_line(mut line: &str) -> anyhow::Result<ParsedCheckLine> {
+/// One checkfile line; with `sigils` (--sigilcode), its digest may be a
+/// sigil as well as hex.
+fn parse_check_line(mut line: &str, sigils: bool) -> anyhow::Result<ParsedCheckLine> {
     // Trim off the trailing newlines, if any.
     line = line.trim_end_matches(['\r', '\n']);
     // If there's a backslash at the front of the line, that means we need to
@@ -598,19 +595,23 @@ fn parse_check_line(mut line: &str) -> anyhow::Result<ParsedCheckLine> {
         bail!("Invalid check line format");
     }
 
-    // Decode the hash: hex is 64 characters, and anything else is read as
-    // a sigil (26 characters), as --sigilcode writes it.
+    // Decode the hash. With --sigilcode, a digest with any character other
+    // than a hex digit is a sigil: no hex digit is a sigil character.
     let mut hash_bytes = [0; blake3::OUT_LEN];
-    if hash_text.chars().count() == 2 * blake3::OUT_LEN {
+    if sigils && !hash_text.chars().all(|c| c.is_ascii_hexdigit()) {
+        let decoded = sigilcode::decode(hash_text, blake3::OUT_LEN).map_err(|e| anyhow::anyhow!("Invalid hash, read as a sigil: {e}"))?;
+        hash_bytes.copy_from_slice(&decoded);
+    } else {
+        if !sigils && !hash_text.is_ascii() {
+            bail!("Invalid hash: not hex (a sigil? check it with --sigilcode)");
+        }
+        ensure!(hash_text.len() == 2 * blake3::OUT_LEN, "Invalid hash length");
         let mut hex_chars = hash_text.chars();
         for byte in &mut hash_bytes {
             let high_char = hex_chars.next().unwrap();
             let low_char = hex_chars.next().unwrap();
             *byte = 16 * hex_half_byte(high_char)? + hex_half_byte(low_char)?;
         }
-    } else {
-        let decoded = sigilcode::decode(hash_text, blake3::OUT_LEN).map_err(|e| anyhow::anyhow!("Invalid hash, read as a sigil: {e}"))?;
-        hash_bytes.copy_from_slice(&decoded);
     }
     let expected_hash: blake3::Hash = hash_bytes.into();
 
@@ -740,7 +741,7 @@ fn print_output(output: blake3::OutputReader, path: &Path, args: &Args) -> anyho
 // passing down the files_failed reference, makes it less likely that we might
 // forget to set it in some error condition.
 fn check_one_line(line: &str, args: &Args) -> bool {
-    let parse_result = parse_check_line(&line);
+    let parse_result = parse_check_line(&line, args.sigilcode());
     let ParsedCheckLine { file_string, is_escaped, file_path, expected_hash } = match parse_result {
         Ok(parsed) => parsed,
         Err(e) => {

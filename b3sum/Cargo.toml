@@ -21,10 +21,8 @@ anyhow = "1.0.25"
 blake3 = { version = "=0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861", path = "..", package = "blake3-servil" }
 clap = { version = "4.0.8", features = ["derive", "wrap_help"] }
 hex = "0.4.0"
-# --sigilcode: each hash as a sigil (johnservil/sigil), pinned by commit.
-# crates.io takes no git dependency: b3sums' next publication follows
-# sigilcode's own, and names it by version.
-sigilcode = { git = "https://github.com/johnservil/sigil", rev = "8bd993a459cdb9c44a358b1e6636b7be2b339c91" }
+# --sigilcode: each hash as a sigil (johnservil/sigil), its full version pinned.
+sigilcode = "=0.1.0+81af550bfd3eb2aff85c3ddf0a21446e78a1809d"
 
 # A file already in the page cache is mapped and hashed in place.
 [target.'cfg(unix)'.dependencies]

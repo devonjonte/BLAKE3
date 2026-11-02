@@ -602,13 +602,13 @@ fn test_pseudo_files_among_many() {
     assert_eq!(expected.join("\n"), String::from_utf8_lossy(&output.stdout).trim_end());
 }
 
-/// --sigilcode writes each hash as a sigil, in every output form, and
-/// --check reads sigils and hex side by side: a checkfile of either form,
-/// or both, checks with no flag.
+/// --sigilcode writes each hash as a sigil, in every output form, and with
+/// --check reads sigils and hex side by side. Without it, b3sum writes and
+/// reads hex alone, as before.
 #[test]
 fn test_sigilcode() {
     // BLAKE3 of the empty input, as johnservil/sigil's README gives it.
-    const EMPTY: &str = "ᕖᣇጎʗƾኖᣊⷈeᑭɨᣫѯᖣቀⷃᣡᗯᕜᑡᔮᣥዲᑮᘜᒬ";
+    const EMPTY: &str = "ᢳᕌᔃጾዿᑂഔጕꔍⶰᣟꕄꕛቴⴲజᐽᙿᕯⶂጁᑃሃᛜጩ";
     let dir = tempfile::tempdir().unwrap();
     let empty = dir.path().join("empty");
     let full = dir.path().join("full");
@@ -618,34 +618,36 @@ fn test_sigilcode() {
     assert_eq!(out, EMPTY);
     let tagged = cmd!(b3sum_exe(), "--sigilcode", "--tag", &empty).read().unwrap();
     assert_eq!(tagged, format!("BLAKE3 ({}) = {EMPTY}", empty.to_string_lossy()));
-    // A sigil of any length from 1 to 64 bytes; outside, a clear error.
-    for len in ["1", "16", "64"] {
-        let short = cmd!(b3sum_exe(), "--sigilcode", "--no-names", "-l", len, &full).read().unwrap();
-        assert!(!short.is_empty() && !short.contains(' '), "{short}");
+    // A sigil of any length from one byte, its letters three bytes of UTF-8
+    // each; no output at all is a clear error.
+    for (len, letters) in [("1", 2), ("16", 13), ("64", 48), ("1000", 729)] {
+        let sigil = cmd!(b3sum_exe(), "--sigilcode", "--no-names", "-l", len, &full).read().unwrap();
+        assert_eq!((sigil.chars().count(), sigil.len()), (letters, 3 * letters), "{len}");
     }
-    for len in ["0", "65"] {
-        let f = cmd!(b3sum_exe(), "--sigilcode", "-l", len, &full).stderr_capture().unchecked().run().unwrap();
-        assert!(!f.status.success());
-        assert!(String::from_utf8_lossy(&f.stderr).contains("--sigilcode writes 1 to 64 output bytes"));
-    }
-    // A checkfile mixing sigils, hex, and the tagged form checks clean.
+    let f = cmd!(b3sum_exe(), "--sigilcode", "-l", "0", &full).stderr_capture().unchecked().run().unwrap();
+    assert!(!f.status.success());
+    assert!(String::from_utf8_lossy(&f.stderr).contains("--sigilcode writes at least one output byte"));
+    // A checkfile mixing sigils, hex, and the tagged form: --sigilcode
+    // checks it clean, and plain --check refuses its sigil lines.
     let sigil_line = cmd!(b3sum_exe(), "--sigilcode", &full).read().unwrap();
     let hex_line = cmd!(b3sum_exe(), &empty).read().unwrap();
     let checkfile = dir.path().join("sums.b3");
     fs::write(&checkfile, format!("{sigil_line}\n{hex_line}\n{tagged}\n")).unwrap();
-    let checked = cmd!(b3sum_exe(), "--check", &checkfile).read().unwrap();
+    let checked = cmd!(b3sum_exe(), "--sigilcode", "--check", &checkfile).read().unwrap();
     assert_eq!(checked.lines().filter(|l| l.ends_with(": OK")).count(), 3, "{checked}");
+    let plain = cmd!(b3sum_exe(), "--check", &checkfile).stdout_capture().stderr_capture().unchecked().run().unwrap();
+    assert!(!plain.status.success());
+    assert_eq!(String::from_utf8_lossy(&plain.stdout).lines().filter(|l| l.ends_with(": OK")).count(), 1);
+    assert_eq!(String::from_utf8_lossy(&plain.stderr).matches("a sigil? check it with --sigilcode").count(), 2);
     // Two neighbours swapped: the sigil's own check refuses it.
     let (sigil, name) = sigil_line.split_once("  ").unwrap();
     let mut chars: Vec<char> = sigil.chars().collect();
     chars.swap(3, 4);
     fs::write(&checkfile, format!("{}  {name}\n", chars.iter().collect::<String>())).unwrap();
-    let f = cmd!(b3sum_exe(), "--check", &checkfile).stderr_capture().unchecked().run().unwrap();
+    let f = cmd!(b3sum_exe(), "--sigilcode", "--check", &checkfile).stderr_capture().unchecked().run().unwrap();
     assert!(!f.status.success());
     assert!(String::from_utf8_lossy(&f.stderr).contains("Invalid hash, read as a sigil"));
-    // --sigilcode writes; it takes no part in --check or --raw.
-    for other in ["--check", "--raw"] {
-        let f = cmd!(b3sum_exe(), "--sigilcode", other, &empty).stderr_capture().unchecked().run().unwrap();
-        assert!(!f.status.success());
-    }
+    // Raw bytes have no text form.
+    let f = cmd!(b3sum_exe(), "--sigilcode", "--raw", &empty).stderr_capture().unchecked().run().unwrap();
+    assert!(!f.status.success());
 }

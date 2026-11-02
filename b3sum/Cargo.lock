@@ -344,8 +344,9 @@ dependencies = [
 
 [[package]]
 name = "sigilcode"
-version = "0.1.0"
-source = "git+https://github.com/johnservil/sigil?rev=8bd993a459cdb9c44a358b1e6636b7be2b339c91#8bd993a459cdb9c44a358b1e6636b7be2b339c91"
+version = "0.1.0+81af550bfd3eb2aff85c3ddf0a21446e78a1809d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c27919570f3bdf30d529b4c8ac6e00beaf19f1bdeaa5ec66f092759f9336780d"
 
 [[package]]
 name = "signal-hook"
