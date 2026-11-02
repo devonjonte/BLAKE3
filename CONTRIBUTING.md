@@ -221,7 +221,8 @@ A change to a tool that runs for hours (`tools/mutants/check.py`,
 `tools/verify/long-proofs.sh`, `bench-hashes regress` and `check`) lands
 after a short run of it, start to finish, on each kind of machine that
 runs it (the VM, the Mac, x86-64 Linux): a fault in its setup or
-teardown otherwise costs a whole run, found at its end.
+teardown otherwise costs a whole run, found at its end. For check.py
+that run is `python3 tools/mutants/smoke.py`, about a minute.
 
 Jobs of hours run on `servil` overnight: the whole mutation run, and the
 long proofs (`sh tools/verify/long-proofs.sh servil`, which posts the
