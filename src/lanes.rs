@@ -769,10 +769,21 @@ fn spin_for_work() -> bool {
             }
             core::hint::spin_loop();
         }
-        if started.elapsed() >= SPIN || !sources::open() {
+        if spin_ends(started.elapsed(), sources::open) {
             return false;
         }
     }
+}
+
+/// Whether a worker's look for work ends, `elapsed` into it: once SPIN has
+/// passed, or when no stream is open (asked only before SPIN, as the
+/// look's own code would). Its own function so a test holds it
+/// whatever the machine's load (#202: with `>=` turned to `<`, a worker
+/// preempted past SPIN before its first look spun while the stream stayed
+/// open, and the mutant timed out only under load).
+#[inline(always)]
+fn spin_ends(elapsed: std::time::Duration, open: impl FnOnce() -> bool) -> bool {
+    elapsed >= SPIN || !open()
 }
 
 /// The workers' work: sources, each a numbered sequence of items that its
@@ -1759,6 +1770,18 @@ mod test {
     /// parked; a worker that never parks hangs it, and nextest's one clock
     /// (.config/nextest.toml) kills and names it. (It once waited at most
     /// ten seconds itself, when other tests ran beside it in one process.)
+    /// A look for work ends once SPIN has passed, or at once with no
+    /// stream open, and goes on otherwise.
+    #[test]
+    fn test_spin_ends_after_spin_or_with_no_stream_open() {
+        let micros = std::time::Duration::from_micros;
+        assert!(!spin_ends(micros(0), || true));
+        assert!(!spin_ends(SPIN - micros(1), || true));
+        assert!(spin_ends(SPIN, || true));
+        assert!(spin_ends(SPIN + micros(100), || true));
+        assert!(spin_ends(micros(0), || false));
+    }
+
     #[test]
     fn test_idle_workers_park_while_a_stream_is_open() {
         let pool = pool();

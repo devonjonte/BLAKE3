@@ -77,7 +77,6 @@ src/incremental.rs	replace || with && in Hasher::gather_part	1	speed: whether th
 src/io.rs	replace < with <= in fill	1	equivalent: one more read into an empty buffer, which returns 0 and ends the loop
 src/lanes.rs	delete ! in initialize	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	delete ! in sources::visible	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	delete ! in spin_for_work	1	speed: how long an idle worker spins before it parks (no effect on results)
 src/lanes.rs	delete match arm 128 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	delete match arm 256 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
 src/lanes.rs	delete match arm 512 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
@@ -158,7 +157,6 @@ src/lanes.rs	replace >= with < in poll_pause	1	OPEN: the pool's scheduling under
 src/lanes.rs	replace >= with < in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace >= with < in sources::Source::publish	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace >= with < in sources::run_one	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace >= with < in spin_for_work	1	speed: how long an idle worker spins before it parks (no effect on results)
 src/lanes.rs	replace >= with < in tree_threads	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace Pool::wake_for with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace all_workers_parked -> bool with true	1	a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before
