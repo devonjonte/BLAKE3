@@ -53,7 +53,6 @@ const NO_NAMES_ARG: &str = "no_names";
 const RAW_ARG: &str = "raw";
 const TAG_ARG: &str = "tag";
 const CHECK_ARG: &str = "check";
-const SIGILCODE_ARG: &str = "sigilcode";
 
 #[derive(Parser)]
 #[command(version, max_term_width(100), after_help = "More information: b3sum/README.md at https://github.com/johnservil/BLAKE3/blob/servil/b3sum/README.md")]
