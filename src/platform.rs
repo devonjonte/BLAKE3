@@ -674,10 +674,13 @@ pub(crate) fn prefetch_code((start, end): (usize, usize)) {
     }
     #[cfg(test)]
     PREFETCHED.with(|p| {
-        let mut p = p.borrow_mut();
-        // A plan that never ends (a mutant's) fails here, not by taking every byte of memory.
-        assert!(p.len() < 100_000, "prefetch_code called without end");
-        p.push(((start, end), steps));
+        // Recorded only while a counting test asks (test::prefetch_counts): the
+        // other tests prefetch without end, as calls do.
+        if let Some(p) = &mut *p.borrow_mut() {
+            // A plan that never ends (a mutant's) fails here, not by taking every byte of memory.
+            assert!(p.len() < 100_000, "prefetch_code called without end");
+            p.push(((start, end), steps));
+        }
     });
 }
 
@@ -686,8 +689,9 @@ std::thread_local! {
     /// The tests' clock for counter(), in its ticks, where a test set one.
     pub(crate) static TEST_COUNTER: core::cell::Cell<Option<u64>> = const { core::cell::Cell::new(None) };
     /// The tests' record of prefetch_code on this thread since they last
-    /// cleared it: each range, and the steps of four lines it took.
-    pub(crate) static PREFETCHED: core::cell::RefCell<std::vec::Vec<((usize, usize), usize)>> = const { core::cell::RefCell::new(std::vec::Vec::new()) };
+    /// took it, while one asks (Some): each range, and the steps of four
+    /// lines it took. None, as in every other test, records nothing.
+    pub(crate) static PREFETCHED: core::cell::RefCell<Option<std::vec::Vec<((usize, usize), usize)>>> = const { core::cell::RefCell::new(None) };
 }
 
 // The little-endian words of a block or a key, and back: 4-byte chunks

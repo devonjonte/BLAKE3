@@ -1611,7 +1611,9 @@ mod prefetch_counts {
 
     /// The prefetches and kernel entries since the last call, both cleared.
     fn taken() -> (Vec<((usize, usize), usize)>, BTreeSet<usize>) {
-        (PREFETCHED.with(|p| core::mem::take(&mut *p.borrow_mut())), RAN_ENTRIES.with(|r| core::mem::take(&mut *r.borrow_mut())))
+        // Recording from here on (platform::PREFETCHED records only while a test asks).
+        let prefetched = PREFETCHED.with(|p| p.borrow_mut().replace(Vec::new())).unwrap_or_default();
+        (prefetched, RAN_ENTRIES.with(|r| core::mem::take(&mut *r.borrow_mut())))
     }
 
     /// Each prefetched range taken whole, in steps of four 128-byte lines;
