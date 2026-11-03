@@ -289,6 +289,7 @@ pub(crate) fn hash_each_on<I: Item>(key: &CVWords, flags: u8, items: &[I], out: 
     let mut owners: Vec<usize> = Vec::with_capacity(shared.len());
     let mut lane_out = vec![0u8; shared.len() * OUT_LEN];
     for k in 0..most_full {
+        crate::counted(crate::Counted::EachRound);
         refs.clear();
         owners.clear();
         for &(i, at) in &shared {
@@ -343,6 +344,54 @@ fn left_len(n: usize) -> usize {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// hash_each_multithreaded takes the pool from MIN_SPLIT_LEN bytes of
+    /// items on, exactly, and the calling thread below them. Both give the
+    /// same digests, so only where the call ran tells (BLAKE3 #219).
+    #[test]
+    fn test_hash_each_multithreaded_splits_at_min_split_len_exactly() {
+        let min = crate::lanes::MIN_SPLIT_LEN;
+        let input = vec![7u8; min];
+        for total in [min - 1, min] {
+            // Items under the split each, so none hashes alone.
+            let items: Vec<&[u8]> = input[..total].chunks(64 * 1024 - 3).collect();
+            let (mut a, mut b) = (vec![[0u8; OUT_LEN]; items.len()], vec![[0u8; OUT_LEN]; items.len()]);
+            crate::RAN.with(|r| r.set(0));
+            crate::performance::hash_each_multithreaded(Mode::Plain, &crate::test::items(&crate::test::messages(&items), &items), &mut a);
+            if total < min {
+                assert_eq!(crate::RAN.with(|r| r.get()) & crate::Ran::Pool as u32, 0, "{total} bytes of items stay on the calling thread");
+            } else {
+                crate::lanes::assert_past_the_split("MIN_SPLIT_LEN bytes of items");
+            }
+            crate::performance::hash_each(Mode::Plain, &crate::test::items(&crate::test::messages(&items), &items), &mut b);
+            assert_eq!(a, b);
+        }
+    }
+
+    /// hash_each_on sends a message to `alone` exactly when it has one chunk
+    /// or fewer, or ALONE_CHUNKS or more, and gives the others' lanes as
+    /// many rounds as the longest of them has whole chunks. Every other
+    /// choice gives the same digests, so only the counts tell (BLAKE3 #219).
+    #[test]
+    fn test_hash_each_on_counts_its_alone_messages_and_rounds() {
+        let input = vec![5u8; (ALONE_CHUNKS + 1) * CHUNK_LEN];
+        let lens = [0, 1, CHUNK_LEN, CHUNK_LEN + 1, 2 * CHUNK_LEN, (ALONE_CHUNKS - 1) * CHUNK_LEN, (ALONE_CHUNKS - 1) * CHUNK_LEN + 1, ALONE_CHUNKS * CHUNK_LEN, ALONE_CHUNKS * CHUNK_LEN + 1];
+        let items: Vec<&[u8]> = lens.iter().map(|&n| &input[..n]).collect();
+        let alone = core::cell::RefCell::new(Vec::new());
+        let mut out = vec![[0u8; OUT_LEN]; items.len()];
+        crate::COUNTED.with(|c| c[crate::Counted::EachRound as usize].set(0));
+        hash_each_on(crate::IV, 0, &items, &mut out, Platform::detect(), |item| {
+            alone.borrow_mut().push(item.len());
+            crate::hash_serial(item, crate::IV, 0)
+        });
+        let rounds = crate::COUNTED.with(|c| c[crate::Counted::EachRound as usize].get());
+        assert_eq!(alone.into_inner(), [0, 1, CHUNK_LEN, (ALONE_CHUNKS - 1) * CHUNK_LEN + 1, ALONE_CHUNKS * CHUNK_LEN, ALONE_CHUNKS * CHUNK_LEN + 1]);
+        // The shared: 1, 2 and ALONE_CHUNKS - 1 whole chunks.
+        assert_eq!(rounds, (ALONE_CHUNKS - 1) as u64);
+        for (item, out) in items.iter().zip(&out) {
+            assert_eq!(out, crate::convenience::hash(item).as_bytes(), "{} bytes", item.len());
+        }
+    }
 
     /// The pool's ranges of items (lanes::Work::Each), just past where the
     /// pool takes them, against the calling thread's.

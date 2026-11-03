@@ -471,3 +471,59 @@ impl zeroize::Zeroize for CvStack {
         self.len = 0;
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::platform::Platform;
+    use core::cell::Cell;
+
+    /// The platform's compressions, counted: blocks compressed from the
+    /// buffer one at a time, and calls of the multi-block kernel.
+    struct Counting {
+        platform: Platform,
+        buffered: Cell<usize>,
+        runs: Cell<usize>,
+    }
+
+    impl Blocks for &Counting {
+        fn compress_in_place(&self, cv: &mut [u32; 8], block: &[u8; BLOCK_LEN], block_len: u8, counter: u64, flags: u8) {
+            self.buffered.set(self.buffered.get() + 1);
+            Blocks::compress_in_place(&self.platform, cv, block, block_len, counter, flags)
+        }
+        fn compress_blocks(&self, cv: &mut [u32; 8], blocks: &[u8], count: usize, counter: u64, flags: u8, flags_start: u8) {
+            self.runs.set(self.runs.get() + 1);
+            Blocks::compress_blocks(&self.platform, cv, blocks, count, counter, flags, flags_start)
+        }
+    }
+
+    /// ChunkState::absorb compresses whole blocks straight from the input
+    /// when its buffer is empty, keeps a last whole block waiting, and
+    /// calls the multi-block kernel only for one block or more. A first
+    /// block through the empty buffer, or a kernel call for no block, gives
+    /// the same state at more work, so only the counts tell (BLAKE3 #219).
+    #[test]
+    fn test_absorb_takes_whole_blocks_straight_from_the_input() {
+        let input: std::vec::Vec<u8> = (0..crate::CHUNK_LEN as u32).map(|i| (i % 251) as u8).collect();
+        let platform = Platform::detect();
+        // Pieces absorbed in turn: (their lengths, blocks compressed from the buffer, multi-block calls).
+        for (pieces, buffered, runs) in [
+            (&[130][..], 0, 1),  // two blocks from the input, two bytes wait
+            (&[64][..], 0, 0),   // one whole block waits
+            (&[64, 64][..], 1, 0),
+            (&[1, 64][..], 1, 0),  // the buffer's byte and 63 more, then one byte waits
+            (&[1, 200][..], 1, 1),
+        ] {
+            let k = Counting { platform, buffered: Cell::new(0), runs: Cell::new(0) };
+            let (mut counted, mut plain) = (ChunkState::new(crate::IV, 0, 0, &k), ChunkState::new(crate::IV, 0, 0, platform));
+            let mut at = 0;
+            for &n in pieces {
+                counted.absorb(&input[at..at + n]);
+                plain.absorb(&input[at..at + n]);
+                at += n;
+            }
+            assert_eq!((k.buffered.get(), k.runs.get()), (buffered, runs), "{pieces:?}");
+            assert_eq!((counted.cv, counted.buf, counted.buf_len, counted.blocks_compressed), (plain.cv, plain.buf, plain.buf_len, plain.blocks_compressed));
+        }
+    }
+}

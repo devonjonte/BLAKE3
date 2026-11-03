@@ -4,17 +4,11 @@
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
 files: src/block.rs src/convenience.rs src/each.rs src/ffi_avx2.rs src/ffi_partial.rs src/ffi_sse41.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/performance.rs src/platform.rs src/self_test.rs src/tree.rs src/pair.rs
 model files: src/finish.rs src/park.rs
-src/each.rs	replace / with * in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
-src/each.rs	replace < with <= in hash_each_multithreaded	1	speed: moves a threshold between equally correct paths
-src/each.rs	replace < with == in hash_each_multithreaded	1	speed: moves a threshold between equally correct paths
-src/each.rs	replace >= with < in hash_each_on	1	speed: moves a threshold between equally correct paths (with more rounds, the extra ones hash nothing)
 src/each.rs	replace hash_held with ()	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/each.rs	replace | with ^ in hash_held	1	equivalent: | and ^ agree on flag bits that never overlap
 src/ffi_partial.rs	replace % with + in rotation	1	equivalent: k % 4 becomes k + 4, which adds 16 to each shuffle index; pshufb reads an index's low four bits (and bit 7, clear: the largest is 47), so the shuffle is the same
 src/ffi_partial.rs	replace | with ^ in rotation	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/finish.rs	delete ! in Finish::wait	1	a scheduling choice: `if poll()` breaks when the poll says to go on, so the waiter spins through its polls in place of parking; the count is still what it returns on. Loom passes it; the whole suite, run unnarrowed, spins into the clock on it (the stream tests)
-src/finish.rs	replace & with | in Finish::finished	1	equivalent under a race alone: `before | SLEEPING` is always set, so a finisher completing the count unparks the owner whether or not it sleeps, a token its next park consumes. Loom passes it; the whole suite, run unnarrowed, wandered into the clock on it
-src/finish.rs	replace && with || in Finish::finished	1	speed: an unpark with no sleeper, or before the count is complete, is a spurious wake the sleeper sleeps through (a_spurious_wake_is_slept_through); the condition spares the syscall a piece
 src/hasher.rs	replace - with + in feed	1	speed: ahead is a prefetch hint (how far the SME2 walk prefetches past its input)
 src/hasher.rs	replace - with / in feed	1	speed: ahead is a prefetch hint (how far the SME2 walk prefetches past its input)
 src/hasher.rs	replace < with <= in ChunkState<P>::fill_buf	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -22,7 +16,6 @@ src/hasher.rs	replace < with <= in fill	1	same code: every test binary hashes as
 src/hasher.rs	replace <impl Feed<ChunkState<P>> for Kernels<'_, P, H>>::subtree_cv -> Option<Cv> with None	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/hasher.rs	replace > with < in feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/hasher.rs	replace > with == in feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/hasher.rs	replace > with >= in ChunkState<P>::absorb	1	speed: chooses between equally correct paths (a first whole block through the empty buffer, or straight from the input)
 src/hasher.rs	replace > with >= in feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/hasher.rs	replace CvStack::array -> Option<&[Cv; DEPTH]> with Some(Box::leak(Box::new([Default::default(); DEPTH])))	1	test-only code (cfg(test)): the test's own accessor
 src/hasher.rs	replace | with ^ in ChunkState<P>::absorb	1	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
@@ -34,9 +27,7 @@ src/incremental.rs	delete ! in HasherCore::update_pooled	1	same code: every test
 src/incremental.rs	replace && with || in <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace && with || in Hasher::update	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace && with || in HasherCore::update_pooled	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/incremental.rs	replace * with / in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
 src/incremental.rs	replace + with * in Hasher::update	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/incremental.rs	replace + with - in Hasher::gather_part	1	equally correct paths: where the stage is cut; every cut hashes the same bytes in the end
 src/incremental.rs	replace + with - in Hasher::update	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace + with - in HasherCore::update_part_with_results	1	equally correct paths: where the results are consumed; every boundary hashes the same bytes
 src/incremental.rs	replace / with * in HasherCore::update_part_with_results	1	equivalent: a power of two times or over 2 has the same one bit, so the stack merges alike
@@ -45,12 +36,10 @@ src/incremental.rs	replace == with != in Hasher::update	1	same code: every test 
 src/incremental.rs	replace > with >= in HasherCore::update_part_with_results	2	equivalent for its one caller: a held group is exactly 16 KiB (16 chunks), so no length it compares equals one chunk
 src/incremental.rs	replace >= with < in <impl hasher::Hooks for HasherHooks<'_>>::children	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace >= with < in HasherCore::update_pooled	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with None	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
 src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((0, Box::leak(Box::new([0; STAGE_LEN]))))	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((0, Box::leak(Box::new([1; STAGE_LEN]))))	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((1, Box::leak(Box::new([0; STAGE_LEN]))))	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((1, Box::leak(Box::new([1; STAGE_LEN]))))	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/incremental.rs	replace || with && in Hasher::gather_part	1	speed: whether the Hasher stages input or hashes it at once (equally correct)
 src/io.rs	replace < with <= in fill	1	equivalent: one more read into an empty buffer, which returns 0 and ends the loop
 src/lanes.rs	delete ! in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	delete match arm 128 in Task::run_members	1	speed: chooses between equally correct paths (a member length's own kernel, or the general one)
@@ -449,12 +438,8 @@ src/self_test.rs	replace | with & in chunk_values	2	same code: every test binary
 src/self_test.rs	replace | with ^ in chunk_values	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/tree.rs	replace && with || in <impl Kernels for PlatformKernels<'_>>::children	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/tree.rs	replace && with || in <impl Kernels for PlatformKernels<'_>>::subtree	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/tree.rs	replace * with + in root_children	1	speed: the arrays' size (each choice holds the values; only the stack frame changes)
 src/tree.rs	replace * with + in wide	1	[cpu lacks avx512f avx512vl] array capacity: 2 + MAX holds the two halves' values on AVX2 (16 of 18); an AVX-512 machine (32) would overflow and catch it there
-src/tree.rs	replace * with / in root_children	1	speed: the arrays' size (each choice holds the values; only the stack frame changes)
 src/tree.rs	replace + with * in wide	1	SME2 only: the argument is `ahead`, consumed by the SME2 subtree path; on x86 subtree() returns None and serial calls pass 0
 src/tree.rs	replace + with - in wide	1	SME2 only: the argument is `ahead`, consumed by the SME2 subtree path; on x86 subtree() returns None and serial calls pass 0
-src/tree.rs	replace / with * in root_children	2	speed: the arrays' size (each choice holds the values; only the stack frame changes)
-src/tree.rs	replace <= with > in root_children	1	[cpu lacks avx512f avx512vl] equivalent: the SMALL and MAX arrays are capacities; children() fills either, the small one in more rounds. On AVX-512 one call of the 32-input kernel writes 32 values, more than SMALL (16) holds, so a machine with it catches the mutant (the EPYC 9255, October 26)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::children -> Option<[Cv; 2]> with None	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::subtree -> Option<usize> with None	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
