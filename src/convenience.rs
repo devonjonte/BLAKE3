@@ -23,10 +23,10 @@ use crate::{Hash, IV, Mode, OutputReader};
 /// streams, a message fed in pieces), the [`performance`](crate::performance)
 /// calls.
 ///
-/// **Speed**, nonstop on an Apple M4 Max: about 50 ns for 64 bytes, 0.7 µs
+/// **Speed**, nonstop on an Apple M4 Max: about 55 ns for 64 bytes, 0.8 µs
 /// for 1 KiB, 4 GB/s at 16 KiB, and 6 GB/s from 1 MiB. A call after a pause
 /// or after other work takes longer (its code and data have left the
-/// CPU's caches): 64 bytes then take about 0.2 to 0.6 µs. On Apple M4 and
+/// CPU's caches): 64 bytes then take about 0.5 to 0.6 µs. On Apple M4 and
 /// later, threads that hash inputs of 16 KiB or more at the same moment
 /// share one accelerator: one runs at full speed and the others at about
 /// two thirds of it.
