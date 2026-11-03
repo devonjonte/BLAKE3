@@ -1881,22 +1881,23 @@ mod test {
     /// An idle worker's look for work lasts SPIN while a stream is open,
     /// and ends at once with none (BLAKE3 #219): on the tests' clock, a
     /// step of 1 us a read, sixteen polls a look, five looks to 5 us; with
-    /// a step of 5 us, one look; with 4 us, two.
+    /// a step of 5 us, one look; with 4 us, two. The clock starts at
+    /// 1000 us, so an elapsed time that read the clock itself would show.
     #[test]
     fn test_a_worker_spins_for_spin_while_a_stream_is_open() {
         let _ = pool();
         counts();
-        clock(0, 1);
+        clock(1000, 1);
         assert!(!spin_for_work(), "no stream open: no work appears");
         assert_eq!(counts()[Noted::Poll as usize], 16, "no stream open: one look and park");
         sources::opened();
-        clock(0, 1);
+        clock(1000, 1);
         assert!(!spin_for_work());
         assert_eq!(counts()[Noted::Poll as usize], 80, "a stream open: looks until 5 us have passed");
-        clock(0, 5);
+        clock(1000, 5);
         assert!(!spin_for_work());
         assert_eq!(counts()[Noted::Poll as usize], 16, "5 us passed at the first check: one look");
-        clock(0, 4);
+        clock(1000, 4);
         assert!(!spin_for_work());
         assert_eq!(counts()[Noted::Poll as usize], 32, "4 us, then 8: two looks");
         sources::closed();
