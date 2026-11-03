@@ -74,14 +74,12 @@ src/lanes.rs	replace + with - in sources::Source::publish	1	speed: whether a pub
 src/lanes.rs	replace += with *= in cut_items	1	a scheduling choice: bytes stays 0, so every item goes into one piece; the digests are the same, the speed gate's business (one piece hashes on one worker)
 src/lanes.rs	replace += with -= in cut_items	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in Pool::run_job	4	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace - with + in Pool::wake_for	4	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace - with + in cut_messages	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in cut_with_prefix	3	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in initialize	1	equivalent: Park::new's count only sizes its tables; slots beyond the workers hurt nothing
 src/lanes.rs	replace - with + in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace - with + in sources::Source::publish	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace - with / in Pool::run_job	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace - with / in Pool::wake_for	3	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace - with / in initialize	1	equivalent: Park::new's count only sizes its tables; slots beyond the workers hurt nothing
 src/lanes.rs	replace - with / in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace -= with += in cut_items	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)

@@ -174,7 +174,66 @@ impl Park {
 
 #[cfg(test)]
 mod test {
-    use super::split;
+    use super::{Park, split};
+    use std::sync::atomic::Ordering;
+
+    /// A park of `workers` slots, every slot this thread's (an unpark of
+    /// the test's own thread leaves a token and nothing more), with the
+    /// workers in `parked` parked. Outside the Shuttle build, where park.rs
+    /// is compiled again under Shuttle's threads and the test thread has no
+    /// handle to register.
+    #[cfg(not(shuttle))]
+    fn park_with(workers: usize, fanout: usize, parked: &[usize]) -> Park {
+        let park = Park::new(workers, fanout);
+        for me in 0..workers {
+            park.register(me);
+        }
+        for &me in parked {
+            let (word, bit) = park.place(me);
+            word.fetch_or(bit, Ordering::SeqCst);
+        }
+        park
+    }
+
+    /// (Outside the Shuttle build, where park.rs is compiled again under
+    /// Shuttle's threads and this thread has no handle to register.)
+    /// The wakes a publisher makes and owes, exactly (BLAKE3 #219): of the
+    /// `wanted`, the workers awake already cover their share; of the rest,
+    /// at most the parked, at most `fanout` now and the others owed; a
+    /// woken worker pays up to `fanout` of the owed, and owed wakes with no
+    /// one parked are dropped.
+    #[test]
+    #[cfg(not(shuttle))]
+    fn wakes_made_and_owed_exactly() {
+        let all: Vec<usize> = (0..12).collect();
+        let park = park_with(12, 4, &all);
+        assert_eq!(park.wake_for(1, 12), 1, "one wanted, twelve parked: one wake");
+        assert_eq!((park.parked_count(), park.owed.load(Ordering::SeqCst)), (11, 0));
+        // Ten wanted, one worker awake already: nine to wake, four now
+        // and five owed.
+        assert_eq!(park.wake_for(10, 12), 4);
+        assert_eq!((park.parked_count(), park.owed.load(Ordering::SeqCst)), (7, 5));
+        // A woken worker pays four of the five, then another the last.
+        assert_eq!(park.pay_owed(), 4);
+        assert_eq!((park.parked_count(), park.owed.load(Ordering::SeqCst)), (3, 1));
+        assert_eq!(park.pay_owed(), 1);
+        assert_eq!((park.parked_count(), park.owed.load(Ordering::SeqCst)), (2, 0));
+        assert_eq!(park.pay_owed(), 0, "nothing owed: nothing paid");
+        // Five wanted with ten awake: they cover it.
+        assert_eq!(park.wake_for(5, 12), 0);
+        assert_eq!((park.parked_count(), park.owed.load(Ordering::SeqCst)), (2, 0));
+        // A hundred wanted, two parked: those two, nothing owed.
+        assert_eq!(park.wake_for(100, 12), 2);
+        assert_eq!((park.parked_count(), park.owed.load(Ordering::SeqCst)), (0, 0));
+        // Owed wakes with no one parked are dropped.
+        park.owed.store(3, Ordering::SeqCst);
+        assert_eq!(park.pay_owed(), 0);
+        assert_eq!(park.owed.load(Ordering::SeqCst), 0);
+        // Exactly the fan-out wanted of as many parked: all now, none owed.
+        let park = park_with(4, 4, &[0, 1, 2, 3]);
+        assert_eq!(park.wake_for(4, 4), 4);
+        assert_eq!((park.parked_count(), park.owed.load(Ordering::SeqCst)), (0, 0));
+    }
 
     /// A waker's share: at most its fan-out now, the rest owed, nothing
     /// lost or added.

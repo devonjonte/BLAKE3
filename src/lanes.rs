@@ -596,7 +596,7 @@ struct Pool {
 pub(crate) fn initialize(threads: usize) {
     // With one thread, none beside the caller: no SME2 thread either.
     let sme2 = threads > 1 && cfg!(blake3_sme2) && !matches!(pool_platform(), p if core::mem::discriminant(&p) == core::mem::discriminant(&Platform::detect()));
-    let pool = Pool { callers: AtomicUsize::new(0), threads, sme2, park: crate::park::Park::new(threads - 1, crate::park::FANOUT) };
+    let pool = Pool { callers: AtomicUsize::new(0), threads, sme2, park: crate::park::Park::new(Pool::workers_of(threads), crate::park::FANOUT) };
     assert!(POOL.set(pool).is_ok(), "initialize_multithreaded creates the pool once");
     if threads == 1 {
         return;
@@ -662,7 +662,7 @@ fn forked() -> ! {
 /// Whether every worker is parked: false before the pool exists
 /// ([`crate::__all_workers_parked`], for tests).
 pub(crate) fn all_workers_parked() -> bool {
-    POOL.get().is_some_and(|pool| pool.park.parked_count() == pool.threads - 1)
+    POOL.get().is_some_and(|pool| pool.park.parked_count() == pool.workers())
 }
 
 /// The pool. The caller must have called
@@ -754,7 +754,16 @@ impl Pool {
 
     /// Wake workers for `wanted` pieces of new work (crate::park).
     pub(crate) fn wake_for(&self, wanted: usize) {
-        self.park.wake_for(wanted, self.threads - 1);
+        self.park.wake_for(wanted, self.workers());
+    }
+
+    /// The pool's workers: every thread but the calling one.
+    pub(crate) fn workers(&self) -> usize {
+        Self::workers_of(self.threads)
+    }
+
+    fn workers_of(threads: usize) -> usize {
+        threads - 1
     }
 
     /// Worker `me`'s loop: the sources' tasks and pieces; spinning a while
@@ -1795,6 +1804,44 @@ mod test {
             }),
             "at MIN_SPLIT_LEN: the pool"
         );
+    }
+
+    /// The pool's workers are every thread but the calling one.
+    #[test]
+    fn test_the_workers_are_every_thread_but_the_caller() {
+        for threads in [1, 2, 16, 20, 112] {
+            assert_eq!(Pool::workers_of(threads), threads - 1);
+        }
+        assert_eq!(pool().workers(), pool().threads - 1);
+    }
+
+    /// A stream open is what makes an idle worker spin before it parks
+    /// (sources::open, BLAKE3 #219): none open at rest; one open while a
+    /// stream runs; none again when it has finished.
+    #[test]
+    fn test_a_stream_is_what_opens_the_sources() {
+        let _ = pool();
+        assert!(!sources::open(), "at rest, nothing is open");
+        let mut digest = Hash::from([0u8; 32]);
+        crate::performance::stream(
+            crate::Mode::Plain,
+            |_: &mut [Hash]| {},
+            |s| {
+                assert!(sources::open(), "a stream open");
+                s.submit_with(
+                    64,
+                    |_, room| {
+                        room.fill(7);
+                        64
+                    },
+                    &mut digest,
+                );
+                s.finish();
+                assert!(sources::open(), "finished, open until the stream is dropped");
+            },
+        );
+        assert!(!sources::open(), "the stream finished: nothing open");
+        assert_eq!(digest, crate::convenience::hash(&[7u8; 64]));
     }
 
     /// A task of one member runs it alone, whatever its length: the

@@ -586,17 +586,20 @@ fn hash_four_at_a_time<const N: usize>(lanes: &[&[u8; N]], key: &CVWords, flags:
     // Keep the padded fourth lane for remainders of three. For other
     // x86 tails, the existing platform kernel avoids separate scalar hashes.
     if cfg!(target_arch = "x86_64") && lanes.len() % 4 != 3 {
+        noted_lanes(lanes.len());
         platform.hash_many::<N>(lanes, key, 0, IncrementCounter::No, flags, start, end, outputs.as_flattened_mut());
         return;
     }
     let fours = lanes.len() / 4 * 4;
     if fours > 0 {
+        noted_lanes(fours);
         platform.hash_many::<N>(&lanes[..fours], key, 0, IncrementCounter::No, flags, start, end, outputs[..fours].as_flattened_mut());
     }
     match lanes.len() - fours {
         3 => {
             let spare = [lanes[fours], lanes[fours + 1], lanes[fours + 2], lanes[fours + 2]];
             let mut digests = [[0u8; OUT_LEN]; 4];
+            noted_lanes(4);
             platform.hash_many::<N>(&spare, key, 0, IncrementCounter::No, flags, start, end, digests.as_flattened_mut());
             outputs[fours..].copy_from_slice(&digests[..3]);
         }
@@ -606,6 +609,22 @@ fn hash_four_at_a_time<const N: usize>(lanes: &[&[u8; N]], key: &CVWords, flags:
             }
         }
     }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// The lanes of each hash_many call hash_four_at_a_time made on this
+    /// thread, for the test of its arrangement (BLAKE3 #219).
+    pub(crate) static FOUR_AT_A_TIME_LANES: core::cell::RefCell<Vec<usize>> = const { core::cell::RefCell::new(Vec::new()) };
+}
+
+/// Note a hash_many call of `lanes` lanes (in the tests' record; nothing
+/// in any other build).
+#[inline(always)]
+fn noted_lanes(lanes: usize) {
+    #[cfg(test)]
+    FOUR_AT_A_TIME_LANES.with(|v| v.borrow_mut().push(lanes));
+    let _ = lanes;
 }
 
 /// Whether this build runs the integer + NEON kernels (hash_many's plans
@@ -715,6 +734,63 @@ mod test {
     /// Message `i` of a batch of `len`-byte messages.
     fn message(input: &[u8], len: usize, i: usize) -> &[u8] {
         &input[i * slot_len(len)..][..len]
+    }
+
+    /// sme2_sized(len, count), exactly (BLAKE3 #219; a predicate every
+    /// build computes, whose answer only an SME2 machine acts on): sixteen
+    /// messages or more; one-block messages from ONE_BLOCK_PAD_MIN (11);
+    /// messages over a block up to a chunk from SME2_TAIL_MIN (10); 2 to 15
+    /// chunks from sme2_chunked_min, on an SME2 build alone; and one message
+    /// or more of SME2_SIZED_LEN (16 chunks) or longer.
+    #[test]
+    fn test_sme2_sized_exactly() {
+        assert!(sme2_sized(0, 16) && !sme2_sized(0, 15), "sixteen messages of any length, empty ones too; fewer empty ones never");
+        assert!(sme2_sized(BLOCK_LEN, 11) && !sme2_sized(BLOCK_LEN, 10), "one-block messages from eleven");
+        assert!(sme2_sized(1, 11) && !sme2_sized(1, 10), "a byte is a one-block message");
+        assert!(!sme2_sized(0, 11), "an empty message is no block");
+        assert!(sme2_sized(BLOCK_LEN + 1, 10) && !sme2_sized(BLOCK_LEN + 1, 9), "over a block, up to a chunk, from ten");
+        assert!(sme2_sized(CHUNK_LEN, 10) && !sme2_sized(CHUNK_LEN, 9));
+        assert!(!sme2_sized(BLOCK_LEN, 10) && sme2_sized(BLOCK_LEN, 16), "a block at ten: neither rule; sixteen: the batch rule");
+        // 2 to 15 chunks: the chunked rule on an SME2 build; elsewhere only
+        // the batch rule (sixteen) reaches them.
+        let two_chunks_min = if cfg!(blake3_sme2) { sme2_chunked_min(2 * CHUNK_LEN) } else { 16 };
+        assert!(sme2_sized(2 * CHUNK_LEN, two_chunks_min) && !sme2_sized(2 * CHUNK_LEN, two_chunks_min - 1));
+        assert!(!sme2_sized(15 * CHUNK_LEN, 1) && !sme2_sized(CHUNK_LEN + 1, 1));
+        assert!(sme2_sized(16 * CHUNK_LEN, 1) && !sme2_sized(16 * CHUNK_LEN - 1, 1), "sixteen chunks, one message: long enough alone");
+        assert!(sme2_sized(1 << 20, 1) && !sme2_sized(1 << 20, 0), "a long message, none of them: nothing");
+    }
+
+    /// hash_four_at_a_time's arrangement on x86-64 (BLAKE3 #219): a count
+    /// of whole-block messages that leaves a remainder of three goes to
+    /// hash_many in fours and then the three with a spare lane; any other
+    /// count goes in one call.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_hash_four_at_a_time_arrangement() {
+        let platform = Platform::detect();
+        let input = messages(BLOCK_LEN, 12);
+        let lanes: Vec<&[u8; BLOCK_LEN]> = (0..12).map(|i| input[i * BLOCK_LEN..][..BLOCK_LEN].try_into().unwrap()).collect();
+        for (count, calls) in [
+            (1, vec![1]),
+            (2, vec![2]),
+            (3, vec![4]),
+            (4, vec![4]),
+            (5, vec![5]),
+            (6, vec![6]),
+            (7, vec![4, 4]),
+            (8, vec![8]),
+            (9, vec![9]),
+            (11, vec![8, 4]),
+            (12, vec![12]),
+        ] {
+            let mut out = vec![[0u8; OUT_LEN]; count];
+            FOUR_AT_A_TIME_LANES.with(|v| v.borrow_mut().clear());
+            hash_four_at_a_time::<BLOCK_LEN>(&lanes[..count], crate::IV, 0, &mut out, platform);
+            assert_eq!(FOUR_AT_A_TIME_LANES.with(|v| v.borrow().clone()), calls, "{count} messages");
+            for (i, o) in out.iter().enumerate() {
+                assert_eq!(*o, *crate::convenience::hash(lanes[i]).as_bytes(), "{count} messages, digest {i}");
+            }
+        }
     }
 
     /// The paths hash_many_on takes by message count (BLAKE3 #219): one-
