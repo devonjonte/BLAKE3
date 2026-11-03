@@ -25,7 +25,13 @@ On Linux the test runner (test-runner) sees it while nextest lists the
 binaries, and its first test stops at once, so it costs a build and no
 test. It is a survivor of its own kind, "same code": --write gives its
 row the reason SAME_REASON, and a run fails (NO LONGER SAME CODE) on a
-row with that reason whose mutant now builds to other code.
+row with that reason whose mutant now builds to other code. A survivor
+whose tested build hashes otherwise gets a second look (release_same.py):
+built as a release build with the lines it deletes left blank, it may hash
+alike, since a deleted line moves every later panic's location and the
+tested builds' incremental optimization keeps code a release build drops.
+It is then same code too (SAME_RELEASE_REASON), at about a release
+build's cost a surviving place.
 
 A mutant whose tests no test fails, but the clock stops (nextest's, or
 cargo-mutants' backstop), has an outcome of its own: it timed out. That
@@ -74,6 +80,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
+
+import release_same
 
 ROOT = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip()
 KNOWN = os.path.join(ROOT, "tools", "mutants", f"known-{platform.machine()}.txt")
@@ -196,6 +205,10 @@ TARGET_DIR = json.loads(subprocess.run(["cargo", "metadata", "--format-version",
 # error, never a verdict (it overlapped the 5 s clock, so a mutant's
 # outcome hung on which ran out first: an EPYC 9255, October 22).
 BACKSTOP = 3600
+# How every mutant builds (and release_same's release build, with the
+# profile's incremental off): the public features on, so the code behind
+# them is tested too (the build variants, pure and the like, are their own builds).
+BUILD = ["--profile", "mutants", "--features", "serde,zeroize"]
 # Each process's memory, builds' and tests' alike: a mutant that allocates
 # without end fails its test here, and leaves the machine's memory to the
 # rest (one of 57 GB took the long proofs' memory). The limit is on data
@@ -311,14 +324,14 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
     """The mutants that survive the library's tests, by name, counted, and
     every mutant's outcome by function. Each shard's results are kept in
     tmp/mutants-last/<label>/ for a look afterwards."""
-    # The public features on, so the code behind them is tested too (the
-    # build variants, pure and the like, are their own builds).
     # A hang is nextest's to end (a test's 30 s); BACKSTOP only guards the run.
-    args = ["cargo", "mutants", "--in-place", "--profile", "mutants", "--features", "serde,zeroize", "--timeout", str(BACKSTOP),
+    args = ["cargo", "mutants", "--in-place", *BUILD, "--timeout", str(BACKSTOP),
             "--test-tool", "nextest", *extra]
     for f in files:
         args += ["--file", f]
     runs = []
+    envs = {}  # each shard's environment, by worktree
+    survivors = {}  # each shard's surviving places, by worktree: release_same's
     for k in range(shards):
         # Its sources in WORKTREES; its build under TARGET_DIR, on disk
         # where cargo builds (six worktrees' release builds in a tmpfs
@@ -371,6 +384,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
         tests = ["--test", "shuttle_finish", "--test", "shuttle_park"] if loom else ["--lib", "--tests"]
         shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", *tests]
         runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=lambda: cap_memory(shards))))
+        envs[tree] = env
     names = collections.Counter()
     timed = collections.Counter()  # the time-outs, by name: their own outcome
     functions = collections.defaultdict(list)  # (file, function) -> [(outcome, name)]
@@ -429,8 +443,26 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
                     STOPPED.setdefault(name, set()).update(t for t, o, _ in tests if o == "TIMEOUT")
                 PLACE_OUTCOMES.setdefault(label, {})[(name, place)] = summary
             functions[(mutant["file"], function)].append((summary, name))
+            if summary == "MissedMutant" and sys.platform == "linux" and not loom:
+                # A survivor whose tested build hashed otherwise: its
+                # release build's turn (release_same, after the shards).
+                survivors.setdefault(tree, []).append(((name, place), mutant["file"], open(os.path.join(out, outcome["diff_path"])).read(),
+                                                       mutant["span"]["start"]["line"]))
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
+    if survivors:
+        # Each shard's survivors in its own worktree and release target, the
+        # shards at once (their cargo-mutants runs are over).
+        def look(tree):
+            target = os.path.join(TARGET_DIR, "mutants", os.path.basename(tree) + "-release")
+            return release_same.confirm(tree, target, survivors[tree], BUILD, envs[tree])
+        with ThreadPoolExecutor(len(survivors)) as pool:
+            same = [key for keys in pool.map(look, sorted(survivors)) for key in keys]
+        for name, _ in same:
+            SAME[label][name] += 1
+            RELEASE_SAME[label][name] += 1
+        print(f"mutants: {len(same)} of {sum(map(len, survivors.values()))} surviving places build to the same code in a release build, "
+              "their line count kept (release_same.py)", flush=True)
     if rows:
         os.makedirs(kept, exist_ok=True)
         with open(os.path.join(kept, "tests.tsv"), "w") as f:
@@ -450,6 +482,13 @@ SAME_REASON = "same code: every test binary hashes as the unmutated build's here
 # The places a name had of it, by run label; confirm() replaces a
 # rerun name's "run" count with its "confirm" one, as it does survivors'.
 SAME = collections.defaultdict(collections.Counter)
+# Of those, the places only a release build with the line count kept shows
+# as same code (release_same.py): a row all of whose places are same code,
+# some of them so, has the reason SAME_RELEASE_REASON.
+RELEASE_SAME = collections.defaultdict(collections.Counter)
+SAME_RELEASE_REASON = ("same code: every test binary of a release build, the mutant's line count kept, "
+                       "hashes as the unmutated build's here (tools/mutants/release_same.py)")
+SAME_REASONS = (SAME_REASON, SAME_RELEASE_REASON)
 # The places that no test failed, but the clock stopped (listed by name in
 # TIMEOUTS): a hang, or a test made slow by the mutant, or by the machine's
 # load (a mutant compiled out of the build was stopped so once, at 5 s).
@@ -598,7 +637,7 @@ def check_rows_exist():
                    + glob.glob(os.path.join(ROOT, "tools", "mutants", "timeouts-*.txt")))
     rows = list_rows(paths)
     files = sorted({f for _, f, _ in rows})
-    args = ["cargo", "mutants", "--list", "--profile", "mutants", "--features", "serde,zeroize"]
+    args = ["cargo", "mutants", "--list", *BUILD]
     for f in files:
         args += ["--file", f]
     listed = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()
@@ -627,6 +666,7 @@ def confirm(found, known, timed, tknown, differ=None):
     for k in differ:
         confirmed[k], confirmed_timed[k] = again.get(k, 0), again_timed.get(k, 0)
         SAME["run"][k] = SAME["confirm"][k]
+        RELEASE_SAME["run"][k] = RELEASE_SAME["confirm"][k]
     print(f"confirmed alone: {len(differ)} names whose count differed from a list")
     return +confirmed, +confirmed_timed
 
@@ -815,8 +855,8 @@ def main():
         found = {k: max(n, known[k][0]) if k in known and open_pool(k, known[k][1]) else n for k, n in found.items()}
         def reason(k, n):
             if SAME["run"][k] == n:
-                return SAME_REASON
-            return known[k][1] if k in known and known[k][1] != SAME_REASON else unclassified(k, 'survives')
+                return SAME_RELEASE_REASON if RELEASE_SAME["run"][k] else SAME_REASON
+            return known[k][1] if k in known and known[k][1] not in SAME_REASONS else unclassified(k, 'survives')
         rows = sorted([f"{k}\t{n}\t{reason(k, n)}" for k, n in found.items()] + INACTIVE)
         open(KNOWN, "w").write("\n".join(header + rows) + "\n")
         print(f"{KNOWN}: {sum(found.values())} survivors, {sum(1 for k in found if k not in known)} names new")
@@ -841,7 +881,7 @@ def main():
         print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
     # A row the tool explained as same code holds only while it is.
     same = SAME["run"]
-    drifted = sorted(k for k, (c, reason) in known.items() if reason == SAME_REASON and same[k] != found.get(k, 0))
+    drifted = sorted(k for k, (c, reason) in known.items() if reason in SAME_REASONS and same[k] != found.get(k, 0))
     for k in drifted:
         print(f"NO LONGER SAME CODE ({found.get(k, 0) - same[k]} of {found.get(k, 0)} places build to other code): {k}")
     # Same code on this machine and on every other whose list has the
@@ -850,7 +890,7 @@ def main():
     # equivalent mutant to note, or code to remove), not a failure.
     for k in sorted(k for k, n in found.items() if same[k] == n):
         others = elsewhere(k)
-        if others and all(SAME_REASON in o for o in others):
+        if others and all(any(r in o for r in SAME_REASONS) for o in others):
             print(f"SAME CODE EVERYWHERE: {k} ({'; '.join(o.split(':', 1)[0] for o in others)} too)")
     for k, c in sorted(stale.items()):
         print(f"{'NOW TIMES OUT' if timed.get(k) else 'NOW CAUGHT'} ({c - found.get(k, 0)}): {k}")
