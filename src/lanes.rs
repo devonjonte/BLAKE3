@@ -450,7 +450,9 @@ fn cut_with_prefix(len: usize, threads: usize, prefix: usize) -> (Vec<Piece>, us
         offset += piece;
     }
     let own = pieces.len();
-    while len - offset > MIN_PIECE_LEN {
+    loop {
+        // What is left is the last piece once a share would take it all
+        // (a share is MIN_PIECE_LEN at least, so this ends).
         let piece = next_piece_len(len - offset, threads);
         if len - offset <= piece {
             break;
