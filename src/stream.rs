@@ -24,8 +24,9 @@
 //!   A program waiting hashes tasks no thread has taken.
 //!
 //! The messages are borrowed for the scope of [`stream`], which waits for
-//! every task before it returns, also when its body panics: no thread
-//! reads a message after the scope ends.
+//! every task before it returns; a panic inside ends the process
+//! (lanes::AbortOnUnwind, as for a one-shot job): no thread reads a message
+//! after the scope ends.
 
 use crate::lanes::{MEMBERS, Member, OwnLine, TASK_LEN, Task};
 use crate::platform::Platform;
@@ -103,7 +104,20 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// [`finish`](Stream::finish), on this thread. `body` calls `finish` last
 /// (a scope that ends with places not handed back panics). A message of
 /// any length; this crate's threads read it where it is, and `stream`
-/// returns only after they are done, also when `body` panics.
+/// returns only after they are done.
+///
+/// **A panic inside a stream ends the process**, wherever it starts: in
+/// `body`, in `done`, in a `fill` or a reader, or in the stream's own
+/// checks (a `body` that ends without `finish`). Its message and backtrace
+/// print first, as for any panic; then the process aborts, since this
+/// crate's threads may still be reading the messages and writing the
+/// places. So `std::panic::catch_unwind` around a stream recovers nothing.
+/// A program that must go on past a failing read hashes it with
+/// [`Stream::submit_reader`], which returns the read's error and goes on
+/// with the next message. Under plain `cargo test`, which runs a test
+/// binary's tests as threads of one process, a failing assertion inside a
+/// stream ends the whole binary, so the tests after it report nothing;
+/// cargo-nextest runs each test in a process of its own.
 ///
 /// The program calls [`crate::initialize_multithreaded`] first. A stream
 /// holds up to 1024 messages (a message over 64 KiB counts once per 64 KiB,
@@ -151,8 +165,12 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// ```
 pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: impl for<'s> FnOnce(&'s mut Stream<'env, D>) -> T) -> T {
     let mut stream = Stream::open(mode, done);
+    // Dropped first if anything below unwinds: the process ends there, while
+    // the threads may still read the messages and write the places.
+    let unwinding = crate::lanes::AbortOnUnwind;
     let result = body(&mut stream);
     assert_eq!(stream.delivered, stream.next, "a stream's body calls finish last");
+    core::mem::forget(unwinding);
     result
 }
 
@@ -728,26 +746,11 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
 }
 
 impl<D> Drop for Stream<'_, D> {
-    /// Wait for every task still reading the messages and writing the
-    /// places (also when the body panicked), then keep the storage as the
-    /// thread's spare. A stream lives only inside [`stream`], which owns
-    /// it, so this runs before the scope ends.
+    /// Keep the storage as the thread's spare. A stream drops finished,
+    /// every place handed back: one that unwinds ends the process first
+    /// ([`stream`]'s guard), and the C API finishes it before it drops.
     fn drop(&mut self) {
-        if let Some(task) = self.open.take() {
-            // Handed over, so that the wait below ends: as publish.
-            self.s.lefts[self.open_first].store(task.members, Ordering::Relaxed);
-            match self.slot {
-                Some(_) => self.s.source.publish(task),
-                None => crate::lanes::run_task(task),
-            }
-        }
-        for i in self.delivered..self.next {
-            while self.s.lefts[self.s.entries[i % ENTRIES].first].load(Ordering::Acquire) != 0 {
-                if !self.s.run_waiting() {
-                    core::hint::spin_loop();
-                }
-            }
-        }
+        assert!(self.open.is_none() && self.delivered == self.next, "a stream drops finished");
         if let Some(slot) = self.slot {
             crate::lanes::sources::Source::unregister(slot);
         }
@@ -901,59 +904,71 @@ mod test {
         }
     }
 
-    /// A fill whose source ends before the message's length stops the
-    /// program, naming how much was left: it can never hash the room's
-    /// stale bytes (BLAKE3 #204).
+    /// A panic inside a stream ends the process, wherever it starts, and
+    /// prints its message first: the body's own, the handler's, a fill
+    /// that ends before the message's length (it can never hash the room's
+    /// stale bytes, BLAKE3 #204), and a body that ends without finishing.
+    /// Each case runs in a child process of this test binary, inside
+    /// catch_unwind as a careless caller would: the child must die of
+    /// SIGABRT, saying why. With the guard gone, it would catch the panic
+    /// and exit 0.
+    #[cfg(unix)]
     #[test]
-    #[cfg_attr(not(panic = "unwind"), ignore = "catches panics, which this target aborts on")]
-    fn test_fill_that_ends_early_panics() {
-        let result = std::panic::catch_unwind(|| {
-            let mut got = places(1);
-            stream(
-                Mode::Plain,
-                |_| {},
-                |s| {
-                    let mut left = 1000usize;
-                    s.submit_with(
-                        5000,
-                        |_, room| {
-                            let n = room.len().min(left);
-                            left -= n;
-                            n
-                        },
-                        &mut got[0],
-                    );
-                    s.finish();
-                },
-            )
-        });
-        let message = result.expect_err("a fill that ends early panics");
-        let text = message.downcast_ref::<std::string::String>().map(|s| s.as_str()).unwrap_or("");
-        assert!(text.contains("wrote nothing with 4000 of its 5000 bytes left"), "{text}");
-    }
-
-    /// A body that ends without finishing panics (after the threads are
-    /// done with its messages), and so does one that panics itself.
-    #[test]
-    #[cfg_attr(not(panic = "unwind"), ignore = "catches panics, which this target aborts on")]
-    fn test_stream_panics() {
+    fn test_a_panic_in_a_stream_ends_the_process() {
+        const CHILD: &str = "BLAKE3_SERVIL_TEST_STREAM_PANIC";
         let input = std::vec![9u8; 300_000];
         let blocks = crate::test::message(&input);
-        for unwinding in [false, true] {
-            let result = std::panic::catch_unwind(|| {
+        if let Ok(case) = std::env::var(CHILD) {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut got = places(4);
                 stream(
                     Mode::Plain,
-                    |_: &mut [Hash]| {},
-                    |s| {
-                        for (len, out) in [10, 100_000, 64, 300_000].into_iter().zip(&mut got) {
-                            s.submit(&blocks, len, out);
+                    |_: &mut [Hash]| assert!(case != "handler", "the handler panics"),
+                    |s| match case.as_str() {
+                        "body" | "handler" => {
+                            for (len, out) in [10, 100_000, 64, 300_000].into_iter().zip(&mut got) {
+                                s.submit(&blocks, len, out);
+                            }
+                            if case == "body" {
+                                panic!("the body panics");
+                            }
+                            s.finish();
                         }
-                        assert!(!unwinding, "the body panics");
+                        "fill" => {
+                            let mut left = 1000usize;
+                            s.submit_with(
+                                5000,
+                                |_, room| {
+                                    let n = room.len().min(left);
+                                    left -= n;
+                                    n
+                                },
+                                &mut got[0],
+                            );
+                            s.finish();
+                        }
+                        "unfinished" => s.submit(&blocks, 300_000, &mut got[0]),
+                        _ => unreachable!(),
                     },
                 )
-            });
-            assert!(result.is_err());
+            }));
+            std::process::exit(0);
+        }
+        for (case, says) in [
+            ("body", "the body panics"),
+            ("handler", "the handler panics"),
+            ("fill", "wrote nothing with 4000 of its 5000 bytes left"),
+            ("unfinished", "a stream's body calls finish last"),
+        ] {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "stream::test::test_a_panic_in_a_stream_ends_the_process", "--nocapture", "--test-threads", "1"])
+                .env(CHILD, case)
+                .output()
+                .expect("the test binary runs again");
+            use std::os::unix::process::ExitStatusExt as _;
+            let stderr = std::string::String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.signal(), Some(6), "{case}: the child aborts (SIGABRT): {:?}\n{stderr}", out.status);
+            assert!(stderr.contains(says), "{case}: it says why: {stderr}");
         }
     }
 

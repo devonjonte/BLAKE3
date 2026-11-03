@@ -311,10 +311,11 @@ fn cut_messages(count: usize, message_len: usize, threads: usize) -> Vec<Piece> 
     pieces
 }
 
-/// Ends the process if dropped: held while a job is published, forgotten
-/// once its workers are done, so it drops only when the caller unwinds
-/// with workers possibly still reading its frame.
-struct AbortOnUnwind;
+/// Ends the process if dropped: held while a job is published, or while a
+/// stream's body runs, and forgotten once the workers are done, so it drops
+/// only when the caller unwinds with workers possibly still reading its
+/// memory (the one mechanism for that: crash-only, Zooko, November 2).
+pub(crate) struct AbortOnUnwind;
 
 impl Drop for AbortOnUnwind {
     fn drop(&mut self) {

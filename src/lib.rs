@@ -122,6 +122,18 @@
 //!   and the threads: by default a worker per CPU beyond the first, each with the
 //!   standard library's stack, started by [`initialize_multithreaded`].
 //!
+//! # Panics
+//!
+//! **A panic inside a [stream](performance::stream) ends the process**,
+//! wherever it starts: in your body, handler, `fill` or reader, or in the
+//! stream's own checks. Its message and backtrace print first; then the
+//! process aborts, since this crate's threads may still be reading your
+//! messages and writing your digests. So `catch_unwind` cannot recover a
+//! stream: a program that must go on past a failing read uses
+//! [`Stream::submit_reader`](performance::Stream::submit_reader), which
+//! returns the read's error. A broken precondition of any other call panics
+//! on the calling thread, and unwinds as usual.
+//!
 //! # Startup self-test
 //!
 //! **Every program calls [`initialize`] (or [`initialize_multithreaded`])
