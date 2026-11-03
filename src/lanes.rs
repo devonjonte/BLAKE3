@@ -177,7 +177,7 @@ std::thread_local! {
     pub(crate) static TEST_CLOCK: core::cell::Cell<Option<(std::time::Instant, std::time::Duration, std::time::Duration)>> = const { core::cell::Cell::new(None) };
     /// The tests' counts of what the waits did on this thread since the
     /// test last cleared them: polls for work, yields.
-    pub(crate) static NOTED: core::cell::Cell<[usize; 2]> = const { core::cell::Cell::new([0; 2]) };
+    pub(crate) static NOTED: core::cell::Cell<[usize; 3]> = const { core::cell::Cell::new([0; 3]) };
 }
 
 /// What a wait did, for the tests' counts.
@@ -188,6 +188,8 @@ enum Noted {
     Poll = 0,
     /// A poller handed the CPU on (poll_pause).
     Yield = 1,
+    /// A publisher or a worker tried to wake a worker for a waiting task.
+    WakeTry = 2,
 }
 
 /// Count `what` (in the tests' record; nothing in any other build).
@@ -969,7 +971,8 @@ pub(crate) mod sources {
             if pool.sme2 {
                 wake_sme2();
             }
-            if p + 1 - self.claimed.load(Ordering::Relaxed) >= 2 {
+            if self.waiting() >= 2 {
+                noted(Noted::WakeTry);
                 pool.park.wake_one();
             }
         }
@@ -1003,7 +1006,7 @@ pub(crate) mod sources {
                 // kernel's readahead stream by stream (official's I/O
                 // pattern), and runs shrink to one piece near the end for
                 // balance. A stream's tasks go one at a time.
-                let n = if self.ring.is_empty() { ((p - c) / (2 * pool().threads)).max(1) } else { 1 };
+                let n = if self.ring.is_empty() { Self::run_len(p - c, pool().threads) } else { 1 };
                 match self.claimed.compare_exchange_weak(c, c + n, Ordering::AcqRel, Ordering::Acquire) {
                     Ok(_) if self.ring.is_empty() => return Some(Item::Pieces(self.job.load(Ordering::Relaxed), c - self.base.load(Ordering::Relaxed), n)),
                     // Sound: this thread alone took slot c, written before
@@ -1012,6 +1015,19 @@ pub(crate) mod sources {
                     Err(now) => c = now,
                 }
             }
+        }
+
+        /// Get the number of pieces one claim takes of `waiting` pieces of a
+        /// job shared by `threads` threads: a 2 * threads-th of what waits,
+        /// one at least, so runs shrink toward the end (guided
+        /// self-scheduling).
+        fn run_len(waiting: usize, threads: usize) -> usize {
+            (waiting / (2 * threads)).max(1)
+        }
+
+        #[cfg(test)]
+        pub(crate) fn run_len_for_tests(waiting: usize, threads: usize) -> usize {
+            Self::run_len(waiting, threads)
         }
 
         /// A stream's next task, if any (this source is a stream's).
@@ -1036,8 +1052,22 @@ pub(crate) mod sources {
         pub(crate) fn wake_for_waiting(&self) {
             let pool = pool();
             if self.waiting() > 0 {
+                noted(Noted::WakeTry);
                 pool.park.wake_one();
             }
+        }
+
+        /// Whether `slot`'s bit is set in ACTIVE, the word the workers scan
+        /// (tests).
+        #[cfg(test)]
+        pub(crate) fn active(slot: usize) -> bool {
+            ACTIVE.load(Ordering::SeqCst) & (1 << slot) != 0
+        }
+
+        /// Whether `slot` holds a source's pointer (tests).
+        #[cfg(test)]
+        pub(crate) fn registered(slot: usize) -> bool {
+            !REGISTERED[slot].load(Ordering::SeqCst).is_null()
         }
 
         /// Count `n` of the caller's job's pieces finished (their outputs
@@ -1131,6 +1161,7 @@ pub(crate) mod sources {
         find(|source| {
             let Some(item) = source.take() else { return false };
             if source.waiting() >= 2 {
+                noted(Noted::WakeTry);
                 pool().park.wake_one();
             }
             match item {
@@ -1892,8 +1923,76 @@ mod test {
         base() + US(us)
     }
 
-    fn counts() -> [usize; 2] {
-        NOTED.with(|n| n.replace([0; 2]))
+    fn counts() -> [usize; 3] {
+        NOTED.with(|n| n.replace([0; 3]))
+    }
+
+    /// A claim's run of a job's pieces, exactly (BLAKE3 #219): a 2 x
+    /// threads-th of what waits, one at least.
+    #[test]
+    fn test_a_claim_takes_a_share_of_what_waits() {
+        let run = sources::Source::run_len_for_tests;
+        assert_eq!(run(100, 20), 2, "100 pieces, 20 threads: 100 / 40");
+        assert_eq!(run(400, 20), 10);
+        assert_eq!(run(39, 20), 1, "under a share: one");
+        assert_eq!(run(40, 20), 1);
+        assert_eq!(run(41, 20), 1);
+        assert_eq!(run(80, 20), 2);
+        assert_eq!(run(1, 2), 1);
+        assert_eq!(run(1000, 2), 250);
+    }
+
+    /// When a stream's publisher and the workers try a wake (BLAKE3 #219):
+    /// a publisher with two or more tasks waiting (the caller takes a lone
+    /// one); wake_for_waiting with any; a worker that took one and left
+    /// two or more. On a source of the test's own, never registered, so
+    /// the workers see none of it.
+    #[test]
+    fn test_a_wake_is_tried_for_the_second_task_waiting() {
+        let _ = pool();
+        let source: &'static sources::Source = Box::leak(Box::new(sources::Source::new(8)));
+        let task = || Task::members(crate::IV, 0, None);
+        counts();
+        source.publish(task());
+        assert_eq!(counts()[Noted::WakeTry as usize], 0, "one task waiting: the caller's");
+        source.publish(task());
+        assert_eq!(counts()[Noted::WakeTry as usize], 1, "two waiting: a wake");
+        source.publish(task());
+        assert_eq!(counts()[Noted::WakeTry as usize], 1, "three waiting: a wake");
+        assert!(source.take_task().is_some());
+        assert!(source.take_task().is_some());
+        counts();
+        source.publish(task());
+        assert_eq!(counts()[Noted::WakeTry as usize], 1, "one waiting, then two: a wake");
+        assert!(source.take_task().is_some() && source.take_task().is_some() && source.take_task().is_none());
+        counts();
+        source.wake_for_waiting();
+        assert_eq!(counts()[Noted::WakeTry as usize], 0, "none waiting: no wake");
+        source.publish(task());
+        counts();
+        source.wake_for_waiting();
+        assert_eq!(counts()[Noted::WakeTry as usize], 1, "one waiting: a wake");
+        assert!(source.take_task().is_some());
+    }
+
+    /// A source registered is active for the workers at its slot, and
+    /// unregistered is not (BLAKE3 #219).
+    #[test]
+    fn test_a_source_unregistered_leaves_its_slot() {
+        let source: &'static sources::Source = Box::leak(Box::new(sources::Source::new(0)));
+        let slot = source.register().expect("a slot free");
+        assert!(sources::Source::active(slot) && sources::Source::registered(slot));
+        sources::Source::unregister(slot);
+        assert!(!sources::Source::active(slot) && !sources::Source::registered(slot), "the slot's bit and pointer cleared");
+        // A second source takes the next slot; its bit is its own to clear
+        // (a shift the wrong way clears slot 0's alone).
+        let second: &'static sources::Source = Box::leak(Box::new(sources::Source::new(0)));
+        let first = source.register().expect("a slot free");
+        let next = second.register().expect("a slot free");
+        assert!(next > first && sources::Source::active(next));
+        sources::Source::unregister(next);
+        assert!(!sources::Source::active(next) && sources::Source::active(first), "the second's slot alone cleared");
+        sources::Source::unregister(first);
     }
 
     /// An idle worker's look for work lasts SPIN while a stream is open,
