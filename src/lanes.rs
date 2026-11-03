@@ -691,6 +691,13 @@ fn no_pool() -> &'static Pool {
     panic!("blake3-servil: call blake3_servil::initialize_multithreaded(None) once, before any multithreaded call or stream: it starts the threads they use")
 }
 
+#[cfg(test)]
+std::thread_local! {
+    /// How many workers the last job this thread ran asked to wake (None:
+    /// it asked for none), for the tests of the wake count (BLAKE3 #219).
+    pub(crate) static WAKES_WANTED: core::cell::Cell<Option<usize>> = const { core::cell::Cell::new(None) };
+}
+
 impl Pool {
     /// Publish `work` of `pieces` pieces as this thread's job source, take
     /// pieces on this thread until none remain, and return once every
@@ -700,6 +707,8 @@ impl Pool {
     /// finds no source slot free hashes every piece itself.
     fn run_job(&self, work: Work, pieces: usize, own: usize, own_platform: Platform) {
         crate::ran(crate::Ran::Pool);
+        #[cfg(test)]
+        WAKES_WANTED.with(|w| w.set(None));
         let job = Job { work };
         let source = sources::job_source();
         let slot = source.register();
@@ -711,12 +720,17 @@ impl Pool {
         let ptr = &job as *const Job as *mut Job<'static>;
         let published = AbortOnUnwind;
         let target = source.publish_job(ptr, pieces, own);
-        if slot.is_some() && pieces > own + 1 {
-            let budget = match &job.work {
-                Work::Tree { input, .. } => tree_threads(input.len(), self.threads, own_platform.simd_degree()).saturating_sub(1),
+        if slot.is_some() {
+            // A worker for each piece past the caller's first (none for a
+            // job of one past its own: a wake for none is nothing); for a
+            // tree, within the wide kernel's thread budget.
+            let wanted = match &job.work {
+                Work::Tree { input, .. } => (pieces - own - 1).min(tree_threads(input.len(), self.threads, own_platform.simd_degree()).saturating_sub(1)),
                 _ => pieces - own - 1,
             };
-            self.wake_for((pieces - own - 1).min(budget));
+            #[cfg(test)]
+            WAKES_WANTED.with(|w| w.set(Some(wanted)));
+            self.wake_for(wanted);
         }
         for index in 0..own {
             // Sound: the workers' pieces start past these.
@@ -1287,6 +1301,7 @@ impl Task {
                 _ => {}
             }
         }
+        crate::ran(crate::Ran::MemberAlone);
         for m in members {
             let bytes = unsafe { core::slice::from_raw_parts(m.input, m.len) };
             let hash = crate::hash_serial_on(bytes, &self.key, self.flags, platform);
@@ -1300,6 +1315,7 @@ impl Task {
     /// most a chunk; run_members checked), side by side on the multi-lane
     /// kernel from a table of pointers.
     fn run_equal_members<const N: usize>(&self, platform: Platform) {
+        crate::ran(crate::Ran::EqualMembers);
         let members = &self.member[..self.members];
         // Sound: the stream keeps every member's N bytes and `out` in place
         // until the task's `left` is zero.
@@ -1531,7 +1547,25 @@ mod test {
                                     let out = unsafe { base.add(m + 1) }.cast::<u8>();
                                     task.member[m] = Member { input: inputs[m][offset..].as_ptr(), len: inputs[m].len() - offset, out };
                                 }
+                                crate::RAN.with(|r| r.set(0));
                                 task.run(platform);
+                                // Which path (BLAKE3 #219): one length, two
+                                // members or more, a length with a kernel
+                                // (one block everywhere; 128 B to 1 KiB on
+                                // x86-64): side by side; else one at a time.
+                                let side_by_side =
+                                    !mixed && count >= 2 && (len == 64 || (cfg!(target_arch = "x86_64") && matches!(len, 128 | 256 | 512 | 1024)));
+                                let ran = crate::RAN.with(|r| r.get());
+                                assert_eq!(
+                                    ran & crate::Ran::EqualMembers as u32 != 0,
+                                    side_by_side,
+                                    "{platform:?}, {count} x {len}, mixed {mixed}: side by side"
+                                );
+                                assert_eq!(
+                                    ran & crate::Ran::MemberAlone as u32 != 0,
+                                    !side_by_side,
+                                    "{platform:?}, {count} x {len}, mixed {mixed}: one at a time"
+                                );
                                 assert_eq!(&out[1..count + 1], &expected[..], "{platform:?}, {count} x {len}, mixed {mixed}, offset {offset}, mode {mode}");
                                 assert_eq!(out[0], [0xAA; crate::OUT_LEN]);
                                 assert_eq!(out[count + 1], [0xAA; crate::OUT_LEN]);
@@ -1760,6 +1794,74 @@ mod test {
             }),
             "at MIN_SPLIT_LEN: the pool"
         );
+    }
+
+    /// A task of one member runs it alone, whatever its length: the
+    /// side-by-side kernels are for two or more.
+    #[test]
+    fn test_one_member_runs_alone() {
+        for len in [64, 128, 1024, 100] {
+            let input: Vec<u8> = (0..len).map(|i| i as u8).collect();
+            let done = AtomicUsize::new(1);
+            let mut out = [[0u8; crate::OUT_LEN]; 1];
+            let mut task = Task::members(crate::IV, 0, None);
+            task.members = 1;
+            task.left = &done;
+            task.member[0] = Member { input: input.as_ptr(), len, out: out.as_mut_ptr().cast::<u8>() };
+            crate::RAN.with(|r| r.set(0));
+            task.run(Platform::detect());
+            let ran = crate::RAN.with(|r| r.get());
+            assert!(ran & crate::Ran::MemberAlone as u32 != 0 && ran & crate::Ran::EqualMembers as u32 == 0, "{len} B alone");
+            assert_eq!(out[0], *crate::convenience::hash(&input).as_bytes());
+        }
+    }
+
+    /// How many workers a job asks to wake (BLAKE3 #219): one for each
+    /// piece past the caller's first, within the pool's other threads, and
+    /// for a tree within the wide kernel's thread budget (tree_threads).
+    /// A job of two pieces asks for one; a batch cut into eight asks for
+    /// seven; a 1 MiB tree asks for every other thread, or the budget.
+    #[test]
+    fn test_a_job_wakes_one_worker_a_piece_past_its_own() {
+        let pool = pool();
+        if pool.threads < 9 {
+            return;
+        }
+        let wanted = || WAKES_WANTED.with(|w| w.get());
+        // Two messages in two slots of MIN_SPLIT_LEN / 2: two pieces of
+        // one message each (test_cut_messages_exactly's rule: a share
+        // under a message is one message).
+        let input = std::vec![0x5Au8; 1 << 20];
+        let mut out = [[0u8; crate::OUT_LEN]; 1000];
+        hash_many(&input[..MIN_SPLIT_LEN], MIN_SPLIT_LEN / 2, crate::IV, 0, &mut out[..2]);
+        assert_eq!(wanted(), Some(1), "two pieces: one worker");
+        // Eight messages in slots of 64 KiB: a share of 512 KiB / threads
+        // is under a message, so a message a piece, eight pieces, seven to
+        // wake for.
+        assert_eq!(cut_messages(8, 64 * 1024, pool.threads).len(), 8);
+        hash_many(&input[..512 * 1024], 64 * 1024, crate::IV, 0, &mut out[..8]);
+        assert_eq!(wanted(), Some(7), "eight pieces: seven workers");
+        // A 1 MiB tree: dozens of pieces, so every other thread of the
+        // pool, within the wide kernel's budget where the kernel is wide.
+        let degree = Platform::detect().simd_degree();
+        let budget = tree_threads(1 << 20, pool.threads, degree) - 1;
+        hash_with_key(&input, crate::IV, 0);
+        assert_eq!(wanted(), Some((pool.threads - 1).min(budget)), "a 1 MiB tree: every other thread, or the budget");
+        // A tree of three pieces (24 KiB cut for two threads, run as a job
+        // directly: the calls cut a tree into more pieces than any pool
+        // has threads) asks for two, under any budget.
+        let (pieces, own) = cut_with_prefix(24 * 1024, 2, 0);
+        assert_eq!((pieces.len(), own), (3, 0));
+        let mut cvs = std::vec![ChainingValue::default(); 3];
+        let work = Work::Tree { input: &input[..24 * 1024], pieces: &pieces, cvs: cvs.as_mut_ptr(), key: *crate::IV, counter: 0, flags: 0 };
+        pool.run_job(work, 3, 0, Platform::detect());
+        assert_eq!(wanted(), Some(2), "three pieces: two workers");
+        assert_eq!(merge_root(&pieces, &mut cvs, crate::IV, 0), crate::convenience::hash(&input[..24 * 1024]));
+        // A call the pool never sees asks for nothing (run_job clears the
+        // record; a serial call leaves it as this sets it).
+        WAKES_WANTED.with(|w| w.set(None));
+        hash_with_key(&input[..MIN_SPLIT_LEN - 1], crate::IV, 0);
+        assert_eq!(wanted(), None, "a serial call wakes none");
     }
 
     /// Cuts with an SME2 prefix tile the input with non-increasing whole
