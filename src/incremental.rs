@@ -621,7 +621,9 @@ mod test {
     /// With `hold`, a stage that fills a whole group from the message's
     /// start is kept (held_group) and the rest of the input handed back,
     /// for the caller to hash the group beside other hashers' groups.
+    /// Holding is std's (update_each): without it held_group is None.
     #[test]
+    #[cfg(feature = "std")]
     fn test_gather_part_holds_a_whole_group() {
         let input = painted();
         let mut h = Hasher::new(Mode::Plain);
