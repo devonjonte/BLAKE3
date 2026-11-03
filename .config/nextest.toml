@@ -28,6 +28,12 @@ slow-timeout = { period = "60s", terminate-after = 1 }
 # A mutant's tests stop at the first that fails: a caught mutant costs the
 # tests up to its first catcher. Each test in its own process.
 fail-fast = true
+# tests/pool_fairness.rs judges how the pool serves two callers by their
+# counts over two seconds, which six shards of mutants beside it decide
+# as much as the pool does: it failed the unmutated baseline under them
+# (i7-12700K, November 3; alone it reads 1.0-1.1 against its bound of
+# 1.5). It runs in the default profile, on a quiet machine (BLAKE3 #215).
+default-filter = "not binary(pool_fairness)"
 # A test still running at 30 s hangs: killed and named. The run's one
 # clock: check.py reports a mutant that only this clock stopped as CLOCK
 # ONLY, not as caught by a test. The slowest test takes under 1 s alone,
@@ -44,6 +50,7 @@ final-status-level = "none"
 # As `mutants`, but every test runs on every mutant: the record names every
 # test that catches each one, with its time (check.py --map).
 fail-fast = false
+default-filter = "not binary(pool_fairness)"
 slow-timeout = { period = "30s", terminate-after = 1 }
 status-level = "all"
 final-status-level = "none"
