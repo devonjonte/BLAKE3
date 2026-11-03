@@ -138,14 +138,64 @@ const MAX_PIECE_LEN: usize = 128 * CHUNK_LEN;
 const YIELD_EVERY: std::time::Duration = std::time::Duration::from_micros(20);
 
 #[inline]
-pub(crate) fn poll_pause(yielded: &mut std::time::Instant) {
+pub(crate) fn poll_pause(yielded: &mut std::time::Duration) {
     for _ in 0..8 {
         std::hint::spin_loop();
     }
-    if yielded.elapsed() >= YIELD_EVERY {
+    if now() - *yielded >= YIELD_EVERY {
+        noted(Noted::Yield);
         std::thread::yield_now();
-        *yielded = std::time::Instant::now();
+        *yielded = now();
     }
+}
+
+/// The pool's clock: the time since this process first read it. Every
+/// wait in this file measures time through it (a test keeps it so,
+/// test_the_pool_reads_time_through_now), so the tests' clock can stand
+/// in: set, it answers what the test set, stepping by the test's step at
+/// each read, so a wait that polls until time passes ends when the test
+/// says (BLAKE3 #219: SPIN, SPIN_BEFORE_SLEEP and YIELD_EVERY stay in
+/// microseconds, and their comparisons are counted exactly).
+fn now() -> std::time::Duration {
+    #[cfg(test)]
+    if let Some((at, step)) = TEST_CLOCK.with(|c| c.get()) {
+        TEST_CLOCK.with(|c| c.set(Some((at + step, step))));
+        return at;
+    }
+    static EPOCH: OnceLock<std::time::Instant> = OnceLock::new();
+    EPOCH.get_or_init(std::time::Instant::now).elapsed()
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// The tests' clock for now(): the time it answers next, and its step
+    /// at each read (None: the real clock).
+    pub(crate) static TEST_CLOCK: core::cell::Cell<Option<(std::time::Duration, std::time::Duration)>> = const { core::cell::Cell::new(None) };
+    /// The tests' counts of what the waits did on this thread since the
+    /// test last cleared them: polls for work, yields.
+    pub(crate) static NOTED: core::cell::Cell<[usize; 2]> = const { core::cell::Cell::new([0; 2]) };
+}
+
+/// What a wait did, for the tests' counts.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+enum Noted {
+    /// spin_for_work looked for work once.
+    Poll = 0,
+    /// A poller handed the CPU on (poll_pause).
+    Yield = 1,
+}
+
+/// Count `what` (in the tests' record; nothing in any other build).
+#[inline(always)]
+fn noted(what: Noted) {
+    #[cfg(test)]
+    NOTED.with(|n| {
+        let mut counts = n.get();
+        counts[what as usize] += 1;
+        n.set(counts);
+    });
+    let _ = what;
 }
 
 /// How long a caller polls for its last pieces before sleeping.
@@ -795,15 +845,16 @@ const SPIN: std::time::Duration = std::time::Duration::from_micros(5);
 
 /// Look for work for up to SPIN: whether some appeared.
 fn spin_for_work() -> bool {
-    let started = std::time::Instant::now();
+    let started = now();
     loop {
         for _ in 0..16 {
+            noted(Noted::Poll);
             if sources::visible(false) {
                 return true;
             }
             core::hint::spin_loop();
         }
-        if spin_ends(started.elapsed(), sources::open) {
+        if spin_ends(now() - started, sources::open) {
             return false;
         }
     }
@@ -995,13 +1046,23 @@ pub(crate) mod sources {
         /// SPIN_BEFORE_SLEEP, then parked until the worker finishing the
         /// last piece unparks this thread.
         pub(crate) fn wait(&self, target: usize) {
-            let started = std::time::Instant::now();
+            let started = now();
             let mut yielded = started;
-            self.finish.wait(target, || {
-                poll_pause(&mut yielded);
-                started.elapsed() < SPIN_BEFORE_SLEEP
-            });
+            self.finish.wait(target, || keeps_polling(started, &mut yielded));
         }
+    }
+
+    /// One poll of a caller waiting for its pieces: a pause (yielding the
+    /// CPU every YIELD_EVERY), and whether to poll on, which it does for
+    /// SPIN_BEFORE_SLEEP from `started` before it sleeps.
+    fn keeps_polling(started: std::time::Duration, yielded: &mut std::time::Duration) -> bool {
+        poll_pause(yielded);
+        now() - started < SPIN_BEFORE_SLEEP
+    }
+
+    #[cfg(test)]
+    pub(crate) fn keeps_polling_for_tests(started: std::time::Duration, yielded: &mut std::time::Duration) -> bool {
+        keeps_polling(started, yielded)
     }
 
     /// Callers' job sources no thread holds.
@@ -1804,6 +1865,96 @@ mod test {
             }),
             "at MIN_SPLIT_LEN: the pool"
         );
+    }
+
+    const US: fn(u64) -> std::time::Duration = std::time::Duration::from_micros;
+
+    /// The tests' clock at `at`, stepping `step` a read, on this thread.
+    fn clock(at: u64, step: u64) {
+        TEST_CLOCK.with(|c| c.set(Some((US(at), US(step)))));
+    }
+
+    fn counts() -> [usize; 2] {
+        NOTED.with(|n| n.replace([0; 2]))
+    }
+
+    /// An idle worker's look for work lasts SPIN while a stream is open,
+    /// and ends at once with none (BLAKE3 #219): on the tests' clock, a
+    /// step of 1 us a read, sixteen polls a look, five looks to 5 us; with
+    /// a step of 5 us, one look; with 4 us, two.
+    #[test]
+    fn test_a_worker_spins_for_spin_while_a_stream_is_open() {
+        let _ = pool();
+        counts();
+        clock(0, 1);
+        assert!(!spin_for_work(), "no stream open: no work appears");
+        assert_eq!(counts()[Noted::Poll as usize], 16, "no stream open: one look and park");
+        sources::opened();
+        clock(0, 1);
+        assert!(!spin_for_work());
+        assert_eq!(counts()[Noted::Poll as usize], 80, "a stream open: looks until 5 us have passed");
+        clock(0, 5);
+        assert!(!spin_for_work());
+        assert_eq!(counts()[Noted::Poll as usize], 16, "5 us passed at the first check: one look");
+        clock(0, 4);
+        assert!(!spin_for_work());
+        assert_eq!(counts()[Noted::Poll as usize], 32, "4 us, then 8: two looks");
+        sources::closed();
+        TEST_CLOCK.with(|c| c.set(None));
+    }
+
+    /// A poller hands the CPU on every YIELD_EVERY (BLAKE3 #219): with the
+    /// clock stepping 20 us a read, every call after the first yields (the
+    /// read that resets `yielded` steps too); with 10 us a read, every
+    /// third call.
+    #[test]
+    fn test_a_poller_yields_every_yield_every() {
+        counts();
+        clock(0, 20);
+        let mut yielded = US(0);
+        for _ in 0..10 {
+            poll_pause(&mut yielded);
+        }
+        assert_eq!(counts()[Noted::Yield as usize], 9);
+        clock(0, 10);
+        let mut yielded = US(0);
+        // Reads: 0 (no), 10 (no), 20 (yes, yielded = 30), 40 (no), 50
+        // (yes, yielded = 60), 70 (no), 80 (yes, yielded = 90), 100 (no), 110
+        // (yes), 130 (no): four yields in ten calls.
+        for _ in 0..10 {
+            poll_pause(&mut yielded);
+        }
+        assert_eq!(counts()[Noted::Yield as usize], 4);
+        TEST_CLOCK.with(|c| c.set(None));
+    }
+
+    /// A caller polls for its pieces for SPIN_BEFORE_SLEEP from its start,
+    /// then sleeps (BLAKE3 #219): at 199 us it polls on, at 200 it sleeps.
+    #[test]
+    fn test_a_caller_polls_for_spin_before_sleep_then_sleeps() {
+        for (at, polls_on) in [(0, true), (199, true), (200, false), (201, false), (1000, false)] {
+            clock(at, 0);
+            let mut yielded = US(0);
+            assert_eq!(sources::keeps_polling_for_tests(US(0), &mut yielded), polls_on, "{at} us after the start");
+        }
+        clock(250, 0);
+        let mut yielded = US(0);
+        counts();
+        assert!(sources::keeps_polling_for_tests(US(100), &mut yielded), "150 us after a start at 100");
+        assert_eq!((counts()[Noted::Yield as usize], yielded), (1, US(250)), "each poll pauses: 250 us since the last yield is one");
+        TEST_CLOCK.with(|c| c.set(None));
+    }
+
+    /// The pool reads time through now() alone, so the tests' clock stands
+    /// in for every wait: the pool's code (this file before its tests)
+    /// reads Instant::now in now() and nowhere else.
+    #[test]
+    fn test_the_pool_reads_time_through_now() {
+        let source = include_str!("lanes.rs");
+        let (code, _tests) = source.split_once("#[cfg(test)]\nmod test {").expect("the tests' module");
+        assert_eq!(code.matches("Instant::now").count(), 1, "one read of the real clock, in now()");
+        assert_eq!(code.matches(".elapsed()").count(), 1, "one elapsed, in now()");
+        assert!(code.contains("EPOCH.get_or_init(std::time::Instant::now).elapsed()"), "the read is now()'s");
     }
 
     /// The pool's workers are every thread but the calling one.
