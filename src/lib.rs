@@ -254,6 +254,11 @@ pub(crate) enum Ran {
     Pool = 1,
     /// The call wanted SME2 and another thread held the turn.
     TurnTaken = 2,
+    /// A task's members, all of one length, ran side by side on that
+    /// length's multi-lane kernel (lanes::Task::run_equal_members).
+    EqualMembers = 4,
+    /// A task's members ran one at a time (lanes::Task::run_members).
+    MemberAlone = 8,
 }
 
 #[cfg(all(test, feature = "std"))]
