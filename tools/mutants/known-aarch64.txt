@@ -2,7 +2,7 @@
 # SME2 and the SHA-3 extension), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/block.rs src/convenience.rs src/each.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/performance.rs src/platform.rs src/self_test.rs src/tree.rs src/pair.rs
+files: src/block.rs src/convenience.rs src/each.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/performance.rs src/platform.rs src/self_test.rs src/tree.rs src/pair.rs src/stream.rs
 model files: src/finish.rs src/park.rs
 src/each.rs	replace hash_held with ()	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/each.rs	replace | with ^ in hash_held	1	equivalent: | and ^ agree on flag bits that never overlap
@@ -415,3 +415,14 @@ src/self_test.rs	replace | with ^ in chunk_values	2	same code: every test binary
 src/tree.rs	replace + with * in wide	1	speed: how far past its input a subtree prefetches (a prefetch never faults)
 src/tree.rs	replace + with - in wide	1	speed: how far past its input a subtree prefetches (a prefetch never faults)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::subtree -> Option<usize> with None	1	speed: subtrees then hash on the walk's one-chunk path, the same digests
+src/stream.rs	replace Storage::run_waiting -> bool with false	1	[cpu has sme2] speed: a waiting caller hashes no lone task itself; the SME2 thread, which every publish wakes, takes it, so finish progresses (without SME2, tests/stream_finish_parked_workers hangs)
+src/stream.rs	replace Storage::run_waiting -> bool with true	1	[cpu has sme2] speed: a waiting caller counts a task it never ran and looks again at once, skipping a pause; the SME2 thread takes the task
+src/stream.rs	replace + with *	1	equivalent: the long message's stack keeps MAX_DEPTH values for MAX_DEPTH + 1, still more than a 2^64-byte message's 48 pieces need
+src/stream.rs	replace + with -	1	equivalent: the long message's stack keeps MAX_DEPTH - 1 values, still more than a 2^64-byte message's 48 pieces need
+src/stream.rs	replace == with != in Stream<'env, D>::collect	1	[cpu has sme2] speed: collect wakes a worker for a lone task only when it handed something back; the SME2 thread takes the task (without SME2, tests/stream_collect_parked_workers hangs)
+src/stream.rs	replace && with || in Stream<'env, D>::collect	1	[cpu has sme2] speed: collect wakes a worker for a lone task whether or not it handed something back, or with no slot: a wake more
+src/stream.rs	replace == with != in Stream<'env, D>::help	1	[cpu has sme2] speed: a waiting caller hashes a lone task only after handing something back; the SME2 thread takes the task
+src/stream.rs	replace && with || in Stream<'env, D>::help	1	[cpu has sme2] speed: a waiting caller pauses only when it handed nothing back and ran no task, otherwise hashes or pauses as it may; the SME2 thread takes the task
+src/stream.rs	delete ! in Stream<'env, D>::help	1	[cpu has sme2] speed: a waiting caller pauses after running a task rather than when it found none; the SME2 thread takes the lone task
+src/stream.rs	replace += with *= in Stream<'env, D>::deliver	1	[cpu has sme2] speed: deliver reports no places handed back, so collect and help act as if nothing was done: a wake or a hashed task more; the SME2 thread takes the task
+src/stream.rs	replace += with -= in Stream<'env, D>::deliver	1	[cpu has sme2] speed: deliver's count wraps: collect and help act as if places came back when none did, waking or hashing a turn later; the SME2 thread takes the task
