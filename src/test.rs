@@ -1633,6 +1633,8 @@ mod prefetch_counts {
     /// prefetches exactly the kernels it runs where `prefetches`, else
     /// nothing; straight after, nothing.
     fn check(what: &str, prefetches: bool, mut call: impl FnMut()) {
+        // Without the SHA-3 extension the hybrids' plans do not run, and nothing is prefetched.
+        let prefetches = prefetches && crate::neon_hybrid::sha3_detected();
         let pause = 10 * platform::ticks_in_100_us();
         let t = 1_000 * pause;
         at(t);
@@ -1684,7 +1686,7 @@ mod prefetch_counts {
             taken();
             at(1_001 * pause);
             std::hint::black_box(crate::hash_serial_from(Platform::NEON, &input[..len], IV, 0));
-            assert!(!taken().0.is_empty(), "hash of {len} bytes after a pause prefetches");
+            assert_eq!(!taken().0.is_empty(), crate::neon_hybrid::sha3_detected(), "hash of {len} bytes after a pause prefetches (where the hybrids run)");
             TEST_COUNTER.with(|c| c.set(None));
         }
     }
@@ -1756,7 +1758,7 @@ mod prefetch_counts {
                     continue;
                 }
                 check(&what, prefetches, call);
-                if message_len > 0 && count <= crate::PAIRS_AFTER_PAUSE_UPTO {
+                if message_len > 0 && count <= crate::PAIRS_AFTER_PAUSE_UPTO && crate::neon_hybrid::sha3_detected() {
                     // After a pause: the pair kernel alone, prefetched alone.
                     let pause = 10 * platform::ticks_in_100_us();
                     at(1_000 * pause);
@@ -1794,7 +1796,7 @@ mod prefetch_counts {
         assert_eq!(taken().0, [], "{ticks} ticks after the last call: not a pause");
         at(t + 2 * ticks + 1);
         call();
-        assert!(!taken().0.is_empty(), "{} ticks after the last call: a pause", ticks + 1);
+        assert_eq!(!taken().0.is_empty(), crate::neon_hybrid::sha3_detected(), "{} ticks after the last call: a pause (where the hybrids run)", ticks + 1);
         TEST_COUNTER.with(|c| c.set(None));
     }
 
@@ -1807,6 +1809,6 @@ mod prefetch_counts {
         taken();
         std::thread::sleep(std::time::Duration::from_millis(1));
         call();
-        assert!(!taken().0.is_empty(), "a call 1 ms after the last prefetches");
+        assert_eq!(!taken().0.is_empty(), crate::neon_hybrid::sha3_detected(), "a call 1 ms after the last prefetches (where the hybrids run)");
     }
 }
