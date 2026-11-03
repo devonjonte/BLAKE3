@@ -317,6 +317,12 @@ def mutants(job, run, work, out):
     except subprocess.CalledProcessError as e:
         if e.returncode not in (1, 2):
             raise
+        # A traceback exits 1 too: a crash, never a verdict (job 1865's
+        # preexec_fn failure read as "a survivor differs from its list").
+        run.log.flush()
+        text = Path(run.log.name).read_text()
+        if "Traceback (most recent call last):" in text[text.rfind("$ (cd"):]:
+            raise RuntimeError("tools/mutants/check.py stopped with a traceback (its log)") from e
         verdict = {1: "a survivor differs from its list", 2: "only time-outs differ"}[e.returncode]
     last = Path(fork) / "tmp" / "mutants-last"
     if last.is_dir():

@@ -219,9 +219,17 @@ BUILD = ["--profile", "mutants", "--features", "serde,zeroize"]
 # shards, since SHARDS such mutants at once must fit: six at 8 GiB killed
 # a 14 GiB machine twice (October 23), once the 30 s clock let a runaway
 # test grow that far. A fresh build and the suite pass under 2.25 GB.
+def physical_memory():
+    """The machine's memory in bytes: sysconf's pages on Linux; macOS has no
+    SC_PHYS_PAGES, and names it hw.memsize (the Mac's mutants job stopped
+    in each shard's preexec_fn without it, runner job 1865)."""
+    if sys.platform == "darwin":
+        return int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, check=True).stdout)
+    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+
+
 def memory_cap(shards):
-    total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-    return min(8 << 30, (total - (4 << 30)) // shards)
+    return min(8 << 30, (physical_memory() - (4 << 30)) // shards)
 
 
 def test_limits(shards, cpus, total):
@@ -354,7 +362,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
         env = dict(os.environ, CARGO_TARGET_DIR=target, NEXTEST_PROFILE="mutants-map" if MAP else "mutants")
         # The tests' own threads and memory cap (test_limits), the cap set
         # by a target runner for test binaries alone; builds keep theirs.
-        threads, test_cap = test_limits(shards, os.cpu_count(), os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"))
+        threads, test_cap = test_limits(shards, os.cpu_count(), physical_memory())
         env["NEXTEST_TEST_THREADS"] = str(threads)
         env["MUTANTS_TEST_DATA_KIB"] = str(test_cap >> 10)
         # Through sh: a checkout's files may sit where nothing executes.
