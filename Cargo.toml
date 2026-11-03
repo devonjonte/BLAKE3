@@ -119,3 +119,13 @@ overflow-checks = true
 [profile.mutants]
 inherits = "release"
 incremental = true
+
+# The fairness probes (#213) use the pool, which needs std: the no_std
+# build (--no-default-features) leaves them out.
+[[example]]
+name = "fair_each"
+required-features = ["std"]
+
+[[example]]
+name = "fair_probe"
+required-features = ["std"]
