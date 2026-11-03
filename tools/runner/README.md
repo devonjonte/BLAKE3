@@ -53,10 +53,13 @@ Monitor stays closed (it keeps `sysmond` near a whole CPU busy: with it
 open, 170 of 219 load windows of a run read busy, closed 5 of 214). A pi
 session at work loads the Mac too, its tools in the VM included (Zooko,
 October 17), so a session waits idle while a job times; idle, pi and its
-VM take about 0.01 CPUs. macOS's own `PerfPowerService`, with
-`runningboardd`, takes 1.1-1.6 CPUs for 1-2 s about every five minutes,
-so about one 60-second run in five reads busy (`top` with pi idle,
-November 3). To name the
+VM take about 0.01 CPUs, and a session waiting on a tool about 0.05. The
+rest is the logged-in user's own macOS services, which run with
+Spotlight's indexing off: Core Spotlight and Apple Intelligence
+(`corespotlightd`, `spotlightknowledged`, `IntelligencePlatform`, Biome),
+2-3 CPUs for 4 s; Contacts sync (`contactsd`, `accountsd`), 1-2 CPUs for
+3 s; `PerfPowerService`, 1-1.6 CPUs for 1-2 s about every five minutes
+(`top` beside check 1877 and with pi idle, November 3). To name the
 programs behind a run's busy windows, add `"top": true` to the job and read
 its `top.txt` at the windows' times.
 
