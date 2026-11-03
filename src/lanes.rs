@@ -1951,7 +1951,10 @@ mod test {
     /// reads Instant::now in now() and nowhere else.
     #[test]
     fn test_the_pool_reads_time_through_now() {
-        let source = include_str!("lanes.rs");
+        // Read at run time, not embedded (include_str!): an embedded copy put
+        // lanes.rs's text in the test binary, so every mutant of the file
+        // changed it, and code_hash.py found none of them same code (#219).
+        let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lanes.rs")).expect("lanes.rs, beside the crate's manifest");
         let (code, _tests) = source.split_once("#[cfg(test)]\nmod test {").expect("the tests' module");
         assert_eq!(code.matches("Instant::now").count(), 1, "one read of the real clock, in now()");
         assert_eq!(code.matches(".elapsed()").count(), 1, "one elapsed, in now()");
