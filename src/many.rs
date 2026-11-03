@@ -59,6 +59,7 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
     // One-block messages first, on the path they took before slots (a
     // shared entry cost 64 B x 3 7% in the regression check).
     if len == BLOCK_LEN && outputs.len() >= 2 {
+        crate::ran(crate::Ran::BlockRun);
         assert_slots(input, len, outputs.len());
         for (messages, digests) in input.chunks(BLOCK_LEN * TABLE).zip(outputs.chunks_mut(TABLE)) {
             hash_run::<{ BLOCK_LEN }>(messages, key, flags, digests, platform);
@@ -90,6 +91,7 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
             return;
         }
     }
+    crate::ran(crate::Ran::ShortRun);
     let plans = neon_plans();
     let last_len = len - (slot - BLOCK_LEN);
     for (messages, digests) in input.chunks(slot * TABLE).zip(outputs.chunks_mut(TABLE)) {
@@ -258,8 +260,10 @@ fn hash_two_chunks(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: 
 #[inline(never)]
 fn hash_long_or_single(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
     if across_from(len, platform).is_some_and(|least| outputs.len() >= least) {
+        crate::ran(crate::Ran::Across);
         return hash_across(input, len, key, flags, outputs, platform);
     }
+    crate::ran(crate::Ran::MessageAlone);
     let slot = slot_len(len);
     for (i, output) in outputs.iter_mut().enumerate() {
         *output = *crate::hash_serial_on(&input[i * slot..][..len], key, flags, platform).as_bytes();
@@ -711,6 +715,87 @@ mod test {
     /// Message `i` of a batch of `len`-byte messages.
     fn message(input: &[u8], len: usize, i: usize) -> &[u8] {
         &input[i * slot_len(len)..][..len]
+    }
+
+    /// The paths hash_many_on takes by message count (BLAKE3 #219): one-
+    /// block messages run on the kernels' table from two messages, one
+    /// alone goes the general way; messages of 2 to 15 chunks run across
+    /// messages from across_from's count, and one at a time below it.
+    #[test]
+    #[cfg(all(target_arch = "x86_64", blake3_avx2_ffi))]
+    fn test_hash_many_on_paths_by_count() {
+        use crate::{IV, Ran};
+        let Some(avx2) = Platform::avx2() else { return };
+        let ran = |call: &mut dyn FnMut()| {
+            crate::RAN.with(|r| r.set(0));
+            call();
+            crate::RAN.with(|r| r.get())
+        };
+        let has = |ran: u32, kind: Ran| ran & kind as u32 != 0;
+        let mut out = vec![[0u8; OUT_LEN]; 16];
+        let blocks = messages(BLOCK_LEN, 2);
+        let r = ran(&mut || hash_many_on(&blocks[..BLOCK_LEN], BLOCK_LEN, IV, 0, &mut out[..1], avx2));
+        assert!(!has(r, Ran::BlockRun), "one block alone: the general way");
+        let r = ran(&mut || hash_many_on(&blocks, BLOCK_LEN, IV, 0, &mut out[..2], avx2));
+        assert!(has(r, Ran::BlockRun), "two blocks: the table");
+        // Up to a chunk, two messages or more: the short runs; one alone,
+        // or longer than a chunk, the one-message way.
+        for len in [65, 500, CHUNK_LEN] {
+            let two = messages(len, 2);
+            let r = ran(&mut || hash_many_on(&two[..slot_len(len)], len, IV, 0, &mut out[..1], avx2));
+            assert!(has(r, Ran::MessageAlone) && !has(r, Ran::ShortRun), "{len} B alone: one message");
+            let r = ran(&mut || hash_many_on(&two, len, IV, 0, &mut out[..2], avx2));
+            assert!(has(r, Ran::ShortRun) && !has(r, Ran::MessageAlone), "two of {len} B: a short run");
+        }
+        let two = messages(CHUNK_LEN + 1, 2);
+        let r = ran(&mut || hash_many_on(&two, CHUNK_LEN + 1, IV, 0, &mut out[..2], avx2));
+        assert!(!has(r, Ran::ShortRun), "two of a chunk and a byte: past the short runs");
+        // Three whole chunks: across from eight messages on AVX2.
+        let len = 3 * CHUNK_LEN;
+        assert_eq!(across_from(len, avx2), Some(8));
+        let eight = messages(len, 8);
+        let r = ran(&mut || hash_many_on(&eight[..7 * slot_len(len)], len, IV, 0, &mut out[..7], avx2));
+        assert!(has(r, Ran::MessageAlone) && !has(r, Ran::Across), "seven: one at a time");
+        let r = ran(&mut || hash_many_on(&eight, len, IV, 0, &mut out[..8], avx2));
+        assert!(has(r, Ran::Across) && !has(r, Ran::MessageAlone), "eight: across");
+        for (i, o) in out[..8].iter().enumerate() {
+            assert_eq!(*o, *crate::convenience::hash(message(&eight, len, i)).as_bytes());
+        }
+    }
+
+    /// across_from(len, platform), exactly (BLAKE3 #219): the fewest
+    /// messages hash_across takes, for 2 to 15 chunks on AVX2 or AVX-512:
+    /// the platform's lanes, or 4 where the chunks leave the lanes short
+    /// and a message's own tree is a long chain (a partial chunk after its
+    /// whole ones, or two chunks); none for one chunk, 16 or more, or SSE4.1.
+    #[test]
+    #[cfg(all(target_arch = "x86_64", blake3_avx2_ffi))]
+    fn test_across_from_exactly() {
+        let avx2 = Platform::AVX2;
+        assert_eq!(across_from(CHUNK_LEN, avx2), None, "one chunk");
+        assert_eq!(across_from(CHUNK_LEN + 1, avx2), Some(4), "two chunks, one partial");
+        assert_eq!(across_from(2 * CHUNK_LEN, avx2), Some(4), "two whole chunks");
+        assert_eq!(across_from(3 * CHUNK_LEN, avx2), Some(8), "three whole chunks: the lanes");
+        assert_eq!(across_from(3 * CHUNK_LEN + 1, avx2), Some(4), "four chunks, one partial");
+        assert_eq!(across_from(6 * CHUNK_LEN + 500, avx2), Some(4), "seven chunks, one partial, short of the lanes");
+        assert_eq!(across_from(7 * CHUNK_LEN + 500, avx2), Some(8), "eight chunks fill the lanes, partial or not");
+        assert_eq!(across_from(8 * CHUNK_LEN, avx2), Some(8), "eight whole chunks");
+        assert_eq!(across_from(8 * CHUNK_LEN + 1, avx2), Some(8), "nine chunks: the lanes are full");
+        assert_eq!(across_from(15 * CHUNK_LEN, avx2), Some(8), "fifteen chunks");
+        assert_eq!(across_from(15 * CHUNK_LEN + 1, avx2), None, "sixteen chunks");
+        assert_eq!(across_from(16 * CHUNK_LEN, avx2), None);
+        assert_eq!(across_from(3 * CHUNK_LEN, Platform::SSE41), None, "SSE4.1 hashes message by message");
+        #[cfg(blake3_avx512_ffi)]
+        {
+            // AVX-512's lanes: 32 on Linux (the wide kernel), 16 elsewhere;
+            // every count under 16 chunks is short of them.
+            let lanes = Platform::AVX512.simd_degree();
+            assert!(lanes >= 16);
+            assert_eq!(across_from(8 * CHUNK_LEN, Platform::AVX512), Some(lanes), "eight whole chunks: the lanes");
+            assert_eq!(across_from(8 * CHUNK_LEN + 1, Platform::AVX512), Some(4), "nine chunks, one partial, short of the lanes");
+            assert_eq!(across_from(2 * CHUNK_LEN, Platform::AVX512), Some(4), "two whole chunks: a long chain");
+            assert_eq!(across_from(15 * CHUNK_LEN, Platform::AVX512), Some(lanes));
+        }
     }
 
     /// hash_many (and hash_many_multithreaded) of `count` messages of
