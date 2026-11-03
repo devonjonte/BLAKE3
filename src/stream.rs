@@ -878,11 +878,11 @@ mod test {
             Mode::Plain,
             |_| {},
             |s| {
-                let mut reader = Uneven { data: &input, at: 0, calls: 0, fail_at: None };
+                let mut reader = Uneven::new(&input, None);
                 s.submit_with(input.len(), |_, room| retry(|| reader.read(room)), &mut got[0]);
                 // 40 messages of 100 bytes, each in its 128-byte slot.
                 let slots: std::vec::Vec<u8> = (0..40).flat_map(|m| (0..128).map(move |b| if b < 100 { (m * 7 + b) as u8 } else { 0 })).collect();
-                let mut reader = Uneven { data: &slots, at: 0, calls: 0, fail_at: None };
+                let mut reader = Uneven::new(&slots, None);
                 s.submit_batch_with(100, |_, room| retry(|| reader.read(room)), &mut batch);
                 s.finish();
             },
@@ -973,29 +973,98 @@ mod test {
     }
 
     /// A reader that yields `data` in reads of varying sizes (1 byte to
-    /// 9000), interrupted now and then, failing after `fail_at` bytes.
+    /// 9000), interrupted now and then, failing after `fail_at` bytes. Read
+    /// into no room, or again after it reported its end or an error, it
+    /// panics: each is a read (for a file, a system call) no caller needs.
     struct Uneven<'a> {
         data: &'a [u8],
         at: usize,
         calls: usize,
         fail_at: Option<usize>,
+        ended: bool,
+    }
+
+    impl<'a> Uneven<'a> {
+        fn new(data: &'a [u8], fail_at: Option<usize>) -> Self {
+            Uneven { data, at: 0, calls: 0, fail_at, ended: false }
+        }
     }
 
     impl std::io::Read for Uneven<'_> {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            assert!(!self.ended, "read again after its end or an error");
+            assert!(!buf.is_empty(), "read into no room");
             self.calls += 1;
             if self.calls % 7 == 0 {
                 return Err(std::io::ErrorKind::Interrupted.into());
             }
             if self.fail_at.is_some_and(|f| self.at >= f) {
+                self.ended = true;
                 return Err(std::io::Error::other("the reader fails"));
             }
             let limit = self.fail_at.unwrap_or(self.data.len()).min(self.data.len());
             let n = buf.len().min([1, 9000, 333, 65536, 4096][self.calls % 5]).min(limit - self.at);
             buf[..n].copy_from_slice(&self.data[self.at..][..n]);
             self.at += n;
+            self.ended = n == 0;
             Ok(n)
         }
+    }
+
+    /// `submit_reader` through a reader of short reads, interrupted now and
+    /// then: each message's length and digest, for lengths around a piece.
+    /// Then readers that fail at every point (in the first piece; at exactly
+    /// a piece, in the read-ahead; one byte into the read-ahead; in the
+    /// third piece and the fourth, with pieces already handed to the pool),
+    /// each followed by more than two rings of messages, long ones among
+    /// them: every digest right, each failed reader's place untouched and
+    /// never handed back, the ring's head moved by the handed pieces alone,
+    /// and no reader read again after its end or error (Uneven). BLAKE3
+    /// #218: the interruption's retry, the error path's ring head and its
+    /// abandoned entry, and the read-ahead's condition had no test; the last
+    /// two only cost work, which this counts, where a clock would only
+    /// guess.
+    #[test]
+    fn test_submit_reader_reads_and_fails_at_every_point() {
+        let input: std::vec::Vec<u8> = (0..4 * PIECE + 99).map(|i| (i % 253) as u8).collect();
+        let reader = |len: usize, fail_at: Option<usize>| Uneven::new(&input[..len], fail_at);
+        let lens = [0, 1, 1000, PIECE - 1, PIECE, PIECE + 1, 2 * PIECE, 3 * PIECE + 7];
+        // Where each reader fails, and how far it leaves the ring's head:
+        // the room of the pieces it handed to the pool, not a byte more
+        // (the ring's head is the caller's arithmetic alone, whatever the
+        // threads do, so this is exact on every machine).
+        let fails = [(10, 0), (PIECE, 0), (PIECE + 1, 0), (2 * PIECE + 5, PIECE), (3 * PIECE + 1, 2 * PIECE)];
+        // Each handed piece is an entry, and with any, one abandoned entry
+        // drops their chaining values; none handed, none added.
+        let entries = |kept: usize| kept / PIECE + usize::from(kept > 0);
+        let after: std::vec::Vec<usize> = (0..2 * RING_BYTES / PIECE + 3).map(|i| [PIECE + 3, 700, 2 * PIECE][i % 3]).collect();
+        let mut want: std::vec::Vec<Hash> = lens.iter().map(|&l| crate::convenience::hash(&input[..l])).collect();
+        for _ in fails {
+            want.push(Hash::from_bytes([0; 32]));
+            want.extend(after.iter().map(|&l| crate::convenience::hash(&input[..l])));
+        }
+        let mut got = places(want.len());
+        let mut handed = std::vec::Vec::new();
+        let mut rest: &mut [Hash] = &mut got;
+        stream(Mode::Plain, record(&mut handed), |s| {
+            for len in lens {
+                assert_eq!(s.submit_reader(reader(len, None), None, &mut take(&mut rest, 1)[0]).unwrap(), len as u64, "{len} bytes");
+            }
+            for (fail, kept) in fails {
+                let (before, next) = (s.head, s.next);
+                assert!(s.submit_reader(reader(input.len(), Some(fail)), None, &mut take(&mut rest, 1)[0]).is_err(), "fails at {fail}");
+                assert_eq!(s.head - before, kept, "a reader failing at {fail} keeps its handed pieces' room alone");
+                assert_eq!(s.next - next, entries(kept), "a reader failing at {fail}: its handed pieces' entries, and one to drop them");
+                for &len in &after {
+                    assert_eq!(s.submit_reader(reader(len, None), None, &mut take(&mut rest, 1)[0]).unwrap(), len as u64);
+                }
+            }
+            s.finish();
+        });
+        for (i, (got, want)) in got.iter().zip(&want).enumerate() {
+            assert_eq!(got, want, "place {i}");
+        }
+        assert_eq!(handed.len(), lens.len() + fails.len() * after.len(), "a place back per message read, none for a failed reader");
     }
 
     /// A few messages through a stream: the handover of entries to the
@@ -1026,7 +1095,7 @@ mod test {
                 );
             }
             assert_eq!(s.submit_reader(&input[..2 * PIECE + 1], None, &mut take(&mut rest, 1)[0]).unwrap(), 2 * PIECE as u64 + 1);
-            assert!(s.submit_reader(Uneven { data: &input, at: 0, calls: 0, fail_at: Some(PIECE + 1) }, None, &mut take(&mut rest, 1)[0]).is_err());
+            assert!(s.submit_reader(Uneven::new(&input, Some(PIECE + 1)), None, &mut take(&mut rest, 1)[0]).is_err());
             s.submit_batch(&batch, take(&mut rest, 4));
             s.submit_batch_with(
                 64,
