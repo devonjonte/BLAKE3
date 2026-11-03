@@ -429,9 +429,10 @@ struct Piece {
 /// prefix, each piece is [`next_piece_len`] of what remains, and the last
 /// is whatever is left. The prefix is whole subtrees of up to
 /// [`MAX_PREFIX_PIECE_LEN`], rounded down to a multiple of the first piece
-/// after it. A piece's length never exceeds the one before it and every
-/// piece starts at a multiple of its own length, so each is a whole
-/// subtree at its offset. Returns the pieces and how many form the prefix
+/// after it. A piece's length never exceeds the one before it (the
+/// prefix's last piece is at least the first after it, and a share only
+/// falls as the input shrinks) and every piece starts at a multiple of
+/// its own length, so each is a whole subtree at its offset. Returns the pieces and how many form the prefix
 /// (none when `prefix` rounds to nothing). `prefix` is below `len`; `len`
 /// exceeds [`MIN_PIECE_LEN`] and at least two threads share it, so two or
 /// more pieces come back.
@@ -449,15 +450,13 @@ fn cut_with_prefix(len: usize, threads: usize, prefix: usize) -> (Vec<Piece>, us
         offset += piece;
     }
     let own = pieces.len();
-    let mut cap = if own > 0 { pieces[own - 1].len } else { MAX_PIECE_LEN };
     while len - offset > MIN_PIECE_LEN {
-        let piece = next_piece_len(len - offset, threads).min(cap);
+        let piece = next_piece_len(len - offset, threads);
         if len - offset <= piece {
             break;
         }
         pieces.push(Piece { offset, len: piece });
         offset += piece;
-        cap = piece;
     }
     pieces.push(Piece { offset, len: len - offset });
     (pieces, own)
@@ -1660,6 +1659,15 @@ mod test {
             cut_with_prefix(4 << 20, 4, prefix),
             (tiling(&[(1, 1024 * K), (1, 256 * K), (1, 128 * K), (18, 128 * K), (3, 64 * K), (3, 32 * K), (3, 16 * K), (6, 8 * K)]), 3)
         );
+        // 2 MiB over 16 threads with the SME2 share, 207800 B: the first
+        // piece after it is 64 KiB (1889352 / 16 = 118084), so the prefix
+        // rounds down to 3 x 64 KiB = 196608 B, cut 128 KiB and 64 KiB
+        // (own = 2). Then 1900544 B over 16: 64 KiB pieces while a share is
+        // 64 KiB or more (14, to 960 KiB left), 32 KiB x15 (to 480 KiB),
+        // 16 KiB x15 (to 240 KiB), 8 KiB x29 (to 8 KiB), and the 8 KiB left.
+        let prefix = sme2_prefix(2 << 20, 16);
+        assert_eq!(prefix, 207_800);
+        assert_eq!(cut_with_prefix(2 << 20, 16, prefix), (tiling(&[(1, 128 * K), (1, 64 * K), (14, 64 * K), (15, 32 * K), (15, 16 * K), (30, 8 * K)]), 2));
     }
 
     /// The SME2 thread's share, exactly: len / (100 + (threads - 1) *
@@ -1707,6 +1715,11 @@ mod test {
         let sixes: Vec<Vec<u8>> = (0..6).map(|_| item(4096)).collect();
         let refs: Vec<&[u8]> = sixes.iter().map(|v| v.as_slice()).collect();
         assert_eq!(cut_items(&refs, 2), tiling(&[(3, 2)]));
+        // Sixteen items of 8 KiB over 2 threads: shares of 64, 32, 16 KiB,
+        // then 8 KiB twice: ranges of 8, 4, 2, 1 and 1 items.
+        let eights: Vec<Vec<u8>> = (0..16).map(|_| item(8192)).collect();
+        let refs: Vec<&[u8]> = eights.iter().map(|v| v.as_slice()).collect();
+        assert_eq!(cut_items(&refs, 2), tiling(&[(1, 8), (1, 4), (1, 2), (2, 1)]));
         assert_eq!(cut_items(&[], 4), Vec::<Piece>::new());
     }
 
