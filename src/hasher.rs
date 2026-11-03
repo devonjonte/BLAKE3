@@ -508,10 +508,10 @@ mod test {
         let platform = Platform::detect();
         // Pieces absorbed in turn: (their lengths, blocks compressed from the buffer, multi-block calls).
         for (pieces, buffered, runs) in [
-            (&[130][..], 0, 1),  // two blocks from the input, two bytes wait
-            (&[64][..], 0, 0),   // one whole block waits
+            (&[130][..], 0, 1), // two blocks from the input, two bytes wait
+            (&[64][..], 0, 0),  // one whole block waits
             (&[64, 64][..], 1, 0),
-            (&[1, 64][..], 1, 0),  // the buffer's byte and 63 more, then one byte waits
+            (&[1, 64][..], 1, 0), // the buffer's byte and 63 more, then one byte waits
             (&[1, 200][..], 1, 1),
         ] {
             let k = Counting { platform, buffered: Cell::new(0), runs: Cell::new(0) };

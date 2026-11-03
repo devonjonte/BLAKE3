@@ -375,7 +375,17 @@ mod test {
     #[test]
     fn test_hash_each_on_counts_its_alone_messages_and_rounds() {
         let input = vec![5u8; (ALONE_CHUNKS + 1) * CHUNK_LEN];
-        let lens = [0, 1, CHUNK_LEN, CHUNK_LEN + 1, 2 * CHUNK_LEN, (ALONE_CHUNKS - 1) * CHUNK_LEN, (ALONE_CHUNKS - 1) * CHUNK_LEN + 1, ALONE_CHUNKS * CHUNK_LEN, ALONE_CHUNKS * CHUNK_LEN + 1];
+        let lens = [
+            0,
+            1,
+            CHUNK_LEN,
+            CHUNK_LEN + 1,
+            2 * CHUNK_LEN,
+            (ALONE_CHUNKS - 1) * CHUNK_LEN,
+            (ALONE_CHUNKS - 1) * CHUNK_LEN + 1,
+            ALONE_CHUNKS * CHUNK_LEN,
+            ALONE_CHUNKS * CHUNK_LEN + 1,
+        ];
         let items: Vec<&[u8]> = lens.iter().map(|&n| &input[..n]).collect();
         let alone = core::cell::RefCell::new(Vec::new());
         let mut out = vec![[0u8; OUT_LEN]; items.len()];
