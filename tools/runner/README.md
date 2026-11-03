@@ -52,7 +52,11 @@ nothing else should run on the Mac, the VM included, and Activity
 Monitor stays closed (it keeps `sysmond` near a whole CPU busy: with it
 open, 170 of 219 load windows of a run read busy, closed 5 of 214). A pi
 session at work loads the Mac too, its tools in the VM included (Zooko,
-October 17), so a session waits idle while a job times. To name the
+October 17), so a session waits idle while a job times; idle, pi and its
+VM take about 0.01 CPUs. macOS's own `PerfPowerService`, with
+`runningboardd`, takes 1.1-1.6 CPUs for 1-2 s about every five minutes,
+so about one 60-second run in five reads busy (`top` with pi idle,
+November 3). To name the
 programs behind a run's busy windows, add `"top": true` to the job and read
 its `top.txt` at the windows' times.
 
