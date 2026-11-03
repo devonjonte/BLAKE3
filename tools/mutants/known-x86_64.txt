@@ -93,9 +93,9 @@ src/lib.rs	replace && with || in compress_chunks_parallel	3	same code: every tes
 src/lib.rs	replace && with || in hash_many_serial_from	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace && with || in prefetch_kernels	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace && with || in prefetch_update_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/lib.rs	replace * with +	2	speed: the lengths PREFETCH_BELOW and SME2_SIZED_LEN, between equally correct paths
+src/lib.rs	replace * with +	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace * with + in hash_one_chunk_root	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/lib.rs	replace * with /	2	speed: the lengths PREFETCH_BELOW and SME2_SIZED_LEN, between equally correct paths
+src/lib.rs	replace * with /	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace * with / in hash_one_chunk_root	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace + with * in compress_chunks_parallel	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace + with * in hash_serial_from	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -155,11 +155,9 @@ src/many.rs	replace % with + in hash_run	1	same code: every test binary hashes a
 src/many.rs	replace % with / in hash_blocks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace % with / in hash_chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace % with / in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace && with || in chunked	1	SME2 only: cfg!(blake3_sme2) is false on x86, so chunked() is false whatever the rest
 src/many.rs	replace && with || in hash_many_on	4	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace && with || in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace && with || in hash_run_short	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace && with || in sme2_sized	5	speed: moves a threshold between equally correct paths
 src/many.rs	replace * with + in chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace * with + in hash_chunked	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace * with + in hash_many_on	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -184,25 +182,21 @@ src/many.rs	replace - with + in hash_two_chunks	3	same code: every test binary h
 src/many.rs	replace - with / in hash_blocks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace - with / in hash_chunked	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace - with / in hash_two_chunks	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace <= with > in sme2_sized	2	speed: moves a threshold between equally correct paths
 src/many.rs	replace > with < in hash_blocks	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace > with < in hash_chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace > with < in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace > with < in sme2_sized	2	speed: moves a threshold between equally correct paths
 src/many.rs	replace > with == in hash_blocks	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace > with == in hash_chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace > with == in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace > with == in sme2_sized	2	speed: moves a threshold between equally correct paths
 src/many.rs	replace > with >= in hash_blocks	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace > with >= in hash_chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace > with >= in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace > with >= in sme2_sized	2	speed: moves a threshold between equally correct paths
 src/many.rs	replace >= with < in hash_blocks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace >= with < in hash_chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace >= with < in hash_many_on	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace >= with < in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace >= with < in hash_run_short	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace >= with < in sme2_sized	6	speed: moves a threshold between equally correct paths
+src/many.rs	replace >= with < in sme2_sized	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace chunked -> bool with false	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace hash_chunked with ()	1	SME2 only: hash_chunked is cfg(blake3_sme2), compiled out on x86
 src/many.rs	replace hash_run_padded with ()	1	SME2 only: hash_run_padded is cfg(blake3_sme2), compiled out on x86
@@ -212,8 +206,6 @@ src/many.rs	replace neon_plans_last_len with ()	1	NEON only: its body is cfg(bla
 src/many.rs	replace platform_is_sme2 -> bool with false	1	equivalent on x86: platform_is_sme2() is already false
 src/many.rs	replace sme2_chunked_min -> usize with 0	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace sme2_chunked_min -> usize with 1	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace sme2_sized -> bool with false	1	speed: moves a threshold between equally correct paths
-src/many.rs	replace sme2_sized -> bool with true	1	speed: moves a threshold between equally correct paths
 src/many.rs	replace | with & in hash_blocks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace | with & in hash_run_padded	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace | with & in hash_two_chunks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -227,7 +219,6 @@ src/many.rs	replace | with ^ in hash_two_chunks	1	same code: every test binary h
 src/many.rs	replace | with ^ in neon_plans_last_len	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace | with ^ in subtree_across	2	equivalent: | and ^ agree on flag bits that never overlap
 src/many.rs	replace || with && in hash_many_on	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace || with && in sme2_sized	4	speed: moves a threshold between equally correct paths
 src/pair.rs	replace | with ^ in parent	1	equivalent: | and ^ agree on flag bits that never overlap
 src/park.rs	replace - with + in Park::pay_owed	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
 src/park.rs	replace - with / in Park::pay_owed	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
