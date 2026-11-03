@@ -268,11 +268,21 @@ pub(crate) fn hash_each(key: &crate::CVWords, flags: u8, items: &[&[u8]], out: &
         let platform = Platform::detect();
         return crate::each::hash_each_on(key, flags, items, out, platform, |item| crate::hash_serial_on(item, key, flags, platform));
     };
+    let pieces = cut_items(items, pool.threads);
+    let work = Work::Each { items, key: *key, flags, pieces: &pieces, outputs: out.as_mut_ptr() };
+    pool.run_job(work, pieces.len(), 0, pool_platform());
+}
+
+/// Cut `items` into consecutive ranges for `threads` threads, in order:
+/// each range takes items until it holds [`next_piece_len`] of the bytes
+/// that remain (one item at least, however long), so ranges shrink toward
+/// the end as subtree pieces do.
+fn cut_items(items: &[&[u8]], threads: usize) -> Vec<Piece> {
     let mut remaining: usize = items.iter().map(|i| i.len()).sum();
     let mut pieces = Vec::with_capacity(64);
     let mut start = 0;
     while start < items.len() {
-        let want = next_piece_len(remaining, pool.threads);
+        let want = next_piece_len(remaining, threads);
         let (mut end, mut bytes) = (start, 0);
         while end < items.len() && (bytes < want || end == start) {
             bytes += items[end].len();
@@ -282,8 +292,7 @@ pub(crate) fn hash_each(key: &crate::CVWords, flags: u8, items: &[&[u8]], out: &
         pieces.push(Piece { offset: start, len: end - start });
         start = end;
     }
-    let work = Work::Each { items, key: *key, flags, pieces: &pieces, outputs: out.as_mut_ptr() };
-    pool.run_job(work, pieces.len(), 0, pool_platform());
+    pieces
 }
 
 /// Cut `count` messages in slots of `message_len` bytes into ranges for `threads`
@@ -1568,6 +1577,174 @@ mod test {
                 assert!(piece.is_power_of_two() && piece >= MIN_PIECE_LEN && piece <= MAX_PIECE_LEN);
             }
         }
+    }
+
+    /// Pieces as (offset, len) from runs of equal lengths: `(count, len)`
+    /// each, tiling from zero.
+    fn tiling(runs: &[(usize, usize)]) -> Vec<Piece> {
+        let mut pieces = Vec::new();
+        let mut offset = 0;
+        for &(count, len) in runs {
+            for _ in 0..count {
+                pieces.push(Piece { offset, len });
+                offset += len;
+            }
+        }
+        pieces
+    }
+
+    /// The exact cut of a batch's messages (BLAKE3 #219: a mutant that
+    /// moves the cut gives another valid tiling, which the shape tests
+    /// above accept; the cut itself is the rule). Each case is derived by
+    /// hand from next_piece_len: a piece is the largest power of two at
+    /// or below a thread's share of the bytes left, within 8 KiB and
+    /// 128 KiB, in messages, one at least.
+    #[test]
+    fn test_cut_messages_exactly() {
+        const K: usize = 1024;
+        // 1000 messages of 64 B over 16 threads: 64000 B / 16 = 4000 B,
+        // below 8 KiB, so every piece wants 8 KiB = 128 messages; 7 of
+        // them take 896, and the 104 left are one piece.
+        assert_eq!(cut_messages(1000, 64, 16), tiling(&[(7, 128), (1, 104)]));
+        // 16 messages in 4 KiB slots over 2 threads: 64 KiB / 2 = 32 KiB
+        // = 8 messages; then 32 KiB / 2 = 16 KiB = 4; then 16 KiB / 2 = 8
+        // KiB = 2; then 8 KiB / 2 = 4 KiB, raised to 8 KiB = 2.
+        assert_eq!(cut_messages(16, 4 * K, 2), tiling(&[(1, 8), (1, 4), (2, 2)]));
+        // 3 messages in 100000 B slots over 4 threads: 300000 / 4 = 75000
+        // rounds down to 65536, under one message, so one message a piece.
+        assert_eq!(cut_messages(3, 100_000, 4), tiling(&[(3, 1)]));
+        // Empty messages take a slot of one byte: 5 B / 16 raised to 8 KiB
+        // = 8192 messages, all five in one piece.
+        assert_eq!(cut_messages(5, 0, 16), tiling(&[(1, 5)]));
+        // 262144 messages of 64 B over 20 threads: 16 MiB / 20 = 838 KiB,
+        // capped at 128 KiB = 2048 messages, while a share is 128 KiB or
+        // more, so down to 2560 KiB left: 109 pieces (108 take 13824 KiB;
+        // 2560 / 20 = 128 KiB is one more); then 2432 KiB / 20 = 121 KiB
+        // rounds to 64 KiB = 1024 messages; ...; the last pieces at 8 KiB
+        // = 128 messages, until none is left.
+        let cut = cut_messages(262_144, 64, 20);
+        assert_eq!(cut[0], Piece { offset: 0, len: 2048 });
+        assert_eq!(cut[108], Piece { offset: 108 * 2048, len: 2048 });
+        assert_eq!(cut[109], Piece { offset: 109 * 2048, len: 1024 });
+        assert_eq!(cut.last(), Some(&Piece { offset: 262_144 - 128, len: 128 }));
+        assert_eq!(cut.iter().map(|p| p.len).sum::<usize>(), 262_144);
+    }
+
+    /// The exact cut of a long input without a prefix (every x86 call; the
+    /// turn gives SME2 to none there) and with one (the SME2 thread's
+    /// share, computable on every machine): derived by hand as
+    /// test_cut_messages_exactly's are, a piece never longer than the one
+    /// before it and the last whatever is left.
+    #[test]
+    fn test_cut_with_prefix_exactly() {
+        const K: usize = 1024;
+        // 24 KiB over 2 threads: 12 KiB a share rounds to 8 KiB; three
+        // pieces, the last the 8 KiB left.
+        assert_eq!(cut_with_prefix(24 * K, 2, 0), (tiling(&[(3, 8 * K)]), 0));
+        // 1 MiB over 2 threads: 512 KiB a share, capped at 128 KiB, seven
+        // times (896 KiB); 128 KiB left: 64 KiB; then 32, 16, 8; 8 KiB
+        // left is the last piece.
+        assert_eq!(cut_with_prefix(1 << 20, 2, 0), (tiling(&[(7, 128 * K), (1, 64 * K), (1, 32 * K), (1, 16 * K), (2, 8 * K)]), 0));
+        // 4 MiB over 4 threads with the SME2 share: sme2_prefix(4 MiB, 4) =
+        // 4194304 / 281 * 100 = 1492600 B. The first piece after it would
+        // be 128 KiB (2701704 / 4 = 675426, capped), so the prefix rounds
+        // down to 11 x 128 KiB = 1441792 B, cut into whole subtrees of at
+        // most 1 MiB: 1 MiB, 256 KiB, 128 KiB (own = 3). Then 2752512 B
+        // over 4: 128 KiB pieces while a share is 128 KiB or more (18 of
+        // them, to 384 KiB left), then 64 KiB x3 (to 192 KiB), 32 KiB x3
+        // (to 96 KiB), 16 KiB x3 (to 48 KiB), 8 KiB x5 (to 8 KiB), and
+        // the 8 KiB left.
+        let prefix = sme2_prefix(4 << 20, 4);
+        assert_eq!(prefix, 1_492_600);
+        assert_eq!(
+            cut_with_prefix(4 << 20, 4, prefix),
+            (tiling(&[(1, 1024 * K), (1, 256 * K), (1, 128 * K), (18, 128 * K), (3, 64 * K), (3, 32 * K), (3, 16 * K), (6, 8 * K)]), 3)
+        );
+    }
+
+    /// The SME2 thread's share, exactly: len / (100 + (threads - 1) *
+    /// 10000 / 165) * 100 in integers, and nothing below 128 KiB.
+    #[test]
+    fn test_sme2_prefix_exactly() {
+        // 64 MiB over 2 threads: 67108864 / 160 = 419430, x100.
+        assert_eq!(sme2_prefix(64 << 20, 2), 41_943_000);
+        // 4 MiB over 4: 4194304 / 281 = 14926, x100 (test_cut_with_prefix_exactly).
+        assert_eq!(sme2_prefix(4 << 20, 4), 1_492_600);
+        // 1 MiB over 16: 1048576 / 1009 = 1039, x100 = 103900, under 128 KiB: none.
+        assert_eq!(sme2_prefix(1 << 20, 16), 0);
+        // 2 MiB over 16: 2097152 / 1009 = 2078, x100 = 207800, over 128 KiB.
+        assert_eq!(sme2_prefix(2 << 20, 16), 207_800);
+        // 256 KiB over 2: 262144 / 160 = 1638, x100 = 163800, over 128 KiB.
+        assert_eq!(sme2_prefix(256 * 1024, 2), 163_800);
+    }
+
+    /// The exact cut of a collection's items: each range takes items until
+    /// it holds a thread's share of the bytes left (next_piece_len), one
+    /// item at least.
+    #[test]
+    fn test_cut_items_exactly() {
+        let item = |n: usize| std::vec![0u8; n];
+        // Ten items of 5000 B over 2 threads: 50000 / 2 = 25000 rounds to
+        // 16384, four items (20000 B); 30000 left, 15000 rounds to 8192,
+        // two items; 20000 left, two; 10000 left, 5000 raised to 8192, two.
+        let tens: Vec<Vec<u8>> = (0..10).map(|_| item(5000)).collect();
+        let refs: Vec<&[u8]> = tens.iter().map(|v| v.as_slice()).collect();
+        assert_eq!(cut_items(&refs, 2), tiling(&[(1, 4), (3, 2)]));
+        // One long item then a short one, over 16 threads: 100010 / 16 =
+        // 6250 raised to 8192; the first item alone fills its range, the
+        // second is one of its own.
+        let (long, short) = (item(100_000), item(10));
+        assert_eq!(cut_items(&[&long, &short], 16), tiling(&[(2, 1)]));
+        // Items of 3000 B, 7 of them, over 3 threads: 21000 / 3 = 7000
+        // raised to 8192: three items (9000 B); 12000 left, 4000 raised to
+        // 8192: three items; 3000 left: one.
+        let sevens: Vec<Vec<u8>> = (0..7).map(|_| item(3000)).collect();
+        let refs: Vec<&[u8]> = sevens.iter().map(|v| v.as_slice()).collect();
+        assert_eq!(cut_items(&refs, 3), tiling(&[(2, 3), (1, 1)]));
+        // Six items of 4 KiB over 2 threads: 24 KiB / 2 = 12 KiB rounds to
+        // 8 KiB, which two items fill exactly, so each range is two (a
+        // range stops once it holds its share, never one item past it).
+        let sixes: Vec<Vec<u8>> = (0..6).map(|_| item(4096)).collect();
+        let refs: Vec<&[u8]> = sixes.iter().map(|v| v.as_slice()).collect();
+        assert_eq!(cut_items(&refs, 2), tiling(&[(3, 2)]));
+        assert_eq!(cut_items(&[], 4), Vec::<Piece>::new());
+    }
+
+    /// Where the pool begins (BLAKE3 #219: a threshold between two correct
+    /// paths): hash_many goes to the pool from MIN_SPLIT_LEN of input with
+    /// two outputs or more, and hashes serially below that or with one
+    /// output; hash_with_key goes from MIN_SPLIT_LEN.
+    #[test]
+    fn test_the_pool_begins_at_min_split_len() {
+        let _ = pool();
+        if pool().threads == 1 {
+            return;
+        }
+        let input = std::vec![0x5Au8; MIN_SPLIT_LEN + 64];
+        let went_to_pool = |call: &mut dyn FnMut()| {
+            crate::RAN.with(|r| r.set(0));
+            call();
+            crate::RAN.with(|r| r.get()) & crate::Ran::Pool as u32 != 0
+        };
+        let mut out = [[0u8; crate::OUT_LEN]; 2];
+        // Two messages in slots of MIN_SPLIT_LEN / 2 (whole blocks), or a
+        // block less each.
+        let slot = MIN_SPLIT_LEN / 2;
+        assert!(!went_to_pool(&mut || hash_many(&input[..MIN_SPLIT_LEN - 128], slot - 64, crate::IV, 0, &mut out)), "under MIN_SPLIT_LEN: serial");
+        assert!(went_to_pool(&mut || hash_many(&input[..MIN_SPLIT_LEN], slot, crate::IV, 0, &mut out)), "at MIN_SPLIT_LEN: the pool");
+        assert!(!went_to_pool(&mut || hash_many(&input[..MIN_SPLIT_LEN], MIN_SPLIT_LEN, crate::IV, 0, &mut out[..1])), "one output: serial");
+        assert!(
+            !went_to_pool(&mut || {
+                hash_with_key(&input[..MIN_SPLIT_LEN - 1], crate::IV, 0);
+            }),
+            "under MIN_SPLIT_LEN: serial"
+        );
+        assert!(
+            went_to_pool(&mut || {
+                hash_with_key(&input[..MIN_SPLIT_LEN], crate::IV, 0);
+            }),
+            "at MIN_SPLIT_LEN: the pool"
+        );
     }
 
     /// Cuts with an SME2 prefix tile the input with non-increasing whole
