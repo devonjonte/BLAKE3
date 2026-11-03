@@ -168,7 +168,11 @@ tasks, bytes prefetched, threads woken) with no clock, or its code goes,
 once the regression check reads level without it. Where the caller's
 own state doesn't show the work, a counter that exists only in test
 builds counts it on the caller's thread. A mutant that changes nothing
-this machine runs stays listed with its reason.
+this machine runs stays listed with its reason. Code whose benefit the check
+cannot see earns a measurement the check makes, or goes: a benefit
+nobody can measure is not worth the code's ongoing cost (Zooko,
+November 3). A deletion is tried first where its benefit is in doubt, and
+the check on every target machine decides.
 
 `tools/mutants/check.py` reruns every mutant, reruns alone any whose
 outcome differs from the list (so a test that fails by chance, under
