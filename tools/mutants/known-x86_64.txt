@@ -51,9 +51,9 @@ src/lanes.rs	replace + with - in sources::Source::publish_job	1	another architec
 src/lanes.rs	replace - with + in Pool::run_job	2	AArch64 only: `pieces - own`, where own, the caller's own pieces, is nonzero only with the SME2 thread's prefix; on x86-64 own is 0 and the sum is the difference (the wake count itself is tested, test_a_job_wakes_one_worker_a_piece_past_its_own)
 src/lanes.rs	replace - with + in sources::Source::publish	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
 src/lanes.rs	replace / with % in sources::Source::take	1	the pool's scheduling: how many of a job's pieces one claim takes (the claimed range stays consistent)
-src/lanes.rs	replace < with <= in sources::Source::wait	1	speed: how long a caller spins before it sleeps, a boundary in elapsed time a clock crosses once (no effect on results)
-src/lanes.rs	replace < with == in sources::Source::wait	1	speed: how a caller polls before it sleeps; the sleep and its wake are the finish handshake's, under Shuttle (tests/shuttle_finish.rs)
-src/lanes.rs	replace < with > in sources::Source::wait	1	speed: how a caller polls before it sleeps; the sleep and its wake are the finish handshake's, under Shuttle (tests/shuttle_finish.rs)
+src/lanes.rs	replace < with <= in sources::keeps_polling	1	speed: how long a caller spins before it sleeps, a boundary in elapsed time a clock crosses once (no effect on results)
+src/lanes.rs	replace < with == in sources::keeps_polling	1	speed: how a caller polls before it sleeps; the sleep and its wake are the finish handshake's, under Shuttle (tests/shuttle_finish.rs)
+src/lanes.rs	replace < with > in sources::keeps_polling	1	speed: how a caller polls before it sleeps; the sleep and its wake are the finish handshake's, under Shuttle (tests/shuttle_finish.rs)
 src/lanes.rs	replace << with >> in sources::Source::unregister	1	speed: the source's bit stays in ACTIVE, and find walks past the slot, whose pointer is null; register finds free slots by REGISTERED alone, so no slot is lost
 src/lanes.rs	replace <impl Drop for AbortOnUnwind>::drop with ()	1	runs only when the caller unwinds mid-job, which ends the process; a test reaching it would abort
 src/lanes.rs	replace > with < in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
