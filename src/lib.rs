@@ -309,12 +309,15 @@ pub(crate) enum Counted {
     /// A round of hash_each_on's shared lanes: one hash_many call over the
     /// k-th chunk of every message that has one.
     EachRound = 0,
+    /// A message whose bytes past it a stream's batch fill zeroed
+    /// (Stream::submit_batch_with).
+    BatchZeroed = 1,
 }
 
 #[cfg(all(test, feature = "std"))]
 std::thread_local! {
     /// This thread's counts since the test last cleared them, by Counted.
-    pub(crate) static COUNTED: [core::cell::Cell<u64>; 1] = const { [core::cell::Cell::new(0)] };
+    pub(crate) static COUNTED: [core::cell::Cell<u64>; 2] = const { [core::cell::Cell::new(0), core::cell::Cell::new(0)] };
 }
 
 /// Count one of `what`: in the tests' record, and nothing in any other

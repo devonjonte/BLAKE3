@@ -529,6 +529,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
             if message_len % 64 != 0 || message_len == 0 {
                 for message in room.chunks_exact_mut(slot) {
                     message[message_len..].fill(0);
+                    crate::counted(crate::Counted::BatchZeroed);
                 }
             }
             let end = self.head;
@@ -714,7 +715,10 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
                     let piece = unsafe { *self.s.pieces_out[index].0.0.get() };
                     let (key, flags, platform) = (self.key, self.flags, Platform::detect());
                     let parent = |left: &CVBytes, right: &CVBytes| crate::hasher::parent_output(left, right, &key, flags, platform);
-                    let cv: CVBytes = if counter == 0 && len > CHUNK_LEN {
+                    // A piece at chunk 0 is a long message's first, a whole
+                    // PIECE: it gave its two children.
+                    debug_assert!(counter != 0 || len == PIECE, "a long message's first piece is whole");
+                    let cv: CVBytes = if counter == 0 {
                         parent(piece[..OUT_LEN].try_into().unwrap(), piece[OUT_LEN..].try_into().unwrap()).chaining_value()
                     } else {
                         piece[..OUT_LEN].try_into().unwrap()
@@ -1065,6 +1069,192 @@ mod test {
             assert_eq!(got, want, "place {i}");
         }
         assert_eq!(handed.len(), lens.len() + fails.len() * after.len(), "a place back per message read, none for a failed reader");
+    }
+
+    /// The ring's arithmetic, exact on every machine (the caller's own,
+    /// whatever the threads do): 32 whole pieces fill the 2 MiB ring to its
+    /// end, the last fitting exactly with no lap skipped and no wait for
+    /// room (nothing handed back yet). BLAKE3 #218: reserve's `>` as `>=`
+    /// skipped a lap, its `<` as `<=` waited, each only costing work.
+    #[test]
+    fn test_a_reservation_that_fits_to_the_ring_s_end_takes_no_lap_and_no_wait() {
+        let input = std::vec![5u8; PIECE];
+        let mut got = places(RING_BYTES / PIECE);
+        stream(
+            Mode::Plain,
+            |_| {},
+            |s| {
+                for out in got.iter_mut() {
+                    s.submit_with(
+                        PIECE,
+                        |at, room| {
+                            room.copy_from_slice(&input[at..][..room.len()]);
+                            room.len()
+                        },
+                        out,
+                    );
+                }
+                assert_eq!(s.head, RING_BYTES, "32 pieces end the ring's first lap exactly");
+                assert_eq!(s.delivered, 0, "and nothing waited for room");
+                s.finish();
+            },
+        );
+        assert!(got.iter().all(|h| *h == crate::convenience::hash(&input)));
+    }
+
+    /// A batch is cut into parts of one task's bytes each (the last the
+    /// rest), an entry a part, whether borrowed or written in, for message
+    /// lengths whose slots divide a task and don't, and counts that fill
+    /// parts and don't; every digest right. BLAKE3 #218: the part's size
+    /// and the last part's count had no test.
+    #[test]
+    fn test_a_batch_is_cut_into_task_sized_parts() {
+        for (message_len, count) in [(64usize, 2500usize), (100, 1000), (64, 1024), (1000, 70), (5000, 30)] {
+            let slot = crate::many::slot_len(message_len);
+            let per_part = (TASK_LEN / slot).max(1);
+            let parts = count.div_ceil(per_part).max(1);
+            let message = |m: usize| -> std::vec::Vec<u8> { (0..message_len).map(|b| (m * 31 + b) as u8).collect() };
+            let mut batch = crate::performance::Batch::new(message_len, count);
+            for m in 0..count {
+                batch.set(m, &message(m));
+            }
+            let bytes: std::vec::Vec<u8> = (0..count)
+                .flat_map(|m| {
+                    let mut v = message(m);
+                    v.resize(slot, 0);
+                    v
+                })
+                .collect();
+            let (mut lent, mut written) = (places(count), places(count));
+            stream(
+                Mode::Plain,
+                |_| {},
+                |s| {
+                    let next = s.next;
+                    s.submit_batch(&batch, &mut lent);
+                    assert_eq!(s.next - next, parts, "{count} messages of {message_len} bytes, lent: {parts} parts");
+                    let next = s.next;
+                    s.submit_batch_with(
+                        message_len,
+                        |at, room| {
+                            room.copy_from_slice(&bytes[at..][..room.len()]);
+                            room.len()
+                        },
+                        &mut written,
+                    );
+                    assert_eq!(s.next - next, parts, "{count} messages of {message_len} bytes, written in: {parts} parts");
+                    s.finish();
+                },
+            );
+            for (m, (a, b)) in lent.iter().zip(&written).enumerate() {
+                let want = crate::convenience::hash(&message(m));
+                assert!(*a == want && *b == want, "{message_len}-byte message {m} of {count}");
+            }
+        }
+    }
+
+    /// A batch written in has its bytes past each message zeroed where there
+    /// are any (lengths not a multiple of 64, and empty messages, whose slot
+    /// is a whole block), and none touched where there are none (counted:
+    /// Counted::BatchZeroed); empty messages in a room an earlier stream left full of
+    /// bytes hash as empty. BLAKE3 #218: the condition had no test.
+    #[test]
+    fn test_batch_with_zeroes_where_bytes_follow_a_message_and_nowhere_else() {
+        let mut got = places(100);
+        // Each fill writes 0xEE over its whole room, as a careless reader
+        // might, so every byte past a message starts nonzero.
+        let zeroed = |message_len: usize, got: &mut [Hash]| {
+            let zeroed = || crate::COUNTED.with(|c| c[crate::Counted::BatchZeroed as usize].get());
+            let before = zeroed();
+            stream(
+                Mode::Plain,
+                |_| {},
+                |s| {
+                    s.submit_batch_with(
+                        message_len,
+                        |_, room| {
+                            room.fill(0xEE);
+                            room.len()
+                        },
+                        got,
+                    );
+                    s.finish();
+                },
+            );
+            zeroed() - before
+        };
+        assert_eq!(zeroed(64, &mut got), 0, "64-byte messages fill their slots");
+        assert!(got.iter().all(|h| *h == crate::convenience::hash(&[0xEE; 64])));
+        assert_eq!(zeroed(128, &mut got[..50]), 0, "128-byte messages fill their slots");
+        assert_eq!(zeroed(100, &mut got), 100, "each 100-byte message's last 28 bytes");
+        assert!(got.iter().all(|h| *h == crate::convenience::hash(&[0xEE; 100])));
+        assert_eq!(zeroed(0, &mut got), 100, "each empty message's whole block");
+        assert!(got.iter().all(|h| *h == crate::convenience::hash(b"")), "empty messages hash as empty");
+    }
+
+    /// How short messages gather into tasks, exact (the caller's own state):
+    /// an empty batch joins no task; 64-byte messages close a task at its
+    /// 64 members; 1000-byte ones at a quarter of a task's bytes (the
+    /// 17th), to spread over more threads; a batch part closes its own.
+    /// BLAKE3 #218: the closing condition's mutants each regrouped work.
+    #[test]
+    fn test_short_messages_gather_into_tasks_as_designed() {
+        let input = std::vec![7u8; 1000];
+        let blocks = crate::test::message(&input);
+        let members = |s: &Stream<'_, _>| s.open.as_ref().map(|t| (t.members, t.len));
+        let mut got = places(64 + 17 + 1);
+        let mut rest: &mut [Hash] = &mut got;
+        let empty = crate::performance::Batch::new(64, 0);
+        let mut none: [Hash; 0] = [];
+        stream(
+            Mode::Plain,
+            |_| {},
+            |s| {
+                s.submit_batch(&empty, &mut none);
+                assert_eq!(members(s), None, "an empty batch joins no task");
+                for k in 1..=64 {
+                    s.submit(&blocks, 64, &mut take(&mut rest, 1)[0]);
+                    assert_eq!(members(s), (k < 64).then_some((k, 64 * k)), "64-byte message {k}");
+                }
+                for k in 1..=17 {
+                    s.submit(&blocks, 1000, &mut take(&mut rest, 1)[0]);
+                    assert_eq!(members(s), (k < 17).then_some((k, 1000 * k)), "1000-byte message {k}");
+                }
+                s.submit(&blocks, 64, &mut take(&mut rest, 1)[0]);
+                assert_eq!(members(s), Some((1, 64)));
+                s.finish();
+            },
+        );
+        assert!(got[..64].iter().chain(&got[81..]).all(|h| *h == crate::convenience::hash(&input[..64])));
+        assert!(got[64..81].iter().all(|h| *h == crate::convenience::hash(&input)));
+    }
+
+    /// A finished stream gives back what it held: its source's slot (with
+    /// 64 slots, 70 streams one after another each get one), the open
+    /// streams' count (none open after it, so idle workers stop looking),
+    /// and its storage. BLAKE3 #218: Drop made a no-op survived the suite.
+    #[test]
+    fn test_a_finished_stream_gives_back_its_slot_and_storage() {
+        if !crate::lanes::splits() {
+            return;
+        }
+        let input = std::vec![1u8; 64];
+        let blocks = crate::test::message(&input);
+        for round in 0..70 {
+            let mut got = places(1);
+            stream(
+                Mode::Plain,
+                |_| {},
+                |s| {
+                    assert!(s.slot.is_some(), "stream {round} has a slot");
+                    s.submit(&blocks, 64, &mut got[0]);
+                    s.finish();
+                },
+            );
+            assert!(!crate::lanes::sources::open(), "no stream open after stream {round}");
+            assert_eq!(got[0], crate::convenience::hash(&input));
+        }
+        assert!(!FREE.lock().unwrap().is_empty(), "the storage is the thread's spare again");
     }
 
     /// A few messages through a stream: the handover of entries to the
