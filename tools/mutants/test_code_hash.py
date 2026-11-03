@@ -33,7 +33,10 @@ def sections(path):
     return out
 
 
-@unittest.skipUnless(sys.platform == "linux" and ELF and os.environ.get("MUTANTS_B3SUM"),
+B3SUM = os.environ.get("MUTANTS_B3SUM")
+
+
+@unittest.skipUnless(sys.platform == "linux" and ELF and B3SUM,
                      "an ELF executable to read, and MUTANTS_B3SUM: official b3sum 1.8.7 (check.py's official_b3sum installs it)")
 class CodeHash(unittest.TestCase):
     def setUp(self):
@@ -49,20 +52,20 @@ class CodeHash(unittest.TestCase):
         data = bytearray(open(path, "rb").read())
         data[offset + size // 2] ^= 0xFF
         open(path, "wb").write(data)
-        return name, code_hash.code_hash(path)
+        return name, code_hash.code_hash(path, B3SUM)
 
     def test_a_copy_hashes_alike(self):
         path = os.path.join(self.dir, "copy")
         shutil.copy(ELF, path)
-        self.assertEqual(code_hash.code_hash(path), code_hash.code_hash(ELF))
+        self.assertEqual(code_hash.code_hash(path, B3SUM), code_hash.code_hash(ELF, B3SUM))
 
     def test_a_mapped_byte_changes_the_hash(self):
         name, h = self.flipped(lambda s: s[0] == ".text")
-        self.assertNotEqual(h, code_hash.code_hash(ELF), name)
+        self.assertNotEqual(h, code_hash.code_hash(ELF, B3SUM), name)
 
     def test_an_unmapped_byte_leaves_it(self):
         name, h = self.flipped(lambda s: not s[1] & code_hash.SHF_ALLOC and s[0] != ".shstrtab")
-        self.assertEqual(h, code_hash.code_hash(ELF), name)
+        self.assertEqual(h, code_hash.code_hash(ELF, B3SUM), name)
 
 
 if __name__ == "__main__":

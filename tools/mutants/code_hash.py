@@ -51,8 +51,8 @@ def loaded_bytes(path):
     return b"".join(out)
 
 
-def code_hash(path):
-    b3sum = os.environ["MUTANTS_B3SUM"]
+def code_hash(path, b3sum):
+    """The BLAKE3 hash, by the b3sum at `b3sum`, of every byte `path` loads."""
     out = subprocess.run([b3sum, "--no-names"], input=loaded_bytes(path), capture_output=True, check=True).stdout
     digest = out.decode().strip()
     assert len(digest) == 64, f"b3sum gave {digest!r}"
@@ -71,14 +71,14 @@ def verdict(state):
     if not os.path.exists(os.path.join(state, binaries[0] + ".base")):
         for name in binaries:
             path = open(os.path.join(state, name + ".path")).read().strip()
-            open(os.path.join(state, name + ".base"), "w").write(open(os.path.join(state, name + ".stat")).read().strip() + " " + code_hash(path) + "\n")
+            open(os.path.join(state, name + ".base"), "w").write(open(os.path.join(state, name + ".stat")).read().strip() + " " + code_hash(path, os.environ["MUTANTS_B3SUM"]) + "\n")
         return "baseline"
     for name in binaries:
         stat = open(os.path.join(state, name + ".stat")).read().strip()
         base_stat, _, base_hash = open(os.path.join(state, name + ".base")).read().strip().rpartition(" ")
         if stat == base_stat:
             return "baseline"  # not relinked: the baseline's own file
-        if code_hash(open(os.path.join(state, name + ".path")).read().strip()) != base_hash:
+        if code_hash(open(os.path.join(state, name + ".path")).read().strip(), os.environ["MUTANTS_B3SUM"]) != base_hash:
             return "differs"
     return "same"
 
@@ -87,4 +87,4 @@ if __name__ == "__main__":
     if sys.argv[1] == "--verdict":
         print(verdict(sys.argv[2]))
     else:
-        print(code_hash(sys.argv[1]))
+        print(code_hash(sys.argv[1], os.environ["MUTANTS_B3SUM"]))
