@@ -133,8 +133,8 @@ pub fn hash_many_multithreaded(mode: Mode, batch: &Batch, out: &mut [[u8; OUT_LE
 ///
 /// **Speed**, on an Apple M4 Max (16 cores): below 512 KiB it hashes on the
 /// calling thread, at [`hash`](crate::convenience::hash)'s speed; from 512 KiB it uses the other cores
-/// too: about 12 GB/s at 1 MiB, 20 GB/s at 4 MiB, and 25 GB/s from 16 MiB,
-/// 4 to 6 times [`hash`](crate::convenience::hash). The extra threads wait asleep between calls and
+/// too: about 14 GB/s at 1 MiB, 21 GB/s at 4 MiB, and 26 to 29 GB/s from
+/// 16 MiB, 2 to 5 times [`hash`](crate::convenience::hash). The extra threads wait asleep between calls and
 /// use no CPU then.
 ///
 /// **Several callers at once**: calls from several threads of one program

@@ -24,8 +24,9 @@
 //!   A program waiting hashes tasks no thread has taken.
 //!
 //! The messages are borrowed for the scope of [`stream`], which waits for
-//! every task before it returns, also when its body panics: no thread
-//! reads a message after the scope ends.
+//! every task before it returns; a panic inside ends the process
+//! (lanes::AbortOnUnwind, as for a one-shot job): no thread reads a message
+//! after the scope ends.
 
 use crate::lanes::{MEMBERS, Member, OwnLine, TASK_LEN, Task};
 use crate::platform::Platform;
@@ -103,7 +104,20 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// [`finish`](Stream::finish), on this thread. `body` calls `finish` last
 /// (a scope that ends with places not handed back panics). A message of
 /// any length; this crate's threads read it where it is, and `stream`
-/// returns only after they are done, also when `body` panics.
+/// returns only after they are done.
+///
+/// **A panic inside a stream ends the process**, wherever it starts: in
+/// `body`, in `done`, in a `fill` or a reader, or in the stream's own
+/// checks (a `body` that ends without `finish`). Its message and backtrace
+/// print first, as for any panic; then the process aborts, since this
+/// crate's threads may still be reading the messages and writing the
+/// places. So `std::panic::catch_unwind` around a stream recovers nothing.
+/// A program that must go on past a failing read hashes it with
+/// [`Stream::submit_reader`], which returns the read's error and goes on
+/// with the next message. Under plain `cargo test`, which runs a test
+/// binary's tests as threads of one process, a failing assertion inside a
+/// stream ends the whole binary, so the tests after it report nothing;
+/// cargo-nextest runs each test in a process of its own.
 ///
 /// The program calls [`crate::initialize_multithreaded`] first. A stream
 /// holds up to 1024 messages (a message over 64 KiB counts once per 64 KiB,
@@ -151,8 +165,12 @@ struct Out<const N: usize>(UnsafeCell<[u8; N]>);
 /// ```
 pub fn stream<'env, D: FnMut(&'env mut [Hash]), T>(mode: Mode, done: D, body: impl for<'s> FnOnce(&'s mut Stream<'env, D>) -> T) -> T {
     let mut stream = Stream::open(mode, done);
+    // Dropped first if anything below unwinds: the process ends there, while
+    // the threads may still read the messages and write the places.
+    let unwinding = crate::lanes::AbortOnUnwind;
     let result = body(&mut stream);
     assert_eq!(stream.delivered, stream.next, "a stream's body calls finish last");
+    core::mem::forget(unwinding);
     result
 }
 
@@ -511,6 +529,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
             if message_len % 64 != 0 || message_len == 0 {
                 for message in room.chunks_exact_mut(slot) {
                     message[message_len..].fill(0);
+                    crate::counted(crate::Counted::BatchZeroed);
                 }
             }
             let end = self.head;
@@ -696,7 +715,10 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
                     let piece = unsafe { *self.s.pieces_out[index].0.0.get() };
                     let (key, flags, platform) = (self.key, self.flags, Platform::detect());
                     let parent = |left: &CVBytes, right: &CVBytes| crate::hasher::parent_output(left, right, &key, flags, platform);
-                    let cv: CVBytes = if counter == 0 && len > CHUNK_LEN {
+                    // A piece at chunk 0 is a long message's first, a whole
+                    // PIECE: it gave its two children.
+                    debug_assert!(counter != 0 || len == PIECE, "a long message's first piece is whole");
+                    let cv: CVBytes = if counter == 0 {
                         parent(piece[..OUT_LEN].try_into().unwrap(), piece[OUT_LEN..].try_into().unwrap()).chaining_value()
                     } else {
                         piece[..OUT_LEN].try_into().unwrap()
@@ -728,26 +750,11 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
 }
 
 impl<D> Drop for Stream<'_, D> {
-    /// Wait for every task still reading the messages and writing the
-    /// places (also when the body panicked), then keep the storage as the
-    /// thread's spare. A stream lives only inside [`stream`], which owns
-    /// it, so this runs before the scope ends.
+    /// Keep the storage as the thread's spare. A stream drops finished,
+    /// every place handed back: one that unwinds ends the process first
+    /// ([`stream`]'s guard), and the C API finishes it before it drops.
     fn drop(&mut self) {
-        if let Some(task) = self.open.take() {
-            // Handed over, so that the wait below ends: as publish.
-            self.s.lefts[self.open_first].store(task.members, Ordering::Relaxed);
-            match self.slot {
-                Some(_) => self.s.source.publish(task),
-                None => crate::lanes::run_task(task),
-            }
-        }
-        for i in self.delivered..self.next {
-            while self.s.lefts[self.s.entries[i % ENTRIES].first].load(Ordering::Acquire) != 0 {
-                if !self.s.run_waiting() {
-                    core::hint::spin_loop();
-                }
-            }
-        }
+        assert!(self.open.is_none() && self.delivered == self.next, "a stream drops finished");
         if let Some(slot) = self.slot {
             crate::lanes::sources::Source::unregister(slot);
         }
@@ -875,11 +882,11 @@ mod test {
             Mode::Plain,
             |_| {},
             |s| {
-                let mut reader = Uneven { data: &input, at: 0, calls: 0, fail_at: None };
+                let mut reader = Uneven::new(&input, None);
                 s.submit_with(input.len(), |_, room| retry(|| reader.read(room)), &mut got[0]);
                 // 40 messages of 100 bytes, each in its 128-byte slot.
                 let slots: std::vec::Vec<u8> = (0..40).flat_map(|m| (0..128).map(move |b| if b < 100 { (m * 7 + b) as u8 } else { 0 })).collect();
-                let mut reader = Uneven { data: &slots, at: 0, calls: 0, fail_at: None };
+                let mut reader = Uneven::new(&slots, None);
                 s.submit_batch_with(100, |_, room| retry(|| reader.read(room)), &mut batch);
                 s.finish();
             },
@@ -901,86 +908,353 @@ mod test {
         }
     }
 
-    /// A fill whose source ends before the message's length stops the
-    /// program, naming how much was left: it can never hash the room's
-    /// stale bytes (BLAKE3 #204).
+    /// A panic inside a stream ends the process, wherever it starts, and
+    /// prints its message first: the body's own, the handler's, a fill
+    /// that ends before the message's length (it can never hash the room's
+    /// stale bytes, BLAKE3 #204), and a body that ends without finishing.
+    /// Each case runs in a child process of this test binary, inside
+    /// catch_unwind as a careless caller would: the child must die of
+    /// SIGABRT, saying why. With the guard gone, it would catch the panic
+    /// and exit 0.
+    #[cfg(unix)]
     #[test]
-    #[cfg_attr(not(panic = "unwind"), ignore = "catches panics, which this target aborts on")]
-    fn test_fill_that_ends_early_panics() {
-        let result = std::panic::catch_unwind(|| {
-            let mut got = places(1);
-            stream(
-                Mode::Plain,
-                |_| {},
-                |s| {
-                    let mut left = 1000usize;
-                    s.submit_with(
-                        5000,
-                        |_, room| {
-                            let n = room.len().min(left);
-                            left -= n;
-                            n
-                        },
-                        &mut got[0],
-                    );
-                    s.finish();
-                },
-            )
-        });
-        let message = result.expect_err("a fill that ends early panics");
-        let text = message.downcast_ref::<std::string::String>().map(|s| s.as_str()).unwrap_or("");
-        assert!(text.contains("wrote nothing with 4000 of its 5000 bytes left"), "{text}");
-    }
-
-    /// A body that ends without finishing panics (after the threads are
-    /// done with its messages), and so does one that panics itself.
-    #[test]
-    #[cfg_attr(not(panic = "unwind"), ignore = "catches panics, which this target aborts on")]
-    fn test_stream_panics() {
+    fn test_a_panic_in_a_stream_ends_the_process() {
+        const CHILD: &str = "BLAKE3_SERVIL_TEST_STREAM_PANIC";
         let input = std::vec![9u8; 300_000];
         let blocks = crate::test::message(&input);
-        for unwinding in [false, true] {
-            let result = std::panic::catch_unwind(|| {
+        if let Ok(case) = std::env::var(CHILD) {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut got = places(4);
                 stream(
                     Mode::Plain,
-                    |_: &mut [Hash]| {},
-                    |s| {
-                        for (len, out) in [10, 100_000, 64, 300_000].into_iter().zip(&mut got) {
-                            s.submit(&blocks, len, out);
+                    |_: &mut [Hash]| assert!(case != "handler", "the handler panics"),
+                    |s| match case.as_str() {
+                        "body" | "handler" => {
+                            for (len, out) in [10, 100_000, 64, 300_000].into_iter().zip(&mut got) {
+                                s.submit(&blocks, len, out);
+                            }
+                            if case == "body" {
+                                panic!("the body panics");
+                            }
+                            s.finish();
                         }
-                        assert!(!unwinding, "the body panics");
+                        "fill" => {
+                            let mut left = 1000usize;
+                            s.submit_with(
+                                5000,
+                                |_, room| {
+                                    let n = room.len().min(left);
+                                    left -= n;
+                                    n
+                                },
+                                &mut got[0],
+                            );
+                            s.finish();
+                        }
+                        "unfinished" => s.submit(&blocks, 300_000, &mut got[0]),
+                        _ => unreachable!(),
                     },
                 )
-            });
-            assert!(result.is_err());
+            }));
+            std::process::exit(0);
+        }
+        for (case, says) in [
+            ("body", "the body panics"),
+            ("handler", "the handler panics"),
+            ("fill", "wrote nothing with 4000 of its 5000 bytes left"),
+            ("unfinished", "a stream's body calls finish last"),
+        ] {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "stream::test::test_a_panic_in_a_stream_ends_the_process", "--nocapture", "--test-threads", "1"])
+                .env(CHILD, case)
+                .output()
+                .expect("the test binary runs again");
+            use std::os::unix::process::ExitStatusExt as _;
+            let stderr = std::string::String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.signal(), Some(6), "{case}: the child aborts (SIGABRT): {:?}\n{stderr}", out.status);
+            assert!(stderr.contains(says), "{case}: it says why: {stderr}");
         }
     }
 
     /// A reader that yields `data` in reads of varying sizes (1 byte to
-    /// 9000), interrupted now and then, failing after `fail_at` bytes.
+    /// 9000), interrupted now and then, failing after `fail_at` bytes. Read
+    /// into no room, or again after it reported its end or an error, it
+    /// panics: each is a read (for a file, a system call) no caller needs.
     struct Uneven<'a> {
         data: &'a [u8],
         at: usize,
         calls: usize,
         fail_at: Option<usize>,
+        ended: bool,
+    }
+
+    impl<'a> Uneven<'a> {
+        fn new(data: &'a [u8], fail_at: Option<usize>) -> Self {
+            Uneven { data, at: 0, calls: 0, fail_at, ended: false }
+        }
     }
 
     impl std::io::Read for Uneven<'_> {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            assert!(!self.ended, "read again after its end or an error");
+            assert!(!buf.is_empty(), "read into no room");
             self.calls += 1;
             if self.calls % 7 == 0 {
                 return Err(std::io::ErrorKind::Interrupted.into());
             }
             if self.fail_at.is_some_and(|f| self.at >= f) {
+                self.ended = true;
                 return Err(std::io::Error::other("the reader fails"));
             }
             let limit = self.fail_at.unwrap_or(self.data.len()).min(self.data.len());
             let n = buf.len().min([1, 9000, 333, 65536, 4096][self.calls % 5]).min(limit - self.at);
             buf[..n].copy_from_slice(&self.data[self.at..][..n]);
             self.at += n;
+            self.ended = n == 0;
             Ok(n)
         }
+    }
+
+    /// `submit_reader` through a reader of short reads, interrupted now and
+    /// then: each message's length and digest, for lengths around a piece.
+    /// Then readers that fail at every point (in the first piece; at exactly
+    /// a piece, in the read-ahead; one byte into the read-ahead; in the
+    /// third piece and the fourth, with pieces already handed to the pool),
+    /// each followed by more than two rings of messages, long ones among
+    /// them: every digest right, each failed reader's place untouched and
+    /// never handed back, the ring's head moved by the handed pieces alone,
+    /// and no reader read again after its end or error (Uneven). BLAKE3
+    /// #218: the interruption's retry, the error path's ring head and its
+    /// abandoned entry, and the read-ahead's condition had no test; the last
+    /// two only cost work, which this counts, where a clock would only
+    /// guess.
+    #[test]
+    fn test_submit_reader_reads_and_fails_at_every_point() {
+        let input: std::vec::Vec<u8> = (0..4 * PIECE + 99).map(|i| (i % 253) as u8).collect();
+        let reader = |len: usize, fail_at: Option<usize>| Uneven::new(&input[..len], fail_at);
+        let lens = [0, 1, 1000, PIECE - 1, PIECE, PIECE + 1, 2 * PIECE, 3 * PIECE + 7];
+        // Where each reader fails, and how far it leaves the ring's head:
+        // the room of the pieces it handed to the pool, not a byte more
+        // (the ring's head is the caller's arithmetic alone, whatever the
+        // threads do, so this is exact on every machine).
+        let fails = [(10, 0), (PIECE, 0), (PIECE + 1, 0), (2 * PIECE + 5, PIECE), (3 * PIECE + 1, 2 * PIECE)];
+        // Each handed piece is an entry, and with any, one abandoned entry
+        // drops their chaining values; none handed, none added.
+        let entries = |kept: usize| kept / PIECE + usize::from(kept > 0);
+        let after: std::vec::Vec<usize> = (0..2 * RING_BYTES / PIECE + 3).map(|i| [PIECE + 3, 700, 2 * PIECE][i % 3]).collect();
+        let mut want: std::vec::Vec<Hash> = lens.iter().map(|&l| crate::convenience::hash(&input[..l])).collect();
+        for _ in fails {
+            want.push(Hash::from_bytes([0; 32]));
+            want.extend(after.iter().map(|&l| crate::convenience::hash(&input[..l])));
+        }
+        let mut got = places(want.len());
+        let mut handed = std::vec::Vec::new();
+        let mut rest: &mut [Hash] = &mut got;
+        stream(Mode::Plain, record(&mut handed), |s| {
+            for len in lens {
+                assert_eq!(s.submit_reader(reader(len, None), None, &mut take(&mut rest, 1)[0]).unwrap(), len as u64, "{len} bytes");
+            }
+            for (fail, kept) in fails {
+                let (before, next) = (s.head, s.next);
+                assert!(s.submit_reader(reader(input.len(), Some(fail)), None, &mut take(&mut rest, 1)[0]).is_err(), "fails at {fail}");
+                assert_eq!(s.head - before, kept, "a reader failing at {fail} keeps its handed pieces' room alone");
+                assert_eq!(s.next - next, entries(kept), "a reader failing at {fail}: its handed pieces' entries, and one to drop them");
+                for &len in &after {
+                    assert_eq!(s.submit_reader(reader(len, None), None, &mut take(&mut rest, 1)[0]).unwrap(), len as u64);
+                }
+            }
+            s.finish();
+        });
+        for (i, (got, want)) in got.iter().zip(&want).enumerate() {
+            assert_eq!(got, want, "place {i}");
+        }
+        assert_eq!(handed.len(), lens.len() + fails.len() * after.len(), "a place back per message read, none for a failed reader");
+    }
+
+    /// The ring's arithmetic, exact on every machine (the caller's own,
+    /// whatever the threads do): 32 whole pieces fill the 2 MiB ring to its
+    /// end, the last fitting exactly with no lap skipped and no wait for
+    /// room (nothing handed back yet). BLAKE3 #218: reserve's `>` as `>=`
+    /// skipped a lap, its `<` as `<=` waited, each only costing work.
+    #[test]
+    fn test_a_reservation_that_fits_to_the_ring_s_end_takes_no_lap_and_no_wait() {
+        let input = std::vec![5u8; PIECE];
+        let mut got = places(RING_BYTES / PIECE);
+        stream(
+            Mode::Plain,
+            |_| {},
+            |s| {
+                for out in got.iter_mut() {
+                    s.submit_with(
+                        PIECE,
+                        |at, room| {
+                            room.copy_from_slice(&input[at..][..room.len()]);
+                            room.len()
+                        },
+                        out,
+                    );
+                }
+                assert_eq!(s.head, RING_BYTES, "32 pieces end the ring's first lap exactly");
+                assert_eq!(s.delivered, 0, "and nothing waited for room");
+                s.finish();
+            },
+        );
+        assert!(got.iter().all(|h| *h == crate::convenience::hash(&input)));
+    }
+
+    /// A batch is cut into parts of one task's bytes each (the last the
+    /// rest), an entry a part, whether borrowed or written in, for message
+    /// lengths whose slots divide a task and don't, and counts that fill
+    /// parts and don't; every digest right. BLAKE3 #218: the part's size
+    /// and the last part's count had no test.
+    #[test]
+    fn test_a_batch_is_cut_into_task_sized_parts() {
+        for (message_len, count) in [(64usize, 2500usize), (100, 1000), (64, 1024), (1000, 70), (5000, 30)] {
+            let slot = crate::many::slot_len(message_len);
+            let per_part = (TASK_LEN / slot).max(1);
+            let parts = count.div_ceil(per_part).max(1);
+            let message = |m: usize| -> std::vec::Vec<u8> { (0..message_len).map(|b| (m * 31 + b) as u8).collect() };
+            let mut batch = crate::performance::Batch::new(message_len, count);
+            for m in 0..count {
+                batch.set(m, &message(m));
+            }
+            let bytes: std::vec::Vec<u8> = (0..count)
+                .flat_map(|m| {
+                    let mut v = message(m);
+                    v.resize(slot, 0);
+                    v
+                })
+                .collect();
+            let (mut lent, mut written) = (places(count), places(count));
+            stream(
+                Mode::Plain,
+                |_| {},
+                |s| {
+                    let next = s.next;
+                    s.submit_batch(&batch, &mut lent);
+                    assert_eq!(s.next - next, parts, "{count} messages of {message_len} bytes, lent: {parts} parts");
+                    let next = s.next;
+                    s.submit_batch_with(
+                        message_len,
+                        |at, room| {
+                            room.copy_from_slice(&bytes[at..][..room.len()]);
+                            room.len()
+                        },
+                        &mut written,
+                    );
+                    assert_eq!(s.next - next, parts, "{count} messages of {message_len} bytes, written in: {parts} parts");
+                    s.finish();
+                },
+            );
+            for (m, (a, b)) in lent.iter().zip(&written).enumerate() {
+                let want = crate::convenience::hash(&message(m));
+                assert!(*a == want && *b == want, "{message_len}-byte message {m} of {count}");
+            }
+        }
+    }
+
+    /// A batch written in has its bytes past each message zeroed where there
+    /// are any (lengths not a multiple of 64, and empty messages, whose slot
+    /// is a whole block), and none touched where there are none (counted:
+    /// Counted::BatchZeroed); empty messages in a room an earlier stream left full of
+    /// bytes hash as empty. BLAKE3 #218: the condition had no test.
+    #[test]
+    fn test_batch_with_zeroes_where_bytes_follow_a_message_and_nowhere_else() {
+        let mut got = places(100);
+        // Each fill writes 0xEE over its whole room, as a careless reader
+        // might, so every byte past a message starts nonzero.
+        let zeroed = |message_len: usize, got: &mut [Hash]| {
+            let zeroed = || crate::COUNTED.with(|c| c[crate::Counted::BatchZeroed as usize].get());
+            let before = zeroed();
+            stream(
+                Mode::Plain,
+                |_| {},
+                |s| {
+                    s.submit_batch_with(
+                        message_len,
+                        |_, room| {
+                            room.fill(0xEE);
+                            room.len()
+                        },
+                        got,
+                    );
+                    s.finish();
+                },
+            );
+            zeroed() - before
+        };
+        assert_eq!(zeroed(64, &mut got), 0, "64-byte messages fill their slots");
+        assert!(got.iter().all(|h| *h == crate::convenience::hash(&[0xEE; 64])));
+        assert_eq!(zeroed(128, &mut got[..50]), 0, "128-byte messages fill their slots");
+        assert_eq!(zeroed(100, &mut got), 100, "each 100-byte message's last 28 bytes");
+        assert!(got.iter().all(|h| *h == crate::convenience::hash(&[0xEE; 100])));
+        assert_eq!(zeroed(0, &mut got), 100, "each empty message's whole block");
+        assert!(got.iter().all(|h| *h == crate::convenience::hash(b"")), "empty messages hash as empty");
+    }
+
+    /// How short messages gather into tasks, exact (the caller's own state):
+    /// an empty batch joins no task; 64-byte messages close a task at its
+    /// 64 members; 1000-byte ones at a quarter of a task's bytes (the
+    /// 17th), to spread over more threads; a batch part closes its own.
+    /// BLAKE3 #218: the closing condition's mutants each regrouped work.
+    #[test]
+    fn test_short_messages_gather_into_tasks_as_designed() {
+        let input = std::vec![7u8; 1000];
+        let blocks = crate::test::message(&input);
+        let members = |s: &Stream<'_, _>| s.open.as_ref().map(|t| (t.members, t.len));
+        let mut got = places(64 + 17 + 1);
+        let mut rest: &mut [Hash] = &mut got;
+        let empty = crate::performance::Batch::new(64, 0);
+        let mut none: [Hash; 0] = [];
+        stream(
+            Mode::Plain,
+            |_| {},
+            |s| {
+                s.submit_batch(&empty, &mut none);
+                assert_eq!(members(s), None, "an empty batch joins no task");
+                for k in 1..=64 {
+                    s.submit(&blocks, 64, &mut take(&mut rest, 1)[0]);
+                    assert_eq!(members(s), (k < 64).then_some((k, 64 * k)), "64-byte message {k}");
+                }
+                for k in 1..=17 {
+                    s.submit(&blocks, 1000, &mut take(&mut rest, 1)[0]);
+                    assert_eq!(members(s), (k < 17).then_some((k, 1000 * k)), "1000-byte message {k}");
+                }
+                s.submit(&blocks, 64, &mut take(&mut rest, 1)[0]);
+                assert_eq!(members(s), Some((1, 64)));
+                s.finish();
+            },
+        );
+        assert!(got[..64].iter().chain(&got[81..]).all(|h| *h == crate::convenience::hash(&input[..64])));
+        assert!(got[64..81].iter().all(|h| *h == crate::convenience::hash(&input)));
+    }
+
+    /// A finished stream gives back what it held: its source's slot (with
+    /// 64 slots, 70 streams one after another each get one), the open
+    /// streams' count (none open after it, so idle workers stop looking),
+    /// and its storage. BLAKE3 #218: Drop made a no-op survived the suite.
+    #[test]
+    fn test_a_finished_stream_gives_back_its_slot_and_storage() {
+        if !crate::lanes::splits() {
+            return;
+        }
+        let input = std::vec![1u8; 64];
+        let blocks = crate::test::message(&input);
+        for round in 0..70 {
+            let mut got = places(1);
+            stream(
+                Mode::Plain,
+                |_| {},
+                |s| {
+                    assert!(s.slot.is_some(), "stream {round} has a slot");
+                    s.submit(&blocks, 64, &mut got[0]);
+                    s.finish();
+                },
+            );
+            assert!(!crate::lanes::sources::open(), "no stream open after stream {round}");
+            assert_eq!(got[0], crate::convenience::hash(&input));
+        }
+        assert!(!FREE.lock().unwrap().is_empty(), "the storage is the thread's spare again");
     }
 
     /// A few messages through a stream: the handover of entries to the
@@ -1011,7 +1285,7 @@ mod test {
                 );
             }
             assert_eq!(s.submit_reader(&input[..2 * PIECE + 1], None, &mut take(&mut rest, 1)[0]).unwrap(), 2 * PIECE as u64 + 1);
-            assert!(s.submit_reader(Uneven { data: &input, at: 0, calls: 0, fail_at: Some(PIECE + 1) }, None, &mut take(&mut rest, 1)[0]).is_err());
+            assert!(s.submit_reader(Uneven::new(&input, Some(PIECE + 1)), None, &mut take(&mut rest, 1)[0]).is_err());
             s.submit_batch(&batch, take(&mut rest, 4));
             s.submit_batch_with(
                 64,

@@ -231,6 +231,52 @@ pub(crate) fn every_platform() -> Vec<crate::platform::Platform> {
     all
 }
 
+/// The decisions between equally correct paths, exactly as their rules
+/// say (BLAKE3 #219: a mutant that moves one takes the other path, whose
+/// digest is the same, so only the decision itself can catch it). The
+/// Platform values are decisions' inputs here, whatever this CPU runs.
+#[test]
+#[cfg(all(target_arch = "x86_64", blake3_sse41_ffi, blake3_avx2_ffi))]
+fn test_the_paths_chosen_exactly() {
+    use crate::platform::Platform;
+    // spare_lane(platform, whole chunks, partial bytes): the lane for the
+    // partial chunk. AVX2: one whole chunk with a partial past a block,
+    // four lanes; three whole, four (SSE4.1 too); six or seven, eight;
+    // five with a partial past five blocks, eight; else none.
+    assert_eq!(crate::spare_lane(Platform::AVX2, 1, BLOCK_LEN + 1), Some(4));
+    assert_eq!(crate::spare_lane(Platform::AVX2, 1, BLOCK_LEN), None);
+    assert_eq!(crate::spare_lane(Platform::AVX2, 1, 0), None);
+    assert_eq!(crate::spare_lane(Platform::AVX2, 3, 0), Some(4));
+    assert_eq!(crate::spare_lane(Platform::SSE41, 3, 500), Some(4));
+    assert_eq!(crate::spare_lane(Platform::SSE41, 1, 500), None);
+    assert_eq!(crate::spare_lane(Platform::AVX2, 6, 0), Some(8));
+    assert_eq!(crate::spare_lane(Platform::AVX2, 7, 1000), Some(8));
+    assert_eq!(crate::spare_lane(Platform::AVX2, 5, 5 * BLOCK_LEN + 1), Some(8));
+    assert_eq!(crate::spare_lane(Platform::AVX2, 5, 5 * BLOCK_LEN), None);
+    assert_eq!(crate::spare_lane(Platform::AVX2, 5, 0), None);
+    for whole in [0, 2, 4, 8] {
+        assert_eq!(crate::spare_lane(Platform::AVX2, whole, 1000), None, "{whole} whole chunks");
+    }
+    #[cfg(blake3_avx512_ffi)]
+    {
+        assert_eq!(crate::spare_lane(Platform::AVX512, 1, BLOCK_LEN + 1), Some(4));
+        assert_eq!(crate::spare_lane(Platform::AVX512, 1, BLOCK_LEN), None);
+        assert_eq!(crate::spare_lane(Platform::AVX512, 3, 0), None);
+    }
+    // pair::takes(platform, len): a whole chunk and a partial one of two
+    // blocks or more, on AVX2 or AVX-512.
+    for (len, takes) in
+        [(CHUNK_LEN + BLOCK_LEN, false), (CHUNK_LEN + BLOCK_LEN + 1, true), (1500, true), (2 * CHUNK_LEN - 1, true), (2 * CHUNK_LEN, false), (CHUNK_LEN, false)]
+    {
+        assert_eq!(crate::pair::takes(Platform::AVX2, len), takes, "AVX2, {len} B");
+        assert!(!crate::pair::takes(Platform::SSE41, len), "SSE4.1, {len} B");
+    }
+    assert!(crate::pair::takes_platform(Platform::AVX2));
+    assert!(!crate::pair::takes_platform(Platform::SSE41));
+    #[cfg(blake3_avx512_ffi)]
+    assert!(crate::pair::takes_platform(Platform::AVX512) && crate::pair::takes(Platform::AVX512, 1500));
+}
+
 /// compress_chunks_parallel on every platform the CPU runs, against fixed
 /// values (official BLAKE3's chunk chaining values): every count of whole
 /// chunks it takes, with no partial chunk and with partial ones on each

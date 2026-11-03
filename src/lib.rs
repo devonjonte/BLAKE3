@@ -122,6 +122,18 @@
 //!   and the threads: by default a worker per CPU beyond the first, each with the
 //!   standard library's stack, started by [`initialize_multithreaded`].
 //!
+//! # Panics
+//!
+//! **A panic inside a [stream](performance::stream) ends the process**,
+//! wherever it starts: in your body, handler, `fill` or reader, or in the
+//! stream's own checks. Its message and backtrace print first; then the
+//! process aborts, since this crate's threads may still be reading your
+//! messages and writing your digests. So `catch_unwind` cannot recover a
+//! stream: a program that must go on past a failing read uses
+//! [`Stream::submit_reader`](performance::Stream::submit_reader), which
+//! returns the read's error. A broken precondition of any other call panics
+//! on the calling thread, and unwinds as usual.
+//!
 //! # Startup self-test
 //!
 //! **Every program calls [`initialize`] (or [`initialize_multithreaded`])
@@ -254,6 +266,22 @@ pub(crate) enum Ran {
     Pool = 1,
     /// The call wanted SME2 and another thread held the turn.
     TurnTaken = 2,
+    /// A task's members, all of one length, ran side by side on that
+    /// length's multi-lane kernel (lanes::Task::run_equal_members).
+    EqualMembers = 4,
+    /// A task's members ran one at a time (lanes::Task::run_members).
+    MemberAlone = 8,
+    /// A batch of one-block messages ran on the kernels' table a run at a
+    /// time (many::hash_many_on's first path).
+    BlockRun = 16,
+    /// A batch's messages of 2 to 15 chunks ran across messages
+    /// (many::hash_across).
+    Across = 32,
+    /// A batch's messages ran one at a time (many::hash_long_or_single).
+    MessageAlone = 64,
+    /// A batch of messages of up to a chunk, two or more, ran on the
+    /// kernels' table a run at a time (many::hash_many_on's short path).
+    ShortRun = 128,
 }
 
 #[cfg(all(test, feature = "std"))]
@@ -281,12 +309,15 @@ pub(crate) enum Counted {
     /// A round of hash_each_on's shared lanes: one hash_many call over the
     /// k-th chunk of every message that has one.
     EachRound = 0,
+    /// A message whose bytes past it a stream's batch fill zeroed
+    /// (Stream::submit_batch_with).
+    BatchZeroed = 1,
 }
 
 #[cfg(all(test, feature = "std"))]
 std::thread_local! {
     /// This thread's counts since the test last cleared them, by Counted.
-    pub(crate) static COUNTED: [core::cell::Cell<u64>; 1] = const { [core::cell::Cell::new(0)] };
+    pub(crate) static COUNTED: [core::cell::Cell<u64>; 2] = const { [core::cell::Cell::new(0), core::cell::Cell::new(0)] };
 }
 
 /// Count one of `what`: in the tests' record, and nothing in any other
