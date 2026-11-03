@@ -159,6 +159,9 @@ jobs:
     - run: cargo nextest run --lib --tests --features=serde,zeroize
       env:
         CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
+        # tests/pool_fairness.rs measures the pool's shares by time, which an
+        # emulator's scheduling decides: it skips (#213).
+        BLAKE3_EMULATED: 1
     - name: C API
       run: cargo nextest run --release
       working-directory: ./capi
