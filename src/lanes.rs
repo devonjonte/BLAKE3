@@ -1850,13 +1850,15 @@ mod test {
         assert_eq!(wanted(), Some((pool.threads - 1).min(budget)), "a 1 MiB tree: every other thread, or the budget");
         // A tree of three pieces (24 KiB cut for two threads, run as a job
         // directly: the calls cut a tree into more pieces than any pool
-        // has threads) asks for two, under any budget.
+        // has threads) asks for two, or its budget: one on x86-64 Linux's
+        // wide kernel, whose 24 KiB tree is two threads' (tree_threads).
         let (pieces, own) = cut_with_prefix(24 * 1024, 2, 0);
         assert_eq!((pieces.len(), own), (3, 0));
         let mut cvs = std::vec![ChainingValue::default(); 3];
         let work = Work::Tree { input: &input[..24 * 1024], pieces: &pieces, cvs: cvs.as_mut_ptr(), key: *crate::IV, counter: 0, flags: 0 };
         pool.run_job(work, 3, 0, Platform::detect());
-        assert_eq!(wanted(), Some(2), "three pieces: two workers");
+        let budget = tree_threads(24 * 1024, pool.threads, degree) - 1;
+        assert_eq!(wanted(), Some(2.min(budget)), "three pieces: two workers, or the budget");
         assert_eq!(merge_root(&pieces, &mut cvs, crate::IV, 0), crate::convenience::hash(&input[..24 * 1024]));
         // A call the pool never sees asks for nothing (run_job clears the
         // record; a serial call leaves it as this sets it).
