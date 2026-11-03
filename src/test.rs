@@ -1600,7 +1600,7 @@ fn test_prefetches_after_a_pause_every_length() {
 /// rows' (the hybrids run on every AArch64 core with the SHA-3 extension).
 #[cfg(all(blake3_neon, feature = "std"))]
 mod prefetch_counts {
-    use crate::platform::{self, Platform, PREFETCHED, TEST_COUNTER};
+    use crate::platform::{self, PREFETCHED, Platform, TEST_COUNTER};
     use crate::{BLOCK_LEN, CHUNK_LEN, IV, OUT_LEN, RAN_ENTRIES};
     use std::collections::BTreeSet;
     use std::vec::Vec;
@@ -1699,7 +1699,14 @@ mod prefetch_counts {
             return; // a Hasher takes the machine's platform: SME2's paths are the SME2 rows'
         }
         let input = painted(crate::PREFETCH_BELOW + CHUNK_LEN);
-        for len in (CHUNK_LEN - 7..=crate::PREFETCH_BELOW + 7).step_by(97).chain([CHUNK_LEN, CHUNK_LEN + 1, 16 * CHUNK_LEN, 32 * CHUNK_LEN, crate::PREFETCH_BELOW - 1, crate::PREFETCH_BELOW]) {
+        for len in (CHUNK_LEN - 7..=crate::PREFETCH_BELOW + 7).step_by(97).chain([
+            CHUNK_LEN,
+            CHUNK_LEN + 1,
+            16 * CHUNK_LEN,
+            32 * CHUNK_LEN,
+            crate::PREFETCH_BELOW - 1,
+            crate::PREFETCH_BELOW,
+        ]) {
             let prefetches = (CHUNK_LEN + 1..crate::PREFETCH_BELOW).contains(&len);
             check(&std::format!("a fresh Hasher's update of {len} bytes and its finalize"), prefetches, || {
                 std::hint::black_box(crate::Hasher::new(crate::Mode::Plain).update(&input[..len]).finalize());
@@ -1728,7 +1735,8 @@ mod prefetch_counts {
                 for (k, slot) in slots.chunks_exact_mut(BLOCK_LEN).enumerate() {
                     slot[..message_len].copy_from_slice(&input[k * BLOCK_LEN..k * BLOCK_LEN + message_len]);
                 }
-                let expected: Vec<[u8; OUT_LEN]> = (0..count).map(|k| *crate::convenience::hash(&slots[k * BLOCK_LEN..k * BLOCK_LEN + message_len]).as_bytes()).collect();
+                let expected: Vec<[u8; OUT_LEN]> =
+                    (0..count).map(|k| *crate::convenience::hash(&slots[k * BLOCK_LEN..k * BLOCK_LEN + message_len]).as_bytes()).collect();
                 let prefetches = count <= crate::PREFETCH_BATCH_BELOW;
                 let what = std::format!("{count} messages of {message_len} bytes");
                 let call = || {
