@@ -245,6 +245,16 @@ def test_limits(shards, cpus, total):
     return threads, min(memory_cap(shards), (total - (4 << 30)) // (shards * threads))
 
 
+def capped(shards):
+    """The shard's preexec_fn, which caps its data on Linux; None on macOS,
+    which enforces no RLIMIT_DATA on memory a program maps (its malloc's),
+    and where setting it stopped every shard (runner jobs 1865-1867)."""
+    if sys.platform != "linux":
+        return None
+    cap = memory_cap(shards)
+    return lambda: cap_memory(cap)
+
+
 def cap_memory(cap):
     """In a shard's child before it runs (preexec_fn): its data limit, `cap`
     bytes, computed in the parent (memory_cap): a child forked from a
@@ -394,7 +404,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
         # and made each build 10% slower, the run no faster, October 21).
         tests = ["--test", "shuttle_finish", "--test", "shuttle_park"] if loom else ["--lib", "--tests"]
         shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", *tests]
-        runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=lambda cap=memory_cap(shards): cap_memory(cap))))
+        runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=capped(shards))))
         envs[tree] = env
     names = collections.Counter()
     timed = collections.Counter()  # the time-outs, by name: their own outcome
