@@ -59,6 +59,11 @@ fn two_callers_share_the_pool() {
     if std::thread::available_parallelism().map_or(1, |n| n.get()) < 4 {
         return; // a pool of one or two: nothing to share
     }
+    if std::env::var_os("BLAKE3_EMULATED").is_some() {
+        // Under an emulator (CI's QEMU Cortex-A72) the threads' speeds are the
+        // emulator's scheduling, not the pool's: 1.71 and 2.00 there (#213).
+        return;
+    }
     let len = 16 << 20;
     let messages = share(
         move |who| blocks(len, who as u8),
