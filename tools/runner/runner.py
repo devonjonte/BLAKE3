@@ -41,6 +41,13 @@ and map land in the job's benchmark-results/. "quick" runs the small set.)
 (A crowd job runs `bench-hashes crowd` with its defaults, built against the
 fork commit: many programs at once, one a CPU, each with its own pool. Its
 samples and report land in the job's benchmark-results/.)
+    {"type": "mutants", "fork_commit": "...", "since": "..."}
+
+(A mutants job runs the fork's tools/mutants/check.py --since SINCE at the
+fork commit: the mutants in the lines the change since SINCE makes, judged
+against the list for this machine. Its exit is the verdict, and each run's
+outcomes land in the job's mutants-last/. No timing: other programs on the
+Mac can only make some mutants time out, an outcome of their own.)
     {"type": "example", "example": "scaling" | "host_lab" | "energy_probe" | "job_trace",
      "fork_commit": "...", "args": ["message", "1048576"]}
     {"type": "test", "fork_commit": "..."}
@@ -299,6 +306,24 @@ def test(job, run, work, out):
     return "passed"
 
 
+def mutants(job, run, work, out):
+    """tools/mutants/check.py --since SINCE at fork_commit. Its exit is the
+    verdict: 0 no new survivor, 1 a survivor differs from its list, 2 only
+    the time-outs differ (no verdict on those)."""
+    fork, _ = run.checkouts(hex_commit(job, "fork_commit"), None)
+    try:
+        run.run([sys.executable, "tools/mutants/check.py", "--since", hex_commit(job, "since")], cwd=fork)
+        verdict = "no new survivor"
+    except subprocess.CalledProcessError as e:
+        if e.returncode not in (1, 2):
+            raise
+        verdict = {1: "a survivor differs from its list", 2: "only time-outs differ"}[e.returncode]
+    last = Path(fork) / "tmp" / "mutants-last"
+    if last.is_dir():
+        shutil.copytree(last, out / "mutants-last", dirs_exist_ok=True)
+    return verdict
+
+
 def crowd(job, run, work, out):
     fork, bench = run.checkouts(hex_commit(job, "fork_commit"), hex_commit(job, "bench_commit"))
     exe = run.run(["cargo", "run", "--release", "--quiet", "--", "build-against", str(fork)],
@@ -307,7 +332,7 @@ def crowd(job, run, work, out):
     return "ok"
 
 
-HANDLERS = {"benchmark": benchmark, "b3sum": b3sum, "check": check, "crowd": crowd, "example": example, "test": test}
+HANDLERS = {"benchmark": benchmark, "b3sum": b3sum, "check": check, "crowd": crowd, "mutants": mutants, "example": example, "test": test}
 
 
 def power():

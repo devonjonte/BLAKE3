@@ -60,6 +60,11 @@ if ! sudo -u benchrunner -H test -x /Users/benchrunner/.cargo/bin/cargo-nextest;
     sudo -u benchrunner -H sh -c "curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C /Users/benchrunner/.cargo/bin"
 fi
 echo "benchrunner's: $(sudo -u benchrunner -H /Users/benchrunner/.cargo/bin/cargo-nextest nextest --version | head -1)"
+# cargo-mutants, which a mutants job runs (tools/mutants/check.py): the VM's version.
+if ! sudo -u benchrunner -H /Users/benchrunner/.cargo/bin/cargo mutants --version 2>/dev/null | grep -qx "cargo-mutants 27.1.0"; then
+    sudo -u benchrunner -H /Users/benchrunner/.cargo/bin/cargo install --locked --version 27.1.0 cargo-mutants
+fi
+echo "benchrunner's: $(sudo -u benchrunner -H /Users/benchrunner/.cargo/bin/cargo mutants --version)"
 
 step "the exchange folder: jobs/ yours, results/ the runner's"
 chmod 600 "$checkout/ghtokenclassic.txt"
