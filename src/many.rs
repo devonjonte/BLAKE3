@@ -736,6 +736,30 @@ mod test {
         &input[i * slot_len(len)..][..len]
     }
 
+    /// sme2_sized(len, count), exactly (BLAKE3 #219; a predicate every
+    /// build computes, whose answer only an SME2 machine acts on): sixteen
+    /// messages or more; one-block messages from ONE_BLOCK_PAD_MIN (11);
+    /// messages over a block up to a chunk from SME2_TAIL_MIN (10); 2 to 15
+    /// chunks from sme2_chunked_min, on an SME2 build alone; and one message
+    /// or more of SME2_SIZED_LEN (16 chunks) or longer.
+    #[test]
+    fn test_sme2_sized_exactly() {
+        assert!(sme2_sized(0, 16) && !sme2_sized(0, 15), "sixteen messages of any length, empty ones too; fewer empty ones never");
+        assert!(sme2_sized(BLOCK_LEN, 11) && !sme2_sized(BLOCK_LEN, 10), "one-block messages from eleven");
+        assert!(sme2_sized(1, 11) && !sme2_sized(1, 10), "a byte is a one-block message");
+        assert!(!sme2_sized(0, 11), "an empty message is no block");
+        assert!(sme2_sized(BLOCK_LEN + 1, 10) && !sme2_sized(BLOCK_LEN + 1, 9), "over a block, up to a chunk, from ten");
+        assert!(sme2_sized(CHUNK_LEN, 10) && !sme2_sized(CHUNK_LEN, 9));
+        assert!(!sme2_sized(BLOCK_LEN, 10) && sme2_sized(BLOCK_LEN, 16), "a block at ten: neither rule; sixteen: the batch rule");
+        // 2 to 15 chunks: the chunked rule on an SME2 build; elsewhere only
+        // the batch rule (sixteen) reaches them.
+        let two_chunks_min = if cfg!(blake3_sme2) { sme2_chunked_min(2 * CHUNK_LEN) } else { 16 };
+        assert!(sme2_sized(2 * CHUNK_LEN, two_chunks_min) && !sme2_sized(2 * CHUNK_LEN, two_chunks_min - 1));
+        assert!(!sme2_sized(15 * CHUNK_LEN, 1) && !sme2_sized(CHUNK_LEN + 1, 1));
+        assert!(sme2_sized(16 * CHUNK_LEN, 1) && !sme2_sized(16 * CHUNK_LEN - 1, 1), "sixteen chunks, one message: long enough alone");
+        assert!(sme2_sized(1 << 20, 1) && !sme2_sized(1 << 20, 0), "a long message, none of them: nothing");
+    }
+
     /// hash_four_at_a_time's arrangement on x86-64 (BLAKE3 #219): a count
     /// of whole-block messages that leaves a remainder of three goes to
     /// hash_many in fours and then the three with a spare lane; any other
