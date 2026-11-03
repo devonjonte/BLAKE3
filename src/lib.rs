@@ -254,6 +254,22 @@ pub(crate) enum Ran {
     Pool = 1,
     /// The call wanted SME2 and another thread held the turn.
     TurnTaken = 2,
+    /// A task's members, all of one length, ran side by side on that
+    /// length's multi-lane kernel (lanes::Task::run_equal_members).
+    EqualMembers = 4,
+    /// A task's members ran one at a time (lanes::Task::run_members).
+    MemberAlone = 8,
+    /// A batch of one-block messages ran on the kernels' table a run at a
+    /// time (many::hash_many_on's first path).
+    BlockRun = 16,
+    /// A batch's messages of 2 to 15 chunks ran across messages
+    /// (many::hash_across).
+    Across = 32,
+    /// A batch's messages ran one at a time (many::hash_long_or_single).
+    MessageAlone = 64,
+    /// A batch of messages of up to a chunk, two or more, ran on the
+    /// kernels' table a run at a time (many::hash_many_on's short path).
+    ShortRun = 128,
 }
 
 #[cfg(all(test, feature = "std"))]
