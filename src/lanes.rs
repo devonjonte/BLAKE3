@@ -1797,6 +1797,35 @@ mod test {
         );
     }
 
+    /// A stream open is what makes an idle worker spin before it parks
+    /// (sources::open, BLAKE3 #219): none open at rest; one open while a
+    /// stream runs; none again when it has finished.
+    #[test]
+    fn test_a_stream_is_what_opens_the_sources() {
+        let _ = pool();
+        assert!(!sources::open(), "at rest, nothing is open");
+        let mut digest = Hash::from([0u8; 32]);
+        crate::performance::stream(
+            crate::Mode::Plain,
+            |_: &mut [Hash]| {},
+            |s| {
+                assert!(sources::open(), "a stream open");
+                s.submit_with(
+                    64,
+                    |_, room| {
+                        room.fill(7);
+                        64
+                    },
+                    &mut digest,
+                );
+                s.finish();
+                assert!(sources::open(), "finished, open until the stream is dropped");
+            },
+        );
+        assert!(!sources::open(), "the stream finished: nothing open");
+        assert_eq!(digest, crate::convenience::hash(&[7u8; 64]));
+    }
+
     /// A task of one member runs it alone, whatever its length: the
     /// side-by-side kernels are for two or more.
     #[test]
