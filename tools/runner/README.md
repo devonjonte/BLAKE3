@@ -50,8 +50,13 @@ takes a new number.
 While a job that times runs (`benchmark`, `b3sum`, `crowd`, `example`, `check`),
 nothing else should run on the Mac, the VM included, and Activity
 Monitor stays closed (it keeps `sysmond` near a whole CPU busy: with it
-open, 170 of 219 load windows of a run read busy, closed 5 of 214). The
-Mac stays on mains power: on battery it runs more calls after a pause on
+open, 170 of 219 load windows of a run read busy, closed 5 of 214). A pi
+session at work loads the Mac too, its tools in the VM included (Zooko,
+October 17), so a session waits idle while a job times. To name the
+programs behind a run's busy windows, add `"top": true` to the job and read
+its `top.txt` at the windows' times.
+
+The Mac stays on mains power: on battery it runs more calls after a pause on
 its efficiency cores (233 of 400 against 32), and every job's
 `verdict.json` records the power state at its start and end; read it
 before trusting a job. A `test` job (the fork's suites, natively) needs

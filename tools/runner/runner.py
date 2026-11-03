@@ -28,7 +28,10 @@ calls: 0.8 against the main line before the performance API. Every run's
 samples file lands in the job's samples/.)
 
 (Any job may add "powermetrics": true: the chip's CPU, GPU, and ANE power
-every 500 ms beside it, in its results' powermetrics.txt.)
+every 500 ms beside it, in its results' powermetrics.txt. And "top": true:
+the twelve busiest processes every second beside it, each sample with its
+time, in its results' top.txt, to name the other programs a timing job's
+busy windows count.)
     {"type": "b3sum", "fork_commit": "...", "bench_commit": "...", "quick": true}
 
 (A b3sum job builds the contenders, bench-hashes' tools/b3sum-contenders.py
@@ -363,6 +366,11 @@ def power():
 POWERMETRICS = ["sudo", "-n", "/usr/bin/powermetrics", "--samplers", "cpu_power", "-i", "500", "-n", "14400"]
 assert 14400 * 0.5 >= MAX_LIMIT
 
+# The busiest processes beside a job ("top": true), every second, stopping
+# by itself after MAX_LIMIT; top's own share shows in its samples.
+TOP = ["/usr/bin/top", "-l", "7200", "-s", "1", "-o", "cpu", "-n", "12", "-stats", "pid,command,cpu,time,user"]
+assert 7200 * 1 >= MAX_LIMIT
+
 
 def process(path, results):
     out = results / f"{path.stem}.{time.strftime('%Y%m%d-%H%M%S')}"
@@ -376,26 +384,28 @@ def process(path, results):
             assert job.get("type") in HANDLERS, f"type must be one of {sorted(HANDLERS)}"
             limit = job.get("time_limit_seconds", DEFAULT_LIMIT)
             assert isinstance(limit, int) and 0 < limit <= MAX_LIMIT, f"time_limit_seconds must be 1-{MAX_LIMIT}"
-            assert isinstance(job.get("powermetrics", False), bool), "powermetrics: true or false"
-            meter = subprocess.Popen(POWERMETRICS, stdout=open(out / "powermetrics.txt", "w"), stderr=log) \
-                if job.get("powermetrics") else None
+            meters = {}
+            for name, command in [("powermetrics", POWERMETRICS), ("top", TOP)]:
+                assert isinstance(job.get(name, False), bool), f"{name}: true or false"
+                if job.get(name):
+                    meters[name] = subprocess.Popen(command, stdout=open(out / f"{name}.txt", "w"), stderr=log)
             try:
                 with tempfile.TemporaryDirectory(dir=HOME / "tmp") as work:
                     verdict["status"] = HANDLERS[job["type"]](job, Job(log, limit), Path(work), out)
             finally:
-                if meter is not None:
+                for name, meter in meters.items():
                     # sudo passes the signal on to powermetrics, which ends its
-                    # last sample and exits. A meter that outlasts 10 s is
-                    # killed and noted beside the verdict: it is no reason to
-                    # replace the job's own status (it once could, with
-                    # "error", from wait's TimeoutExpired).
+                    # last sample and exits, as top does. A meter that outlasts
+                    # 10 s is killed and noted beside the verdict: it is no
+                    # reason to replace the job's own status (it once could,
+                    # with "error", from wait's TimeoutExpired).
                     meter.send_signal(signal.SIGINT)
                     try:
                         meter.wait(timeout=10)
                     except subprocess.TimeoutExpired:
                         meter.kill()
                         meter.wait()
-                        verdict["powermetrics"] = "did not exit within 10 s of SIGINT; killed (its last samples may be missing)"
+                        verdict[name] = "did not exit within 10 s of SIGINT; killed (its last samples may be missing)"
         except TimedOut as e:
             verdict["status"] = "timed out"
             verdict["timed out"] = str(e)
