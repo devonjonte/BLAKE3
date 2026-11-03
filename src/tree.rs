@@ -193,3 +193,65 @@ impl Kernels for PlatformKernels<'_> {
         crate::hasher::parent_output(&children[0], &children[1], self.key, self.flags, self.platform).root_bytes()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use core::cell::RefCell;
+    use std::vec::Vec;
+
+    /// Kernels that hash nothing and record the room each call is handed:
+    /// root_children's arrays reach chunks and parents as their `out`.
+    struct Rooms {
+        chunks: RefCell<Vec<usize>>,
+        parents: RefCell<Vec<usize>>,
+    }
+
+    impl Kernels for Rooms {
+        fn degree(&self) -> usize {
+            SMALL
+        }
+        fn chunks(&self, input: &[u8], _: u64, out: &mut [Cv]) -> usize {
+            self.chunks.borrow_mut().push(out.len());
+            input.len().div_ceil(CHUNK_LEN)
+        }
+        fn parents(&self, children: &[Cv], out: &mut [Cv]) -> usize {
+            self.parents.borrow_mut().push(out.len());
+            children.len().div_ceil(2)
+        }
+        fn subtree(&self, _: &[u8], _: usize, _: u64, _: &mut [Cv]) -> Option<usize> {
+            None
+        }
+        fn children(&self, _: &[u8], _: usize, _: u64) -> Option<[Cv; 2]> {
+            None
+        }
+        fn chunk_root(&self, _: &[u8]) -> Cv {
+            [0; OUT_LEN]
+        }
+        fn parent_root(&self, _: &[Cv; 2]) -> Cv {
+            [0; OUT_LEN]
+        }
+    }
+
+    /// The rooms root_children hands its walk, exactly: an input of SMALL
+    /// chunks or fewer gets arrays of SMALL values and SMALL / 2, a longer
+    /// one MAX and MAX / 2, the smallest that hold every value. Larger
+    /// arrays give the same digests (only the frame and its zeroing grow),
+    /// so only the count tells (BLAKE3 #219). Where MAX is SMALL (NEON
+    /// alone), the two kinds of input get the same arrays.
+    #[test]
+    fn test_root_children_arrays_are_the_smallest_that_hold_the_walk() {
+        let input = [0u8; (SMALL + 1) * CHUNK_LEN];
+        for (chunks, rooms, parents) in [
+            (2, std::vec![SMALL], std::vec![]),
+            (SMALL, std::vec![SMALL], std::vec![SMALL / 2; 3]),
+            // Past SMALL the walk splits: SMALL chunks (the left subtree,
+            // in its own room) and one more, then their parents into MAX.
+            (SMALL + 1, std::vec![SMALL, 2 * MAX - SMALL], std::vec![MAX, MAX / 2, MAX / 2, MAX / 2]),
+        ] {
+            let k = Rooms { chunks: RefCell::new(Vec::new()), parents: RefCell::new(Vec::new()) };
+            root_children(&k, &input[..chunks * CHUNK_LEN], 0, 0);
+            assert_eq!((k.chunks.into_inner(), k.parents.into_inner()), (rooms, parents), "{chunks} chunks");
+        }
+    }
+}

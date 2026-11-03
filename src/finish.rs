@@ -75,6 +75,8 @@ impl Finish {
         let before = self.state.fetch_add(n, Ordering::SeqCst);
         if before & SLEEPING != 0 && (before & !SLEEPING) + n == self.published.load(Ordering::SeqCst) {
             if let Some(owner) = &*self.owner.lock().unwrap() {
+                #[cfg(all(test, not(shuttle)))]
+                tests::UNPARKS.with(|u| u.set(u.get() + 1));
                 owner.unpark();
             }
         }
@@ -109,6 +111,38 @@ impl Finish {
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    std::thread_local! {
+        /// The owner unparks finished() made on this thread.
+        pub(super) static UNPARKS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+    }
+
+    /// finished() unparks the owner only when it sleeps and the count is
+    /// complete. Any other unpark is a system call a piece for a wake the
+    /// owner sleeps through, which no result shows, so only the count tells
+    /// (BLAKE3 #219).
+    #[test]
+    fn finished_unparks_only_a_sleeper_on_the_last_piece() {
+        let finish = Finish::new();
+        finish.own();
+        finish.published.store(3, Ordering::SeqCst);
+        UNPARKS.with(|u| u.set(0));
+        // No sleeper: the last piece wakes nobody.
+        for _ in 0..3 {
+            finish.finished(1);
+        }
+        assert_eq!(UNPARKS.with(|u| u.get()), 0, "no sleeper, no unpark");
+        // A sleeper (its bit, as wait() sets it): only the last piece wakes it.
+        finish.published.store(6, Ordering::SeqCst);
+        finish.state.fetch_or(SLEEPING, Ordering::SeqCst);
+        finish.finished(1);
+        finish.finished(1);
+        assert_eq!(UNPARKS.with(|u| u.get()), 0, "a sleeper is not woken before its count is complete");
+        finish.finished(1);
+        assert_eq!(UNPARKS.with(|u| u.get()), 1, "the last piece wakes the sleeper once");
+        // The token this thread was handed, taken so it outlives no test.
+        thread::park();
+    }
 
     /// The handshake files use one ordering, SeqCst, the one the model
     /// checker assumes; this fires on any other, with the reason above.

@@ -578,3 +578,58 @@ impl Zeroize for HasherCore {
         cv_stack.zeroize();
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn painted() -> std::vec::Vec<u8> {
+        let mut input = std::vec![0u8; 3 * STAGE_LEN];
+        crate::test::paint_test_input(&mut input);
+        input
+    }
+
+    /// A fresh hasher's first chunk and a whole group from a 16 KiB
+    /// boundary go to the core unstaged; shorter updates stage up to the
+    /// next boundary, where the stage goes to the core. Staging gives the
+    /// same digest either way, so only `staged` tells (BLAKE3 #219).
+    #[test]
+    fn test_update_stages_exactly_what_it_must() {
+        let input = painted();
+        let mut h = Hasher::new(Mode::Plain);
+        for (end, staged) in [(CHUNK_LEN, 0), (CHUNK_LEN + 100, 100), (STAGE_LEN, 0), (2 * STAGE_LEN, 0)] {
+            let from = h.count() as usize;
+            h.update(&input[from..end]);
+            assert_eq!(h.staged, staged, "after {end} bytes");
+        }
+        assert_eq!(h.finalize(), crate::convenience::hash(&input[..2 * STAGE_LEN]));
+    }
+
+    /// A hasher started 8 chunks into the message (the tests' subtrees;
+    /// it holds 8) stages up to the message's 16 KiB boundary, its own
+    /// end, not to 16 chunks of its own.
+    #[test]
+    fn test_update_stages_to_the_message_boundary_from_an_offset() {
+        let input = painted();
+        let mut h = Hasher::new(Mode::Plain);
+        h.core.set_input_offset(8 * CHUNK_LEN as u64);
+        h.update(&input[..CHUNK_LEN]);
+        h.update(&input[CHUNK_LEN..8 * CHUNK_LEN]);
+        assert_eq!(h.staged, 0, "the stage went to the core at the message's boundary");
+    }
+
+    /// With `hold`, a stage that fills a whole group from the message's
+    /// start is kept (held_group) and the rest of the input handed back,
+    /// for the caller to hash the group beside other hashers' groups.
+    #[test]
+    fn test_gather_part_holds_a_whole_group() {
+        let input = painted();
+        let mut h = Hasher::new(Mode::Plain);
+        h.update(&input[..STAGE_LEN]);
+        h.update(&input[STAGE_LEN..STAGE_LEN + 100]);
+        let rest = h.gather_part(&input[STAGE_LEN + 100..2 * STAGE_LEN + 50], false, true);
+        assert_eq!(rest.len(), 50, "the rest handed back");
+        let (counter, bytes) = h.held_group().expect("a whole group held");
+        assert_eq!((counter, &bytes[..]), ((STAGE_LEN / CHUNK_LEN) as u64, &input[STAGE_LEN..2 * STAGE_LEN]));
+    }
+}

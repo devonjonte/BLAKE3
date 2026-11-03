@@ -272,6 +272,33 @@ pub(crate) fn ran(kind: Ran) {
     let _ = kind;
 }
 
+/// The work the tests count, for a mutant that only costs work (BLAKE3
+/// #219): an exact count on the calling thread, the same on every machine,
+/// where the digests are the same either way.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub(crate) enum Counted {
+    /// A round of hash_each_on's shared lanes: one hash_many call over the
+    /// k-th chunk of every message that has one.
+    EachRound = 0,
+}
+
+#[cfg(all(test, feature = "std"))]
+std::thread_local! {
+    /// This thread's counts since the test last cleared them, by Counted.
+    pub(crate) static COUNTED: [core::cell::Cell<u64>; 1] = const { [core::cell::Cell::new(0)] };
+}
+
+/// Count one of `what`: in the tests' record, and nothing in any other
+/// build.
+#[inline(always)]
+#[allow(dead_code)]
+pub(crate) fn counted(what: Counted) {
+    #[cfg(all(test, feature = "std"))]
+    COUNTED.with(|c| c[what as usize].set(c[what as usize].get() + 1));
+    let _ = what;
+}
+
 #[cfg(all(test, feature = "std"))]
 std::thread_local! {
     /// The assembly entry points this thread's calls ran since the test
