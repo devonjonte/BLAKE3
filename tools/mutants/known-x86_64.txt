@@ -62,15 +62,12 @@ src/lanes.rs	replace << with >> in sources::Source::unregister	1	speed: the sour
 src/lanes.rs	replace <impl Drop for AbortOnUnwind>::drop with ()	1	runs only when the caller unwinds mid-job, which ends the process; a test reaching it would abort
 src/lanes.rs	replace > with < in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace > with < in sme2_serve	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/lanes.rs	replace > with < in sources::open	1	speed: whether an idle worker spins (a stream is open) or parks; the spin is bounded by SPIN and work reaches a parked worker through the wakes
 src/lanes.rs	replace > with == in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace > with == in sme2_serve	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/lanes.rs	replace > with == in sources::open	1	speed: whether an idle worker spins (a stream is open) or parks; the spin is bounded by SPIN and work reaches a parked worker through the wakes
 src/lanes.rs	replace > with >= in Task::run	1	equivalent: a subtree task at counter zero is more than one chunk (the pool splits at MIN_SPLIT_LEN and above), so len == CHUNK_LEN never reaches this branch
 src/lanes.rs	replace > with >= in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace > with >= in sme2_serve	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace > with >= in sources::Source::wake_for_waiting	1	the pool's scheduling: whether a waiting task wakes a parked worker; the caller takes what waits meanwhile
-src/lanes.rs	replace > with >= in sources::open	1	speed: whether an idle worker spins (a stream is open) or parks; the spin is bounded by SPIN and work reaches a parked worker through the wakes
 src/lanes.rs	replace >= with < in poll_pause	1	speed: how a caller polls before it sleeps; the sleep and its wake are the finish handshake's, under Shuttle (tests/shuttle_finish.rs)
 src/lanes.rs	replace >= with < in sources::Source::publish	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
 src/lanes.rs	replace >= with < in sources::run_one	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
@@ -80,10 +77,6 @@ src/lanes.rs	replace poll_pause with ()	1	speed: how a caller polls before it sl
 src/lanes.rs	replace prefix_for -> usize with 0	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace prefix_for -> usize with 1	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace sme2_main with ()	1	another machine's code: the SME2 thread runs only where pool.sme2 is set (an SME2 build on a CPU with it); on x86 it is never started
-src/lanes.rs	replace sources::closed with ()	1	speed: whether an idle worker spins (a stream is open) or parks; the spin is bounded by SPIN and work reaches a parked worker through the wakes
-src/lanes.rs	replace sources::open -> bool with false	1	speed: whether an idle worker spins (a stream is open) or parks; the spin is bounded by SPIN and work reaches a parked worker through the wakes
-src/lanes.rs	replace sources::open -> bool with true	1	speed: whether an idle worker spins (a stream is open) or parks; the spin is bounded by SPIN and work reaches a parked worker through the wakes
-src/lanes.rs	replace sources::opened with ()	1	speed: whether an idle worker spins (a stream is open) or parks; the spin is bounded by SPIN and work reaches a parked worker through the wakes
 src/lanes.rs	replace sources::take_stream_task -> Option<Task> with None	1	another machine's code: the SME2 thread runs only where pool.sme2 is set (an SME2 build on a CPU with it); on x86 it is never started
 src/lanes.rs	replace spin_for_work -> bool with false	1	speed: how long an idle worker spins before it parks (no effect on results)
 src/lanes.rs	replace wake_sme2 with ()	1	another machine's code: the SME2 thread runs only where pool.sme2 is set (an SME2 build on a CPU with it); on x86 it is never started
@@ -156,18 +149,13 @@ src/lib.rs	replace | with ^ in hash_one_chunk_root	1	same code: every test binar
 src/lib.rs	replace | with ^ in ran	1	test-only record of which kernels ran; on x86 nothing reads it (AArch64's kernel-coverage test does)
 src/lib.rs	replace || with && in batch_after_pause	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace || with && in compress_chunks_parallel	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	delete match arm 3 in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
-src/many.rs	replace != with == in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace % with + in hash_blocks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace % with + in hash_chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace % with + in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace % with + in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace % with / in hash_blocks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace % with / in hash_chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace % with / in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace % with / in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace && with || in chunked	1	SME2 only: cfg!(blake3_sme2) is false on x86, so chunked() is false whatever the rest
-src/many.rs	replace && with || in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace && with || in hash_many_on	4	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace && with || in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace && with || in hash_run_short	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -178,7 +166,6 @@ src/many.rs	replace * with + in hash_many_on	2	same code: every test binary hash
 src/many.rs	replace * with + in hash_two_chunks	4	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace * with / in chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace * with / in hash_chunked	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace * with / in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace * with / in hash_many_on	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace * with / in hash_two_chunks	4	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace + with * in chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -193,7 +180,6 @@ src/many.rs	replace + with - in hash_run_padded	1	same code: every test binary h
 src/many.rs	replace + with - in hash_two_chunks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace - with + in hash_blocks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace - with + in hash_chunked	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace - with + in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace - with + in hash_two_chunks	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace - with / in hash_blocks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace - with / in hash_chunked	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -209,7 +195,6 @@ src/many.rs	replace > with == in hash_run	1	same code: every test binary hashes 
 src/many.rs	replace > with == in sme2_sized	2	speed: moves a threshold between equally correct paths
 src/many.rs	replace > with >= in hash_blocks	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace > with >= in hash_chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	replace > with >= in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
 src/many.rs	replace > with >= in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace > with >= in sme2_sized	2	speed: moves a threshold between equally correct paths
 src/many.rs	replace >= with < in hash_blocks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
