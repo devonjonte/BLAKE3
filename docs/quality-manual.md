@@ -145,7 +145,12 @@ contract's `should_panic`, a hang, a shape no mutant models).
 the unmutated one, every test binary alike, cannot change what runs:
 the check compares each binary's loaded bytes (`code_hash.py`), decides
 it without a test, and lists it as "same code". That covers code for
-another architecture and changes the optimizer erases. Every other
+another architecture and changes the optimizer erases. A survivor
+whose tested build differs gets a second look (`release_same.py`): a
+release build with the lines the mutant deletes left blank, since a
+deleted line moves every later panic's location in the binary, and the
+tested builds' incremental optimization keeps code a release build
+drops. Hashing alike there, it is same code too. Every other
 mutant a test survives is
 listed with its reason in `tools/mutants/known-aarch64.txt`: code for
 another machine (x86, a CPU without SME2 or the SHA-3 extension, one
