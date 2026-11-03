@@ -161,6 +161,15 @@ overlap). Two groups stay open: the thread pool's and the stream's
 scheduling under interleavings the tests leave to chance (Loom would
 force them). The assembly kernels are the proofs'.
 
+A mutant that changes only speed is work to finish (Zooko, November 3;
+BLAKE3 #219). Either a test catches it at once and the same way on every
+machine, counting the work it changes (reads, ring bytes, entries,
+tasks, bytes prefetched, threads woken) with no clock, or its code goes,
+once the regression check reads level without it. Where the caller's
+own state doesn't show the work, a counter that exists only in test
+builds counts it on the caller's thread. A mutant that changes nothing
+this machine runs stays listed with its reason.
+
 `tools/mutants/check.py` reruns every mutant, reruns alone any whose
 outcome differs from the list (so a test that fails by chance, under
 load, decides nothing), and fails on a survivor not listed, a listed one
