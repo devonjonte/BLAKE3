@@ -8,7 +8,7 @@ src/lanes.rs	replace + with * in sources::Source::publish_job	1	a hang the test 
 src/lanes.rs	replace + with * in sources::Source::take	1	a hang the test lanes::test::test_hash_many_pool_agrees showed: the claimed count runs away from the published; the caller waits for a piece nobody owns
 src/lanes.rs	replace + with - in sources::Source::publish_job	1	a hang the test lanes::test::test_hash_many_pool_agrees showed: the job's pieces are miscounted; the caller waits for pieces that do not exist
 src/lanes.rs	replace + with - in sources::Source::take	1	a hang the test each::test::test_hash_each_multithreaded showed: the claimed count runs backward; the caller waits for a piece nobody owns
-src/lanes.rs	replace += with *= in hash_each	1	a hang the test each::test::test_hash_each_multithreaded showed: the cut's byte count stays 0; pieces are cut forever
+src/lanes.rs	replace += with *= in cut_items	1	a hang the test each::test::test_hash_each_multithreaded showed: the cut's byte count stays 0; pieces are cut forever
 src/lanes.rs	replace - with + in all_workers_parked	1	a test-only hook (__all_workers_parked): a no that never turns yes, so the stream tests wait for every worker parked, forever
 src/lanes.rs	replace - with / in all_workers_parked	1	a test-only hook (__all_workers_parked): a no that never turns yes, so the stream tests wait for every worker parked, forever
 src/lanes.rs	replace - with / in sources::find	1	find's own loop never empties `active`: even the single-threaded test_find_reaches_every_registered_source never returns (gate16's logs)
