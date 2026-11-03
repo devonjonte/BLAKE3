@@ -49,11 +49,7 @@ src/lanes.rs	replace + with * in sources::Source::publish	1	a scheduling choice:
 src/lanes.rs	replace + with - in sources::Source::publish	1	the pool's scheduling: when a waiting task wakes a worker; the caller takes what waits
 src/lanes.rs	replace + with - in sources::Source::publish_job	1	another architecture's: `own`, the caller's own pieces, is nonzero only where the SME2 thread takes a prefix (cut_with_prefix on AArch64); on x86 own is 0 and base - 0 is base, so claimed is where it was. On AArch64 the change strands the job (the old hangs.txt had it)
 src/lanes.rs	replace - with + in Pool::run_job	2	AArch64 only: `pieces - own`, where own, the caller's own pieces, is nonzero only with the SME2 thread's prefix; on x86-64 own is 0 and the sum is the difference (the wake count itself is tested, test_a_job_wakes_one_worker_a_piece_past_its_own)
-src/lanes.rs	replace - with + in Pool::wake_for	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
-src/lanes.rs	replace - with + in initialize	1	equivalent: Park::new's count only sizes its tables; slots beyond the workers hurt nothing
 src/lanes.rs	replace - with + in sources::Source::publish	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
-src/lanes.rs	replace - with / in Pool::wake_for	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
-src/lanes.rs	replace - with / in initialize	1	equivalent: Park::new's count only sizes its tables; slots beyond the workers hurt nothing
 src/lanes.rs	replace / with % in sources::Source::take	1	the pool's scheduling: how many of a job's pieces one claim takes (the claimed range stays consistent)
 src/lanes.rs	replace < with <= in sources::Source::wait	1	speed: how long a caller spins before it sleeps, a boundary in elapsed time a clock crosses once (no effect on results)
 src/lanes.rs	replace < with == in sources::Source::wait	1	speed: how a caller polls before it sleeps; the sleep and its wake are the finish handshake's, under Shuttle (tests/shuttle_finish.rs)
@@ -220,9 +216,7 @@ src/many.rs	replace | with ^ in neon_plans_last_len	1	same code: every test bina
 src/many.rs	replace | with ^ in subtree_across	2	equivalent: | and ^ agree on flag bits that never overlap
 src/many.rs	replace || with && in hash_many_on	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/pair.rs	replace | with ^ in parent	1	equivalent: | and ^ agree on flag bits that never overlap
-src/park.rs	replace - with + in Park::pay_owed	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
-src/park.rs	replace - with / in Park::pay_owed	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
-src/park.rs	replace > with >= in Park::wake_for	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
+src/park.rs	replace > with >= in Park::wake_for	1	equivalent: `later >= 0` adds `later` to the owed when it is 0, which is adding nothing; the `if` keeps an atomic add off the path of a job that owes none
 src/platform.rs	delete ! in Sme2Turn::take	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/platform.rs	delete ! in sme2_detect_uncached	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/platform.rs	delete match arm 1 in sme2_detected	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
