@@ -607,6 +607,12 @@ pub fn sse41_detected() -> bool {
 #[cfg(all(blake3_neon, feature = "std"))]
 #[inline]
 pub(crate) fn counter() -> u64 {
+    // The tests' clock, where a test set one: a pause is then exact, never
+    // left to the scheduler (BLAKE3 #219).
+    #[cfg(test)]
+    if let Some(now) = TEST_COUNTER.with(|c| c.get()) {
+        return now;
+    }
     let now: u64;
     // Sound: readable at EL0 on every AArch64 OS this crate builds the
     // hybrids for (Linux, macOS).
@@ -644,7 +650,15 @@ pub(crate) fn prefetch_code((start, end): (usize, usize)) {
     debug_assert!(start < end && end - start < 64 * 1024, "a kernel's code");
     // Four lines a step (past `end` by up to three: harmless).
     let mut line = start;
+    #[cfg(test)]
+    let mut steps = 0;
     while line < end {
+        #[cfg(test)]
+        {
+            steps += 1;
+            // A loop that never ends (a mutant's) fails here, at once, not by the clock.
+            assert!(steps < 1 << 16, "prefetch_code without end");
+        }
         // Sound: a prefetch never faults, whatever the address.
         unsafe {
             core::arch::asm!(
@@ -658,6 +672,22 @@ pub(crate) fn prefetch_code((start, end): (usize, usize)) {
         };
         line += 512;
     }
+    #[cfg(test)]
+    PREFETCHED.with(|p| {
+        let mut p = p.borrow_mut();
+        // A plan that never ends (a mutant's) fails here, not by taking every byte of memory.
+        assert!(p.len() < 100_000, "prefetch_code called without end");
+        p.push(((start, end), steps));
+    });
+}
+
+#[cfg(all(test, blake3_neon, feature = "std"))]
+std::thread_local! {
+    /// The tests' clock for counter(), in its ticks, where a test set one.
+    pub(crate) static TEST_COUNTER: core::cell::Cell<Option<u64>> = const { core::cell::Cell::new(None) };
+    /// The tests' record of prefetch_code on this thread since they last
+    /// cleared it: each range, and the steps of four lines it took.
+    pub(crate) static PREFETCHED: core::cell::RefCell<std::vec::Vec<((usize, usize), usize)>> = const { core::cell::RefCell::new(std::vec::Vec::new()) };
 }
 
 // The little-endian words of a block or a key, and back: 4-byte chunks
