@@ -234,8 +234,8 @@ status from that run in a second, so a change to the Rust, the build or
 the pages never waits on the proofs. A failure there is fixed first, before the next change
 to a kernel. After a candidate lands, bench-hashes pins its contender to
 the new tip (`blake3-servil`'s `rev` in `Cargo.toml`, the full hash).
-Its separate `clocks` pin fixes the instrument used on both sides of a
-comparison. Pull requests are welcome against `servil`; say in yours
+The instrument, `clocks`, is bench-hashes' own, so a result's bench
+commit names it on both sides of a comparison. Pull requests are welcome against `servil`; say in yours
 which machines you measured on.
 
 ## Releases

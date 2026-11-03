@@ -62,9 +62,8 @@ SUITE = ["--release", "--lib", "--tests", "--features", "serde,zeroize"]
 EVERYTHING = re.compile(r"^(c/|build\.rs$|Cargo\.toml$|Cargo\.lock$|\.cargo/|\.config/|src/.*\.(S|c|h)$)")
 # Crates and suites of their own, which the library's tests never run:
 # a change there is no change to them. (capi and test_vectors have their
-# own suites, run by CONTRIBUTING's commands; clocks is a dev-dependency
-# of the examples alone.)
-APART = re.compile(r"^(clocks/|capi/|test_vectors/)")
+# own suites, run by CONTRIBUTING's commands.)
+APART = re.compile(r"^(capi/|test_vectors/)")
 
 
 def git(*args, text=True):
