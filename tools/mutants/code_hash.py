@@ -51,8 +51,11 @@ def loaded_bytes(path):
     return b"".join(out)
 
 
-def code_hash(path):
-    b3sum = os.environ["MUTANTS_B3SUM"]
+def code_hash(path, b3sum=None):
+    """The hash of what the loader maps of `path`, by `b3sum` (the
+    official one; MUTANTS_B3SUM in this process's environment when none
+    is given, as test-runner runs it)."""
+    b3sum = b3sum or os.environ["MUTANTS_B3SUM"]
     out = subprocess.run([b3sum, "--no-names"], input=loaded_bytes(path), capture_output=True, check=True).stdout
     digest = out.decode().strip()
     assert len(digest) == 64, f"b3sum gave {digest!r}"

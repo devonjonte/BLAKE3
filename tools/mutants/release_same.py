@@ -68,7 +68,9 @@ def build(tree, target, build_args, env):
             if m.get("reason") == "compiler-artifact" and m.get("executable"):
                 exes.append(m["executable"])
     assert exes, "a release build with no test binary"
-    return {os.path.basename(e).rsplit("-", 1)[0]: code_hash.code_hash(e) for e in exes}
+    # The b3sum is the build's environment's (check.py's), which is not
+    # this process's.
+    return {os.path.basename(e).rsplit("-", 1)[0]: code_hash.code_hash(e, env["MUTANTS_B3SUM"]) for e in exes}
 
 
 def clean(tree):
