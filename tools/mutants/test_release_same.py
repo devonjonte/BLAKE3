@@ -90,7 +90,11 @@ class Confirm(unittest.TestCase):
         subprocess.run([*git, "add", "-A"], check=True)
         subprocess.run([*git, "commit", "-qm", "fixture"], check=True)
         cls.target = os.path.join(cls.dir, "target")
+        # The build's environment names the b3sum; this process's does not
+        # (check.py runs confirm from a process that never set it, and the
+        # first whole run after #220 died there: KeyError, 42 minutes in).
         cls.env = dict(os.environ)
+        cls.b3sum = os.environ.pop("MUTANTS_B3SUM")
         foreign = LIB.replace("    let y = x + 1;\n    let z = y * 2;\n    z - 3\n", "    0 /* ~ changed by cargo-mutants ~ */\n")
         changed = LIB.replace("    v[i]\n", "    v[0] /* ~ changed by cargo-mutants ~ */\n")
         cls.places = [
@@ -102,6 +106,7 @@ class Confirm(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        os.environ["MUTANTS_B3SUM"] = cls.b3sum
         shutil.rmtree(cls.dir)
 
     def test_compiled_out_lines_deleted_are_same_code(self):

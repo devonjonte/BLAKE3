@@ -148,7 +148,11 @@ mod tests {
     /// checker assumes; this fires on any other, with the reason above.
     #[test]
     fn every_atomic_in_the_handshake_files_is_seqcst() {
-        for (name, text) in [("finish.rs", include_str!("finish.rs")), ("park.rs", include_str!("park.rs"))] {
+        // Read at run time, not embedded (include_str!), so the test binary
+        // holds none of the files' text: an embedded copy changed with every
+        // mutant of them, and code_hash.py found none same code (#219).
+        for name in ["finish.rs", "park.rs"] {
+            let text = std::fs::read_to_string(std::format!("{}/src/{name}", env!("CARGO_MANIFEST_DIR"))).expect("the file, beside the crate's manifest");
             for (n, line) in text.lines().enumerate() {
                 if line.contains("Ordering::") && !line.contains("Ordering::SeqCst") && !line.trim_start().starts_with("//") {
                     panic!("{name}:{}: {} (every atomic here is SeqCst: see finish.rs's head)", n + 1, line.trim());
