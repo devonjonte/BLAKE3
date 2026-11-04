@@ -70,7 +70,7 @@ fn build_sse41_avx2_assembly() {
     // difference themselves).
     build.file("c/blake3_sse41_x86-64_unix.S");
     build.file("c/blake3_avx2_x86-64_unix.S");
-    // The fork's own kernels (the pass with a partial chunk, the chunk root
+    // BLAKE3-Servil's own kernels (the pass with a partial chunk, the chunk root
     // in one call).
     build.file("c/blake3_partial_x86-64_unix.S");
     build.file("c/blake3_chunk_root_x86-64_unix.S");

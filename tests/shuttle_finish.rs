@@ -13,7 +13,7 @@
 //! while the bit is set unparks it. A schedule where every thread is
 //! blocked is a deadlock Shuttle reports, which is the failure a lost
 //! wake would be. (This test first ran under Loom, which does not model
-//! SeqCst's total order; the fork's handshakes are under one tool now,
+//! SeqCst's total order; BLAKE3-Servil's handshakes are under one tool now,
 //! Shuttle: Zooko, October 23.)
 #![cfg(shuttle)]
 

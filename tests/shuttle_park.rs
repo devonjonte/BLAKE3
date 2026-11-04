@@ -5,7 +5,7 @@
 //!     RUSTFLAGS="--cfg shuttle" cargo test --release --test shuttle_park
 //!
 //! Without the cfg it compiles to nothing. Shuttle explores schedules under
-//! sequential consistency, which SeqCst gives on every target the fork
+//! sequential consistency, which SeqCst gives on every target BLAKE3-Servil
 //! builds for, and models park and unpark; a lost wake (a worker parked
 //! with work published and no one to wake it) is a deadlock it reports,
 //! and a schedule it finds is reproducible from its seed.

@@ -801,7 +801,7 @@ fn test_serde() {
     assert_eq!(hash_from_bytestring_cbor, hash);
 }
 
-// The fork's unsafe paths on small inputs: the batch tables and padded
+// BLAKE3-Servil's unsafe paths on small inputs: the batch tables and padded
 // lanes of many.rs, and the pool's jobs from concurrent callers. Each
 // against crate::convenience::hash().
 #[cfg(feature = "std")]

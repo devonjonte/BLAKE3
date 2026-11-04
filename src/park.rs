@@ -12,7 +12,7 @@
 //! in the one total order of SeqCst operations one of the two sees the
 //! other: the worker sees the work and does not park, or the publisher
 //! sees the bit and wakes it. That order is what the hardware gives SeqCst
-//! on every target the fork builds for, and what Shuttle models (Loom
+//! on every target BLAKE3-Servil builds for, and what Shuttle models (Loom
 //! does not: data branch, 2026-10-23/model-checkers).
 
 use super::park_sync::{AtomicU64, AtomicUsize, OnceLock, Ordering, thread};
