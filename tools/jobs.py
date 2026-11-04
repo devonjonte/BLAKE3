@@ -4,6 +4,7 @@
     python3 tools/jobs.py start NAME -- COMMAND...   run COMMAND as job NAME
     python3 tools/jobs.py status [NAME]              running or ended, and the log's tail
     python3 tools/jobs.py stop NAME|PID              stop it and every process it started
+    python3 tools/jobs.py find TEXT                  the processes whose command line holds TEXT
 
 A job runs in a session of its own (its own process group), with its
 output in tmp/jobs/NAME.log and its process ID and start time in
@@ -15,9 +16,16 @@ process (one did, and `stop` would have ended it).
 its leader, waits up to 10 s, then sends KILL to what remains. It never
 matches processes by name (as pkill -f does, which can match the shell
 that runs it), and it refuses to stop itself or any process it descends
-from. A raw PID stops that process's tree the same way. An ended process
-whose parent is gone can linger as a zombie (ps state Z: the VM's PID 1
-reaps none); it holds nothing, and this tool counts it as ended.
+from. A raw PID stops that process's tree the same way. An ended
+process whose parent is gone can linger as a zombie (ps state Z: the
+VM's PID 1 reaps none); it holds nothing, and this tool counts it as
+ended.
+
+`find` lists processes by their command line, for the PID to stop: it
+never lists itself or a process it descends from, the shell that runs it
+among them (pgrep -f lists that shell, whose command holds the pattern
+too). The VM refuses pkill, pgrep and killall (vm/setup.sh), at Zooko's
+request: matching by name has ended the shell running it many times.
 
 Why and when to use it: AGENTS.md, "The VM" (BLAKE3-Servil's AGENTS.md).
 """
@@ -158,6 +166,23 @@ def stop(target):
     sys.exit(f"jobs: still alive after KILL: {sorted(victims)}")
 
 
+def find(text):
+    """Each process whose command line holds `text` (a literal string),
+    but this tool and the processes it descends from: its PID, when it
+    started, and its command line."""
+    table = processes()
+    mine = ancestors(table)
+    out = subprocess.run(["ps", "-A", "-o", "pid=,args="], capture_output=True, text=True, check=True).stdout
+    found = 0
+    for line in out.split("\n"):
+        pid, _, args = line.strip().partition(" ")
+        if pid.isdigit() and int(pid) not in mine and text in args and alive(int(pid)):
+            print(f"{pid}\t{started(int(pid))}\t{args.strip()}")
+            found += 1
+    if not found:
+        print(f"jobs: no process's command line holds {text!r}")
+
+
 def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
@@ -174,6 +199,9 @@ def main():
     elif command == "stop":
         assert len(rest) == 1, "stop NAME|PID"
         stop(rest[0])
+    elif command == "find":
+        assert len(rest) == 1 and rest[0], "find TEXT"
+        find(rest[0])
     else:
         sys.exit(__doc__)
 
