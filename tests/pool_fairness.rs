@@ -24,9 +24,29 @@ use std::time::{Duration, Instant};
 const BOUND: f64 = 1.5;
 const RUN: Duration = Duration::from_secs(1);
 
+/// The CPU the calling thread runs on (Linux; None elsewhere): the
+/// callers' cores beside a failed ratio, since on a chip with two kinds
+/// of core a caller on the slower kind completes fewer calls of its own
+/// work whatever the pool does (Sam Shackleton, #215).
+fn current_cpu() -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn sched_getcpu() -> i32;
+        }
+        // Sound: a plain libc call with no arguments.
+        let cpu = unsafe { sched_getcpu() };
+        return (cpu >= 0).then_some(cpu as usize);
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
 /// Two callers of `call`, each built from `make(who)`, free-running for RUN
-/// from one moment: the more calls completed over the fewer.
-fn share<T: Send + 'static>(make: impl Fn(usize) -> T + Send + Sync + 'static, call: impl Fn(&T) + Send + Sync + 'static) -> f64 {
+/// from one moment: the more calls completed over the fewer, and the CPUs
+/// each caller's thread was seen on (one in ten calls), in order of first
+/// sight.
+fn share<T: Send + 'static>(make: impl Fn(usize) -> T + Send + Sync + 'static, call: impl Fn(&T) + Send + Sync + 'static) -> (f64, [Vec<usize>; 2]) {
     let make = Arc::new(make);
     let call = Arc::new(call);
     let counts: Arc<[AtomicUsize; 2]> = Arc::new([AtomicUsize::new(0), AtomicUsize::new(0)]);
@@ -36,21 +56,31 @@ fn share<T: Send + 'static>(make: impl Fn(usize) -> T + Send + Sync + 'static, c
             let (make, call, counts, go) = (make.clone(), call.clone(), counts.clone(), go.clone());
             std::thread::spawn(move || {
                 let input = make(who);
+                let mut cpus = Vec::new();
                 go.wait();
                 let end = Instant::now() + RUN;
                 while Instant::now() < end {
                     call(&input);
-                    counts[who].fetch_add(1, Ordering::Relaxed);
+                    let n = counts[who].fetch_add(1, Ordering::Relaxed);
+                    if n % 10 == 0 {
+                        if let Some(cpu) = current_cpu() {
+                            if !cpus.contains(&cpu) {
+                                cpus.push(cpu);
+                            }
+                        }
+                    }
                 }
+                cpus
             })
         })
         .collect();
-    for h in handles {
-        h.join().unwrap();
+    let mut seen: [Vec<usize>; 2] = [Vec::new(), Vec::new()];
+    for (who, h) in handles.into_iter().enumerate() {
+        seen[who] = h.join().unwrap();
     }
     let (a, b) = (counts[0].load(Ordering::Relaxed), counts[1].load(Ordering::Relaxed));
     assert!(a.min(b) > 0, "each caller completed some calls: {a} and {b}");
-    a.max(b) as f64 / a.min(b) as f64
+    (a.max(b) as f64 / a.min(b) as f64, seen)
 }
 
 fn blocks(len: usize, seed: u8) -> Vec<Block> {
@@ -69,13 +99,18 @@ fn two_callers_share_the_pool() {
         return;
     }
     let len = 16 << 20;
-    let messages = share(
+    let (messages, cpus) = share(
         move |who| blocks(len, who as u8),
         move |b| {
             std::hint::black_box(hash_multithreaded(Mode::Plain, b, len));
         },
     );
-    assert!(messages <= BOUND, "16 MiB messages: one caller completed {messages:.2} times the other's calls");
+    assert!(
+        messages <= BOUND,
+        "16 MiB messages: one caller completed {messages:.2} times the other's calls; the callers ran on CPUs {:?} and {:?}",
+        cpus[0],
+        cpus[1]
+    );
 
     const CLASSES: &[(usize, usize)] = &[
         (1, 24),
@@ -98,7 +133,7 @@ fn two_callers_share_the_pool() {
     let lengths: Vec<usize> = CLASSES.iter().flat_map(|&(n, l)| std::iter::repeat_n(l, n)).collect();
     let order: Arc<Vec<usize>> = Arc::new((0..2048).map(|j| lengths[j * 389 % 2048]).collect());
     let o = order.clone();
-    let collections = share(
+    let (collections, cpus) = share(
         move |who| o.iter().enumerate().map(|(i, &l)| (blocks(l, (i + who) as u8), l)).collect::<Vec<_>>(),
         |items: &Vec<(Vec<Block>, usize)>| {
             let refs: Vec<(&[Block], usize)> = items.iter().map(|(b, l)| (&b[..], *l)).collect();
@@ -107,5 +142,10 @@ fn two_callers_share_the_pool() {
             std::hint::black_box(&out);
         },
     );
-    assert!(collections <= BOUND, "collections: one caller completed {collections:.2} times the other's calls");
+    assert!(
+        collections <= BOUND,
+        "collections: one caller completed {collections:.2} times the other's calls; the callers ran on CPUs {:?} and {:?}",
+        cpus[0],
+        cpus[1]
+    );
 }
