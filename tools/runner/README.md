@@ -64,9 +64,11 @@ programs behind a run's busy windows, add `"top": true` to the job and read
 its `top.txt` at the windows' times.
 
 The Mac stays on mains power: on battery it runs more calls after a pause on
-its efficiency cores (233 of 400 against 32), and every job's
-`verdict.json` records the power state at its start and end; read it
-before trusting a job. A `test` job (BLAKE3-Servil's suites, natively) needs
+its efficiency cores (233 of 400 against 32). So the runner refuses a job
+that times when the Mac is on battery (its status says so: plug in and
+queue it again), and a job whose power leaves mains on the way ends with
+a status that says its results are no evidence; every job's `verdict.json`
+records the power state at its start and end. A `test` job (BLAKE3-Servil's suites, natively) needs
 no quiet machine.
 
 A direct A/B is four `benchmark` jobs, old new new old, back to back,

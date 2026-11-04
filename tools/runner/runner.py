@@ -341,6 +341,12 @@ def crowd(job, run, work, out):
     return "ok"
 
 
+# The jobs that time (README, "Running a job"): on mains power alone. On
+# battery the Mac runs another machine's speeds (more calls on the
+# efficiency cores, job 351), so such a job is refused before it runs, and
+# one whose power leaves mains on the way says so in its status.
+TIMED = {"benchmark", "b3sum", "crowd", "example", "check"}
+
 HANDLERS = {"benchmark": benchmark, "b3sum": b3sum, "check": check, "crowd": crowd, "mutants": mutants, "example": example, "test": test}
 
 
@@ -382,6 +388,9 @@ def process(path, results):
             job = json.loads(path.read_text())
             verdict["type"] = job.get("type")
             assert job.get("type") in HANDLERS, f"type must be one of {sorted(HANDLERS)}"
+            on_mains = lambda state: state.startswith("AC Power")
+            assert job["type"] not in TIMED or on_mains(verdict["power at start"]), \
+                f"a {job['type']} job times, so it runs on mains power alone; the Mac is on {verdict['power at start']}: plug it in and queue the job again"
             limit = job.get("time_limit_seconds", DEFAULT_LIMIT)
             assert isinstance(limit, int) and 0 < limit <= MAX_LIMIT, f"time_limit_seconds must be 1-{MAX_LIMIT}"
             meters = {}
@@ -416,6 +425,8 @@ def process(path, results):
             print(f"runner: {verdict['error']}", file=log, flush=True)
     verdict["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     verdict["power at end"] = power()
+    if verdict.get("type") in TIMED and verdict.get("status") not in (None, "error") and not verdict["power at end"].startswith("AC Power"):
+        verdict["status"] = f"power left mains during the job ({verdict['status']}): its results are no evidence of speed"
     (out / "verdict.json").write_text(json.dumps(verdict, indent=2) + "\n")
     print(f"runner: {path.name}: {verdict['status']} -> {out}", file=sys.stderr, flush=True)
 
