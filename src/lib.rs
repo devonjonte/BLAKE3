@@ -101,6 +101,16 @@
 //! the cores themselves, so a program gets the most from one thread making
 //! them.
 //!
+//! **The GPU of an Apple silicon Mac** joins the CPU's threads on a
+//! [stream](performance::stream)'s long messages, 4 MiB or more written in
+//! with [`Stream::submit_with`](performance::Stream::submit_with), once the
+//! stream has kept sending them for 10 ms: it takes 8 MiB of the stream's
+//! waiting work at a time. On an Apple M4 Max, streams of 16 or more such
+//! messages ran in 0.79-0.85 of the time on the CPU alone, at 0.77-0.92 of
+//! its CPU time; shorter streams run as on the CPU alone. There is nothing
+//! to turn on, and the digests are the same; a pool of one thread keeps to
+//! its core.
+//!
 //! # Memory
 //!
 //! - **A [`Hasher`] is about 18 KiB**; box it where that matters.
@@ -117,7 +127,10 @@
 //! - **A [stream](performance::stream)** takes its storage (its 2 MiB ring, 8 MiB more for
 //!   messages of 4 MiB or more, of which only the pages used are faulted in, and its entries)
 //!   from a pool the process keeps: a thread's first stream allocates it
-//!   and later streams reuse it, never freed.
+//!   and later streams reuse it, never freed. On an Apple silicon Mac, a
+//!   stream that has used the GPU keeps 64 MiB of memory the CPU and GPU
+//!   share, with its storage; the process's first such stream starts
+//!   Metal, about 160 ms on a thread of its own, and Metal's 16 threads.
 //! - **Once per process**: the startup self-test's buffers, about 45 KiB
 //!   of the calling thread's stack while it runs (it allocates nothing),
 //!   and the threads: by default a worker per CPU beyond the first, each with the
@@ -193,6 +206,8 @@ mod block;
 pub mod convenience;
 #[cfg(feature = "std")]
 mod each;
+#[cfg(blake3_gpu)]
+mod gpu;
 pub mod performance;
 
 mod platform;
