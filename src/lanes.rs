@@ -132,23 +132,6 @@ const MIN_PIECE_LEN: usize = 8 * CHUNK_LEN;
 /// The longest piece.
 const MAX_PIECE_LEN: usize = 128 * CHUNK_LEN;
 
-/// Between polls a thread spins in user space, and every YIELD_EVERY it
-/// hands the CPU to any runnable thread (a caller the OS has queued
-/// behind a poller then waits this long at most, never a quantum).
-const YIELD_EVERY: std::time::Duration = std::time::Duration::from_micros(20);
-
-#[inline]
-pub(crate) fn poll_pause(yielded: &mut std::time::Instant) {
-    for _ in 0..8 {
-        std::hint::spin_loop();
-    }
-    if now() - *yielded >= YIELD_EVERY {
-        noted(Noted::Yield);
-        std::thread::yield_now();
-        *yielded = now();
-    }
-}
-
 /// The pool's clock: the standard library's instant, and in production
 /// exactly that (the
 /// release build is the one before this function existed). Every wait in
@@ -186,7 +169,7 @@ std::thread_local! {
 enum Noted {
     /// spin_for_work looked for work once.
     Poll = 0,
-    /// A poller handed the CPU on (poll_pause).
+    /// Unused in the trial.
     Yield = 1,
     /// A publisher or a worker tried to wake a worker for a waiting task.
     WakeTry = 2,
@@ -203,9 +186,6 @@ fn noted(what: Noted) {
     });
     let _ = what;
 }
-
-/// How long a caller polls for its last pieces before sleeping.
-pub(crate) const SPIN_BEFORE_SLEEP: std::time::Duration = std::time::Duration::from_micros(200);
 
 /// The length of the next piece when `remaining` bytes are uncut and
 /// `threads` threads may share them: about a thread's share of what is
@@ -1080,23 +1060,9 @@ pub(crate) mod sources {
         /// SPIN_BEFORE_SLEEP, then parked until the worker finishing the
         /// last piece unparks this thread.
         pub(crate) fn wait(&self, target: usize) {
-            let started = now();
-            let mut yielded = started;
-            self.finish.wait(target, || keeps_polling(started, &mut yielded));
+            // Deletion trial (#234): the caller parks at once, no polling.
+            self.finish.wait(target, || false);
         }
-    }
-
-    /// One poll of a caller waiting for its pieces: a pause (yielding the
-    /// CPU every YIELD_EVERY), and whether to poll on, which it does for
-    /// SPIN_BEFORE_SLEEP from `started` before it sleeps.
-    fn keeps_polling(started: std::time::Instant, yielded: &mut std::time::Instant) -> bool {
-        poll_pause(yielded);
-        now() - started < SPIN_BEFORE_SLEEP
-    }
-
-    #[cfg(test)]
-    pub(crate) fn keeps_polling_for_tests(started: std::time::Instant, yielded: &mut std::time::Instant) -> bool {
-        keeps_polling(started, yielded)
     }
 
     /// Callers' job sources no thread holds.
@@ -1587,13 +1553,13 @@ mod test {
         // A plain thread: a scope's thread unparks the scope's owner as it
         // ends, which would hide a missing wake-up too.
         let worker = std::thread::spawn(move || {
-            std::thread::sleep(10 * SPIN_BEFORE_SLEEP);
+            std::thread::sleep(std::time::Duration::from_millis(2));
             let Some(sources::Item::Pieces(_, _, n)) = source.take() else { panic!("the one piece") };
             assert_eq!(n, 1, "the one piece");
             source.finished(n);
         });
         source.wait(target);
-        assert!(started.elapsed() >= 10 * SPIN_BEFORE_SLEEP, "the caller waited for the piece");
+        assert!(started.elapsed() >= std::time::Duration::from_millis(2), "the caller waited for the piece");
         worker.join().unwrap();
     }
 
@@ -2018,48 +1984,6 @@ mod test {
         assert!(!spin_for_work());
         assert_eq!(counts()[Noted::Poll as usize], 32, "4 us, then 8: two looks");
         sources::closed();
-        TEST_CLOCK.with(|c| c.set(None));
-    }
-
-    /// A poller hands the CPU on every YIELD_EVERY (BLAKE3 #219): with the
-    /// clock stepping 20 us a read, every call after the first yields (the
-    /// read that resets `yielded` steps too); with 10 us a read, every
-    /// third call.
-    #[test]
-    fn test_a_poller_yields_every_yield_every() {
-        counts();
-        clock(0, 20);
-        let mut yielded = at(0);
-        for _ in 0..10 {
-            poll_pause(&mut yielded);
-        }
-        assert_eq!(counts()[Noted::Yield as usize], 9);
-        clock(0, 10);
-        let mut yielded = at(0);
-        // Reads: 0 (no), 10 (no), 20 (yes, yielded = 30), 40 (no), 50
-        // (yes, yielded = 60), 70 (no), 80 (yes, yielded = 90), 100 (no), 110
-        // (yes), 130 (no): four yields in ten calls.
-        for _ in 0..10 {
-            poll_pause(&mut yielded);
-        }
-        assert_eq!(counts()[Noted::Yield as usize], 4);
-        TEST_CLOCK.with(|c| c.set(None));
-    }
-
-    /// A caller polls for its pieces for SPIN_BEFORE_SLEEP from its start,
-    /// then sleeps (BLAKE3 #219): at 199 us it polls on, at 200 it sleeps.
-    #[test]
-    fn test_a_caller_polls_for_spin_before_sleep_then_sleeps() {
-        for (now_us, polls_on) in [(0, true), (199, true), (200, false), (201, false), (1000, false)] {
-            clock(now_us, 0);
-            let mut yielded = at(0);
-            assert_eq!(sources::keeps_polling_for_tests(at(0), &mut yielded), polls_on, "{now_us} us after the start");
-        }
-        clock(250, 0);
-        let mut yielded = at(0);
-        counts();
-        assert!(sources::keeps_polling_for_tests(at(100), &mut yielded), "150 us after a start at 100");
-        assert_eq!((counts()[Noted::Yield as usize], yielded), (1, at(250)), "each poll pauses: 250 us since the last yield is one");
         TEST_CLOCK.with(|c| c.set(None));
     }
 
