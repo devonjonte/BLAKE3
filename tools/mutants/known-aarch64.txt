@@ -428,9 +428,7 @@ src/stream.rs	replace += with *= in Stream<'env, D>::deliver	1	[cpu has sme2] sp
 src/stream.rs	replace += with -= in Stream<'env, D>::deliver	1	[cpu has sme2] speed: deliver's count wraps: collect and help act as if places came back when none did, waking or hashing a turn later; the SME2 thread takes the task
 src/incremental.rs	replace && with || in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/incremental.rs	replace == with != in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	delete ! in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace && with || in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/lib.rs	replace -= with /= in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace / with % in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace / with * in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with < in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)

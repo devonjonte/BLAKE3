@@ -615,7 +615,7 @@ fn hash_four_at_a_time<const N: usize>(lanes: &[&[u8; N]], key: &CVWords, flags:
 std::thread_local! {
     /// The lanes of each hash_many call hash_four_at_a_time made on this
     /// thread, for the test of its arrangement (BLAKE3 #219).
-    pub(crate) static FOUR_AT_A_TIME_LANES: core::cell::RefCell<Vec<usize>> = const { core::cell::RefCell::new(Vec::new()) };
+    pub(crate) static FOUR_AT_A_TIME_LANES: core::cell::RefCell<std::vec::Vec<usize>> = const { core::cell::RefCell::new(std::vec::Vec::new()) };
 }
 
 /// Note a hash_many call of `lanes` lanes (in the tests' record; nothing
@@ -798,7 +798,7 @@ mod test {
     /// alone goes the general way; messages of 2 to 15 chunks run across
     /// messages from across_from's count, and one at a time below it.
     #[test]
-    #[cfg(all(target_arch = "x86_64", blake3_avx2_ffi))]
+    #[cfg(all(target_arch = "x86_64", blake3_avx2_ffi, feature = "std"))]
     fn test_hash_many_on_paths_by_count() {
         use crate::{IV, Ran};
         let Some(avx2) = Platform::avx2() else { return };
