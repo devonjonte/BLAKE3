@@ -75,7 +75,7 @@ the clearest place to see how BLAKE3 works.
 
 This is a fork of official BLAKE3 1.8.7, and much of what makes it good is theirs. On
 x86-64, compression runs Samuel Neves' SSE4.1, AVX2 and AVX-512 assembly, renamed and
-with one fix, except where the fork's own kernels below take over; the speed of a single
+with one fix, except where BLAKE3-Servil's own kernels below take over; the speed of a single
 message there is his, except on AMD Zen 5 and later. The API (`Hasher`, `update`,
 `finalize`, `finalize_xof`, `OutputReader`, `Hash`, key derivation) and the crate's architecture are
 Jack O'Connor's, kept and rebuilt around. `b3sum`'s command line and checkfiles and the test

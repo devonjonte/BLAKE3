@@ -1,6 +1,6 @@
 [package]
 name = "blake3-servil"
-# The fork's own version series, from 0.1.0, based on upstream BLAKE3 1.8.7:
+# BLAKE3-Servil's own version series, from 0.1.0, based on upstream BLAKE3 1.8.7:
 # tools/gen-ver.py sets X.Y.Z+<commit> here and tags vX.Y.Z+<commit>.
 version = "0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861"
 authors = ["Jack O'Connor <oconnor663@gmail.com>", "Samuel Neves", "John Servil"]

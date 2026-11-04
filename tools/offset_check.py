@@ -4,7 +4,7 @@ sit, modulo the 4 KiB page (4 KiB aliasing), and whether that changed.
 
     python3 tools/offset_check.py [--exe BENCH] [--step BYTES] [--keep DIR]
 
-Run from the fork's root with a bench-hashes checkout beside it
+Run from BLAKE3-Servil's root with a bench-hashes checkout beside it
 (`../bench-hashes`, or --bench DIR), or pass --exe, a `bench-hashes
 build-against` executable. Linux with glibc:
 it moves the duo-copy threads' stacks (glibc.rtld.optional_static_tls)

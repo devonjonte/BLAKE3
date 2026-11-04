@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark runner for the servil fork, for the Mac's `benchrunner` account.
+"""Benchmark runner for BLAKE3-Servil, for the Mac's `benchrunner` account.
 
     sudo -u benchrunner -H python3 runner.py EXCHANGE
 
@@ -15,7 +15,7 @@ at most 7200):
      "flags": ["--all", "--quick"], "contenders": [...], "points": [...],
      "rounds": N, "repeat": N}
 
-(bench-hashes before its git dependency on the fork took `--thorough` for
+(bench-hashes before its git dependency on BLAKE3-Servil took `--thorough` for
 a full run; later ones run in full by default and take `--quick`.)
     {"type": "check", "old_commit": "...", "new_commit": "...",
      "bench_commit": "...", "old_bench_commit": "...", "cells": "all", "layouts": N}
@@ -35,7 +35,7 @@ busy windows count.)
     {"type": "b3sum", "fork_commit": "...", "bench_commit": "...", "quick": true}
 
 (A b3sum job builds the contenders, bench-hashes' tools/b3sum-contenders.py
-at the fork commit: official BLAKE3's b3sum, the fork's as b3sum and
+at the BLAKE3-Servil commit: official BLAKE3's b3sum, BLAKE3-Servil's as b3sum and
 b3sum-1-thread, the system's sum programs; and runs bench-hashes b3sum on
 the files in ~/b3sum-bench-files, made there once. The report, samples
 and map land in the job's benchmark-results/. "quick" runs the small set.)
@@ -46,7 +46,7 @@ fork commit: many programs at once, one a CPU, each with its own pool. Its
 samples and report land in the job's benchmark-results/.)
     {"type": "mutants", "fork_commit": "...", "since": "..."}
 
-(A mutants job runs the fork's tools/mutants/check.py --since SINCE at the
+(A mutants job runs BLAKE3-Servil's tools/mutants/check.py --since SINCE at the
 fork commit: the mutants in the lines the change since SINCE makes, judged
 against the list for this machine. Its exit is the verdict, and each run's
 outcomes land in the job's mutants-last/. No timing: other programs on the
@@ -55,7 +55,7 @@ Mac can only make some mutants time out, an outcome of their own.)
      "fork_commit": "...", "args": ["message", "1048576"]}
     {"type": "test", "fork_commit": "..."}
 
-(A test job runs the fork's suites natively, under cargo-nextest: the
+(A test job runs BLAKE3-Servil's suites natively, under cargo-nextest: the
 library tests, the doc tests, the
 integration tests in tests/ (the planned API's contract), and the
 official vectors.)
@@ -71,12 +71,12 @@ Each result folder holds runner.log (every command and its output),
 verdict.json, and the job's own files: the benchmark's report, graph,
 and samples; host_lab's report.
 
-The checkouts persist between jobs (CHECKOUTS: the fork, and bench-hashes
+The checkouts persist between jobs (CHECKOUTS: BLAKE3-Servil, and bench-hashes
 beside it), moved to each job's commits with a forced checkout that
 rewrites only the files that differ, so Cargo rebuilds only what changed:
-the fork's target directory serves test and example jobs, check's
-sides (target/check/ in the fork) its jobs, and bench-hashes' own build
-against the fork as it is (`bench-hashes build-against`) benchmark jobs.
+BLAKE3-Servil's target directory serves test and example jobs, check's
+sides (target/check/ in BLAKE3-Servil) its jobs, and bench-hashes' own build
+against BLAKE3-Servil as it is (`bench-hashes build-against`) benchmark jobs.
 """
 import json
 import os
@@ -174,12 +174,12 @@ class Job:
         assert full.startswith(commit), f"{url}: asked for {commit}, got {full}"
 
     def checkouts(self, fork_commit, bench_commit):
-        """The fork's checkout and bench-hashes', each a clone of its own
+        """BLAKE3-Servil's checkout and bench-hashes', each a clone of its own
         beside the other (neither inside the other: bench-hashes names the
         fork's checkout, `build-against DIR`, `check --fork DIR`), kept
         between jobs: (fork, bench). Anything untracked goes before each
         job, so each reads as the commit the job names (nested bench clones
-        that probe examples left in the fork made every build's provenance
+        that probe examples left in BLAKE3-Servil made every build's provenance
         read dirty, job 1778); ignored paths (target/) stay."""
         CHECKOUTS.mkdir(exist_ok=True)
         fork, bench = CHECKOUTS / "fork", CHECKOUTS / "bench"
@@ -223,7 +223,7 @@ def benchmark(job, run, work, out):
     assert isinstance(repeat, int) and 1 <= repeat <= 100, "repeat must be 1-100"
     fork_commit = hex_commit(job, "fork_commit")
     fork, bench = run.checkouts(fork_commit, hex_commit(job, "bench_commit"))
-    # bench-hashes built against the fork checkout as it is, in a side
+    # bench-hashes built against the BLAKE3-Servil checkout as it is, in a side
     # directory that owns its lock and target directory (the committed lock
     # is never written); Cargo rebuilds only what changed. The one build
     # mechanism, check's (bench-hashes #54).
@@ -251,10 +251,10 @@ def b3sum(job, run, work, out):
 
 
 def check(job, run, work, out):
-    """bench-hashes check: the fork at new_commit, with bench-hashes at
+    """bench-hashes check: BLAKE3-Servil at new_commit, with bench-hashes at
     bench_commit beside it (a bench with `check --fork`, October 31, 2026),
     against old_commit. check builds both
-    sides itself (under the fork's target/check/), relinks each per pair,
+    sides itself (under BLAKE3-Servil's target/check/), relinks each per pair,
     and measures the cells whose code the change touches ("cells": "all"
     measures every one). Its exit is the verdict: 0 no cell slower, 1 a
     regression, 2 no verdict (other programs kept the machine busy)."""

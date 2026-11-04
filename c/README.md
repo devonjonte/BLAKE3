@@ -16,4 +16,4 @@ crate and official BLAKE3 keeps each one's kernels apart.
 
 `tools/check-builds.sh` fails when a generated file and its generator
 differ. The proofs of every kernel are in `tools/verify/` (its README);
-the fork's C API is `capi/b3.h`.
+BLAKE3-Servil's C API is `capi/b3.h`.

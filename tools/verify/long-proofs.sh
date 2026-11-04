@@ -50,7 +50,7 @@ mkdir -p "$logs"
 rm -rf "$tree"
 git -C "$root" worktree prune
 git -C "$root" worktree add -q --detach "$tree" "$commit"
-status pending "running on the fork's VM"
+status pending "running on BLAKE3-Servil's VM"
 cd "$tree"
 export ELAN_HOME=${ELAN_HOME:-/root/.elan} PATH=/root/.elan/bin:$PATH
 verdict=passed state=success

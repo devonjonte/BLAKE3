@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the fork's x86-64 kernels: whole chunks and a partial one in one
+"""Generate BLAKE3-Servil's x86-64 kernels: whole chunks and a partial one in one
 pass, side by side, as the Arm q kernels do (c/blake3_partial_x86-64_unix.S).
 
     python3 tools/gen_x86.py > c/blake3_partial_x86-64_unix.S

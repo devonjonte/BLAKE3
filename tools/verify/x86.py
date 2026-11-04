@@ -3,7 +3,7 @@ _FACT_CACHE = {}
 
 """A model of the x86-64 instructions BLAKE3's kernels use, for proving
 the assembled machine code (upstream's c/blake3_{sse41,avx2,avx512}_
-x86-64_unix.S and the fork's generated kernels) as aarch64.py proves the
+x86-64_unix.S and BLAKE3-Servil's generated kernels) as aarch64.py proves the
 Arm kernels.
 
 The machine runs LLVM's disassembly (Intel syntax) of a linked object, so

@@ -11,7 +11,7 @@ overview, read [QUALITY.md](../QUALITY.md) first.
 | Platform | Its kernels | Checked |
 |---|---|---|
 | 64-bit Arm: Apple Silicon, Linux and macOS | generated assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved** at every block and group count, and tested |
-| x86-64: Linux | the fork's generated assembly: whole chunks with a partial one, the chunk root, and on AVX-512 32 whole chunks or 16 parent nodes at once (dispatched on AMD Zen 5 and later) | **proved** for every input, and tested |
+| x86-64: Linux | BLAKE3-Servil's generated assembly: whole chunks with a partial one, the chunk root, and on AVX-512 32 whole chunks or 16 parent nodes at once (dispatched on AMD Zen 5 and later) | **proved** for every input, and tested |
 | | upstream's assembly, its symbols renamed and its batch kernels' loads kept within each input (bug 8, below) | **proved** at every shape the crate calls (below), and tested |
 
 ## What is new, and so where the risk is
@@ -280,16 +280,16 @@ preservation, and branches and addresses independent of input bytes and
 keys (the induction proofs also treat counters and their steps as
 public: "Timing and secrets", below).
 
-On x86-64, the fork's generated kernels (`blake3_servil_partial_sse41` and
+On x86-64, BLAKE3-Servil's generated kernels (`blake3_servil_partial_sse41` and
 `blake3_servil_partial_avx2`) are proved for
 every input: each lane's sixteen blocks from its chaining value and
 counter, with every per-lane, per-block length and flags, and the
 snapshot after every block (`prove_x86.py partial`, 32 cases).
-The fork's chunk-root kernel (`blake3_chunk_root_x86-64_unix.S`, SSE4.1
+BLAKE3-Servil's chunk-root kernel (`blake3_chunk_root_x86-64_unix.S`, SSE4.1
 and AVX-512 entries), which hashes an input of one chunk or less to its
 root in one call, is proved for every input: 0 to 15 whole blocks before
 the last, every last-block length, every mode (`prove_x86.py chunk_root`,
-32 cases). The fork's wide AVX-512 kernels (`c/blake3_avx512_32.S`: k32
+32 cases). BLAKE3-Servil's wide AVX-512 kernels (`c/blake3_avx512_32.S`: k32
 and p32, 32 inputs with incrementing or fixed counters, and p16, 16
 inputs) are proved for every input byte, key, counter, flags and last
 length, at every block count from 1 to 16 and every entry alignment

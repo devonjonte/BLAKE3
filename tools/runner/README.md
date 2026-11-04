@@ -4,13 +4,13 @@
 `benchrunner`, with code from GitHub at the commits each job names.
 Jobs go in the checkout's `runner/jobs/`; results come back in
 `runner/results/<job>.<time>/`. Both folders stay out of git
-(`.git/info/exclude`). The runner keeps its clones of the fork and of
+(`.git/info/exclude`). The runner keeps its clones of BLAKE3-Servil and of
 bench-hashes, side by side, in `~benchrunner/checkouts/`, and moves
 them to each job's commits, so Cargo rebuilds only what changed: a
-benchmark job builds bench-hashes against the fork as it is, through
+benchmark job builds bench-hashes against BLAKE3-Servil as it is, through
 `bench-hashes build-against` (in a directory with its own `Cargo.lock`;
 the committed lock is never written), and check jobs build their two
-sides the same way under the fork's `target/check/`. Before each job it
+sides the same way under BLAKE3-Servil's `target/check/`. Before each job it
 removes anything untracked from both clones, so each reads as the commit
 the job names. The job format is the docstring at the top of
 `runner.py`.
@@ -66,7 +66,7 @@ its `top.txt` at the windows' times.
 The Mac stays on mains power: on battery it runs more calls after a pause on
 its efficiency cores (233 of 400 against 32), and every job's
 `verdict.json` records the power state at its start and end; read it
-before trusting a job. A `test` job (the fork's suites, natively) needs
+before trusting a job. A `test` job (BLAKE3-Servil's suites, natively) needs
 no quiet machine.
 
 A direct A/B is four `benchmark` jobs, old new new old, back to back,

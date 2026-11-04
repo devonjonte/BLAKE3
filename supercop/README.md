@@ -19,7 +19,7 @@ pub fn crypto_hash(out: &mut [u8; 32], m: &[u8]) {
 
 SUPERCOP builds Rust implementations with cargo, as it does `crypto_hash/sha256/rust_sha2`.
 The crate picks its kernels at run time for each length and CPU; on x86-64, upstream's
-assembly for SSE4.1, AVX2 or AVX-512, with the fork's own passes of whole chunks and a
+assembly for SSE4.1, AVX2 or AVX-512, with BLAKE3-Servil's own passes of whole chunks and a
 partial one.
 
 SUPERCOP 20261004 in a Linux VM on an Apple M4 Max, cycles per call (checksums pass, and
@@ -75,7 +75,7 @@ implementations stay untouched: their code is widely used, and their timings mus
 predicting it.
 
 **Changes made with eBASH in mind** (Zooko, October 12, 2026): eBASH should predict what
-our users see. A change that also speeds the fork up for users in plausible cases is made;
+our users see. A change that also speeds BLAKE3-Servil up for users in plausible cases is made;
 one that makes eBASH more representative of users is made; one that makes it less
 representative stays out; one where we can't tell may go in.
 

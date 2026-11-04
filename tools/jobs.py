@@ -16,7 +16,7 @@ from. A raw PID stops that process's tree the same way. An ended process
 whose parent is gone can linger as a zombie (ps state Z: the VM's PID 1
 reaps none); it holds nothing, and this tool counts it as ended.
 
-Why and when to use it: AGENTS.md, "The VM" (the fork's AGENTS.md).
+Why and when to use it: AGENTS.md, "The VM" (BLAKE3-Servil's AGENTS.md).
 """
 
 import os
