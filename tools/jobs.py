@@ -21,6 +21,8 @@ process whose parent is gone can linger as a zombie (ps state Z: the
 VM's PID 1 reaps none); it holds nothing, and this tool counts it as
 ended.
 
+A record names its process by when it started, as `started` reads it.
+
 `find` lists processes by their command line, for the PID to stop: it
 never lists itself or a process it descends from, the shell that runs it
 among them (pgrep -f lists that shell, whose command holds the pattern
@@ -75,8 +77,21 @@ def tree(table, root):
 
 
 def started(pid):
-    """When process `pid` started, as ps prints it (the same on Linux and
-    macOS); None if there is no such process."""
+    """When process `pid` started, as a string that names it alone; None if
+    there is no such process. On Linux, the kernel's own count of clock
+    ticks from boot to its start (/proc/PID/stat, field 22): ps's lstart
+    there is that count added to a boot time ps infers from the wall clock,
+    so it moves when the clock is set, and the VM's moved 4.5 minutes under
+    a running job, which status then called ended (November 4). On macOS,
+    ps's lstart, which the kernel keeps as a time."""
+    stat = f"/proc/{pid}/stat"
+    if os.path.exists("/proc/self/stat"):
+        try:
+            text = open(stat).read()
+        except FileNotFoundError:
+            return None
+        # The command sits in parentheses and may hold spaces; the fields follow it.
+        return "ticks " + text[text.rindex(")") + 2:].split()[19]
     out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
     return out or None
 
