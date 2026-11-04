@@ -6,8 +6,11 @@
     python3 tools/jobs.py stop NAME|PID              stop it and every process it started
 
 A job runs in a session of its own (its own process group), with its
-output in tmp/jobs/NAME.log and its process ID in tmp/jobs/NAME.pid, in
-the checkout this tool sits in; `start` refuses a NAME still running.
+output in tmp/jobs/NAME.log and its process ID and start time in
+tmp/jobs/NAME.pid, in the checkout this tool sits in; `start` refuses a
+NAME still running. A process is the job's only while both match: a
+record outlives a reboot, and its number may by then name another
+process (one did, and `stop` would have ended it).
 `stop` sends TERM to the job's process group and to every descendant of
 its leader, waits up to 10 s, then sends KILL to what remains. It never
 matches processes by name (as pkill -f does, which can match the shell
@@ -63,7 +66,17 @@ def tree(table, root):
     return found
 
 
-def alive(pid):
+def started(pid):
+    """When process `pid` started, as ps prints it (the same on Linux and
+    macOS); None if there is no such process."""
+    out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return out or None
+
+
+def alive(pid, since=None):
+    """Whether `pid` runs, and, given `since`, is the process that started then."""
+    if since is not None and started(pid) != since:
+        return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -76,10 +89,12 @@ def alive(pid):
 
 
 def pid_of(name):
+    """Job `name`'s process: (its ID, when it started)."""
     path = os.path.join(JOBS, f"{name}.pid")
     if not os.path.exists(path):
         sys.exit(f"jobs: no job named {name} (no {path})")
-    return int(open(path).read())
+    pid, since = open(path).read().rstrip("\n").split("\t")
+    return int(pid), since
 
 
 def start(name, command):
@@ -87,12 +102,14 @@ def start(name, command):
     assert command, "start NAME -- COMMAND..."
     os.makedirs(JOBS, exist_ok=True)
     pid_path, log_path = os.path.join(JOBS, f"{name}.pid"), os.path.join(JOBS, f"{name}.log")
-    if os.path.exists(pid_path) and alive(int(open(pid_path).read())):
-        sys.exit(f"jobs: {name} is still running (PID {open(pid_path).read().strip()}); stop it first")
+    if os.path.exists(pid_path) and alive(*pid_of(name)):
+        sys.exit(f"jobs: {name} is still running (PID {pid_of(name)[0]}); stop it first")
     log = open(log_path, "w")
     proc = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+    since = started(proc.pid)
+    assert since, f"jobs: {name}'s process {proc.pid} ended before its start time was read"
     with open(pid_path, "w") as f:
-        f.write(f"{proc.pid}\n")
+        f.write(f"{proc.pid}\t{since}\n")
     print(f"jobs: {name} started, PID {proc.pid}, log {log_path}")
 
 
@@ -101,15 +118,21 @@ def status(name=None):
     if not names:
         print("jobs: none")
     for n in names:
-        pid = pid_of(n)
+        pid, since = pid_of(n)
         log = os.path.join(JOBS, f"{n}.log")
-        print(f"{n}: PID {pid}, {'running' if alive(pid) else 'ended'}, log {log}")
+        print(f"{n}: PID {pid}, {'running' if alive(pid, since) else 'ended'}, log {log}")
         if name and os.path.exists(log):
             print("".join(open(log, errors="replace").readlines()[-5:]), end="")
 
 
 def stop(target):
-    root = int(target) if target.isdigit() else pid_of(target)
+    if target.isdigit():
+        root = int(target)
+    else:
+        root, since = pid_of(target)
+        if not alive(root, since):
+            print(f"jobs: nothing of {target} is running")
+            return
     table = processes()
     victims = tree(table, root)
     mine = ancestors(table)
