@@ -1120,7 +1120,9 @@ pub(crate) mod sources {
         let active = ACTIVE.load(Ordering::SeqCst);
         let start = start % SLOTS;
         // The slots from `start` up, then those below it: the mask rotated
-        // so that `start` is bit 0, each set bit mapped back.
+        // so that `start` is bit 0, each set bit mapped back. The rotation
+        // is the slots' only because the mask is exactly SLOTS bits wide.
+        const _: () = assert!(SLOTS == u64::BITS as usize, "ACTIVE holds one bit a slot");
         let mut rotated = active.rotate_right(start as u32);
         while rotated != 0 {
             let slot = (rotated.trailing_zeros() as usize + start) % SLOTS;
