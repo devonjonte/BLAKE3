@@ -1147,9 +1147,16 @@ pub(crate) mod sources {
     /// long as it kept publishing; BLAKE3 #240). When two or more wait
     /// and a worker is parked, this one wakes the next first (the chain).
     pub(crate) fn run_one() -> bool {
-        find_from(NEXT.with(core::cell::Cell::get), |slot, source| {
+        NEXT.with(|next| run_one_from(next, serve))
+    }
+
+    /// [`run_one`]'s walk and its record, with `next` where the walk
+    /// begins and `serve` what is done with the item taken (the test's
+    /// way in: a recording `serve`).
+    fn run_one_from(next: &core::cell::Cell<usize>, mut serve: impl FnMut(&'static Source, Item)) -> bool {
+        find_from(next.get(), |slot, source| {
             let Some(item) = source.take() else { return false };
-            NEXT.with(|next| next.set(slot + 1));
+            next.set(slot + 1);
             serve(source, item);
             true
         })
@@ -1268,14 +1275,10 @@ pub(crate) mod sources {
             for s in &sources {
                 s.finish.published.store(3, Ordering::SeqCst);
             }
+            // run_one's own walk and record, its item recorded, not run.
             let mut served = Vec::new();
-            let mut next = 0;
-            while find_from(next, |slot, source| {
-                let Some(_) = source.take() else { return false };
-                next = slot + 1;
-                served.push(slot);
-                true
-            }) {}
+            let next = core::cell::Cell::new(0);
+            while run_one_from(&next, |source, _| served.push(slots[sources.iter().position(|s| core::ptr::eq(*s, source)).unwrap()])) {}
             let (a, b) = (slots[0], slots[1]);
             assert_eq!(served, [a, b, a, b, a, b], "three items each, taken in turn");
             // From slot 0 every time: the lower slot first, whole.
