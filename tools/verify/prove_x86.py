@@ -284,7 +284,7 @@ def cases(only):
     for n in range(1, 33):
         out.append(("avx512", False, "xof_many", n))
     for windows in (False, True):
-        for kisa in ("sse41", "avx2"):
+        for kisa in ("sse41", "avx2", "avx2_pair"):
             for last in range(16):
                 out.append(("partial", windows, "partial", (kisa, last)))
     return [c for c in out if not only or c[0] in only or c[2] in only or ("windows" if c[1] else "unix") in only]
