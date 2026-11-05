@@ -350,6 +350,15 @@ fn ring(len: usize) -> *mut u8 {
     block[start..].as_mut_ptr()
 }
 
+/// Whether a ring of `ring` bytes, `head - tail` of them in flight (both
+/// counting on), has `taken` bytes free: each ring's wait for room, here
+/// once, so a test holds it to exact values (Sam's whole x86-64 run, #218:
+/// the long ring's own copy of it, `-` as `+`, survived, as the ring never
+/// filled under the tests).
+fn has_room(head: usize, tail: usize, ring: usize, taken: usize) -> bool {
+    ring - (head - tail) >= taken
+}
+
 /// Where `len` bytes go in a ring of `ring` bytes whose head is at `head`
 /// (counting on), at a 64-byte boundary, whole before its end: their
 /// offset, and the bytes they take from the head (a room that would cross
@@ -777,7 +786,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// hashing tasks, until entries in flight free them.
     fn reserve(&mut self, len: usize) -> usize {
         let (at, taken) = room(self.head, RING_BYTES, len);
-        while RING_BYTES - (self.head - self.tail) < taken {
+        while !has_room(self.head, self.tail, RING_BYTES, taken) {
             self.publish();
             self.help();
         }
@@ -789,7 +798,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     #[cfg(blake3_gpu)]
     fn reserve_gpu(&mut self, len: usize) -> usize {
         let (at, taken) = room(self.gpu_head, crate::gpu::RING_BYTES, len);
-        while crate::gpu::RING_BYTES - (self.gpu_head - self.gpu_tail) < taken {
+        while !has_room(self.gpu_head, self.gpu_tail, crate::gpu::RING_BYTES, taken) {
             self.publish();
             self.help();
         }
@@ -800,7 +809,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// `reserve`, in the long ring.
     fn reserve_long(&mut self, len: usize) -> usize {
         let (at, taken) = room(self.long_head, LONG_RING_BYTES, len);
-        while LONG_RING_BYTES - (self.long_head - self.long_tail) < taken {
+        while !has_room(self.long_head, self.long_tail, LONG_RING_BYTES, taken) {
             self.publish();
             self.help();
         }
@@ -1658,6 +1667,15 @@ mod test {
         }
         golden.check(0x6449952b3442e340);
         assert_eq!(handed.len(), lens.len() - 1, "a place back per message read, none for the failed reader");
+    }
+
+    /// A ring's room, exact: a 16-byte ring 10 bytes in flight (head 110,
+    /// tail 100) has 6 bytes free and not 7, and an empty one all 16.
+    #[test]
+    fn test_has_room_counts_the_bytes_in_flight() {
+        assert!(has_room(110, 100, 16, 6) && !has_room(110, 100, 16, 7));
+        assert!(has_room(100, 100, 16, 16) && !has_room(100, 100, 16, 17));
+        assert!(has_room(116, 100, 16, 0) && !has_room(116, 100, 16, 1), "a full ring");
     }
 
     /// The ring's arithmetic, exact on every machine (the caller's own,
