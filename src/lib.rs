@@ -1196,6 +1196,18 @@ fn hash_serial_from(platform: Platform, input: &[u8], key: &CVWords, flags: u8) 
     if (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
         prefetch_after_pause(input.len(), turn.platform(), false);
     }
+    // PROBE (x86): prefetch the many-lane kernel's code and the single-chain
+    // compress for a call of 2 to 16 chunks, always (no pause check yet).
+    #[cfg(all(target_arch = "x86_64", blake3_sse41_ffi, blake3_avx2_ffi))]
+    if (CHUNK_LEN + 1..16 * CHUNK_LEN).contains(&input.len()) {
+        let (many, compress) = match turn.platform() {
+            Platform::AVX2 => (avx2::ffi::blake3_servil_hash_many_avx2 as *const () as usize, sse41::ffi::blake3_servil_compress_in_place_sse41 as *const () as usize),
+            _ => (sse41::ffi::blake3_servil_hash_many_sse41 as *const () as usize, sse41::ffi::blake3_servil_compress_in_place_sse41 as *const () as usize),
+        };
+        // The kernels' sizes, from the assembly (hash_many_avx2 about 14 KiB, sse41 11 KiB; compress 2 KiB).
+        platform::prefetch_code((many, many + if matches!(turn.platform(), Platform::AVX2) { 14 * 1024 } else { 11 * 1024 }));
+        platform::prefetch_code((compress, compress + 2 * 1024));
+    }
     hash_serial_on(input, key, flags, turn.platform())
 }
 

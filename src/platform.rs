@@ -684,6 +684,27 @@ pub(crate) fn prefetch_code((start, end): (usize, usize)) {
     });
 }
 
+/// PROBE: the x86 twin, 64-byte lines into L2 (prefetcht1), four a step.
+#[cfg(target_arch = "x86_64")]
+#[inline]
+pub(crate) fn prefetch_code((start, end): (usize, usize)) {
+    let mut line = start;
+    while line < end {
+        // Sound: a prefetch never faults, whatever the address.
+        unsafe {
+            core::arch::asm!(
+                "prefetcht1 [{0}]",
+                "prefetcht1 [{0} + 64]",
+                "prefetcht1 [{0} + 128]",
+                "prefetcht1 [{0} + 192]",
+                in(reg) line,
+                options(nostack, readonly, preserves_flags),
+            )
+        };
+        line += 256;
+    }
+}
+
 #[cfg(all(test, blake3_neon, feature = "std"))]
 std::thread_local! {
     /// The tests' clock for counter(), in its ticks, where a test set one.
