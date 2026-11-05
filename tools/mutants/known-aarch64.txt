@@ -57,7 +57,6 @@ src/lanes.rs	replace && with || in cut_items	1	OPEN: the pool's scheduling under
 src/lanes.rs	replace && with || in initialize	2	SME2 CPUs: the same pool (the second place differs only with one thread, where no SME2 thread starts; the first would start the SME2 thread on a CPU without SME2, a case only CI's QEMU Cortex-A72 job reaches)
 src/lanes.rs	replace * with +	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace * with + in merge_to_children	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace * with + in sources::Source::take	1	speed: how many pieces a worker claims at once (every run size claims each piece once)
 src/lanes.rs	replace * with /	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace + with * in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace + with * in sources::Source::publish	1	a scheduling choice: the wake-a-worker threshold counts one task fewer waiting; the task is published and taken the same, a worker woken one publish later
@@ -65,7 +64,6 @@ src/lanes.rs	replace + with * in sources::Source::take_run	3	same code: every te
 src/lanes.rs	replace + with - in sources::Source::publish	1	speed: whether a published task wakes a worker (the caller and the SME2 thread take it otherwise)
 src/lanes.rs	replace + with - in sources::Source::take_run	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace - with + in Pool::run_job	4	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace - with + in sources::Source::publish	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace - with / in Pool::run_job	2	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace -= with += in cut_items	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace -= with /= in cut_items	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
