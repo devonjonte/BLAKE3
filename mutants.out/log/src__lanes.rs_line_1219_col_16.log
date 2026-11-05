@@ -1,0 +1,152 @@
+
+*** src/lanes.rs:1219:16: delete field key from struct Task expression in Task::members
+
+*** mutation diff:
+--- src/lanes.rs
++++ delete field key from struct Task expression in Task::members
+@@ -1211,17 +1211,17 @@
+             members: 0,
+             member: [NO_MEMBER; MEMBERS],
+         }
+     }
+ 
+     /// An empty task of short messages (with `batch`, batches of messages
+     /// of that length) in the mode of `key` and `flags`.
+     pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {
+-        Task { key: *key, flags, batch, ..Task::of(&[], 0) }
++        Task {  /* ~ changed by cargo-mutants ~ */ flags, batch, ..Task::of(&[], 0) }
+     }
+ 
+     /// Hash on `platform` into `out`: for a subtree of two chunks or more at
+     /// chunk zero (it may be the whole message), its pair of child chaining
+     /// values; for any other, its chaining value (first 32 bytes). Then
+     /// count down.
+     pub(crate) fn run(self, platform: Platform) {
+         if self.members > 0 {
+
+
+*** /home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo nextest run --no-run --cargo-profile=mutants --verbose --package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5 --features=serde,zeroize
+   Compiling blake3-servil v0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5 (/home/agent/BLAKE3-mini)
+warning: unused variable: `key`
+    --> src/lanes.rs:1218:27
+     |
+1218 |     pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {
+     |                           ^^^ help: if this is intentional, prefix it with an underscore: `_key`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `blake3-servil` (lib) generated 1 warning (run `cargo fix --lib -p blake3-servil` to apply 1 suggestion)
+warning: `blake3-servil` (lib test) generated 1 warning (1 duplicate)
+    Finished `mutants` profile [optimized] target(s) in 0.59s
+
+*** result: Success
+
+*** /home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo nextest run --cargo-profile=mutants --verbose --package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5 --features=serde,zeroize
+warning: unused variable: `key`
+    --> src/lanes.rs:1218:27
+     |
+1218 |     pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {
+     |                           ^^^ help: if this is intentional, prefix it with an underscore: `_key`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `blake3-servil` (lib) generated 1 warning (run `cargo fix --lib -p blake3-servil` to apply 1 suggestion)
+warning: `blake3-servil` (lib test) generated 1 warning (1 duplicate)
+    Finished `mutants` profile [optimized] target(s) in 0.02s
+────────────
+ Nextest run ID 9149b540-dfb5-4763-ab6e-2efc979a0f8c with nextest profile: default
+    Starting 98 tests across 10 binaries
+       START [         ] ( 1/98) blake3-servil avx512::test::test_xof_many
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact avx512::test::test_xof_many --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_miri_hash_each_multithreaded
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_miri_hash_each_multithreaded --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_hash_each_multithreaded
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_hash_each_multithreaded --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_hash_each_matches_hash_with
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_hash_each_matches_hash_with --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_update_each_at_offsets
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_update_each_at_offsets --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_update_each
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_update_each --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::sources::test::test_find_reaches_every_registered_source
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::sources::test::test_find_reaches_every_registered_source --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_update_each_holds_groups_together
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_update_each_holds_groups_together --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_a_caller_gives_its_place_back
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_a_caller_gives_its_place_back --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::equal_members_match_the_reference
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::equal_members_match_the_reference --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_concurrent_batch_callers_agree
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_concurrent_batch_callers_agree --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_a_parked_caller_is_woken_by_the_last_piece
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_a_parked_caller_is_woken_by_the_last_piece --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_cut_messages_shapes
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_cut_messages_shapes --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_concurrent_callers_agree
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_concurrent_callers_agree --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_cut_with_prefix_shapes_and_hashes
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_cut_with_prefix_shapes_and_hashes --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_hash_many_pool_agrees
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_hash_many_pool_agrees --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_idle_workers_park_while_a_stream_is_open
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_idle_workers_park_while_a_stream_is_open --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_hash_matches_serial
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_hash_matches_serial --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_simd_merge_matches_recursive
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_simd_merge_matches_recursive --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_next_piece_len
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_next_piece_len --nocapture
+        PASS [   0.003s] ( 1/98) blake3-servil lanes::sources::test::test_find_reaches_every_registered_source
+       START [         ] ( 2/98) blake3-servil lanes::test::test_update_multithreaded_matches_hash
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_update_multithreaded_matches_hash --nocapture
+        PASS [   0.004s] ( 2/98) blake3-servil avx512::test::test_xof_many
+       START [         ] ( 3/98) blake3-servil many::test::portable_across_partial_chunks_matches_published_vectors
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::portable_across_partial_chunks_matches_published_vectors --nocapture
+        FAIL [   0.005s] ( 3/98) blake3-servil lanes::test::equal_members_match_the_reference
+  stdout ───
+
+    running 1 test
+    test lanes::test::equal_members_match_the_reference ... FAILED
+
+    failures:
+
+    failures:
+        lanes::test::equal_members_match_the_reference
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 78 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'lanes::test::equal_members_match_the_reference' (3338192) panicked at src/lanes.rs:1539:33:
+    assertion `left == right` failed: Portable, 2 x 64, mixed false, offset 0, mode 0
+      left: [[133, 232, 12, 146, 67, 22, 203, 131, 139, 46, 17, 118, 144, 129, 242, 72, 50, 215, 26, 208, 110, 159, 23, 20, 202, 0, 90, 202, 58, 189, 87, 159], [33, 174, 183, 230, 122, 113, 182, 250, 242, 152, 200, 108, 96, 181, 207, 56, 75, 61, 60, 254, 179, 13, 0, 166, 47, 108, 246, 20, 33, 152, 222, 62]]
+     right: [[78, 237, 113, 65, 234, 74, 92, 212, 183, 136, 96, 107, 210, 63, 70, 226, 18, 175, 156, 172, 235, 172, 220, 125, 31, 76, 109, 199, 242, 81, 27, 152], [160, 90, 97, 44, 46, 89, 121, 231, 194, 172, 22, 200, 86, 93, 81, 170, 75, 135, 24, 94, 206, 3, 87, 207, 100, 213, 121, 118, 71, 78, 43, 238]]
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  Cancelling due to test failure: 19 tests still running
+        PASS [   0.005s] ( 4/98) blake3-servil each::test::test_update_each_holds_groups_together
+        PASS [   0.005s] ( 5/98) blake3-servil each::test::test_hash_each_matches_hash_with
+        PASS [   0.005s] ( 6/98) blake3-servil lanes::test::test_idle_workers_park_while_a_stream_is_open
+        PASS [   0.006s] ( 7/98) blake3-servil each::test::test_update_each
+        PASS [   0.006s] ( 8/98) blake3-servil lanes::test::test_cut_messages_shapes
+        PASS [   0.006s] ( 9/98) blake3-servil each::test::test_update_each_at_offsets
+        PASS [   0.006s] (10/98) blake3-servil lanes::test::test_a_caller_gives_its_place_back
+        PASS [   0.006s] (11/98) blake3-servil lanes::test::test_simd_merge_matches_recursive
+        PASS [   0.006s] (12/98) blake3-servil lanes::test::test_next_piece_len
+        PASS [   0.008s] (13/98) blake3-servil each::test::test_miri_hash_each_multithreaded
+        PASS [   0.004s] (14/98) blake3-servil many::test::portable_across_partial_chunks_matches_published_vectors
+        PASS [   0.011s] (15/98) blake3-servil lanes::test::test_a_parked_caller_is_woken_by_the_last_piece
+        PASS [   0.027s] (16/98) blake3-servil lanes::test::test_hash_many_pool_agrees
+        PASS [   0.032s] (17/98) blake3-servil lanes::test::test_hash_matches_serial
+        PASS [   0.049s] (18/98) blake3-servil lanes::test::test_cut_with_prefix_shapes_and_hashes
+        PASS [   0.069s] (19/98) blake3-servil lanes::test::test_concurrent_batch_callers_agree
+        PASS [   0.079s] (20/98) blake3-servil lanes::test::test_concurrent_callers_agree
+        PASS [   0.112s] (21/98) blake3-servil each::test::test_hash_each_multithreaded
+        PASS [   0.216s] (22/98) blake3-servil lanes::test::test_update_multithreaded_matches_hash
+────────────
+     Summary [   0.219s] 22/98 tests run: 21 passed, 1 failed, 0 skipped
+        FAIL [   0.005s] ( 3/98) blake3-servil lanes::test::equal_members_match_the_reference
+warning: 76/98 tests were not run due to test failure (run with --no-fail-fast to run all tests, or run with --max-fail)
+error: test run failed
+
+*** result: Failure(100)

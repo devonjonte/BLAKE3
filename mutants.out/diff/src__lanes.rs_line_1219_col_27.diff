@@ -1,0 +1,21 @@
+--- src/lanes.rs
++++ delete field flags from struct Task expression in Task::members
+@@ -1211,17 +1211,17 @@
+             members: 0,
+             member: [NO_MEMBER; MEMBERS],
+         }
+     }
+ 
+     /// An empty task of short messages (with `batch`, batches of messages
+     /// of that length) in the mode of `key` and `flags`.
+     pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {
+-        Task { key: *key, flags, batch, ..Task::of(&[], 0) }
++        Task { key: *key,  /* ~ changed by cargo-mutants ~ */ batch, ..Task::of(&[], 0) }
+     }
+ 
+     /// Hash on `platform` into `out`: for a subtree of two chunks or more at
+     /// chunk zero (it may be the whole message), its pair of child chaining
+     /// values; for any other, its chaining value (first 32 bytes). Then
+     /// count down.
+     pub(crate) fn run(self, platform: Platform) {
+         if self.members > 0 {

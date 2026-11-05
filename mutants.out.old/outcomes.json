@@ -1,0 +1,403 @@
+{
+  "outcomes": [
+    {
+      "scenario": "Baseline",
+      "summary": "Success",
+      "log_path": "log/baseline.log",
+      "diff_path": null,
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.753023771,
+          "process_status": "Success",
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--no-run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 1.055360779,
+          "process_status": "Success",
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/lanes.rs:510:59: replace * with / in sme2_prefix",
+          "package": "blake3-servil",
+          "file": "src/lanes.rs",
+          "function": {
+            "function_name": "sme2_prefix",
+            "return_type": "-> usize",
+            "span": {
+              "start": {
+                "line": 500,
+                "column": 1
+              },
+              "end": {
+                "line": 512,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 510,
+              "column": 59
+            },
+            "end": {
+              "line": 510,
+              "column": 60
+            }
+          },
+          "replacement": "/",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__lanes.rs_line_510_col_59.log",
+      "diff_path": "diff/src__lanes.rs_line_510_col_59.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.702293737,
+          "process_status": "Success",
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--no-run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 1.05430098,
+          "process_status": "Success",
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/lanes.rs:510:44: replace * with / in sme2_prefix",
+          "package": "blake3-servil",
+          "file": "src/lanes.rs",
+          "function": {
+            "function_name": "sme2_prefix",
+            "return_type": "-> usize",
+            "span": {
+              "start": {
+                "line": 500,
+                "column": 1
+              },
+              "end": {
+                "line": 512,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 510,
+              "column": 44
+            },
+            "end": {
+              "line": 510,
+              "column": 45
+            }
+          },
+          "replacement": "/",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__lanes.rs_line_510_col_44.log",
+      "diff_path": "diff/src__lanes.rs_line_510_col_44.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.701765268,
+          "process_status": "Success",
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--no-run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.961085224,
+          "process_status": {
+            "Failure": 100
+          },
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/lanes.rs:1219:16: delete field key from struct Task expression in Task::members",
+          "package": "blake3-servil",
+          "file": "src/lanes.rs",
+          "function": {
+            "function_name": "Task::members",
+            "return_type": "-> Task",
+            "span": {
+              "start": {
+                "line": 1216,
+                "column": 5
+              },
+              "end": {
+                "line": 1220,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 1219,
+              "column": 16
+            },
+            "end": {
+              "line": 1219,
+              "column": 26
+            }
+          },
+          "replacement": "",
+          "genre": "StructField"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__lanes.rs_line_1219_col_16.log",
+      "diff_path": "diff/src__lanes.rs_line_1219_col_16.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.752389565,
+          "process_status": "Success",
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--no-run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.360895775,
+          "process_status": {
+            "Failure": 100
+          },
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/lanes.rs:1219:27: delete field flags from struct Task expression in Task::members",
+          "package": "blake3-servil",
+          "file": "src/lanes.rs",
+          "function": {
+            "function_name": "Task::members",
+            "return_type": "-> Task",
+            "span": {
+              "start": {
+                "line": 1216,
+                "column": 5
+              },
+              "end": {
+                "line": 1220,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 1219,
+              "column": 27
+            },
+            "end": {
+              "line": 1219,
+              "column": 33
+            }
+          },
+          "replacement": "",
+          "genre": "StructField"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__lanes.rs_line_1219_col_27.log",
+      "diff_path": "diff/src__lanes.rs_line_1219_col_27.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.706656995,
+          "process_status": "Success",
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--no-run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.401149663,
+          "process_status": {
+            "Failure": 100
+          },
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/lanes.rs:1219:34: delete field batch from struct Task expression in Task::members",
+          "package": "blake3-servil",
+          "file": "src/lanes.rs",
+          "function": {
+            "function_name": "Task::members",
+            "return_type": "-> Task",
+            "span": {
+              "start": {
+                "line": 1216,
+                "column": 5
+              },
+              "end": {
+                "line": 1220,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 1219,
+              "column": 34
+            },
+            "end": {
+              "line": 1219,
+              "column": 40
+            }
+          },
+          "replacement": "",
+          "genre": "StructField"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__lanes.rs_line_1219_col_34.log",
+      "diff_path": "diff/src__lanes.rs_line_1219_col_34.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.757923298,
+          "process_status": "Success",
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--no-run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 1.00562732,
+          "process_status": {
+            "Failure": 100
+          },
+          "argv": [
+            "/home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "nextest",
+            "run",
+            "--cargo-profile=mutants",
+            "--verbose",
+            "--package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5",
+            "--features=serde,zeroize"
+          ]
+        }
+      ]
+    }
+  ],
+  "total_mutants": 5,
+  "missed": 1,
+  "caught": 4,
+  "timeout": 0,
+  "unviable": 0,
+  "success": 0,
+  "start_time": "2026-10-22T02:30:00.226271179Z",
+  "end_time": "2026-10-22T02:30:09.446132842Z",
+  "cargo_mutants_version": "27.1.0"
+}

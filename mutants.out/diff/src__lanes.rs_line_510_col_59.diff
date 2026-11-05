@@ -1,0 +1,21 @@
+--- src/lanes.rs
++++ replace * with / in sme2_prefix
+@@ -502,17 +502,17 @@
+ /// (M4 Max and the VM on it: the best split of 1 to 64 MiB put 62% on SME2
+ /// beside one NEON thread, 38% beside three, 12% beside fifteen;
+ /// probe/sme2-thread, job 187).
+ /// A share below MAX_PIECE_LEN is no prefix: too little SME2 work to pay
+ /// for the turn and the streaming session (VM, servil mt 256 KiB over
+ /// sixteen threads, a 24 KiB prefix: +18-20%).
+ #[cfg_attr(not(blake3_sme2), allow(dead_code))]
+ fn sme2_prefix(len: usize, threads: usize) -> usize {
+-    let share = len / (100 + (threads - 1) * 10000 / 165) * 100;
++    let share = len / (100 + (threads - 1) * 10000 / 165) / /* ~ changed by cargo-mutants ~ */ 100;
+     if share >= MAX_PIECE_LEN { share } else { 0 }
+ }
+ 
+ /// Merge a shrinking cut in place, a level at a time. `pieces` tiles the
+ /// input from zero, with non-increasing power-of-two lengths except the
+ /// final (possibly short) piece, as produced by `cut_subtrees`. Each CV
+ /// hashes its corresponding piece. Two or more pieces are required.
+ ///

@@ -1,0 +1,4 @@
+src/lanes.rs:510:44: replace * with / in sme2_prefix
+src/lanes.rs:1219:16: delete field key from struct Task expression in Task::members
+src/lanes.rs:1219:27: delete field flags from struct Task expression in Task::members
+src/lanes.rs:1219:34: delete field batch from struct Task expression in Task::members

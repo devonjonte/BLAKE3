@@ -1,0 +1,312 @@
+
+*** baseline
+
+*** /home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo nextest run --no-run --cargo-profile=mutants --verbose --package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5 --features=serde,zeroize
+   Compiling blake3-servil v0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5 (/home/agent/BLAKE3-mini)
+    Finished `mutants` profile [optimized] target(s) in 0.59s
+
+*** result: Success
+
+*** /home/agent/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo nextest run --cargo-profile=mutants --verbose --package=blake3-servil@0.3.0+2e4fa821f9db07b945dbb2b0d02eb76cb19617b5 --features=serde,zeroize
+    Finished `mutants` profile [optimized] target(s) in 0.02s
+────────────
+ Nextest run ID 88d6188b-9b8a-4a75-91be-8f7267ec2f54 with nextest profile: default
+    Starting 98 tests across 10 binaries
+       START [         ] ( 1/98) blake3-servil each::test::test_miri_hash_each_multithreaded
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_miri_hash_each_multithreaded --nocapture
+       START [         ] ( 1/98) blake3-servil avx512::test::test_xof_many
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact avx512::test::test_xof_many --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_hash_each_matches_hash_with
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_hash_each_matches_hash_with --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_hash_each_multithreaded
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_hash_each_multithreaded --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_update_each_at_offsets
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_update_each_at_offsets --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_update_each
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_update_each --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::sources::test::test_find_reaches_every_registered_source
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::sources::test::test_find_reaches_every_registered_source --nocapture
+       START [         ] ( 1/98) blake3-servil each::test::test_update_each_holds_groups_together
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact each::test::test_update_each_holds_groups_together --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_a_caller_gives_its_place_back
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_a_caller_gives_its_place_back --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::equal_members_match_the_reference
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::equal_members_match_the_reference --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_concurrent_batch_callers_agree
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_concurrent_batch_callers_agree --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_a_parked_caller_is_woken_by_the_last_piece
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_a_parked_caller_is_woken_by_the_last_piece --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_cut_messages_shapes
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_cut_messages_shapes --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_hash_many_pool_agrees
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_hash_many_pool_agrees --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_cut_with_prefix_shapes_and_hashes
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_cut_with_prefix_shapes_and_hashes --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_idle_workers_park_while_a_stream_is_open
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_idle_workers_park_while_a_stream_is_open --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_hash_matches_serial
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_hash_matches_serial --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_simd_merge_matches_recursive
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_simd_merge_matches_recursive --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_next_piece_len
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_next_piece_len --nocapture
+       START [         ] ( 1/98) blake3-servil lanes::test::test_concurrent_callers_agree
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_concurrent_callers_agree --nocapture
+        PASS [   0.004s] ( 1/98) blake3-servil lanes::sources::test::test_find_reaches_every_registered_source
+       START [         ] ( 2/98) blake3-servil lanes::test::test_update_multithreaded_matches_hash
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact lanes::test::test_update_multithreaded_matches_hash --nocapture
+        PASS [   0.004s] ( 2/98) blake3-servil lanes::test::test_simd_merge_matches_recursive
+        PASS [   0.004s] ( 3/98) blake3-servil each::test::test_hash_each_matches_hash_with
+       START [         ] ( 4/98) blake3-servil many::test::portable_four_chunk_batch_matches_published_vectors
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::portable_four_chunk_batch_matches_published_vectors --nocapture
+       START [         ] ( 4/98) blake3-servil many::test::portable_across_partial_chunks_matches_published_vectors
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::portable_across_partial_chunks_matches_published_vectors --nocapture
+        PASS [   0.004s] ( 4/98) blake3-servil lanes::test::test_cut_messages_shapes
+       START [         ] ( 5/98) blake3-servil many::test::portable_two_chunk_batch_matches_published_vectors
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::portable_two_chunk_batch_matches_published_vectors --nocapture
+        PASS [   0.004s] ( 5/98) blake3-servil each::test::test_update_each_holds_groups_together
+       START [         ] ( 6/98) blake3-servil many::test::test_hash_blocks_without_plans
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::test_hash_blocks_without_plans --nocapture
+        PASS [   0.005s] ( 6/98) blake3-servil avx512::test::test_xof_many
+       START [         ] ( 7/98) blake3-servil many::test::test_hash_many_modes_every_platform
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::test_hash_many_modes_every_platform --nocapture
+        PASS [   0.006s] ( 7/98) blake3-servil each::test::test_update_each_at_offsets
+       START [         ] ( 8/98) blake3-servil many::test::test_hash_many_needs_the_input_it_names
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::test_hash_many_needs_the_input_it_names --nocapture
+        PASS [   0.006s] ( 8/98) blake3-servil each::test::test_miri_hash_each_multithreaded
+       START [         ] ( 9/98) blake3-servil many::test::test_hash_many_needs_whole_slots
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::test_hash_many_needs_whole_slots --nocapture
+        PASS [   0.006s] ( 9/98) blake3-servil lanes::test::test_next_piece_len
+       START [         ] (10/98) blake3-servil many::test::test_hash_many_whole_blocks
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::test_hash_many_whole_blocks --nocapture
+        PASS [   0.004s] (10/98) blake3-servil many::test::portable_two_chunk_batch_matches_published_vectors
+       START [         ] (11/98) blake3-servil many::test::test_small_batches_after_a_pause
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::test_small_batches_after_a_pause --nocapture
+        PASS [   0.008s] (11/98) blake3-servil each::test::test_update_each
+       START [         ] (12/98) blake3-servil many::test::test_whole_blocks_x86_full_width
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact many::test::test_whole_blocks_x86_full_width --nocapture
+        PASS [   0.008s] (12/98) blake3-servil lanes::test::test_a_caller_gives_its_place_back
+       START [         ] (13/98) blake3-servil outboard::test::test_miri_outboard_multithreaded
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact outboard::test::test_miri_outboard_multithreaded --nocapture
+        PASS [   0.010s] (13/98) blake3-servil lanes::test::test_a_parked_caller_is_woken_by_the_last_piece
+       START [         ] (14/98) blake3-servil outboard::test::test_miri_verifier_multithreaded
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact outboard::test::test_miri_verifier_multithreaded --nocapture
+        PASS [   0.005s] (14/98) blake3-servil many::test::test_hash_many_needs_the_input_it_names
+        PASS [   0.006s] (15/98) blake3-servil many::test::portable_four_chunk_batch_matches_published_vectors
+        PASS [   0.006s] (16/98) blake3-servil many::test::test_hash_blocks_without_plans
+        PASS [   0.011s] (17/98) blake3-servil lanes::test::test_idle_workers_park_while_a_stream_is_open
+        PASS [   0.006s] (18/98) blake3-servil many::test::portable_across_partial_chunks_matches_published_vectors
+        PASS [   0.005s] (19/98) blake3-servil many::test::test_hash_many_needs_whole_slots
+       START [         ] (20/98) blake3-servil platform::x86_features_test::test_x86_features_match_std
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact platform::x86_features_test::test_x86_features_match_std --nocapture
+       START [         ] (20/98) blake3-servil outboard::test::test_outboard_and_verify
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact outboard::test::test_outboard_and_verify --nocapture
+       START [         ] (20/98) blake3-servil outboard::test::test_verifier_one_message
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact outboard::test::test_verifier_one_message --nocapture
+       START [         ] (20/98) blake3-servil platform::x86_degree_test::test_detected_degree_is_the_widest_kernel
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact platform::x86_degree_test::test_detected_degree_is_the_widest_kernel --nocapture
+       START [         ] (20/98) blake3-servil rust_avx2::test::test_hash_many
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact rust_avx2::test::test_hash_many --nocapture
+       START [         ] (20/98) blake3-servil rust_avx2::partial_test::test_miri_chunks_with_partial
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact rust_avx2::partial_test::test_miri_chunks_with_partial --nocapture
+        PASS [   0.005s] (20/98) blake3-servil platform::x86_features_test::test_x86_features_match_std
+       START [         ] (21/98) blake3-servil rust_avx2::test::test_transpose
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact rust_avx2::test::test_transpose --nocapture
+        PASS [   0.005s] (21/98) blake3-servil outboard::test::test_verifier_one_message
+       START [         ] (22/98) blake3-servil rust_sse41::partial_test::test_miri_chunks_with_partial
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact rust_sse41::partial_test::test_miri_chunks_with_partial --nocapture
+        PASS [   0.007s] (22/98) blake3-servil platform::x86_degree_test::test_detected_degree_is_the_widest_kernel
+       START [         ] (23/98) blake3-servil rust_sse41::test::test_compress
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact rust_sse41::test::test_compress --nocapture
+        PASS [   0.007s] (23/98) blake3-servil rust_avx2::test::test_hash_many
+       START [         ] (24/98) blake3-servil rust_sse41::test::test_transpose
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact rust_sse41::test::test_transpose --nocapture
+        PASS [   0.014s] (24/98) blake3-servil outboard::test::test_miri_outboard_multithreaded
+       START [         ] (25/98) blake3-servil self_test::test::self_test_matches_the_reference
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact self_test::test::self_test_matches_the_reference --nocapture
+        PASS [   0.013s] (25/98) blake3-servil rust_avx2::partial_test::test_miri_chunks_with_partial
+       START [         ] (26/98) blake3-servil self_test::test::test_initialize_from_threads_at_once
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact self_test::test::test_initialize_from_threads_at_once --nocapture
+        PASS [   0.014s] (26/98) blake3-servil outboard::test::test_miri_verifier_multithreaded
+       START [         ] (27/98) blake3-servil self_test::test::test_self_test_run_checks_every_case
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact self_test::test::test_self_test_run_checks_every_case --nocapture
+        PASS [   0.010s] (27/98) blake3-servil rust_avx2::test::test_transpose
+       START [         ] (28/98) blake3-servil stream::test::test_miri_stream
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact stream::test::test_miri_stream --nocapture
+        PASS [   0.011s] (28/98) blake3-servil rust_sse41::test::test_transpose
+       START [         ] (29/98) blake3-servil stream::test::test_stream_against_hash_with
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact stream::test::test_stream_against_hash_with --nocapture
+        PASS [   0.009s] (29/98) blake3-servil self_test::test::self_test_matches_the_reference
+       START [         ] (30/98) blake3-servil stream::test::test_stream_panics
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact stream::test::test_stream_panics --nocapture
+        PASS [   0.017s] (30/98) blake3-servil rust_sse41::test::test_compress
+       START [         ] (31/98) blake3-servil test::aaa_require_nextest
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::aaa_require_nextest --nocapture
+        PASS [   0.035s] (31/98) blake3-servil lanes::test::test_hash_matches_serial
+       START [         ] (32/98) blake3-servil test::guard_pages::test_each_item_against_a_guard_page
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::guard_pages::test_each_item_against_a_guard_page --nocapture
+        PASS [   0.013s] (32/98) blake3-servil self_test::test::test_self_test_run_checks_every_case
+       START [         ] (33/98) blake3-servil test::guard_pages::test_hash_inside_guard_pages
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::guard_pages::test_hash_inside_guard_pages --nocapture
+        PASS [   0.020s] (33/98) blake3-servil stream::test::test_miri_stream
+       START [         ] (34/98) blake3-servil test::guard_pages::test_hash_many_each_input_against_a_guard_page
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::guard_pages::test_hash_many_each_input_against_a_guard_page --nocapture
+        PASS [   0.014s] (34/98) blake3-servil stream::test::test_stream_panics
+       START [         ] (35/98) blake3-servil test::guard_pages::test_hash_many_inside_guard_pages
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::guard_pages::test_hash_many_inside_guard_pages --nocapture
+        PASS [   0.039s] (35/98) blake3-servil many::test::test_hash_many_whole_blocks
+       START [         ] (36/98) blake3-servil test::guard_pages::test_xof_inside_guard_pages
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::guard_pages::test_xof_inside_guard_pages --nocapture
+        PASS [   0.032s] (36/98) blake3-servil rust_sse41::partial_test::test_miri_chunks_with_partial
+       START [         ] (37/98) blake3-servil test::test_block_buffer_alignment
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_block_buffer_alignment --nocapture
+        PASS [   0.003s] (37/98) blake3-servil test::test_block_buffer_alignment
+       START [         ] (38/98) blake3-servil test::test_debug_leaves_out_the_bytes
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_debug_leaves_out_the_bytes --nocapture
+        PASS [   0.019s] (38/98) blake3-servil test::aaa_require_nextest
+        PASS [   0.030s] (39/98) blake3-servil self_test::test::test_initialize_from_threads_at_once
+       START [         ] (40/98) blake3-servil test::test_grouped_hash
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_grouped_hash --nocapture
+       START [         ] (40/98) blake3-servil test::test_empty_subtree_should_panic
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_empty_subtree_should_panic --nocapture
+        PASS [   0.055s] (40/98) blake3-servil lanes::test::test_hash_many_pool_agrees
+       START [         ] (41/98) blake3-servil test::test_hash_comparisons_and_formats
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_hash_comparisons_and_formats --nocapture
+        PASS [   0.005s] (41/98) blake3-servil test::test_empty_subtree_should_panic
+       START [         ] (42/98) blake3-servil test::test_hash_const_conversions
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_hash_const_conversions --nocapture
+        PASS [   0.013s] (42/98) blake3-servil test::test_debug_leaves_out_the_bytes
+       START [         ] (43/98) blake3-servil test::test_hash_conversions
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_hash_conversions --nocapture
+        PASS [   0.018s] (43/98) blake3-servil test::guard_pages::test_xof_inside_guard_pages
+        PASS [   0.005s] (44/98) blake3-servil test::test_hash_const_conversions
+       START [         ] (45/98) blake3-servil test::test_hasher_gathers
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_hasher_gathers --nocapture
+        PASS [   0.009s] (45/98) blake3-servil test::test_hash_comparisons_and_formats
+       START [         ] (46/98) blake3-servil test::test_hasher_io_write
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_hasher_io_write --nocapture
+       START [         ] (46/98) blake3-servil test::test_hasher_already_accepted_input_should_panic
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_hasher_already_accepted_input_should_panic --nocapture
+        PASS [   0.021s] (46/98) blake3-servil test::guard_pages::test_hash_many_each_input_against_a_guard_page
+       START [         ] (47/98) blake3-servil test::test_hex_encoding_decoding
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_hex_encoding_decoding --nocapture
+        PASS [   0.013s] (47/98) blake3-servil test::test_grouped_hash
+       START [         ] (48/98) blake3-servil test::test_miri_smoketest
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_miri_smoketest --nocapture
+        PASS [   0.005s] (48/98) blake3-servil test::test_hash_conversions
+       START [         ] (49/98) blake3-servil test::test_reset
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_reset --nocapture
+        PASS [   0.004s] (49/98) blake3-servil test::test_hex_encoding_decoding
+       START [         ] (50/98) blake3-servil test::test_serde
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_serde --nocapture
+        PASS [   0.007s] (50/98) blake3-servil test::test_hasher_io_write
+       START [         ] (51/98) blake3-servil test::test_set_input_offset_cant_finalize
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_set_input_offset_cant_finalize --nocapture
+        PASS [   0.008s] (51/98) blake3-servil test::test_hasher_already_accepted_input_should_panic
+       START [         ] (52/98) blake3-servil test::test_set_input_offset_cant_finalize_xof
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_set_input_offset_cant_finalize_xof --nocapture
+        PASS [   0.004s] (52/98) blake3-servil test::test_serde
+       START [         ] (53/98) blake3-servil test::test_too_much_input_should_panic
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_too_much_input_should_panic --nocapture
+        PASS [   0.007s] (53/98) blake3-servil test::test_reset
+       START [         ] (54/98) blake3-servil test::test_unaligned_offset_should_panic
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_unaligned_offset_should_panic --nocapture
+        PASS [   0.006s] (54/98) blake3-servil test::test_set_input_offset_cant_finalize
+       START [         ] (55/98) blake3-servil test::test_update_reader_interrupted
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_update_reader_interrupted --nocapture
+        PASS [   0.010s] (55/98) blake3-servil test::test_miri_smoketest
+       START [         ] (56/98) blake3-servil test::test_update_reader_keeps_every_byte_across_errors
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_update_reader_keeps_every_byte_across_errors --nocapture
+        PASS [   0.004s] (56/98) blake3-servil test::test_too_much_input_should_panic
+       START [         ] (57/98) blake3-servil test::test_xof_seek
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_xof_seek --nocapture
+        PASS [   0.013s] (57/98) blake3-servil test::test_hasher_gathers
+       START [         ] (58/98) blake3-servil test::test_zeroize
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::test_zeroize --nocapture
+        PASS [   0.004s] (58/98) blake3-servil test::test_unaligned_offset_should_panic
+       START [         ] (59/98) blake3-servil test::unsafe_paths::test_batches_small
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::unsafe_paths::test_batches_small --nocapture
+        PASS [   0.081s] (59/98) blake3-servil lanes::test::test_cut_with_prefix_shapes_and_hashes
+       START [         ] (60/98) blake3-servil test::unsafe_paths::test_pool_from_two_callers
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/blake3_servil-b5a8346ece4b785a --exact test::unsafe_paths::test_pool_from_two_callers --nocapture
+        PASS [   0.006s] (60/98) blake3-servil test::test_update_reader_interrupted
+        PASS [   0.011s] (61/98) blake3-servil test::test_set_input_offset_cant_finalize_xof
+       START [         ] (62/98) blake3-servil::api_plan a_batch_whose_buffer_is_not_whole_slots_is_refused
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact a_batch_whose_buffer_is_not_whole_slots_is_refused --nocapture
+       START [         ] (62/98) blake3-servil::api_plan a_message_in_pieces_matches_the_reference
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact a_message_in_pieces_matches_the_reference --nocapture
+        PASS [   0.005s] (62/98) blake3-servil test::unsafe_paths::test_batches_small
+       START [         ] (63/98) blake3-servil::api_plan a_panicking_handler_unwinds_and_the_pool_goes_on
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact a_panicking_handler_unwinds_and_the_pool_goes_on --nocapture
+        PASS [   0.007s] (63/98) blake3-servil::api_plan a_batch_whose_buffer_is_not_whole_slots_is_refused
+       START [         ] (64/98) blake3-servil::api_plan a_stream_cycles_a_fixed_set_of_places
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact a_stream_cycles_a_fixed_set_of_places --nocapture
+        PASS [   0.017s] (64/98) blake3-servil test::test_zeroize
+       START [         ] (65/98) blake3-servil::api_plan a_stream_puts_every_digest_in_its_place_and_hands_the_places_back_in_order
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact a_stream_puts_every_digest_in_its_place_and_hands_the_places_back_in_order --nocapture
+        PASS [   0.017s] (65/98) blake3-servil test::test_xof_seek
+       START [         ] (66/98) blake3-servil::api_plan a_streams_batches_fill_the_callers_places
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact a_streams_batches_fill_the_callers_places --nocapture
+        PASS [   0.019s] (66/98) blake3-servil test::test_update_reader_keeps_every_byte_across_errors
+       START [         ] (67/98) blake3-servil::api_plan batches_every_form_match_the_reference
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact batches_every_form_match_the_reference --nocapture
+        PASS [   0.099s] (67/98) blake3-servil each::test::test_hash_each_multithreaded
+        PASS [   0.019s] (68/98) blake3-servil test::unsafe_paths::test_pool_from_two_callers
+       START [         ] (69/98) blake3-servil::api_plan bursts_of_large_batches_after_pauses_complete
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact bursts_of_large_batches_after_pauses_complete --nocapture
+       START [         ] (69/98) blake3-servil::api_plan one_message_every_form_matches_the_vectors
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact one_message_every_form_matches_the_vectors --nocapture
+        PASS [   0.008s] (69/98) blake3-servil::api_plan one_message_every_form_matches_the_vectors
+       START [         ] (70/98) blake3-servil::api_plan one_message_large_inputs_match_the_reference
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact one_message_large_inputs_match_the_reference --nocapture
+        PASS [   0.031s] (70/98) blake3-servil::api_plan a_panicking_handler_unwinds_and_the_pool_goes_on
+       START [         ] (71/98) blake3-servil::api_plan streams_on_several_threads_keep_their_own_order
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/api_plan-e84e2505c2bdeed4 --exact streams_on_several_threads_keep_their_own_order --nocapture
+        PASS [   0.035s] (71/98) blake3-servil::api_plan a_stream_cycles_a_fixed_set_of_places
+       START [         ] (72/98) blake3-servil::initialize_contract a_call_before_initialize_panics
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/initialize_contract-d51d9d97748d9f43 --exact a_call_before_initialize_panics --nocapture
+        PASS [   0.127s] (72/98) blake3-servil lanes::test::test_concurrent_batch_callers_agree
+       START [         ] (73/98) blake3-servil::initialize_multithreaded_contract a_multithreaded_call_before_initialize_multithreaded_panics
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/initialize_multithreaded_contract-35ca8b9d89c6937a --exact a_multithreaded_call_before_initialize_multithreaded_panics --nocapture
+        PASS [   0.132s] (73/98) blake3-servil lanes::test::equal_members_match_the_reference
+       START [         ] (74/98) blake3-servil::pool_threads one_thread_starts_no_workers
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/pool_threads-12bafc5ad66a8daa --exact one_thread_starts_no_workers --nocapture
+        PASS [   0.124s] (74/98) blake3-servil many::test::test_small_batches_after_a_pause
+       START [         ] (75/98) blake3-servil::stream_collect_no_workers a_caller_looping_on_collect_makes_progress_without_workers
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/stream_collect_no_workers-01059eaf806e9402 --exact a_caller_looping_on_collect_makes_progress_without_workers --nocapture
+        PASS [   0.012s] (75/98) blake3-servil::initialize_contract a_call_before_initialize_panics
+       START [         ] (76/98) blake3-servil::stream_collect_one_worker a_caller_looping_on_collect_makes_progress_without_workers
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/stream_collect_one_worker-162c732a579d1454 --exact a_caller_looping_on_collect_makes_progress_without_workers --nocapture
+        PASS [   0.043s] (76/98) blake3-servil::api_plan a_streams_batches_fill_the_callers_places
+        PASS [   0.012s] (77/98) blake3-servil::initialize_multithreaded_contract a_multithreaded_call_before_initialize_multithreaded_panics
+       START [         ] (78/98) blake3-servil::stream_collect_with_workers a_caller_looping_on_collect_makes_progress_with_sleeping_workers
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/stream_collect_with_workers-6b2696f5238a22d3 --exact a_caller_looping_on_collect_makes_progress_with_sleeping_workers --nocapture
+       START [         ] (78/98) blake3-servil::stream_collect_parked_workers a_caller_looping_on_collect_wakes_a_parked_worker
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/stream_collect_parked_workers-912ec9db26d691bc --exact a_caller_looping_on_collect_wakes_a_parked_worker --nocapture
+        PASS [   0.137s] (78/98) blake3-servil many::test::test_hash_many_modes_every_platform
+       START [         ] (79/98) blake3-servil::stream_one_cpu every_stream_completes_on_one_cpu
+             command: /home/agent/BLAKE3-mini/target/mutants/deps/stream_one_cpu-c5a215bedfcbb603 --exact every_stream_completes_on_one_cpu --nocapture
+        PASS [   0.010s] (79/98) blake3-servil::stream_collect_no_workers a_caller_looping_on_collect_makes_progress_without_workers
+        PASS [   0.148s] (80/98) blake3-servil lanes::test::test_concurrent_callers_agree
+        PASS [   0.053s] (81/98) blake3-servil::api_plan batches_every_form_match_the_reference
+        PASS [   0.023s] (82/98) blake3-servil::pool_threads one_thread_starts_no_workers
+        PASS [   0.064s] (83/98) blake3-servil::api_plan a_stream_puts_every_digest_in_its_place_and_hands_the_places_back_in_order
+        PASS [   0.051s] (84/98) blake3-servil::api_plan streams_on_several_threads_keep_their_own_order
+        PASS [   0.035s] (85/98) blake3-servil::stream_one_cpu every_stream_completes_on_one_cpu
+        PASS [   0.101s] (86/98) blake3-servil::api_plan one_message_large_inputs_match_the_reference
+        PASS [   0.229s] (87/98) blake3-servil outboard::test::test_outboard_and_verify
+        PASS [   0.157s] (88/98) blake3-servil::api_plan a_message_in_pieces_matches_the_reference
+        PASS [   0.226s] (89/98) blake3-servil test::guard_pages::test_hash_inside_guard_pages
+        PASS [   0.266s] (90/98) blake3-servil lanes::test::test_update_multithreaded_matches_hash
+        PASS [   0.228s] (91/98) blake3-servil test::guard_pages::test_hash_many_inside_guard_pages
+        PASS [   0.196s] (92/98) blake3-servil::api_plan bursts_of_large_batches_after_pauses_complete
+        PASS [   0.213s] (93/98) blake3-servil::stream_collect_one_worker a_caller_looping_on_collect_makes_progress_without_workers
+        PASS [   0.340s] (94/98) blake3-servil test::guard_pages::test_each_item_against_a_guard_page
+        PASS [   0.409s] (95/98) blake3-servil::stream_collect_parked_workers a_caller_looping_on_collect_wakes_a_parked_worker
+        PASS [   0.430s] (96/98) blake3-servil::stream_collect_with_workers a_caller_looping_on_collect_makes_progress_with_sleeping_workers
+        PASS [   0.753s] (97/98) blake3-servil many::test::test_whole_blocks_x86_full_width
+        PASS [   0.862s] (98/98) blake3-servil stream::test::test_stream_against_hash_with
+────────────
+     Summary [   0.891s] 98 tests run: 98 passed, 0 skipped
+
+*** result: Success

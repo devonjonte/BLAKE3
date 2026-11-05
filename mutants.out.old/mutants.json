@@ -1,0 +1,162 @@
+[
+  {
+    "diff": "--- src/lanes.rs\n+++ replace * with / in sme2_prefix\n@@ -502,17 +502,17 @@\n /// (M4 Max and the VM on it: the best split of 1 to 64 MiB put 62% on SME2\n /// beside one NEON thread, 38% beside three, 12% beside fifteen;\n /// probe/sme2-thread, job 187).\n /// A share below MAX_PIECE_LEN is no prefix: too little SME2 work to pay\n /// for the turn and the streaming session (VM, servil mt 256 KiB over\n /// sixteen threads, a 24 KiB prefix: +18-20%).\n #[cfg_attr(not(blake3_sme2), allow(dead_code))]\n fn sme2_prefix(len: usize, threads: usize) -> usize {\n-    let share = len / (100 + (threads - 1) * 10000 / 165) * 100;\n+    let share = len / (100 + (threads - 1) * 10000 / 165) / /* ~ changed by cargo-mutants ~ */ 100;\n     if share >= MAX_PIECE_LEN { share } else { 0 }\n }\n \n /// Merge a shrinking cut in place, a level at a time. `pieces` tiles the\n /// input from zero, with non-increasing power-of-two lengths except the\n /// final (possibly short) piece, as produced by `cut_subtrees`. Each CV\n /// hashes its corresponding piece. Two or more pieces are required.\n ///\n",
+    "file": "src/lanes.rs",
+    "function": {
+      "function_name": "sme2_prefix",
+      "return_type": "-> usize",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 512
+        },
+        "start": {
+          "column": 1,
+          "line": 500
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/lanes.rs:510:59: replace * with / in sme2_prefix",
+    "package": "blake3-servil",
+    "replacement": "/",
+    "span": {
+      "end": {
+        "column": 60,
+        "line": 510
+      },
+      "start": {
+        "column": 59,
+        "line": 510
+      }
+    }
+  },
+  {
+    "diff": "--- src/lanes.rs\n+++ replace * with / in sme2_prefix\n@@ -502,17 +502,17 @@\n /// (M4 Max and the VM on it: the best split of 1 to 64 MiB put 62% on SME2\n /// beside one NEON thread, 38% beside three, 12% beside fifteen;\n /// probe/sme2-thread, job 187).\n /// A share below MAX_PIECE_LEN is no prefix: too little SME2 work to pay\n /// for the turn and the streaming session (VM, servil mt 256 KiB over\n /// sixteen threads, a 24 KiB prefix: +18-20%).\n #[cfg_attr(not(blake3_sme2), allow(dead_code))]\n fn sme2_prefix(len: usize, threads: usize) -> usize {\n-    let share = len / (100 + (threads - 1) * 10000 / 165) * 100;\n+    let share = len / (100 + (threads - 1) / /* ~ changed by cargo-mutants ~ */ 10000 / 165) * 100;\n     if share >= MAX_PIECE_LEN { share } else { 0 }\n }\n \n /// Merge a shrinking cut in place, a level at a time. `pieces` tiles the\n /// input from zero, with non-increasing power-of-two lengths except the\n /// final (possibly short) piece, as produced by `cut_subtrees`. Each CV\n /// hashes its corresponding piece. Two or more pieces are required.\n ///\n",
+    "file": "src/lanes.rs",
+    "function": {
+      "function_name": "sme2_prefix",
+      "return_type": "-> usize",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 512
+        },
+        "start": {
+          "column": 1,
+          "line": 500
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/lanes.rs:510:44: replace * with / in sme2_prefix",
+    "package": "blake3-servil",
+    "replacement": "/",
+    "span": {
+      "end": {
+        "column": 45,
+        "line": 510
+      },
+      "start": {
+        "column": 44,
+        "line": 510
+      }
+    }
+  },
+  {
+    "diff": "--- src/lanes.rs\n+++ delete field key from struct Task expression in Task::members\n@@ -1211,17 +1211,17 @@\n             members: 0,\n             member: [NO_MEMBER; MEMBERS],\n         }\n     }\n \n     /// An empty task of short messages (with `batch`, batches of messages\n     /// of that length) in the mode of `key` and `flags`.\n     pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {\n-        Task { key: *key, flags, batch, ..Task::of(&[], 0) }\n+        Task {  /* ~ changed by cargo-mutants ~ */ flags, batch, ..Task::of(&[], 0) }\n     }\n \n     /// Hash on `platform` into `out`: for a subtree of two chunks or more at\n     /// chunk zero (it may be the whole message), its pair of child chaining\n     /// values; for any other, its chaining value (first 32 bytes). Then\n     /// count down.\n     pub(crate) fn run(self, platform: Platform) {\n         if self.members > 0 {\n",
+    "file": "src/lanes.rs",
+    "function": {
+      "function_name": "Task::members",
+      "return_type": "-> Task",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 1220
+        },
+        "start": {
+          "column": 5,
+          "line": 1216
+        }
+      }
+    },
+    "genre": "StructField",
+    "name": "src/lanes.rs:1219:16: delete field key from struct Task expression in Task::members",
+    "package": "blake3-servil",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 26,
+        "line": 1219
+      },
+      "start": {
+        "column": 16,
+        "line": 1219
+      }
+    }
+  },
+  {
+    "diff": "--- src/lanes.rs\n+++ delete field flags from struct Task expression in Task::members\n@@ -1211,17 +1211,17 @@\n             members: 0,\n             member: [NO_MEMBER; MEMBERS],\n         }\n     }\n \n     /// An empty task of short messages (with `batch`, batches of messages\n     /// of that length) in the mode of `key` and `flags`.\n     pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {\n-        Task { key: *key, flags, batch, ..Task::of(&[], 0) }\n+        Task { key: *key,  /* ~ changed by cargo-mutants ~ */ batch, ..Task::of(&[], 0) }\n     }\n \n     /// Hash on `platform` into `out`: for a subtree of two chunks or more at\n     /// chunk zero (it may be the whole message), its pair of child chaining\n     /// values; for any other, its chaining value (first 32 bytes). Then\n     /// count down.\n     pub(crate) fn run(self, platform: Platform) {\n         if self.members > 0 {\n",
+    "file": "src/lanes.rs",
+    "function": {
+      "function_name": "Task::members",
+      "return_type": "-> Task",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 1220
+        },
+        "start": {
+          "column": 5,
+          "line": 1216
+        }
+      }
+    },
+    "genre": "StructField",
+    "name": "src/lanes.rs:1219:27: delete field flags from struct Task expression in Task::members",
+    "package": "blake3-servil",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 33,
+        "line": 1219
+      },
+      "start": {
+        "column": 27,
+        "line": 1219
+      }
+    }
+  },
+  {
+    "diff": "--- src/lanes.rs\n+++ delete field batch from struct Task expression in Task::members\n@@ -1211,17 +1211,17 @@\n             members: 0,\n             member: [NO_MEMBER; MEMBERS],\n         }\n     }\n \n     /// An empty task of short messages (with `batch`, batches of messages\n     /// of that length) in the mode of `key` and `flags`.\n     pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {\n-        Task { key: *key, flags, batch, ..Task::of(&[], 0) }\n+        Task { key: *key, flags,  /* ~ changed by cargo-mutants ~ */ ..Task::of(&[], 0) }\n     }\n \n     /// Hash on `platform` into `out`: for a subtree of two chunks or more at\n     /// chunk zero (it may be the whole message), its pair of child chaining\n     /// values; for any other, its chaining value (first 32 bytes). Then\n     /// count down.\n     pub(crate) fn run(self, platform: Platform) {\n         if self.members > 0 {\n",
+    "file": "src/lanes.rs",
+    "function": {
+      "function_name": "Task::members",
+      "return_type": "-> Task",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 1220
+        },
+        "start": {
+          "column": 5,
+          "line": 1216
+        }
+      }
+    },
+    "genre": "StructField",
+    "name": "src/lanes.rs:1219:34: delete field batch from struct Task expression in Task::members",
+    "package": "blake3-servil",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 40,
+        "line": 1219
+      },
+      "start": {
+        "column": 34,
+        "line": 1219
+      }
+    }
+  }
+]
