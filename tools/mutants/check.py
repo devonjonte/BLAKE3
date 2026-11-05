@@ -853,7 +853,11 @@ def main():
         new = {k: n for k, n in found.items() if n > known.get(k, (0, ""))[0]}
         new_timed = {k: n for k, n in timed.items() if n > tknown.get(k, (0, ""))[0]}
         for k, n in sorted(new.items()):
-            print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
+            # A name all of whose places build to the same code gets that
+            # row's reason (SAME_REASON, or SAME_RELEASE_REASON), as --write
+            # gives it in a whole run.
+            same = " same code" + (", in a release build" if RELEASE_SAME["run"][k] else "") if SAME["run"][k] == n else ""
+            print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}{';' + same if same else ''}): {k}")
         for k, n in sorted(new_timed.items()):
             print(f"NEW TIME-OUT ({n - tknown.get(k, (0, ''))[0]}): {k}")
         print(f"mutants: the change since {since}: {sum(1 for f in functions.values() for _ in f)} mutants, "
