@@ -13,6 +13,16 @@
 # slowest test of CI's debug and QEMU jobs before landing: the clock must
 # sit well above every test there.
 slow-timeout = { period = "60s", terminate-after = 1 }
+# pool_fairness times two callers for a second and reads their shares: a
+# probe of the machine as much as of the pool, which other load fails
+# (#240: 2 of 5 alone on a 4-vCPU guest, every shard of a mutation check).
+# It runs on purpose, `cargo nextest run -P machine`, with the machine to
+# itself; the pool's order of service has its own test in lanes::sources.
+default-filter = "not binary(pool_fairness)"
+
+[profile.machine]
+default-filter = "binary(pool_fairness)"
+slow-timeout = { period = "60s", terminate-after = 1 }
 
 [profile.mutants]
 # A mutant's tests stop at the first that fails: a caught mutant costs the
