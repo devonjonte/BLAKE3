@@ -452,6 +452,7 @@ pub fn test_xof_many_fn(xof_many_function: XofManyFunction) {
 /// A reader cloned mid-output carries on as the original does, from the
 /// same position, each then independent; an empty fill reads nothing and
 /// moves nothing (BLAKE3 #238: no test cloned a reader or filled nothing).
+#[cfg(feature = "std")]
 #[test]
 fn test_xof_clone_and_empty_fill() {
     let mut golden = Golden::new("xof_clone_and_empty_fill");
@@ -489,6 +490,7 @@ fn test_xof_clone_and_empty_fill() {
 /// the fallback; it is in an unsafe fn, which cargo-mutants never mutates).
 /// Block counts of 1, 2, 3 and 16 (a whole chunk), one to five inputs,
 /// counters incremented or not, the chunk flags at start and end.
+#[cfg(feature = "std")]
 #[test]
 fn test_pair_hash_many_blocks_every_platform() {
     use crate::{CHUNK_END, CHUNK_START, IV};
