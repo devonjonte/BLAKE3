@@ -1150,28 +1150,49 @@ pub(crate) mod sources {
         false
     }
 
-    /// Run one item from any source: whether there was one. When two or
-    /// more wait and a worker is parked, this one wakes the next first
-    /// (the chain).
+    /// Run one item from any source: whether there was one. The walk
+    /// begins at slot 0 every time, so a worker serves the lowest
+    /// registered source until it holds no item, then the next: each call
+    /// gets the whole pool and finishes soon, and its caller submits the
+    /// next; the shares two callers get are fair because a job's pieces
+    /// are claimed in microseconds and the next job is published later
+    /// (pool_fairness: 1.0-1.1, #213, #215). Serving the sources in turn
+    /// instead cost the shared cells 6-16% on an i7-12700K (lent 1 MiB
+    /// +15.6% in every one of 64 pairs; #241): each call then waits for
+    /// the other's pieces before its last one finishes. When two or more
+    /// wait and a worker is parked, this one wakes the next first (the
+    /// chain).
     pub(crate) fn run_one() -> bool {
+        run_one_from(serve)
+    }
+
+    /// [`run_one`]'s walk, with `serve` what is done with the item taken
+    /// (the test's way in: a recording `serve`).
+    fn run_one_from(mut serve: impl FnMut(&'static Source, Item)) -> bool {
         find(|source| {
             let Some(item) = source.take() else { return false };
-            if source.waiting() >= 2 {
-                pool().park.wake_one();
-            }
-            match item {
-                Item::Task(task) => task.run(pool_platform()),
-                Item::Pieces(job, index, n) => {
-                    // Sound: the job lives until its pieces are finished,
-                    // these among them; this thread alone took them.
-                    for i in index..index + n {
-                        unsafe { (*job).hash_piece(i, pool_platform()) };
-                    }
-                    source.finished(n);
-                }
-            }
+            serve(source, item);
             true
         })
+    }
+
+    /// Hash `item` of `source` on this thread, waking the next worker first
+    /// when two or more wait and one is parked.
+    fn serve(source: &'static Source, item: Item) {
+        if source.waiting() >= 2 {
+            pool().park.wake_one();
+        }
+        match item {
+            Item::Task(task) => task.run(pool_platform()),
+            Item::Pieces(job, index, n) => {
+                // Sound: the job lives until its pieces are finished,
+                // these among them; this thread alone took them.
+                for i in index..index + n {
+                    unsafe { (*job).hash_piece(i, pool_platform()) };
+                }
+                source.finished(n);
+            }
+        }
     }
 
     /// A task from any stream (the SME2 thread takes these alone).
@@ -1280,6 +1301,35 @@ pub(crate) mod sources {
             }
             for &i in &[0, 2] {
                 Source::unregister(slots[i]);
+            }
+        }
+
+        /// A worker serves the lowest registered source until it holds no
+        /// item, then the next: two sources with three items each are
+        /// served a, a, a, b, b, b (run_one's own walk, its item recorded,
+        /// not run). The order is the pool's by choice (run_one's comment:
+        /// serving them in turn cost the shared cells 6-16%, #241), and a
+        /// test states it so a change to it is a decision.
+        #[test]
+        fn test_a_worker_serves_the_lowest_source_until_it_is_empty() {
+            let sources: Vec<&'static Source> = (0..2).map(|_| &*Box::leak(Box::new(Source::new(0)))).collect();
+            let slots: Vec<usize> = sources.iter().map(|s| s.register().expect("a free slot")).collect();
+            for s in &sources {
+                s.finish.published.store(3, Ordering::SeqCst);
+            }
+            let mut served = Vec::new();
+            while run_one_from(|source, _| served.push(slots[sources.iter().position(|s| core::ptr::eq(*s, source)).unwrap()])) {}
+            let (a, b) = (slots[0], slots[1]);
+            assert_eq!(served, [a, a, a, b, b, b], "the lower slot whole, then the higher");
+            // An item published to the lower slot meanwhile is served before
+            // the higher slot's remaining ones.
+            sources[0].finish.published.store(4, Ordering::SeqCst);
+            sources[1].finish.published.store(5, Ordering::SeqCst);
+            served.clear();
+            while run_one_from(|source, _| served.push(slots[sources.iter().position(|s| core::ptr::eq(*s, source)).unwrap()])) {}
+            assert_eq!(served, [a, b, b]);
+            for slot in slots {
+                Source::unregister(slot);
             }
         }
 

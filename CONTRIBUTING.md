@@ -61,6 +61,7 @@ under `cargo test --doc`. The C API tests also need cargo-c
 
 ```sh
 cargo nextest run --release --lib --tests
+cargo nextest run --release -P machine     # the pool's shares timed with the machine to itself (pool_fairness)
 cargo test --release --doc
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API
