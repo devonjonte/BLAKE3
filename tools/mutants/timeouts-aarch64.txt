@@ -33,12 +33,10 @@ src/platform.rs	delete ! in Sme2Turn::take	1	the SME2 turn's handshake inverted:
 src/platform.rs	replace <impl Drop for Sme2Turn>::drop with ()	1	the SME2 turn is never released: the second SME2-sized call waits forever for the first's turn; the clock stops it
 src/lanes.rs	replace sources::Source::publish_job -> usize with 1	1	a loop variant broken: a job's target is 1, which its pieces' count passes, so the caller's wait for them never ends; the clock stops the multithreaded tests
 src/stream.rs	replace - with + in Stream<'env, D>::add_entry	1	a loop variant broken: a full set of entries never reads as full, so entries are overwritten and the stream never finishes; the clock stops every stream test
-src/stream.rs	replace - with + in Stream<'env, D>::reserve	1	a loop variant broken: the room a reservation needs is miscounted, so it waits for room that never comes; the clock stops every stream test
 src/stream.rs	replace - with + in Stream<'env, D>::wait_for_room	1	a loop variant broken: the stream never hands back its last entries, so finish (or the wait for room) never returns; the clock stops every stream test
 src/stream.rs	replace < with <= in Stream<'env, D>::finish	1	a loop variant broken: finish helps while every entry is handed back, forever; the clock stops every stream test
 src/stream.rs	replace < with == in Stream<'env, D>::deliver	1	a loop variant broken: the stream never hands back its last entries, so finish (or the wait for room) never returns; the clock stops every stream test
 src/stream.rs	replace < with > in Stream<'env, D>::deliver	1	a loop variant broken: the stream never hands back its last entries, so finish (or the wait for room) never returns; the clock stops every stream test
-src/stream.rs	replace < with > in Stream<'env, D>::reserve	1	a loop variant broken: the room a reservation needs is miscounted, so it waits for room that never comes; the clock stops every stream test
 src/stream.rs	replace == with != in Stream<'env, D>::wait_for_room	1	a loop variant broken: the stream never hands back its last entries, so finish (or the wait for room) never returns; the clock stops every stream test
 src/stream.rs	replace Stream<'env, D>::collect with ()	1	a loop variant broken: a caller looping on collect waits for entries that collect never hands back; the clock stops the tests that collect
 src/stream.rs	replace Stream<'env, D>::deliver -> usize with 0	1	a loop variant broken: the stream never hands back its last entries, so finish (or the wait for room) never returns; the clock stops every stream test
@@ -50,4 +48,3 @@ src/stream.rs	replace + with * in room	1	a loop variant broken: the room a reser
 src/stream.rs	replace + with - in room	2	a loop variant broken: the room a reservation needs is miscounted, so it waits for room that never comes; the clock stops every stream test
 src/stream.rs	replace - with + in room	1	a loop variant broken: the room a reservation needs is miscounted, so it waits for room that never comes; the clock stops every stream test
 src/stream.rs	replace > with < in room	1	a loop variant broken: the room a reservation needs is miscounted, so it waits for room that never comes; the clock stops every stream test
-src/stream.rs	replace < with > in Stream<'env, D>::reserve_long	1	a loop variant broken: the room a reservation needs is miscounted, so it waits for room that never comes; the clock stops every stream test

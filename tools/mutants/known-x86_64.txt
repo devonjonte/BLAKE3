@@ -29,11 +29,8 @@ src/incremental.rs	replace && with || in Hasher::update	1	same code: every test 
 src/incremental.rs	replace && with || in HasherCore::update_pooled	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace + with * in Hasher::update	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace + with - in Hasher::update	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/incremental.rs	replace + with - in HasherCore::update_part_with_results	1	equally correct paths: where the results are consumed; every boundary hashes the same bytes
-src/incremental.rs	replace / with * in HasherCore::update_part_with_results	1	equivalent: a power of two times or over 2 has the same one bit, so the stack merges alike
 src/incremental.rs	replace <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv -> Option<CVBytes> with None	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/incremental.rs	replace == with != in Hasher::update	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/incremental.rs	replace > with >= in HasherCore::update_part_with_results	2	equivalent for its one caller: a held group is exactly 16 KiB (16 chunks), so no length it compares equals one chunk
 src/incremental.rs	replace >= with < in <impl hasher::Hooks for HasherHooks<'_>>::children	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace >= with < in HasherCore::update_pooled	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((0, Box::leak(Box::new([0; STAGE_LEN]))))	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -61,7 +58,6 @@ src/lanes.rs	replace > with >= in initialize	1	as on aarch64: survives (known-aa
 src/lanes.rs	replace > with >= in sme2_serve	1	as on aarch64: survives (known-aarch64.txt): speed: whether the SME2 thread runs a gathered task on NEON or in an SME2 session (equally correct)
 src/lanes.rs	replace > with >= in sources::Source::wake_for_waiting	1	the pool's scheduling: whether a waiting task wakes a parked worker; the caller takes what waits meanwhile
 src/lanes.rs	replace >= with < in sources::Source::publish	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
-src/lanes.rs	replace >= with < in sources::run_one	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
 src/lanes.rs	replace Pool::wake_for with ()	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
 src/lanes.rs	replace all_workers_parked -> bool with true	1	a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before
 src/lanes.rs	replace prefix_for -> usize with 0	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)

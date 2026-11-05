@@ -9,7 +9,6 @@ src/stream.rs	delete ! in Stream<'env, D>::reclaim	1	a loop variant broken: the 
 src/stream.rs	replace && with || in Stream<'env, D>::finish	1	a loop variant broken: finish's pause and reclaim run on the wrong condition, and a held GPU's tasks are never taken back; the clock stops the stream tests that reach it
 src/stream.rs	replace += with *= in Stream<'env, D>::deliver	2	a loop variant broken: a ring's tail never moves, so the writer waits for room that never comes; the clock stops the stream tests that reach it
 src/stream.rs	replace < with <= in Stream<'env, D>::finish	1	a loop variant broken: finish waits for one entry more than were submitted; the clock stops the stream tests that reach it
-src/stream.rs	replace < with > in Stream<'env, D>::reserve_gpu	1	a loop variant broken: the GPU ring's room is miscounted, so a reservation waits for room that never comes; the clock stops the stream tests that reach it
 src/stream.rs	replace == with != in Stream<'env, D>::finish	1	a loop variant broken: finish reclaims and pauses only when places came back, so a held GPU's tasks are never taken back; the clock stops the stream tests that reach it
 src/stream.rs	replace Stream<'env, D>::deliver -> usize with 0	1	a loop variant broken: finish counts nothing handed back and reclaims for ever; the clock stops the stream tests that reach it
 src/stream.rs	replace Stream<'env, D>::deliver -> usize with 1	1	a loop variant broken: the stream hands back no entry, so finish never returns; the clock stops the stream tests that reach it

@@ -36,10 +36,7 @@ src/incremental.rs	delete ! in HasherCore::update_pooled	1	speed: whether the up
 src/incremental.rs	replace && with || in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
 src/incremental.rs	replace + with * in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/incremental.rs	replace + with - in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/incremental.rs	replace + with - in HasherCore::update_part_with_results	1	equivalent: at counter zero the stack holds one value, and merging it to the right counter's ones (one) or the wrapped one's (more) does nothing
-src/incremental.rs	replace / with * in HasherCore::update_part_with_results	1	equivalent: a power of two times or over 2 has the same one bit, so the stack merges alike
 src/incremental.rs	replace <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv -> Option<CVBytes> with None	1	speed: chooses between equally correct paths
-src/incremental.rs	replace > with >= in HasherCore::update_part_with_results	2	equivalent for its one caller: a held group is exactly 16 KiB (16 chunks), so no length it compares equals one chunk
 src/incremental.rs	replace >= with < in <impl hasher::Hooks for HasherHooks<'_>>::children	1	speed: chooses between equally correct paths
 src/incremental.rs	replace >= with < in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
 src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((0, Box::leak(Box::new([0; STAGE_LEN]))))	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -130,7 +127,6 @@ src/lanes.rs	replace >= with < in Task::run_members	1	speed: chooses between equ
 src/lanes.rs	replace >= with < in poll_pause	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace >= with < in sme2_prefix	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace >= with < in sources::Source::publish	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace >= with < in sources::run_one	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace >= with < in tree_threads	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace Pool::wake_for with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace all_workers_parked -> bool with true	1	a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before
@@ -445,14 +441,9 @@ src/stream.rs	replace += with *= in Stream<'env, D>::reserve_gpu	1	same code: ev
 src/stream.rs	replace += with -= in Stream<'env, D>::deliver	3	[cpu has sme2] speed: deliver's count wraps: collect and help act as if places came back when none did, waking or hashing a turn later; the SME2 thread takes the task; and two places in the GPU's branch, where the GPU's code is not built, same code
 src/stream.rs	replace += with -= in Stream<'env, D>::reserve_gpu	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace - with + in Stream<'env, D>::feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace - with + in Stream<'env, D>::reserve_gpu	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace - with + in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace - with / in Stream<'env, D>::feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace - with / in Stream<'env, D>::reserve_gpu	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace - with / in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace < with <= in Stream<'env, D>::reserve_gpu	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace < with == in Stream<'env, D>::reserve_gpu	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace < with > in Stream<'env, D>::reserve_gpu	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace == with != in Stream<'env, D>::collect	1	[cpu has sme2] speed: collect wakes a worker for a lone task only when it handed something back; the SME2 thread takes the task (without SME2, tests/stream_collect_parked_workers hangs)
 src/stream.rs	replace == with != in Stream<'env, D>::finish	1	[cpu has sme2] speed: a waiting caller's pause in finish's loop when nothing came back and nothing waits (the SME2 thread takes stream tasks alone, so each pause decides only how soon the caller looks again)
 src/stream.rs	replace == with != in Stream<'env, D>::help	1	[cpu has sme2] speed: a waiting caller hashes a lone task only after handing something back; the SME2 thread takes the task
