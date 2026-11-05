@@ -1205,8 +1205,9 @@ fn hash_serial_from(platform: Platform, input: &[u8], key: &CVWords, flags: u8) 
             _ => (sse41::ffi::blake3_servil_hash_many_sse41 as *const () as usize, sse41::ffi::blake3_servil_compress_in_place_sse41 as *const () as usize),
         };
         // The kernels' sizes, from the assembly (hash_many_avx2 about 14 KiB, sse41 11 KiB; compress 2 KiB).
-        platform::prefetch_code((many, many + if matches!(turn.platform(), Platform::AVX2) { 14 * 1024 } else { 11 * 1024 }));
-        platform::prefetch_code((compress, compress + 2 * 1024));
+        // Narrow: the kernel's first 3 KiB (its wide loop) and compress's first KiB.
+        platform::prefetch_code((many, many + 3 * 1024));
+        platform::prefetch_code((compress, compress + 1024));
     }
     hash_serial_on(input, key, flags, turn.platform())
 }
