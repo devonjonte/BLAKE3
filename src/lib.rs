@@ -234,6 +234,13 @@ mod many;
 mod pair;
 #[cfg(feature = "std")]
 mod park;
+/// SCRATCH: the wake-count probe's histograms (direct, owed, paid).
+#[cfg(feature = "std")]
+#[doc(hidden)]
+pub fn __wake_stats() -> [[usize; 64]; 3] {
+    let read = |a: &[core::sync::atomic::AtomicUsize; 64]| core::array::from_fn(|i| a[i].load(core::sync::atomic::Ordering::Relaxed));
+    [read(&park::stats::DIRECT), read(&park::stats::OWED), read(&park::stats::PAID)]
+}
 mod self_test;
 #[cfg(feature = "std")]
 mod stream;

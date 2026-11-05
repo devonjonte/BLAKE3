@@ -118,11 +118,16 @@ impl Park {
             if need > direct {
                 self.owed.fetch_add(need - direct, Ordering::SeqCst);
             }
+            let mut made = 0;
             for _ in 0..direct {
                 if !self.wake_one() {
                     break;
                 }
+                made += 1;
             }
+            // SCRATCH: count the publisher's direct wakes and the wakes owed.
+            stats::DIRECT[made.min(63)].fetch_add(1, Ordering::Relaxed);
+            stats::OWED[(need - direct).min(63)].fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -158,9 +163,13 @@ impl Park {
     /// A woken worker pays the wakes owed before working: one more worker
     /// each, until none is owed or none is parked.
     pub(crate) fn pay_owed(&self) {
+        // SCRATCH: how many wakes this woken worker makes before it works.
+        let mut paid = 0usize;
+        let record = |paid: usize| { stats::PAID[paid.min(63)].fetch_add(1, Ordering::Relaxed); };
         loop {
             let owed = self.owed.load(Ordering::SeqCst);
             if owed == 0 {
+                record(paid);
                 return;
             }
             if self.owed.compare_exchange(owed, owed - 1, Ordering::SeqCst, Ordering::SeqCst).is_err() {
@@ -168,8 +177,20 @@ impl Park {
             }
             if !self.wake_one() {
                 self.owed.store(0, Ordering::SeqCst);
+                record(paid);
                 return;
             }
+            paid += 1;
         }
     }
+}
+
+/// SCRATCH: histograms of wakes, for the wake-count probe.
+pub mod stats {
+    use core::sync::atomic::AtomicUsize;
+    #[allow(clippy::declare_interior_mutable_const)]
+    const Z: AtomicUsize = AtomicUsize::new(0);
+    pub static DIRECT: [AtomicUsize; 64] = [Z; 64];
+    pub static OWED: [AtomicUsize; 64] = [Z; 64];
+    pub static PAID: [AtomicUsize; 64] = [Z; 64];
 }
