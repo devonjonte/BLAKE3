@@ -8,7 +8,7 @@ input, like `sha256sum` or `md5sum`. This is `blake3-servil`'s `b3sum` (see the 
 # Installation
 
 On Linux, download the binary for your machine from the
-[releases page](https://github.com/johnservil/BLAKE3/releases):
+[releases page](https://github.com/servil-software-factory/BLAKE3/releases):
 `b3sum-VERSION-x86_64-unknown-linux-gnu` or
 `b3sum-VERSION-aarch64-unknown-linux-gnu`, each beside its SHA-256 and
 BLAKE3 digests. They are statically linked, so each run starts in about
@@ -81,7 +81,7 @@ Options:
   -V, --version               Print version
 
 More information: b3sum/README.md at
-https://github.com/johnservil/BLAKE3/blob/servil/b3sum/README.md
+https://github.com/servil-software-factory/BLAKE3/blob/servil/b3sum/README.md
 ```
 
 By default b3sum uses every CPU: several files at once, and a large file over several

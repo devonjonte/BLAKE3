@@ -130,7 +130,7 @@ def ci_result(run):
         return TIMED_OUT if run["conclusion"] == "timed_out" else False
     jobs, page = [], 1
     while True:
-        reply = github(f"/repos/johnservil/BLAKE3/actions/runs/{run['id']}/jobs?per_page=100&page={page}")
+        reply = github(f"/repos/servil-software-factory/BLAKE3/actions/runs/{run['id']}/jobs?per_page=100&page={page}")
         jobs.extend(reply["jobs"])
         if len(jobs) == reply["total_count"]:
             break
@@ -168,7 +168,7 @@ def main():
         print(f"{label}  {name}" + ("" if ok is True else f": {how}"))
 
     try:
-        runs = github(f"/repos/johnservil/BLAKE3/actions/runs?head_sha={commit}&event=workflow_dispatch&per_page=20").get("workflow_runs", [])
+        runs = github(f"/repos/servil-software-factory/BLAKE3/actions/runs?head_sha={commit}&event=workflow_dispatch&per_page=20").get("workflow_runs", [])
         ci = [r for r in runs if r["name"] == "tests"]
         result = ci_result(ci[0]) if ci else None
         step("CI, every job", result,
@@ -177,7 +177,7 @@ def main():
         step("CI, every job", TIMED_OUT, str(e))
 
     try:
-        statuses = github(f"/repos/johnservil/BLAKE3/commits/{commit}/statuses")
+        statuses = github(f"/repos/servil-software-factory/BLAKE3/commits/{commit}/statuses")
         proofs = [s for s in statuses if s["context"] == "long proofs"]
         step("long proofs", (proofs[0]["state"] == "success") if proofs else None, "sh tools/verify/long-proofs.sh <commit> (overnight)")
     except GitHubTimedOut as e:

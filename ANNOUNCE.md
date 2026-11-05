@@ -49,7 +49,7 @@ other systems.
 ## Fast
 
 It is fast. Like 10 *times* as fast, or more, as the competitors in many cases. (See
-[benchmarks](https://johnservil.github.io/bench-hashes).) This could be a big improvement for a lot
+[benchmarks](https://servil-software-factory.github.io/bench-hashes).) This could be a big improvement for a lot
 of use cases, where you need to ensure data integrity and user security, and you have to do it
 efficiently.
 
@@ -91,7 +91,7 @@ It comes with excellent quality assurance:
    * A self-test on startup
    * `Shuttle`, which uses a clever method of randomized thread scheduling to uncover concurrency bugs
 
- * It has extremely thorough and precise [benchmarks](https://johnservil.github.io/bench-hashes/)
+ * It has extremely thorough and precise [benchmarks](https://servil-software-factory.github.io/bench-hashes/)
    that exercise many different cases that could practically impact performance for real users.
 
  * For more information, please read [QUALITY.md](QUALITY.md).

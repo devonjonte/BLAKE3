@@ -424,7 +424,7 @@ On an Apple Silicon Mac, or on Linux with a C compiler that assembles
 SME2 (clang 17 or later; set `CC=clang-19` or similar):
 
 ```sh
-git clone -b servil https://github.com/johnservil/BLAKE3 && cd BLAKE3
+git clone -b servil https://github.com/servil-software-factory/BLAKE3 && cd BLAKE3
 cargo nextest run --release --lib --tests         # 103 tests, each in its own process
 cargo test --release --doc                        # 19 doc examples
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
@@ -437,7 +437,7 @@ The crate is crash-only software: what still exists as a process ends (a
 pool's threads, a recycled source, a test's buffers) is no fault, and no
 code frees it for a checker's sake.
 
-Timing claims are checked the same way: [bench-hashes](https://github.com/johnservil/bench-hashes)
+Timing claims are checked the same way: [bench-hashes](https://github.com/servil-software-factory/bench-hashes)
 measures this implementation against the official crate and others on your machine.
 
 ## The bugs these steps found

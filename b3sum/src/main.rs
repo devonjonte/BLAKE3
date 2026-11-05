@@ -55,7 +55,7 @@ const TAG_ARG: &str = "tag";
 const CHECK_ARG: &str = "check";
 
 #[derive(Parser)]
-#[command(version, max_term_width(100), after_help = "More information: b3sum/README.md at https://github.com/johnservil/BLAKE3/blob/servil/b3sum/README.md")]
+#[command(version, max_term_width(100), after_help = "More information: b3sum/README.md at https://github.com/servil-software-factory/BLAKE3/blob/servil/b3sum/README.md")]
 struct Inner {
     /// Files to hash, or checkfiles to check
     file: Vec<PathBuf>,

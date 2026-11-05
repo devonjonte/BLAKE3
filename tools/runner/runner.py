@@ -89,8 +89,8 @@ import tempfile
 import time
 from pathlib import Path
 
-FORK_URL = "https://github.com/johnservil/BLAKE3.git"
-BENCH_URL = "https://github.com/johnservil/bench-hashes.git"
+FORK_URL = "https://github.com/servil-software-factory/BLAKE3.git"
+BENCH_URL = "https://github.com/servil-software-factory/bench-hashes.git"
 HOME = Path.home()
 CHECKOUTS = HOME / "checkouts"
 DONE_FILE = HOME / ".benchrunner_done"

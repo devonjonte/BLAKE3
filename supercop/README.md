@@ -51,7 +51,7 @@ Subject: BLAKE3: new implementation crypto_hash/blake3/rust_servil
 
 Dan,
 
-Please include https://raw.githubusercontent.com/johnservil/BLAKE3/<commit>/supercop/<tarball>
+Please include https://raw.githubusercontent.com/servil-software-factory/BLAKE3/<commit>/supercop/<tarball>
 in SUPERCOP. It adds one implementation, crypto_hash/blake3/rust_servil,
 and leaves the existing ones unchanged: the blake3-servil Rust crate,
 pinned by its Cargo.lock and called as its users call it. The crate

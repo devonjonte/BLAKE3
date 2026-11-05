@@ -7,9 +7,9 @@ A fast [BLAKE3](https://blake3.io) implementation for 64-bit Arm and x86-64.
 <img src="docs/images/hash-epyc-128mib.svg" alt="Hashing one 128 MiB message on an AMD EPYC 9255: BLAKE3 on every core and on one core, beside SHA-256, SHA-1 and SHA3-256, in GB/s" width="720">
 
 Speed depends on your machine and on how your program hashes.
-[bench-hashes](https://github.com/johnservil/bench-hashes) measures both on your own
-computer; its published maps cover an [Apple M4 Max](https://johnservil.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.map.html),
-an [AMD EPYC 9255](https://johnservil.github.io/bench-hashes/benchmark-results/AMDEPYC925524CoreProcessor.linux70038generic/bench-hashes.map.html),
+[bench-hashes](https://github.com/servil-software-factory/bench-hashes) measures both on your own
+computer; its published maps cover an [Apple M4 Max](https://servil-software-factory.github.io/bench-hashes/benchmark-results/AppleM4Max.darwin25/bench-hashes.map.html),
+an [AMD EPYC 9255](https://servil-software-factory.github.io/bench-hashes/benchmark-results/AMDEPYC925524CoreProcessor.linux70038generic/bench-hashes.map.html),
 and an [Intel i7-12700K](https://devonjonte.github.io/bench-hashes/benchmark-results/12thGenIntelRCoreTMi712700K.linux70038generic/bench-hashes.map.html);
 [an overview](https://devonjonte.github.io/bench-hashes/) sets every machine side by side.
 
@@ -36,10 +36,10 @@ Details: [`QUALITY.md`](QUALITY.md).
 [dependencies]
 # A release by its full version and its commit's full hash: Cargo fetches
 # exactly that commit (and reads the version up to the "+" today).
-blake3-servil = { git = "https://github.com/johnservil/BLAKE3", rev = "<the release's commit>", version = "=<X.Y.Z+hash>" }
+blake3-servil = { git = "https://github.com/servil-software-factory/BLAKE3", rev = "<the release's commit>", version = "=<X.Y.Z+hash>" }
 ```
 
-`git ls-remote --tags https://github.com/johnservil/BLAKE3` lists each
+`git ls-remote --tags https://github.com/servil-software-factory/BLAKE3` lists each
 release, `vX.Y.Z+<hash>`, with its commit. The hash in a release's
 version names the commit of its code, so the version alone identifies
 what you have (`b3sum --version` and the C library's `b3_version()`
@@ -51,7 +51,7 @@ blake3_servil::initialize(); // once, before any other call
 let hash = blake3_servil::convenience::hash(b"foobarbaz");
 ```
 
-The [crate documentation](https://johnservil.github.io/BLAKE3/blake3_servil/) covers the
+The [crate documentation](https://servil-software-factory.github.io/BLAKE3/blake3_servil/) covers the
 calls for programs that hash a lot, and the C library in [`capi/`](capi/).
 [`b3sum/README.md`](b3sum/README.md) covers the command-line tool.
 

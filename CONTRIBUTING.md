@@ -126,7 +126,7 @@ every pull request, and by hand for a candidate that changes code for
 those targets. A build for any other target (Windows, 32-bit,
 big-endian, WebAssembly and the rest) stops with a message naming
 official BLAKE3, which supports them, and
-[#160](https://github.com/johnservil/BLAKE3/issues/160) holds what full
+[#160](https://github.com/servil-software-factory/BLAKE3/issues/160) holds what full
 support takes (dedicated hardware of ours to benchmark, optimize and
 test on, then the kernels and the gates). The Mac runner
 (`tools/runner/`) runs the Rust suites natively. `sh tools/check-builds.sh`
@@ -149,12 +149,12 @@ c/blake3_chunk_root_x86-64_unix.S`;
 
 Speed is BLAKE3-Servil's purpose, so every change to `src/`, `c/`, `build.rs`,
 `Cargo.toml`, or `Cargo.lock` passes a regression check first. The check
-uses [bench-hashes](https://github.com/johnservil/bench-hashes), in a
+uses [bench-hashes](https://github.com/servil-software-factory/bench-hashes), in a
 checkout of its own beside this one (neither inside the other), named
 with `--fork`. From this checkout's root:
 
 ```sh
-git clone https://github.com/johnservil/bench-hashes ../bench-hashes
+git clone https://github.com/servil-software-factory/bench-hashes ../bench-hashes
 fork=$PWD
 (cd ../bench-hashes && cargo run --release -- check --fork "$fork")                 # the working tree against HEAD
 (cd ../bench-hashes && cargo run --release -- check --fork "$fork" --against OLD)   # a checkout at NEW

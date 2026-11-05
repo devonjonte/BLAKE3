@@ -1,4 +1,4 @@
-# The crate's API documentation, published at johnservil.github.io/BLAKE3
+# The crate's API documentation, published at servil-software-factory.github.io/BLAKE3
 # from every push to servil: the doors that the benchmark's map links its
 # call names to (bench-hashes tools/map-mockup).
 name: docs

@@ -115,7 +115,7 @@ remains.
 ## Run the checks
 
 ```sh
-git clone -b servil https://github.com/johnservil/BLAKE3
+git clone -b servil https://github.com/servil-software-factory/BLAKE3
 cd BLAKE3
 cargo nextest run --release --lib --tests   # with cargo-nextest (https://nexte.st)
 ```
