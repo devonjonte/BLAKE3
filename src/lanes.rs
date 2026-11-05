@@ -1109,43 +1109,69 @@ pub(crate) mod sources {
         OPEN.load(Ordering::Relaxed) > 0
     }
 
-    /// The first registered source for which `f` says yes.
+    /// The first registered source for which `f` says yes, from slot 0 up.
     fn find(mut f: impl FnMut(&'static Source) -> bool) -> bool {
-        let mut active = ACTIVE.load(Ordering::SeqCst);
-        while active != 0 {
-            let slot = active.trailing_zeros() as usize;
-            active &= active - 1;
+        find_from(0, |_, source| f(source))
+    }
+
+    /// The first registered source for which `f` says yes, walking the
+    /// slots once around from `start` (any value; taken modulo SLOTS).
+    fn find_from(start: usize, mut f: impl FnMut(usize, &'static Source) -> bool) -> bool {
+        let active = ACTIVE.load(Ordering::SeqCst);
+        let start = start % SLOTS;
+        // The slots from `start` up, then those below it: the mask rotated
+        // so that `start` is bit 0, each set bit mapped back.
+        let mut rotated = active.rotate_right(start as u32);
+        while rotated != 0 {
+            let slot = (rotated.trailing_zeros() as usize + start) % SLOTS;
+            rotated &= rotated - 1;
             let ptr = REGISTERED[slot].load(Ordering::Acquire);
             // Sound: sources are never freed (they are recycled).
-            if !ptr.is_null() && f(unsafe { &*ptr }) {
+            if !ptr.is_null() && f(slot, unsafe { &*ptr }) {
                 return true;
             }
         }
         false
     }
 
-    /// Run one item from any source: whether there was one. When two or
-    /// more wait and a worker is parked, this one wakes the next first
-    /// (the chain).
+    std::thread_local! {
+        /// The slot after the one this thread served last: where its next
+        /// walk of the sources begins (run_one).
+        static NEXT: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+    }
+
+    /// Run one item from any source: whether there was one. The walk
+    /// begins after the source this thread served last, so two sources
+    /// that both hold items are served in turn (a walk that began at slot
+    /// 0 every time served a caller at slot 0 before one at slot 1 for as
+    /// long as it kept publishing; BLAKE3 #240). When two or more wait
+    /// and a worker is parked, this one wakes the next first (the chain).
     pub(crate) fn run_one() -> bool {
-        find(|source| {
+        find_from(NEXT.with(core::cell::Cell::get), |slot, source| {
             let Some(item) = source.take() else { return false };
-            if source.waiting() >= 2 {
-                pool().park.wake_one();
-            }
-            match item {
-                Item::Task(task) => task.run(pool_platform()),
-                Item::Pieces(job, index, n) => {
-                    // Sound: the job lives until its pieces are finished,
-                    // these among them; this thread alone took them.
-                    for i in index..index + n {
-                        unsafe { (*job).hash_piece(i, pool_platform()) };
-                    }
-                    source.finished(n);
-                }
-            }
+            NEXT.with(|next| next.set(slot + 1));
+            serve(source, item);
             true
         })
+    }
+
+    /// Hash `item` of `source` on this thread, waking the next worker first
+    /// when two or more wait and one is parked.
+    fn serve(source: &'static Source, item: Item) {
+        if source.waiting() >= 2 {
+            pool().park.wake_one();
+        }
+        match item {
+            Item::Task(task) => task.run(pool_platform()),
+            Item::Pieces(job, index, n) => {
+                // Sound: the job lives until its pieces are finished,
+                // these among them; this thread alone took them.
+                for i in index..index + n {
+                    unsafe { (*job).hash_piece(i, pool_platform()) };
+                }
+                source.finished(n);
+            }
+        }
     }
 
     /// A task from any stream (the SME2 thread takes these alone).
@@ -1227,6 +1253,47 @@ pub(crate) mod sources {
             }
             for &i in &[0, 2] {
                 Source::unregister(slots[i]);
+            }
+        }
+
+        /// A walk from a slot serves the sources in turn: two sources that
+        /// both hold items are taken from alternately by one thread, where
+        /// a walk from slot 0 every time would drain the lower slot first
+        /// (#240). The item itself is a job's pieces with no job behind it,
+        /// taken and not run.
+        #[test]
+        fn test_a_thread_serves_the_sources_in_turn() {
+            let sources: Vec<&'static Source> = (0..2).map(|_| &*Box::leak(Box::new(Source::new(0)))).collect();
+            let slots: Vec<usize> = sources.iter().map(|s| s.register().expect("a free slot")).collect();
+            for s in &sources {
+                s.finish.published.store(3, Ordering::SeqCst);
+            }
+            let mut served = Vec::new();
+            let mut next = 0;
+            while find_from(next, |slot, source| {
+                let Some(_) = source.take() else { return false };
+                next = slot + 1;
+                served.push(slot);
+                true
+            }) {}
+            let (a, b) = (slots[0], slots[1]);
+            assert_eq!(served, [a, b, a, b, a, b], "three items each, taken in turn");
+            // From slot 0 every time: the lower slot first, whole.
+            for s in &sources {
+                s.finish.published.store(6, Ordering::SeqCst);
+            }
+            let mut drained = Vec::new();
+            while find(|source| {
+                let Some(_) = source.take() else { return false };
+                drained.push(source as *const Source);
+                true
+            }) {}
+            assert_eq!(drained, vec![sources[0] as *const Source; 3].into_iter().chain(vec![sources[1] as *const Source; 3]).collect::<Vec<_>>());
+            // A start past every slot wraps.
+            sources[1].finish.published.store(7, Ordering::SeqCst);
+            assert!(find_from(SLOTS + b, |slot, source| source.take().is_some() && slot == b));
+            for slot in slots {
+                Source::unregister(slot);
             }
         }
 

@@ -8,7 +8,11 @@
 //! call), and a collection of 2048 items of 24 B to 768 KiB (the bench's
 //! git objects: many small jobs and some trees a call). Measured on an
 //! i7-12700K: 1.00-1.10 either way; starvation reads 2 and more. The
-//! bound leaves room for a loaded machine.
+//! bound leaves room for a loaded machine, and a loaded one still fails
+//! it (1.6-1.9 on a 4-vCPU guest under a mutation check, #240), so it
+//! runs on purpose with the machine to itself (`cargo nextest run -P
+//! machine`); the order the pool serves sources in, which makes the
+//! shares fair, has its own test with no clock (lanes::sources::test).
 #![cfg(feature = "std")]
 
 use blake3_servil::Mode;
