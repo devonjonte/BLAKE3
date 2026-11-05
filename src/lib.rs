@@ -768,6 +768,9 @@ fn spare_lane(platform: Platform, whole: usize, partial: usize) -> Option<usize>
         #[cfg(blake3_avx512_ffi)]
         (Platform::AVX512, 1) if partial > BLOCK_LEN => Some(4),
         (Platform::SSE41 | Platform::AVX2, 3) => Some(4),
+        // PROBE: two whole chunks and a partial past a block: the partial
+        // in a spare lane of four, in place of the pair and a serial tail.
+        (Platform::SSE41 | Platform::AVX2, 2) if partial > BLOCK_LEN => Some(4),
         (Platform::AVX2, 6..=7) => Some(8),
         (Platform::AVX2, 5) if partial > 5 * BLOCK_LEN => Some(8),
         _ => None,
