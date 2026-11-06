@@ -70,16 +70,18 @@ of tests that still catches every caught mutant, the tests outside it
 (each a big test whose catches cheaper ones make), and the mutants only an
 expensive test catches (each a small test worth writing).
 
-With --since REV, a change's check: the mutants in the lines the change
-makes (git diff REV...HEAD, cargo-mutants --in-diff), and it fails on a new
-survivor among them; a listed one now caught waits for a whole run. Either
-way it fails while the list names a missing test ("OPEN: a missing test"):
-that is work to do, not a survivor to keep. A change that alters a test (a
-line taken away inside a #[test] function, comments aside) can lose the
-catches of code it leaves alone: the mutants the latest map (a --map run of
-an ancestor) records that test catching, the startup self-test's aside, run
-again too. A change to other test code (a helper, a test module's or
-tests/'s own items), or one with no such map, runs the whole check.
+A change's check (the default, or --since REV) runs the mutants in the
+lines the change makes (git diff REV...HEAD, cargo-mutants --in-diff), and
+only those, and fails on a new survivor among them; it fails too while the
+list names a missing test ("OPEN: a missing test"): that is work to do, not
+a survivor to keep. Its budget is about a minute (Zooko, November 6, 2026,
+BLAKE3 #257): it says what it will run before it starts, spreads the
+mutants over as many shards as they fill, takes the release build's second
+look (release_same) for new survivors alone, and ends with its time against
+the budget and where the time went. It leaves to the whole run, once per
+stable release, what it gives up: a changed test's or helper's effect on
+other code's mutants, a listed survivor now caught, and the lists' exact
+counts. Rows naming code the change removed it drops from every list.
 """
 
 import collections
@@ -92,6 +94,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import release_same
@@ -353,7 +356,7 @@ def remove_leftovers():
     os.makedirs(WORKTREES)
 
 
-def run(files, extra=(), shards=SHARDS, label="run", loom=False):
+def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None):
     """The mutants that survive the library's tests, by name, counted, and
     every mutant's outcome by function. Each shard's results are kept in
     tmp/mutants-last/<label>/ for a look afterwards."""
@@ -482,6 +485,13 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False):
                                                        mutant["span"]["start"]["line"]))
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
+    if survivors and known is not None:
+        # A change's check: the second look for new survivors alone (a name
+        # with more surviving places than its row); a listed one keeps its
+        # row's reason, and the look is a release build a shard.
+        count = collections.Counter(key[0] for v in survivors.values() for key, *_ in v)
+        survivors = {t: [x for x in v if count[x[0][0]] > known.get(x[0][0], (0, ""))[0]] for t, v in survivors.items()}
+        survivors = {t: v for t, v in survivors.items() if v}
     if survivors:
         # Each shard's survivors in its own worktree and release target, the
         # shards at once (their cargo-mutants runs are over).
@@ -668,7 +678,7 @@ def stale_rows(rows, listed):
     return [r for r in rows if (r[1], r[2]) not in exist]
 
 
-def check_rows_exist():
+def check_rows_exist(remove=False):
     """Every row of every architecture's lists names a mutant the source
     holds now. Which mutants exist is the source's alone: cargo mutants
     --list reads it unbuilt, every target's files alike, so any machine
@@ -685,10 +695,41 @@ def check_rows_exist():
     listed = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()
     stale = stale_rows(rows, listed)
     for name, file, mutant in stale:
-        print(f"STALE ROW: {name}: {file}\t{mutant}")
-    if stale:
+        print(f"{'REMOVED' if remove else 'STALE'} ROW: {name}: {file}\t{mutant}")
+    if stale and remove:
+        # A change's check: a row naming code the change removed goes, from
+        # every machine's lists alike (the source decides which mutants exist).
+        gone = {(n, f, m) for n, f, m in stale}
+        for path in paths:
+            lines = open(path).read().splitlines()
+            keep = [l for l in lines if not (l.startswith("src/") and (os.path.basename(path), *l.split("\t")[:2]) in gone)]
+            if keep != lines:
+                open(path, "w").write("\n".join(keep) + "\n")
+    elif stale:
         sys.exit(f"mutants: {len(stale)} rows name mutants the source no longer has; remove them")
     return listed
+
+
+# A change's check's budget (Zooko, November 6, 2026, BLAKE3 #257).
+BUDGET_S = 60
+
+
+def budget(started):
+    """The run's wall time against BUDGET_S, and, over it, where the time
+    went (each shard's baseline build and its mutants' builds and tests,
+    from cargo-mutants' outcomes): a check that grows slow says so on every
+    run, to whoever runs it."""
+    took = round(time.monotonic() - started)
+    if took <= BUDGET_S:
+        print(f"mutants: took {took} s, within the {BUDGET_S} s budget")
+        return
+    phases = collections.Counter()
+    for path in glob.glob(os.path.join(ROOT, "tmp", "mutants-last", "*", "shard*", "outcomes.json")):
+        for o in json.load(open(path)).get("outcomes", []):
+            for ph in o.get("phase_results", []):
+                phases[ph.get("phase", "?")] += ph.get("duration", 0)
+    spent = ", ".join(f"{k} {round(v)} s" for k, v in phases.most_common())
+    print(f"mutants: took {took} s, OVER the {BUDGET_S} s budget (shard time: {spent or 'not recorded'})")
 
 
 def known_hangs(tknown, listed):
@@ -736,91 +777,6 @@ def confirm(found, known, timed, tknown, differ=None):
     return +confirmed, +confirmed_timed
 
 
-def changed_tests(since, head="HEAD"):
-    """The tests a change alters, from the code before it: (names, sure).
-    A line the change takes away (a changed line is one taken away and one
-    added) inside a #[test] function names that test; one in other test code
-    (a helper, a test module's or tests/'s own items) can weaken any test,
-    so `sure` is False. Lines of the library's code are the change's own
-    mutants' business."""
-    diff = subprocess.run(["git", "-C", ROOT, "diff", "-U0", f"{since}...{head}", "--", "src", "tests"], capture_output=True, text=True, check=True).stdout
-    names, sure, file, old = set(), True, None, []
-    for line in diff.splitlines():
-        if line.startswith("--- "):
-            file = line[6:] if line.startswith("--- a/") else None
-            old = subprocess.run(["git", "-C", ROOT, "show", f"{since}:{file}"], capture_output=True, text=True).stdout.splitlines() if file else []
-        elif line.startswith("@@") and file:
-            start, count = re.match(r"@@ -(\d+)(?:,(\d+))?", line).groups()
-            for n in range(int(start), int(start) + int(count if count is not None else 1)):
-                if not old[n - 1].strip() or old[n - 1].lstrip().startswith("//"):
-                    continue  # a comment or a blank line weakens no test
-                # src/test.rs is the library's test module (lib.rs: #[cfg(test)] mod test).
-                kind, name = enclosing(old, n - 1, file.startswith("tests/") or file == "src/test.rs")
-                if kind == "test":
-                    names.add(name)
-                elif kind == "helper":
-                    sure = False
-    return names, sure
-
-
-def enclosing(lines, i, test_file):
-    """What line `i` of a source file (rustfmt's layout) belongs to: ("test",
-    its name) inside a #[test] function, ("helper", None) inside other test
-    code (a #[cfg(test)] module, or anywhere in tests/), ("code", None)
-    elsewhere."""
-    depth = len(lines[i]) - len(lines[i].lstrip())
-    fn = None
-    for k in range(i, -1, -1):
-        line = lines[k]
-        indent = len(line) - len(line.lstrip())
-        if not line.strip() or indent > depth or (indent == depth and k != i and not line.lstrip().startswith(("fn ", "pub fn ", "mod ", "pub(crate) mod ", "#["))):
-            continue
-        m = re.match(r"\s*(?:pub(?:\([a-z]+\))? )?(?:async )?fn (\w+)", line)
-        if m and fn is None:
-            attrs = []
-            for a in range(k - 1, -1, -1):
-                if lines[a].lstrip().startswith(("#[", "///", "//")):
-                    attrs.append(lines[a])
-                else:
-                    break
-            if any(re.search(r"#\[test\]", a) for a in attrs):
-                return "test", m.group(1)
-            fn = m.group(1)
-        if re.match(r"\s*(?:pub(?:\([a-z]+\))? )?mod \w+ \{", line):
-            above = lines[k - 1] if k else ""
-            if "cfg(test" in above or "cfg(all(test" in above:
-                return "helper", None
-        depth = min(depth, indent)
-    return ("helper" if test_file else "code"), None
-
-
-MAP_DIR = os.path.join(ROOT, "tmp", "mutants-last", "map")
-
-
-def caught_by(tests):
-    """The mutants the latest map (a --map run of an ancestor of HEAD) records
-    as caught by any of `tests` (by function name) at a place the startup
-    self-test does not catch, by name (rerun at all its places); None when
-    there is no such map."""
-    record, commit = os.path.join(MAP_DIR, "tests.tsv"), os.path.join(MAP_DIR, "commit")
-    if not (os.path.exists(record) and os.path.exists(commit)):
-        return None
-    if subprocess.run(["git", "-C", ROOT, "merge-base", "--is-ancestor", open(commit).read().strip(), "HEAD"]).returncode != 0:
-        return None
-    by, self_test = collections.defaultdict(set), set()
-    lines = open(record)
-    assert next(lines) == HEADER, f"{record} is in an older format: make a new map with --map"
-    for line in lines:
-        file, mutant, place, _function, test, outcome, _ms = line.rstrip("\n").split("\t")
-        if file == "(unmutated)" or outcome == "PASS":
-            continue
-        name = (f"{file}\t{mutant}", place)
-        if test == SELF_TEST:
-            self_test.add(name)
-        elif re.split(r"[ :]", test)[-1] in tests:
-            by[name].add(test)
-    return sorted({name for name, _ in set(by) - self_test})
-
 
 def figure(functions, known):
     """How much of the library mutation testing covers, by function: every
@@ -850,7 +806,9 @@ def main():
     changed = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, check=True).stdout.strip()
     print(f"mutants: BLAKE3-Servil at {commit}{', with uncommitted changes' if changed else ''}", flush=True)
     remove_leftovers()
-    listed = check_rows_exist()
+    started = time.monotonic()
+    whole = "--whole" in sys.argv or "--write" in sys.argv
+    listed = check_rows_exist(remove=not whole)
     files, known = read_known()
     _, tknown = read_known(TIMEOUTS, INACTIVE_TIMEOUTS)
     # A test known to be missing is work to do now, not a survivor to keep:
@@ -870,37 +828,26 @@ def main():
     # The log names its own scope on its first line: a release gate reads
     # a whole run alone (tools/release-check.py's mutation_result).
     print(f"mutants: the change since {since}" if since is not None else "mutants: the whole run")
-    extra = []  # the mutants the change's altered tests caught (the map's)
     if since is not None:
         diff = subprocess.run(["git", "-C", ROOT, "diff", f"{since}...HEAD", "--", *files, *LOOM_FILES], capture_output=True, text=True, check=True).stdout
-        tests, sure = changed_tests(since)
-        caught = caught_by(tests) if tests and sure else []
-        if not sure:
-            print(f"mutants: the change since {since} alters test code outside a test (a helper); the whole run")
-            since = None
-        elif caught is None:
-            print(f"mutants: the change since {since} alters {len(tests)} test{'s' if len(tests) > 1 else ''} and no map of an ancestor holds their catches (check.py --map); the whole run")
-            since = None
-        else:
-            extra = caught
-            if tests:
-                print(f"mutants: the change alters {len(tests)} test{'s' if len(tests) > 1 else ''}; the map's {len(extra)} mutant names they catch run again")
-    if since is not None:
-        if not diff and not extra:
-            print(f"mutants: the change since {since} touches no mutated file and alters no test")
+        if not diff:
+            print(f"mutants: the change since {since} touches no mutated file")
+            budget(started)
             return
         path = os.path.join(tempfile.mkdtemp(prefix="mutants-diff-", dir=scratch_dir()), "change.diff")
         with open(path, "w") as f:
             f.write(diff)
-        # One shard: a change's mutants are few, and each shard builds anew.
-        found, functions, timed = run(files, ["--in-diff", path], shards=1) if diff else (collections.Counter(), {}, collections.Counter())
+        # The plan first: the change's mutants, over as many shards as they
+        # fill (each shard's baseline build costs about as much as three
+        # mutants), so the budget's cost shows before anything runs.
+        planned = subprocess.run(["cargo", "mutants", "--list", *BUILD, "--in-diff", path, *[a for f in files for a in ("--file", f)]],
+                                 cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()
+        shards = min(SHARDS, max(1, len(planned) // 3))
+        print(f"mutants: the change's {len(planned)} mutants on {shards} shard{'s' if shards > 1 else ''}"
+              + (f" (about {len(planned) * 6 // shards + 20} s, over the {BUDGET_S} s budget)" if len(planned) * 6 // shards + 20 > BUDGET_S else ""), flush=True)
+        found, functions, timed = run(files, ["--in-diff", path], shards=shards, known=known) if planned else (collections.Counter(), {}, collections.Counter())
         if any(f in diff for f in LOOM_FILES):
-            found, timed, functions = with_loom(found, timed, functions, run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True)[1])
-        if extra:
-            # The altered tests' catches, wherever they are: by name.
-            again, more, again_timed = run(sorted({k.split("\t", 1)[0] for k in extra}), [arg for k in extra for arg in ("--re", ": " + re.escape(k.split("\t", 1)[1]) + "$")], label="tests")
-            found, timed = found + again, timed + again_timed
-            functions = {**more, **functions}
+            found, timed, functions = with_loom(found, timed, functions, run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True, known=known)[1])
         # Only the names with more survivors than the list: the run holds
         # the change's lines alone, so a listed name's other places are
         # missing from it (a whole run sees those, and stale entries).
@@ -919,6 +866,7 @@ def main():
         print(f"mutants: the change since {since}: {sum(1 for f in functions.values() for _ in f)} mutants, "
               + ("no new survivor" if not new else f"{len(new)} names with a new survivor")
               + ("" if not new_timed else f", {len(new_timed)} names with a new time-out (no verdict on them)"))
+        budget(started)
         sys.exit(1 if new else 2 if new_timed else 0)
     # The known hangs stay out of a whole run (known_hangs); their rows stand
     # as listed. A run that rewrites the lists (--write) runs them, so a row

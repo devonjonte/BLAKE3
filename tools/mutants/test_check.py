@@ -173,9 +173,6 @@ class Leftovers(unittest.TestCase):
         self.assertEqual(removed, ["/tmpdir/blake3-servil-mutants/mutants-abc123"], "every other worktree stays")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class Hangs(unittest.TestCase):
     """BLAKE3 #244: the known hangs stay out of a whole run, and a test
@@ -222,3 +219,25 @@ class Hangs(unittest.TestCase):
         self.assertTrue(check.clock_only(clock), "the clock stopped one; the rest were ended: timed out")
         self.assertFalse(check.clock_only(both), "a test failed beside the clock: caught")
         self.assertFalse(check.clock_only([("a", "PASS", 1)]))
+
+    def test_budget_reports_within_or_over_with_phase_times(self):
+        import io, json
+        from contextlib import redirect_stdout
+        out = io.StringIO()
+        with redirect_stdout(out):
+            check.budget(check.time.monotonic() - 12)
+        self.assertEqual(out.getvalue().strip(), "mutants: took 12 s, within the 60 s budget")
+        with tempfile.TemporaryDirectory() as d, patch.object(check, "ROOT", d):
+            shard = os.path.join(d, "tmp", "mutants-last", "run", "shard0")
+            os.makedirs(shard)
+            json.dump({"outcomes": [{"phase_results": [{"phase": "Build", "duration": 42.4}, {"phase": "Test", "duration": 31.1}]}]},
+                      open(os.path.join(shard, "outcomes.json"), "w"))
+            out = io.StringIO()
+            with redirect_stdout(out):
+                check.budget(check.time.monotonic() - 75)
+            self.assertEqual(out.getvalue().strip(),
+                             "mutants: took 75 s, OVER the 60 s budget (shard time: Build 42 s, Test 31 s)")
+
+
+if __name__ == "__main__":
+    unittest.main()
