@@ -38,6 +38,13 @@ use crate::{Hash, IV, Mode, OutputReader};
 // (i7-12700K, after idling, 64 B: -16.5%, 8 fresh layouts a side).
 #[inline]
 pub fn hash(input: &[u8]) -> Hash {
+    // PROBE (x86, the cold API): two or three leaves through the compact
+    // single-block kernel (448 B of code) in place of the pair and the
+    // 4-lane kernels (6-10 KiB), whose code a cold call fetches from DRAM.
+    #[cfg(all(target_arch = "x86_64", blake3_sse41_ffi))]
+    if (crate::CHUNK_LEN + 1..=3 * crate::CHUNK_LEN).contains(&input.len()) {
+        return crate::hash_few_leaves_compact(input, IV, 0);
+    }
     crate::hash_serial(input, IV, 0)
 }
 

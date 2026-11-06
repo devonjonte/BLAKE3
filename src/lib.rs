@@ -1424,6 +1424,30 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
     Hash(tree::hash(&tree::PlatformKernels { key, flags, platform }, input))
 }
 
+/// PROBE: a message of two or three leaves (more than a chunk, at most
+/// three), each chunk through the single-block kernel in turn, the
+/// parents the same way: the least code a cold call can touch.
+#[cfg(all(target_arch = "x86_64", blake3_sse41_ffi))]
+fn hash_few_leaves_compact(input: &[u8], key: &CVWords, flags: u8) -> Hash {
+    let platform = Platform::detect();
+    let leaf = |i: usize, bytes: &[u8]| -> [u8; OUT_LEN] {
+        let mut state = hasher::ChunkState::new(key, i as u64, flags, platform);
+        state.update(bytes);
+        state.output().chaining_value()
+    };
+    let mut leaves: ArrayVec<[u8; OUT_LEN], 4> = ArrayVec::new();
+    for (i, chunk) in input.chunks(CHUNK_LEN).enumerate() {
+        leaves.push(leaf(i, chunk));
+    }
+    let parent = |l: &[u8; OUT_LEN], r: &[u8; OUT_LEN]| hasher::parent_output(l, r, key, flags, platform);
+    match leaves.len() {
+        2 => parent(&leaves[0], &leaves[1]).root_hash(),
+        3 => parent(&parent(&leaves[0], &leaves[1]).chaining_value(), &leaves[2]).root_hash(),
+        4 => parent(&parent(&leaves[0], &leaves[1]).chaining_value(), &parent(&leaves[2], &leaves[3]).chaining_value()).root_hash(),
+        _ => unreachable!("two to four leaves"),
+    }
+}
+
 /// [`hash_many`] in the mode of `key` and `flags`, on the calling thread.
 #[inline]
 pub(crate) fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]]) {
