@@ -116,18 +116,21 @@ A panic on a pool worker ends the process. Otherwise, the caller waiting
 for that worker's piece could wait forever.
 
 Some mutants still hang: no test fails, and the clock stops the test.
-The mutation check lists them, each with its reason, in
-`tools/mutants/timeouts-<arch>.txt`, and runs them every time, so one
-that a new test catches is seen.
+The mutation check records them separately, each with its reason, in
+`tools/mutants/timeouts-<arch>.txt`. Changed-line checks execute affected
+places; ordinary whole runs skip names whose every place is a classified
+hang. `--all-hangs` revisits them, and `--write` obtains current outcomes
+before rewriting their rows.
 
 The mutants profile uses the release configuration. A mutant caught only
 by a debug assertion or an overflow check counts as uncaught. Release
 users get no such check.
 
 **Which tests do the catching, at what cost.** The tests run under
-cargo-nextest, each in its own process; a test still running at 5 s is
-killed as a hang. A daily run stops a mutant's tests at the first that
-fails. A map run (`--map`) runs every test on every mutant and records
+cargo-nextest, each in its own process; the mutants profile's per-test
+deadline in `.config/nextest.toml` stops a hang. A change's run stops a
+mutant's tests at the first that fails. A full map run (`--whole --map`)
+runs every test on every mutant and records
 each test's outcome and time at each mutant's place, and on the
 unmutated tree (`tmp/mutants-last/map/tests.tsv`). From the map it
 weighs the tests by cost: the cheapest set that still catches every
@@ -204,8 +207,8 @@ the pool's cuts and merges, its thread caps, and 32 callers at once.
 **Every process checks itself before its first hash.** The tests prove
 the code on our machines; a user's machine may have a compiler that
 miscompiles, a linker that mislinks, or a CPU with a faulty vector or
-matrix unit. So the first call in a process (or `initialize()`) hashes 42
-fixed inputs and compares each result with official BLAKE3's answer,
+matrix unit. So the first call in a process (or `initialize()`) hashes a
+platform-specific set of fixed inputs and compares each result with official BLAKE3's answer,
 checked into the source (`src/self_test.rs`) and generated there by a
 unit test. The inputs are chosen so that together they run every one
 of the AArch64 assembly kernels, every entry point, which a unit test
@@ -216,7 +219,7 @@ Ferguson suggested, each case's output feeds the next case's input, so
 a fault anywhere changes every result after it, and the inputs use
 unusual alignments, lengths, and padding, where platform, compiler, and
 hardware faults hide from ordinary tests. A wrong result stops the
-program with a panic naming the failing path. The check costs about
+process; builds with the standard library name the failing path. The check costs about
 0.2 ms once per process; most of it is the first fetch of 500 KB of
 unrolled kernel code.
 
@@ -417,8 +420,8 @@ kernel or the proof tools: every harness's complete matrix, the
 planted-error controls and the Arm CPU cross-check. The harnesses report
 their current case counts. A proved case states equality between the code
 and the definition for every input in its contract; a failed one prints
-`NOT PROVED` with
-what it could not prove, and the run ends with exit status 1.
+`NOT PROVED` with what it could not prove, and the run ends with exit
+status 1.
 
 ## Check it yourself
 
@@ -430,7 +433,7 @@ git clone -b servil https://github.com/servil-software-factory/BLAKE3 && cd BLAK
 cargo nextest run --release --lib --tests         # each test in its own process
 cargo test --release --doc                        # each doc example in its own process
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
-cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API, 8
+cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API
 ```
 
 The tests need [cargo-nextest](https://nexte.st).
