@@ -340,10 +340,14 @@ WORKTREES = os.path.join(tempfile.gettempdir(), "blake3-servil-mutants")
 
 
 def remove_leftovers():
-    """The worktrees and builds an earlier run left (a crash, a stop by
-    hand: a run removes none of its own, crash-only), removed before this
-    run starts, so a failure to remove them costs no run. One run at a
-    time: none of them is live."""
+    """The worktrees an earlier run left (a crash, a stop by hand: a run
+    removes none of its own, crash-only), removed before this run starts,
+    so a failure to remove them costs no run. One run at a time: none of
+    them is live. Each shard's build stays (TARGET_DIR/mutants/<label>-<k>):
+    the next run's shard rebuilds the crate from its fresh checkout, whose
+    files are newer than every artifact there, and keeps the dependencies'
+    builds, most of a build's time (a Mac's six shards spent 575 s building
+    for 19 mutants, November 6, BLAKE3 #257)."""
     listed = subprocess.run(["git", "-C", ROOT, "worktree", "list", "--porcelain"], capture_output=True, text=True, check=True).stdout
     home = os.path.realpath(WORKTREES) + os.sep
     for line in listed.splitlines():
@@ -352,7 +356,6 @@ def remove_leftovers():
             subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree], check=True)
     subprocess.run(["git", "-C", ROOT, "worktree", "prune"], check=True)
     shutil.rmtree(WORKTREES, ignore_errors=True)
-    shutil.rmtree(os.path.join(TARGET_DIR, "mutants"), ignore_errors=True)
     os.makedirs(WORKTREES)
 
 
@@ -386,7 +389,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None):
         # test the others' builds), inside the target directory cargo is
         # set to use: where this machine runs what it builds (the VM's
         # shared mount runs nothing, so its cargo builds in /tmp).
-        target = os.path.join(TARGET_DIR, "mutants", os.path.basename(tree))
+        target = os.path.join(TARGET_DIR, "mutants", f"{label}-{k}")
         env = dict(os.environ, CARGO_TARGET_DIR=target, NEXTEST_PROFILE="mutants-map" if MAP else "mutants")
         # The tests' own threads and memory cap (test_limits), the cap set
         # by a target runner for test binaries alone; builds keep theirs.
@@ -396,7 +399,9 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None):
         # Through sh: a checkout's files may sit where nothing executes.
         env[f"CARGO_TARGET_{HOST.upper().replace('-', '_')}_RUNNER"] = "sh " + os.path.join(ROOT, "tools", "mutants", "test-runner")
         if sys.platform == "linux":  # code_hash.py reads ELF
+            # Fresh each run: its first build is this run's unmutated one.
             env["MUTANTS_SAME_CODE"] = os.path.join(target, "same-code")
+            shutil.rmtree(env["MUTANTS_SAME_CODE"], ignore_errors=True)
             os.makedirs(env["MUTANTS_SAME_CODE"])
             env["MUTANTS_CODE_HASH"] = os.path.join(ROOT, "tools", "mutants", "code_hash.py")
             env["MUTANTS_B3SUM"] = official_b3sum()
@@ -496,7 +501,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None):
         # Each shard's survivors in its own worktree and release target, the
         # shards at once (their cargo-mutants runs are over).
         def look(tree):
-            target = os.path.join(TARGET_DIR, "mutants", os.path.basename(tree) + "-release")
+            target = envs[tree]["CARGO_TARGET_DIR"] + "-release"
             return release_same.confirm(tree, target, survivors[tree], BUILD, envs[tree])
         with ThreadPoolExecutor(len(survivors)) as pool:
             same = [key for keys in pool.map(look, sorted(survivors)) for key in keys]
