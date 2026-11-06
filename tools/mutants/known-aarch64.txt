@@ -6,12 +6,8 @@ files: src/block.rs src/convenience.rs src/each.rs src/ffi_neon_hybrid.rs src/ff
 model files: src/finish.rs src/park.rs
 src/each.rs	replace hash_held with ()	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/each.rs	replace | with ^ in hash_held	1	equivalent: | and ^ agree on flag bits that never overlap
-src/ffi_neon_hybrid.rs	replace % with + in prefetch_message_code	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/ffi_neon_hybrid.rs	replace % with / in prefetch_message_code	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/ffi_neon_hybrid.rs	replace && with || in prefetch_message_code	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace * with + in partial_pays	1	speed: moves a threshold between equally correct paths (the partial kernel computes every count from 1 to 15, 10 too; 10 runs faster without it)
 src/ffi_neon_hybrid.rs	replace > with >= in partial_pays	1	speed: moves a threshold between equally correct paths (the partial kernel computes every count from 1 to 15, 10 too; 10 runs faster without it)
-src/ffi_neon_hybrid.rs	replace > with >= in prefetch_message_code	2	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace > with >= in prefetch_parent_code	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace > with >= in prefetch_tree_code	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/ffi_neon_hybrid.rs	replace sha3_detected -> bool with true	1	detection, on a machine with SHA-3: a wrong no runs the NEON kernels (equally correct), a wrong yes is this machine's answer
@@ -143,7 +139,6 @@ src/lib.rs	replace > with == in spare_lane	3	same code: every test binary hashes
 src/lib.rs	replace > with >= in OutputReader::fill	1	equivalent: xof_many of no whole block returns at once
 src/lib.rs	replace > with >= in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace > with >= in spare_lane	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/lib.rs	replace >= with < in batch_after_pause	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace >= with < in hash_serial_from	1	speed: moves a threshold between equally correct paths
 src/lib.rs	replace >= with < in prefetch_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
 src/lib.rs	replace >= with < in prefetch_update_kernels	1	speed: whether and what to prefetch after a pause (no effect on results)
@@ -157,7 +152,6 @@ src/lib.rs	replace spare_lane -> Option<usize> with Some(0)	1	same code: every t
 src/lib.rs	replace spare_lane -> Option<usize> with Some(1)	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/lib.rs	replace | with ^ in Output::root_output_block	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in OutputReader::fill	1	equivalent: | and ^ agree on flag bits that never overlap
-src/lib.rs	replace | with ^ in batch_after_pause	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace | with ^ in compress_parents_parallel	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in hash_all_at_once	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in hash_one_chunk_root	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -175,6 +169,7 @@ src/many.rs	replace % with / in hash_chunked	1	speed: moves a threshold between 
 src/many.rs	replace % with / in hash_four_at_a_time	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace && with || in across_from	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace && with || in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
+src/many.rs	replace && with || in hash_run_short	1	speed here: on this SME2 machine every short run goes to the padded group, whose digests are the plans'; a CPU without SME2 would run SME2 instructions, and no mutation machine of ours lacks SME2
 src/many.rs	replace * with + in hash_across	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace * with + in hash_group_across	5	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace * with + in hash_long_or_single	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -236,6 +231,7 @@ src/many.rs	replace hash_group_across with ()	1	same code: every test binary of 
 src/many.rs	replace hash_long_or_single with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/many.rs	replace neon_plans -> bool with true	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace noted_lanes with ()	1	test-only: it notes hash_four_at_a_time's lanes for the arrangement test, which runs on x86-64 alone (#228); no AArch64 test reads them
+src/many.rs	replace platform_is_sme2 -> bool with true	1	equivalent here: on this SME2 machine the platform is SME2, so the function returns true already
 src/many.rs	replace subtree_across with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/many.rs	replace takes_platform -> bool with false	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/many.rs	replace takes_platform -> bool with true	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
