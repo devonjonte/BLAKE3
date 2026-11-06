@@ -1170,7 +1170,14 @@ fn hash_serial_from(platform: Platform, input: &[u8], key: &CVWords, flags: u8, 
     if cold && (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
         prefetch_cold(input.len(), turn.platform(), false);
     }
-    #[cfg(not(all(blake3_neon, feature = "std")))]
+    // The x86 twin of the NEON prefetch above (probe): 4 KiB of the
+    // many-lane kernel's code and 1 KiB of the single-block kernel's,
+    // before a cold call of 2 to 16 chunks.
+    #[cfg(all(target_arch = "x86_64", blake3_sse41_ffi, feature = "std"))]
+    if cold && (crate::CHUNK_LEN + 1..=16 * crate::CHUNK_LEN).contains(&input.len()) {
+        prefetch_cold_x86(turn.platform());
+    }
+    #[cfg(not(any(all(blake3_neon, feature = "std"), all(target_arch = "x86_64", blake3_sse41_ffi, feature = "std"))))]
     let _ = cold;
     hash_serial_on(input, key, flags, turn.platform())
 }
@@ -1261,6 +1268,25 @@ fn prefetch_update_kernels(len: usize, platform: Platform) {
         left -= subtree;
     }
     let _ = platform;
+}
+
+/// PROBE (x86): the code a cold call of 2 to 16 chunks runs, its first
+/// lines prefetched: the many-lane kernel by platform, and the
+/// single-block kernel the parents and the root run on.
+#[cfg(all(target_arch = "x86_64", blake3_sse41_ffi, feature = "std"))]
+#[cold]
+#[inline(never)]
+fn prefetch_cold_x86(platform: Platform) {
+    let many = match platform {
+        #[cfg(blake3_avx512_ffi)]
+        Platform::AVX512 => crate::avx512::ffi::blake3_servil_hash_many_avx512 as *const () as usize,
+        #[cfg(blake3_avx2_ffi)]
+        Platform::AVX2 => crate::avx2::ffi::blake3_servil_hash_many_avx2 as *const () as usize,
+        _ => crate::sse41::ffi::blake3_servil_hash_many_sse41 as *const () as usize,
+    };
+    let compress = crate::sse41::ffi::blake3_servil_compress_in_place_sse41 as *const () as usize;
+    crate::platform::prefetch_code((many, many + 4 * 1024));
+    crate::platform::prefetch_code((compress, compress + 1024));
 }
 
 /// The smallest input the SME2 kernels take part in: one group of sixteen
