@@ -808,9 +808,20 @@ def main():
     commit = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
     changed = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, check=True).stdout.strip()
     print(f"mutants: BLAKE3-Servil at {commit}{', with uncommitted changes' if changed else ''}", flush=True)
-    remove_leftovers()
     started = time.monotonic()
     whole = "--whole" in sys.argv or "--write" in sys.argv
+    # Sam Shackleton's stops (#256, 446a748f): a run asks for one scope,
+    # and a change's check never becomes the whole run by accident.
+    if "--since" in sys.argv and whole:
+        sys.exit("mutants: choose --since REV or --whole/--write, not both")
+    since = sys.argv[sys.argv.index("--since") + 1] if "--since" in sys.argv else None
+    if since is None and not whole:
+        base = subprocess.run(["git", "-C", ROOT, "merge-base", "HEAD", "origin/servil"], capture_output=True, text=True)
+        if base.returncode == 0:
+            since = base.stdout.strip()
+        else:
+            sys.exit("mutants: no origin/servil to take a base from; fetch it or name --since REV (--whole asks for every mutant)")
+    remove_leftovers()
     listed = check_rows_exist(remove=not whole)
     files, known = read_known()
     _, tknown = read_known(TIMEOUTS, INACTIVE_TIMEOUTS)
@@ -821,13 +832,6 @@ def main():
         print(f"MISSING TEST: {k}")
     if missing:
         sys.exit("mutants: the list names missing tests; write them first")
-    since = sys.argv[sys.argv.index("--since") + 1] if "--since" in sys.argv else None
-    if since is None and "--whole" not in sys.argv and "--write" not in sys.argv:
-        base = subprocess.run(["git", "-C", ROOT, "merge-base", "HEAD", "origin/servil"], capture_output=True, text=True)
-        if base.returncode == 0:
-            since = base.stdout.strip()
-        else:
-            print("mutants: no origin/servil to take a base from")
     # The log names its own scope on its first line: a release gate reads
     # a whole run alone (tools/release-check.py's mutation_result).
     print(f"mutants: the change since {since}" if since is not None else "mutants: the whole run")
