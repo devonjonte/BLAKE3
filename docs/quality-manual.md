@@ -395,9 +395,9 @@ Z3 (an AArch64 Linux machine with Python 3 and `python3-z3`, Clang and
 llvm-objdump 17 or later; details in [`tools/verify/README.md`](../tools/verify/README.md)):
 
 ```sh
-python3 tools/verify/prove_hybrid.py   # ends "415 of 415 cases proved"
+python3 tools/verify/prove_hybrid.py   # every declared hybrid-kernel case
 python3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof chunks_x2 every parents_every xof_every messages_every x2_every
-                                      # ends "41 of 41 cases proved"
+                                      # fixed-count cases and loop inductions
 python3 tools/verify/mutants.py        # wrong kernels, each rejected
 ```
 
@@ -407,16 +407,17 @@ LLVM's `ld.lld`; their instruction model is checked against the CPU by
 
 ```sh
 python3 tools/verify/prove_x86_loop.py --workers 4
-                                      # ends "51 of 51 all-count cases proved"
-python3 tools/verify/prove_x86.py     # ends "390 of 390 cases proved"
-python3 tools/verify/prove_x86.py --representative   # 203 of them
+                                      # every input count, by induction
+python3 tools/verify/prove_x86.py     # every declared assembled-kernel case
+python3 tools/verify/prove_x86.py --representative   # a shorter selection
 ```
 
 `sh tools/verify/long-proofs.sh` runs all of it after a change to a
-kernel or the proof tools: 897 cases (415 hybrid, 41 SME2, 390 x86 and
-51 all-count x86), the planted-error controls, and the Arm CPU
-cross-check. Each case is proved when Z3 finds no input on which the
-code and the definition differ; one that fails prints `NOT PROVED` with
+kernel or the proof tools: every harness's complete matrix, the
+planted-error controls and the Arm CPU cross-check. The harnesses report
+their current case counts. A proved case states equality between the code
+and the definition for every input in its contract; a failed one prints
+`NOT PROVED` with
 what it could not prove, and the run ends with exit status 1.
 
 ## Check it yourself
@@ -426,8 +427,8 @@ SME2 (clang 17 or later; set `CC=clang-19` or similar):
 
 ```sh
 git clone -b servil https://github.com/servil-software-factory/BLAKE3 && cd BLAKE3
-cargo nextest run --release --lib --tests         # 103 tests, each in its own process
-cargo test --release --doc                        # 19 doc examples
+cargo nextest run --release --lib --tests         # each test in its own process
+cargo test --release --doc                        # each doc example in its own process
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API, 8
 ```
