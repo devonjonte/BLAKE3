@@ -411,6 +411,7 @@ def main():
         failures += failed
     for line, failed in workers.each(run, chunk_root_mutant_jobs(), 2, fork):
         print(line, flush=True)
+        failures += failed
     for line, failed in workers.each(run, wide_mutant_jobs(), 1, fork):
         print(line, flush=True)
         failures += failed
