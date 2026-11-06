@@ -68,6 +68,10 @@ pub(crate) fn hash_many_on(input: &[u8], len: usize, key: &CVWords, flags: u8, o
     }
     let slot = slot_len(len);
     assert_slots(input, len, outputs.len());
+    // Empty messages: the NEON plans take a last block of 1 to 64 bytes
+    // (hash_many_in's contract), so without this arm a batch of them stops
+    // there (#251: CI's Cortex-A72, and every NEON machine since the pair
+    // kernels left).
     if len == 0 {
         outputs.fill(*crate::hash_serial_on(&[], key, flags, platform).as_bytes());
         return;
