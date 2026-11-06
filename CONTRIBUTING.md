@@ -157,8 +157,8 @@ with `--fork`. From this checkout's root:
 ```sh
 git clone https://github.com/servil-software-factory/bench-hashes ../bench-hashes
 fork=$PWD
-(cd ../bench-hashes && cargo run --release -- check --fork "$fork")                 # the working tree against HEAD
-(cd ../bench-hashes && cargo run --release -- check --fork "$fork" --against OLD)   # a checkout at NEW
+(cd ../bench-hashes && cargo run --release -- check --fork "$fork" --points "3 KiB,idle 3 KiB")   # choose the points the change can move
+(cd ../bench-hashes && cargo run --release -- check --fork "$fork" --against OLD --cells all)  # every point, for a broad change
 ```
 
 It builds the benchmark against both versions of BLAKE3-Servil and runs them
@@ -167,15 +167,18 @@ exit status:
 
 - 0: no cell slower;
 - 1: a regression, its cells listed;
-- 2: no verdict, because other programs kept the machine busy during the
-  check (run it again on a quiet machine).
+- 2: verdict pending: name a scope with `--points` or `--cells all`, or
+  run on a quiet machine when other programs kept it busy.
 
-`sh tools/install-git-hooks.sh` installs a pre-commit hook that runs it
-for every commit that touches code. To run the full
-benchmark against your working tree, see bench-hashes' `CONTRIBUTING.md`.
+`check` first prints the changed files and items; the author names the
+points the change can move. `sh tools/install-git-hooks.sh` installs a
+hook that presents that summary for code commits and keeps a pending
+verdict pending. Once the explicit scoped check passes, commit with
+`--no-verify` to use that result. To run the full benchmark against your
+working tree, see bench-hashes' `CONTRIBUTING.md`.
 
-The check runs its pairs in two stages: four pairs over every cell the
-change reaches, then sixteen fresh pairs over the cells it suspects,
+The check runs its pairs in two stages: four pairs over the named cells,
+then 64 pairs over the cells it suspects,
 judged among themselves. Planted at one input length, it caught +20%
 and +10%, not +6%, which cells after a gap drown in (bench-hashes #66).
 Where a short-message cell turns on where a stack or a buffer happens to

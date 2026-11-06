@@ -5,11 +5,11 @@
 #    where coverage cannot see the change), a few seconds; a failure
 #    aborts the commit. With no map yet (tmp/tests-map), it says so and
 #    runs on: `python3 tools/tests/reach.py map` makes one in a minute.
-# 2. the performance-regression check (the working tree against HEAD:
-#    `bench-hashes check`, which measures the cells whose code the commit
-#    touches). A confirmed regression (exit 1) aborts the commit; no
-#    verdict (exit 2: other programs kept the machine busy) warns and lets
-#    it through.
+# 2. the performance-regression check's scope summary. Current bench-hashes
+#    asks the author to name its points. A pending verdict keeps the commit
+#    pending: run `check --points ...` (or --cells all), then commit with
+#    --no-verify once that explicit check passes. A regression or tool
+#    failure also keeps the commit pending.
 # `git commit --no-verify` skips both after review.
 #
 # Both measure the working tree, which is what is being committed when
@@ -36,6 +36,7 @@ bench=${BENCH_HASHES_DIR:-$top/../bench-hashes}
 verdict=$?
 case $verdict in
 0) exit 0 ;;
-2) echo "pre-commit: the performance check gave no verdict (above); committing. Check again on a quiet machine."; exit 0 ;;
-*) echo "pre-commit: performance regression; commit aborted. After review, git commit --no-verify overrides."; exit 1 ;;
+1) echo "pre-commit: performance regression; commit pending. Review the slowed cells above."; exit 1 ;;
+2) echo "pre-commit: performance verdict pending. Choose --points (or --cells all), run check on a quiet machine, then commit --no-verify after it passes."; exit 1 ;;
+*) echo "pre-commit: the performance tool failed (exit $verdict); commit pending."; exit 1 ;;
 esac
