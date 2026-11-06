@@ -38,6 +38,12 @@ use crate::{Hash, IV, Mode, OutputReader};
 // (i7-12700K, after idling, 64 B: -16.5%, 8 fresh layouts a side).
 #[inline]
 pub fn hash(input: &[u8]) -> Hash {
+    // PROBE (x86, the cold API): the first 4 KiB of the many-lane kernel's
+    // code and 1 KiB of compress, prefetched before a call of 2 to 16 chunks.
+    #[cfg(all(target_arch = "x86_64", blake3_sse41_ffi, blake3_avx2_ffi))]
+    if (crate::CHUNK_LEN + 1..16 * crate::CHUNK_LEN).contains(&input.len()) {
+        crate::prefetch_kernels_narrow(input.len());
+    }
     crate::hash_serial(input, IV, 0)
 }
 

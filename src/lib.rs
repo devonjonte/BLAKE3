@@ -1424,6 +1424,20 @@ fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) ->
     Hash(tree::hash(&tree::PlatformKernels { key, flags, platform }, input))
 }
 
+/// PROBE: the x86 kernels' code a call of 2-16 chunks runs, its first
+/// lines prefetched (4 KiB of the many-lane kernel, 1 KiB of compress).
+#[cfg(all(target_arch = "x86_64", blake3_sse41_ffi, blake3_avx2_ffi))]
+#[cold]
+#[inline(never)]
+fn prefetch_kernels_narrow(_len: usize) {
+    let (many, compress) = match Platform::detect() {
+        Platform::AVX2 => (avx2::ffi::blake3_servil_hash_many_avx2 as *const () as usize, sse41::ffi::blake3_servil_compress_in_place_sse41 as *const () as usize),
+        _ => (sse41::ffi::blake3_servil_hash_many_sse41 as *const () as usize, sse41::ffi::blake3_servil_compress_in_place_sse41 as *const () as usize),
+    };
+    platform::prefetch_code((many, many + 3 * 1024));
+    platform::prefetch_code((compress, compress + 1024));
+}
+
 /// [`hash_many`] in the mode of `key` and `flags`, on the calling thread.
 #[inline]
 pub(crate) fn hash_many_serial(input: &[u8], message_len: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]]) {
