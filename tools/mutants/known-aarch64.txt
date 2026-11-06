@@ -30,8 +30,8 @@ src/hasher.rs	replace | with ^ in parent_output	1	equivalent: | made ^ on flag b
 src/incremental.rs	delete ! in <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv	1	speed: chooses between equally correct paths
 src/incremental.rs	delete ! in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
 src/incremental.rs	replace && with || in HasherCore::update_pooled	1	speed: whether the update takes the SME2 turn
-src/incremental.rs	replace + with * in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
-src/incremental.rs	replace + with - in Hasher::update	1	speed: whether and what to prefetch after a pause (no effect on results)
+src/incremental.rs	replace + with * in Hasher::update	1	equivalent: the range then starts at 1023 or 1024 bytes, and prefetch_update_kernels prefetches nothing for a chunk or less; the bound spares a short piece's first update the call
+src/incremental.rs	replace + with - in Hasher::update	1	equivalent: the range then starts at 1023 or 1024 bytes, and prefetch_update_kernels prefetches nothing for a chunk or less; the bound spares a short piece's first update the call
 src/incremental.rs	replace / with * in HasherCore::push_group	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv -> Option<CVBytes> with None	1	speed: chooses between equally correct paths
 src/incremental.rs	replace >= with < in <impl hasher::Hooks for HasherHooks<'_>>::children	1	speed: chooses between equally correct paths
