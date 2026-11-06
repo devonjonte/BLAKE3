@@ -111,6 +111,31 @@ MAX_LIMIT = 7200
 
 stopping = False
 
+# The session of the command a job is running: its PID and start time. A
+# runner stopped some other way than Ctrl-C (its terminal closed, a kill)
+# leaves that session running, and the next runner would measure beside
+# it: two checks of job 1939 ran at once, each the other's load
+# (bench-hashes #135, November 6, 2026). The next runner ends it first.
+SESSION_FILE = Path.home() / "runner-session.txt"
+
+
+def started(pid):
+    """A process's start time as ps prints it, or None when it is gone."""
+    out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True)
+    return out.stdout.strip() or None
+
+
+def end_leftover_session():
+    """End the session an earlier runner left running, if it is the one it
+    recorded (the same PID and start time; this account's processes only)."""
+    if not SESSION_FILE.exists():
+        return
+    pid, recorded = SESSION_FILE.read_text().split("\t", 1)
+    if started(int(pid)) == recorded.strip():
+        print(f"runner: ending the session an earlier runner left running (PID {pid})", file=sys.stderr, flush=True)
+        os.killpg(int(pid), signal.SIGKILL)
+    SESSION_FILE.unlink()
+
 
 def on_signal(signum, _frame):
     global stopping
@@ -155,6 +180,7 @@ class Job:
         # runner alone and the current job finishes.
         proc = subprocess.Popen(cmd, cwd=cwd, env=environment(), start_new_session=True,
                                 stdout=subprocess.PIPE if capture else self.log, stderr=self.log, text=True)
+        SESSION_FILE.write_text(f"{proc.pid}\t{started(proc.pid)}\n")
         try:
             stdout, _ = proc.communicate(timeout=remaining)
         except subprocess.TimeoutExpired:
@@ -445,6 +471,7 @@ def main():
     (HOME / "tmp").mkdir(exist_ok=True)
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
+    end_leftover_session()
     done = set(DONE_FILE.read_text().split()) if DONE_FILE.exists() else set()
     print(f"runner: watching {jobs}; Ctrl-C stops after the current job", file=sys.stderr, flush=True)
     while not stopping:
