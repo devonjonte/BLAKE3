@@ -18,10 +18,14 @@ at most 7200):
 (bench-hashes before its git dependency on BLAKE3-Servil took `--thorough` for
 a full run; later ones run in full by default and take `--quick`.)
     {"type": "check", "old_commit": "...", "new_commit": "...",
-     "bench_commit": "...", "old_bench_commit": "...", "cells": "all", "layouts": N}
+     "bench_commit": "...", "old_bench_commit": "...", "points": "3 KiB,idle 3 KiB",
+     "layouts": N}
 
-(bench-hashes check measures the cells whose code the change touches, or
-every cell with "cells": "all"; "layouts" is the links a side, a pair
+(The check's scope: "points" names the cells, as bench-hashes check --points
+takes them; "probe" the same for its three-pair survey, with no verdict;
+"cells": "all" every cell. From bench-hashes 0.21 the check needs one; an
+older bench, given none, measures the cells whose code the change touches.
+"layouts" is the links a side, a pair
 each, its default check's. "old_bench_commit" builds the old side with the bench at that
 commit (check --old-bench), for an old side that predates the bench's
 calls: 0.8 against the main line before the performance API. Every run's
@@ -255,16 +259,17 @@ def check(job, run, work, out):
     bench_commit beside it (a bench with `check --fork`, October 31, 2026),
     against old_commit. check builds both
     sides itself (under BLAKE3-Servil's target/check/), relinks each per pair,
-    and measures the cells whose code the change touches ("cells": "all"
-    measures every one). Its exit is the verdict: 0 no cell slower, 1 a
-    regression, 2 no verdict (other programs kept the machine busy)."""
+    and measures the job's scope (the module docstring). Its exit is the
+    verdict: 0 no cell slower, 1 a regression, 2 no verdict (other programs
+    kept the machine busy, or no scope given to a bench that needs one)."""
     old, new = hex_commit(job, "old_commit"), hex_commit(job, "new_commit")
     fork, bench = run.checkouts(new, hex_commit(job, "bench_commit"))
     cmd = ["cargo", "run", "--release", "--quiet", "--", "check", "--fork", str(fork), "--against", old, "--keep", str(out / "samples")]
-    if job.get("cells") == "all":
-        cmd += ["--cells", "all"]
-    elif "cells" in job:
-        raise AssertionError("cells: \"all\", or left out (the cells the change touches)")
+    scope = [k for k in ("cells", "points", "probe") if k in job]
+    assert len(scope) <= 1, "one scope: cells, points, or probe"
+    assert job.get("cells", "all") == "all", "cells: \"all\""
+    for k in scope:
+        cmd += [f"--{k}", job[k]]
     if "layouts" in job:
         assert isinstance(job["layouts"], int) and job["layouts"] >= 2, "layouts: 2 or more"
         cmd += ["--layouts", str(job["layouts"])]
@@ -272,7 +277,7 @@ def check(job, run, work, out):
         cmd += ["--old-bench", hex_commit(job, "old_bench_commit")]
     try:
         run.run(cmd, cwd=bench)
-        return "no regression"
+        return "probe done" if "probe" in job else "no regression"
     except subprocess.CalledProcessError as e:
         if e.returncode in (1, 2):
             return {1: "regression", 2: "no verdict"}[e.returncode]
