@@ -136,8 +136,7 @@ per millisecond, so small tests come first), the tests outside it (each
 a big test whose catches cheaper ones make), and the mutants only an
 expensive test catches (each a small test worth writing). A failure
 that names the startup self-test is the self-test's catch, whichever
-test it ran in. A change's check (`--since`) that alters a test reruns
-the mutants the map records that test catching. The weighing guides
+test it ran in. The weighing guides
 judgment: a test's worth can go beyond the mutants it catches (a
 contract's `should_panic`, a hang, a shape no mutant models).
 
@@ -178,9 +177,11 @@ the check on every target machine decides.
 outcome differs from the list (so a test that fails by chance, under
 load, decides nothing), and fails on a survivor not listed, a listed one
 now caught, a listed one without a reason, or a test the list names as
-missing (overnight). For a change, `--since servil`
-tests only the mutants in the lines it changes, in seconds, and runs the
-whole set itself when the change removes or alters test code.
+missing: the whole run (`--whole`), once per stable release. A change's
+check, the default, tests only the mutants in the lines the change
+makes, in about a minute (BLAKE3 #257). What it gives up waits for the
+next whole run: a changed test's effect on other code's mutants, and a
+listed survivor now caught.
 
 **What the suites cover.** Branch coverage runs over the default,
 one-CPU, and no-std builds. Most uncovered sides are the branches of

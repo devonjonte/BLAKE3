@@ -1811,8 +1811,8 @@ mod prefetch_counts {
         }
     }
 
-    /// The public calls take their paths: convenience::hash the cold one,
-    /// performance::hash the warm one.
+    /// The public calls take their paths: convenience::hash and hash_with
+    /// the cold one, performance::hash the warm one.
     #[test]
     fn test_convenience_prefetches_and_performance_does_not() {
         if !matches!(Platform::detect(), Platform::NEON | Platform::SME2) || !crate::neon_hybrid::sha3_detected() {
@@ -1823,6 +1823,8 @@ mod prefetch_counts {
         taken();
         std::hint::black_box(crate::convenience::hash(&crate::performance::Block::bytes(&blocks)[..len]));
         assert!(!taken().0.is_empty(), "convenience::hash prefetches");
+        std::hint::black_box(crate::convenience::hash_with(crate::Mode::Keyed(&[3; 32]), &crate::performance::Block::bytes(&blocks)[..len]));
+        assert!(!taken().0.is_empty(), "convenience::hash_with prefetches (Sam, #253)");
         std::hint::black_box(crate::performance::hash(crate::Mode::Plain, &blocks, len));
         assert_eq!(taken().0, [], "performance::hash prefetches nothing");
     }

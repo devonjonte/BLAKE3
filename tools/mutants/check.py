@@ -512,8 +512,6 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None):
             f.writelines("\t".join(map(str, r)) + "\n" for r in rows)
         if MAP and label == "run":  # the confirming pass reruns a few mutants: its weights would be noise
             weigh(rows, os.path.join(kept, "tests.tsv"))
-            head = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout
-            open(os.path.join(kept, "commit"), "w").write(head)
     return names, functions, timed
 
 

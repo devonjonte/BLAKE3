@@ -212,8 +212,8 @@ what was checked is what lands) once:
   code for targets the VM and Mac do not run (x86-64, AArch64 without
   SME2);
 - mutation testing passes on a change to the Rust
-  (`python3 tools/mutants/check.py`: the mutants in the
-  changed lines, and the ones the last map says a changed test catches);
+  (`python3 tools/mutants/check.py`: the mutants in the changed lines,
+  in about a minute, the time it took printed at its end);
 - the regression check finds no slowdown on AArch64 Linux in a VM and
   natively on an Apple M4 Max. A candidate that changes no compiled code
   needs no speed check: it would compare identical code.
