@@ -290,14 +290,16 @@ def check(job, run, work, out):
     kept the machine busy, or no scope given to a bench that needs one)."""
     old, new = hex_commit(job, "old_commit"), hex_commit(job, "new_commit")
     fork, bench = run.checkouts(new, hex_commit(job, "bench_commit"))
-    cmd = ["cargo", "run", "--release", "--quiet", "--", "check", "--fork", str(fork), "--against", old, "--keep", str(out / "samples")]
+    # --when-quiet: a Mac busy for a few seconds (a scan after a build, a
+    # runner restart) waits instead of abstaining (jobs 1986, 1989, 1990).
+    cmd = ["cargo", "run", "--release", "--quiet", "--", "check", "--fork", str(fork), "--against", old, "--when-quiet", "--keep", str(out / "samples")]
     scope = [k for k in ("cells", "points", "probe") if k in job]
     assert len(scope) <= 1, "one scope: cells, points, or probe"
     assert job.get("cells", "all") == "all", "cells: \"all\""
     for k in scope:
         cmd += [f"--{k}", job[k]]
     if "layouts" in job:
-        assert isinstance(job["layouts"], int) and job["layouts"] >= 2, "layouts: 2 or more"
+        assert isinstance(job["layouts"], int) and job["layouts"] >= 3, "layouts: 3 or more (regress's rule needs three pairs)"
         cmd += ["--layouts", str(job["layouts"])]
     if "old_bench_commit" in job:
         cmd += ["--old-bench", hex_commit(job, "old_bench_commit")]
