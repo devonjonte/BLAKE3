@@ -219,7 +219,10 @@ fast-forward of its tip (so what was checked is what lands) once:
   in about a minute, the time it took printed at its end);
 - the regression check finds no slowdown on AArch64 Linux in a VM and
   natively on an Apple M4 Max. A candidate that changes no compiled code
-  needs no speed check: it would compare identical code.
+  needs no speed check: it would compare identical code. The Mac is
+  John's runner: ask for its check on the pull request, naming the
+  points, and he queues it (about twenty minutes; its result is posted
+  there). Whoever made the candidate lands it once every check has passed.
 
 A change to a tool that runs for hours (`tools/mutants/check.py`,
 `tools/verify/long-proofs.sh`, `bench-hashes regress` and `check`) lands
