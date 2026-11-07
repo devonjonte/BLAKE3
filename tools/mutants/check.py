@@ -2,7 +2,7 @@
 
     python3 tools/mutants/check.py [--since REV | --whole] [--write] [--map] [--whole-suite] [--all-hangs]
 
-By default the check covers the change since the branch left origin/main
+By default the check covers the change since the branch left origin/next
 (git merge-base; a minute for a day's change). --since REV names another
 base; --whole runs every mutant in the lists (an hour or more: a release's
 check, or a list rewritten with --write). A run started by mistake was
@@ -816,11 +816,11 @@ def main():
         sys.exit("mutants: choose --since REV or --whole/--write, not both")
     since = sys.argv[sys.argv.index("--since") + 1] if "--since" in sys.argv else None
     if since is None and not whole:
-        base = subprocess.run(["git", "-C", ROOT, "merge-base", "HEAD", "origin/main"], capture_output=True, text=True)
+        base = subprocess.run(["git", "-C", ROOT, "merge-base", "HEAD", "origin/next"], capture_output=True, text=True)
         if base.returncode == 0:
             since = base.stdout.strip()
         else:
-            sys.exit("mutants: no origin/main to take a base from; fetch it or name --since REV (--whole asks for every mutant)")
+            sys.exit("mutants: no origin/next to take a base from; fetch it or name --since REV (--whole asks for every mutant)")
     remove_leftovers()
     listed = check_rows_exist(remove=not whole)
     files, known = read_known()
