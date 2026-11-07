@@ -67,7 +67,7 @@ cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API
 sh tools/check-builds.sh            # the builds the suites leave out
 RUSTFLAGS="--cfg shuttle" cargo test --release --test shuttle_finish --test shuttle_park   # the pool's handshakes, every schedule a model checker tries
-python3 tools/mutants/check.py        # the change since origin/servil, a minute; --whole for every mutant (an hour)
+python3 tools/mutants/check.py        # the change since origin/main, a minute; --whole for every mutant (an hour)
 ```
 
 **While working, run the tests a change reaches:** `python3
@@ -206,8 +206,8 @@ margin.
 
 ## Branches and changes
 
-`servil` is the main line. Work happens on `candidate/<topic>`
-branches; a candidate joins `servil` as a fast-forward of its tip (so
+`main` is the main line. Work happens on `candidate/<topic>`
+branches; a candidate joins `main` as a fast-forward of its tip (so
 what was checked is what lands) once:
 
 - every suite above passes, and `sh tools/check-builds.sh`;
@@ -228,8 +228,8 @@ runs it (the VM, the Mac, x86-64 Linux): a fault in its setup or
 teardown otherwise costs a whole run, found at its end. For check.py
 that run is `python3 tools/mutants/smoke.py`, about a minute.
 
-Jobs of hours run on `servil` overnight: the whole mutation run, and the
-long proofs (`sh tools/verify/long-proofs.sh servil`, which posts the
+Jobs of hours run on `main` overnight: the whole mutation run, and the
+long proofs (`sh tools/verify/long-proofs.sh main`, which posts the
 commit's "long proofs" status). The proofs' inputs are the kernels
 (`c/`), the specification (`c2sp/`), the proof tools (`tools/verify/`)
 and the NEON generator; the script hashes them, and a commit whose
@@ -239,7 +239,7 @@ the pages never waits on the proofs. A failure there is fixed first, before the 
 to a kernel. After a candidate lands, bench-hashes pins its contender to
 the new tip (`blake3-servil`'s `rev` in `Cargo.toml`, the full hash).
 The instrument, `clocks`, is bench-hashes' own, so a result's bench
-commit names it on both sides of a comparison. Pull requests are welcome against `servil`; say in yours
+commit names it on both sides of a comparison. Pull requests are welcome against `main`; say in yours
 which machines you measured on.
 
 ## Releases

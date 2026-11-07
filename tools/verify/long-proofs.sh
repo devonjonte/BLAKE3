@@ -67,7 +67,7 @@ run prove_hybrid python3 tools/verify/prove_hybrid.py
 run prove_sme2 python3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof chunks_x2 every parents_every xof_every messages_every x2_every
 # Every kind prove_x86.py declares: the commit's own list, so a kernel a
 # commit adds is proved by the script that checks it, whichever commit's
-# copy of this script runs (October 25: servil's copy named four kinds and
+# copy of this script runs (October 25: the main line's copy named four kinds and
 # skipped a candidate's two new kernels).
 run prove_x86 python3 tools/verify/prove_x86.py
 run prove_x86_loop sh -c 'ulimit -v 6291456; exec python3 tools/verify/prove_x86_loop.py'

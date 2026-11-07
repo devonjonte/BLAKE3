@@ -2,7 +2,7 @@
 """The release checklist's mechanical steps, read from where each gate
 left its result, for one commit (CONTRIBUTING.md, "Releases").
 
-    python3 tools/release-check.py [COMMIT]        # default: servil's tip
+    python3 tools/release-check.py [COMMIT]        # default: main's tip
 
 It runs nothing heavy. For each step it reads the evidence the gate
 wrote and prints one line: PASS, FAIL, OPEN (no evidence yet, with the
@@ -163,7 +163,7 @@ def previous_release(commit):
 
 
 def main():
-    commit = git("rev-parse", sys.argv[1] if len(sys.argv) > 1 else "servil")
+    commit = git("rev-parse", sys.argv[1] if len(sys.argv) > 1 else "main")
     previous = previous_release(commit)
     results = []
 
@@ -218,7 +218,7 @@ def main():
     step("VM check against the previous release", log_ends_with(f"tmp/night/check-release-vm-{commit[:12]}.log", "no cell slower"),
          f"(cd ../bench-hashes && cargo run --release -- check --fork {ROOT} --against {previous or '<the main line before this release>'} --cells all [--old-bench <bench commit>]) > tmp/night/check-release-vm-{commit[:12]}.log")
     step("full mutation run", mutation_result(f"tmp/night/mutants-{commit[:12]}.log"),
-         f"python3 tools/mutants/check.py --whole > tmp/night/mutants-{commit[:12]}.log, the commit checked out (overnight; the whole run, since check.py alone covers the change since origin/servil)")
+         f"python3 tools/mutants/check.py --whole > tmp/night/mutants-{commit[:12]}.log, the commit checked out (overnight; the whole run, since check.py alone covers the change since origin/main)")
     step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "every build passes"),
          f"sh tools/check-builds.sh > tmp/night/check-builds-{commit[:12]}.log")
     step("cargo publish --dry-run", log_ends_with(f"tmp/night/publish-dry-run-{commit[:12]}.log", "publish-dry-run: ok"),

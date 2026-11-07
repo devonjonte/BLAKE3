@@ -165,7 +165,7 @@ class ReleaseEvidence(unittest.TestCase):
 
     def test_a_mutation_log_must_name_the_whole_run(self):
         # check.py's first line names the run's scope; its default covers the change since
-        # origin/servil, and the gate wants the whole run (--whole).
+        # origin/main, and the gate wants the whole run (--whole).
         tail = MUTATION_OK.split("\n", 1)[1]
         for text in ["mutants: the change since 0123456789ab\n" + tail, tail]:
             with self.subTest(text=text):
