@@ -146,8 +146,9 @@ impl<'a, T: Copy, F: FnMut(Event<'a, T>)> Stream<'a, T, F> {
 
     /// Await an admission, collecting while it is pending: a slot held by an
     /// uncollected completion comes back through `collect`, so a wait that
-    /// collected nothing would otherwise never end. Wakes on the admission
-    /// itself and on any completion.
+    /// collected nothing would otherwise never end; and hashing a waiting
+    /// task itself where no worker takes it (one CPU). Wakes on the
+    /// admission itself and on any completion.
     async fn admit<R>(&self, admission: impl Future<Output = R>) -> R {
         let mut admission = core::pin::pin!(admission);
         core::future::poll_fn(|cx| {
@@ -155,10 +156,10 @@ impl<'a, T: Copy, F: FnMut(Event<'a, T>)> Stream<'a, T, F> {
                 if let Poll::Ready(r) = admission.as_mut().poll(cx) {
                     return Poll::Ready(r);
                 }
-                if self.collect() == 0 {
+                if self.collect() == 0 && !self.receiver.help() {
                     break;
                 }
-                // Something was delivered: a slot may be free now; poll again.
+                // Something was delivered or hashed: poll again.
             }
             let mut notify = self.notify.lock().unwrap();
             notify.flagged = false;
@@ -228,12 +229,20 @@ impl<'a, T: Copy, F: FnMut(Event<'a, T>)> Stream<'a, T, F> {
     /// Wait until some completion may be ready (then [`collect`](Stream::collect)).
     pub async fn ready(&self) {
         core::future::poll_fn(|cx| {
-            let mut notify = self.notify.lock().unwrap();
-            if core::mem::take(&mut notify.flagged) {
-                return Poll::Ready(());
+            loop {
+                {
+                    let mut notify = self.notify.lock().unwrap();
+                    if core::mem::take(&mut notify.flagged) {
+                        return Poll::Ready(());
+                    }
+                    notify.waker = Some(cx.waker().clone());
+                }
+                // The producer's own help where no worker takes a task (one
+                // CPU, or every worker parked): hash one, then look again.
+                if !self.receiver.help() {
+                    return Poll::Pending;
+                }
             }
-            notify.waker = Some(cx.waker().clone());
-            Poll::Pending
         })
         .await
     }
@@ -253,7 +262,21 @@ impl<'a, T: Copy, F: FnMut(Event<'a, T>)> Message<'_, 'a, T, F> {
     /// Room for the message's next bytes, once a buffer is reserved: write
     /// into [`Input::bytes_mut`], then [`Input::commit`] how many.
     pub async fn input(&mut self) -> Input<'_> {
-        self.inner.input().await
+        let receiver = &self.stream.receiver;
+        let mut input = core::pin::pin!(self.inner.input());
+        core::future::poll_fn(|cx| {
+            loop {
+                if let Poll::Ready(input) = input.as_mut().poll(cx) {
+                    return Poll::Ready(input);
+                }
+                // A room comes back when a worker has hashed it; with none to
+                // (one CPU), the producer hashes one itself.
+                if !receiver.help() {
+                    return Poll::Pending;
+                }
+            }
+        })
+        .await
     }
     /// The message is complete, its last `written` bytes at the start of
     /// the current room's free part (0 when none are new): the digest comes
@@ -534,7 +557,13 @@ mod tests {
             by.iter().map(|(_, n)| *n).collect::<Vec<_>>(),
             by.iter().any(|(t, _)| *t == me)
         );
-        assert!(by.len() > 1, "more than one thread hashed parts: {by:?}");
+        // On one CPU the pool has no workers: the producer hashes every
+        // part itself, its own help while it waits.
+        let workers = crate::lanes::worker_count();
+        assert!(
+            by.len() > 1 || (workers == 0 && by.iter().any(|(t, _)| *t == me)),
+            "more than one thread hashed parts (or the producer alone, with {workers} workers): {by:?}"
+        );
     }
 
     /// `end(n)` carries a message's last bytes: at a room boundary, where

@@ -1150,9 +1150,23 @@ pub(crate) mod sources {
 
         /// Wait for every published action to finish: the pipeline's scope
         /// boundary, before its producer's borrowed contexts go away.
-        pub(crate) fn drain_actions(&self) {
+        pub(crate) fn drain_actions(&self, help: impl FnMut() -> bool) {
             self.finish.own();
-            self.finish.wait(self.finish.published.load(Ordering::SeqCst), || false);
+            self.finish.wait(self.finish.published.load(Ordering::SeqCst), help);
+        }
+
+        /// Hash one of this source's tasks no worker has taken: whether
+        /// there was one. A waiting producer's own help, the one way a task
+        /// runs where the pool has no workers (one CPU) or every worker is
+        /// parked.
+        pub(crate) fn help(&'static self) -> bool {
+            match self.take_task() {
+                Some(task) => {
+                    crate::lanes::run_task(task);
+                    true
+                }
+                None => false,
+            }
         }
 
         /// Wait until `finished` reaches `target`: polling for
@@ -1689,6 +1703,12 @@ pub(crate) fn assert_past_the_split(what: &str) {
 }
 
 /// Run `task` on this thread, as a worker would.
+/// The pool's workers (tests): every thread but the caller's, none on one CPU.
+#[cfg(test)]
+pub(crate) fn worker_count() -> usize {
+    pool().workers()
+}
+
 pub(crate) fn run_task(task: Task) {
     task.run(pool_platform());
 }

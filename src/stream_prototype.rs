@@ -98,7 +98,7 @@ fn reserved_buffer_returns_from_an_actual_worker() {
     assert_eq!(returned.as_ptr(), address, "the worker returns the same receive storage");
     crate::throughput::Block::bytes_mut(&mut returned).fill(0);
     returned.release();
-    source.drain_actions();
+    source.drain_actions(|| source.help());
     assert_eq!(unsafe { (*work.output.get()).as_bytes() }, &expected);
     assert_ne!(work.worker.lock().unwrap().unwrap(), std::thread::current().id(), "hashing ran on the shared worker pool");
     crate::lanes::sources::Source::unregister(slot);
@@ -211,7 +211,7 @@ fn one_message_accepts_callback_pieces_and_finishes_on_the_workers() {
                 source.wake_for_waiting();
                 wait_for(next.as_mut(), &mut cx).release();
             }
-            source.drain_actions();
+            source.drain_actions(|| source.help());
             assert_eq!(unsafe { (*work.output.get()).unwrap() }.as_bytes(), &expected, "flags={flags} length={len}");
             assert_eq!(work.core.lock().unwrap().count(), len as u64);
         }

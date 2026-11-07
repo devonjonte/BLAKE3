@@ -153,7 +153,7 @@ impl Receiver {
         // holds no buffer). The Mac's timing found a ring sized at
         // `buffers` overflowing: a worker read a garbage task.
         let source = Box::leak(Box::new(Source::new(buffers + messages)));
-        source.drain_actions(); // Initialize its platform completion metadata.
+        source.drain_actions(|| false); // Initialize its platform completion metadata.
         let input = (0..buffers).map(|index| Buffer { index, blocks: vec![Block::ZERO; INPUT_BYTES / 64].into_boxed_slice() }).collect();
         let slots = (0..buffers).map(|_| Slot { state: initialized_mutex(SlotState::Vacant) }).collect();
         let states = (0..messages)
@@ -259,7 +259,13 @@ impl Receiver {
     /// Explicit test scope boundary, using the source's existing finish line.
     pub(super) fn drain(&self) {
         assert!(self.core.messages.iter().all(|s| !s.lock().unwrap().writer_open), "end or abort every message before draining");
-        self.core.source.drain_actions();
+        self.core.source.drain_actions(|| self.core.source.help());
+    }
+
+    /// Hash one of the pipeline's tasks no worker has taken: the
+    /// producer's own help while it waits (one CPU: there is no worker).
+    pub(super) fn help(&self) -> bool {
+        self.core.source.help()
     }
 }
 
