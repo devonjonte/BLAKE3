@@ -1,3 +1,47 @@
+# Unreleased: changes since 0.8 (a draft for 0.9)
+
+The figures for this release come from its release runs; this section
+lists what changed, each item with where it is described.
+
+## The API: one call family for a hash now and then, one for call after call
+
+- **`convenience`** is for a hash amid other work: `hash`, `hash_with`,
+  `hash_xof`, and now the incremental `Hasher` (`convenience::Hasher::new(mode,
+  length_hint)`). Its paths are tuned for code that has left the caches
+  (on AArch64, its kernels' code is prefetched). The length hint is a
+  scheduling hint and never part of the hash.
+- **`throughput`** (the `performance` module of 0.8, renamed) is for call
+  after call: `hash`, `hash_many`, `hash_each` and their multithreaded forms
+  over prepared inputs (`Block`, `Batch`), the stream, grouped incremental
+  updates (`update_each`, `finalize_each`), and `update_multithreaded`, a
+  Hasher's parallel update. A program chooses the pattern by the call it
+  makes; no clock guesses it.
+- **`throughput::pipeline`**: one message or many, received in pieces,
+  hashed on the worker pool while the program reads the next piece, the
+  program's buffers bounded by reserved admission.
+- **The C API is the convenience API**: `b3_hash`, `b3_hasher_*` (with
+  the length hint) and the modes.
+
+## Checked more
+
+- **Mutation testing on a budget**: a change's check covers its own lines
+  in about a minute; the whole run, every mutant, gates each release.
+- **Every speed-only mutant earns a test that counts its work**, with no
+  clock, or its code goes; the pool's clock-bound knobs read a test clock.
+- **The tests split in two**: the code's, on fixed inputs and the test
+  clock, under two seconds; the machine's (clocks, counters, sleeps) by
+  their own profile.
+
+## To fill at the release
+
+- The Faster table from each machine's release run (bench-hashes 0.21).
+- The x86-64 kernels that land before the release, each with its measured
+  gain and its proof (lane rounding, the grouped AVX2 and AVX-512
+  finishing kernels, Zen 5's integer-register chunk root).
+- The pool and stream fixes that land before it (#276: a stream with no
+  worker stops at once where it would wait forever; #291: a pipeline part
+  wakes a worker whenever none is looking).
+
 # blake3-servil 0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861, against official BLAKE3 1.8.7
 
 The same digests. Faster than official BLAKE3 1.8.7 on 64-bit Arm and
