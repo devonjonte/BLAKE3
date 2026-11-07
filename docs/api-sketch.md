@@ -1,6 +1,6 @@
 # Prepared bulk and incremental background hashing: Rust API sketch
 
-**Proposal for review.** The `Block`/`Batch` types and direct bulk calls below exist today and stay in the design. The incremental pipeline, moved convenience Hasher and async submission signatures are proposed. Their names, lifetime parameters and cancellation behavior remain provisional.
+**Status, November 8, 2026.** Everything below is on `next`: the `Block`/`Batch`/`Packed` types and direct bulk calls, `convenience::Hasher` with `finalize(self)`, and the incremental pipeline as `throughput::pipeline` (its names may still change before 1.0; bench-hashes measures it in the receive cells). This page stays as the design's record; the crate's documentation is the contract.
 
 BLAKE3-Servil has two intended interfaces:
 
@@ -16,11 +16,11 @@ Convenience is tuned for occasional hashing amid other work. Throughput is tuned
 | Your work / call family | Tuned for | Caller-thread entry | Workers / background entry |
 |---|---|---|---|
 | Ordinary bytes, one message | Occasional / cold | `convenience::hash`, `hash_with`, `hash_xof` | — |
-| Ordinary bytes arriving in pieces | Occasional / convenient incremental state | `convenience::Hasher` **(proposed move)** | — |
+| Ordinary bytes arriving in pieces | Occasional / convenient incremental state | `convenience::Hasher` | — |
 | Repeated aligned messages | Repeated / warm | `throughput::hash` | `throughput::hash_multithreaded` |
 | Equal-length messages in a `Batch` | Repeated / warm, side-by-side hashing | `throughput::hash_many` | `throughput::hash_many_multithreaded` |
 | Mixed-length collection in `Block`s | Repeated / warm | `throughput::hash_each` | `throughput::hash_each_multithreaded` |
-| Read/generate complete messages, batches, or incremental pieces | Ongoing production overlapped with hashing | — | `throughput::Stream`: typed `submit` / `submit_batch`, or message `input` / `commit` **(proposed forms)** |
+| Read/generate complete messages, batches, or incremental pieces | Ongoing production overlapped with hashing | — | `throughput::pipeline::Stream`: `submit_batch`, or a message's `input` / `commit` / `end(n)` (beside today's `throughput::Stream`, until the measurements decide) |
 
 - The first row's three functions are in `convenience`. Batching and library-managed parallelism belong to throughput. Its direct calls and prepared types already exist and are retained.
 - Multithread-capable means the call may use workers where that helps. It still completes synchronously. Initialize those entry points with `initialize_multithreaded`.
@@ -54,24 +54,22 @@ Each call takes `Mode`. The multi-result calls write into the caller's output ar
 
 #### One million 32-byte messages
 
-This is a direct prepared-batch operation, already available today:
+A direct prepared-batch operation on `Packed<32>`, the messages end to end as the program holds them, on a 128-byte boundary the type guarantees (Sam's audit on #275; Zooko: 16- and 32-byte leaves will be common):
 
 ```rust
-use blake3_servil::{Mode, throughput::{self, Batch, Block}};
+use blake3_servil::{Mode, throughput::{self, Packed}};
 
 blake3_servil::initialize_multithreaded(None); // Once per program.
 const COUNT: usize = 1_000_000;
-let mut batch = Batch::new(32, COUNT);
+let mut leaves = Packed::<32>::new(COUNT);
 for i in 0..COUNT {
-    produce_message_into(batch.message_mut(i)); // Writes directly into 32 bytes.
+    produce_message_into(&mut leaves[i]); // Writes the 32 bytes in place.
 }
-let mut digests = vec![[0u8; 32]; COUNT];
-throughput::hash_many_multithreaded(Mode::Plain, &batch, &mut digests);
+let mut digests = Packed::<32>::new(COUNT); // The next Merkle layer's input.
+throughput::hash_many_multithreaded(Mode::Plain, &leaves, &mut digests);
 ```
 
-`produce_message_into` is application code. For existing messages, `batch.set(i, &messages[i])` copies each one into prepared storage. That preparation belongs in an end-to-end measurement.
-
-Each message occupies a 64-byte-aligned block: 32 logical bytes plus 32 protected zero bytes. This batch occupies 64,000,000 bytes, and the digest array 32,000,000 bytes. A continuing producer can reuse smaller batches through the pipeline.
+`produce_message_into` is application code. The batch occupies 32,000,000 bytes and the digests the same; a layer's digests, two by two, are the next layer's parents (`digests.as_blocks()` as a `Batch` of 64-byte messages). Measured (bench-hashes' Merkle cells, M4 Max): 3.9 ns a leaf over the cores, 26 ns on one thread, against 75 for one `keyed_hash` call each; a kernel that reads the packed form itself is #294. A `Batch::new(32, COUNT)` of blocks remains for messages of any length, at 64 bytes a message.
 
 For caller-thread hashing, replace the final call with `throughput::hash_many(Mode::Plain, &batch, &mut digests)`. Convenience exposes ordinary byte-oriented hashing. These batch operations belong to throughput.
 
@@ -87,9 +85,9 @@ let nodes = Batch::from_blocks(blocks, 64); // Complete 64-byte messages.
 
 `Batch::from_blocks` is a zero-copy read-only borrow when messages fill whole blocks. Throughput hashing retains prepared typed inputs.
 
-### Pipelined prepared batches: proposed admission form
+### Pipelined prepared batches: the admission form
 
-The stream also accepts ready work in its prepared representation. The proposed async form waits for admission, then returns without waiting for hashing:
+The pipeline also accepts ready work in its prepared representation. The async form waits for admission, then returns without waiting for hashing:
 
 ```rust
 stream.submit_batch(batch, &mut batch_places, batch_tag).await;
@@ -229,7 +227,7 @@ The public C API is convenience-only in this proposal. Prepared bulk inputs, the
 
 ## Feedback requested
 
-1. Do the retained typed bulk calls and proposed `submit_batch` form cover your ready-work flow? Is `input().await` → write → `commit(n)` clear for incremental production?
+1. Do the retained typed bulk calls and the `submit_batch` form cover your ready-work flow? Is `input().await` → write → `commit(n)` clear for incremental production?
 2. **Output ownership:** incremental messages hand their digest over by value with the completion (the pipeline owns the result; one 32-byte copy), while batches keep caller-provided digest places under the crash-only lifecycle above. Does that split fit your programs?
 3. Are the byte/message budgets and advisory total-length hint enough to predict and control resource use? An incorrect hint changes neither bytes consumed nor end-of-message behavior.
 4. Which concrete receive/generate workflow would make you choose this pipeline over the convenience Hasher or direct prepared-bulk calls?
