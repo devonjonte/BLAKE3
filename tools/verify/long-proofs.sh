@@ -30,11 +30,11 @@ curl -sf -o /dev/null -H "Authorization: token $token" "https://api.github.com/r
 	{ echo "long-proofs: GitHub has no commit $commit: push it first (the run posts its status there)" >&2; exit 1; }
 b64() { printf %s "$1" | tr a-f A-F | basenc --base16 -d | basenc --base64url | tr -d '='; }
 # The inputs that can change a proof result: the kernels, the proof
-# tools (this script among them), the specification, and the hybrid
-# generator. A green run for the same inputs is the same evidence, so
+# tools (this script among them), the specification, and every generator
+# checked below. A green run for the same inputs is the same evidence, so
 # a commit that changes none of them is not proved again; its status
 # names the run that already passed.
-inputs=$(git -C "$root" ls-tree "$commit" -- c c2sp tools/verify tools/gen_neon_hybrid.py | sha256sum | cut -d' ' -f1)
+inputs=$(git -C "$root" ls-tree "$commit" -- c c2sp tools/verify tools/gen_neon_hybrid.py tools/gen_sme2_hybrid.py tools/gen_x86.py | sha256sum | cut -d' ' -f1)
 record=$root/tmp/long-proofs/inputs/$inputs.txt
 if [ -f "$record" ]; then
 	prior=$(sed -n '1p' "$record")
