@@ -717,6 +717,14 @@ pub(crate) fn all_workers_parked() -> bool {
     POOL.get().is_some_and(|pool| pool.park.parked_count() == pool.workers())
 }
 
+/// How many workers are parked, and how many there are (tests: a case
+/// that needs every idle worker parked first).
+#[cfg(test)]
+pub(crate) fn parked_and_workers() -> (usize, usize) {
+    let pool = pool();
+    (pool.park.parked_count(), pool.workers())
+}
+
 /// The pool. The caller must have called
 /// [`crate::initialize_multithreaded`] before; a call before it panics. The
 /// check is the load of the pool, which every call makes anyway.

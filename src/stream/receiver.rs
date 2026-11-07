@@ -728,6 +728,13 @@ pub(super) mod tests {
     }
 
     /// Run `future` on this thread, parking while its resources are pending.
+    /// Poll `future` to its end on this thread, which helps while it waits:
+    /// it runs a waiting task where it finds one, else parks briefly. A wake
+    /// is never promised for a part published while every worker is parked
+    /// or busy (the pool wakes none then, to spare the producer a system
+    /// call), so a test whose worker holds a part at a gate would wait for
+    /// a second part forever; the helping test thread runs it instead, on
+    /// every machine and every schedule.
     pub(in crate::stream) fn run<F: Future>(future: F) -> F::Output {
         let waker = producer_waker();
         let mut cx = Context::from_waker(&waker);
@@ -735,7 +742,27 @@ pub(super) mod tests {
         loop {
             match future.as_mut().poll(&mut cx) {
                 Poll::Ready(value) => return value,
-                Poll::Pending => std::thread::park(),
+                Poll::Pending => {
+                    if !crate::lanes::sources::run_one() {
+                        std::thread::park_timeout(std::time::Duration::from_micros(100));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Wait at `barrier`, helping meanwhile: another thread waits there in
+    /// this one's place, and this one runs waiting tasks until it has.
+    pub(super) fn wait_helping(barrier: &Arc<Barrier>) {
+        let done = Arc::new(core::sync::atomic::AtomicBool::new(false));
+        let (b, d) = (barrier.clone(), done.clone());
+        std::thread::spawn(move || {
+            b.wait();
+            d.store(true, core::sync::atomic::Ordering::Release);
+        });
+        while !done.load(core::sync::atomic::Ordering::Acquire) {
+            if !crate::lanes::sources::run_one() {
+                std::thread::yield_now();
             }
         }
     }
@@ -805,7 +832,7 @@ pub(super) mod tests {
         gate.started.wait();
         message.observe_next(second_done.clone());
         feed(&mut message, &input[INPUT_BYTES..2 * INPUT_BYTES], INPUT_BYTES);
-        second_done.wait();
+        wait_helping(&second_done);
         // Both buffers are retained: the third part has no room yet.
         {
             let mut third = core::pin::pin!(message.input());
@@ -815,6 +842,45 @@ pub(super) mod tests {
             room.bytes_mut()[..100].copy_from_slice(&input[2 * INPUT_BYTES..]);
             room.commit(100);
         }
+        let finished = run(message.end(0));
+        assert_eq!(finished.hash().as_bytes(), &expected(Mode::Plain, &input));
+        receiver.drain();
+        finished.retire();
+        receiver.close();
+    }
+
+    /// The receiver's tests' worst schedule, every run: a worker holds a
+    /// part at the gate and every other worker is parked when the second
+    /// part is published, so no worker takes it (the pool wakes none while
+    /// one is busy). The test thread, helping while it waits, runs it: on a
+    /// 20-CPU x86-64 this schedule hung the blocking form of these tests
+    /// about one run in three (BLAKE3 #272).
+    #[test]
+    fn a_second_part_runs_while_every_free_worker_is_parked() {
+        let receiver = receiver(Mode::Plain, 2, 1);
+        let mut input = vec![0u8; 2 * INPUT_BYTES + 100];
+        crate::test::paint_test_input(&mut input);
+        let mut message = run(receiver.message(None));
+        let gate = Gate::new();
+        let second_done = Arc::new(Barrier::new(2));
+        message.hold_next(gate.clone());
+        feed(&mut message, &input[..INPUT_BYTES], INPUT_BYTES);
+        gate.started.wait();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while {
+            let (parked, workers) = crate::lanes::parked_and_workers();
+            parked < workers - 1
+        } {
+            assert!(std::time::Instant::now() < deadline, "the idle worker parks");
+            std::thread::yield_now();
+        }
+        message.observe_next(second_done.clone());
+        feed(&mut message, &input[INPUT_BYTES..2 * INPUT_BYTES], INPUT_BYTES);
+        wait_helping(&second_done);
+        gate.release.wait();
+        let mut room = run(message.input());
+        room.bytes_mut()[..100].copy_from_slice(&input[2 * INPUT_BYTES..]);
+        room.commit(100);
         let finished = run(message.end(0));
         assert_eq!(finished.hash().as_bytes(), &expected(Mode::Plain, &input));
         receiver.drain();
