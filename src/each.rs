@@ -94,6 +94,8 @@ pub fn finalize_each(hashers: &mut [Hasher], which: &[usize], out: &mut [[u8; OU
     debug_assert!(which.iter().enumerate().all(|(at, i)| !which[..at].contains(i)), "each finalized index is distinct");
     #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
     if which.len() >= 16 && matches!(Platform::detect(), Platform::AVX512) {
+        #[cfg(all(test, feature = "std"))]
+        crate::counted(crate::Counted::OutputGroupTurn);
         for (which, out) in which.chunks(16).zip(out.chunks_mut(16)) {
             if which.len() == 16 {
                 let hashed = {
@@ -526,6 +528,31 @@ fn left_len(n: usize) -> usize {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[cfg(all(blake3_avx512_ffi, target_os = "linux", feature = "std"))]
+    #[test]
+    fn finalize_each_groups_only_full_output_lanes() {
+        crate::initialize();
+        let expected = crate::test::official::hash(Mode::Plain, b"output selector");
+        for n in [0, 1, 2, 15, 16, 17, 31, 32, 33] {
+            let mut hashers: Vec<_> = (0..n)
+                .map(|_| {
+                    let mut h = Hasher::new(Mode::Plain, None);
+                    h.update(b"output selector");
+                    h
+                })
+                .collect();
+            let which: Vec<_> = (0..n).collect();
+            let mut out = vec![[0u8; OUT_LEN]; n];
+            crate::COUNTED.with(|c| c[crate::Counted::OutputGroupTurn as usize].set(0));
+            finalize_each(&mut hashers, &which, &mut out);
+            let turns = crate::COUNTED.with(|c| c[crate::Counted::OutputGroupTurn as usize].get());
+            let expected_turns = u64::from(n >= 16 && matches!(Platform::detect(), Platform::AVX512));
+            assert_eq!(turns, expected_turns, "full output group dispatch n={n}");
+            assert!(out.iter().all(|digest| *digest == expected));
+            assert!(hashers.iter().all(|h| h.count() == 0));
+        }
+    }
 
     #[cfg(debug_assertions)]
     #[test]
