@@ -89,6 +89,7 @@ pub fn update_each_multithreaded(hashers: &mut [Hasher], pieces: &[(usize, &[u8]
 /// `hashers[which[k]].finalize()` would give, and that hasher is then
 /// reset for its next message (no length hint). Requires
 /// `out.len() == which.len()` and each index `< hashers.len()`.
+/// Indices may repeat; later occurrences observe earlier resets.
 pub fn finalize_each(hashers: &mut [Hasher], which: &[usize], out: &mut [[u8; OUT_LEN]]) {
     assert_eq!(which.len(), out.len(), "one digest per message named");
     #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
@@ -96,7 +97,14 @@ pub fn finalize_each(hashers: &mut [Hasher], which: &[usize], out: &mut [[u8; OU
         for (which, out) in which.chunks(16).zip(out.chunks_mut(16)) {
             if which.len() == 16 {
                 let hashed = {
-                    let inputs: Option<arrayvec::ArrayVec<_, 16>> = which.iter().map(|&i| crate::ffi_output::input(&hashers[i])).collect();
+                    let inputs: Option<arrayvec::ArrayVec<_, 16>> = which
+                        .iter()
+                        .enumerate()
+                        .map(|(at, &i)| {
+                            // Repeated indices must observe the preceding reset.
+                            if which[..at].contains(&i) { None } else { crate::ffi_output::input(&hashers[i]) }
+                        })
+                        .collect();
                     match inputs {
                         Some(inputs) => {
                             // Sound: the detected platform supplies AVX-512F+VL;
