@@ -973,7 +973,9 @@ pub(crate) mod sources {
         /// `waiting` exposes the copy/reuse boundary to the schedule test.
         fn publish_waiting(&self, task: Task, waiting: impl FnOnce()) {
             let p = self.finish.published.load(Ordering::Relaxed);
-            debug_assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
+            // Every build: an unclaimed full ring is a broken capacity
+            // contract. Only a claimed reader may delay slot reuse.
+            assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
             let slot = &self.ring[p % self.ring.len()];
             if slot.next.load(Ordering::Acquire) != p {
                 waiting();
@@ -1398,6 +1400,14 @@ pub(crate) mod sources {
                 assert_eq!(source.take_task().unwrap().counter, 2);
                 assert!(source.take_task().is_none());
             });
+        }
+
+        #[test]
+        #[should_panic(expected = "a source's ring holds every task not yet taken")]
+        fn a_full_ring_stops_before_waiting_for_a_copy() {
+            let source = Source::new(1);
+            source.publish(Task::of(&[], 0));
+            source.publish_waiting(Task::of(&[], 1), || panic!("a full ring reached the copy wait"));
         }
 
         #[test]
