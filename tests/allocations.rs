@@ -2,7 +2,7 @@
 //! calls allocate nothing, and `hash_each` only 32 bytes for each chunk of
 //! its messages of 2 to 15 chunks and up to 128 for each such message. A
 //! counting allocator, in a process of its own, counts the bytes each call
-//! asks for.
+//! asks for on its calling thread.
 #![cfg(feature = "std")]
 
 #[path = "../tools/require_nextest.rs"]
@@ -12,16 +12,21 @@ use blake3_servil::convenience::Hasher;
 use blake3_servil::throughput::{self, Batch, Block};
 use blake3_servil::{Mode, convenience};
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use std::cell::Cell;
 
 struct Counting;
 
-static BYTES: AtomicUsize = AtomicUsize::new(0);
+// The calls measured here are single-threaded; count their allocations
+// separately from the test harness's other threads.
+thread_local! {
+    static BYTES: Cell<usize> = const { Cell::new(0) };
+}
 
 // Sound: every call goes on to the system allocator, unchanged.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        BYTES.fetch_add(layout.size(), Relaxed);
+        // A thread whose locals are gone counts nothing.
+        let _ = BYTES.try_with(|b| b.set(b.get() + layout.size()));
         unsafe { System.alloc(layout) }
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -32,11 +37,16 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static COUNTING: Counting = Counting;
 
-/// The bytes `call` asks the allocator for.
+/// The bytes `call` asks the allocator for, on this thread.
 fn allocated(call: impl FnOnce()) -> usize {
-    let before = BYTES.load(Relaxed);
+    let before = BYTES.with(Cell::get);
     call();
-    BYTES.load(Relaxed) - before
+    BYTES.with(Cell::get) - before
+}
+
+#[test]
+fn allocation_counter_sees_a_callers_allocation() {
+    assert_eq!(allocated(|| drop(std::hint::black_box(vec![0u8; 4096]))), 4096);
 }
 
 fn blocks(len: usize, seed: u8) -> Vec<Block> {
