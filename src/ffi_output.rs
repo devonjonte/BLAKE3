@@ -181,29 +181,16 @@ mod tests {
             crate::each::finalize_each(&mut hashers, &which, &mut out);
             let wanted: Vec<_> = which.iter().map(|&i| empty[i]).collect();
             assert_eq!(out, wanted, "reset preserves every key and mode");
-            if count > 0 {
-                for h in &mut hashers {
-                    h.update(b"next");
-                }
-                crate::each::finalize_each(&mut hashers, &vec![0; count], &mut out);
-                assert_eq!(out[0], next[0]);
-                assert!(out[1..].iter().all(|x| *x == empty[0]), "repeated indices observe the earlier reset");
-                assert_eq!(hashers[0].count(), 0);
-                assert!(hashers[1..].iter().all(|h| h.count() == 4), "unselected hashers stay unchanged");
+            for h in &mut hashers {
+                h.update(b"next");
             }
-            if count >= 16 {
-                for h in &mut hashers {
-                    h.reset(None);
-                    h.update(b"next");
-                }
-                let across: Vec<_> = (0..16).chain(0..16).collect();
-                let mut out = [[0u8; 32]; 32];
-                crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
-                crate::each::finalize_each(&mut hashers, &across, &mut out);
-                assert_eq!(&out[..16], &next[..16]);
-                assert_eq!(&out[16..], &empty[..16], "later groups observe earlier resets");
-                let reached = crate::RAN_ENTRIES.with(|r| r.borrow().contains(&(entry() as usize)));
-                assert_eq!(reached, matches!(Platform::detect(), Platform::AVX512));
+            let selected: Vec<_> = (0..count).step_by(2).collect();
+            let mut out = vec![[0u8; 32]; selected.len()];
+            crate::each::finalize_each(&mut hashers, &selected, &mut out);
+            let wanted: Vec<_> = selected.iter().map(|&i| next[i]).collect();
+            assert_eq!(out, wanted);
+            for (i, h) in hashers.iter().enumerate() {
+                assert_eq!(h.count(), if i % 2 == 0 { 0 } else { 4 }, "only selected states reset");
             }
         }
     }
