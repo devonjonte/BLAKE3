@@ -87,7 +87,6 @@ src/lanes.rs	replace > with >= in sme2_serve	1	speed: whether the SME2 thread ru
 src/lanes.rs	replace > with >= in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace > with >= in sources::open	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace >= with < in poll_pause	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace >= with < in sources::Source::publish	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace >= with < in sources::serve	1	[cpu has sme2] speed: the chain's wake for a second waiting item (sources::serve, run_one's before #241) comes when fewer than two wait; the parked workers still wake for work by publish's own wake
 src/lanes.rs	replace >= with < in tree_threads	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace Pool::wake_for with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
