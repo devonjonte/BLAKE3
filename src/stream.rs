@@ -298,7 +298,7 @@ impl Storage {
 
     fn new() -> Storage {
         Storage {
-            source: Box::leak(Box::new(crate::lanes::sources::Source::new(ENTRIES))),
+            source: Box::leak(Box::new(crate::lanes::sources::Source::new(ENTRIES).without_hand_back())),
             entries: std::vec![Entry { len: 0, kind: Kind::Abandoned, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
             ring: ring(RING_BYTES),
             long_ring: ring(LONG_RING_BYTES),

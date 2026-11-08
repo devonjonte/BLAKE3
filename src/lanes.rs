@@ -918,6 +918,9 @@ pub(crate) mod sources {
         #[cfg(all(test, blake3_gpu))]
         gpu_batch_reserved: core::sync::atomic::AtomicBool,
         claimed: OwnLine<AtomicUsize>,
+        /// PROBE: whether a worker hands a slot back after its copy (a
+        /// stream reuses a slot only after its task completes).
+        hand_back: bool,
         /// A stream's tasks; empty for a caller's jobs.
         ring: Box<[TaskSlot]>,
         /// A caller's current job and its first number; the job stays the
@@ -949,11 +952,19 @@ pub(crate) mod sources {
     impl Source {
         /// A source with a ring of `len` tasks (a stream's), or none (a
         /// caller's jobs).
+        /// PROBE: a source whose stream reuses a slot only after its task
+        /// completes.
+        pub(crate) fn without_hand_back(mut self) -> Source {
+            self.hand_back = false;
+            self
+        }
+
         pub(crate) fn new(len: usize) -> Source {
             Source {
                 #[cfg(all(test, blake3_gpu))]
                 gpu_batch_reserved: core::sync::atomic::AtomicBool::new(false),
                 claimed: OwnLine(AtomicUsize::new(0)),
+                hand_back: true,
                 ring: (0..len).map(|i| TaskSlot { task: UnsafeCell::new(MaybeUninit::uninit()), next: AtomicUsize::new(i) }).collect(),
                 job: AtomicPtr::new(core::ptr::null_mut()),
                 base: AtomicUsize::new(0),
@@ -1017,7 +1028,7 @@ pub(crate) mod sources {
             // and a comparison the debug check already made).
             assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
             let slot = &self.ring[p % self.ring.len()];
-            if slot.next.load(Ordering::Acquire) != p {
+            if self.hand_back && slot.next.load(Ordering::Acquire) != p {
                 waiting();
                 // A worker has claimed the old task and may be descheduled
                 // before its copy. Let it run before reusing that storage.
@@ -1086,7 +1097,9 @@ pub(crate) mod sources {
                         // Sound: this worker claimed the task after its
                         // publication; the producer waits for `next` below.
                         let task = unsafe { (*slot.task.get()).assume_init_read() };
-                        slot.next.store(c + self.ring.len(), Ordering::Release);
+                        if self.hand_back {
+                            slot.next.store(c + self.ring.len(), Ordering::Release);
+                        }
                         return Some(Item::Task(task));
                     }
                     Err(now) => c = now,
