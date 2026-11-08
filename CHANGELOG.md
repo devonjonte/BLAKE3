@@ -22,6 +22,14 @@ lists what changed, each item with where it is described.
 - **The C API is the convenience API**: `b3_hash`, `b3_hasher_*` (with
   the length hint) and the modes.
 
+## Faster, already on `next`
+
+- **A Hasher's in-place checkpoint copies only the bytes it has staged**
+  (`clone_from`), not its whole 16 KiB stage (#283).
+- **`Packed<16>` and `Packed<32>`**: a batch of 16- or 32-byte messages
+  (Merkle leaves, digests) hashed without the program writing each into a
+  block of its own first (#289).
+
 ## Checked more
 
 - **Mutation testing on a budget**: a change's check covers its own lines
@@ -38,9 +46,8 @@ lists what changed, each item with where it is described.
 - The x86-64 kernels that land before the release, each with its measured
   gain and its proof (lane rounding, the grouped AVX2 and AVX-512
   finishing kernels, Zen 5's integer-register chunk root).
-- The pool and stream fixes that land before it (#276: a stream with no
-  worker stops at once where it would wait forever; #291: a pipeline part
-  wakes a worker whenever none is looking).
+- The pool and stream fix that lands before it (#276: a stream with no
+  worker stops at once where it would wait forever).
 
 # blake3-servil 0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861, against official BLAKE3 1.8.7
 
