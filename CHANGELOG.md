@@ -29,6 +29,17 @@ lists what changed, each item with where it is described.
 - **`Packed<16>` and `Packed<32>`**: a batch of 16- or 32-byte messages
   (Merkle leaves, digests) hashed without the program writing each into a
   block of its own first (#289).
+- **`finalize_each` finishes sixteen hashers at once on AVX-512**, each
+  with its own chaining value and flags, on a proved kernel; its indices
+  are distinct, a contract a debug build checks (#295).
+
+## Safer
+
+- **`throughput::Stream::open` is private** (#308). In 0.8 it is public,
+  safe and hidden from the docs, and a safe program could open a stream,
+  hand it borrowed input, forget it (`mem::forget`) and free the input
+  while the workers still read it. `throughput::stream`, which keeps the
+  stream inside its scope, is the way in.
 
 ## Checked more
 
