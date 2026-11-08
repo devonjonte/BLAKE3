@@ -1157,6 +1157,33 @@ fn hash_serial(input: &[u8], key: &CVWords, flags: u8) -> Hash {
     hash_serial_from(Platform::detect(), input, key, flags, false)
 }
 
+/// PROBE: a message of more than one chunk and at most two, each chunk
+/// compressed a block at a time on the one-block kernel, then the root.
+#[cfg(target_arch = "x86_64")]
+#[inline(never)]
+fn two_chunks_one_block_at_a_time(input: &[u8], key: &CVWords, flags: u8) -> Hash {
+    let platform = Platform::detect();
+    let mut cvs = [[0u8; OUT_LEN]; 2];
+    for (i, chunk) in input.chunks(CHUNK_LEN).enumerate() {
+        let mut cv = *key;
+        let blocks = chunk.len().div_ceil(BLOCK_LEN);
+        for (j, block) in chunk.chunks(BLOCK_LEN).enumerate() {
+            let mut buf = [0u8; BLOCK_LEN];
+            buf[..block.len()].copy_from_slice(block);
+            let f = flags | if j == 0 { CHUNK_START } else { 0 } | if j + 1 == blocks { CHUNK_END } else { 0 };
+            platform.compress_in_place(&mut cv, &buf, block.len() as u8, i as u64, f);
+        }
+        for (k, w) in cv.iter().enumerate() {
+            cvs[i][4 * k..4 * k + 4].copy_from_slice(&w.to_le_bytes());
+        }
+    }
+    let mut block = [0u8; BLOCK_LEN];
+    block[..32].copy_from_slice(&cvs[0]);
+    block[32..].copy_from_slice(&cvs[1]);
+    let out = platform.compress_xof(key, &block, BLOCK_LEN as u8, 0, flags | PARENT | ROOT);
+    Hash(out[..OUT_LEN].try_into().unwrap())
+}
+
 /// [`hash_serial`] for a call now and then (`convenience`'s): its kernels'
 /// code prefetched first, where that helps a call whose code has left the
 /// caches (AGENTS, "Cold calls and warm calls, by their API").

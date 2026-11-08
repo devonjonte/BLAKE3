@@ -43,6 +43,12 @@ use crate::{Hash, IV, Mode, OutputReader};
 // (i7-12700K, after idling, 64 B: -16.5%, 8 fresh layouts a side).
 #[inline]
 pub fn hash(input: &[u8]) -> Hash {
+    // PROBE (x86, the cold API): two chunks hashed block by block through the
+    // one-block kernel, official's footprint, in place of the pair kernel.
+    #[cfg(target_arch = "x86_64")]
+    if (crate::CHUNK_LEN + 1..=2 * crate::CHUNK_LEN).contains(&input.len()) {
+        return crate::two_chunks_one_block_at_a_time(input, IV, 0);
+    }
     crate::hash_serial_cold(input, IV, 0)
 }
 
