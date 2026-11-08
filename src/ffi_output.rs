@@ -149,6 +149,8 @@ mod tests {
         for count in [0usize, 1, 15, 16, 17, 31, 32, 65] {
             let mut hashers = Vec::new();
             let mut expected = Vec::new();
+            let mut empty = Vec::new();
+            let mut next = Vec::new();
             for i in 0..count {
                 let len = [0usize, 1, 31, 63, 64, 65, 127, 255, 511, 1023, 1024][i % 11];
                 let data: Vec<u8> = (0..len).map(|j| (i * 37 + j * 17) as u8).collect();
@@ -163,28 +165,45 @@ mod tests {
                     h.update(part);
                 }
                 expected.push(crate::test::official::hash(mode, &data));
+                empty.push(crate::test::official::hash(mode, b""));
+                next.push(crate::test::official::hash(mode, b"next"));
                 hashers.push(h);
             }
             let which: Vec<usize> = (0..count).rev().collect();
             let mut out = vec![[0u8; 32]; count];
             crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
-            let modes: Vec<_> = (0..count).map(|i| i % 3).collect();
             crate::each::finalize_each(&mut hashers, &which, &mut out);
             let wanted: Vec<_> = which.iter().map(|&i| expected[i]).collect();
             assert_eq!(out, wanted);
             let reached = crate::RAN_ENTRIES.with(|r| r.borrow().contains(&(entry() as usize)));
             assert_eq!(reached, count >= 16 && matches!(Platform::detect(), Platform::AVX512));
-            // finalize_each resets each hasher it finishes: finished again,
-            // each is the empty message in its mode.
+            assert!(hashers.iter().all(|h| h.count() == 0), "selected hashers reset");
             crate::each::finalize_each(&mut hashers, &which, &mut out);
-            for (k, &i) in which.iter().enumerate() {
-                let key = [i as u8; 32];
-                let mode = match modes[i] {
-                    0 => crate::Mode::Plain,
-                    1 => crate::Mode::Keyed(&key),
-                    _ => crate::Mode::DeriveKey("BLAKE3-Servil bulk-root test"),
-                };
-                assert_eq!(out[k], crate::test::official::hash(mode, &[]), "reset after finishing, message {i}");
+            let wanted: Vec<_> = which.iter().map(|&i| empty[i]).collect();
+            assert_eq!(out, wanted, "reset preserves every key and mode");
+            if count > 0 {
+                for h in &mut hashers {
+                    h.update(b"next");
+                }
+                crate::each::finalize_each(&mut hashers, &vec![0; count], &mut out);
+                assert_eq!(out[0], next[0]);
+                assert!(out[1..].iter().all(|x| *x == empty[0]), "repeated indices observe the earlier reset");
+                assert_eq!(hashers[0].count(), 0);
+                assert!(hashers[1..].iter().all(|h| h.count() == 4), "unselected hashers stay unchanged");
+            }
+            if count >= 16 {
+                for h in &mut hashers {
+                    h.reset(None);
+                    h.update(b"next");
+                }
+                let across: Vec<_> = (0..16).chain(0..16).collect();
+                let mut out = [[0u8; 32]; 32];
+                crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
+                crate::each::finalize_each(&mut hashers, &across, &mut out);
+                assert_eq!(&out[..16], &next[..16]);
+                assert_eq!(&out[16..], &empty[..16], "later groups observe earlier resets");
+                let reached = crate::RAN_ENTRIES.with(|r| r.borrow().contains(&(entry() as usize)));
+                assert_eq!(reached, matches!(Platform::detect(), Platform::AVX512));
             }
         }
     }
