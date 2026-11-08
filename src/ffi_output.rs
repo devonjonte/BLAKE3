@@ -158,7 +158,7 @@ mod tests {
                     1 => crate::Mode::Keyed(&key),
                     _ => crate::Mode::DeriveKey("BLAKE3-Servil bulk-root test"),
                 };
-                let mut h = Hasher::new(mode);
+                let mut h = Hasher::new(mode, None);
                 for part in data.chunks(17) {
                     h.update(part);
                 }
@@ -168,17 +168,23 @@ mod tests {
             let which: Vec<usize> = (0..count).rev().collect();
             let mut out = vec![[0u8; 32]; count];
             crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
-            crate::each::finalize_each(&hashers, &which, &mut out);
+            let modes: Vec<_> = (0..count).map(|i| i % 3).collect();
+            crate::each::finalize_each(&mut hashers, &which, &mut out);
             let wanted: Vec<_> = which.iter().map(|&i| expected[i]).collect();
             assert_eq!(out, wanted);
             let reached = crate::RAN_ENTRIES.with(|r| r.borrow().contains(&(entry() as usize)));
             assert_eq!(reached, count >= 16 && matches!(Platform::detect(), Platform::AVX512));
-            crate::each::finalize_each(&hashers, &which, &mut out);
-            assert_eq!(out, wanted, "finalization leaves the input states reusable");
-            if count > 0 {
-                let repeated = vec![0usize; count];
-                crate::each::finalize_each(&hashers, &repeated, &mut out);
-                assert!(out.iter().all(|x| *x == expected[0]));
+            // finalize_each resets each hasher it finishes: finished again,
+            // each is the empty message in its mode.
+            crate::each::finalize_each(&mut hashers, &which, &mut out);
+            for (k, &i) in which.iter().enumerate() {
+                let key = [i as u8; 32];
+                let mode = match modes[i] {
+                    0 => crate::Mode::Plain,
+                    1 => crate::Mode::Keyed(&key),
+                    _ => crate::Mode::DeriveKey("BLAKE3-Servil bulk-root test"),
+                };
+                assert_eq!(out[k], crate::test::official::hash(mode, &[]), "reset after finishing, message {i}");
             }
         }
     }
@@ -190,7 +196,7 @@ mod tests {
         let mut expected = Vec::new();
         for i in 0..32 {
             let data = vec![i as u8; if i == 3 || i == 20 { 4097 } else { 129 }];
-            let mut h = Hasher::new(crate::Mode::Plain);
+            let mut h = Hasher::new(crate::Mode::Plain, None);
             for piece in data.chunks(23) {
                 h.update(piece);
             }
@@ -200,7 +206,7 @@ mod tests {
         let which: Vec<_> = (0..32).collect();
         let mut out = vec![[0u8; 32]; 32];
         crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
-        crate::each::finalize_each(&hashers, &which, &mut out);
+        crate::each::finalize_each(&mut hashers, &which, &mut out);
         assert_eq!(out, expected);
         assert!(!crate::RAN_ENTRIES.with(|r| r.borrow().contains(&(entry() as usize))));
     }

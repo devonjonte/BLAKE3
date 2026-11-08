@@ -95,20 +95,35 @@ pub fn finalize_each(hashers: &mut [Hasher], which: &[usize], out: &mut [[u8; OU
     if which.len() >= 16 && matches!(Platform::detect(), Platform::AVX512) {
         for (which, out) in which.chunks(16).zip(out.chunks_mut(16)) {
             if which.len() == 16 {
-                let inputs: Option<arrayvec::ArrayVec<_, 16>> = which.iter().map(|&i| crate::ffi_output::input(&hashers[i])).collect();
-                if let Some(inputs) = inputs {
-                    // Sound: the detected platform supplies AVX-512F+VL;
-                    // borrowed descriptors keep every block/CV readable.
-                    unsafe { crate::ffi_output::hash_group(inputs.as_slice().try_into().unwrap(), out) };
+                let hashed = {
+                    let inputs: Option<arrayvec::ArrayVec<_, 16>> = which.iter().map(|&i| crate::ffi_output::input(&hashers[i])).collect();
+                    match inputs {
+                        Some(inputs) => {
+                            // Sound: the detected platform supplies AVX-512F+VL;
+                            // borrowed descriptors keep every block/CV readable.
+                            unsafe { crate::ffi_output::hash_group(inputs.as_slice().try_into().unwrap(), out) };
+                            true
+                        }
+                        None => false,
+                    }
+                };
+                if hashed {
+                    for &i in which {
+                        hashers[i].reset(None);
+                    }
                     continue;
                 }
             }
-            for (&i, digest) in which.iter().zip(out) {
-                *digest = *hashers[i].finalize().as_bytes();
-            }
+            finish_each(hashers, which, out);
         }
         return;
     }
+    finish_each(hashers, which, out);
+}
+
+/// Each hasher `which` names finished in place and reset, its digest into
+/// `out`: the path every message takes but a sixteen-lane group.
+fn finish_each(hashers: &mut [Hasher], which: &[usize], out: &mut [[u8; OUT_LEN]]) {
     for (&i, out) in which.iter().zip(out) {
         *out = *hashers[i].take_output().root_hash().as_bytes();
         hashers[i].reset(None);
