@@ -519,7 +519,7 @@ fn test_xof_partial_block_cache_seeks_and_clones() {
     for platform in every_platform() {
         let key = [0x42u8; 32];
         for mode in [crate::Mode::Plain, crate::Mode::Keyed(&key), crate::Mode::DeriveKey("partial XOF block cache")] {
-            let mut hasher = crate::Hasher::new(mode);
+            let mut hasher = crate::Hasher::new(mode, None);
             hasher.core.chunk_state.platform = platform;
             hasher.update(b"the cached output belongs to its counter and mode");
             let expected = official::xof(mode, b"the cached output belongs to its counter and mode", 0, 256);
