@@ -1099,19 +1099,44 @@ mod test {
     /// Engage every run (crate::gpu::Run: its timing is the machine's, and
     /// a gap of 5 ms between streams, a finish's or a check's, ends one),
     /// wait until the GPU is ready (its start runs on a thread of its own),
-    /// then a stream of 64 messages of 16 MiB, in which the GPU takes
-    /// batches.
+    /// then establish one GPU batch on a 16 MiB message. Holding CPU claims
+    /// until that batch is taken makes this a setup condition, not a race.
     #[cfg(blake3_gpu)]
-    fn gpu_ready(input: &[u8]) {
+    fn gpu_ready(mode: Mode, input: &[u8]) {
         crate::gpu::test::ENGAGED.store(true, Ordering::Relaxed);
-        let started = std::time::Instant::now();
         while !crate::gpu::ready() {
-            assert!(started.elapsed() < std::time::Duration::from_secs(10), "the GPU starts within 10 s");
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let before = gpu_batches();
-        gpu_stream_checked(Mode::Plain, input, &[16 << 20; 64], usize::MAX, false);
-        assert!(gpu_batches() > before, "the GPU took batches in a stream of 1 GiB");
+        let mut got = Hash::from_bytes([0; 32]);
+        stream(
+            mode,
+            |_| {},
+            |s| {
+                if let Some(gpu) = &s.s.gpu {
+                    // Reclaimed commands may still occupy every slot from
+                    // the previous stream. The setup needs a free command
+                    // before holding the CPU claims for its GPU batch.
+                    gpu.wait_idle_for_test();
+                }
+                s.s.source.reserve_gpu_batch_for_test();
+                s.submit_with(
+                    16 << 20,
+                    |at, room| {
+                        room.copy_from_slice(&input[at..][..room.len()]);
+                        room.len()
+                    },
+                    &mut got,
+                );
+                assert!(gpu_batches() > before, "the GPU took the setup batch before finish");
+                // Complete the GPU-owned first batch before finish can reclaim
+                // it. Its digest must exercise the GPU's output in this mode.
+                s.s.gpu.as_ref().expect("the setup submitted a GPU batch").wait_idle_for_test();
+                assert_eq!(s.s.lefts[0].load(Ordering::Acquire), 0, "the GPU completed the first setup piece");
+                s.finish();
+            },
+        );
+        assert_eq!(got, crate::convenience::hash_with(mode, &input[..16 << 20]));
     }
 
     /// Long messages with the GPU taking batches, in every mode, among
@@ -1125,7 +1150,6 @@ mod test {
     fn test_gpu_stream_against_hash_with() {
         let mut input = std::vec![0u8; (64 << 20) + 300];
         crate::test::paint_test_input(&mut input);
-        gpu_ready(&input);
         let key = [9u8; 32];
         let lens: std::vec::Vec<usize> = (0..48)
             .map(|i| {
@@ -1135,14 +1159,10 @@ mod test {
         for (mode, collect, read) in
             [(Mode::Plain, false, 1000), (Mode::Keyed(&key), true, usize::MAX), (Mode::DeriveKey("gpu stream test"), false, usize::MAX)]
         {
-            let before = gpu_batches();
+            gpu_ready(mode, &input);
+            // The setup establishes GPU digest coverage in this mode.
+            // The mixed stream checks every result whichever worker wins.
             gpu_stream_checked(mode, &input, &lens, read, collect);
-            // The GPU claims what waits unclaimed: a writer of whole pieces
-            // runs ahead of the pool, one of 1000-byte reads may not (so
-            // there its share is the machine's timing, not asserted).
-            if read == usize::MAX {
-                assert!(gpu_batches() > before, "the GPU took batches in this mode's stream");
-            }
         }
     }
 
@@ -1155,15 +1175,13 @@ mod test {
     fn test_gpu_streams_of_one_message() {
         let mut input = std::vec![0u8; (64 << 20) + 300];
         crate::test::paint_test_input(&mut input);
-        gpu_ready(&input);
+        gpu_ready(Mode::Plain, &input);
         let lens = [16 << 20, 64 << 20, 32 << 20];
         let want: std::vec::Vec<Hash> = lens.iter().map(|&len| crate::convenience::hash(gpu_message(&input, 0, len))).collect();
-        let before = gpu_batches();
         let got: std::vec::Vec<Hash> = (0..40).map(|i| gpu_stream(Mode::Plain, &input, &[lens[i % 3]], usize::MAX, false)[0]).collect();
         for (i, got) in got.iter().enumerate() {
             assert_eq!(*got, want[i % 3], "stream {i}, {} bytes", lens[i % 3]);
         }
-        assert!(gpu_batches() > before, "the GPU took batches in streams of one message");
     }
 
     /// The GPU ring's arithmetic, exact on every machine (the caller's
@@ -1175,7 +1193,7 @@ mod test {
     fn test_gpu_ring_fills_to_its_end_and_its_run_holds_every_piece() {
         let mut input = std::vec![0u8; (64 << 20) + 300];
         crate::test::paint_test_input(&mut input);
-        gpu_ready(&input);
+        gpu_ready(Mode::Plain, &input);
         let message = &input[..4 << 20];
         let mut got = places(crate::gpu::RING_BYTES / message.len());
         stream(
@@ -1211,7 +1229,7 @@ mod test {
     fn test_gpu_feed_asks_only_with_a_batch_s_run() {
         let mut input = std::vec![0u8; (64 << 20) + 300];
         crate::test::paint_test_input(&mut input);
-        gpu_ready(&input);
+        gpu_ready(Mode::Plain, &input);
         let lens: std::vec::Vec<usize> = core::iter::once(4 << 20).chain(core::iter::repeat_n(1 << 20, 40)).collect();
         let feeds = crate::gpu::test::FEEDS.load(Ordering::Relaxed);
         gpu_stream_checked(Mode::Plain, &input, &lens, usize::MAX, false);
@@ -1228,13 +1246,39 @@ mod test {
     fn test_gpu_finish_reclaims_the_gpus_tasks() {
         let mut input = std::vec![0u8; (64 << 20) + 300];
         crate::test::paint_test_input(&mut input);
-        gpu_ready(&input);
+        gpu_ready(Mode::Plain, &input);
         let lens = [16 << 20; 4];
-        let (batches, reclaims) = (gpu_batches(), crate::gpu::test::RECLAIMS.load(Ordering::Relaxed));
-        crate::gpu::test::HOLD.store(true, Ordering::Release);
-        let got = gpu_stream(Mode::Plain, &input, &lens, usize::MAX, false);
+        let (batches, reclaims, feeds) = (gpu_batches(), crate::gpu::test::RECLAIMS.load(Ordering::Relaxed), crate::gpu::test::FEEDS.load(Ordering::Relaxed));
+        let mut got = places(lens.len());
+        stream(
+            Mode::Plain,
+            |_| {},
+            |s| {
+                // Warm-up commands may have been reclaimed by its finish. Wait
+                // for their callbacks before holding the commands of this run.
+                s.s.gpu.as_ref().expect("the warm-up created GPU storage").wait_idle_for_test();
+                s.s.source.reserve_gpu_batch_for_test();
+                crate::gpu::test::HOLD.store(true, Ordering::Release);
+                for (i, out) in got.iter_mut().enumerate() {
+                    s.submit_with(
+                        lens[i],
+                        |at, room| {
+                            room.copy_from_slice(&gpu_message(&input, i, lens[i])[at..][..room.len()]);
+                            room.len()
+                        },
+                        out,
+                    );
+                }
+                assert!(gpu_batches() > batches, "the held run owns a GPU batch before finish");
+                s.finish();
+            },
+        );
         crate::gpu::test::HOLD.store(false, Ordering::Release);
-        assert!(gpu_batches() > batches, "the GPU took batches");
+        assert!(
+            gpu_batches() > batches,
+            "the GPU took batches; {} feed attempts found a free command (a positive count locates the failure in the source's task claim)",
+            crate::gpu::test::FEEDS.load(Ordering::Relaxed) - feeds
+        );
         assert!(crate::gpu::test::RECLAIMS.load(Ordering::Relaxed) > reclaims, "finish took the held batches back");
         for (i, got) in got.iter().enumerate() {
             assert_eq!(*got, crate::convenience::hash(gpu_message(&input, i, lens[i])), "message {i}");
