@@ -158,6 +158,46 @@ fn hash_packed(input: &[u8], len: usize, key: &CVWords, flags: u8, outputs: &mut
     }
 }
 
+/// The whole groups of `digests.len()` one-block messages (each `len`
+/// bytes of a 64-byte slot in `bytes`, zero past them: a batch's padding,
+/// or the block `hash_packed` writes each packed message into) that run on
+/// the independent-compression kernel side by side: how many messages they
+/// took.
+#[cfg(all(feature = "std", blake3_avx512_ffi, target_os = "linux"))]
+fn one_block_groups(bytes: &[u8], digests: &mut [[u8; OUT_LEN]], len: usize, key: &CVWords, flags: u8, platform: Platform) -> usize {
+    let lanes = crate::ffi_output::lanes(platform);
+    if lanes == 0 {
+        return 0;
+    }
+    let groups = digests.len() / lanes;
+    for g in 0..groups {
+        let (at, out) = (g * lanes, &mut digests[g * lanes..][..lanes]);
+        let group = &bytes[at * BLOCK_LEN..];
+        // Sound: lanes() names the platform's kernel width, which the CPU
+        // runs (Platform::detect chose it).
+        unsafe {
+            if lanes == 16 {
+                packed_group::<16>(group, out, len, key, flags);
+            } else {
+                packed_group::<8>(group, out, len, key, flags);
+            }
+        }
+    }
+    groups * lanes
+}
+
+/// `W` one-block messages, each `len` bytes zero-padded to a block at the
+/// start of `blocks`, on the `W`-lane independent-compression kernel.
+/// Requires the CPU to run that kernel (`ffi_output::lanes`).
+#[cfg(all(feature = "std", blake3_avx512_ffi, target_os = "linux"))]
+unsafe fn packed_group<const W: usize>(blocks: &[u8], out: &mut [[u8; OUT_LEN]], len: usize, key: &CVWords, flags: u8) {
+    let block = |i: usize| -> &[u8; BLOCK_LEN] { blocks[i * BLOCK_LEN..][..BLOCK_LEN].try_into().unwrap() };
+    let inputs: [crate::ffi_output::Input<'_>; W] = core::array::from_fn(|i| crate::ffi_output::packed(block(i), key, len, flags));
+    // Sound: the caller's CPU runs the W-lane kernel; every block is 64
+    // readable bytes.
+    unsafe { crate::ffi_output::hash_group::<W>(&inputs, out) };
+}
+
 /// Fewest messages of 2 to 16 blocks that go to SME2 as one more group of
 /// sixteen, its spare lanes reading the last message again: 10 in a batch
 /// of fewer than sixteen, 5 left over after the SME2 groups (where NEON
@@ -483,6 +523,15 @@ fn hash_run_padded<const N: usize>(messages: &[u8], key: &CVWords, flags: u8, ou
 /// without them.
 #[inline(never)]
 fn hash_run_short<const N: usize>(messages: &[u8], key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform, plans: bool, last_len: usize) {
+    // One-block messages on x86-64 with the independent-compression kernels
+    // (AVX2's eight lanes, AVX-512's sixteen): whole groups side by side,
+    // a batch's and a `Packed`'s alike; the rest, and every other platform,
+    // as before.
+    #[cfg(all(feature = "std", blake3_avx512_ffi, target_os = "linux"))]
+    let done = if N == BLOCK_LEN { one_block_groups(messages, outputs, last_len, key, flags, platform) } else { 0 };
+    #[cfg(not(all(feature = "std", blake3_avx512_ffi, target_os = "linux")))]
+    let done = 0;
+    let (messages, outputs) = (&messages[done * N..], &mut outputs[done..]);
     #[cfg(blake3_sme2)]
     if platform_is_sme2(platform) && outputs.len() >= ONE_BLOCK_PAD_MIN {
         return hash_run_padded::<N>(messages, key, flags, outputs, last_len);

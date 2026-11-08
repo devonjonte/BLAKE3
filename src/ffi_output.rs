@@ -37,6 +37,15 @@ unsafe extern "C" {
     fn blake3_servil_output8(params: *const Params8, out: *mut u8);
 }
 
+/// A packed message's descriptor (`Packed<16>`, `Packed<32>`): its block
+/// zero-padded past `len` bytes, the key as its chaining value, and the
+/// flags of a whole one-chunk root (CHUNK_START, CHUNK_END and ROOT with
+/// the mode's).
+pub(crate) fn packed<'a>(block: &'a [u8; BLOCK_LEN], key: &'a [u32; 8], len: usize, flags: u8) -> Input<'a> {
+    debug_assert!(len <= BLOCK_LEN, "a packed message is one block");
+    Input { block, cv: key, len: len as u8, flags: flags | CHUNK_START | CHUNK_END | ROOT }
+}
+
 pub(crate) fn lanes(platform: Platform) -> usize {
     match platform {
         Platform::AVX512 => 16,
@@ -281,6 +290,52 @@ mod tests {
                 out.copy_from_slice(guarded_out);
             });
             assert_eq!(answer, SELF_TEST_EXPECTED, "guard placement at_end={at_end}");
+        }
+    }
+
+    /// Packed messages in whole groups take the independent-compression
+    /// kernel (#294): a group of the platform's width reaches its entry, and
+    /// fewer than a group reach none of it. The digests are packed_test's.
+    #[test]
+    fn packed_groups_take_the_independent_kernel() {
+        use crate::throughput::{Packed, hash_many};
+        let platform = Platform::detect();
+        if lanes(platform) == 0 {
+            return;
+        }
+        let entry = if lanes(platform) == 16 { entry() } else { entry8() } as usize;
+        // A whole group runs on that kernel alone, no message hashed again
+        // on the one-message path; one short of a group runs none of it.
+        for (count, reached) in [(lanes(platform), true), (2 * lanes(platform), true), (lanes(platform) - 1, false)] {
+            let mut leaves = Packed::<32>::new(count);
+            for (i, leaf) in leaves.iter_mut().enumerate() {
+                leaf.fill(i as u8);
+            }
+            let mut out = std::vec![[0u8; OUT_LEN]; count];
+            crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
+            hash_many(crate::Mode::Plain, &leaves, &mut out);
+            let ran = crate::RAN_ENTRIES.with(|r| r.borrow().clone());
+            assert_eq!(ran.contains(&entry), reached, "{count} packed messages");
+            if reached {
+                assert_eq!(ran.len(), 1, "{count} packed messages run on the group kernel alone: {ran:?}");
+            }
+            // A batch of one-block messages, 1 to 63 bytes, takes the same groups.
+            for len in [1, 33, 63] {
+                let mut batch = crate::throughput::Batch::new(len, count);
+                for i in 0..count {
+                    batch.message_mut(i).fill(i as u8);
+                }
+                crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
+                hash_many(crate::Mode::Plain, &batch, &mut out);
+                let ran = crate::RAN_ENTRIES.with(|r| r.borrow().clone());
+                assert_eq!(ran.contains(&entry), reached, "{count} batch messages of {len} bytes");
+                if reached {
+                    assert_eq!(ran.len(), 1, "{count} batch messages of {len} bytes on the group kernel alone: {ran:?}");
+                }
+                for i in 0..count {
+                    assert_eq!(out[i], *crate::convenience::hash(&std::vec![i as u8; len]).as_bytes(), "{len} bytes, message {i}");
+                }
+            }
         }
     }
 
