@@ -905,6 +905,18 @@ pub(crate) mod sources {
     /// Streams open: workers spin a while for more work only when some are.
     static OPEN: OwnLine<AtomicUsize> = OwnLine(AtomicUsize::new(0));
 
+    /// PROBE: a slot one word longer, as #303's, its word unused.
+    struct Padded {
+        task: UnsafeCell<MaybeUninit<Task>>,
+        _word: AtomicUsize,
+    }
+    impl core::ops::Deref for Padded {
+        type Target = UnsafeCell<MaybeUninit<Task>>;
+        fn deref(&self) -> &Self::Target {
+            &self.task
+        }
+    }
+
     #[repr(align(128))]
     pub(crate) struct Source {
         /// A GPU-path fixture reserves its first batch from CPU claims.
@@ -912,7 +924,7 @@ pub(crate) mod sources {
         gpu_batch_reserved: core::sync::atomic::AtomicBool,
         claimed: OwnLine<AtomicUsize>,
         /// A stream's tasks; empty for a caller's jobs.
-        ring: Box<[UnsafeCell<MaybeUninit<Task>>]>,
+        ring: Box<[Padded]>,
         /// A caller's current job and its first number; the job stays the
         /// claimed numbers' until `finish.finished` passes them.
         job: AtomicPtr<Job<'static>>,
@@ -945,7 +957,7 @@ pub(crate) mod sources {
                 #[cfg(all(test, blake3_gpu))]
                 gpu_batch_reserved: core::sync::atomic::AtomicBool::new(false),
                 claimed: OwnLine(AtomicUsize::new(0)),
-                ring: (0..len).map(|_| UnsafeCell::new(MaybeUninit::uninit())).collect(),
+                ring: (0..len).map(|_| Padded { task: UnsafeCell::new(MaybeUninit::uninit()), _word: AtomicUsize::new(0) }).collect(),
                 job: AtomicPtr::new(core::ptr::null_mut()),
                 base: AtomicUsize::new(0),
                 finish: crate::finish::Finish::new(),
