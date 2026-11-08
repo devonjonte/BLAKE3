@@ -1071,6 +1071,13 @@ mod test {
         let want_handed: std::vec::Vec<(usize, usize)> = got.iter().map(|h| (h as *const Hash as usize, 1)).collect();
         let mut handed = std::vec::Vec::new();
         stream(mode, record(&mut handed), |s| {
+            if read == usize::MAX {
+                // gpu_ready established the device. Whole-piece fixtures
+                // supply a first message holding a batch; reserve it so
+                // their GPU coverage follows ownership, not worker speed.
+                assert!(lens.first().is_some_and(|&len| len >= crate::gpu::BATCH * crate::lanes::TASK_LEN));
+                s.s.source.reserve_gpu_batch_for_test();
+            }
             for (i, out) in got.iter_mut().enumerate() {
                 s.submit_with(
                     lens[i],
