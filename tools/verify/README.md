@@ -19,7 +19,11 @@ Commands:
     python3 tools/verify/prove_x86_loop.py              # hash_many at every input count, by induction (51 cases)
     python3 tools/verify/prove_output.py                # 16 independent root outputs, per-lane CV/block/length/flags; four fault controls
     python3 tools/verify/cross_check_x86.py             # the x86-64 model against the CPU (needs an x86-64 CPU; AVX-512 forms need one with AVX-512)
-    sh tools/verify/long-proofs.sh [COMMIT]             # the proofs, the Arm CPU cross-check and the controls together (Isla and the x86 CPU check apart); posts the commit's "long proofs" status, from an earlier run when the proofs' inputs (c/, c2sp/, tools/verify/, the checked NEON, SME2-hybrid and x86 generators) are the same
+    sh tools/verify/long-proofs.sh [COMMIT]             # the proofs, the Arm CPU cross-check and the controls together (Isla and the x86 CPU check apart); posts the commit's "long proofs" status, from an earlier run when the proofs' inputs (c/, c2sp/, tools/verify/, the checked NEON, SME2-hybrid and x86 generators, and the executing driver's contents) are the same
+
+Logs are retained in `tmp/long-proofs/COMMIT-INPUTS/`. Distinct drivers can
+check the same target commit without overwriting each other's evidence;
+cache-hit output names the matching prior log directory.
 
 The AArch64 proofs need Python 3 with Z3 (`python3-z3`), an AArch64
 machine with the SHA-3 extension, and Clang and llvm-objdump 17 or later

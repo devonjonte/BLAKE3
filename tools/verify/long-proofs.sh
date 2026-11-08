@@ -9,7 +9,7 @@
 # (prove_x86_loop.py); the instruction models checked against the CPU;
 # and the proofs' mutants.
 # Run under a bounded process-group supervisor; nothing should measure
-# meanwhile. The logs stay in tmp/long-proofs/COMMIT/, and
+# meanwhile. The logs stay in tmp/long-proofs/COMMIT-INPUTS/, and
 # the status names their SHA-256 and BLAKE3 hashes.
 #
 #     sh tools/verify/long-proofs.sh [COMMIT]     (default HEAD)
@@ -17,8 +17,7 @@ set -eu
 root=$(cd "$(dirname "$0")/../.." && pwd)
 commit=$(git -C "$root" rev-parse "${1:-HEAD}")
 token=$(cat "$root/ghtokenclassic.txt")
-logs=$root/tmp/long-proofs/$commit
-tree=/tmp/long-proofs-$commit
+tree="$(python3 -c 'import tempfile; print(tempfile.gettempdir())')/long-proofs-$commit"
 status() {
 	python3 -c 'import json, sys; print(json.dumps({"state": sys.argv[1], "context": "long proofs", "description": sys.argv[2]}))' "$1" "$2" |
 		curl -sSf --retry 5 --retry-all-errors --retry-delay 10 -o /dev/null -X POST -H "Authorization: token $token" -d @- \
@@ -30,11 +29,11 @@ curl -sf -o /dev/null -H "Authorization: token $token" "https://api.github.com/r
 	{ echo "long-proofs: GitHub has no commit $commit: push it first (the run posts its status there)" >&2; exit 1; }
 b64() { printf %s "$1" | tr a-f A-F | basenc --base16 -d | basenc --base64url | tr -d '='; }
 # The inputs that can change a proof result: the kernels, the proof
-# tools (this script among them), the specification, and every generator
-# checked below. A green run for the same inputs is the same evidence, so
-# a commit that changes none of them is not proved again; its status
-# names the run that already passed.
-inputs=$(git -C "$root" ls-tree "$commit" -- c c2sp tools/verify tools/gen_neon_hybrid.py tools/gen_sme2_hybrid.py tools/gen_x86.py tools/gen_output16.py | sha256sum | cut -d' ' -f1)
+# tools, the specification, every checked generator, and the executing
+# driver, which can come from another commit. A green run with identical
+# inputs is reused; its status names the run that already passed.
+inputs=$(listing=$(git -C "$root" ls-tree "$commit" -- c c2sp tools/verify tools/gen_neon_hybrid.py tools/gen_sme2_hybrid.py tools/gen_x86.py tools/gen_output16.py) && driver=$(sha256sum < "$0") && printf '%s\n%s\n' "$listing" "$driver" | sha256sum | cut -d' ' -f1)
+logs=$root/tmp/long-proofs/$commit-$inputs
 record=$root/tmp/long-proofs/inputs/$inputs.txt
 if [ -f "$record" ]; then
 	prior=$(sed -n '1p' "$record")
@@ -43,7 +42,7 @@ if [ -f "$record" ]; then
 	description="passed; inputs as $(printf %s "$prior" | cut -c1-12); SHA-256 $(b64 $psha) BLAKE3 $(b64 $pb3)"
 	[ ${#description} -le 140 ] || { echo "long-proofs: the status description is ${#description} characters, over GitHub's 140: $description" >&2; exit 1; }
 	status success "$description"
-	echo "long proofs passed for $commit; same proof inputs as $prior, not rerun; logs in $root/tmp/long-proofs/$prior, SHA-256 $psha, BLAKE3 $pb3 (hex)"
+	echo "long proofs passed for $commit; same proof inputs as $prior, not rerun; logs in $root/tmp/long-proofs/$prior-$inputs, SHA-256 $psha, BLAKE3 $pb3 (hex)"
 	exit 0
 fi
 mkdir -p "$logs"
@@ -52,7 +51,8 @@ git -C "$root" worktree prune
 git -C "$root" worktree add -q --detach "$tree" "$commit"
 status pending "running on BLAKE3-Servil's VM"
 cd "$tree"
-export ELAN_HOME=${ELAN_HOME:-/root/.elan} PATH=/root/.elan/bin:$PATH
+export ELAN_HOME=${ELAN_HOME:-"$HOME/.elan"}
+export PATH="$ELAN_HOME/bin:$PATH"
 verdict=passed state=success
 run() {  # name, command...: its log in $logs/name.txt; a failure ends the run
 	name=$1; shift
