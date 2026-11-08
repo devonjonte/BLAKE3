@@ -88,9 +88,43 @@ pub fn update_each_multithreaded(hashers: &mut [Hasher], pieces: &[(usize, &[u8]
 /// The hash of each message `which` names: `out[k]` is what
 /// `hashers[which[k]].finalize()` would give, and that hasher is then
 /// reset for its next message (no length hint). Requires
-/// `out.len() == which.len()` and each index `< hashers.len()`.
+/// `out.len() == which.len()`, each index `< hashers.len()`, and distinct indices.
 pub fn finalize_each(hashers: &mut [Hasher], which: &[usize], out: &mut [[u8; OUT_LEN]]) {
     assert_eq!(which.len(), out.len(), "one digest per message named");
+    debug_assert!(which.iter().enumerate().all(|(at, i)| !which[..at].contains(i)), "each finalized index is distinct");
+    #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
+    if which.len() >= 16 && matches!(Platform::detect(), Platform::AVX512) {
+        for (which, out) in which.chunks(16).zip(out.chunks_mut(16)) {
+            if which.len() == 16 {
+                let hashed = {
+                    let inputs: Option<arrayvec::ArrayVec<_, 16>> = which.iter().map(|&i| crate::ffi_output::input(&hashers[i])).collect();
+                    match inputs {
+                        Some(inputs) => {
+                            // Sound: the detected platform supplies AVX-512F+VL;
+                            // borrowed descriptors keep every block/CV readable.
+                            unsafe { crate::ffi_output::hash_group(inputs.as_slice().try_into().unwrap(), out) };
+                            true
+                        }
+                        None => false,
+                    }
+                };
+                if hashed {
+                    for &i in which {
+                        hashers[i].reset(None);
+                    }
+                    continue;
+                }
+            }
+            finish_each(hashers, which, out);
+        }
+        return;
+    }
+    finish_each(hashers, which, out);
+}
+
+/// Each hasher `which` names finished in place and reset, its digest into
+/// `out`: the path every message takes but a sixteen-lane group.
+fn finish_each(hashers: &mut [Hasher], which: &[usize], out: &mut [[u8; OUT_LEN]]) {
     for (&i, out) in which.iter().zip(out) {
         *out = *hashers[i].take_output().root_hash().as_bytes();
         hashers[i].reset(None);
@@ -492,6 +526,25 @@ fn left_len(n: usize) -> usize {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "each finalized index is distinct")]
+    fn finalize_each_rejects_repeated_indices() {
+        crate::initialize();
+        let mut hashers = [Hasher::new(Mode::Plain, None)];
+        finalize_each(&mut hashers, &[0, 0], &mut [[0; OUT_LEN]; 2]);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "each finalized index is distinct")]
+    fn finalize_each_rejects_repeats_across_groups() {
+        crate::initialize();
+        let mut hashers: Vec<_> = (0..16).map(|_| Hasher::new(Mode::Plain, None)).collect();
+        let which: Vec<_> = (0..16).chain(0..16).collect();
+        finalize_each(&mut hashers, &which, &mut [[0; OUT_LEN]; 32]);
+    }
 
     // Expected routes are independent of the implementation's predicate:
     // all supported ARM platforms, AVX2 and AVX-512, but not SSE4.1.

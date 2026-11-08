@@ -34,7 +34,7 @@ b64() { printf %s "$1" | tr a-f A-F | basenc --base16 -d | basenc --base64url | 
 # checked below. A green run for the same inputs is the same evidence, so
 # a commit that changes none of them is not proved again; its status
 # names the run that already passed.
-inputs=$(git -C "$root" ls-tree "$commit" -- c c2sp tools/verify tools/gen_neon_hybrid.py tools/gen_sme2_hybrid.py tools/gen_x86.py | sha256sum | cut -d' ' -f1)
+inputs=$(git -C "$root" ls-tree "$commit" -- c c2sp tools/verify tools/gen_neon_hybrid.py tools/gen_sme2_hybrid.py tools/gen_x86.py tools/gen_output16.py | sha256sum | cut -d' ' -f1)
 record=$root/tmp/long-proofs/inputs/$inputs.txt
 if [ -f "$record" ]; then
 	prior=$(sed -n '1p' "$record")
@@ -61,7 +61,7 @@ run() {  # name, command...: its log in $logs/name.txt; a failure ends the run
 }
 run lean_spec python3 c2sp/BLAKE3/check.py
 run lean_emit sh -c 'python3 tools/verify/lean/emit.py && git diff --exit-code tools/verify/lean/compress.json tools/verify/lean/Generic.lean'
-run generated sh -c 'python3 tools/gen_neon_hybrid.py | cmp - c/blake3_neon_hybrid_aarch64.S && python3 tools/gen_sme2_hybrid.py | cmp - c/blake3_sme2_hybrid_aarch64.S && python3 tools/gen_x86.py | cmp - c/blake3_partial_x86-64_unix.S'
+run generated sh -c 'python3 tools/gen_neon_hybrid.py | cmp - c/blake3_neon_hybrid_aarch64.S && python3 tools/gen_sme2_hybrid.py | cmp - c/blake3_sme2_hybrid_aarch64.S && python3 tools/gen_x86.py | cmp - c/blake3_partial_x86-64_unix.S && python3 tools/gen_output16.py | cmp - c/blake3_output16.S'
 run helpers python3 -m unittest discover -s tools/verify -p 'test_*.py'
 run prove_hybrid python3 tools/verify/prove_hybrid.py
 run prove_sme2 python3 tools/verify/prove_sme2.py chunks chunks_at messages parents xof chunks_x2 every parents_every xof_every messages_every x2_every
@@ -70,6 +70,7 @@ run prove_sme2 python3 tools/verify/prove_sme2.py chunks chunks_at messages pare
 # copy of this script runs (October 25: the main line's copy named four kinds and
 # skipped a candidate's two new kernels).
 run prove_x86 python3 tools/verify/prove_x86.py
+run prove_output python3 tools/verify/prove_output.py
 run prove_x86_loop sh -c 'ulimit -v 6291456; exec python3 tools/verify/prove_x86_loop.py'
 run cross_check python3 tools/verify/cross_check.py
 run mutants python3 tools/verify/mutants.py
