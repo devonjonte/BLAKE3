@@ -912,7 +912,7 @@ pub(crate) mod sources {
         gpu_batch_reserved: core::sync::atomic::AtomicBool,
         claimed: OwnLine<AtomicUsize>,
         /// A stream's tasks; empty for a caller's jobs.
-        ring: Box<[UnsafeCell<MaybeUninit<Task>>]>,
+        ring: Box<[RingSlot]>,
         /// A caller's current job and its first number; the job stays the
         /// claimed numbers' until `finish.finished` passes them.
         job: AtomicPtr<Job<'static>>,
@@ -923,10 +923,31 @@ pub(crate) mod sources {
         finish: crate::finish::Finish,
     }
 
-    // Sound: a ring slot is written by its stream only above `published`
-    // and below `claimed` + len, and read by the one worker whose CAS took
-    // it, across the Release store of `published` and the Acquire load;
-    // `owner` is behind its lock; the rest is atomics.
+    #[cfg(test)]
+    std::thread_local! {
+        /// Run once by this thread's next claim of a stream's task, between
+        /// its claim and its copy (tests: a delayed worker).
+        pub(crate) static CLAIMED_HOOK: core::cell::RefCell<Option<std::boxed::Box<dyn FnOnce()>>> = const { core::cell::RefCell::new(None) };
+    }
+
+    /// A ring slot: its task, and the position it is next written at. The
+    /// worker whose claim took position `c` copies the task out and then
+    /// moves `next` to `c + len`; the stream writes position `p` once
+    /// `next` reads `p`. A claim alone leaves the slot to its claimer: a
+    /// worker delayed between its claim and its copy (a two-socket Ice
+    /// Lake, #296) read the task written after it, ran that one twice and
+    /// lost its own.
+    struct RingSlot {
+        task: UnsafeCell<MaybeUninit<Task>>,
+        next: AtomicUsize,
+    }
+
+    // Sound: the stream writes a ring slot's task only at position `p`,
+    // once its `next` reads `p` (its last task copied out, Acquire), and
+    // the one worker whose CAS took `p` reads it across the Release store
+    // of `published` and the Acquire load, then hands the slot back with a
+    // Release store of `next`; `owner` is behind its lock; the rest is
+    // atomics.
     unsafe impl Sync for Source {}
     unsafe impl Send for Source {}
 
@@ -945,7 +966,7 @@ pub(crate) mod sources {
                 #[cfg(all(test, blake3_gpu))]
                 gpu_batch_reserved: core::sync::atomic::AtomicBool::new(false),
                 claimed: OwnLine(AtomicUsize::new(0)),
-                ring: (0..len).map(|_| UnsafeCell::new(MaybeUninit::uninit())).collect(),
+                ring: (0..len).map(|i| RingSlot { task: UnsafeCell::new(MaybeUninit::uninit()), next: AtomicUsize::new(i) }).collect(),
                 job: AtomicPtr::new(core::ptr::null_mut()),
                 base: AtomicUsize::new(0),
                 finish: crate::finish::Finish::new(),
@@ -1002,9 +1023,17 @@ pub(crate) mod sources {
             // run as garbage (memory mismanagement, at the cost of a load
             // and a comparison the debug check already made).
             assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
-            // Sound: slot p % len is free (its last task was taken), and
+            let slot = &self.ring[p % self.ring.len()];
+            // Its last task is claimed; wait the moment its claimer takes
+            // to copy it out.
+            while slot.next.load(Ordering::Acquire) != p {
+                core::hint::spin_loop();
+                #[cfg(feature = "std")]
+                std::thread::yield_now();
+            }
+            // Sound: slot p % len is free (its last task copied out), and
             // only this stream writes it.
-            unsafe { (*self.ring[p % self.ring.len()].get()).write(task) };
+            unsafe { (*slot.task.get()).write(task) };
             self.finish.published.store(p + 1, Ordering::Release);
             core::sync::atomic::fence(Ordering::SeqCst);
             if pool().sme2 {
@@ -1050,9 +1079,16 @@ pub(crate) mod sources {
                 let n = if self.ring.is_empty() { Self::run_len(p - c, pool().threads) } else { 1 };
                 match self.claimed.compare_exchange_weak(c, c + n, Ordering::AcqRel, Ordering::Acquire) {
                     Ok(_) if self.ring.is_empty() => return Some(Item::Pieces(self.job.load(Ordering::Relaxed), c - self.base.load(Ordering::Relaxed), n)),
-                    // Sound: this thread alone took slot c, written before
-                    // `published` passed it.
-                    Ok(_) => return Some(Item::Task(unsafe { (*self.ring[c % self.ring.len()].get()).assume_init_read() })),
+                    Ok(_) => {
+                        let slot = &self.ring[c % self.ring.len()];
+                        #[cfg(test)]
+                        CLAIMED_HOOK.with(|hook| hook.borrow_mut().take().map(|f| f()));
+                        // Sound: this thread alone took slot c, written
+                        // before `published` passed it.
+                        let task = unsafe { (*slot.task.get()).assume_init_read() };
+                        slot.next.store(c + self.ring.len(), Ordering::Release);
+                        return Some(Item::Task(task));
+                    }
                     Err(now) => c = now,
                 }
             }
@@ -1085,7 +1121,10 @@ pub(crate) mod sources {
             self.gpu_batch_reserved.store(false, Ordering::SeqCst);
             // Sound: this thread alone took slots c..c + n, written before
             // `published` passed them.
-            f(&mut (c..c + n).map(|i| unsafe { (*self.ring[i % self.ring.len()].get()).assume_init_ref() }));
+            f(&mut (c..c + n).map(|i| unsafe { (*self.ring[i % self.ring.len()].task.get()).assume_init_ref() }));
+            for i in c..c + n {
+                self.ring[i % self.ring.len()].next.store(i + self.ring.len(), Ordering::Release);
+            }
             true
         }
 
@@ -1376,7 +1415,7 @@ pub(crate) mod sources {
             let source = Source::new(8);
             for i in 0..8 {
                 // Sound: no worker sees an unregistered source.
-                unsafe { (*source.ring[i].get()).write(Task::of(&[], i as u64)) };
+                unsafe { (*source.ring[i].task.get()).write(Task::of(&[], i as u64)) };
             }
             let counters = |from: usize, to: usize, n: usize| {
                 let mut seen = std::vec::Vec::new();
@@ -1392,6 +1431,34 @@ pub(crate) mod sources {
             assert_eq!(counters(0, 8, 3), Some(std::vec![2, 3, 4]));
             assert_eq!(counters(0, 8, 3), Some(std::vec![5, 6, 7]), "the last three, the run's end");
             assert_eq!(counters(0, 8, 1), None, "nothing waits");
+        }
+
+        /// A worker delayed between its claim and its copy keeps its task:
+        /// the stream's next write to that slot waits for the copy. (It
+        /// read the task written after it, ran that one twice and lost its
+        /// own: the pipeline's doc example on a two-socket Ice Lake, #296.)
+        #[test]
+        fn a_claimed_task_survives_until_its_claimer_copies_it() {
+            let source: &'static Source = std::boxed::Box::leak(std::boxed::Box::new(Source::new(1)));
+            source.push(Task::of(&[], 0));
+            let (claimed, go) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
+            let worker = std::thread::spawn(move || {
+                let (tell, wait) = (claimed.0, go.1);
+                CLAIMED_HOOK.with(|hook| {
+                    *hook.borrow_mut() = Some(std::boxed::Box::new(move || {
+                        tell.send(()).unwrap();
+                        wait.recv().unwrap();
+                    }))
+                });
+                source.take_task().map(|t| t.counter)
+            });
+            claimed.1.recv().unwrap(); // the worker holds its claim, uncopied
+            let writer = std::thread::spawn(move || source.push(Task::of(&[], 1)));
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            go.0.send(()).unwrap();
+            assert_eq!(worker.join().unwrap(), Some(0), "the claimer runs the task it claimed");
+            writer.join().unwrap();
+            assert_eq!(source.take_task().map(|t| t.counter), Some(1), "the next task, written after the copy");
         }
 
         /// Unregistering one source leaves the others registered: its bit
