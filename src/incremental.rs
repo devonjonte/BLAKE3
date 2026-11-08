@@ -629,27 +629,26 @@ mod test {
         let other_key = [0x73u8; 32];
         for mode in [Mode::Plain, Mode::Keyed(&key), Mode::DeriveKey("in-place prefix checkpoint")] {
             for len in [0usize, 64, 1024, 1025, 2048, STAGE_LEN - 1, STAGE_LEN, 2 * STAGE_LEN + 17] {
-                let mut source = Hasher::new(mode);
+                let mut source = Hasher::new(mode, None);
                 for part in input[..len].chunks(17) {
                     source.update(part);
                 }
                 let staged = source.staged;
                 source.stage[staged..].fill(core::mem::MaybeUninit::new(0xbb));
-                let mut copy = Hasher::new(Mode::Keyed(&other_key));
+                let mut copy = Hasher::new(Mode::Keyed(&other_key), None);
                 copy.update(&input[..2 * STAGE_LEN]);
                 copy.stage.fill(core::mem::MaybeUninit::new(0xaa));
                 copy.clone_from(&source);
                 let expected = crate::test::official::hash(mode, &input[..len]);
                 assert_eq!(copy.count(), source.count());
-                assert_eq!(*copy.finalize().as_bytes(), expected);
-                assert_eq!(*source.finalize().as_bytes(), expected);
+                assert_eq!(*copy.clone().finalize().as_bytes(), expected);
                 assert_eq!(copy.staged_bytes(), source.staged_bytes());
                 // Sound: every unused byte in both fixtures was explicitly
                 // initialized above, including for the full-copy control.
                 assert!(copy.stage[staged..].iter().all(|b| unsafe { b.assume_init() } == 0xaa), "unused stage copied at len={len}");
                 copy.update(&input[len..len + 129]);
-                assert_eq!(*copy.finalize().as_bytes(), crate::test::official::hash(mode, &input[..len + 129]));
-                assert_eq!(*source.finalize().as_bytes(), expected, "checkpoint source is immutable");
+                assert_eq!(*copy.clone().finalize().as_bytes(), crate::test::official::hash(mode, &input[..len + 129]));
+                assert_eq!(*source.finalize().as_bytes(), expected, "checkpoint source is untouched");
                 let mut out = [0u8; 129];
                 copy.finalize_xof().fill(&mut out);
                 assert_eq!(out.as_slice(), crate::test::official::xof(mode, &input[..len + 129], 0, out.len()));
