@@ -33,6 +33,15 @@ lists what changed, each item with where it is described.
   with its own chaining value and flags, on a proved kernel; its indices
   are distinct, a contract a debug build checks (#295).
 
+## Steadier
+
+- **After preparation, the pool's calls allocate nothing** (#325): a
+  whole message, a batch, a collection of chunk-sized items, and repeated
+  update-and-finish cycles of 4 MiB messages in every mode, on the calling
+  thread and the workers, the first cycle included.
+  `initialize_multithreaded` prepares the calling thread's scratch (48 KiB,
+  for inputs to 64 MiB).
+
 ## Safer
 
 - **`throughput::Stream::open` is private** (#308). In 0.8 it is public,
@@ -57,6 +66,12 @@ lists what changed, each item with where it is described.
 - The x86-64 kernels that land before the release, each with its measured
   gain and its proof (lane rounding, the grouped AVX2 and AVX-512
   finishing kernels, Zen 5's integer-register chunk root).
+- The pipeline's batch and message cycles allocating nothing after the
+  first (#329: the batch's job waits in its message slot, and the
+  completions stay in fixed entries), when it lands.
+- The build version, when it lands (#328): the code after a release reads
+  `X.Y.Z+dev`, and a build's version names its commit and a dirty tree's
+  Git tree id (`b3sum --version`, `b3_version()`, `BUILD_VERSION`).
 - The pool and stream fix that lands before it (#276: a stream with no
   worker stops at once where it would wait forever).
 - The safety fixes that land before it, each with its record:
