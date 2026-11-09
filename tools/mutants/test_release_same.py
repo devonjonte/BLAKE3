@@ -84,7 +84,7 @@ class Confirm(unittest.TestCase):
         os.makedirs(os.path.join(cls.tree, "src"))
         open(os.path.join(cls.tree, "Cargo.toml"), "w").write(CARGO)
         open(os.path.join(cls.tree, "src", "lib.rs"), "w").write(LIB)
-        git = ["git", "-C", cls.tree, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=/dev/null"]
+        git = ["git", "-C", cls.tree, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false"]
         subprocess.run(["cargo", "generate-lockfile", "--offline"], cwd=cls.tree, check=True, capture_output=True)
         subprocess.run(["git", "init", "-q", cls.tree], check=True)
         subprocess.run([*git, "add", "-A"], check=True)
