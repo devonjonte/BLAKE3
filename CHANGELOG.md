@@ -59,6 +59,13 @@ lists what changed, each item with where it is described.
   finishing kernels, Zen 5's integer-register chunk root).
 - The pool and stream fix that lands before it (#276: a stream with no
   worker stops at once where it would wait forever).
+- The safety fixes that land before it, each with its record:
+  - the task ring's claim-then-copy race (#303: a worker held between
+    its claim and its copy could read the next task in its slot);
+  - the pipeline's batches and places owned while the workers write them
+    (#309: a forgotten pipeline freed borrowed storage under them);
+  - `update_each`'s grouping by public mode, never by key (#312);
+  - `Packed::new`'s checked capacity (#307).
 
 # blake3-servil 0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861, against official BLAKE3 1.8.7
 
