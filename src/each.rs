@@ -39,7 +39,9 @@ pub fn hash_each_multithreaded(mode: Mode, items: &[(&[Block], usize)], out: &mu
     // The items that hash alone are set aside in the pool's collection
     // call (a zero stand-in) and hashed after, each over the whole pool.
     if items.iter().map(|i| i.bytes().len()).filter(|&len| !alone_len(len)).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN {
-        hash_each_on(key, flags, items, out, Platform::detect(), |item| if alone(item) { Hash::from_bytes([0; OUT_LEN]) } else { crate::hash_serial(item, key, flags) });
+        hash_each_on(key, flags, items, out, Platform::detect(), |item| {
+            if alone(item) { Hash::from_bytes([0; OUT_LEN]) } else { crate::hash_serial(item, key, flags) }
+        });
     } else {
         crate::lanes::hash_each(key, flags, items, out);
     }
