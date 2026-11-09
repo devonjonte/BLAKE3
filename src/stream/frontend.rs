@@ -51,8 +51,9 @@ pub enum Event<T> {
     },
 }
 
-/// A completion the producer has yet to collect. Pushed with one poll, so
-/// its waker is registered before `ready` can wait on it.
+/// A completion the producer has yet to collect, kept in place in its
+/// entry of the stream's `pending` (see there) and polled there. Polled once
+/// as it arrives, so its waker is registered before `ready` can wait on it.
 /// A producer-local borrow cannot become accepted pipeline input, even
 /// for an empty batch. This program is compiled only, never executed.
 ///
@@ -80,9 +81,9 @@ pub enum Event<T> {
 /// # }
 /// ```
 enum Pending<T> {
-    Message(T, Pin<Box<Completion>>),
+    Message(T, Completion),
     /// The batch and places, held until the completion returns them.
-    Batch(T, Pin<Box<BatchCompletion>>, Option<(Batch<'static>, Box<[[u8; OUT_LEN]]>)>),
+    Batch(T, BatchCompletion, Option<(Batch<'static>, Box<[[u8; OUT_LEN]]>)>),
 }
 
 /// Completions wake the producer through this; `ready` waits on it.
@@ -123,7 +124,13 @@ impl std::task::Wake for NotifyWake {
 pub struct Stream<T, F: FnMut(Event<T>)> {
     receiver: Receiver,
     on_completion: RefCell<F>,
-    pending: RefCell<Vec<Pending<T>>>,
+    /// The uncollected completions, one entry per message slot: each holds
+    /// its slot until collected, so `limits.messages` entries hold them all,
+    /// made with the stream. A completion stays pinned in its entry: the
+    /// entries never move (the slice is never resized), an occupied entry
+    /// is never moved, and a completion is dropped where it lies. So a
+    /// message's or batch's cycle allocates nothing (#325).
+    pending: RefCell<Box<[Option<Pending<T>>]>>,
     notify: Arc<Mutex<Notify>>,
     completion_waker: Waker,
 }
@@ -144,7 +151,7 @@ impl<T: Copy, F: FnMut(Event<T>)> Stream<T, F> {
         Self {
             receiver: Receiver::new(mode, limits.buffers, limits.messages),
             on_completion: RefCell::new(on_completion),
-            pending: RefCell::new(Vec::with_capacity(limits.messages)),
+            pending: RefCell::new((0..limits.messages).map(|_| None).collect()),
             completion_waker: Waker::from(Arc::new(NotifyWake(notify.clone()))),
             notify,
         }
@@ -171,7 +178,7 @@ impl<T: Copy, F: FnMut(Event<T>)> Stream<T, F> {
         // untouched, until the completion resolves, then hands them back
         // with the event. A forgotten pipeline leaks them.
         let completion = self.admit(unsafe { self.receiver.submit_batch(&batch, places.as_mut_ptr()) }).await;
-        self.push(Pending::Batch(tag, Box::pin(completion), Some((batch, places))));
+        self.push(Pending::Batch(tag, completion, Some((batch, places))));
     }
 
     /// Await an admission, collecting while it is pending: a slot held by an
@@ -202,23 +209,25 @@ impl<T: Copy, F: FnMut(Event<T>)> Stream<T, F> {
     /// Deliver every completion that is ready, without waiting: how many.
     pub fn collect(&self) -> usize {
         let mut delivered = 0;
-        let mut i = 0;
-        loop {
-            let event = {
-                let mut pending = self.pending.borrow_mut();
-                let Some(item) = pending.get_mut(i) else { break };
-                let Some(event) = self.poll_pending(item) else {
-                    i += 1;
-                    continue;
-                };
-                pending.swap_remove(i);
-                event
-            };
+        let entries = self.pending.borrow().len();
+        for i in 0..entries {
             // The handler runs with no borrow held: it may submit.
-            (self.on_completion.borrow_mut())(event);
-            delivered += 1;
+            if let Some(event) = self.poll_entry(i) {
+                (self.on_completion.borrow_mut())(event);
+                delivered += 1;
+            }
         }
         delivered
+    }
+
+    /// One poll of entry `i`'s completion, where it lies: its event once
+    /// ready, the completion then dropped in place and the entry free.
+    fn poll_entry(&self, i: usize) -> Option<Event<T>> {
+        let mut pending = self.pending.borrow_mut();
+        let entry = &mut pending[i];
+        let event = self.poll_pending(entry.as_mut()?)?;
+        *entry = None; // Drops the finished completion in place.
+        Some(event)
     }
 
     /// One poll of a pending completion with the stream's waker: its event
@@ -226,7 +235,9 @@ impl<T: Copy, F: FnMut(Event<T>)> Stream<T, F> {
     fn poll_pending(&self, item: &mut Pending<T>) -> Option<Event<T>> {
         let mut cx = Context::from_waker(&self.completion_waker);
         match item {
-            Pending::Message(tag, completion) => match completion.as_mut().poll(&mut cx) {
+            // Sound: the completion lies in its entry of `pending`, which
+            // never moves it (see there).
+            Pending::Message(tag, completion) => match unsafe { Pin::new_unchecked(completion) }.poll(&mut cx) {
                 Poll::Ready(finished) => {
                     let outcome = finished.outcome().copied();
                     finished.retire();
@@ -237,7 +248,7 @@ impl<T: Copy, F: FnMut(Event<T>)> Stream<T, F> {
                 }
                 Poll::Pending => None,
             },
-            Pending::Batch(tag, completion, work) => match completion.as_mut().poll(&mut cx) {
+            Pending::Batch(tag, completion, work) => match unsafe { Pin::new_unchecked(completion) }.poll(&mut cx) {
                 Poll::Ready(finished) => {
                     finished.retire();
                     let (batch, places) = work.take().expect("a batch completes once");
@@ -248,12 +259,18 @@ impl<T: Copy, F: FnMut(Event<T>)> Stream<T, F> {
         }
     }
 
-    /// Keep a completion for `collect`, polled once now so that its waker
-    /// is registered; one already ready is delivered at once.
-    fn push(&self, mut item: Pending<T>) {
-        match self.poll_pending(&mut item) {
-            Some(event) => (self.on_completion.borrow_mut())(event),
-            None => self.pending.borrow_mut().push(item),
+    /// Keep a completion for `collect` in a free entry, polled once there
+    /// so that its waker is registered; one already ready is delivered at
+    /// once. Its message slot guarantees a free entry.
+    fn push(&self, item: Pending<T>) {
+        let i = {
+            let mut pending = self.pending.borrow_mut();
+            let i = pending.iter().position(Option::is_none).expect("a completion holds a message slot, and there is an entry for each");
+            pending[i] = Some(item);
+            i
+        };
+        if let Some(event) = self.poll_entry(i) {
+            (self.on_completion.borrow_mut())(event);
         }
     }
 
@@ -282,7 +299,7 @@ impl<T: Copy, F: FnMut(Event<T>)> Stream<T, F> {
     /// close. Every message has been ended or aborted.
     pub fn finish(self) {
         self.receiver.drain();
-        while !self.pending.borrow().is_empty() {
+        while self.pending.borrow().iter().any(Option::is_some) {
             assert!(self.collect() > 0, "after the drain, every pending completion is ready");
         }
         self.receiver.close();
@@ -314,11 +331,11 @@ impl<T: Copy, F: FnMut(Event<T>)> Message<'_, T, F> {
     /// as [`Event::Hashed`]. Where the producer learns the bytes and the
     /// end together, `end(n)` publishes them as the last part at once.
     pub fn end(self, written: usize) {
-        self.stream.push(Pending::Message(self.tag, Box::pin(self.inner.end(written))));
+        self.stream.push(Pending::Message(self.tag, self.inner.end(written)));
     }
     /// Give the message up: no digest, [`Event::Aborted`] instead.
     pub fn abort(self) {
-        self.stream.push(Pending::Message(self.tag, Box::pin(self.inner.abort())));
+        self.stream.push(Pending::Message(self.tag, self.inner.abort()));
     }
 }
 
