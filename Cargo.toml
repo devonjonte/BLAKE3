@@ -2,7 +2,7 @@
 name = "blake3-servil"
 # BLAKE3-Servil's own version series, from 0.1.0, based on upstream BLAKE3 1.8.7:
 # tools/gen-ver.py sets X.Y.Z+<commit> here and tags vX.Y.Z+<commit>.
-version = "0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861"
+version = "0.8.0+dev"
 authors = ["Jack O'Connor <oconnor663@gmail.com>", "Samuel Neves", "John Servil"]
 description = "the BLAKE3 hash function, with SME2 and integer + NEON kernels for AArch64 and a shared thread pool"
 repository = "https://github.com/servil-software-factory/BLAKE3"
@@ -71,7 +71,7 @@ required-features = ["std"]
 [dependencies]
 # BUILD_VERSION, in a crate of its own: its build script reruns on every
 # edit, and the library's, which assembles the kernels, does not.
-blake3-servil-version = { version = "=0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861", path = "version" }
+blake3-servil-version = { version = "=0.8.0+dev", path = "version" }
 arrayvec = { version = "0.7.4", default-features = false }
 constant_time_eq = { version = "0.4.2", default-features = false }
 cfg-if = "1.0.0"

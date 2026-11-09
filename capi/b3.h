@@ -35,7 +35,7 @@
  * built and a dirty tree's Git tree id), so a program can check that the
  * two agree.
  */
-#define B3_VERSION "0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861"
+#define B3_VERSION "0.8.0+dev"
 #ifndef B3_H
 #define B3_H
 
