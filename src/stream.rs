@@ -951,9 +951,11 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     fn hand_over(&mut self, task: Task) {
         match self.slot {
             Some(_) => {
-                let entry = (task.left as usize - self.s.lefts.as_ptr() as usize) / core::mem::size_of::<OwnLine<AtomicUsize>>();
-                debug_assert!(core::ptr::eq(&*self.s.lefts[entry], task.left), "a stream's task counts down an entry's count");
-                self.s.source.publish(entry, task)
+                // EXPERIMENT (not for landing: no bound keeps this safe): the
+                // places in publication order, as the old ring's slots.
+                static COUNT: AtomicUsize = AtomicUsize::new(0);
+                let place = COUNT.fetch_add(1, Ordering::Relaxed) % ENTRIES;
+                self.s.source.publish(place, task)
             }
             None => crate::lanes::run_task(task),
         }
