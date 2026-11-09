@@ -419,7 +419,7 @@ assert 7200 * 1 >= MAX_LIMIT
 
 
 def process(path, out):
-    print(f"runner: {path.name}: started, log in {out / 'runner.log'}", file=sys.stderr, flush=True)
+    print(f"runner: {path.name}: started, log in {out / 'runner.log'} until it ends", file=sys.stderr, flush=True)
     verdict = {"job": path.name, "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "power at start": power()}
     with open(out / "runner.log", "w") as log:
         try:
@@ -489,7 +489,15 @@ def main():
         out = exchange.claim(pending[0])
         if out is None:
             continue
-        status = process(pending[0], out)
+        # The job's files are written on this machine's own disk and copied
+        # into the exchange once the job is over: an exchange on a shared
+        # folder is served by another process, and every line written while
+        # a job times is that process's work beside the measurement.
+        stage = HOME / "tmp" / out.name
+        stage.mkdir()
+        status = process(pending[0], stage)
+        shutil.copytree(stage, out, dirs_exist_ok=True)
+        shutil.rmtree(stage)
         exchange.publish(out, f"{pending[0].stem}: {status} ({machine})")
 
 

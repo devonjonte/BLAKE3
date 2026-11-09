@@ -12,7 +12,9 @@ samples, reports). Several runners may share one exchange; the claim
 makes sure a job runs once, and the folder's name says which machine ran
 it (results from different machines never compare). A private exchange
 is a plain folder, `runner/` in a checkout (out of git by
-`.git/info/exclude`). Operator notes are in the private repository
+`.git/info/exclude`). A job's files are written on the runner's own disk
+and copied into the exchange when the job ends, so a folder served by
+another process (a mount) costs that process nothing while a job times. Operator notes are in the private repository
 servil-software-factory/ops. The runner keeps its clones of BLAKE3-Servil and of
 bench-hashes, side by side, in `~benchrunner/checkouts/`, and moves
 them to each job's commits, so Cargo rebuilds only what changed: a
