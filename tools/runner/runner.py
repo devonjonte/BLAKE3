@@ -196,11 +196,15 @@ class Job:
         return stdout
 
     def sync(self, url, dest, commit):
-        """`dest`, a clone of `url` kept between jobs, at `commit`."""
+        """`dest`, a clone of `url` kept between jobs, at `commit`: a commit
+        on a branch or at a pull request's head (fetched as
+        refs/remotes/origin/pr/N), so a job names a pull request's head as
+        it is, from a fork too."""
         if not (dest / ".git").exists():
             self.run(["git", "clone", "--quiet", url, str(dest)], cwd=dest.parent)
         else:
             self.run(["git", "fetch", "--quiet", "--prune", "origin"], cwd=dest)
+        self.run(["git", "fetch", "--quiet", "origin", "+refs/pull/*/head:refs/remotes/origin/pr/*"], cwd=dest)
         self.run(["git", "checkout", "--quiet", "--force", "--detach", commit], cwd=dest)
         full = self.run(["git", "rev-parse", "HEAD"], cwd=dest, capture=True).strip()
         assert full.startswith(commit), f"{url}: asked for {commit}, got {full}"

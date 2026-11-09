@@ -50,9 +50,8 @@ command starts the runner every time, including after a change to
 
 ## Running a job
 
-Write `jobs/NNN-name.json` naming pushed commits (the runner fetches
-branches alone: push a pull request's head as `candidate/*` first) and
-push it to the exchange repository (take the next free number); wait with
+Write `jobs/NNN-name.json` naming pushed commits (a branch's, or a pull
+request's head, from a fork too) and push it to the exchange repository (take the next free number); wait with
 `python3 tools/runner/wait_for.py NNN-name PATH-OF-YOUR-CLONE`, which
 pulls before each look; results land in `results/` with the machine's
 name in the folder. A job runs once per file name, so a changed job takes
