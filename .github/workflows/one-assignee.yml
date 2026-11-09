@@ -1,0 +1,23 @@
+# Every open issue and pull request has exactly one assignee, the person
+# whose move is next (AGENTS.md). tools/one_assignee.py assigns the author
+# to an item left with none and asks when there are several.
+name: one assignee
+on:
+  issues:
+    types: [opened, reopened, unassigned, assigned]
+  pull_request_target:
+    types: [opened, reopened, unassigned, assigned]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+permissions:
+  issues: write
+  pull-requests: write
+jobs:
+  one:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/one_assignee.py "$GITHUB_REPOSITORY"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

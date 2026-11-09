@@ -136,6 +136,8 @@ The part above (Philosophy, Strategy, Style) reads the same in the `AGENTS.md` o
 - Sam Shackleton is a woman: she, her.
 - Stage the paths a commit is about, by name, and read `git status` before committing: a checkout may hold someone's work in progress.
 
+**One assignee makes the next move** (Zooko, November 9, 2026). Every open issue and pull request has one assignee, the person whose move is next. When your move is done, say in a comment what the next move is and assign the person who makes it. When nothing is left, close it. A pull request's author lands it the day its checks pass (CONTRIBUTING, "Branches and changes"). A Mac check is a job the author queues (`tools/runner/README.md`). An item that waits on nobody's move is closed, and one that waits on a decision names the decider. A workflow (`.github/workflows/one-assignee.yml`) assigns the author to any item left with none and asks when there are several.
+
 **Generated text is computed from what the page shows.** A sentence about the page's own contents is built from the same data as the page, so it names only what is on the page, whatever options produced it.
 
 **Our APIs freeze at 1.0** (Zooko, October 16, 2026). The crate's version stays below 1.0 while we still change its APIs freely, every caller with them (Contracts change everywhere at once). Version 1.0 marks the day its efficiency, correctness, and generality over platforms and use cases reach what we want, and its public APIs freeze. From then on, their callers are users we cannot change, so a parameter that costs little and will likely be needed may come ahead of its use, to spare them a breaking change (`Stream::submit_reader`'s size hint, a scheduling hint and never part of the hash, is the first).

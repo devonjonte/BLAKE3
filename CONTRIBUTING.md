@@ -222,7 +222,15 @@ fast-forward of its tip (so what was checked is what lands) once:
   needs no speed check: it would compare identical code. The Mac is
   John's runner: ask for its check on the pull request, naming the
   points, and he queues it (about twenty minutes; its result is posted
-  there). Whoever made the candidate lands it once every check has passed.
+  there). Whoever made the candidate lands it once every check has passed,
+the same day: no review gate stands between a passing candidate and
+`next`.
+
+Every open issue and pull request has one assignee, the person whose
+move is next. Finish your move, say in a comment what the next move is,
+and assign the person who makes it. Close the item when nothing is left.
+A workflow assigns the author to an item left with no assignee and asks
+when there are several.
 
 A change to a tool that runs for hours (`tools/mutants/check.py`,
 `tools/verify/long-proofs.sh`, `bench-hashes regress` and `check`) lands
