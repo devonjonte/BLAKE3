@@ -99,16 +99,22 @@ typedef struct {
 
 void b3_hasher_new(b3_hasher *hasher, const b3_mode *mode, int has_length_hint, uint64_t length_hint);
 
-/* Add the message's next `len` bytes. */
+/* Add the message's next `len` bytes. The hasher holds a message that
+ * `b3_hasher_new` began and no finalize has finished. */
 void b3_hasher_update(b3_hasher *hasher, const void *input, size_t len);
 
-/* The digest of the message: the hasher is finished and holds no message;
- * `b3_hasher_new` starts the next. */
+/* The digest of the message. This finishes the hasher: the one call it
+ * takes from then on is `b3_hasher_new`, which starts the next message.
+ * A finished hasher is not reset, so an update or a second finalize on it
+ * breaks this contract: nothing stops the call, and a later digest is
+ * wrong, since the hasher goes on from the finished message's bytes.
+ * (Official BLAKE3's hasher may be finalized again and updated further;
+ * code ported from it calls `b3_hasher_new` between messages here.) */
 b3_digest b3_hasher_finalize(b3_hasher *hasher);
 
 /* Extended output: `len` bytes of the output from byte `offset` on, into
  * `out`. Its first 32 bytes are the digest. The hasher is finished, as
- * with `b3_hasher_finalize`. */
+ * with `b3_hasher_finalize`: ask for every byte you need in one call. */
 void b3_hasher_finalize_xof(b3_hasher *hasher, uint64_t offset, void *out, size_t len);
 
 #ifdef __cplusplus

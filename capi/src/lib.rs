@@ -153,8 +153,8 @@ pub unsafe extern "C" fn b3_hasher_new(hasher: *mut B3Hasher, mode: *const B3Mod
 }
 
 /// # Safety
-/// `hasher` was initialized by `b3_hasher_new`; `input` holds `len`
-/// bytes (NULL only with `len` 0).
+/// `hasher` was initialized by `b3_hasher_new` and not finalized since;
+/// `input` holds `len` bytes (NULL only with `len` 0).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn b3_hasher_update(hasher: *mut B3Hasher, input: *const c_void, len: usize) {
     check_disjoint(hasher.cast(), size_of::<B3Hasher>(), input, len);
@@ -162,8 +162,9 @@ pub unsafe extern "C" fn b3_hasher_update(hasher: *mut B3Hasher, input: *const c
     hasher.update(unsafe { bytes(input, len, "the input") });
 }
 
-/// The Hasher moved out of the caller's memory, which then holds no
-/// message: `b3_hasher_new` starts the next.
+/// The Hasher read out of the caller's memory, which is finished from
+/// then on: its bytes stay as they were, and `b3_hasher_new` alone may
+/// follow (b3.h; BLAKE3 #311).
 ///
 /// # Safety
 /// `hasher` was initialized by `b3_hasher_new` and not finalized since.
