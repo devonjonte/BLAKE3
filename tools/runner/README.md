@@ -12,7 +12,8 @@ samples, reports). Several runners may share one exchange; the claim
 makes sure a job runs once, and the folder's name says which machine ran
 it (results from different machines never compare). A private exchange
 is a plain folder, `runner/` in a checkout (out of git by
-`.git/info/exclude`). The runner keeps its clones of BLAKE3-Servil and of
+`.git/info/exclude`). Operator notes are in the private repository
+servil-software-factory/ops. The runner keeps its clones of BLAKE3-Servil and of
 bench-hashes, side by side, in `~benchrunner/checkouts/`, and moves
 them to each job's commits, so Cargo rebuilds only what changed: a
 benchmark job builds bench-hashes against BLAKE3-Servil as it is, through
@@ -77,26 +78,18 @@ starts the runner; it prints which of the two sudoers lines below are
 missing. Run it again after a reviewed change to `runner.py`.
 
 While a job that times runs (`benchmark`, `b3sum`, `crowd`, `example`, `check`),
-nothing else should run on the Mac, the VM included, and Activity
-Monitor stays closed (it keeps `sysmond` near a whole CPU busy: with it
-open, 170 of 219 load windows of a run read busy, closed 5 of 214). A pi
-session at work loads the Mac too, its tools in the VM included (Zooko,
-October 17), so a session waits idle while a job times; idle, pi and its
-VM take about 0.01 CPUs, and a session waiting on a tool about 0.05. The
-rest is the logged-in user's own macOS services, which run with
-Spotlight's indexing off: Core Spotlight and Apple Intelligence
-(`corespotlightd`, `spotlightknowledged`, `IntelligencePlatform`, Biome),
-2-3 CPUs for 4 s; Contacts sync (`contactsd`, `accountsd`), 1-2 CPUs for
-3 s; `PerfPowerService`, 1-1.6 CPUs for 1-2 s about every five minutes
-(`top` beside check 1877 and with pi idle, November 3). To name the
-programs behind a run's busy windows, add `"top": true` to the job and read
-its `top.txt` at the windows' times.
+nothing else runs on the machine: a machine on the shared exchange runs
+nothing else by design, and a private runner's operator keeps the
+machine idle and its monitoring tools closed (their load reads as busy
+windows). To name the programs behind a run's busy windows, add
+`"top": true` to the job and read its `top.txt` at the windows' times.
 
-The Mac stays on mains power: on battery it runs more calls after a pause on
-its efficiency cores (233 of 400 against 32). So the runner refuses a job
-that times when the Mac is on battery (its status says so: plug in and
-queue it again), and a job whose power leaves mains on the way ends with
-a status that says its results are no evidence; every job's `verdict.json`
+A timing job runs on mains power: on battery the machine runs another
+machine's speeds (more calls after a pause on its efficiency cores). So
+the runner refuses a job that times when the machine is on battery (its
+status says so: plug in and queue it again), and a job whose power leaves
+mains on the way ends with a status that says its results are no
+evidence; every job's `verdict.json`
 records the power state at its start and end. A `test` job (BLAKE3-Servil's suites, natively) needs
 no quiet machine.
 

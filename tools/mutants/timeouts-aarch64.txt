@@ -1,4 +1,4 @@
-# The mutants that time out on AArch64 (the VM on an Apple M4 Max, 16 vCPUs, SME2; October 26): no test fails,
+# The mutants that time out on AArch64 (an AArch64 VM, 16 vCPUs, SME2; October 26): no test fails,
 # nextest's clock stops one, and the model files' (finish.rs, park.rs) only where Shuttle does not catch them either
 # (tools/mutants/check.py, TIMEOUTS). Their own outcome: neither caught nor survived.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.

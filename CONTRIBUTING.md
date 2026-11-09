@@ -219,10 +219,10 @@ fast-forward of its tip (so what was checked is what lands) once:
   in about a minute, the time it took printed at its end);
 - the regression check finds no slowdown on AArch64 Linux in a VM and
   natively on an Apple M4 Max. A candidate that changes no compiled code
-  needs no speed check: it would compare identical code. The Mac is
-  John's runner: ask for its check on the pull request, naming the
-  points, and he queues it (about twenty minutes; its result is posted
-  there). Whoever made the candidate lands it once every check has passed,
+  needs no speed check: it would compare identical code. The Mac
+  check is a job you queue yourself, through the shared exchange
+  (`tools/runner/README.md`, "Running a job"; about twenty minutes), and
+  its result is a link on the pull request. Whoever made the candidate lands it once every check has passed,
 the same day: no review gate stands between a passing candidate and
 `next`.
 
