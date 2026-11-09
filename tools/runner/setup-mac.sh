@@ -2,13 +2,13 @@
 # Sets up the benchmark runner for the hidden `benchrunner` account, then
 # starts it. Run as yourself on the Mac (it asks for sudo when it needs it):
 #
-#     sh ~/piplayground/blake3-servil/blake3-servil/tools/runner/setup-mac.sh
+#     sh tools/runner/setup-mac.sh
 #
-# On a dedicated machine, the exchange is the team's Git repository, and
-# the runner's toolchain is named, since the machine's own user has none:
+# For the team's shared exchange, a Git repository, the runner's toolchain
+# is named (the machine's own user may have none) and the machine labelled:
 #
 #     EXCHANGE_REPO=git@github.com:servil-software-factory/mac-runner.git \
-#     RUNNER_TOOLCHAIN=nightly-2026-09-24 MACHINE=m6 \
+#     RUNNER_TOOLCHAIN=nightly-2026-09-24 MACHINE=LABEL \
 #     sh tools/runner/setup-mac.sh
 #
 # Safe to run again: steps already done are skipped, and runner.py is
@@ -53,7 +53,7 @@ if ! sudo -u benchrunner -H test -x /Users/benchrunner/.cargo/bin/cargo; then
     sudo -u benchrunner -H sh -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none"
 fi
 if [ -n "${RUNNER_TOOLCHAIN:-}" ]; then
-    # A named nightly (a dedicated machine, whose user has no rustc).
+    # A named nightly, for a machine whose own user has no rustc.
     $br_rustup toolchain list | grep -q "^$RUNNER_TOOLCHAIN" || $br_rustup toolchain install --profile minimal "$RUNNER_TOOLCHAIN"
     $br_rustup default "$RUNNER_TOOLCHAIN"
     $br_rustup toolchain list | grep -v "^$RUNNER_TOOLCHAIN" | cut -d' ' -f1 | while read -r other; do $br_rustup toolchain uninstall "$other"; done

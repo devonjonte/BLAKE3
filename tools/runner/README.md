@@ -5,15 +5,14 @@
 Jobs and results pass through an *exchange*, a folder holding `jobs/`
 and `results/`. The team's exchange is the Git repository
 [servil-software-factory/mac-runner](https://github.com/servil-software-factory/mac-runner):
-anyone with write access pushes a job file into `jobs/`, the dedicated
-Mac (the M6 Mini) pulls it, claims it by pushing
-`results/<job>.<time>-<machine>/claimed.json`, runs it, and pushes the
-results' text (`verdict.json`, `runner.log`, samples, reports). A second
-runner (the M4 Max, when it is on) takes jobs the same way; the claim
+anyone with write access pushes a job file into `jobs/`, a runner pulls
+it, claims it by pushing `results/<job>.<time>-<machine>/claimed.json`,
+runs it, and pushes the results' text (`verdict.json`, `runner.log`,
+samples, reports). Several runners may share one exchange; the claim
 makes sure a job runs once, and the folder's name says which machine ran
-it (results from different machines never compare). A private exchange is
-a plain folder: Zooko's laptop uses the checkout's `runner/` (out of git
-by `.git/info/exclude`). The runner keeps its clones of BLAKE3-Servil and of
+it (results from different machines never compare). A private exchange
+is a plain folder, `runner/` in a checkout (out of git by
+`.git/info/exclude`). The runner keeps its clones of BLAKE3-Servil and of
 bench-hashes, side by side, in `~benchrunner/checkouts/`, and moves
 them to each job's commits, so Cargo rebuilds only what changed: a
 benchmark job builds bench-hashes against BLAKE3-Servil as it is, through
@@ -36,7 +35,7 @@ Nobody can log in to it; `sudo -u benchrunner` runs commands as it.
 
 ## Setting up and starting
 
-    sh ~/piplayground/blake3-servil/blake3-servil/tools/runner/setup-mac.sh
+    sh tools/runner/setup-mac.sh
 
 Run it as yourself; it asks for sudo when it needs it. It makes the
 account's home private, installs Python 3 when absent, and gives the account
@@ -56,22 +55,23 @@ request's head, from a fork too) and push it to the exchange repository (take th
 pulls before each look; results land in `results/` with the machine's
 name in the folder. A job runs once per file name, so a changed job takes
 a new number. The job format is the docstring at the top of `runner.py`.
-Nothing else runs on the dedicated Mac, so a timing job there needs no
-arrangement with anyone.
+A machine that serves the shared exchange runs nothing else, so a
+timing job there needs no arrangement with anyone.
 
-## A dedicated machine (once)
+## A machine for the shared exchange (once)
 
 After the account above, with the command-line tools installed
-(`xcode-select --install`), run from a checkout of BLAKE3-Servil:
+(`xcode-select --install`), run from a checkout of BLAKE3-Servil, with a
+label of your choosing for the machine:
 
     EXCHANGE_REPO=git@github.com:servil-software-factory/mac-runner.git \
-    RUNNER_TOOLCHAIN=nightly-2026-09-24 MACHINE=m6 \
+    RUNNER_TOOLCHAIN=nightly-2026-09-24 MACHINE=LABEL \
     sh tools/runner/setup-mac.sh
 
 The first run prints the runner's public key and stops: add it to the
 exchange repository as a deploy key with write access (Settings, Deploy
 keys), then run the command again. It installs the named nightly for
-`benchrunner` (the one the M4 Max runs, so results read the same
+`benchrunner` (the one the other runners use, so results read the same
 compiler), cargo-nextest and cargo-mutants, clones the exchange, and
 starts the runner; it prints which of the two sudoers lines below are
 missing. Run it again after a reviewed change to `runner.py`.
@@ -149,6 +149,6 @@ that needs it is built by the job into
     benchrunner ALL=(root) NOPASSWD: /Users/Shared/bench-runner/root-probes/kpc-probe
 
 The runner's user writes that path, so this rule lets a job run code of
-its choosing as root (Zooko, November 9, 2026: accepted, for the
-counters). Without the rule the job records sudo's refusal and the rest of
-its results stand.
+its choosing as root: it belongs on a machine that holds nothing else.
+Without the rule the job records sudo's refusal and the rest of its
+results stand.

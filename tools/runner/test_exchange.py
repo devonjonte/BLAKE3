@@ -1,5 +1,6 @@
 """The shared exchange: jobs pushed by anyone, claimed once, results' text
-pushed back. Two clones of one bare repository stand for two machines."""
+pushed back. Two clones of one bare repository stand for two machines,
+mac-a and mac-b."""
 import json
 import subprocess
 import tempfile
@@ -59,14 +60,14 @@ class SharedExchange(unittest.TestCase):
         git(self.submitter, "push", "--quiet")
 
     def test_a_pushed_job_is_pending_until_a_runner_claims_it_and_results_come_back_as_text(self):
-        mini = machine(self.root, self.remote, "m6")
+        a = machine(self.root, self.remote, "mac-a")
         self.submit("3001-a.json")
-        self.assertEqual(mini.pending(), [])
-        mini.refresh()
-        self.assertEqual([p.name for p in mini.pending()], ["3001-a.json"])
-        out = mini.claim(mini.pending()[0])
+        self.assertEqual(a.pending(), [])
+        a.refresh()
+        self.assertEqual([p.name for p in a.pending()], ["3001-a.json"])
+        out = a.claim(a.pending()[0])
         self.assertIsNotNone(out)
-        self.assertEqual(mini.pending(), [])
+        self.assertEqual(a.pending(), [])
         # The job's results: text a reader needs, and a build tree nobody does.
         (out / "verdict.json").write_text('{"status": "passed"}\n')
         (out / "samples").mkdir()
@@ -77,28 +78,28 @@ class SharedExchange(unittest.TestCase):
         (out / "bench/Cargo.toml").write_text("[package]")
         (out / "bench/README.md").write_text("fetched")
         (out / "binary").write_bytes(b"\x00" * 10)
-        mini.publish(out, "3001-a: passed")
+        a.publish(out, "3001-a: passed")
         git(self.submitter, "pull", "--quiet")
         published = sorted(p.relative_to(self.submitter / "results" / out.name).as_posix() for p in (self.submitter / "results" / out.name).rglob("*") if p.is_file())
         self.assertEqual(published, ["claimed.json", "samples/run-1.tsv", "verdict.json"])
 
     def test_two_machines_claiming_one_job_leave_exactly_one_claim(self):
-        mini = machine(self.root, self.remote, "m6")
-        laptop = machine(self.root, self.remote, "m4max")
+        a = machine(self.root, self.remote, "mac-a")
+        b = machine(self.root, self.remote, "mac-b")
         self.submit("3002-b.json")
-        mini.refresh()
-        laptop.refresh()
-        job_on_mini, job_on_laptop = mini.pending()[0], laptop.pending()[0]
-        first = mini.claim(job_on_mini)
-        second = laptop.claim(job_on_laptop)
+        a.refresh()
+        b.refresh()
+        job_on_a, job_on_b = a.pending()[0], b.pending()[0]
+        first = a.claim(job_on_a)
+        second = b.claim(job_on_b)
         self.assertIsNotNone(first)
         self.assertIsNone(second, "the later push is rejected, the claim withdrawn")
         git(self.submitter, "pull", "--quiet")
         claims = [d.name for d in (self.submitter / "results").glob("3002-b.*")]
         self.assertEqual(len(claims), 1)
-        self.assertTrue(claims[0].endswith("-m6"))
-        laptop.refresh()
-        self.assertEqual(laptop.pending(), [], "the laptop sees the mini's claim")
+        self.assertTrue(claims[0].endswith("-mac-a"))
+        b.refresh()
+        self.assertEqual(b.pending(), [], "b sees a's claim")
 
     def test_a_folder_without_git_is_a_private_exchange(self):
         private = self.root / "private"
