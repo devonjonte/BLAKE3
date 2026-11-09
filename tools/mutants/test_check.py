@@ -139,6 +139,11 @@ class Leftovers(unittest.TestCase):
             def git(*args):
                 return subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True, text=True)
             git("init", "-q")
+            # This private repository must not depend on the caller's Git
+            # identity or signing setup (fresh runner homes have neither).
+            git("config", "user.name", "Mutation fixture")
+            git("config", "user.email", "mutants@example.invalid")
+            git("config", "commit.gpgsign", "false")
             for name in ["changed.rs", "stable.rs"]:
                 with open(os.path.join(repo, name), "w") as f:
                     f.write("original\n")
