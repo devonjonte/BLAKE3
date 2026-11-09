@@ -901,13 +901,14 @@ pub(crate) mod sources {
 
     struct TaskSlot {
         task: UnsafeCell<MaybeUninit<Task>>,
-        /// The next publication allowed to write this slot. Claiming its
-        /// current task leaves it occupied until the worker copies it.
-        next: AtomicUsize,
+        /// Whether a worker has claimed this slot's task and not yet copied
+        /// it: the contract's check, in tests and debug builds alone.
+        #[cfg(any(test, debug_assertions))]
+        uncopied: core::sync::atomic::AtomicBool,
     }
 
-    /// How often a publication found its slot's last task claimed and not
-    /// yet copied, and waited (tests).
+    /// How often a publication met its slot's last task claimed and not yet
+    /// copied (tests).
     #[cfg(test)]
     pub(crate) static COPY_WAITS: AtomicUsize = AtomicUsize::new(0);
 
@@ -953,7 +954,13 @@ pub(crate) mod sources {
                 #[cfg(all(test, blake3_gpu))]
                 gpu_batch_reserved: core::sync::atomic::AtomicBool::new(false),
                 claimed: OwnLine(AtomicUsize::new(0)),
-                ring: (0..len).map(|i| TaskSlot { task: UnsafeCell::new(MaybeUninit::uninit()), next: AtomicUsize::new(i) }).collect(),
+                ring: (0..len)
+                    .map(|_| TaskSlot {
+                        task: UnsafeCell::new(MaybeUninit::uninit()),
+                        #[cfg(any(test, debug_assertions))]
+                        uncopied: core::sync::atomic::AtomicBool::new(false),
+                    })
+                    .collect(),
                 job: AtomicPtr::new(core::ptr::null_mut()),
                 base: AtomicUsize::new(0),
                 finish: crate::finish::Finish::new(),
@@ -976,29 +983,24 @@ pub(crate) mod sources {
         /// A stream's task to the workers: one write, one Release store;
         /// then the SME2 thread first, and with two or more waiting and a
         /// worker parked, a worker.
+        ///
+        /// The caller's contract: the slot's last task has been copied out
+        /// by its claimer. A stream keeps it by its ring's length (its
+        /// TASK_SLOTS, BLAKE3 #303), checked in tests and debug builds.
         pub(crate) fn publish(&self, task: Task) {
-            self.publish_waiting(task, || {});
-        }
-
-        /// `waiting` exposes the copy/reuse boundary to the schedule test.
-        fn publish_waiting(&self, task: Task, waiting: impl FnOnce()) {
             let p = self.finish.published.load(Ordering::Relaxed);
             // Every build: an unclaimed full ring is a broken capacity
-            // contract. Only a claimed reader may delay slot reuse.
+            // contract.
             assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
             let slot = &self.ring[p % self.ring.len()];
-            if slot.next.load(Ordering::Acquire) != p {
+            #[cfg(any(test, debug_assertions))]
+            if slot.uncopied.load(Ordering::SeqCst) {
                 #[cfg(test)]
                 COPY_WAITS.fetch_add(1, Ordering::SeqCst);
-                waiting();
-                // A worker has claimed the old task and may be descheduled
-                // before its copy. Let it run before reusing that storage.
-                while slot.next.load(Ordering::Acquire) != p {
-                    std::thread::yield_now();
-                }
+                panic!("a publication met a task claimed and not yet copied: the stream's ring is too short (BLAKE3 #303)");
             }
-            // Sound: the previous reader released this slot after its copy,
-            // and this stream alone writes it.
+            // Sound: the slot's last task was copied out by its claimer (the
+            // caller's contract above), and this stream alone writes it.
             unsafe { (*slot.task.get()).write(task) };
             self.finish.published.store(p + 1, Ordering::Release);
             core::sync::atomic::fence(Ordering::SeqCst);
@@ -1054,12 +1056,16 @@ pub(crate) mod sources {
                 match self.claimed.compare_exchange_weak(c, c + n, Ordering::AcqRel, Ordering::Acquire) {
                     Ok(_) if self.ring.is_empty() => return Some(Item::Pieces(self.job.load(Ordering::Relaxed), c - self.base.load(Ordering::Relaxed), n)),
                     Ok(_) => {
-                        claimed();
                         let slot = &self.ring[c % self.ring.len()];
+                        #[cfg(any(test, debug_assertions))]
+                        slot.uncopied.store(true, Ordering::SeqCst);
+                        claimed();
                         // Sound: this worker claimed the task after its
-                        // publication; the producer waits for `next` below.
+                        // publication; the stream writes the slot again only
+                        // after this copy (`publish`'s contract).
                         let task = unsafe { (*slot.task.get()).assume_init_read() };
-                        slot.next.store(c + self.ring.len(), Ordering::Release);
+                        #[cfg(any(test, debug_assertions))]
+                        slot.uncopied.store(false, Ordering::SeqCst);
                         return Some(Item::Task(task));
                     }
                     Err(now) => c = now,
@@ -1095,9 +1101,6 @@ pub(crate) mod sources {
             // Sound: this thread alone took slots c..c + n, written before
             // `published` passed them.
             f(&mut (c..c + n).map(|i| unsafe { (*self.ring[i % self.ring.len()].task.get()).assume_init_ref() }));
-            for i in c..c + n {
-                self.ring[i % self.ring.len()].next.store(i + self.ring.len(), Ordering::Release);
-            }
             true
         }
 
@@ -1394,73 +1397,48 @@ pub(crate) mod sources {
             assert_eq!(counters(0, 8, 3), Some(std::vec![2, 3, 4]));
             assert_eq!(counters(0, 8, 3), Some(std::vec![5, 6, 7]), "the last three, the run's end");
             assert_eq!(counters(0, 8, 1), None, "nothing waits");
-            for (i, slot) in source.ring.iter().enumerate() {
-                assert_eq!(slot.next.load(Ordering::Acquire), i + 8, "a GPU borrow releases its slot");
-            }
         }
 
-        /// A claimed task still occupies its ring slot until copied. Force
-        /// the worker to pause in that interval while the producer wraps.
+        /// A publication into a slot whose task a worker has claimed and
+        /// not yet copied breaks `publish`'s contract, and the check stops
+        /// it before the write (tests and debug builds).
         #[test]
-        fn ring_reuse_waits_for_the_claimed_task_copy() {
-            use std::sync::mpsc;
-            let source = Source::new(2);
+        #[should_panic(expected = "a publication met a task claimed and not yet copied")]
+        fn a_publication_into_an_uncopied_slot_is_stopped() {
+            let source = Source::new(1);
             source.publish(Task::of(&[], 0));
-            source.publish(Task::of(&[], 1));
-            let (claimed_tx, claimed_rx) = mpsc::channel();
-            let (resume_tx, resume_rx) = mpsc::channel();
-            let (progress_tx, progress_rx) = mpsc::channel::<bool>();
+            let (claimed_tx, claimed_rx) = std::sync::mpsc::channel();
+            let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
             std::thread::scope(|scope| {
                 let source = &source;
-                let worker = scope.spawn(move || {
-                    let item = source.take_claimed(|| {
-                        claimed_tx.send(()).unwrap();
-                        resume_rx.recv().unwrap();
-                    });
-                    let Some(Item::Task(task)) = item else { panic!("the first task is claimed") };
-                    task.counter
+                scope.spawn(move || {
+                    let _ = source
+                        .take_claimed(|| {
+                            claimed_tx.send(()).unwrap();
+                            let _ = done_rx.recv();
+                        })
+                        .is_some();
                 });
                 claimed_rx.recv().unwrap();
-                assert_eq!(source.take_task().unwrap().counter, 1);
-                let observer = scope.spawn(move || {
-                    let waited = progress_rx.recv().unwrap();
-                    // Release even a faulty producer's worker before asserting,
-                    // so the fault fails rather than stranding the scope.
-                    resume_tx.send(()).unwrap();
-                    assert!(waited, "publication waits until the old task is copied");
-                });
-                source.publish_waiting(Task::of(&[], 2), || progress_tx.send(true).unwrap());
-                let _ = progress_tx.send(false);
-                observer.join().unwrap();
-                assert_eq!(worker.join().unwrap(), 0, "the claimed task survives ring wraparound");
-                assert_eq!(source.take_task().unwrap().counter, 2);
-                assert!(source.take_task().is_none());
+                // Release the holder whatever happens, so a fault fails
+                // rather than strands the scope.
+                let _guard = Drop2(done_tx);
+                source.publish(Task::of(&[], 1));
             });
+        }
+        struct Drop2(std::sync::mpsc::Sender<()>);
+        impl Drop for Drop2 {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
         }
 
         #[test]
         #[should_panic(expected = "a source's ring holds every task not yet taken")]
-        fn a_full_ring_stops_before_waiting_for_a_copy() {
+        fn a_full_ring_stops() {
             let source = Source::new(1);
             source.publish(Task::of(&[], 0));
-            source.publish_waiting(Task::of(&[], 1), || panic!("a full ring reached the copy wait"));
-        }
-
-        #[test]
-        fn ring_slots_advance_after_every_copy() {
-            for len in [1, 2, 3] {
-                let source = Source::new(len);
-                for lap in 0..16 {
-                    for i in 0..len {
-                        source.publish(Task::of(&[], (lap * len + i) as u64));
-                    }
-                    for i in 0..len {
-                        assert_eq!(source.take_task().unwrap().counter, (lap * len + i) as u64);
-                        assert_eq!(source.ring[i].next.load(Ordering::Acquire), (lap + 1) * len + i);
-                    }
-                    assert!(source.take_task().is_none());
-                }
-            }
+            source.publish(Task::of(&[], 1));
         }
 
         /// Unregistering one source leaves the others registered: its bit
