@@ -247,6 +247,26 @@ def memory_cap(shards):
     return min(8 << 30, (physical_memory() - (4 << 30)) // shards)
 
 
+def wide_shards(cpus, memory):
+    """The most shards a change's check runs here: SHARDS, as ever, and on
+    a machine with more of both, a shard for every four CPUs that the
+    memory holds at the cap six have (memory_cap's 8 GiB a process, 4 GiB
+    left over). On an EPYC 9255 (48 CPUs, 396 GB) the same 163 mutants,
+    their outcomes the same at every count, on kept worktrees: 58 s on 6
+    shards, 53 on 8, 47 on 12, 48 on 16 (November 9, BLAKE3 #257); the
+    CPU time grew from 1,480 s to 1,800 s at 12, since every shard builds
+    and tests the unmutated tree first."""
+    return max(SHARDS, min(cpus // 4, (memory - (4 << 30)) // (8 << 30)))
+
+
+def shard_count(mutants, wide):
+    """A change's shards for its `mutants`, `wide` at most (wide_shards):
+    three mutants a shard up to SHARDS, as it was; past SHARDS, eight a
+    shard, since each shard spends 4-6 s on the unmutated tree before its
+    first mutant, about what three mutants take."""
+    return max(min(SHARDS, max(1, mutants // 3)), min(wide, mutants // 8))
+
+
 def test_limits(shards, cpus, total):
     """(test threads a shard, each test process's data cap in bytes). A
     shard runs cpus / shards tests at once, so the run keeps every CPU
@@ -888,7 +908,7 @@ def main():
         # mutants), so the budget's cost shows before anything runs.
         planned = subprocess.run(["cargo", "mutants", "--list", *BUILD, "--in-diff", path, *[a for f in files for a in ("--file", f)]],
                                  cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()
-        shards = min(SHARDS, max(1, len(planned) // 3))
+        shards = shard_count(len(planned), wide_shards(os.cpu_count(), physical_memory()))
         print(f"mutants: the change's {len(planned)} mutants on {shards} shard{'s' if shards > 1 else ''}"
               + (f" (about {len(planned) * 6 // shards + 20} s, over the {BUDGET_S} s budget)" if len(planned) * 6 // shards + 20 > BUDGET_S else ""), flush=True)
         found, functions, timed = run(files, ["--in-diff", path], shards=shards, known=known) if planned else (collections.Counter(), {}, collections.Counter())
