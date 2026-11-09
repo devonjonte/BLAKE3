@@ -34,14 +34,14 @@ pub fn hash_each_multithreaded(mode: Mode, items: &[(&[Block], usize)], out: &mu
     assert_eq!(items.len(), out.len(), "one digest per item");
     let mut room = core::mem::MaybeUninit::uninit();
     let (key, flags) = mode.key(&mut room);
-    let alone = |item: &[u8]| item.len() >= crate::lanes::MIN_SPLIT_LEN;
-    // The collection with each item that hashes alone set aside (an empty
-    // stand-in, its digest written after).
-    let small: Vec<&[u8]> = items.iter().map(|i| if alone(i.bytes()) { &[][..] } else { i.bytes() }).collect();
-    if small.iter().map(|i| i.len()).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN {
-        hash_each_on(key, flags, &small, out, Platform::detect(), |item| crate::hash_serial(item, key, flags));
+    let alone_len = |len: usize| len >= crate::lanes::MIN_SPLIT_LEN;
+    let alone = |item: &[u8]| alone_len(item.len());
+    // The items that hash alone are set aside in the pool's collection
+    // call (a zero stand-in) and hashed after, each over the whole pool.
+    if items.iter().map(|i| i.bytes().len()).filter(|&len| !alone_len(len)).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN {
+        hash_each_on(key, flags, items, out, Platform::detect(), |item| if alone(item) { Hash::from_bytes([0; OUT_LEN]) } else { crate::hash_serial(item, key, flags) });
     } else {
-        crate::lanes::hash_each(key, flags, &small, out);
+        crate::lanes::hash_each(key, flags, items, out);
     }
     for (item, out) in items.iter().map(Item::bytes).zip(out.iter_mut()) {
         if alone(item) {

@@ -1051,6 +1051,13 @@ pub fn initialize() {
 /// none of them). A program that forks initializes the pool in the process
 /// that hashes, after any fork; its single-threaded calls work anywhere.
 ///
+/// Each thread that makes multithreaded calls keeps a little storage for
+/// them (its cut of the input, 48 KiB for inputs up to 64 MiB, and its
+/// job record), grown on its first call and on the first call that
+/// outgrows it, and otherwise untouched: after that, a call allocates
+/// nothing. This call prepares the calling thread's; a call from another
+/// thread prepares that thread's the first time.
+///
 /// ```
 /// blake3_servil::initialize_multithreaded(None);
 /// let message = vec![blake3_servil::throughput::Block::ZERO; (1 << 20) / 64];
@@ -1067,6 +1074,7 @@ pub fn initialize_multithreaded(threads: Option<core::num::NonZeroUsize>) {
         lanes::initialize(threads);
         threads
     });
+    lanes::prepare_thread();
     if let Some(threads) = threads {
         assert_eq!(
             started,

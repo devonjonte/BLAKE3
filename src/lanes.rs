@@ -235,8 +235,7 @@ fn hash_over_pool(input: &[u8], key: &crate::CVWords, flags: u8) -> Hash {
     let Some((pool, _caller)) = spare_pool() else {
         return crate::hash_serial(input, key, flags);
     };
-    let (pieces, mut cvs) = tree_cvs(pool, input, key, 0, flags);
-    merge_root(&pieces, &mut cvs, key, flags)
+    tree_cvs(pool, input, key, 0, flags, |pieces, cvs| merge_root(pieces, cvs, key, flags))
 }
 
 /// The pool, this caller counted until the guard drops; or None with no
@@ -258,18 +257,74 @@ fn spare_pool() -> Option<(&'static Pool, Caller<'static>)> {
     (callers < pool.threads).then_some((pool, caller))
 }
 
+/// A call's cut and the chaining values its pieces produce, on the
+/// calling thread, kept between calls: a job's pieces are read, and its
+/// chaining values written, by the workers while the call runs, and the
+/// call returns only once every piece is done, so the storage outlives
+/// every access. The first call on a thread, or the first longer than
+/// the storage holds, grows it; calls after that allocate nothing (#325:
+/// repeated work after preparation allocates nothing).
+/// [`initialize`] prepares the initializing thread's for
+/// [`PREPARED_PIECES`] pieces. One call runs at a time on a thread, so a
+/// second borrow is a bug and stops (RefCell).
+struct Scratch {
+    pieces: Vec<Piece>,
+    cvs: Vec<ChainingValue>,
+}
+
+/// The pieces a thread's scratch holds after [`initialize`]: a 64 MiB
+/// input cut into [`MAX_PIECE_LEN`] pieces, and the shorter tail pieces
+/// and prefix beside them (48 KiB of storage: a piece is 16 bytes, a
+/// chaining value 32).
+const PREPARED_PIECES: usize = 1024;
+
+std::thread_local! {
+    static SCRATCH: core::cell::RefCell<Scratch> = const { core::cell::RefCell::new(Scratch { pieces: Vec::new(), cvs: Vec::new() }) };
+}
+
+/// This thread's storage for its pool calls, made now: its scratch for
+/// [`PREPARED_PIECES`] pieces and its job source (`sources::job_source`,
+/// 640 bytes). After this, its calls on inputs the scratch holds allocate
+/// nothing.
+pub(crate) fn prepare_thread() {
+    SCRATCH.with(|s| {
+        let mut s = s.borrow_mut();
+        s.pieces.reserve(PREPARED_PIECES);
+        s.cvs.reserve(PREPARED_PIECES);
+    });
+    sources::job_source();
+}
+
+/// `cut` fills this thread's scratch with a job's pieces; `job` runs with
+/// what `cut` returned, the pieces, and as many chaining values, zeroed.
+fn with_scratch<C, T>(cut: impl FnOnce(&mut Vec<Piece>) -> C, job: impl FnOnce(C, &[Piece], &mut [ChainingValue]) -> T) -> T {
+    SCRATCH.with(|s| {
+        let mut s = s.try_borrow_mut().expect("one pool call at a time on a thread");
+        let Scratch { pieces, cvs } = &mut *s;
+        pieces.clear();
+        let c = cut(pieces);
+        cvs.clear();
+        cvs.resize(pieces.len(), ChainingValue::default());
+        job(c, pieces, cvs)
+    })
+}
+
 /// The subtree pieces of `input` at chunk `counter` and their chaining
 /// values, hashed over the pool (the SME2 thread's prefix first, where it
-/// takes one).
-fn tree_cvs(pool: &Pool, input: &[u8], key: &crate::CVWords, counter: u64, flags: u8) -> (Vec<Piece>, Vec<ChainingValue>) {
+/// takes one), handed to `merge`.
+fn tree_cvs<T>(pool: &Pool, input: &[u8], key: &crate::CVWords, counter: u64, flags: u8, merge: impl FnOnce(&[Piece], &mut [ChainingValue]) -> T) -> T {
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
     let threads = tree_threads(input.len(), pool.threads, turn.platform().simd_degree());
-    let (pieces, own) = cut_with_prefix(input.len(), threads, prefix_for(&turn, input.len(), threads));
-    let mut cvs = vec![ChainingValue::default(); pieces.len()];
-    let work = Work::Tree { input, pieces: &pieces, cvs: cvs.as_mut_ptr(), key: *key, counter, flags };
-    pool.run_job(work, pieces.len(), own, turn.platform());
-    drop(turn);
-    (pieces, cvs)
+    let prefix = prefix_for(&turn, input.len(), threads);
+    with_scratch(
+        |pieces| cut_with_prefix(pieces, input.len(), threads, prefix),
+        |own, pieces, cvs| {
+            let work = Work::Tree { input, pieces, cvs: cvs.as_mut_ptr(), key: *key, counter, flags };
+            pool.run_job(work, pieces.len(), own, turn.platform());
+            drop(turn);
+            merge(pieces, cvs)
+        },
+    )
 }
 
 /// The two child chaining values of the subtree `input` at chunk
@@ -282,12 +337,13 @@ pub(crate) fn subtree_children(input: &[u8], key: &crate::CVWords, counter: u64,
     assert!(input.len().is_power_of_two() && input.len() >= MIN_SPLIT_LEN, "a whole subtree of at least MIN_SPLIT_LEN bytes");
     assert_eq!(counter % (input.len() / CHUNK_LEN) as u64, 0, "a subtree starts at a multiple of its chunk count");
     let Some((pool, _caller)) = spare_pool() else { return crate::compress_subtree_to_parent_node(input, 0, key, counter, flags, pool_platform()) };
-    let (pieces, mut cvs) = tree_cvs(pool, input, key, counter, flags);
-    merge_to_children(&pieces, &mut cvs, key, flags);
-    let mut children = [0u8; 2 * crate::OUT_LEN];
-    children[..crate::OUT_LEN].copy_from_slice(&cvs[0]);
-    children[crate::OUT_LEN..].copy_from_slice(&cvs[1]);
-    children
+    tree_cvs(pool, input, key, counter, flags, |pieces, cvs| {
+        merge_to_children(pieces, cvs, key, flags);
+        let mut children = [0u8; 2 * crate::OUT_LEN];
+        children[..crate::OUT_LEN].copy_from_slice(&cvs[0]);
+        children[crate::OUT_LEN..].copy_from_slice(&cvs[1]);
+        children
+    })
 }
 
 /// [`crate::hash_many`] over the machine's threads: below MIN_SPLIT_LEN
@@ -308,53 +364,69 @@ fn hash_many_over_pool(input: &[u8], message_len: usize, slot: usize, key: &crat
     let Some((pool, _caller)) = spare_pool() else {
         return crate::hash_many_serial(input, message_len, slot, key, flags, outputs);
     };
-    let pieces = cut_messages(outputs.len(), slot, pool.threads);
-    let work = Work::Messages { input, message_len, slot, key: *key, flags, pieces: &pieces, outputs: outputs.as_mut_ptr() };
-    pool.run_job(work, pieces.len(), 0, pool_platform());
+    let count = outputs.len();
+    with_scratch(
+        |pieces| cut_messages(pieces, count, slot, pool.threads),
+        |(), pieces, _| {
+            let work = Work::Messages { input, message_len, slot, key: *key, flags, pieces, outputs: outputs.as_mut_ptr() };
+            pool.run_job(work, pieces.len(), 0, pool_platform());
+        },
+    )
 }
 
-/// [`crate::hash_each_multithreaded_with`]'s pool job: `items`, every one
-/// under MIN_SPLIT_LEN, cut into ranges of about [`next_piece_len`] of the
-/// bytes that remain.
-pub(crate) fn hash_each(key: &crate::CVWords, flags: u8, items: &[&[u8]], out: &mut [[u8; crate::OUT_LEN]]) {
-    assert!(items.iter().all(|i| i.len() < MIN_SPLIT_LEN), "items under MIN_SPLIT_LEN");
+/// [`crate::each::hash_each_multithreaded`]'s pool job: the items under
+/// MIN_SPLIT_LEN, cut into ranges of about [`next_piece_len`] of the
+/// bytes that remain, each range hashed by one thread. An item of
+/// MIN_SPLIT_LEN or more is set aside here (its digest zero, a stand-in)
+/// and hashed by the caller over the whole pool after.
+pub(crate) fn hash_each(key: &crate::CVWords, flags: u8, items: &[(&[crate::throughput::Block], usize)], out: &mut [[u8; crate::OUT_LEN]]) {
     let Some((pool, _caller)) = spare_pool() else {
         let platform = Platform::detect();
-        return crate::each::hash_each_on(key, flags, items, out, platform, |item| crate::hash_serial_on(item, key, flags, platform));
+        return crate::each::hash_each_on(key, flags, items, out, platform, |item| hash_small_on(item, key, flags, platform));
     };
-    let pieces = cut_items(items, pool.threads);
-    let work = Work::Each { items, key: *key, flags, pieces: &pieces, outputs: out.as_mut_ptr() };
-    pool.run_job(work, pieces.len(), 0, pool_platform());
+    with_scratch(
+        |pieces| cut_items(pieces, items, pool.threads),
+        |(), pieces, _| {
+            let work = Work::Each { items, key: *key, flags, pieces, outputs: out.as_mut_ptr() };
+            pool.run_job(work, pieces.len(), 0, pool_platform());
+        },
+    )
+}
+
+/// An item hashed alone on `platform` within a collection's range: a
+/// stand-in, zero, for one of MIN_SPLIT_LEN or more, which the caller
+/// hashes over the pool after.
+fn hash_small_on(item: &[u8], key: &crate::CVWords, flags: u8, platform: Platform) -> Hash {
+    if item.len() >= MIN_SPLIT_LEN { Hash::from_bytes([0; crate::OUT_LEN]) } else { crate::hash_serial_on(item, key, flags, platform) }
 }
 
 /// Cut `items` into consecutive ranges for `threads` threads, in order:
 /// each range takes items until it holds [`next_piece_len`] of the bytes
 /// that remain (one item at least, however long), so ranges shrink toward
-/// the end as subtree pieces do.
-fn cut_items(items: &[&[u8]], threads: usize) -> Vec<Piece> {
-    let mut remaining: usize = items.iter().map(|i| i.len()).sum();
-    let mut pieces = Vec::with_capacity(64);
+/// the end as subtree pieces do. An item of MIN_SPLIT_LEN or more weighs
+/// nothing here: it is hashed after, over the pool.
+fn cut_items(pieces: &mut Vec<Piece>, items: &[impl crate::each::Item], threads: usize) {
+    let weight = |i: &dyn crate::each::Item| if i.bytes().len() >= MIN_SPLIT_LEN { 0 } else { i.bytes().len() };
+    let mut remaining: usize = items.iter().map(|i| weight(i)).sum();
     let mut start = 0;
     while start < items.len() {
         let want = next_piece_len(remaining, threads);
         let (mut end, mut bytes) = (start, 0);
         while end < items.len() && (bytes < want || end == start) {
-            bytes += items[end].len();
+            bytes += weight(&items[end]);
             end += 1;
         }
         remaining -= bytes;
         pieces.push(Piece { offset: start, len: end - start });
         start = end;
     }
-    pieces
 }
 
 /// Cut `count` messages in slots of `message_len` bytes into ranges for `threads`
 /// threads, in order: each range holds about [`next_piece_len`] of the
 /// bytes that remain, at least one message, so ranges shrink toward the
 /// end as subtree pieces do.
-fn cut_messages(count: usize, message_len: usize, threads: usize) -> Vec<Piece> {
-    let mut pieces = Vec::with_capacity(64);
+fn cut_messages(pieces: &mut Vec<Piece>, count: usize, message_len: usize, threads: usize) {
     let mut start = 0;
     while start < count {
         let remaining = (count - start) * message_len.max(1);
@@ -362,7 +434,6 @@ fn cut_messages(count: usize, message_len: usize, threads: usize) -> Vec<Piece> 
         pieces.push(Piece { offset: start, len: take });
         start += take;
     }
-    pieces
 }
 
 /// Ends the process if dropped: held while a job is published, or while a
@@ -415,7 +486,7 @@ enum Work<'a> {
     Messages { input: &'a [u8], message_len: usize, slot: usize, key: crate::CVWords, flags: u8, pieces: &'a [Piece], outputs: *mut [u8; crate::OUT_LEN] },
     /// Ranges of a collection's items (`offset` and `len` count items),
     /// each under MIN_SPLIT_LEN; one digest each.
-    Each { items: &'a [&'a [u8]], key: crate::CVWords, flags: u8, pieces: &'a [Piece], outputs: *mut [u8; crate::OUT_LEN] },
+    Each { items: &'a [(&'a [crate::throughput::Block], usize)], key: crate::CVWords, flags: u8, pieces: &'a [Piece], outputs: *mut [u8; crate::OUT_LEN] },
 }
 
 /// Any value on a cache line of its own.
@@ -453,7 +524,7 @@ impl Job<'_> {
                 // Sound: this range of outputs belongs to piece `index` alone.
                 let digests = unsafe { core::slice::from_raw_parts_mut(outputs.add(piece.offset), piece.len) };
                 let range = &items[piece.offset..][..piece.len];
-                crate::each::hash_each_on(key, *flags, range, digests, platform, |item| crate::hash_serial_on(item, key, *flags, platform));
+                crate::each::hash_each_on(key, *flags, range, digests, platform, |item| hash_small_on(item, key, *flags, platform));
             }
         }
     }
@@ -486,15 +557,14 @@ struct Piece {
 /// after it. A piece's length never exceeds the one before it (the
 /// prefix's last piece is at least the first after it, and a share only
 /// falls as the input shrinks) and every piece starts at a multiple of
-/// its own length, so each is a whole subtree at its offset. Returns the pieces and how many form the prefix
+/// its own length, so each is a whole subtree at its offset. Fills `pieces` and returns how many form the prefix
 /// (none when `prefix` rounds to nothing). `prefix` is below `len`; `len`
 /// exceeds [`MIN_PIECE_LEN`] and at least two threads share it, so two or
 /// more pieces come back.
-fn cut_with_prefix(len: usize, threads: usize, prefix: usize) -> (Vec<Piece>, usize) {
+fn cut_with_prefix(pieces: &mut Vec<Piece>, len: usize, threads: usize, prefix: usize) -> usize {
     assert!(threads >= 2, "a serial call hashes the input whole");
     assert!(len > MIN_PIECE_LEN, "one piece has no parent to merge; hash it whole instead");
     assert!(prefix < len, "the SME2 thread's prefix leaves the pool some input");
-    let mut pieces = Vec::with_capacity(64);
     let mut offset = 0;
     let first_after = next_piece_len(len - prefix, threads);
     let prefix = prefix / first_after * first_after;
@@ -515,7 +585,7 @@ fn cut_with_prefix(len: usize, threads: usize, prefix: usize) -> (Vec<Piece>, us
         offset += piece;
     }
     pieces.push(Piece { offset, len: len - offset });
-    (pieces, own)
+    own
 }
 
 /// The SME2 thread's prefix for a call holding `turn`: [`sme2_prefix`]
@@ -604,7 +674,27 @@ fn merge_to_children(pieces: &[Piece], cvs: &mut [ChainingValue], key: &crate::C
 /// [`cut_with_prefix`] with no prefix (the tests').
 #[cfg(test)]
 fn cut_subtrees(len: usize, threads: usize) -> Vec<Piece> {
-    cut_with_prefix(len, threads, 0).0
+    cut_with_prefix_vec(len, threads, 0).0
+}
+
+/// The cuts as values (the tests').
+#[cfg(test)]
+fn cut_with_prefix_vec(len: usize, threads: usize, prefix: usize) -> (Vec<Piece>, usize) {
+    let mut pieces = Vec::new();
+    let own = cut_with_prefix(&mut pieces, len, threads, prefix);
+    (pieces, own)
+}
+#[cfg(test)]
+fn cut_messages_vec(count: usize, message_len: usize, threads: usize) -> Vec<Piece> {
+    let mut pieces = Vec::new();
+    cut_messages(&mut pieces, count, message_len, threads);
+    pieces
+}
+#[cfg(test)]
+fn cut_items_vec(items: &[&[u8]], threads: usize) -> Vec<Piece> {
+    let mut pieces = Vec::new();
+    cut_items(&mut pieces, items, threads);
+    pieces
 }
 
 /// The chaining value of the subtree covering `pieces` (in offset order,
@@ -1987,24 +2077,24 @@ mod test {
         // 1000 messages of 64 B over 16 threads: 64000 B / 16 = 4000 B,
         // below 8 KiB, so every piece wants 8 KiB = 128 messages; 7 of
         // them take 896, and the 104 left are one piece.
-        assert_eq!(cut_messages(1000, 64, 16), tiling(&[(7, 128), (1, 104)]));
+        assert_eq!(cut_messages_vec(1000, 64, 16), tiling(&[(7, 128), (1, 104)]));
         // 16 messages in 4 KiB slots over 2 threads: 64 KiB / 2 = 32 KiB
         // = 8 messages; then 32 KiB / 2 = 16 KiB = 4; then 16 KiB / 2 = 8
         // KiB = 2; then 8 KiB / 2 = 4 KiB, raised to 8 KiB = 2.
-        assert_eq!(cut_messages(16, 4 * K, 2), tiling(&[(1, 8), (1, 4), (2, 2)]));
+        assert_eq!(cut_messages_vec(16, 4 * K, 2), tiling(&[(1, 8), (1, 4), (2, 2)]));
         // 3 messages in 100000 B slots over 4 threads: 300000 / 4 = 75000
         // rounds down to 65536, under one message, so one message a piece.
-        assert_eq!(cut_messages(3, 100_000, 4), tiling(&[(3, 1)]));
+        assert_eq!(cut_messages_vec(3, 100_000, 4), tiling(&[(3, 1)]));
         // Empty messages take a slot of one byte: 5 B / 16 raised to 8 KiB
         // = 8192 messages, all five in one piece.
-        assert_eq!(cut_messages(5, 0, 16), tiling(&[(1, 5)]));
+        assert_eq!(cut_messages_vec(5, 0, 16), tiling(&[(1, 5)]));
         // 262144 messages of 64 B over 20 threads: 16 MiB / 20 = 838 KiB,
         // capped at 128 KiB = 2048 messages, while a share is 128 KiB or
         // more, so down to 2560 KiB left: 109 pieces (108 take 13824 KiB;
         // 2560 / 20 = 128 KiB is one more); then 2432 KiB / 20 = 121 KiB
         // rounds to 64 KiB = 1024 messages; ...; the last pieces at 8 KiB
         // = 128 messages, until none is left.
-        let cut = cut_messages(262_144, 64, 20);
+        let cut = cut_messages_vec(262_144, 64, 20);
         assert_eq!(cut[0], Piece { offset: 0, len: 2048 });
         assert_eq!(cut[108], Piece { offset: 108 * 2048, len: 2048 });
         assert_eq!(cut[109], Piece { offset: 109 * 2048, len: 1024 });
@@ -2022,11 +2112,11 @@ mod test {
         const K: usize = 1024;
         // 24 KiB over 2 threads: 12 KiB a share rounds to 8 KiB; three
         // pieces, the last the 8 KiB left.
-        assert_eq!(cut_with_prefix(24 * K, 2, 0), (tiling(&[(3, 8 * K)]), 0));
+        assert_eq!(cut_with_prefix_vec(24 * K, 2, 0), (tiling(&[(3, 8 * K)]), 0));
         // 1 MiB over 2 threads: 512 KiB a share, capped at 128 KiB, seven
         // times (896 KiB); 128 KiB left: 64 KiB; then 32, 16, 8; 8 KiB
         // left is the last piece.
-        assert_eq!(cut_with_prefix(1 << 20, 2, 0), (tiling(&[(7, 128 * K), (1, 64 * K), (1, 32 * K), (1, 16 * K), (2, 8 * K)]), 0));
+        assert_eq!(cut_with_prefix_vec(1 << 20, 2, 0), (tiling(&[(7, 128 * K), (1, 64 * K), (1, 32 * K), (1, 16 * K), (2, 8 * K)]), 0));
         // 4 MiB over 4 threads with the SME2 share: sme2_prefix(4 MiB, 4) =
         // 4194304 / 281 * 100 = 1492600 B. The first piece after it would
         // be 128 KiB (2701704 / 4 = 675426, capped), so the prefix rounds
@@ -2039,7 +2129,7 @@ mod test {
         let prefix = sme2_prefix(4 << 20, 4);
         assert_eq!(prefix, 1_492_600);
         assert_eq!(
-            cut_with_prefix(4 << 20, 4, prefix),
+            cut_with_prefix_vec(4 << 20, 4, prefix),
             (tiling(&[(1, 1024 * K), (1, 256 * K), (1, 128 * K), (18, 128 * K), (3, 64 * K), (3, 32 * K), (3, 16 * K), (6, 8 * K)]), 3)
         );
         // 2 MiB over 16 threads with the SME2 share, 207800 B: the first
@@ -2050,7 +2140,7 @@ mod test {
         // 16 KiB x15 (to 240 KiB), 8 KiB x29 (to 8 KiB), and the 8 KiB left.
         let prefix = sme2_prefix(2 << 20, 16);
         assert_eq!(prefix, 207_800);
-        assert_eq!(cut_with_prefix(2 << 20, 16, prefix), (tiling(&[(1, 128 * K), (1, 64 * K), (14, 64 * K), (15, 32 * K), (15, 16 * K), (30, 8 * K)]), 2));
+        assert_eq!(cut_with_prefix_vec(2 << 20, 16, prefix), (tiling(&[(1, 128 * K), (1, 64 * K), (14, 64 * K), (15, 32 * K), (15, 16 * K), (30, 8 * K)]), 2));
     }
 
     /// The SME2 thread's share, exactly: len / (100 + (threads - 1) *
@@ -2080,30 +2170,30 @@ mod test {
         // two items; 20000 left, two; 10000 left, 5000 raised to 8192, two.
         let tens: Vec<Vec<u8>> = (0..10).map(|_| item(5000)).collect();
         let refs: Vec<&[u8]> = tens.iter().map(|v| v.as_slice()).collect();
-        assert_eq!(cut_items(&refs, 2), tiling(&[(1, 4), (3, 2)]));
+        assert_eq!(cut_items_vec(&refs, 2), tiling(&[(1, 4), (3, 2)]));
         // One long item then a short one, over 16 threads: 100010 / 16 =
         // 6250 raised to 8192; the first item alone fills its range, the
         // second is one of its own.
         let (long, short) = (item(100_000), item(10));
-        assert_eq!(cut_items(&[&long, &short], 16), tiling(&[(2, 1)]));
+        assert_eq!(cut_items_vec(&[&long, &short], 16), tiling(&[(2, 1)]));
         // Items of 3000 B, 7 of them, over 3 threads: 21000 / 3 = 7000
         // raised to 8192: three items (9000 B); 12000 left, 4000 raised to
         // 8192: three items; 3000 left: one.
         let sevens: Vec<Vec<u8>> = (0..7).map(|_| item(3000)).collect();
         let refs: Vec<&[u8]> = sevens.iter().map(|v| v.as_slice()).collect();
-        assert_eq!(cut_items(&refs, 3), tiling(&[(2, 3), (1, 1)]));
+        assert_eq!(cut_items_vec(&refs, 3), tiling(&[(2, 3), (1, 1)]));
         // Six items of 4 KiB over 2 threads: 24 KiB / 2 = 12 KiB rounds to
         // 8 KiB, which two items fill exactly, so each range is two (a
         // range stops once it holds its share, never one item past it).
         let sixes: Vec<Vec<u8>> = (0..6).map(|_| item(4096)).collect();
         let refs: Vec<&[u8]> = sixes.iter().map(|v| v.as_slice()).collect();
-        assert_eq!(cut_items(&refs, 2), tiling(&[(3, 2)]));
+        assert_eq!(cut_items_vec(&refs, 2), tiling(&[(3, 2)]));
         // Sixteen items of 8 KiB over 2 threads: shares of 64, 32, 16 KiB,
         // then 8 KiB twice: ranges of 8, 4, 2, 1 and 1 items.
         let eights: Vec<Vec<u8>> = (0..16).map(|_| item(8192)).collect();
         let refs: Vec<&[u8]> = eights.iter().map(|v| v.as_slice()).collect();
-        assert_eq!(cut_items(&refs, 2), tiling(&[(1, 8), (1, 4), (1, 2), (2, 1)]));
-        assert_eq!(cut_items(&[], 4), Vec::<Piece>::new());
+        assert_eq!(cut_items_vec(&refs, 2), tiling(&[(1, 8), (1, 4), (1, 2), (2, 1)]));
+        assert_eq!(cut_items_vec(&[], 4), Vec::<Piece>::new());
     }
 
     /// Where the pool begins (BLAKE3 #219: a threshold between two correct
@@ -2399,7 +2489,7 @@ mod test {
         // Eight messages in slots of 64 KiB: a share of 512 KiB / threads
         // is under a message, so a message a piece, eight pieces, seven to
         // wake for.
-        assert_eq!(cut_messages(8, 64 * 1024, pool.threads).len(), 8);
+        assert_eq!(cut_messages_vec(8, 64 * 1024, pool.threads).len(), 8);
         hash_many(&input[..512 * 1024], 64 * 1024, 64 * 1024, crate::IV, 0, &mut out[..8]);
         assert_eq!(wanted(), Some(7), "eight pieces: seven workers");
         // A 1 MiB tree: dozens of pieces, so every other thread of the
@@ -2412,7 +2502,7 @@ mod test {
         // directly: the calls cut a tree into more pieces than any pool
         // has threads) asks for two, or its budget: one on x86-64 Linux's
         // wide kernel, whose 24 KiB tree is two threads' (tree_threads).
-        let (pieces, own) = cut_with_prefix(24 * 1024, 2, 0);
+        let (pieces, own) = cut_with_prefix_vec(24 * 1024, 2, 0);
         assert_eq!((pieces.len(), own), (3, 0));
         let mut cvs = std::vec![ChainingValue::default(); 3];
         let work = Work::Tree { input: &input[..24 * 1024], pieces: &pieces, cvs: cvs.as_mut_ptr(), key: *crate::IV, counter: 0, flags: 0 };
@@ -2437,7 +2527,7 @@ mod test {
         for len in [MIN_PIECE_LEN + 1, 64 * CHUNK_LEN, 100 * CHUNK_LEN + 7, 1 << 20, 3 << 20, input.len()] {
             for threads in [2, 3, 4, 16] {
                 let prefix = sme2_prefix(len, threads);
-                let (pieces, own) = cut_with_prefix(len, threads, prefix);
+                let (pieces, own) = cut_with_prefix_vec(len, threads, prefix);
                 assert!(pieces.len() >= 2 && own < pieces.len());
                 assert!(pieces[..own].iter().map(|p| p.len).sum::<usize>() <= prefix);
                 let mut offset = 0;
@@ -2558,7 +2648,7 @@ mod test {
     fn test_cut_messages_shapes() {
         for message_len in [crate::BLOCK_LEN, 256, 3 * CHUNK_LEN + 5] {
             let count = 40 * MIN_SPLIT_LEN / message_len;
-            let pieces = cut_messages(count, message_len, 16);
+            let pieces = cut_messages_vec(count, message_len, 16);
             assert!(pieces.len() >= 16, "{} ranges of {message_len}-byte messages", pieces.len());
             assert_eq!(pieces[0].offset, 0);
             assert!(pieces.windows(2).all(|w| w[0].offset + w[0].len == w[1].offset && w[0].len >= w[1].len));
@@ -2566,7 +2656,7 @@ mod test {
             let bytes = |p: &Piece| p.len * message_len;
             assert!(pieces[..pieces.len() - 1].iter().all(|p| bytes(p) <= MAX_PIECE_LEN && bytes(p) >= MIN_PIECE_LEN / 2));
         }
-        assert_eq!(cut_messages(100, crate::BLOCK_LEN, 16).len(), 1);
+        assert_eq!(cut_messages_vec(100, crate::BLOCK_LEN, 16).len(), 1);
     }
 
     /// The pool gives the single-threaded digests, for one-block
