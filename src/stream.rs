@@ -83,6 +83,13 @@ const ENTRIES: usize = 1024;
 /// open task's entry handed back while the first piece of a long message
 /// was still claimed and uncopied, and the next piece took its slot (test
 /// a_publication_never_meets_a_claimed_uncopied_task).
+///
+/// HELD bounds the GPU's duplicates cumulatively, not only at an instant:
+/// a reclaim runs only in `finish`, `finish` commits no new GPU work, and
+/// `finish` cannot return while X's entry is out. So while X is uncopied
+/// the GPU gives back at most the HELD pieces its commands then hold. A
+/// change that feeds the GPU or reclaims anywhere else changes this
+/// bound.
 const TASK_SLOTS: usize = task_slots();
 
 /// TASK_SLOTS' count (a function, so that a mutation test names its rule).

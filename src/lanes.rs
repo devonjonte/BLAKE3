@@ -901,8 +901,10 @@ pub(crate) mod sources {
 
     struct TaskSlot {
         task: UnsafeCell<MaybeUninit<Task>>,
-        /// Whether a worker has claimed this slot's task and not yet copied
-        /// it: the contract's check, in tests and debug builds alone.
+        /// Whether the slot holds a published task not yet copied out (by
+        /// its claimer's copy, or the GPU's callback): set as the task is
+        /// published, cleared after the copy. The contract's check, in
+        /// tests and debug builds alone; release builds carry none.
         #[cfg(any(test, debug_assertions))]
         uncopied: core::sync::atomic::AtomicBool,
     }
@@ -931,11 +933,14 @@ pub(crate) mod sources {
     }
 
     // Sound: publication's Release/Acquire makes a task visible to the
-    // one worker whose CAS claims it. That worker copies the task before
-    // releasing the slot's next publication number; the producer acquires
-    // that number before writing the slot again. The GPU borrows its
-    // claimed slots on the producer's thread and releases them afterward.
-    // `owner` is behind its lock; the rest is atomics.
+    // one worker whose CAS claims it, and that worker alone reads the slot.
+    // The stream writes a slot again only after its last task was copied
+    // out: `publish`'s contract, which a stream keeps by the length of its
+    // ring (TASK_SLOTS: a slot is reused only after its task completed,
+    // after its copy; BLAKE3 #303), checked in tests and debug builds. The
+    // GPU reads its claimed slots on the stream's own thread, inside
+    // `take_run`'s callback. `owner` is behind its lock; the rest is
+    // atomics.
     unsafe impl Sync for Source {}
     unsafe impl Send for Source {}
 
@@ -994,7 +999,7 @@ pub(crate) mod sources {
             assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
             let slot = &self.ring[p % self.ring.len()];
             #[cfg(any(test, debug_assertions))]
-            if slot.uncopied.load(Ordering::SeqCst) {
+            if slot.uncopied.swap(true, Ordering::SeqCst) {
                 #[cfg(test)]
                 COPY_WAITS.fetch_add(1, Ordering::SeqCst);
                 panic!("a publication met a task claimed and not yet copied: the stream's ring is too short (BLAKE3 #303)");
@@ -1057,8 +1062,6 @@ pub(crate) mod sources {
                     Ok(_) if self.ring.is_empty() => return Some(Item::Pieces(self.job.load(Ordering::Relaxed), c - self.base.load(Ordering::Relaxed), n)),
                     Ok(_) => {
                         let slot = &self.ring[c % self.ring.len()];
-                        #[cfg(any(test, debug_assertions))]
-                        slot.uncopied.store(true, Ordering::SeqCst);
                         claimed();
                         // Sound: this worker claimed the task after its
                         // publication; the stream writes the slot again only
@@ -1101,6 +1104,10 @@ pub(crate) mod sources {
             // Sound: this thread alone took slots c..c + n, written before
             // `published` passed them.
             f(&mut (c..c + n).map(|i| unsafe { (*self.ring[i % self.ring.len()].task.get()).assume_init_ref() }));
+            #[cfg(any(test, debug_assertions))]
+            for i in c..c + n {
+                self.ring[i % self.ring.len()].uncopied.store(false, Ordering::SeqCst);
+            }
             true
         }
 
@@ -1382,6 +1389,8 @@ pub(crate) mod sources {
             for i in 0..8 {
                 // Sound: no worker sees an unregistered source.
                 unsafe { (*source.ring[i].task.get()).write(Task::of(&[], i as u64)) };
+                // As `publish` marks a slot it fills.
+                source.ring[i].uncopied.store(true, Ordering::SeqCst);
             }
             let counters = |from: usize, to: usize, n: usize| {
                 let mut seen = std::vec::Vec::new();
@@ -1397,6 +1406,7 @@ pub(crate) mod sources {
             assert_eq!(counters(0, 8, 3), Some(std::vec![2, 3, 4]));
             assert_eq!(counters(0, 8, 3), Some(std::vec![5, 6, 7]), "the last three, the run's end");
             assert_eq!(counters(0, 8, 1), None, "nothing waits");
+            assert!(source.ring.iter().all(|slot| !slot.uncopied.load(Ordering::SeqCst)), "the GPU's callback releases every slot it read");
         }
 
         /// A publication into a slot whose task a worker has claimed and
