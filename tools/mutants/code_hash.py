@@ -62,8 +62,10 @@ def code_hash(path, b3sum):
 def verdict(state):
     """The build's verdict, for test-runner, which holds the state's lock:
     "baseline" for the shard's first build (whose hashes it records),
-    "same" when every listed binary hashes as that build's, else
-    "differs". The library's own test binary first: most mutants change
+    "same" when some file metadata changed but every listed binary hashes
+    as that build's, else "differs". All-original metadata keeps "baseline"
+    so that unmutated tests still run. Metadata alone never proves "same".
+    The library's own test binary first: most mutants change
     it, so most builds cost one hash."""
     binaries = sorted(f[:-5] for f in os.listdir(state) if f.endswith(".path"))
     binaries.sort(key=lambda name: not name.startswith("blake3_servil-"))
@@ -73,14 +75,20 @@ def verdict(state):
             path = open(os.path.join(state, name + ".path")).read().strip()
             open(os.path.join(state, name + ".base"), "w").write(open(os.path.join(state, name + ".stat")).read().strip() + " " + code_hash(path, os.environ["MUTANTS_B3SUM"]) + "\n")
         return "baseline"
+    changed = False
     for name in binaries:
-        stat = open(os.path.join(state, name + ".stat")).read().strip()
-        base_stat, _, base_hash = open(os.path.join(state, name + ".base")).read().strip().rpartition(" ")
-        if stat == base_stat:
-            return "baseline"  # not relinked: the baseline's own file
-        if code_hash(open(os.path.join(state, name + ".path")).read().strip(), os.environ["MUTANTS_B3SUM"]) != base_hash:
+        with open(os.path.join(state, name + ".stat")) as f:
+            stat = f.read().strip()
+        with open(os.path.join(state, name + ".base")) as f:
+            base_stat, _, base_hash = f.read().strip().rpartition(" ")
+        changed |= stat != base_stat
+        # One unchanged binary says nothing about the others. Hash even
+        # that binary before allowing an identical relink to skip tests.
+        with open(os.path.join(state, name + ".path")) as f:
+            path = f.read().strip()
+        if code_hash(path, os.environ["MUTANTS_B3SUM"]) != base_hash:
             return "differs"
-    return "same"
+    return "same" if changed else "baseline"
 
 
 if __name__ == "__main__":
