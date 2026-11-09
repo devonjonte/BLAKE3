@@ -1655,6 +1655,7 @@ pub(crate) mod sources {
             assert_eq!(counters(0, 8, 3), Some(std::vec![2, 3, 4]));
             assert_eq!(counters(0, 8, 3), Some(std::vec![5, 6, 7]), "the last three, the run's end");
             assert_eq!(counters(0, 8, 1), None, "nothing waits");
+            assert!(source.places.iter().all(|place| !place.uncopied.load(Ordering::SeqCst)), "the GPU's callback counts every place it read as copied");
         }
 
         /// Unregistering one source leaves the others registered: its bit
