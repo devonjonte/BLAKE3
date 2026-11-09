@@ -39,6 +39,38 @@ class ShardOwner(unittest.TestCase):
             self.assertEqual((tree / "input.rs").read_text(), "foreign tracked edit\n")
             self.assertEqual(marker.read_text(), "keep my work\n")
 
+    def test_a_shard_whose_clone_was_deleted_is_replaced(self):
+        """A runner's fresh clone, deleted after its run, leaves its shards in a shared TMPDIR:
+        checkouts of nothing, which the next clone's run replaces with its own."""
+        import shutil
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            repo, gone, trees = home / "repo", home / "gone", home / "trees"
+            repo.mkdir()
+            trees.mkdir()
+
+            def git(where, *args):
+                return subprocess.run(["git", "-C", str(where), *args], check=True, capture_output=True, text=True)
+
+            git(repo, "init", "-q")
+            git(repo, "config", "user.name", "Mutation fixture")
+            git(repo, "config", "user.email", "mutants@example.invalid")
+            git(repo, "config", "commit.gpgsign", "false")
+            (repo / "input.rs").write_text("original\n")
+            git(repo, "add", "input.rs")
+            git(repo, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "fixture")
+            git(repo, "clone", "-q", str(repo), str(gone))
+            tree = trees / "run-0"
+            git(gone, "worktree", "add", "-q", "--detach", str(tree), "HEAD")
+            (tree / "left-behind.txt").write_text("the deleted clone's\n")
+            shutil.rmtree(gone)
+            with patch.object(check, "ROOT", str(repo)), patch.object(check, "WORKTREES", str(trees)):
+                self.assertEqual(check.shard_tree("run", 0), str(tree))
+            self.assertFalse((tree / "left-behind.txt").exists(), "a fresh worktree, not the orphan")
+            self.assertEqual(git(tree, "rev-parse", "HEAD").stdout, git(repo, "rev-parse", "HEAD").stdout)
+            self.assertIn(str(tree), git(repo, "worktree", "list").stdout, "this repository's worktree now")
+
+
 
 if __name__ == "__main__":
     unittest.main()

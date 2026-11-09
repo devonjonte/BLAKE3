@@ -375,13 +375,18 @@ def shard_tree(label, k):
     i7-12700K where one alone took 3.8 s, and a reused one 0.1 s (November
     9, BLAKE3 #257)."""
     tree = os.path.join(WORKTREES, f"{label}-{k}")
-    if os.path.exists(os.path.join(tree, ".git")):
+
+    def owner(path):
+        """The Git repository `path` is a checkout of (its common directory), or None where
+        Git finds none: a shard whose clone was deleted is a checkout of nothing."""
+        r = subprocess.run(["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"], capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    theirs = owner(tree) if os.path.exists(os.path.join(tree, ".git")) else None
+    if theirs is not None:
         # A shared TMPDIR can hold another clone's identically named shard.
         # Even if it has this HEAD, do not reset or clean somebody else's tree.
-        def owner(path):
-            return subprocess.run(["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                                  capture_output=True, text=True, check=True).stdout.strip()
-        if not os.path.samefile(owner(ROOT), owner(tree)):
+        if not os.path.samefile(owner(ROOT), theirs):
             raise RuntimeError(f"retained shard {tree} belongs to a different Git repository; "
                                "use a private TMPDIR or clean it through its owning checkout")
         # The checkout's HEAD (a worktree's own HEAD is the last run's).
