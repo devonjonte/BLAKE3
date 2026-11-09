@@ -89,15 +89,17 @@ import shutil
 import signal
 import subprocess
 import sys
+import platform
 import tempfile
 import time
 from pathlib import Path
+
+from exchange import Exchange
 
 FORK_URL = "https://github.com/servil-software-factory/BLAKE3.git"
 BENCH_URL = "https://github.com/servil-software-factory/bench-hashes.git"
 HOME = Path.home()
 CHECKOUTS = HOME / "checkouts"
-DONE_FILE = HOME / ".benchrunner_done"
 CARGO_BIN = HOME / ".cargo" / "bin"
 
 BENCHMARK_FLAGS = {"--all", "--quick", "--thorough"}
@@ -412,9 +414,7 @@ TOP = ["/usr/bin/top", "-l", "7200", "-s", "1", "-o", "cpu", "-n", "12", "-stats
 assert 7200 * 1 >= MAX_LIMIT
 
 
-def process(path, results):
-    out = results / f"{path.stem}.{time.strftime('%Y%m%d-%H%M%S')}"
-    out.mkdir()
+def process(path, out):
     print(f"runner: {path.name}: started, log in {out / 'runner.log'}", file=sys.stderr, flush=True)
     verdict = {"job": path.name, "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "power at start": power()}
     with open(out / "runner.log", "w") as log:
@@ -463,28 +463,30 @@ def process(path, results):
         verdict["status"] = f"power left mains during the job ({verdict['status']}): its results are no evidence of speed"
     (out / "verdict.json").write_text(json.dumps(verdict, indent=2) + "\n")
     print(f"runner: {path.name}: {verdict['status']} -> {out}", file=sys.stderr, flush=True)
+    return verdict["status"]
 
 
 def main():
-    assert len(sys.argv) == 2, "usage: runner.py EXCHANGE (the folder holding jobs/ and results/)"
-    exchange = Path(sys.argv[1])
-    jobs, results = exchange / "jobs", exchange / "results"
-    assert jobs.is_dir() and results.is_dir(), f"{exchange} must hold jobs/ and results/"
+    assert len(sys.argv) in (2, 3), "usage: runner.py EXCHANGE [MACHINE] (the folder, or Git clone, holding jobs/ and results/; the machine's name, default the host's)"
+    machine = sys.argv[2] if len(sys.argv) == 3 else platform.node().split(".")[0]
+    exchange = Exchange(sys.argv[1], machine)
     assert (CARGO_BIN / "cargo").exists(), f"no cargo at {CARGO_BIN}: install rustup for this account"
     (HOME / "tmp").mkdir(exist_ok=True)
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
     end_leftover_session()
-    done = set(DONE_FILE.read_text().split()) if DONE_FILE.exists() else set()
-    print(f"runner: watching {jobs}; Ctrl-C stops after the current job", file=sys.stderr, flush=True)
+    print(f"runner: {machine} watching {exchange.jobs}{' (shared through Git)' if exchange.shared else ''}; Ctrl-C stops after the current job", file=sys.stderr, flush=True)
     while not stopping:
-        pending = sorted(p for p in jobs.glob("*.json") if p.name not in done)
+        exchange.refresh()
+        pending = exchange.pending()
         if not pending:
-            time.sleep(2)
+            time.sleep(30 if exchange.shared else 2)
             continue
-        process(pending[0], results)
-        done.add(pending[0].name)
-        DONE_FILE.write_text("".join(f"{name}\n" for name in sorted(done)))
+        out = exchange.claim(pending[0])
+        if out is None:
+            continue
+        status = process(pending[0], out)
+        exchange.publish(out, f"{pending[0].stem}: {status} ({machine})")
 
 
 if __name__ == "__main__":

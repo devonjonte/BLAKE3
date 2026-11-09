@@ -4,6 +4,13 @@
 #
 #     sh ~/piplayground/blake3-servil/blake3-servil/tools/runner/setup-mac.sh
 #
+# On a dedicated machine, the exchange is the team's Git repository, and
+# the runner's toolchain is named, since the machine's own user has none:
+#
+#     EXCHANGE_REPO=git@github.com:servil-software-factory/mac-runner.git \
+#     RUNNER_TOOLCHAIN=nightly-2026-09-24 MACHINE=m6 \
+#     sh tools/runner/setup-mac.sh
+#
 # Safe to run again: steps already done are skipped, and runner.py is
 # copied afresh each time, so this is also how to start the runner after a
 # reviewed change to runner.py.
@@ -11,10 +18,17 @@ set -eu
 
 code=$(cd "$(dirname "$0")" && pwd)
 checkout=$(cd "$code/../.." && pwd)
-# The exchange folder, kept out of git by .git/info/exclude.
-runner=$checkout/runner
-grep -qx "/runner/" "$checkout/.git/info/exclude" || echo "/runner/" >> "$checkout/.git/info/exclude"
 installed=/Users/Shared/bench-runner
+shared=${EXCHANGE_REPO:-}
+machine=${MACHINE:-$(scutil --get ComputerName | tr -c 'A-Za-z0-9_-' '-' | sed 's/-*$//')}
+if [ -n "$shared" ]; then
+    # The runner's own clone of the shared exchange.
+    runner=/Users/benchrunner/exchange
+else
+    # The exchange folder in this checkout, kept out of git by .git/info/exclude.
+    runner=$checkout/runner
+    grep -qx "/runner/" "$checkout/.git/info/exclude" || echo "/runner/" >> "$checkout/.git/info/exclude"
+fi
 
 step() { printf '\n== %s\n' "$*"; }
 
@@ -35,11 +49,19 @@ step "benchrunner's Rust toolchain: the very compiler you use"
 # its rustc commit, so try the dates around it.
 br_rustup="sudo -u benchrunner -H /Users/benchrunner/.cargo/bin/rustup"
 br_rustc="sudo -u benchrunner -H /Users/benchrunner/.cargo/bin/rustc"
-want_hash=$(cd ~ && rustc -vV | sed -n 's/^commit-hash: //p')
-want_date=$(cd ~ && rustc -vV | sed -n 's/^commit-date: //p')
-echo "yours: $(cd ~ && rustc --version)"
 if ! sudo -u benchrunner -H test -x /Users/benchrunner/.cargo/bin/cargo; then
     sudo -u benchrunner -H sh -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none"
+fi
+if [ -n "${RUNNER_TOOLCHAIN:-}" ]; then
+    # A named nightly (a dedicated machine, whose user has no rustc).
+    $br_rustup toolchain list | grep -q "^$RUNNER_TOOLCHAIN" || $br_rustup toolchain install --profile minimal "$RUNNER_TOOLCHAIN"
+    $br_rustup default "$RUNNER_TOOLCHAIN"
+    $br_rustup toolchain list | grep -v "^$RUNNER_TOOLCHAIN" | cut -d' ' -f1 | while read -r other; do $br_rustup toolchain uninstall "$other"; done
+    want_hash=$($br_rustc -vV | sed -n 's/^commit-hash: //p')
+else
+    want_hash=$(cd ~ && rustc -vV | sed -n 's/^commit-hash: //p')
+    want_date=$(cd ~ && rustc -vV | sed -n 's/^commit-date: //p')
+    echo "yours: $(cd ~ && rustc --version)"
 fi
 if [ "$($br_rustc -vV 2>/dev/null | sed -n 's/^commit-hash: //p')" != "$want_hash" ]; then
     found=
@@ -66,29 +88,52 @@ if ! sudo -u benchrunner -H /Users/benchrunner/.cargo/bin/cargo mutants --versio
 fi
 echo "benchrunner's: $(sudo -u benchrunner -H /Users/benchrunner/.cargo/bin/cargo mutants --version)"
 
-step "the exchange folder: jobs/ yours, results/ the runner's"
-chmod 600 "$checkout/ghtokenclassic.txt"
-mkdir -p "$runner/jobs" "$runner/results"
-sudo chown benchrunner "$runner/results"
-# benchrunner passes through every folder from your home down to the checkout.
-dir=$checkout
-while :; do
-    ls -led "$dir" | grep -q "benchrunner allow search" || chmod +a "benchrunner allow search" "$dir"
-    [ "$dir" = "$HOME" ] || [ "$dir" = / ] && break
-    dir=$(dirname "$dir")
-done
-ls -le "$checkout/ghtokenclassic.txt"
-ls -led "$runner/jobs" "$runner/results"
+if [ -n "$shared" ]; then
+    step "the shared exchange: benchrunner's clone of $shared"
+    br="sudo -u benchrunner -H"
+    if ! $br test -f /Users/benchrunner/.ssh/id_ed25519.pub; then
+        $br mkdir -p /Users/benchrunner/.ssh
+        $br ssh-keygen -q -t ed25519 -N "" -C "benchrunner@$machine" -f /Users/benchrunner/.ssh/id_ed25519
+    fi
+    $br sh -c "ssh-keygen -F github.com >/dev/null 2>&1 || ssh-keyscan -t ed25519 github.com >> /Users/benchrunner/.ssh/known_hosts 2>/dev/null"
+    if ! $br git -C "$runner" rev-parse --quiet --verify HEAD >/dev/null 2>&1; then
+        echo "The runner's public key; add it to the exchange repository as a deploy key WITH write access, then run this again:"
+        $br cat /Users/benchrunner/.ssh/id_ed25519.pub
+        $br git clone --quiet "$shared" "$runner" || exit 1
+    fi
+    $br git -C "$runner" config user.name "Bench Runner ($machine)"
+    $br git -C "$runner" config user.email "benchrunner@$machine.invalid"
+    $br git -C "$runner" config pull.rebase false
+    $br git -C "$runner" pull --ff-only --quiet
+    sudo mkdir -p "$installed/root-probes"
+    sudo chown benchrunner "$installed/root-probes"
+    step "what sudo lets benchrunner run as root (tools/runner/README.md names the two lines)"
+    sudo -u benchrunner sudo -n -l 2>/dev/null | grep -E 'powermetrics|root-probes' || echo "none yet: add the sudoers lines from the README"
+else
+    step "the exchange folder: jobs/ yours, results/ the runner's"
+    chmod 600 "$checkout/ghtokenclassic.txt"
+    mkdir -p "$runner/jobs" "$runner/results"
+    sudo chown benchrunner "$runner/results"
+    # benchrunner passes through every folder from your home down to the checkout.
+    dir=$checkout
+    while :; do
+        ls -led "$dir" | grep -q "benchrunner allow search" || chmod +a "benchrunner allow search" "$dir"
+        [ "$dir" = "$HOME" ] || [ "$dir" = / ] && break
+        dir=$(dirname "$dir")
+    done
+    ls -le "$checkout/ghtokenclassic.txt"
+    ls -led "$runner/jobs" "$runner/results"
+fi
 
 step "runner.py installed read-only for benchrunner"
 sudo mkdir -p "$installed"
 sudo chown "$(whoami)" "$installed"
-cp "$code/runner.py" "$installed/runner.py"
+cp "$code/runner.py" "$code/exchange.py" "$installed/"
 chmod 755 "$installed"
-chmod 644 "$installed/runner.py"
+chmod 644 "$installed/runner.py" "$installed/exchange.py"
 
 step "benchrunner can run Python 3"
 sudo -u benchrunner -H "$python" --version
 
 step "starting the runner (Ctrl-C stops it after the current job)"
-exec sudo -u benchrunner -H "$python" "$installed/runner.py" "$runner"
+exec sudo -u benchrunner -H "$python" "$installed/runner.py" "$runner" "$machine"

@@ -2,9 +2,18 @@
 
 `runner.py` runs benchmark jobs on the Mac as the hidden standard account
 `benchrunner`, with code from GitHub at the commits each job names.
-Jobs go in the checkout's `runner/jobs/`; results come back in
-`runner/results/<job>.<time>/`. Both folders stay out of git
-(`.git/info/exclude`). The runner keeps its clones of BLAKE3-Servil and of
+Jobs and results pass through an *exchange*, a folder holding `jobs/`
+and `results/`. The team's exchange is the Git repository
+[servil-software-factory/mac-runner](https://github.com/servil-software-factory/mac-runner):
+anyone with write access pushes a job file into `jobs/`, the dedicated
+Mac (the M6 Mini) pulls it, claims it by pushing
+`results/<job>.<time>-<machine>/claimed.json`, runs it, and pushes the
+results' text (`verdict.json`, `runner.log`, samples, reports). A second
+runner (the M4 Max, when it is on) takes jobs the same way; the claim
+makes sure a job runs once, and the folder's name says which machine ran
+it (results from different machines never compare). A private exchange is
+a plain folder: Zooko's laptop uses the checkout's `runner/` (out of git
+by `.git/info/exclude`). The runner keeps its clones of BLAKE3-Servil and of
 bench-hashes, side by side, in `~benchrunner/checkouts/`, and moves
 them to each job's commits, so Cargo rebuilds only what changed: a
 benchmark job builds bench-hashes against BLAKE3-Servil as it is, through
@@ -41,11 +50,32 @@ command starts the runner every time, including after a change to
 
 ## Running a job
 
-Write `runner/jobs/NNN-name.json` naming pushed commits (the runner
-fetches branches alone: push a pull request's head as `candidate/*`
-first); wait with `python3 tools/runner/wait_for.py NNN-name`; results land
-in `runner/results/`. A job runs once per file name, so a changed job
-takes a new number.
+Write `jobs/NNN-name.json` naming pushed commits (the runner fetches
+branches alone: push a pull request's head as `candidate/*` first) and
+push it to the exchange repository (take the next free number); wait with
+`python3 tools/runner/wait_for.py NNN-name PATH-OF-YOUR-CLONE`, which
+pulls before each look; results land in `results/` with the machine's
+name in the folder. A job runs once per file name, so a changed job takes
+a new number. The job format is the docstring at the top of `runner.py`.
+Nothing else runs on the dedicated Mac, so a timing job there needs no
+arrangement with anyone.
+
+## A dedicated machine (once)
+
+After the account above, with the command-line tools installed
+(`xcode-select --install`), run from a checkout of BLAKE3-Servil:
+
+    EXCHANGE_REPO=git@github.com:servil-software-factory/mac-runner.git \
+    RUNNER_TOOLCHAIN=nightly-2026-09-24 MACHINE=m6 \
+    sh tools/runner/setup-mac.sh
+
+The first run prints the runner's public key and stops: add it to the
+exchange repository as a deploy key with write access (Settings, Deploy
+keys), then run the command again. It installs the named nightly for
+`benchrunner` (the one the M4 Max runs, so results read the same
+compiler), cargo-nextest and cargo-mutants, clones the exchange, and
+starts the runner; it prints which of the two sudoers lines below are
+missing. Run it again after a reviewed change to `runner.py`.
 
 While a job that times runs (`benchmark`, `b3sum`, `crowd`, `example`, `check`),
 nothing else should run on the Mac, the VM included, and Activity
@@ -103,3 +133,23 @@ Check it with `sudo -u benchrunner sudo -n /usr/bin/powermetrics --samplers
 cpu_power -i 500 -n 14400` (Ctrl-C after a sample). Any other arguments
 stay refused, so the runner cannot use `powermetrics -o` to write files as
 root.
+
+## Root for a probe
+
+Two lines in `/etc/sudoers.d/` let the runner's account run two things as
+root: `powermetrics` (above) and one probe path. Apple's per-thread
+counter interface (`kpc`, in the private kperf framework) configures
+counters only as root: the cache-miss, TLB-miss and stall events beside
+cycles and instructions, and its own read call (bench-hashes'
+`process/fast-feedback/mac-clocks/README.md` has what it buys). A probe
+that needs it is built by the job into
+`/Users/Shared/bench-runner/root-probes/kpc-probe` and run through
+`sudo -n` at that one path. Allow it once, with
+`sudo visudo -f /etc/sudoers.d/benchrunner-kpc-probe`, holding exactly:
+
+    benchrunner ALL=(root) NOPASSWD: /Users/Shared/bench-runner/root-probes/kpc-probe
+
+The runner's user writes that path, so this rule lets a job run code of
+its choosing as root (Zooko, November 9, 2026: accepted, for the
+counters). Without the rule the job records sudo's refusal and the rest of
+its results stand.

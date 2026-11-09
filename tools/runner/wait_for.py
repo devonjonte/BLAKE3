@@ -4,7 +4,9 @@
     python3 tools/runner/wait_for.py JOB
 
 JOB is the job file's name in runner/jobs/ (with or without `.json`).
-Checks every 30 s for runner/results/<JOB>.*/verdict.json and prints it.
+Checks every 30 s for runner/results/<JOB>.*/verdict.json and prints it. A
+second argument names another exchange, a clone of the shared one for
+instance, pulled before each look.
 It holds no deadline of its own over the job: the runner's is the job's one
 clock (time_limit_seconds), and the runner writes a verdict when it passes
 ("timed out"). Two cases have no verdict to wait for, each its own outcome:
@@ -23,11 +25,12 @@ The VM stays idle meanwhile, as a Mac measurement needs.
 """
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
 
-EXCHANGE = Path(__file__).resolve().parents[2] / "runner"
+EXCHANGE = Path(sys.argv[2]) if len(sys.argv) == 3 else Path(__file__).resolve().parents[2] / "runner"
 # A runner takes its next job within seconds of finishing one.
 IDLE_SECONDS = 180
 # What a runner does around a job's time limit: power readings and the
@@ -41,7 +44,7 @@ NO_VERDICT = ("timed out", "no verdict")
 
 
 def main():
-    assert len(sys.argv) == 2, __doc__
+    assert len(sys.argv) in (2, 3), __doc__
     stem = sys.argv[1].removesuffix(".json")
     job = json.loads((EXCHANGE / "jobs" / f"{stem}.json").read_text())
     limit = job.get("time_limit_seconds", DEFAULT_LIMIT)
@@ -52,6 +55,8 @@ def main():
         # the folder is on the Mac, and each operation through the mount is
         # work on the Mac while it measures (a poll that read every result
         # folder, every 10 s, kept half a CPU busy there: October 22, 2026).
+        if (EXCHANGE / ".git").exists():
+            subprocess.run(["git", "pull", "--ff-only", "--quiet"], cwd=EXCHANGE, capture_output=True)
         names = os.listdir(results)
         mine = sorted(n for n in names if n.startswith(stem + "."))
         if mine and (results / mine[-1] / "verdict.json").exists():
