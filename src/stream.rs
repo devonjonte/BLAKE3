@@ -943,10 +943,18 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     }
 
     /// Give `task` to the workers through the stream's source; with no
-    /// slot, hash it on this thread now.
+    /// slot, hash it on this thread now. Its place in the source is that of
+    /// the entry whose count it holds (`left`): the task's first entry,
+    /// which stays out until the task has run, and no other task's first.
+    /// So the place is this task's own until it has run (`publish`'s
+    /// contract), whatever order tasks finish in.
     fn hand_over(&mut self, task: Task) {
         match self.slot {
-            Some(_) => self.s.source.publish(task),
+            Some(_) => {
+                let entry = (task.left as usize - self.s.lefts.as_ptr() as usize) / core::mem::size_of::<OwnLine<AtomicUsize>>();
+                debug_assert!(core::ptr::eq(&*self.s.lefts[entry], task.left), "a stream's task counts down an entry's count");
+                self.s.source.publish(entry, task)
+            }
             None => crate::lanes::run_task(task),
         }
     }
@@ -1063,7 +1071,7 @@ mod test {
         task.key = *crate::IV;
         task.out = output.0.as_mut_ptr();
         task.left = &left;
-        storage.source.publish(task);
+        storage.source.publish(0, task);
         assert!(storage.run_waiting(), "the waiting caller runs its queued task");
         assert_eq!(left.load(Ordering::Acquire), 0, "help completes the task");
         assert!(!storage.run_waiting(), "the completed task is taken once");
@@ -1932,6 +1940,74 @@ mod test {
             assert_eq!(got[0], crate::convenience::hash(&input));
         }
         assert!(!FREE.lock().unwrap().is_empty(), "the storage is the thread's spare again");
+    }
+
+    /// A publication never meets a task claimed and not yet copied (BLAKE3
+    /// #302), on the tightest public schedule. A short message's task stays
+    /// open while long messages' pieces are published ahead of it, until
+    /// every entry is in flight; then the open task goes out, completes,
+    /// and hands its entry back while the first piece is still claimed and
+    /// uncopied, and the last piece is published: the one that laps the
+    /// ring onto the first piece's word, and that a ring of ENTRIES tasks
+    /// wrote over the first piece. Each task's place is its first entry's,
+    /// so the last piece takes the short message's. Workers see no task
+    /// (the source is unregistered); this thread hashes the rest as it
+    /// waits for room, and one thread claims the first piece before the
+    /// rest are submitted, and holds it between its claim and its copy. A
+    /// publication into a place still to be copied would stop the test at
+    /// `publish`'s check.
+    #[test]
+    fn a_publication_never_meets_a_claimed_uncopied_task() {
+        use crate::lanes::sources::Source;
+        crate::initialize_multithreaded(core::num::NonZeroUsize::new(2));
+        let short = std::vec![crate::throughput::Block::ZERO; 1];
+        // Two pieces, the first one held; then enough pieces that every
+        // entry is in flight (the short message's and these 1 + 1 + 1021),
+        // and one more, which takes the short message's entry.
+        let two = std::vec![crate::throughput::Block::ZERO; 2 * PIECE / 64];
+        let long = std::vec![crate::throughput::Block::ZERO; (ENTRIES - 2) * PIECE / 64];
+        let mut hashes = std::vec![Hash::from_bytes([0; 32]); 3];
+        let [first, second, third] = &mut hashes[..] else { unreachable!() };
+        let (claimed_tx, claimed_rx) = std::sync::mpsc::channel();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let held_input = crate::throughput::Block::bytes(&two).as_ptr() as usize;
+        stream(
+            Mode::Plain,
+            |_| {},
+            |s| {
+                let slot = s.slot.expect("a source slot (two CPUs)");
+                Source::unregister(slot);
+                // A fresh source has never been visible to a registry walker.
+                // The stream still publishes through its ordinary slot path.
+                s.s.source = Box::leak(Box::new(Source::new(ENTRIES)));
+                let source = s.s.source;
+                s.submit(&short, 64, first);
+                s.submit(&two, two.len() * 64, second);
+                std::thread::scope(|scope| {
+                    let holder = scope.spawn(move || {
+                        // Hold the first piece between its claim and its
+                        // copy until the submissions end.
+                        let task = source.take_task_claimed(|| {
+                            claimed_tx.send(()).unwrap();
+                            let _ = go_rx.recv();
+                        });
+                        let task = task.expect("the first piece");
+                        assert_eq!((task.input as usize, task.counter), (held_input, 0), "the held claimer copied another task than the one it claimed");
+                        crate::lanes::run_task(task);
+                    });
+                    claimed_rx.recv().unwrap();
+                    // Release the holder whatever happens below.
+                    let go = crate::test::Released(go_tx);
+                    s.submit(&long, long.len() * 64, third);
+                    drop(go);
+                    holder.join().unwrap();
+                    s.finish();
+                });
+            },
+        );
+        assert_eq!(hashes[0], crate::convenience::hash(&[0u8; 64]));
+        assert_eq!(hashes[1], crate::convenience::hash(&std::vec![0u8; 2 * PIECE]));
+        assert_eq!(hashes[2], crate::convenience::hash(&std::vec![0u8; (ENTRIES - 2) * PIECE]));
     }
 
     /// A few messages through a stream: the handover of entries to the

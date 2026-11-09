@@ -995,14 +995,31 @@ pub(crate) mod sources {
     /// Streams open: workers spin a while for more work only when some are.
     static OPEN: OwnLine<AtomicUsize> = OwnLine(AtomicUsize::new(0));
 
+    /// A task's place in a source: the publisher's own (`publish`).
+    struct Place {
+        task: UnsafeCell<MaybeUninit<Task>>,
+        /// Whether the place holds a published task not yet copied out (by
+        /// its claimer's copy, or the GPU's callback): set as the task is
+        /// published, cleared after the copy. The check of `publish`'s
+        /// contract, in tests and debug builds alone; release builds carry
+        /// none.
+        #[cfg(any(test, debug_assertions))]
+        uncopied: core::sync::atomic::AtomicBool,
+    }
+
     #[repr(align(128))]
     pub(crate) struct Source {
         /// A GPU-path fixture reserves its first batch from CPU claims.
         #[cfg(all(test, blake3_gpu))]
         gpu_batch_reserved: core::sync::atomic::AtomicBool,
         claimed: OwnLine<AtomicUsize>,
-        /// A stream's tasks; empty for a caller's jobs.
-        ring: Box<[UnsafeCell<MaybeUninit<Task>>]>,
+        /// A stream's tasks, each in the place its publisher named; empty
+        /// for a caller's jobs.
+        places: Box<[Place]>,
+        /// The published tasks' places in the order published, a ring of
+        /// as many words: publication `p`'s at `p % len`. Empty for a
+        /// caller's jobs.
+        ring: Box<[AtomicUsize]>,
         /// A caller's current job and its first number; the job stays the
         /// claimed numbers' until `finish.finished` passes them.
         job: AtomicPtr<Job<'static>>,
@@ -1013,10 +1030,19 @@ pub(crate) mod sources {
         finish: crate::finish::Finish,
     }
 
-    // Sound: a ring slot is written by its stream only above `published`
-    // and below `claimed` + len, and read by the one worker whose CAS took
-    // it, across the Release store of `published` and the Acquire load;
-    // `owner` is behind its lock; the rest is atomics.
+    // Sound: a place is written by its publisher alone, who owns it: no
+    // task published into it earlier is still to run (`publish`'s contract,
+    // checked in tests and debug builds). It is read by the one thread
+    // whose CAS claimed the publication naming it, across the Release store
+    // of `published` and the Acquire load, and that read comes before the
+    // task runs, so before the place is written again. The GPU reads its
+    // claimed places on the stream's own thread, inside `take_run`'s
+    // callback. The ring's words are atomics: a claimer reads its word
+    // before its CAS, and a CAS that succeeds read the word its publication
+    // wrote, since the stream writes that word again only once `claimed`
+    // has passed it (`take`). So a claimer held between its claim and its
+    // copy loses nothing, however far the ring laps meanwhile (BLAKE3
+    // #302). `owner` is behind its lock; the rest is atomics.
     unsafe impl Sync for Source {}
     unsafe impl Send for Source {}
 
@@ -1028,14 +1054,22 @@ pub(crate) mod sources {
     }
 
     impl Source {
-        /// A source with a ring of `len` tasks (a stream's), or none (a
-        /// caller's jobs).
+        /// A source with `len` places for tasks and a ring of as many (a
+        /// stream's: at most `len` tasks published and not yet claimed), or
+        /// none (a caller's jobs).
         pub(crate) fn new(len: usize) -> Source {
             Source {
                 #[cfg(all(test, blake3_gpu))]
                 gpu_batch_reserved: core::sync::atomic::AtomicBool::new(false),
                 claimed: OwnLine(AtomicUsize::new(0)),
-                ring: (0..len).map(|_| UnsafeCell::new(MaybeUninit::uninit())).collect(),
+                places: (0..len)
+                    .map(|_| Place {
+                        task: UnsafeCell::new(MaybeUninit::uninit()),
+                        #[cfg(any(test, debug_assertions))]
+                        uncopied: core::sync::atomic::AtomicBool::new(false),
+                    })
+                    .collect(),
+                ring: (0..len).map(|_| AtomicUsize::new(0)).collect(),
                 job: AtomicPtr::new(core::ptr::null_mut()),
                 base: AtomicUsize::new(0),
                 finish: crate::finish::Finish::new(),
@@ -1055,11 +1089,20 @@ pub(crate) mod sources {
             REGISTERED[slot].store(core::ptr::null_mut(), Ordering::SeqCst);
         }
 
-        /// A stream's task to the workers: one write, one Release store;
-        /// then the SME2 thread first, and with two or more waiting and a
-        /// worker parked, a worker.
-        pub(crate) fn publish(&self, task: Task) {
-            self.push(task);
+        /// A stream's task to the workers, in `place`: one write, one
+        /// Release store; then the SME2 thread first, and with two or more
+        /// waiting and a worker parked, a worker.
+        ///
+        /// The caller's contract: `place` is its own, below the source's
+        /// `len`, and every task published into it earlier has run. A
+        /// publisher keeps it by naming a place that belongs to something
+        /// the task holds until it has run: a stream its task's first
+        /// entry, the pipeline a part's buffer or a batch's message slot.
+        /// So no claimed task is written over before its claimer has copied
+        /// it, whatever order tasks finish in (BLAKE3 #302); checked in
+        /// tests and debug builds.
+        pub(crate) fn publish(&self, place: usize, task: Task) {
+            self.push(place, task);
             if self.waiting() >= 2 {
                 noted(Noted::WakeTry);
                 pool().park.wake_one();
@@ -1075,8 +1118,9 @@ pub(crate) mod sources {
         /// woke workers that found the task taken: the pipeline's receive
         /// took 0.32 ns/B on a 16-thread pool against 0.11 on a 4-thread
         /// one (BLAKE3 #272, November 7, 2026).
-        pub(crate) fn publish_part(&self, task: Task) {
-            self.push(task);
+        /// `place` as `publish` takes it.
+        pub(crate) fn publish_part(&self, place: usize, task: Task) {
+            self.push(place, task);
             let pool = pool();
             if pool.park.parked_count() == pool.workers() {
                 noted(Noted::WakeTry);
@@ -1084,17 +1128,25 @@ pub(crate) mod sources {
             }
         }
 
-        /// Write `task` to the ring and make it visible (the SME2 thread
-        /// woken for it where there is one).
-        fn push(&self, task: Task) {
+        /// Write `task` to `place`, the place to the ring, and make the task
+        /// visible (the SME2 thread woken for it where there is one).
+        fn push(&self, place: usize, task: Task) {
             let p = self.finish.published.load(Ordering::Relaxed);
-            // Every build: a task written over one not yet taken would be
-            // run as garbage (memory mismanagement, at the cost of a load
-            // and a comparison the debug check already made).
+            // Every build: a ring word written over one not yet claimed
+            // would lose its task (at the cost of a load and a comparison).
             assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
-            // Sound: slot p % len is free (its last task was taken), and
-            // only this stream writes it.
-            unsafe { (*self.ring[p % self.ring.len()].get()).write(task) };
+            let slot = &self.places[place];
+            #[cfg(any(test, debug_assertions))]
+            assert!(
+                !slot.uncopied.swap(true, Ordering::SeqCst),
+                "a publication met a task claimed and not yet copied: its place is not the publisher's own (BLAKE3 #302)"
+            );
+            // Sound: the place is the publisher's own (`publish`'s
+            // contract): no claimer is still to read it.
+            unsafe { (*slot.task.get()).write(task) };
+            // Word p % len is free: `claimed` has passed its last
+            // publication (the assertion above).
+            self.ring[p % self.ring.len()].store(place, Ordering::Relaxed);
             self.finish.published.store(p + 1, Ordering::Release);
             core::sync::atomic::fence(Ordering::SeqCst);
             if pool().sme2 {
@@ -1119,6 +1171,13 @@ pub(crate) mod sources {
 
         /// Claim the next published item, if any.
         pub(crate) fn take(&self) -> Option<Item> {
+            self.take_claimed(|| {})
+        }
+
+        /// `take`, with `claimed` run between a task's claim and its copy
+        /// (a test holds a claimer there).
+        #[inline(always)]
+        fn take_claimed(&self, claimed: impl FnOnce()) -> Option<Item> {
             let mut c = self.claimed.load(Ordering::Acquire);
             loop {
                 let p = self.finish.published.load(Ordering::Acquire);
@@ -1138,11 +1197,29 @@ pub(crate) mod sources {
                 // pattern), and runs shrink to one piece near the end for
                 // balance. A stream's tasks go one at a time.
                 let n = if self.ring.is_empty() { Self::run_len(p - c, pool().threads) } else { 1 };
+                // A task's place, read before the claim: publication c
+                // wrote this word before `published` passed c (the Acquire
+                // above), and the stream writes it again, for publication
+                // c + len, only once it has seen `claimed` past c. So if
+                // the CAS below succeeds, `claimed` was c until then, no
+                // such write had begun, and this is c's place. Read after
+                // the claim, it could be a later task's.
+                let place = if self.ring.is_empty() { 0 } else { self.ring[c % self.ring.len()].load(Ordering::Relaxed) };
                 match self.claimed.compare_exchange_weak(c, c + n, Ordering::AcqRel, Ordering::Acquire) {
                     Ok(_) if self.ring.is_empty() => return Some(Item::Pieces(self.job.load(Ordering::Relaxed), c - self.base.load(Ordering::Relaxed), n)),
-                    // Sound: this thread alone took slot c, written before
-                    // `published` passed it.
-                    Ok(_) => return Some(Item::Task(unsafe { (*self.ring[c % self.ring.len()].get()).assume_init_read() })),
+                    Ok(_) => {
+                        claimed();
+                        let slot = &self.places[place];
+                        // Sound: this thread alone claimed the publication
+                        // naming this place, written before `published`
+                        // passed it; its publisher writes the place again
+                        // only after the task has run (`publish`'s
+                        // contract), so after this copy.
+                        let task = unsafe { (*slot.task.get()).assume_init_read() };
+                        #[cfg(any(test, debug_assertions))]
+                        slot.uncopied.store(false, Ordering::SeqCst);
+                        return Some(Item::Task(task));
+                    }
                     Err(now) => c = now,
                 }
             }
@@ -1173,9 +1250,15 @@ pub(crate) mod sources {
             }
             #[cfg(test)]
             self.gpu_batch_reserved.store(false, Ordering::SeqCst);
-            // Sound: this thread alone took slots c..c + n, written before
-            // `published` passed them.
-            f(&mut (c..c + n).map(|i| unsafe { (*self.ring[i % self.ring.len()].get()).assume_init_ref() }));
+            // Sound: this thread alone took publications c..c + n, written
+            // before `published` passed them; it is the stream's own, which
+            // alone writes the ring's words and the places.
+            let place = |i: usize| &self.places[self.ring[i % self.ring.len()].load(Ordering::Relaxed)];
+            f(&mut (c..c + n).map(|i| unsafe { (*place(i).task.get()).assume_init_ref() }));
+            #[cfg(any(test, debug_assertions))]
+            for i in c..c + n {
+                place(i).uncopied.store(false, Ordering::SeqCst);
+            }
             true
         }
 
@@ -1200,7 +1283,14 @@ pub(crate) mod sources {
 
         /// A stream's next task, if any (this source is a stream's).
         pub(crate) fn take_task(&self) -> Option<Task> {
-            match self.take() {
+            self.take_task_claimed(|| {})
+        }
+
+        /// `take_task`, with `claimed` run between the claim and the copy
+        /// (a test holds a claimer there).
+        #[inline(always)]
+        pub(crate) fn take_task_claimed(&self, claimed: impl FnOnce()) -> Option<Task> {
+            match self.take_claimed(claimed) {
                 Some(Item::Task(task)) => Some(task),
                 Some(Item::Pieces(..)) => unreachable!("a stream's source carries tasks"),
                 None => None,
@@ -1420,7 +1510,7 @@ pub(crate) mod sources {
             task.key = *crate::IV;
             task.out = output.0.as_mut_ptr();
             task.left = &left;
-            source.publish(task);
+            source.publish(0, task);
             assert!(source.help(), "the waiting caller runs its queued task");
             assert_eq!(left.load(Ordering::Acquire), 0, "help completes the task");
             assert!(!source.help(), "the completed task is taken once");
@@ -1475,6 +1565,68 @@ pub(crate) mod sources {
             assert_eq!(first, second, "the second thread takes the source the first gave back");
         }
 
+        /// A claimer held between its claim and its copy copies the task it
+        /// claimed, however far the ring laps meanwhile (BLAKE3 #302). Its
+        /// task's place stays the publisher's until the task has run, and
+        /// the claimer read which place before its claim. Here place 1 goes
+        /// round four times, twice over the held task's ring word, while a
+        /// thread holds place 0's task claimed and uncopied. With the ring
+        /// word read after the claim, the holder copies place 1's last task.
+        #[test]
+        fn a_claim_held_before_its_copy_keeps_its_task_while_the_ring_laps() {
+            crate::initialize_multithreaded(core::num::NonZeroUsize::new(1));
+            let source = Source::new(2);
+            source.publish(0, Task::of(&[], 100));
+            let (claimed_tx, claimed_rx) = std::sync::mpsc::channel();
+            let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+            std::thread::scope(|scope| {
+                let source = &source;
+                let holder = scope.spawn(move || {
+                    let held = source.take_task_claimed(|| {
+                        claimed_tx.send(()).unwrap();
+                        let _ = go_rx.recv();
+                    });
+                    held.map(|task| task.counter)
+                });
+                claimed_rx.recv().unwrap();
+                // Release the holder whatever happens below, so that a fault
+                // fails the test where it would strand the scope.
+                let go = crate::test::Released(go_tx);
+                for i in 0..4 {
+                    source.publish(1, Task::of(&[], i));
+                    assert_eq!(source.take_task().map(|task| task.counter), Some(i), "place 1's task, published and taken");
+                }
+                drop(go);
+                assert_eq!(holder.join().unwrap(), Some(100), "the held claimer copies the task it claimed");
+            });
+            assert!(source.take_task().is_none(), "each task was taken once");
+        }
+
+        /// A publication into a place whose task is claimed and not yet
+        /// copied breaks `publish`'s contract; the check stops it before
+        /// the write (tests and debug builds).
+        #[test]
+        #[should_panic(expected = "a publication met a task claimed and not yet copied")]
+        fn a_publication_into_a_place_still_to_be_copied_is_stopped() {
+            crate::initialize_multithreaded(core::num::NonZeroUsize::new(1));
+            let source = Source::new(2);
+            source.publish(0, Task::of(&[], 0));
+            let (claimed_tx, claimed_rx) = std::sync::mpsc::channel();
+            let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+            std::thread::scope(|scope| {
+                let source = &source;
+                scope.spawn(move || {
+                    let _ = source.take_task_claimed(|| {
+                        claimed_tx.send(()).unwrap();
+                        let _ = go_rx.recv();
+                    });
+                });
+                claimed_rx.recv().unwrap();
+                let _go = crate::test::Released(go_tx);
+                source.publish(0, Task::of(&[], 1));
+            });
+        }
+
         /// The GPU's claim: the oldest `n` waiting tasks, all of them in the
         /// run it may take; one step, the tasks read in place, and `claimed`
         /// past them.
@@ -1483,8 +1635,11 @@ pub(crate) mod sources {
         fn test_take_run_claims_the_oldest_n_in_the_run() {
             let source = Source::new(8);
             for i in 0..8 {
-                // Sound: no worker sees an unregistered source.
-                unsafe { (*source.ring[i].get()).write(Task::of(&[], i as u64)) };
+                // Sound: no worker sees an unregistered source. As `publish`
+                // fills a place and its ring word.
+                unsafe { (*source.places[i].task.get()).write(Task::of(&[], i as u64)) };
+                source.places[i].uncopied.store(true, Ordering::SeqCst);
+                source.ring[i].store(i, Ordering::Relaxed);
             }
             let counters = |from: usize, to: usize, n: usize| {
                 let mut seen = std::vec::Vec::new();
@@ -1852,8 +2007,8 @@ mod test {
         crate::initialize_multithreaded(core::num::NonZeroUsize::new(1));
         let source = sources::Source::new(4);
         source.reserve_gpu_batch_for_test();
-        source.publish(Task::of(&[], 0));
-        source.publish(Task::of(&[], 1));
+        source.publish(0, Task::of(&[], 0));
+        source.publish(1, Task::of(&[], 1));
         assert!(source.take_task().is_none());
         assert!(!source.take_run(0, 1, 2, |_| panic!("the run is too short")));
         assert!(source.take_task().is_none(), "a failed claim keeps the reservation");
@@ -2284,22 +2439,22 @@ mod test {
         let source: &'static sources::Source = Box::leak(Box::new(sources::Source::new(8)));
         let task = || Task::members(crate::IV, 0, None);
         counts();
-        source.publish(task());
+        source.publish(0, task());
         assert_eq!(counts()[Noted::WakeTry as usize], 0, "one task waiting: the caller's");
-        source.publish(task());
+        source.publish(1, task());
         assert_eq!(counts()[Noted::WakeTry as usize], 1, "two waiting: a wake");
-        source.publish(task());
+        source.publish(2, task());
         assert_eq!(counts()[Noted::WakeTry as usize], 1, "three waiting: a wake");
         assert!(source.take_task().is_some());
         assert!(source.take_task().is_some());
         counts();
-        source.publish(task());
+        source.publish(3, task());
         assert_eq!(counts()[Noted::WakeTry as usize], 1, "one waiting, then two: a wake");
         assert!(source.take_task().is_some() && source.take_task().is_some() && source.take_task().is_none());
         counts();
         source.wake_for_waiting();
         assert_eq!(counts()[Noted::WakeTry as usize], 0, "none waiting: no wake");
-        source.publish(task());
+        source.publish(4, task());
         counts();
         source.wake_for_waiting();
         assert_eq!(counts()[Noted::WakeTry as usize], 1, "one waiting: a wake");

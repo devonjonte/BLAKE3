@@ -88,7 +88,7 @@ fn reserved_buffer_returns_from_an_actual_worker() {
     let bytes = unsafe { crate::throughput::Block::bytes((*work.input.get()).as_ref().unwrap()) };
     let mut task = Task::of(bytes, 0);
     task.action = Some((run, (&*work as *const Work).cast_mut().cast()));
-    source.publish(task);
+    source.publish(0, task);
     source.wake_for_waiting();
     drop(pool); // The queued request and worker lease retain pool ownership.
     work.started.wait();
@@ -207,7 +207,8 @@ fn one_message_accepts_callback_pieces_and_finishes_on_the_workers() {
                 // regular HasherCore path does. Groups use the worker's.
                 task.members = usize::from(last);
                 task.action = Some((run, (&*work as *const Work<'_>).cast_mut().cast()));
-                source.publish(task);
+                // The one buffer's place: its last action returned it.
+                source.publish(0, task);
                 source.wake_for_waiting();
                 wait_for(next.as_mut(), &mut cx).release();
             }
