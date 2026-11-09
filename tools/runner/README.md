@@ -103,3 +103,20 @@ Check it with `sudo -u benchrunner sudo -n /usr/bin/powermetrics --samplers
 cpu_power -i 500 -n 14400` (Ctrl-C after a sample). Any other arguments
 stay refused, so the runner cannot use `powermetrics -o` to write files as
 root.
+
+## Root for a probe (`probe/measure-clocks3`)
+
+Apple's per-thread counter interface (`kpc`, in the private kperf
+framework) configures counters only as root: the cache-miss, TLB-miss and
+stall events beside cycles and instructions, and its own read call. A
+probe that needs it is built by the job into
+`/Users/Shared/bench-runner/root-probes/kpc-probe` and run through
+`sudo -n` at that one path. Allow it once, with
+`sudo visudo -f /etc/sudoers.d/benchrunner-kpc-probe`, holding exactly:
+
+    benchrunner ALL=(root) NOPASSWD: /Users/Shared/bench-runner/root-probes/kpc-probe
+
+The runner's user writes that path, so this rule lets a job run code of
+its choosing as root (Zooko, November 9, 2026: accepted, for the
+counters). Without the rule the job records sudo's refusal and the rest of
+its results stand.

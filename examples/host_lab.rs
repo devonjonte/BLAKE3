@@ -54,17 +54,23 @@ fn main() {
     std::fs::write(root.join("bracket-control.txt"), &output.stdout).unwrap();
     print!("{}", String::from_utf8_lossy(&output.stdout));
 
-    // What root buys: kpc_probe runs as the runner's user, then through
-    // `sudo -n` where the Mac's sudoers allows it; a refusal is recorded.
+    // What root buys: kpc_probe runs as the runner's user, then as root
+    // through `sudo -n` at one fixed path, the one the Mac's sudoers may
+    // name (tools/runner/README.md, "Root for a probe"); a refusal is
+    // recorded as a result.
     let probe = root.join("kpc-probe");
     run(&["cc", "-O2", "-o", probe.to_str().unwrap(), concat!(env!("CARGO_MANIFEST_DIR"), "/tools/studies/kpc_probe.c")], &root);
-    for (label, mut command) in [("kpc-probe-user.txt", Command::new(&probe)), ("kpc-probe-root.txt", {
-        let mut c = Command::new("sudo");
-        c.args(["-n", probe.to_str().unwrap()]);
-        c
-    })] {
+    let fixed = Path::new("/Users/Shared/bench-runner/root-probes/kpc-probe");
+    let placed = std::fs::create_dir_all(fixed.parent().unwrap()).and_then(|()| std::fs::copy(&probe, fixed));
+    let mut as_root = Command::new("sudo");
+    as_root.args(["-n", fixed.to_str().unwrap()]);
+    for (label, mut command) in [("kpc-probe-user.txt", Command::new(&probe)), ("kpc-probe-root.txt", as_root)] {
+        let mut text = match &placed {
+            Err(e) if label.contains("root") => format!("could not place the probe at {}: {e}\n", fixed.display()).into_bytes(),
+            _ => Vec::new(),
+        };
         let output = command.current_dir(&root).output().unwrap();
-        let mut text = output.stdout;
+        text.extend_from_slice(&output.stdout);
         text.extend_from_slice(format!("\nexit: {:?}\nstderr:\n", output.status.code()).as_bytes());
         text.extend_from_slice(&output.stderr);
         std::fs::write(root.join(label), &text).unwrap();
