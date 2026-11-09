@@ -69,4 +69,6 @@ The `--static` flag supplies the system libraries Rust's static library needs.
   [`tests/check.c`](tests/check.c) includes a complete example.
 
 `B3_VERSION` identifies the header; `b3_version()` identifies the linked
-library. Both carry the release's full version string.
+library's build. A release's build reports the release's full version
+string, the same as the header's; any other build adds its commit, and a
+dirty tree's Git tree id, after it.

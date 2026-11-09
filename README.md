@@ -43,8 +43,10 @@ blake3-servil = { git = "https://github.com/servil-software-factory/BLAKE3", rev
 release, `vX.Y.Z+<hash>`, with its commit. The hash in a release's
 version names the commit of its code, so the version alone identifies
 what you have (`b3sum --version` and the C library's `b3_version()`
-print it). Write it whole wherever you write it: tools that check it may
-come.
+print it). The code after a release reads `X.Y.Z+dev`, "newer than
+X.Y.Z", and a build of it prints its commit too, and from a dirty tree the
+Git tree id of its working tree: `0.8.0+dev.<commit>.dirty.<tree>`. Write
+it whole wherever you write it: tools that check it may come.
 
 ```rust
 blake3_servil::initialize(); // once, before any other call

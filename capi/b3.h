@@ -30,8 +30,10 @@
  * libb3_servil.dylib). Build and install with `cargo cinstall --release`
  * in capi/; `pkg-config --cflags --libs b3_servil` gives the compiler flags.
  * The shared library has a versioned soname. C11, or C++11.
- * B3_VERSION names the header's version; b3_version() the library's, so a
- * program can check that the two agree.
+ * B3_VERSION names the header's version; b3_version() the library build's,
+ * which starts with it (and adds, past a release's own commit, the commit
+ * built and a dirty tree's Git tree id), so a program can check that the
+ * two agree.
  */
 #define B3_VERSION "0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861"
 #ifndef B3_H
@@ -44,8 +46,9 @@
 extern "C" {
 #endif
 
-/* The library's version, the same text as B3_VERSION in the header it was
- * built with. */
+/* The library build's version: B3_VERSION of the header it was built with,
+ * then, for a build past a release's own commit, ".<commit>" and from a
+ * dirty tree ".dirty.<Git tree id>". */
 const char *b3_version(void);
 
 /* A digest: 32 bytes. */

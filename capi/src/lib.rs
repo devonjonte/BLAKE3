@@ -99,10 +99,21 @@ unsafe fn hasher_mut<'a>(hasher: *mut B3Hasher) -> &'a mut Hasher {
     unsafe { &mut *(hasher as *mut Hasher) }
 }
 
-/// `b3_version`: the library's version, as `b3.h`'s `B3_VERSION`.
+/// `b3_version`: the library's build version (`blake3_servil::BUILD_VERSION`),
+/// which starts with `b3.h`'s `B3_VERSION`.
 #[unsafe(no_mangle)]
 pub extern "C" fn b3_version() -> *const c_char {
-    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr().cast()
+    const N: usize = blake3_servil::BUILD_VERSION.len();
+    static VERSION: [u8; N + 1] = {
+        let (mut text, version) = ([0; N + 1], blake3_servil::BUILD_VERSION.as_bytes());
+        let mut i = 0;
+        while i < N {
+            text[i] = version[i];
+            i += 1;
+        }
+        text
+    };
+    VERSION.as_ptr().cast()
 }
 
 #[unsafe(no_mangle)]

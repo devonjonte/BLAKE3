@@ -56,7 +56,7 @@ const CHECK_ARG: &str = "check";
 
 #[derive(Parser)]
 #[command(
-    version,
+    version = blake3::BUILD_VERSION,
     max_term_width(100),
     after_help = "More information: b3sum/README.md at https://github.com/servil-software-factory/BLAKE3/blob/servil/b3sum/README.md"
 )]

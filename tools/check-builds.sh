@@ -15,6 +15,9 @@ cd "$(git rev-parse --show-toplevel)"
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$PWD/target"}
 rustup target add x86_64-unknown-linux-gnu 2>/dev/null
 step() { echo "== $*"; "$@"; }
+# The version names this commit truly (tools/gen-ver.py: a release's on
+# the release commit alone, X.Y.Z+dev after it).
+step python3 tools/gen-ver.py --check
 step cargo nextest run --cargo-quiet --release --no-default-features
 # nextest skips doc tests: the examples without std too, where Batch is absent.
 step cargo test -q --release --doc --no-default-features

@@ -428,6 +428,12 @@ use platform::{MAX_SIMD_DEGREE, Platform};
 #[cfg(feature = "zeroize")]
 use zeroize::Zeroize;
 
+/// This build's version: the crate's version, and for any build but a
+/// release's own commit, the commit built and, from a dirty tree, the Git
+/// tree id of its working tree, e.g. `0.8.0+dev.<commit>.dirty.<tree>`.
+/// `b3sum --version` and the C library's `b3_version()` print it.
+pub use blake3_servil_version::BUILD_VERSION;
+
 /// The number of bytes in a [`Hash`](struct.Hash.html), 32.
 pub const OUT_LEN: usize = 32;
 

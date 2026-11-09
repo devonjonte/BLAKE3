@@ -1,0 +1,10 @@
+[package]
+name = "blake3-servil-version"
+# The library's version, set with it by tools/gen-ver.py.
+version = "0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861"
+authors = ["John Servil", "Devon Jonte"]
+description = "blake3-servil's build version: its version and what names the code built"
+repository = "https://github.com/servil-software-factory/BLAKE3"
+license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
+edition = "2024"
+include = ["/src", "/build.rs", "/build_version.rs", "/LICENSE_*"]
