@@ -2,7 +2,9 @@
 //! written, then a control that brackets a known amount of work the way
 //! bench-hashes' samplers do (a counts read, a wall read, the work, a wall
 //! read, a counts read), so the reads' own share of the counted interval
-//! is known. Run from a fresh result directory.
+//! is known. Then tools/studies/kpc_probe.c: what root buys a read (direct
+//! counter reads, the cost of each read interface, the configurable
+//! events around known work). Run from a fresh result directory.
 use std::path::Path;
 use std::process::Command;
 
@@ -51,4 +53,21 @@ fn main() {
     assert!(output.status.success(), "bracket-control: {}", String::from_utf8_lossy(&output.stderr));
     std::fs::write(root.join("bracket-control.txt"), &output.stdout).unwrap();
     print!("{}", String::from_utf8_lossy(&output.stdout));
+
+    // What root buys: kpc_probe runs as the runner's user, then through
+    // `sudo -n` where the Mac's sudoers allows it; a refusal is recorded.
+    let probe = root.join("kpc-probe");
+    run(&["cc", "-O2", "-o", probe.to_str().unwrap(), concat!(env!("CARGO_MANIFEST_DIR"), "/tools/studies/kpc_probe.c")], &root);
+    for (label, mut command) in [("kpc-probe-user.txt", Command::new(&probe)), ("kpc-probe-root.txt", {
+        let mut c = Command::new("sudo");
+        c.args(["-n", probe.to_str().unwrap()]);
+        c
+    })] {
+        let output = command.current_dir(&root).output().unwrap();
+        let mut text = output.stdout;
+        text.extend_from_slice(format!("\nexit: {:?}\nstderr:\n", output.status.code()).as_bytes());
+        text.extend_from_slice(&output.stderr);
+        std::fs::write(root.join(label), &text).unwrap();
+        println!("== {label}\n{}", String::from_utf8_lossy(&text));
+    }
 }
