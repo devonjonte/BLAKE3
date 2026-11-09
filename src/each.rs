@@ -151,29 +151,77 @@ fn finish_each(hashers: &mut [Hasher], which: &[usize], out: &mut [[u8; OUT_LEN]
     }
 }
 
-/// Gather pieces in caller order, holding at most TABLE ready stages.
-/// Before a held hasher's next bytes, hash its ready group; a full table
-/// or the end of the caller's pieces also flushes. The caller owns the
-/// input descriptors; stack workspace holds intermediate CVs.
+/// A turn of pieces for many hashers, in caller order: each piece
+/// gathered into its hasher's stage; a stage that fills a whole group is
+/// held, and its hasher's later bytes (the rest of that piece, and its
+/// later pieces) wait, in order, until the held groups hash together, up
+/// to TABLE of them in one pass (one SME2 call for all; elsewhere a call
+/// per group, then each parent level in one call). A full table, a full
+/// waiting list, or the turn's end hashes what is held and gathers what
+/// waited, pass after pass, until nothing waits. Outside a drain every
+/// waiting piece's hasher is held (it entered waiting because the hasher
+/// was held, or as the rest of the piece that filled the stage; only a
+/// drain un-holds, and a drain leaves nothing waiting), so a hasher that
+/// is not held has no earlier bytes waiting, and takes its piece now. Both
+/// lists live on the stack: a turn allocates nothing.
 fn update_turn(hashers: &mut [Hasher], pieces: &[(usize, &[u8])], pooled: bool) {
     let mut held = arrayvec::ArrayVec::<usize, TABLE>::new();
-    for &(i, mut bytes) in pieces {
-        if hashers[i].held_group().is_some() {
-            flush_held(hashers, &mut held);
+    let mut waiting = arrayvec::ArrayVec::<(usize, &[u8]), TABLE>::new();
+    for &(i, bytes) in pieces {
+        if waiting.is_full() || held.is_full() {
+            drain(hashers, &mut held, &mut waiting, pooled);
         }
-        while !bytes.is_empty() {
-            let before = bytes.len();
-            bytes = hashers[i].gather_part(bytes, pooled, true);
-            assert!(bytes.len() < before, "a turn's pass gathered nothing");
+        if hashers[i].held_group().is_some() {
+            waiting.push((i, bytes));
+            continue;
+        }
+        gather(hashers, i, bytes, pooled, &mut held, &mut waiting);
+    }
+    drain(hashers, &mut held, &mut waiting, pooled);
+}
+
+/// `bytes` into hasher `i`, which is not held: as much as fills its stage;
+/// a filled stage is held and the rest of the piece waits.
+fn gather<'a>(
+    hashers: &mut [Hasher],
+    i: usize,
+    bytes: &'a [u8],
+    pooled: bool,
+    held: &mut arrayvec::ArrayVec<usize, TABLE>,
+    waiting: &mut arrayvec::ArrayVec<(usize, &'a [u8]), TABLE>,
+) {
+    debug_assert!(hashers[i].held_group().is_none(), "a held hasher's bytes wait");
+    let rest = hashers[i].gather_part(bytes, pooled, true);
+    assert!(rest.len() < bytes.len() || bytes.is_empty(), "a turn's pass gathered nothing");
+    if hashers[i].held_group().is_some() {
+        held.push(i);
+        if !rest.is_empty() {
+            waiting.push((i, rest));
+        }
+    }
+}
+
+/// Hash the held groups, then gather what waited, in order, pass after
+/// pass, until nothing waits. Each pass starts with every hasher free, so
+/// the first waiting piece of each hasher gathers and shrinks the bytes
+/// in play; a hasher filled again in the pass sends its later pieces back
+/// to wait. A pass holds at most one group per hasher and keeps at most
+/// as many pieces waiting as it took, so neither list overflows.
+fn drain<'a>(hashers: &mut [Hasher], held: &mut arrayvec::ArrayVec<usize, TABLE>, waiting: &mut arrayvec::ArrayVec<(usize, &'a [u8]), TABLE>, pooled: bool) {
+    loop {
+        flush_held(hashers, held);
+        if waiting.is_empty() {
+            return;
+        }
+        let batch = core::mem::take(waiting);
+        for &(i, bytes) in &batch {
             if hashers[i].held_group().is_some() {
-                held.push(i);
-                if held.is_full() || !bytes.is_empty() {
-                    flush_held(hashers, &mut held);
-                }
+                waiting.push((i, bytes));
+            } else {
+                gather(hashers, i, bytes, pooled, held, waiting);
             }
         }
     }
-    flush_held(hashers, &mut held);
 }
 
 /// Hash every queued stage, then return the bounded table to its caller.
@@ -924,6 +972,40 @@ mod test {
                 "fresh hasher {i}, {platform:?}"
             );
         }
+    }
+
+    /// A piece that outlasts its hasher's stage waits for the turn's flush
+    /// instead of forcing one: 256 plain hashers, each holding part of a
+    /// chunk, each given a 16 KiB piece in caller order (the benchmark's
+    /// interleaved cell), fill 256 stages that hash in two full passes of
+    /// the table, with the rest of each piece gathered after. A flush at
+    /// each outlasting piece would take a pass per hasher. The digests
+    /// agree with the official implementation.
+    #[cfg(feature = "std")]
+    #[test]
+    fn outlasting_pieces_wait_for_a_full_table() {
+        crate::initialize();
+        const N: usize = 256;
+        let mut input = vec![0u8; 1448 + crate::STAGE_LEN];
+        crate::test::paint_test_input(&mut input);
+        let mut hashers: Vec<Hasher> = (0..N).map(|_| Hasher::new(Mode::Plain, None)).collect();
+        let first: Vec<(usize, &[u8])> = (0..N).map(|i| (i, &input[..1448])).collect();
+        update_each(&mut hashers, &first);
+        let second: Vec<(usize, &[u8])> = (0..N).map(|i| (i, &input[1448..])).collect();
+        crate::COUNTED.with(|c| c[crate::Counted::HeldPass as usize].set(0));
+        update_each(&mut hashers, &second);
+        let passes = crate::COUNTED.with(|c| c[crate::Counted::HeldPass as usize].get());
+        assert_eq!(passes, (N / TABLE) as u64, "every stage hashed in full passes of the table");
+        for h in &hashers {
+            assert_eq!(h.clone().finalize(), crate::test::official::hash(Mode::Plain, &input));
+        }
+        // Two pieces of one hasher in one turn apply in order: the second
+        // waits while the first's rest does.
+        let mut pair = vec![Hasher::new(Mode::Plain, None), Hasher::new(Mode::Plain, None)];
+        let (a, b) = input.split_at(crate::STAGE_LEN + 100);
+        update_each(&mut pair, &[(0, a), (1, &input[..7]), (0, b), (1, &input[7..])]);
+        assert_eq!(pair[0].clone().finalize(), crate::test::official::hash(Mode::Plain, &input));
+        assert_eq!(pair[1].clone().finalize(), crate::test::official::hash(Mode::Plain, &input));
     }
 
     /// update_each's held groups hash together by their public mode alone
