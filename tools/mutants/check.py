@@ -76,9 +76,11 @@ only those, and fails on a new survivor among them; it fails too while the
 list names a missing test ("OPEN: a missing test"): that is work to do, not
 a survivor to keep. Its budget is about a minute (Zooko, November 6, 2026,
 BLAKE3 #257): it says what it will run before it starts, spreads the
-mutants over as many shards as they fill, takes the release build's second
-look (release_same) for new survivors alone, and ends with its time against
-the budget and where the time went. It leaves to the whole run, once per
+mutants over as many shards as they fill (more where the machine has the
+CPUs and memory: wide_shards), names each survivor beyond its row as soon
+as the shards end (SURVIVES SO FAR), takes the release build's second look
+(release_same) once, for new survivors alone, in the run that confirms
+them, and ends with its time against the budget and where the time went. It leaves to the whole run, once per
 stable release, what it gives up: a changed test's or helper's effect on
 other code's mutants, a listed survivor now caught, and the lists' exact
 counts. Rows naming code the change removed it drops from every list.
@@ -566,21 +568,17 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None):
                                                        mutant["span"]["start"]["line"]))
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
-    if survivors and known is not None:
-        # A change's check: the second look for new survivors alone (a name
-        # with more surviving places than its row); a listed one keeps its
-        # row's reason, and the look is a release build a shard.
-        count = collections.Counter(key[0] for v in survivors.values() for key, *_ in v)
-        survivors = {t: [x for x in v if count[x[0][0]] > known.get(x[0][0], (0, ""))[0]] for t, v in survivors.items()}
-        survivors = {t: v for t, v in survivors.items() if v}
+    survivors = second_looks(survivors, known)
     if survivors:
         # Each shard's survivors in its own worktree and release target, the
         # shards at once (their cargo-mutants runs are over).
         def look(tree):
             target = envs[tree]["CARGO_TARGET_DIR"] + "-release"
             return release_same.confirm(tree, target, survivors[tree], BUILD, envs[tree])
+        looking = time.monotonic()
         with ThreadPoolExecutor(len(survivors)) as pool:
             same = [key for keys in pool.map(look, sorted(survivors)) for key in keys]
+        LOOKS_S[label] += time.monotonic() - looking
         for name, _ in same:
             SAME[label][name] += 1
             RELEASE_SAME[label][name] += 1
@@ -607,6 +605,30 @@ SAME = collections.defaultdict(collections.Counter)
 # as same code (release_same.py): a row all of whose places are same code,
 # some of them so, has the reason SAME_RELEASE_REASON.
 RELEASE_SAME = collections.defaultdict(collections.Counter)
+# The wall time of the survivors' release builds, by run label (budget).
+LOOKS_S = collections.Counter()
+
+
+def second_looks(survivors, known):
+    """The surviving places whose release builds this run makes
+    (release_same.py): every one in a whole run and in a confirming run
+    (`known` None). None in a change's first run: each name with more
+    survivors than its row runs again alone (main's confirm), and that
+    run's look is the one the verdict reads (confirm copies it over this
+    run's), so a look here was a release build a place whose answer
+    nothing read."""
+    return survivors if known is None else {}
+
+
+def so_far(found, known, timed, tknown):
+    """What a change's first run found beyond the lists, to print as soon
+    as its shards end: the names to look at now, minutes before the verdict
+    where each runs again alone and its surviving places are built again."""
+    lines = [f"SURVIVES SO FAR ({n - known.get(k, (0, ''))[0]}): {k}" for k, n in sorted(found.items()) if n > known.get(k, (0, ""))[0]]
+    lines += [f"TIMED OUT SO FAR ({n - tknown.get(k, (0, ''))[0]}): {k}" for k, n in sorted(timed.items()) if n > tknown.get(k, (0, ""))[0]]
+    if lines:
+        lines.append(f"mutants: {len(lines)} names beyond their rows so far; each runs again alone before the verdict")
+    return lines
 SAME_RELEASE_REASON = ("same code: every test binary of a release build, the mutant's line count kept, "
                        "hashes as the unmutated build's here (tools/mutants/release_same.py)")
 SAME_REASONS = (SAME_REASON, SAME_RELEASE_REASON)
@@ -808,6 +830,8 @@ def budget(started):
             for ph in o.get("phase_results", []):
                 phases[ph.get("phase", "?")] += ph.get("duration", 0)
     spent = ", ".join(f"{k} {round(v)} s" for k, v in phases.most_common())
+    if spent and sum(LOOKS_S.values()):
+        spent += f"; survivors' release builds: {round(sum(LOOKS_S.values()))} s"
     print(f"mutants: took {took} s, OVER the {BUDGET_S} s budget (shard time: {spent or 'not recorded'})")
 
 
@@ -931,6 +955,8 @@ def main():
         found, functions, timed = run(files, ["--in-diff", path], shards=shards, known=known) if planned else (collections.Counter(), {}, collections.Counter())
         if any(f in diff for f in LOOM_FILES):
             found, timed, functions = with_loom(found, timed, functions, run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True, known=known)[1])
+        for line in so_far(found, known, timed, tknown):
+            print(line, flush=True)
         # Only the names with more survivors than the list: the run holds
         # the change's lines alone, so a listed name's other places are
         # missing from it (a whole run sees those, and stale entries).
