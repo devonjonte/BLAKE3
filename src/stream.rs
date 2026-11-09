@@ -67,6 +67,32 @@ const LONG: usize = 4 << 20;
 /// 26-130% at 64 and 256 B).
 const ENTRIES: usize = 1024;
 
+/// The stream's ring of tasks: long enough that a task's slot is reused only
+/// after the task has completed, so after its claimer copied it (BLAKE3
+/// #303). Every published task holds an entry of its own, and the stream
+/// hands entries back in order, each once its task completes, with at most
+/// ENTRIES out. Say task X, in the slot task p is about to take, is still
+/// incomplete. Then every entry from X's first on is still out. Of the
+/// tasks from X to p, every one but two kinds holds an entry from X's on:
+/// the one task that was open (gathering short messages) when X, a piece of
+/// a long message, went out, and is published after it with older entries;
+/// and, with the GPU, a piece the GPU gave back at a finish, published again
+/// under the entry it already had (at most HELD of them). So at least
+/// TASK_SLOTS + 1 - 1 - HELD of those tasks' entries are out, more than
+/// ENTRIES: X has completed. With ENTRIES slots the margin was zero: the
+/// open task's entry handed back while the first piece of a long message
+/// was still claimed and uncopied, and the next piece took its slot (test
+/// a_publication_never_meets_a_claimed_uncopied_task).
+const TASK_SLOTS: usize = task_slots();
+
+/// TASK_SLOTS' count (a function, so that a mutation test names its rule).
+const fn task_slots() -> usize {
+    #[cfg(not(blake3_gpu))]
+    return ENTRIES + 1;
+    #[cfg(blake3_gpu)]
+    return ENTRIES + 1 + crate::gpu::HELD;
+}
+
 /// One message, one piece of a long one, or one part of a batch, from its
 /// submission to its delivery: what the program's thread keeps of it. Its
 /// task's threads write its digests, then count down the `left` of the
@@ -300,7 +326,7 @@ impl Storage {
 
     fn new() -> Storage {
         Storage {
-            source: Box::leak(Box::new(crate::lanes::sources::Source::new(ENTRIES))),
+            source: Box::leak(Box::new(crate::lanes::sources::Source::new(TASK_SLOTS))),
             entries: std::vec![Entry { len: 0, kind: Kind::Abandoned, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
             ring: ring(RING_BYTES),
             long_ring: ring(LONG_RING_BYTES),
@@ -1914,6 +1940,66 @@ mod test {
     /// pool's threads and back.
     /// Keep: it detects, by hanging, mutants the clock then stops
     /// (tools/mutants/timeouts-x86_64.txt).
+    /// The ring of tasks is long enough that a publication never meets a
+    /// task claimed and not yet copied (BLAKE3 #303). The tightest public
+    /// schedule: a short message's task stays open while long borrowed
+    /// messages' pieces are published ahead of it, until every entry is in
+    /// flight; then the open task goes out, completes, and hands its entry
+    /// back while the first piece is still claimed and uncopied. With a ring
+    /// of ENTRIES tasks the next piece lands in that piece's slot. Workers
+    /// see no task (the source is unregistered); this thread hashes the rest
+    /// as it waits for room, and one thread claims the first piece before
+    /// the rest are submitted, and holds it between its claim and its copy.
+    #[test]
+    fn a_publication_never_meets_a_claimed_uncopied_task() {
+        use crate::lanes::sources::{COPY_WAITS, Source};
+        crate::initialize_multithreaded(core::num::NonZeroUsize::new(2));
+        let short = std::vec![crate::throughput::Block::ZERO; 1];
+        // Two pieces, the first one held; then enough pieces that every
+        // entry is in flight (the short message's and these 1 + 1 + 1022).
+        let two = std::vec![crate::throughput::Block::ZERO; 2 * PIECE / 64];
+        let long = std::vec![crate::throughput::Block::ZERO; (ENTRIES - 2) * PIECE / 64];
+        let mut hashes = std::vec![Hash::from_bytes([0; 32]); 3];
+        let [first, second, third] = &mut hashes[..] else { unreachable!() };
+        let (claimed_tx, claimed_rx) = std::sync::mpsc::channel();
+        let submitted = std::sync::atomic::AtomicBool::new(false);
+        stream(
+            Mode::Plain,
+            |_| {},
+            |s| {
+                let slot = s.slot.expect("a source slot (two CPUs)");
+                Source::unregister(slot);
+                let source = s.s.source;
+                let before = COPY_WAITS.load(Ordering::SeqCst);
+                std::thread::scope(|scope| {
+                    let submitted = &submitted;
+                    let holder = scope.spawn(move || {
+                        // Hold the first piece between its claim and its copy
+                        // until a publication waits on it, or the submissions end.
+                        let task = source.take_task_claimed(|| {
+                            claimed_tx.send(()).unwrap();
+                            while COPY_WAITS.load(Ordering::SeqCst) == before && !submitted.load(Ordering::SeqCst) {
+                                std::thread::yield_now();
+                            }
+                        });
+                        crate::lanes::run_task(task.expect("the first piece"));
+                    });
+                    s.submit(&short, 64, first);
+                    s.submit(&two, two.len() * 64, second);
+                    claimed_rx.recv().unwrap();
+                    s.submit(&long, long.len() * 64, third);
+                    submitted.store(true, Ordering::SeqCst);
+                    holder.join().unwrap();
+                    s.finish();
+                });
+                assert_eq!(COPY_WAITS.load(Ordering::SeqCst) - before, 0, "a publication met a task claimed and not yet copied");
+            },
+        );
+        assert_eq!(hashes[0], crate::convenience::hash(&[0u8; 64]));
+        assert_eq!(hashes[1], crate::convenience::hash(&std::vec![0u8; 2 * PIECE]));
+        assert_eq!(hashes[2], crate::convenience::hash(&std::vec![0u8; (ENTRIES - 2) * PIECE]));
+    }
+
     #[test]
     fn test_small_stream() {
         let input = std::vec![3u8; 3 * PIECE + 5];

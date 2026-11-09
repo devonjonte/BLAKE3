@@ -906,6 +906,11 @@ pub(crate) mod sources {
         next: AtomicUsize,
     }
 
+    /// How often a publication found its slot's last task claimed and not
+    /// yet copied, and waited (tests).
+    #[cfg(test)]
+    pub(crate) static COPY_WAITS: AtomicUsize = AtomicUsize::new(0);
+
     #[repr(align(128))]
     pub(crate) struct Source {
         /// A GPU-path fixture reserves its first batch from CPU claims.
@@ -983,6 +988,8 @@ pub(crate) mod sources {
             assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
             let slot = &self.ring[p % self.ring.len()];
             if slot.next.load(Ordering::Acquire) != p {
+                #[cfg(test)]
+                COPY_WAITS.fetch_add(1, Ordering::SeqCst);
                 waiting();
                 // A worker has claimed the old task and may be descheduled
                 // before its copy. Let it run before reusing that storage.
@@ -1111,6 +1118,17 @@ pub(crate) mod sources {
         #[cfg(test)]
         pub(crate) fn run_len_for_tests(waiting: usize, threads: usize) -> usize {
             Self::run_len(waiting, threads)
+        }
+
+        /// A stream's next task, claimed with `claimed` run between its
+        /// claim and its copy (tests: a worker held there).
+        #[cfg(test)]
+        pub(crate) fn take_task_claimed(&self, claimed: impl FnOnce()) -> Option<Task> {
+            match self.take_claimed(claimed) {
+                Some(Item::Task(task)) => Some(task),
+                Some(Item::Pieces(..)) => unreachable!("a stream's source carries tasks"),
+                None => None,
+            }
         }
 
         /// A stream's next task, if any (this source is a stream's).
