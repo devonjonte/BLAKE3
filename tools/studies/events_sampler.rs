@@ -10,13 +10,20 @@
 //! small share of each sample. A "nothing" shape brackets no work, so that
 //! share is on record.
 //!
-//! The counters are Apple's per-thread kpc counters (root): cycles,
-//! instructions, and up to eight chosen events, taken in the order below
-//! until the counters are full. Output is TSV on stdout: `meta` lines
+//! The counters are, on macOS, Apple's per-thread kpc counters (root):
+//! cycles, instructions, and up to eight chosen events, taken in the order
+//! below until the counters are full. On Linux x86-64 they are the `clocks`
+//! crate's diagnostic events (`clocks::events`): the same set by name
+//! (cycles, instructions, L1 data and instruction misses, dTLB misses,
+//! backend stalls, branch misses), counted on the calling thread per core
+//! kind, user space alone. Run it on one kind of core (`taskset`): the
+//! samples name the kind's events, and a sample whose thread ran on the
+//! other kind stops the run. Output is TSV on stdout: `meta` lines
 //! (events configured, user), one `digest` line (the library's own hash
 //! of every output, for the judge to match across runs), and `sample`
 //! lines: shape, event, count, units (messages finished; 1 for nothing).
 use blake3_servil::{convenience::Hasher, throughput, Mode};
+#[cfg(target_os = "macos")]
 use std::ffi::{c_char, c_int, c_void, CString};
 
 const K: usize = 8;
@@ -34,6 +41,7 @@ const SHAPES: &[(&str, usize, usize)] = &[
     ("mixed", 8, 16384),
     ("shared", 128, 32768),
 ];
+#[cfg(target_os = "macos")]
 const WANTED: &[&str] = &[
     "FIXED_CYCLES",
     "FIXED_INSTRUCTIONS",
@@ -48,12 +56,14 @@ const WANTED: &[&str] = &[
     "L1D_CACHE_MISS_ST",
 ];
 
+#[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn dlopen(path: *const c_char, flags: c_int) -> *mut c_void;
     fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
     fn getuid() -> u32;
 }
 
+#[cfg(target_os = "macos")]
 struct Kpc {
     get_thread_counters: unsafe extern "C" fn(u32, u32, *mut u64) -> c_int,
     set_counting: unsafe extern "C" fn(u32) -> c_int,
@@ -65,6 +75,7 @@ struct Kpc {
     names: Vec<&'static str>,
 }
 
+#[cfg(target_os = "macos")]
 fn sym<T>(lib: *mut c_void, name: &str) -> T {
     let c = CString::new(name).unwrap();
     // Sound: the frameworks export these C functions with the declared types.
@@ -73,6 +84,7 @@ fn sym<T>(lib: *mut c_void, name: &str) -> T {
     unsafe { std::mem::transmute_copy(&p) }
 }
 
+#[cfg(target_os = "macos")]
 impl Kpc {
     fn open() -> Kpc {
         assert_eq!(unsafe { getuid() }, 0, "kpc configures counters as root alone");
@@ -156,6 +168,43 @@ impl Kpc {
     }
 }
 
+/// The diagnostic events on Linux: the same interface as Kpc's (names,
+/// their indices, a read into 32 counters), so main is one for both.
+#[cfg(target_os = "linux")]
+struct Kpc {
+    counters: u32,
+    map: Vec<usize>,
+    names: Vec<&'static str>,
+}
+
+#[cfg(target_os = "linux")]
+impl Kpc {
+    fn open() -> Kpc {
+        let first = clocks::events::Events::read().expect("this Linux counts the diagnostic events (perf_event_open)");
+        // The events this kernel and PMU give, by the set's names.
+        let held: Vec<usize> = (0..clocks::events::NAMES.len()).filter(|&i| first.p.values[i].is_some() || first.e.values[i].is_some()).collect();
+        let names = held.iter().map(|&i| clocks::events::NAMES[i]).collect::<Vec<_>>();
+        println!("meta\tevents\t{}", names.iter().zip(&held).map(|(n, i)| format!("{n}@{i}")).collect::<Vec<_>>().join(" "));
+        Kpc { counters: clocks::events::NAMES.len() as u32 + 2, map: held, names }
+    }
+
+    /// The events so far, at their set indices; the last two words are the
+    /// P and E kinds' running times, so a sample can tell which kind ran.
+    #[inline(always)]
+    fn read(&self, into: &mut [u64; 32]) {
+        let e = clocks::events::Events::read().expect("the diagnostic events read");
+        let total = e.total();
+        for i in 0..clocks::events::NAMES.len() {
+            into[i] = total.values[i].unwrap_or(0);
+        }
+        into[clocks::events::NAMES.len()] = e.p.time_ns;
+        into[clocks::events::NAMES.len() + 1] = e.e.time_ns;
+        let _ = self.counters;
+    }
+
+    fn close(&self) {}
+}
+
 fn mode<'a>(i: usize, flavor: &str, keys: &'a [[u8; 32]]) -> Mode<'a> {
     match flavor {
         "plain" => Mode::Plain,
@@ -171,6 +220,7 @@ fn mode<'a>(i: usize, flavor: &str, keys: &'a [[u8; 32]]) -> Mode<'a> {
 
 fn main() {
     blake3_servil::initialize();
+    #[cfg(target_os = "macos")]
     println!("meta\tuid\t{}", unsafe { getuid() });
     println!("meta\tsets\t{K}\tsamples\t{SAMPLES}\tpiece\t{PIECE}");
     let kpc = Kpc::open();
@@ -178,6 +228,14 @@ fn main() {
     let mut after = [0u64; 32];
     let mut all_outputs = Hasher::new(Mode::Plain, None);
     let emit = |shape: &str, wall: u64, before: &[u64; 32], after: &[u64; 32], units: usize| {
+        // On Linux, one kind of core a run: a sample on both kinds would
+        // add two kinds' events whose meanings differ (clocks::events).
+        #[cfg(target_os = "linux")]
+        {
+            let n = clocks::events::NAMES.len();
+            let (p, e) = (after[n] - before[n], after[n + 1] - before[n + 1]);
+            assert!(p == 0 || e == 0, "{shape}: the sample ran on both kinds of core (P {p} ns, E {e} ns); pin the run with taskset");
+        }
         println!("sample\t{shape}\twall_ns\t{wall}\t{units}");
         for (name, &i) in kpc.names.iter().zip(&kpc.map) {
             println!("sample\t{shape}\t{name}\t{}\t{units}", after[i] - before[i]);
