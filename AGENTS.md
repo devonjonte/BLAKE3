@@ -150,6 +150,8 @@ The part above (Philosophy, Strategy, Style) reads the same in the `AGENTS.md` o
 
 **Comparisons, as the servil projects run them** (Zooko, October 16, 2026). A run's mean is `clocks::summary::mean`. A comparison's cells are judged by `clocks::summary::discoveries` (a paired t-test per cell, the false discovery rate controlled over all cells at 5%, a 3% margin), each pair of runs with a fresh link layout; for samples files, `bench-hashes compare OLD... -- NEW...`; for a change, `bench-hashes check`. Before changing how comparisons are judged, read bench-hashes' METHODOLOGY, "Each part of the rule, and its evidence".
 
+**Who decides what** (Zooko, November 9, 2026). Devon decides what the benchmark asks (above). Sam decides the testing system's design: the mutation checks, their budget, shards, timeouts and known lists, the smoke run, how the suites run; she lands her decisions with her own checks, and tells John when one would change what a verdict means for the library's code, as a recommendation he weighs. John decides the library's design and lands its candidates. Each decides within the one-assignee rule; none waits for another's approval inside their own area.
+
 **The order of work** (Zooko, November 3, 2026). bench-hashes first, since an excellent benchmark guides all the other work; the mutation tests second, since they give confidence that the other work is correct and find code to remove (BLAKE3 #219); then the fork's speed, the GPU first.
 
 ## Strategy: the streaming APIs first (Zooko, September 27, 2026)
