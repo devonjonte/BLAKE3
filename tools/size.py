@@ -188,8 +188,13 @@ def machine_code(tree, target):
     return (kernels, rust) if kernels and rust else (None, None)
 
 
+def resolve(rev):
+    """The commit `rev` names where the tool is run: a name such as HEAD
+    is the caller's, each worktree having its own."""
+    return subprocess.run(["git", "rev-parse", "--verify", f"{rev}^{{commit}}"], capture_output=True, text=True, check=True).stdout.strip()
+
+
 def measures(rev):
-    rev = git("rev-parse", rev).strip()
     out = lines_of(rev)
     with tempfile.TemporaryDirectory(prefix="size-") as scratch:
         tree = os.path.join(scratch, "tree")
@@ -210,7 +215,9 @@ ORDER = ["public items", "decisions (mutants)", "build conditions", "machine cod
 def main():
     revs = sys.argv[1:] or ["HEAD"]
     assert len(revs) <= 2, __doc__
-    results = [measures(r) for r in revs]
+    commits = [resolve(r) for r in revs]
+    assert len(set(commits)) == len(commits), f"size: {revs[0]} and {revs[-1]} are one commit ({commits[0][:12]}): nothing to compare"
+    results = [measures(c) for c in commits]
     show = lambda v: "not measured here" if v is None else f"{v:,}"
     if len(results) == 1:
         rev, m = results[0]
