@@ -11,7 +11,7 @@
 
 use crate::admission::{Acquire, OwnedLease, Pool, initialized_mutex};
 use crate::incremental::{HasherCore, STAGE_LEN};
-use crate::lanes::{Task, sources::Source};
+use crate::lanes::sources::Source;
 use crate::platform::Platform;
 use crate::{
     CHUNK_LEN, CVWords, Hash, Mode, OUT_LEN,
@@ -159,7 +159,7 @@ impl Receiver {
         // count of places would bound a lap (BLAKE3 #302). The Mac's timing
         // found a ring sized at `buffers` overflowing: a worker read a
         // garbage task.
-        let source = Box::leak(Box::new(Source::with_named_places(buffers + messages)));
+        let source = Box::leak(Box::new(Source::with_actions(buffers + messages)));
         source.drain_actions(|| false); // Initialize its platform completion metadata.
         let input = (0..buffers).map(|index| Buffer { index, blocks: vec![Block::ZERO; INPUT_BYTES / 64].into_boxed_slice() }).collect();
         let slots = (0..buffers).map(|_| Slot { state: initialized_mutex(SlotState::Vacant) }).collect();
@@ -258,11 +258,7 @@ impl Receiver {
                 state.batch = Some(BatchJob { owner: core.clone(), id, key, flags, input, input_len, message_len, out: places, count });
                 id
             };
-            let mut task = Task::of(&[], 0);
-            task.action = Some((execute_batch, (&core.messages[id.index] as *const Mutex<Progress>).cast_mut().cast()));
-            // The job's place: its message slot's, past the buffers', held
-            // until the batch's result is collected.
-            core.source.publish_part(core.slots.len() + id.index, task);
+            core.source.publish_part(execute_batch, (&core.messages[id.index] as *const Mutex<Progress>).cast_mut().cast(), 0);
             BatchCompletion { request: core.outputs[id.index].clone().acquire_owned(), core, id, guard: Some(crate::lanes::AbortOnUnwind) }
         }
     }
@@ -391,14 +387,10 @@ impl Message {
         }
         self.sent += len as u64;
         self.used = 0;
-        let mut task = Task::of(&[], 0);
-        // The final short update takes its own SME2 turn. A complete group
-        // uses the worker's turn, as the existing stream's piece does.
-        task.members = usize::from(last);
-        task.action = Some((execute, (&owner.slots[index] as *const Slot).cast_mut().cast()));
-        // The part's place: its buffer's, held until the part has run and
-        // its message has taken the result.
-        owner.source.publish_part(index, task);
+        // The final short update takes its own SME2 turn (`members` 1). A
+        // complete group uses the worker's turn, as the existing stream's
+        // piece does.
+        owner.source.publish_part(execute, (&owner.slots[index] as *const Slot).cast_mut().cast(), usize::from(last));
     }
 
     /// The message's last `written` bytes are at the start of its current
