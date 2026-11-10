@@ -151,14 +151,14 @@ impl Receiver {
 
     /// A core of the given capacities, its source and pools made once.
     fn core(buffers: usize, messages: usize) -> Arc<Core> {
-        // The source persists, as the registry requires. It has a place
-        // for every task that can be out at once: a part per input buffer
-        // and a batch job per message slot (a batch holds no buffer), each
-        // in its buffer's or its slot's own place (`submit`,
-        // `submit_batch`), since buffers come back out of order and no
-        // count of places would bound a lap (BLAKE3 #302). The Mac's timing
-        // found a ring sized at `buffers` overflowing: a worker read a
-        // garbage task.
+        // The source persists, as the registry requires. Its ring holds
+        // every action that can be published before a worker claims it: a
+        // part per input buffer and a batch job per message slot (a batch
+        // holds no buffer). The Mac's timing found a ring sized at
+        // `buffers` overflowing: a worker read a garbage task. An action is
+        // three words, read whole before its claim, so buffers coming back
+        // out of order write over nothing a claimer still needs (BLAKE3
+        // #302).
         let source = Box::leak(Box::new(Source::with_actions(buffers + messages)));
         source.drain_actions(|| false); // Initialize its platform completion metadata.
         let input = (0..buffers).map(|index| Buffer { index, blocks: vec![Block::ZERO; INPUT_BYTES / 64].into_boxed_slice() }).collect();
@@ -1187,16 +1187,16 @@ mod ring_bound {
         receiver.close();
     }
 
-    /// A part claimed and not yet copied is the part its claimer copies,
-    /// while another message's parts go round the ring past it (BLAKE3
-    /// #302: buffers come back out of order, a message at a time, so no
-    /// ring length bounds the lap). One thread claims message A's part and
-    /// is held before its copy; message B's eight parts then pass through
-    /// the other buffer, twice round the ring of four, hashed by this
-    /// thread (a pool of one thread has no worker). The holder's task is
-    /// A's part by its buffer's slot, run once; both digests are right.
+    /// A part claimed is the part its claimer runs, while another message's
+    /// parts go round the ring past it (BLAKE3 #302: buffers come back out
+    /// of order, a message at a time, so no ring length bounds the lap).
+    /// One thread claims message A's part and is held there; message B's
+    /// eight parts then pass through the other buffer, twice round the
+    /// ring of four, hashed by this thread (a pool of one thread has no
+    /// worker). The holder's task is A's part by its buffer's slot, run
+    /// once; both digests are right.
     #[test]
-    fn a_part_claimed_and_not_yet_copied_survives_the_ring_lapping_it() {
+    fn a_part_claimed_is_the_part_run_while_another_message_laps_the_ring() {
         crate::initialize_multithreaded(core::num::NonZeroUsize::new(1));
         let (buffers, messages) = (2, 2);
         let receiver = Receiver::new(Mode::Plain, buffers, messages);
@@ -1216,7 +1216,7 @@ mod ring_bound {
                 });
                 let task = task.expect("A's part, the one task published");
                 let (_, context) = task.action.expect("a part's task is an action");
-                assert!(core::ptr::eq(context.cast::<Slot>(), &core.slots[a_buffer]), "the held claimer copied another task than the one it claimed");
+                assert!(core::ptr::eq(context.cast::<Slot>(), &core.slots[a_buffer]), "the held claimer has another task than the one it claimed");
                 crate::lanes::run_task(task);
             });
             claimed_rx.recv().unwrap();

@@ -999,9 +999,23 @@ pub(crate) mod sources {
     /// context, and the task's `members` (the SME2 thread's turn). Atomic
     /// words, so that a claimer reads them before its claim (`take`).
     struct Action {
-        run: AtomicUsize,
+        run: AtomicPtr<()>,
         context: AtomicPtr<()>,
         members: AtomicUsize,
+    }
+
+    impl Action {
+        fn write(&self, run: unsafe fn(*mut (), Platform), context: *mut (), members: usize) {
+            self.run.store(run as *mut (), Ordering::Relaxed);
+            self.context.store(context, Ordering::Relaxed);
+            self.members.store(members, Ordering::Relaxed);
+        }
+
+        /// The three words as they read now: one publication's only for a
+        /// reader whose claim of it then succeeds (`take`).
+        fn read(&self) -> (*mut (), *mut (), usize) {
+            (self.run.load(Ordering::Relaxed), self.context.load(Ordering::Relaxed), self.members.load(Ordering::Relaxed))
+        }
     }
 
     /// A task's place in a source.
@@ -1094,7 +1108,11 @@ pub(crate) mod sources {
                     })
                     .collect(),
                 actions: (0..actions)
-                    .map(|_| Action { run: AtomicUsize::new(0), context: AtomicPtr::new(core::ptr::null_mut()), members: AtomicUsize::new(0) })
+                    .map(|_| Action {
+                        run: AtomicPtr::new(core::ptr::null_mut()),
+                        context: AtomicPtr::new(core::ptr::null_mut()),
+                        members: AtomicUsize::new(0),
+                    })
                     .collect(),
                 job: AtomicPtr::new(core::ptr::null_mut()),
                 base: AtomicUsize::new(0),
@@ -1154,10 +1172,7 @@ pub(crate) mod sources {
             assert!(p - self.claimed.load(Ordering::Relaxed) < self.actions.len(), "a source's ring holds every action not yet taken");
             // Action p % len is free: `claimed` has passed its last
             // publication (the assertion above).
-            let action = &self.actions[p % self.actions.len()];
-            action.run.store(run as usize, Ordering::Relaxed);
-            action.context.store(context, Ordering::Relaxed);
-            action.members.store(members, Ordering::Relaxed);
+            self.actions[p % self.actions.len()].write(run, context, members);
             self.finish.published.store(p + 1, Ordering::Release);
             core::sync::atomic::fence(Ordering::SeqCst);
             if pool().sme2 {
@@ -1241,25 +1256,21 @@ pub(crate) mod sources {
                 // c. So if the CAS below succeeds, `claimed` was c until
                 // then, no such write had begun, and these are c's words.
                 // Read after the claim, they could be a later action's.
-                let action = match self.actions.get(c % self.actions.len().max(1)) {
-                    Some(action) => (action.run.load(Ordering::Relaxed), action.context.load(Ordering::Relaxed), action.members.load(Ordering::Relaxed)),
-                    None => (0, core::ptr::null_mut(), 0),
-                };
+                let action = (!self.actions.is_empty()).then(|| self.actions[c % self.actions.len()].read());
                 match self.claimed.compare_exchange_weak(c, c + n, Ordering::AcqRel, Ordering::Acquire) {
                     Ok(_) if !self.carries_tasks() => return Some(Item::Pieces(self.job.load(Ordering::Relaxed), c - self.base.load(Ordering::Relaxed), n)),
-                    Ok(_) if !self.actions.is_empty() => {
-                        claimed();
-                        let (run, context, members) = action;
-                        // Sound: `run` is the function its publication
-                        // stored (the claim succeeded: the words are c's).
-                        let run = unsafe { core::mem::transmute::<usize, unsafe fn(*mut (), Platform)>(run) };
-                        let mut task = Task::of(&[], 0);
-                        task.action = Some((run, context));
-                        task.members = members;
-                        return Some(Item::Task(task));
-                    }
                     Ok(_) => {
                         claimed();
+                        if let Some((run, context, members)) = action {
+                            // Sound: `run` is the function its publication
+                            // stored (the claim succeeded: the words are
+                            // c's), and its claimer has nothing more to read.
+                            let run = unsafe { core::mem::transmute::<*mut (), unsafe fn(*mut (), Platform)>(run) };
+                            let mut task = Task::of(&[], 0);
+                            task.action = Some((run, context));
+                            task.members = members;
+                            return Some(Item::Task(task));
+                        }
                         let slot = &self.places[c % self.places.len()];
                         // Sound: this thread alone claimed the publication
                         // in this place, written before `published` passed

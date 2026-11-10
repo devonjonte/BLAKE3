@@ -91,8 +91,9 @@ const ENTRIES: usize = 1024;
 /// the GPU gives back at most the HELD pieces its commands then hold. A
 /// change that feeds the GPU or reclaims anywhere else, or that hands
 /// entries back out of order, changes this bound (the pipeline's receiver
-/// hands buffers back out of order, and names its places instead:
-/// `Source::publish_part`).
+/// hands buffers back out of order, and no count bounds its lap: its
+/// tasks are actions, whole in the ring's atomic words, read before the
+/// claim: `Source::publish_part`).
 const TASK_SLOTS: usize = task_slots();
 
 /// TASK_SLOTS' count (a function, so that a mutation test names its rule).
