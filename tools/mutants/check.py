@@ -1,6 +1,11 @@
 """Mutation testing against a list of the mutants known to survive.
 
-    python3 tools/mutants/check.py [--since REV | --whole] [--write] [--map] [--whole-suite] [--all-hangs] [--every-mutant]
+    python3 tools/mutants/check.py [--since REV | --whole] [--write] [--map] [--whole-suite] [--all-hangs] [--every-mutant] [--crate DIR]
+
+The repository holds two crates (BLAKE3 #335): the one-thread crate at its
+root and the crate with the pool in threads/. A run is of both, the root's
+first, each with its own lists (tools/mutants/ and tools/mutants/threads/,
+a row naming its file within its crate); --crate DIR runs one.
 
 By default the check covers the change since the branch left origin/next
 (git merge-base; a minute for a day's change). --since REV names another
@@ -106,13 +111,86 @@ from concurrent.futures import ThreadPoolExecutor
 import release_same
 
 ROOT = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip()
-KNOWN = os.path.join(ROOT, "tools", "mutants", f"known-{platform.machine()}.txt")
+
+
+def crate_named(argv):
+    """The crate a run is of: "" for the repository's root (the one-thread
+    crate), or the folder `--crate DIR` names, a crate of its own beside
+    it (threads/, BLAKE3 #335). One folder's name, inside the repository."""
+    if "--crate" not in argv:
+        return ""
+    at = argv.index("--crate") + 1
+    if at == len(argv):
+        sys.exit("mutants: --crate takes a folder's name (threads)")
+    name = argv[at]
+    if name == ".":
+        return ""
+    if os.sep in name or name.startswith(".") or (os.altsep and os.altsep in name):
+        sys.exit(f"mutants: --crate names one folder at the repository's root, not {name!r}")
+    return name
+
+
+def lists_dir(root, crate):
+    """Where a crate's lists are: tools/mutants/ for the root's, and a
+    folder of the crate's name there for another's. A row names its file
+    within its crate (src/lanes.rs), so a file that moves between crates
+    takes its rows to the other list as they are."""
+    return os.path.join(root, "tools", "mutants", *([crate] if crate else []))
+
+
+def other_crates(entries, has_list):
+    """The crates beside the root's that have lists: the folders of
+    tools/mutants/ that hold this machine's."""
+    return sorted(d for d in entries if has_list(d))
+
+
+def build_args(crate):
+    """How every mutant builds: the mutants profile, and in the root's
+    crate its public features on (the other crate has none)."""
+    return ["--profile", "mutants"] + ([] if crate else ["--features", "serde,zeroize"])
+
+
+def divide_list(text, moved):
+    """A list's text as two: (what stays, what goes with the files of
+    `moved` to another crate). Comments go to both; the `files:` and
+    `model files:` lines divide by their files; each row goes with its file."""
+    stays, goes = [], []
+    for line in text.splitlines():
+        for key in ("files: ", "model files: "):
+            if line.startswith(key):
+                names = line[len(key):].split()
+                for side, mine in ((stays, [f for f in names if f not in moved]), (goes, [f for f in names if f in moved])):
+                    if mine:
+                        side.append(key + " ".join(mine))
+                break
+        else:
+            if not line or line.startswith("#"):
+                stays.append(line)
+                goes.append(line)
+            else:
+                (goes if line.split("\t", 1)[0] in moved else stays).append(line)
+    return "\n".join(stays) + "\n", "\n".join(goes) + "\n"
+
+
+CRATE = crate_named(sys.argv)
+# Where cargo runs: the crate's folder, in the checkout and in each shard.
+CRATE_DIR = os.path.join(ROOT, CRATE) if CRATE else ROOT
+LISTS = lists_dir(ROOT, CRATE)
+
+
+def last():
+    """Where a run's outcomes are kept for a look afterwards, a crate's
+    apart from the other's."""
+    return os.path.join(ROOT, "tmp", "mutants-last", *([CRATE] if CRATE else []))
+
+
+KNOWN = os.path.join(LISTS, f"known-{platform.machine()}.txt")
 # The mutants (by name, counted in places, as KNOWN) that no test catches but
 # the clock stops: a loop that never ends, a wait that never returns. Their
 # own outcome, never folded into caught or survived: a time-out says the
 # tests did not finish, not what they would have found. Rows as KNOWN's, CPU
 # conditions too.
-TIMEOUTS = os.path.join(ROOT, "tools", "mutants", f"timeouts-{platform.machine()}.txt")
+TIMEOUTS = os.path.join(LISTS, f"timeouts-{platform.machine()}.txt")
 NAME = re.compile(r"^(\S+?):\d+:\d+: (.*)$")
 
 
@@ -212,7 +290,7 @@ MAP = "--map" in sys.argv
 # outcome is a hang that narrowing avoids, October 23); the shards run
 # in two thirds of the time. --whole-suite runs every test on every
 # mutant, as before.
-REACH = "--whole-suite" not in sys.argv
+REACH = "--whole-suite" not in sys.argv and not CRATE  # the map is of the root crate's tests
 
 
 # Runs at once, each in its own worktree and build: on the VM (16 CPUs),
@@ -222,7 +300,7 @@ SHARDS = 6
 HOST = next(l.split(": ", 1)[1] for l in subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True).stdout.splitlines() if l.startswith("host: "))
 # The target directory cargo is set to use (a cargo config's target-dir, or
 # the checkout's target/): the shards build inside it.
-TARGET_DIR = json.loads(subprocess.run(["cargo", "metadata", "--format-version", "1", "--no-deps"], cwd=ROOT,
+TARGET_DIR = json.loads(subprocess.run(["cargo", "metadata", "--format-version", "1", "--no-deps"], cwd=CRATE_DIR,
                                        capture_output=True, text=True, check=True).stdout)["target_directory"]
 # cargo-mutants needs a limit on a mutant's tests (with --in-place it would
 # otherwise take 300 s). The run's one clock is nextest's, a test's 15 s
@@ -234,7 +312,7 @@ BACKSTOP = 3600
 # How every mutant builds (and release_same's release build, with the
 # profile's incremental off): the public features on, so the code behind
 # them is tested too (the build variants, pure and the like, are their own builds).
-BUILD = ["--profile", "mutants", "--features", "serde,zeroize"]
+BUILD = build_args(CRATE)
 # Each process's memory, builds' and tests' alike: a mutant that allocates
 # without end fails its test here, and leaves the machine's memory to the
 # rest (one of 57 GB took the long proofs' memory). The limit is on data
@@ -467,8 +545,8 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None, tkn
         # The checkout's lock (git ignores it): the shard builds what the
         # checkout builds, from the crates already downloaded, without the
         # network (a slow crates.io failed a run's baseline, October 24).
-        if os.path.exists(os.path.join(ROOT, "Cargo.lock")):
-            shutil.copy(os.path.join(ROOT, "Cargo.lock"), tree)
+        if os.path.exists(os.path.join(CRATE_DIR, "Cargo.lock")):
+            shutil.copy(os.path.join(CRATE_DIR, "Cargo.lock"), os.path.join(tree, CRATE))
         # The library's and the integration tests; the doc tests stay out
         # (each compiles a program of its own: minutes per mutant).
         # Its own build directory, named outright (a cargo config's
@@ -511,13 +589,13 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None, tkn
         # and made each build 10% slower, the run no faster, October 21).
         tests = ["--test", "shuttle_finish", "--test", "shuttle_park"] if loom else ["--lib", "--tests"]
         shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", *tests]
-        runs.append((tree, subprocess.Popen(shard, cwd=tree, env=env, preexec_fn=capped(shards))))
+        runs.append((tree, subprocess.Popen(shard, cwd=os.path.join(tree, CRATE), env=env, preexec_fn=capped(shards))))
         envs[tree] = env
     names = collections.Counter()
     timed = collections.Counter()  # the time-outs, by name: their own outcome
     functions = collections.defaultdict(list)  # (file, function) -> [(outcome, name)]
     rows = []  # (mutant name, function, test, outcome, ms); the unmutated tree's mutant name is UNMUTATED
-    kept = os.path.join(ROOT, "tmp", "mutants-last", "map" if MAP and label == "run" else label)
+    kept = os.path.join(last(), "map" if MAP and label == "run" else label)
     shutil.rmtree(kept, ignore_errors=True)
     for k, (tree, process) in enumerate(runs):
         # 0: every mutant caught; 2: some missed; 3: some timed out. Any
@@ -590,7 +668,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None, tkn
         # shards at once (their cargo-mutants runs are over).
         def look(tree):
             target = envs[tree]["CARGO_TARGET_DIR"] + "-release"
-            return release_same.confirm(tree, target, survivors[tree], BUILD, envs[tree])
+            return release_same.confirm(os.path.join(tree, CRATE), target, survivors[tree], BUILD, envs[tree])
         looking = time.monotonic()
         with ThreadPoolExecutor(len(survivors)) as pool:
             built_same = {key for keys in pool.map(look, sorted(survivors)) for key in keys}
@@ -706,8 +784,8 @@ def elsewhere(name, lists=None):
     the code, kept beside this machine's, never in place of it."""
     here = platform.machine()
     if lists is None:
-        lists = sorted(glob.glob(os.path.join(ROOT, "tools", "mutants", "known-*.txt")) +
-                       glob.glob(os.path.join(ROOT, "tools", "mutants", "timeouts-*.txt")))
+        lists = sorted(glob.glob(os.path.join(LISTS, "known-*.txt")) +
+                       glob.glob(os.path.join(LISTS, "timeouts-*.txt")))
     out = []
     for path in lists:
         base = os.path.basename(path)
@@ -833,14 +911,14 @@ def check_rows_exist(remove=False):
     checks every list. The outcomes and reasons are the runs' and people's.
     A list a run on other code wrote stops the check here, by row (26 of
     the AArch64 list's rows named mutants gone, unnoticed: October 26)."""
-    paths = sorted(glob.glob(os.path.join(ROOT, "tools", "mutants", "known-*.txt"))
-                   + glob.glob(os.path.join(ROOT, "tools", "mutants", "timeouts-*.txt")))
+    paths = sorted(glob.glob(os.path.join(LISTS, "known-*.txt"))
+                   + glob.glob(os.path.join(LISTS, "timeouts-*.txt")))
     rows = list_rows(paths)
     files = sorted({f for _, f, _ in rows})
     args = ["cargo", "mutants", "--list", *BUILD]
     for f in files:
         args += ["--file", f]
-    listed = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()
+    listed = subprocess.run(args, cwd=CRATE_DIR, capture_output=True, text=True, check=True).stdout.splitlines()
     stale = stale_rows(rows, listed)
     for name, file, mutant in stale:
         print(f"{'REMOVED' if remove else 'STALE'} ROW: {name}: {file}\t{mutant}")
@@ -889,7 +967,7 @@ BUDGET_S = 60
 
 # What a check costs on this machine, kept beside its shards' worktrees: the
 # seconds of a shard's unmutated build and tests, and of a mutant's.
-RATE = os.path.join(WORKTREES, "rate.json")
+RATE = os.path.join(WORKTREES, f"rate-{CRATE}.json" if CRATE else "rate.json")
 
 
 def rate_of(shards):
@@ -944,7 +1022,7 @@ def budget(started):
     run, to whoever runs it."""
     took = round(time.monotonic() - started)
     shards = []
-    for path in glob.glob(os.path.join(ROOT, "tmp", "mutants-last", "run", "shard*", "outcomes.json")):
+    for path in glob.glob(os.path.join(last(), "run", "shard*", "outcomes.json")):
         with open(path) as f:
             shards.append(json.load(f).get("outcomes", []))
     keep_rate(RATE, rate_of(shards))
@@ -952,7 +1030,7 @@ def budget(started):
         print(f"mutants: took {took} s, within the {BUDGET_S} s budget")
         return
     phases = collections.Counter()
-    for path in glob.glob(os.path.join(ROOT, "tmp", "mutants-last", "*", "shard*", "outcomes.json")):
+    for path in glob.glob(os.path.join(last(), "*", "shard*", "outcomes.json")):
         with open(path) as f:
             outcomes = json.load(f).get("outcomes", [])
         for o in outcomes:
@@ -1122,7 +1200,8 @@ def main():
     # a whole run alone (tools/release-check.py's mutation_result).
     print(f"mutants: the change since {since}" if since is not None else "mutants: the whole run")
     if since is not None:
-        diff = subprocess.run(["git", "-C", ROOT, "diff", f"{since}...HEAD", "--", *files, *LOOM_FILES], capture_output=True, text=True, check=True).stdout
+        # The crate's files by their paths within it, as its list names them.
+        diff = subprocess.run(["git", "-C", CRATE_DIR, "diff", "--relative", f"{since}...HEAD", "--", *files, *LOOM_FILES], capture_output=True, text=True, check=True).stdout
         if not diff:
             print(f"mutants: the change since {since} touches no mutated file")
             budget(started)
@@ -1136,7 +1215,7 @@ def main():
         # fill (each shard's baseline build costs about as much as three
         # mutants), so the budget's cost shows before anything runs.
         planned = subprocess.run(["cargo", "mutants", "--list", *BUILD, "--in-diff", path, *[a for f in files for a in ("--file", f)]],
-                                 cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()
+                                 cwd=CRATE_DIR, capture_output=True, text=True, check=True).stdout.splitlines()
         every = "--every-mutant" in sys.argv
         kept, by_row, by_kind = left_to_the_whole_run(planned, known, every)
         left_out = exclude_args(by_row) + ([] if every else [arg for p in kind_patterns() for arg in ("--exclude-re", p)])
@@ -1269,5 +1348,27 @@ def main():
     sys.exit(0 if ok and ok_timed else 1 if not ok else 2)
 
 
+def every_crate():
+    """The same run of each crate, the root's first, each in a process of
+    its own (a crate's lists, target and outcomes are its own); the worst
+    status of them: 1 a survivor or a list wrong, else 2 only time-outs
+    differ, else 0."""
+    entries = os.listdir(lists_dir(ROOT, ""))
+    others = other_crates(entries, lambda d: os.path.exists(os.path.join(lists_dir(ROOT, d), os.path.basename(KNOWN)))
+                          and os.path.exists(os.path.join(ROOT, d, "Cargo.toml")))
+    if not others:
+        return main()
+    started = time.monotonic()
+    statuses = []
+    for crate in [".", *others]:
+        print(f"mutants: the crate {'at the root' if crate == '.' else 'in ' + crate + '/'}", flush=True)
+        statuses.append(subprocess.run([sys.executable, os.path.abspath(__file__), *sys.argv[1:], "--crate", crate]).returncode)
+    print(f"mutants: {len(statuses)} crates took {round(time.monotonic() - started)} s in all")
+    sys.exit(next((s for s in (1, 2) if s in statuses), max(statuses)))
+
+
 if __name__ == "__main__":
-    main()
+    if "--crate" in sys.argv or "--help" in sys.argv or "-h" in sys.argv:
+        main()
+    else:
+        every_crate()

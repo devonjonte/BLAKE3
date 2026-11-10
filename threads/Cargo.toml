@@ -28,3 +28,18 @@ tempfile = "3.8.0"
 serde_json = "1.0.107"
 # tests/shuttle_*.rs: the pool's handshakes under a model checker.
 shuttle = "0.8"
+
+# The profiles the root's crate has, for this crate's own builds (a crate
+# outside a workspace reads its own): tests optimized with their checks on,
+# and tools/mutants/check.py's incremental release build.
+[profile.test]
+opt-level = 3
+codegen-units = 16
+incremental = false
+debug = false
+debug-assertions = true
+overflow-checks = true
+
+[profile.mutants]
+inherits = "release"
+incremental = true
