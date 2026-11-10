@@ -7,7 +7,7 @@
 # mutants have a list of their own. Rows come from its runs (the runner's
 # mutants job), --since the GPU's change first (job 1909).
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/block.rs src/convenience.rs src/each.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/throughput.rs src/platform.rs src/self_test.rs src/tree.rs src/pair.rs src/stream.rs src/gpu.rs src/stream/frontend.rs
+files: src/block.rs src/convenience.rs src/each.rs src/ffi_neon_hybrid.rs src/ffi_sme2.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/throughput.rs src/platform.rs src/self_test.rs src/tree.rs src/pair.rs src/stream.rs src/gpu.rs
 model files: src/finish.rs src/park.rs
 src/gpu.rs	replace % with + in start	1	the start's check of the GPU against the CPU, its input's bytes, counters or compared lengths changed: a GPU that hashes right passes it on any input, and only a faulty GPU tells the two apart
 src/gpu.rs	replace % with / in start	1	the start's check of the GPU against the CPU, its input's bytes, counters or compared lengths changed: a GPU that hashes right passes it on any input, and only a faulty GPU tells the two apart
@@ -55,3 +55,5 @@ src/self_test.rs	replace * with / in last_lanes	2	[cpu has FEAT_SHA3] equivalent
 src/self_test.rs	replace + with * in last_lanes	1	[cpu has FEAT_SHA3] equivalent here: changes only the scalar startup path that this CPU leaves uncalled; the SHA-3-free startup tests check those answers
 src/self_test.rs	replace + with - in last_lanes	1	[cpu has FEAT_SHA3] equivalent here: changes only the scalar startup path that this CPU leaves uncalled; the SHA-3-free startup tests check those answers
 src/self_test.rs	replace | with ^ in last_lanes	1	equivalent: CHUNK_END and ROOT are disjoint bits
+src/lanes.rs	replace > with >= in Task::run	1	as on aarch64: survives (known-aarch64.txt): equivalent: a subtree task at counter zero is more than one chunk (the pool splits at MIN_SPLIT_LEN and above, and a stream's pieces are TASK_LEN), so len == CHUNK_LEN never reaches this branch
+src/lanes.rs	replace sources::take_stream_task -> Option<Task> with None	1	as on aarch64: survives (known-aarch64.txt): OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103): without it the SME2 thread takes no stream task and the NEON workers hash them all, the same digests
