@@ -93,7 +93,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from exchange import Exchange
+from exchange import Exchange, utc
 
 FORK_URL = "https://github.com/servil-software-factory/BLAKE3.git"
 BENCH_URL = "https://github.com/servil-software-factory/bench-hashes.git"
@@ -153,7 +153,7 @@ def hex_commit(job, key):
 
 def environment():
     env = {"PATH": f"{CARGO_BIN}:/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(HOME),
-           "LANG": "en_US.UTF-8", "TMPDIR": str(HOME / "tmp") + "/"}
+           "LANG": "en_US.UTF-8", "TMPDIR": str(HOME / "tmp") + "/", "TZ": "UTC"}
     return env
 
 
@@ -421,7 +421,7 @@ assert 7200 * 1 >= MAX_LIMIT
 
 def process(path, out):
     print(f"runner: {path.name}: started, log in {out / 'runner.log'} until it ends", file=sys.stderr, flush=True)
-    verdict = {"job": path.name, "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "power at start": power()}
+    verdict = {"job": path.name, "started": utc("%Y-%m-%dT%H:%M:%SZ"), "power at start": power()}
     with open(out / "runner.log", "w") as log:
         try:
             job = json.loads(path.read_text())
@@ -462,7 +462,7 @@ def process(path, out):
             verdict["status"] = "error"
             verdict["error"] = f"{type(e).__name__}: {e}"
             print(f"runner: {verdict['error']}", file=log, flush=True)
-    verdict["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    verdict["finished"] = utc("%Y-%m-%dT%H:%M:%SZ")
     verdict["power at end"] = power()
     if verdict.get("type") in TIMED and verdict.get("status") not in (None, "error") and not verdict["power at end"].startswith("AC Power"):
         verdict["status"] = f"power left mains during the job ({verdict['status']}): its results are no evidence of speed"
@@ -480,6 +480,10 @@ def main():
     assert not exchange.shared or len(sys.argv) == 3, "a shared exchange needs a label for this machine: runner.py EXCHANGE LABEL"
     assert (CARGO_BIN / "cargo").exists(), f"no cargo at {CARGO_BIN}: install rustup for this account"
     (HOME / "tmp").mkdir(exist_ok=True)
+    # Every time a job or its meters print is UTC: results are published,
+    # and a machine's local time and zone say where it is.
+    os.environ["TZ"] = "UTC"
+    time.tzset()
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
     end_leftover_session()

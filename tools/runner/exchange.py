@@ -24,6 +24,12 @@ import sys
 import time
 from pathlib import Path
 
+def utc(form):
+    """The time now in UTC: results are published, and a machine's local
+    time and zone say where it is."""
+    return time.strftime(form, time.gmtime())
+
+
 PUBLISHED_KINDS = {".json", ".log", ".txt", ".tsv", ".csv", ".md", ".err", ".html", ".svg", ".asm"}
 PUBLISHED_LIMIT = 20 << 20
 
@@ -75,9 +81,9 @@ class Exchange:
     def claim(self, job):
         """A results folder for `job`, pushed; None when another runner
         claimed it first."""
-        out = self.results / f"{job.stem}.{time.strftime('%Y%m%d-%H%M%S')}-{self.machine}"
+        out = self.results / f"{job.stem}.{utc('%Y%m%dT%H%M%SZ')}-{self.machine}"
         out.mkdir()
-        (out / "claimed.json").write_text(json.dumps({"job": job.name, "machine": self.machine, "claimed": time.strftime("%Y-%m-%dT%H:%M:%S%z")}, indent=2) + "\n")
+        (out / "claimed.json").write_text(json.dumps({"job": job.name, "machine": self.machine, "claimed": utc("%Y-%m-%dT%H:%M:%SZ")}, indent=2) + "\n")
         if not self.shared:
             return out
         self.git("add", str(out / "claimed.json"))
