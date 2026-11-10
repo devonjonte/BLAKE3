@@ -208,6 +208,49 @@ jobs:
           ~/.cargo/bin/cargo nextest run
           ~/.cargo/bin/cargo test --doc
 
+  # x86-64's three kernel widths, whichever CPU this runner is: the suites
+  # as an AVX-512 CPU (Ice Lake server), as one with AVX2 and no AVX-512
+  # (Haswell), and as one with SSE4.1 alone (Nehalem), under Intel's
+  # Software Development Emulator. The other Linux jobs run the widths of
+  # the runner they draw, and about half have no AVX-512: a test's AVX-512
+  # expectations went unrun through review and several CI rounds (#346).
+  # The emulator is pinned by its SHA-256 and BLAKE3 hashes; its licence
+  # (Intel Simplified Software License, in its Licenses/) allows use and
+  # unmodified redistribution.
+  x86_widths:
+    name: "x86-64 as an AVX-512, an AVX2 and an SSE4.1 CPU (Intel SDE)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: taiki-e/install-action@nextest
+    - run: grep -o -w 'avx512f\|avx512vl\|avx2\|sse4_1' /proc/cpuinfo | sort -u
+    - name: Intel SDE 9.58.0
+      run: |
+        curl -sSfL -o sde.tar.xz https://downloadmirror.intel.com/859732/sde-external-9.58.0-2025-06-16-lin.tar.xz
+        echo "f849acecad4c9b108259c643b2688fd65c35723cd23368abe5dd64b917cc18c0  sde.tar.xz" | sha256sum -c
+        echo "22b6383cfadc97177e0bf3e432ca339a734222b53fb8c00d4a6e51797d96f27f  sde.tar.xz" > sde.b3
+        cargo run -q --release --manifest-path b3sum/Cargo.toml -- -c sde.b3
+        mkdir "$RUNNER_TEMP/sde" && tar xJf sde.tar.xz -C "$RUNNER_TEMP/sde" --strip-components=1
+        rm sde.tar.xz sde.b3
+        "$RUNNER_TEMP/sde/sde64" -version | head -n 1
+    - run: cargo nextest run --release --lib --tests --no-run
+    # tests/pool_fairness.rs measures the pool's shares by time, which an
+    # emulator's scheduling decides: it skips (#213), as under QEMU.
+    - name: as Ice Lake server (AVX-512)
+      run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -icx --" cargo nextest run --release --lib --tests
+      env:
+        BLAKE3_EMULATED: 1
+    - name: as Haswell (AVX2, no AVX-512)
+      run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -hsw --" cargo nextest run --release --lib --tests
+      env:
+        BLAKE3_EMULATED: 1
+    - name: as Nehalem (SSE4.1, no AVX2)
+      run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -nhm --" cargo nextest run --release --lib --tests
+      env:
+        BLAKE3_EMULATED: 1
+
   x86_model:
     name: "the x86-64 proofs' model against the CPU"
     runs-on: ubuntu-latest
