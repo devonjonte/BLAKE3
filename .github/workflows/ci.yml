@@ -218,13 +218,22 @@ jobs:
   # (Intel Simplified Software License, in its Licenses/) allows use and
   # unmodified redistribution.
   x86_widths:
-    name: "x86-64 as an AVX-512, an AVX2 and an SSE4.1 CPU (Intel SDE)"
+    name: "x86-64 as ${{ matrix.cpu.name }} (Intel SDE)"
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu: [
+          { "flag": "icx", "name": "an Ice Lake server CPU: AVX-512" },
+          { "flag": "hsw", "name": "a Haswell: AVX2, no AVX-512" },
+          { "flag": "nhm", "name": "a Nehalem: SSE4.1, no AVX2" },
+        ]
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
     - uses: taiki-e/install-action@nextest
+    # What this runner is, beside what it is about to run as.
     - run: grep -o -w 'avx512f\|avx512vl\|avx2\|sse4_1' /proc/cpuinfo | sort -u
     - name: Intel SDE 9.58.0
       run: |
@@ -236,20 +245,9 @@ jobs:
         rm sde.tar.xz sde.b3
         "$RUNNER_TEMP/sde/sde64" -version | head -n 1
     - run: cargo nextest run --release --lib --tests --no-run
-    # tests/pool_fairness.rs measures the pool's shares by time, which an
-    # emulator's scheduling decides: it skips (#213), as under QEMU.
-    - name: as Ice Lake server (AVX-512)
-      run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -icx --" cargo nextest run --release --lib --tests
-      env:
-        BLAKE3_EMULATED: 1
-    - name: as Haswell (AVX2, no AVX-512)
-      run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -hsw --" cargo nextest run --release --lib --tests
-      env:
-        BLAKE3_EMULATED: 1
-    - name: as Nehalem (SSE4.1, no AVX2)
-      run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -nhm --" cargo nextest run --release --lib --tests
-      env:
-        BLAKE3_EMULATED: 1
+    # The `emulated` profile's clock (.config/nextest.toml): a test runs
+    # tens of times slower here than on the CPU.
+    - run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -${{ matrix.cpu.flag }} --" cargo nextest run -P emulated --release --lib --tests
 
   x86_model:
     name: "the x86-64 proofs' model against the CPU"

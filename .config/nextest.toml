@@ -24,6 +24,15 @@ default-filter = "not binary(pool_fairness)"
 default-filter = "binary(pool_fairness)"
 slow-timeout = { period = "60s", terminate-after = 1 }
 
+[profile.emulated]
+# CI's x86_widths job: the suites under Intel's emulator, as a CPU the
+# runner is not (BLAKE3 #346). A test runs tens of times slower there: on
+# a four-CPU runner as an Ice Lake server, the slowest finished in 51 s
+# and one multithreaded test was still running at 60 s (November 10,
+# 2026). The clock sits well above that; a hang still ends and is named.
+slow-timeout = { period = "300s", terminate-after = 1 }
+default-filter = "not binary(pool_fairness)"
+
 [profile.mutants]
 # A mutant's tests stop at the first that fails, and the tests still running
 # end at once: a caught mutant costs the tests up to its first catcher. With
