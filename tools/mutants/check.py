@@ -79,8 +79,8 @@ BLAKE3 #257): it says what it will run before it starts, spreads the
 mutants over as many shards as they fill (more where the machine has the
 CPUs and memory: wide_shards), names each survivor beyond its row as soon
 as the shards end (SURVIVES SO FAR), takes the release build's second look
-(release_same) once, for new survivors alone, in the run that confirms
-them, and ends with its time against the budget and where the time went. It leaves to the whole run, once per
+(release_same) for new survivors alone and once for each place (the run
+that confirms them reuses the first run's builds), and ends with its time against the budget and where the time went. It leaves to the whole run, once per
 stable release, what it gives up: a changed test's or helper's effect on
 other code's mutants, a listed survivor now caught, and the lists' exact
 counts. Rows naming code the change removed it drops from every list.
@@ -438,7 +438,7 @@ def shard_tree(label, k):
     return tree
 
 
-def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None):
+def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None, tknown=None):
     """The mutants that survive the library's tests, by name, counted, and
     every mutant's outcome by function. Each shard's results are kept in
     tmp/mutants-last/<label>/ for a look afterwards."""
@@ -568,7 +568,14 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None):
                                                        mutant["span"]["start"]["line"]))
         if os.path.exists(out):
             shutil.copytree(out, os.path.join(kept, f"shard{k}"))
+    if known is not None and tknown is not None:
+        # A change's first run: what it found beyond the lists, before the
+        # release builds and the confirming run that follow.
+        for line in so_far(names, known, timed, tknown):
+            print(line, flush=True)
     survivors = second_looks(survivors, known)
+    survivors, remembered = looks_to_make(survivors, LOOKED)
+    same = [key for key in remembered if LOOKED[key]]
     if survivors:
         # Each shard's survivors in its own worktree and release target, the
         # shards at once (their cargo-mutants runs are over).
@@ -577,13 +584,19 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None):
             return release_same.confirm(tree, target, survivors[tree], BUILD, envs[tree])
         looking = time.monotonic()
         with ThreadPoolExecutor(len(survivors)) as pool:
-            same = [key for keys in pool.map(look, sorted(survivors)) for key in keys]
+            built_same = {key for keys in pool.map(look, sorted(survivors)) for key in keys}
         LOOKS_S[label] += time.monotonic() - looking
+        for places in survivors.values():
+            for key, *_ in places:
+                LOOKED[key] = key in built_same
+        same += sorted(built_same)
+    if survivors or remembered:
         for name, _ in same:
             SAME[label][name] += 1
             RELEASE_SAME[label][name] += 1
-        print(f"mutants: {len(same)} of {sum(map(len, survivors.values()))} surviving places build to the same code in a release build, "
-              "their line count kept (release_same.py)", flush=True)
+        print(f"mutants: {len(same)} of {sum(map(len, survivors.values())) + len(remembered)} surviving places build to the same code in a release build, "
+              "their line count kept (release_same.py)"
+              + (f"; {len(remembered)} of them as this check's first run built them" if remembered else ""), flush=True)
     if rows:
         os.makedirs(kept, exist_ok=True)
         with open(os.path.join(kept, "tests.tsv"), "w") as f:
@@ -609,21 +622,43 @@ RELEASE_SAME = collections.defaultdict(collections.Counter)
 LOOKS_S = collections.Counter()
 
 
+# Each surviving place a release build has answered for in this process:
+# (name, place) -> whether it built to the same code.
+LOOKED = {}
+
+
 def second_looks(survivors, known):
-    """The surviving places whose release builds this run makes
+    """The surviving places that get the release build's second look
     (release_same.py): every one in a whole run and in a confirming run
-    (`known` None). None in a change's first run: each name with more
-    survivors than its row runs again alone (main's confirm), and that
-    run's look is the one the verdict reads (confirm copies it over this
-    run's), so a look here was a release build a place whose answer
-    nothing read."""
-    return survivors if known is None else {}
+    (`known` None); in a change's first run the new survivors alone (a name
+    with more surviving places than its row), since a listed one keeps its
+    row's reason."""
+    if known is None:
+        return survivors
+    count = collections.Counter(key[0] for places in survivors.values() for key, *_ in places)
+    new = {tree: [x for x in places if count[x[0][0]] > known.get(x[0][0], (0, ""))[0]] for tree, places in survivors.items()}
+    return {tree: places for tree, places in new.items() if places}
+
+
+def looks_to_make(survivors, looked):
+    """(the places still to build, by tree; the places `looked` already
+    answers for). A place's release build is the same build whichever run
+    asks: the mutant, the source and the toolchain are the same, and no
+    clock or load enters it. A change's first run builds its new survivors
+    on every shard's tree at once; the confirming run then asks about the
+    same places from one tree, one after another (45 s for five places
+    where the first run took 17 s for four: a 112-CPU Ice Lake host,
+    November 10, BLAKE3 #257), and has its answers here."""
+    to_make = {tree: [x for x in places if x[0] not in looked] for tree, places in survivors.items()}
+    remembered = [x[0] for places in survivors.values() for x in places if x[0] in looked]
+    return {tree: places for tree, places in to_make.items() if places}, remembered
 
 
 def so_far(found, known, timed, tknown):
     """What a change's first run found beyond the lists, to print as soon
-    as its shards end: the names to look at now, minutes before the verdict
-    where each runs again alone and its surviving places are built again."""
+    as its shards end: the names to look at now, before the release builds
+    and the run that confirms each alone (a minute and a half later for
+    four names on the Ice Lake host; minutes on a smaller machine)."""
     lines = [f"SURVIVES SO FAR ({n - known.get(k, (0, ''))[0]}): {k}" for k, n in sorted(found.items()) if n > known.get(k, (0, ""))[0]]
     lines += [f"TIMED OUT SO FAR ({n - tknown.get(k, (0, ''))[0]}): {k}" for k, n in sorted(timed.items()) if n > tknown.get(k, (0, ""))[0]]
     if lines:
@@ -978,11 +1013,9 @@ def main():
         shards = shard_count(len(planned), wide_shards(os.cpu_count(), physical_memory()))
         print(f"mutants: the change's {len(planned)} mutants on {shards} shard{'s' if shards > 1 else ''}"
               + (f" (about {len(planned) * 6 // shards + 20} s, over the {BUDGET_S} s budget)" if len(planned) * 6 // shards + 20 > BUDGET_S else ""), flush=True)
-        found, functions, timed = run(files, ["--in-diff", path], shards=shards, known=known) if planned else (collections.Counter(), {}, collections.Counter())
+        found, functions, timed = run(files, ["--in-diff", path], shards=shards, known=known, tknown=tknown) if planned else (collections.Counter(), {}, collections.Counter())
         if any(f in diff for f in LOOM_FILES):
             found, timed, functions = with_loom(found, timed, functions, run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True, known=known)[1])
-        for line in so_far(found, known, timed, tknown):
-            print(line, flush=True)
         # Only the names with more survivors than the list: the run holds
         # the change's lines alone, so a listed name's other places are
         # missing from it (a whole run sees those, and stale entries).
