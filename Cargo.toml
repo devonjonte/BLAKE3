@@ -132,3 +132,7 @@ required-features = ["std"]
 [[example]]
 name = "fair_probe"
 required-features = ["std"]
+
+[[example]]
+name = "room_stride_probe"
+required-features = ["std"]
