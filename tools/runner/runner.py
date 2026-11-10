@@ -347,6 +347,12 @@ def test(job, run, work, out):
     run.run(["cargo", "test", "--release", "--doc"], cwd=fork)
     run.run(["cargo", "nextest", "run", "--release", "--tests"], cwd=fork)
     run.run(["cargo", "nextest", "run", "--release", "--manifest-path", "test_vectors/Cargo.toml"], cwd=fork)
+    # A checkout of two crates (BLAKE3 #335): the crate with the pool, the
+    # stream and the GPU beside the one-thread crate at the root.
+    threads = Path(fork) / "threads"
+    if (threads / "Cargo.toml").exists():
+        run.run(["cargo", "nextest", "run", "--release"], cwd=threads)
+        run.run(["cargo", "test", "--release", "--doc"], cwd=threads)
     return "passed"
 
 
