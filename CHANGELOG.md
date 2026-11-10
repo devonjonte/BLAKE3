@@ -21,6 +21,9 @@ lists what changed, each item with where it is described.
   program's buffers bounded by reserved admission.
 - **The C API is the convenience API**: `b3_hash`, `b3_hasher_*` (with
   the length hint) and the modes.
+- **A build names its code** (#328): `BUILD_VERSION`, `b3_version()` and
+  `b3sum --version`. A release reads its version; the code after one reads
+  `X.Y.Z+dev` with its commit, and a dirty tree adds its Git tree id.
 
 ## Faster, already on `next`
 
@@ -33,6 +36,11 @@ lists what changed, each item with where it is described.
   with its own chaining value and flags, on a proved kernel; its indices
   are distinct, a contract a debug build checks (#295).
 
+- **On x86-64, whole chunks and parents round up to the lanes** (#248,
+  #345): 3 inputs run on 4 lanes, 5 to 7 on 8, 9 to 15 on 16 and 17 to 31
+  on 32 where those kernels run, each in one pass where the kernels took
+  two or three; the spare lanes hash a copy whose result is dropped.
+
 ## Steadier
 
 - **After preparation, the pool's calls allocate nothing** (#325): a
@@ -41,6 +49,11 @@ lists what changed, each item with where it is described.
   thread and the workers, the first cycle included.
   `initialize_multithreaded` prepares the calling thread's scratch (48 KiB,
   for inputs to 64 MiB).
+- **The pipeline's batch and message cycles allocate nothing after the
+  first** (#329): the batch's job waits in its message slot, and the
+  completions stay in fixed entries.
+- **A stream with no worker stops at once** where it would wait forever
+  (#276).
 
 ## Safer
 
@@ -75,16 +88,8 @@ lists what changed, each item with where it is described.
 
 - The Faster table from each machine's release run (bench-hashes 0.21).
 - The x86-64 kernels that land before the release, each with its measured
-  gain and its proof (lane rounding, the grouped AVX2 and AVX-512
-  finishing kernels, Zen 5's integer-register chunk root).
-- The pipeline's batch and message cycles allocating nothing after the
-  first (#329: the batch's job waits in its message slot, and the
-  completions stay in fixed entries), when it lands.
-- The build version, when it lands (#328): the code after a release reads
-  `X.Y.Z+dev`, and a build's version names its commit and a dirty tree's
-  Git tree id (`b3sum --version`, `b3_version()`, `BUILD_VERSION`).
-- The pool and stream fix that lands before it (#276: a stream with no
-  worker stops at once where it would wait forever).
+  gain and its proof (the grouped AVX2 and AVX-512 finishing kernels,
+  Zen 5's integer-register chunk root), and lane rounding's gain.
 - The safety fixes that land before it, each with its record:
   - the task ring's claim-then-copy race (#302, repaired by #331 when it
     lands: a worker held between its claim and its copy could run another
