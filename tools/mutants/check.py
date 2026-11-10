@@ -691,8 +691,11 @@ STOPPED = {}
 def open_pool(name, reason):
     """A row whose outcome the pool's schedules decide, run by run (its
     reason begins OPEN: the pool's scheduling): a run that catches it is
-    one draw, so the row stays."""
-    return name.startswith("src/lanes.rs") and reason.startswith("OPEN: the pool's scheduling")
+    one draw, so the row stays. The pool's file and the stream's: a stream's
+    wait hangs to the clock or meets a failing test first by the same draw
+    (`room`'s `+` as `-`: hung on three machines' whole runs and was caught
+    on a fourth, November 10, 2026)."""
+    return name.startswith(("src/lanes.rs", "src/stream.rs")) and reason.startswith("OPEN: the pool's scheduling")
 
 
 def elsewhere(name, lists=None):

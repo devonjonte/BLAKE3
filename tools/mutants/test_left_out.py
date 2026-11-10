@@ -79,5 +79,14 @@ class Explained(unittest.TestCase):
         self.assertEqual(check.left_to_the_whole_run(PLANNED, {}, every=True), (PLANNED, [], 0))
 
 
+class OpenPool(unittest.TestCase):
+    def test_a_row_of_the_pools_scheduling_is_the_pools_or_the_streams(self):
+        reason = "OPEN: the pool's scheduling: by the run"
+        self.assertTrue(check.open_pool("src/lanes.rs\treplace a with b in f", reason))
+        self.assertTrue(check.open_pool("src/stream.rs\treplace + with - in room", reason))
+        self.assertFalse(check.open_pool("src/each.rs\treplace a with b in f", reason))
+        self.assertFalse(check.open_pool("src/stream.rs\treplace + with - in room", "a loop variant broken"))
+
+
 if __name__ == "__main__":
     unittest.main()
