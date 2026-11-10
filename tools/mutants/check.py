@@ -397,15 +397,32 @@ def shard_tree(label, k):
     tree = os.path.join(WORKTREES, f"{label}-{k}")
 
     def owner(path):
-        """The Git repository `path` is a checkout of (its common directory), or None where
-        Git finds none: a shard whose clone was deleted is a checkout of nothing."""
+        """The Git repository `path` is a checkout of (its common directory).
+        Git's failure to say stops the run: a tree whose owner is unknown
+        may be somebody's live work, and nothing of it is removed."""
         r = subprocess.run(["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"], capture_output=True, text=True)
-        return r.stdout.strip() if r.returncode == 0 else None
+        if r.returncode != 0:
+            raise RuntimeError(f"Git cannot say which repository {path} belongs to ({r.stderr.strip()}); "
+                               "nothing was removed: use a private TMPDIR or clean it through its owning checkout")
+        return r.stdout.strip()
 
-    theirs = owner(tree) if os.path.exists(os.path.join(tree, ".git")) else None
-    if theirs is not None:
+    def orphaned(path):
+        """Whether `path` is a worktree whose repository is gone: its .git
+        file names that repository's record of it, and a clone deleted
+        after its run (a runner's) leaves the name pointing at nothing.
+        Read from the file, not asked of Git, which fails the same way
+        for a repository it merely will not answer for (another user's)."""
+        pointer = os.path.join(path, ".git")
+        if not os.path.isfile(pointer):
+            return False
+        with open(pointer) as f:
+            text = f.read().strip()
+        return text.startswith("gitdir: ") and not os.path.exists(os.path.join(path, text[len("gitdir: "):]))
+
+    if os.path.exists(os.path.join(tree, ".git")) and not orphaned(tree):
         # A shared TMPDIR can hold another clone's identically named shard.
         # Even if it has this HEAD, do not reset or clean somebody else's tree.
+        theirs = owner(tree)
         if not os.path.samefile(owner(ROOT), theirs):
             raise RuntimeError(f"retained shard {tree} belongs to a different Git repository; "
                                "use a private TMPDIR or clean it through its owning checkout")
