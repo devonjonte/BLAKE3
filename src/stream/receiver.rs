@@ -11,7 +11,7 @@
 
 use crate::admission::{Acquire, OwnedLease, Pool, initialized_mutex};
 use crate::incremental::{HasherCore, STAGE_LEN};
-use crate::lanes::{Task, sources::Source};
+use crate::lanes::sources::Source;
 use crate::platform::Platform;
 use crate::{
     CHUNK_LEN, CVWords, Hash, Mode, OUT_LEN,
@@ -152,11 +152,14 @@ impl Receiver {
     /// A core of the given capacities, its source and pools made once.
     fn core(buffers: usize, messages: usize) -> Arc<Core> {
         // The source persists, as the registry requires. Its ring holds
-        // every task that can be published before a worker claims it: a
-        // part per input buffer, and a batch job per message slot (a batch
+        // every action that can be published before a worker claims it: a
+        // part per input buffer and a batch job per message slot (a batch
         // holds no buffer). The Mac's timing found a ring sized at
-        // `buffers` overflowing: a worker read a garbage task.
-        let source = Box::leak(Box::new(Source::new(buffers + messages)));
+        // `buffers` overflowing: a worker read a garbage task. An action is
+        // three words, read whole before its claim, so buffers coming back
+        // out of order write over nothing a claimer still needs (BLAKE3
+        // #302).
+        let source = Box::leak(Box::new(Source::with_actions(buffers + messages)));
         source.drain_actions(|| false); // Initialize its platform completion metadata.
         let input = (0..buffers).map(|index| Buffer { index, blocks: vec![Block::ZERO; INPUT_BYTES / 64].into_boxed_slice() }).collect();
         let slots = (0..buffers).map(|_| Slot { state: initialized_mutex(SlotState::Vacant) }).collect();
@@ -255,9 +258,7 @@ impl Receiver {
                 state.batch = Some(BatchJob { owner: core.clone(), id, key, flags, input, input_len, message_len, out: places, count });
                 id
             };
-            let mut task = Task::of(&[], 0);
-            task.action = Some((execute_batch, (&core.messages[id.index] as *const Mutex<Progress>).cast_mut().cast()));
-            core.source.publish_part(task);
+            core.source.publish_part(execute_batch, (&core.messages[id.index] as *const Mutex<Progress>).cast_mut().cast(), 0);
             BatchCompletion { request: core.outputs[id.index].clone().acquire_owned(), core, id, guard: Some(crate::lanes::AbortOnUnwind) }
         }
     }
@@ -386,12 +387,10 @@ impl Message {
         }
         self.sent += len as u64;
         self.used = 0;
-        let mut task = Task::of(&[], 0);
-        // The final short update takes its own SME2 turn. A complete group
-        // uses the worker's turn, as the existing stream's piece does.
-        task.members = usize::from(last);
-        task.action = Some((execute, (&owner.slots[index] as *const Slot).cast_mut().cast()));
-        owner.source.publish_part(task);
+        // The final short update takes its own SME2 turn (`members` 1). A
+        // complete group uses the worker's turn, as the existing stream's
+        // piece does.
+        owner.source.publish_part(execute, (&owner.slots[index] as *const Slot).cast_mut().cast(), usize::from(last));
     }
 
     /// The message's last `written` bytes are at the start of its current
@@ -1185,6 +1184,56 @@ mod ring_bound {
         let finished = tests::run(held.end(0));
         receiver.drain();
         finished.retire();
+        receiver.close();
+    }
+
+    /// A part claimed is the part its claimer runs, while another message's
+    /// parts go round the ring past it (BLAKE3 #302: buffers come back out
+    /// of order, a message at a time, so no ring length bounds the lap).
+    /// One thread claims message A's part and is held there; message B's
+    /// eight parts then pass through the other buffer, twice round the
+    /// ring of four, hashed by this thread (a pool of one thread has no
+    /// worker). The holder's task is A's part by its buffer's slot, run
+    /// once; both digests are right.
+    #[test]
+    fn a_part_claimed_is_the_part_run_while_another_message_laps_the_ring() {
+        crate::initialize_multithreaded(core::num::NonZeroUsize::new(1));
+        let (buffers, messages) = (2, 2);
+        let receiver = Receiver::new(Mode::Plain, buffers, messages);
+        let core = &receiver.core;
+        let mut a = tests::run(receiver.message(None));
+        tests::feed(&mut a, &[1; INPUT_BYTES], INPUT_BYTES);
+        let queued = |slot: &Slot| matches!(*slot.state.lock().unwrap(), SlotState::Queued(_));
+        let a_buffer = core.slots.iter().position(queued).expect("A's part is queued in its buffer's slot");
+        let (claimed_tx, claimed_rx) = std::sync::mpsc::channel();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let b_input = vec![2u8; 2 * (buffers + messages) * INPUT_BYTES];
+        let b = std::thread::scope(|scope| {
+            let holder = scope.spawn(move || {
+                let task = core.source.take_task_claimed(|| {
+                    claimed_tx.send(()).unwrap();
+                    let _ = go_rx.recv();
+                });
+                let task = task.expect("A's part, the one task published");
+                let (_, context) = task.action.expect("a part's task is an action");
+                assert!(core::ptr::eq(context.cast::<Slot>(), &core.slots[a_buffer]), "the held claimer has another task than the one it claimed");
+                crate::lanes::run_task(task);
+            });
+            claimed_rx.recv().unwrap();
+            // Release the holder whatever happens below.
+            let go = crate::test::Released(go_tx);
+            let mut b = tests::run(receiver.message(None));
+            tests::feed(&mut b, &b_input, INPUT_BYTES);
+            drop(go);
+            holder.join().unwrap();
+            b
+        });
+        let (a, b) = (tests::run(a.end(0)), tests::run(b.end(0)));
+        assert_eq!(a.hash().as_bytes(), &tests::expected(Mode::Plain, &[1; INPUT_BYTES]));
+        assert_eq!(b.hash().as_bytes(), &tests::expected(Mode::Plain, &b_input));
+        a.retire();
+        b.retire();
+        receiver.drain();
         receiver.close();
     }
 }
