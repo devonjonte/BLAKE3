@@ -1,6 +1,5 @@
 //! The throughput API, for power users: every way this crate makes
-//! hashing fast (other cores, batches, collections, streams, a message fed
-//! in pieces). The program takes on more of the work, so the calls can be
+//! hashing fast (batches, collections, many hashers fed in turns). The program takes on more of the work, so the calls can be
 //! fast and simple:
 //!
 //! - **Inputs are [`Block`]s**: 64 bytes each on a 64-byte boundary, so

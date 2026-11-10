@@ -35,7 +35,7 @@ pub fn slot_len(len: usize) -> usize {
 /// messages of `len` bytes (checked in every build: the kernels read
 /// them), each slot's bytes past its message zero (checked in debug
 /// builds: a Batch keeps them so). A slot is whole blocks ([`slot_len`]),
-/// or the message itself, packed ([`packed`]).
+/// or the message itself, packed (`packed`).
 #[inline]
 pub fn assert_slots(input: &[u8], len: usize, slot: usize, count: usize) {
     debug_assert!(slot == slot_len(len) || packed(len, slot), "a slot is whole blocks or a packed message");

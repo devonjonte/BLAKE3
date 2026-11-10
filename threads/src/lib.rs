@@ -1,6 +1,198 @@
-//! BLAKE3-Servil on every core: [`blake3_servil_core`], re-exported whole,
-//! and what uses other threads: the multithreaded forms of its calls, the
-//! stream. TRIAL of the two-crate layout (BLAKE3 #335).
+//! `blake3-servil` is a fast [BLAKE3] implementation for 64-bit Arm and
+//! x86-64. It produces the same digests as official BLAKE3, with a call
+//! for each way programs hash (the table below).
+//!
+//! It is two crates in one: [`blake3_servil_core`], which hashes on the
+//! calling thread (the assembly kernels, each proved against the
+//! specification, and every one-thread call), re-exported here whole; and
+//! this crate's own part, a pool of threads and the multithreaded form of
+//! each call. A program that wants no thread started depends on the core
+//! alone.
+//!
+//! # Examples
+//!
+//! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // Once per process, before any other call (see Startup self-test).
+//! blake3_servil::initialize();
+//!
+//! // Hash an input all at once.
+//! let hash1 = blake3_servil::convenience::hash(b"foobarbaz");
+//!
+//! // Hash an input incrementally.
+//! let mut hasher = blake3_servil::convenience::Hasher::new(blake3_servil::Mode::Plain, None);
+//! hasher.update(b"foo");
+//! hasher.update(b"bar");
+//! hasher.update(b"baz");
+//! // finalize takes the Hasher: a new one for the next message.
+//! let hash2 = hasher.finalize();
+//! assert_eq!(hash1, hash2);
+//!
+//! // Extended output. OutputReader also implements Read and Seek.
+//! # #[cfg(feature = "std")] {
+//! let mut output = [0; 1000];
+//! let mut hasher = blake3_servil::convenience::Hasher::new(blake3_servil::Mode::Plain, None);
+//! hasher.update(b"foobarbaz");
+//! let mut output_reader = hasher.finalize_xof();
+//! output_reader.fill(&mut output);
+//! assert_eq!(hash1, output[..32]);
+//! # }
+//!
+//! // Print a hash as hex.
+//! println!("{}", hash1);
+//!
+//! // Many short messages in one call: a Batch lays them out in Blocks.
+//! # #[cfg(feature = "std")] {
+//! use blake3_servil::{throughput::{self, Batch}, Mode};
+//! let mut batch = Batch::new(64, 3);
+//! for i in 0..3 {
+//!     batch.set(i, &[i as u8; 64]);
+//! }
+//! let mut hashes = [[0u8; 32]; 3];
+//! throughput::hash_many(Mode::Plain, &batch, &mut hashes);
+//! assert_eq!(hashes[2], *blake3_servil::convenience::hash(&[2u8; 64]).as_bytes());
+//! # }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Two kinds of call
+//!
+//! - **[`convenience`]**: one call per hash, every feature of BLAKE3 (the
+//!   plain hash, the keyed hash, key derivation, extended output), any
+//!   slice, the result returned, and the [`Hasher`]
+//!   for a message fed in pieces. Tuned for a hash now and then, amid
+//!   other work: where it helps, a call fetches its code back into the
+//!   caches before it starts.
+//! - **[`throughput`]**, for power users: every way this crate makes
+//!   hashing fast (other cores, batches, collections), tuned for
+//!   call after call: an occasional call amid other work may run slower
+//!   than a convenience call would. The
+//!   program takes on more of the work: inputs come as
+//!   [`Block`](throughput::Block)s (64 bytes on a 64-byte boundary, so
+//!   alignment is the type's), digests go into the program's places, and
+//!   every call takes a [`Mode`].
+//!
+//! The [`Hasher`] runs on the calling thread; its
+//! first update is treated as a call now and then (its code fetched first
+//! where that helps), and its later updates as call after call. The
+//! throughput calls that take it, [`throughput::update_multithreaded`]
+//! and [`throughput::update_each`], are tuned as throughput calls.
+//!
+//! Start with the convenience calls; when a program needs more speed, it
+//! moves to the throughput ones.
+//!
+//! | Your data | Call |
+//! |---|---|
+//! | One message in memory | [`convenience::hash`], or for speed [`throughput::hash_multithreaded`] |
+//! | One message arriving in pieces | [`convenience::Hasher`], or for speed [`throughput::update_multithreaded`] |
+//! | Many messages of one length, in one buffer | [`throughput::hash_many_multithreaded`] |
+//! | Many 16- or 32-byte messages (a Merkle layer's leaves or digests) | [`throughput::hash_many_multithreaded`] over a [`throughput::Packed`] |
+//! | Many messages of different lengths, in memory | [`throughput::hash_each_multithreaded`] |
+//! | Many messages arriving at once (a server's uploads) | [`throughput::update_each`] |
+//!
+//! Each call returns once its hash is done, and uses other CPU cores
+//! where that is faster (the forms without `multithreaded` stay on the
+//! calling thread).
+//!
+//! Short messages hash fastest together: 1024 messages of 64 bytes in one
+//! [`throughput::hash_many`] call take about a fifth of the time of 1024
+//! [`convenience::hash`] calls.
+//!
+//! Select **keyed hashing or key derivation** with [`Mode`], supplied to
+//! throughput calls and the [`Hasher`] constructor. See [Key-dependent
+//! timing](#key-dependent-timing) for the key-independence contract.
+//!
+//! **Hashing now and then** (rather than nonstop) is slower per byte on
+//! every hash function, since its code and data must come back into the
+//! CPU's caches and a resting core runs slower at first: hashing 64 KiB
+//! after a pause takes about three times as long as nonstop on an Apple M4
+//! Max.
+//!
+//! **Apple M4 and later** have one matrix unit that this crate uses for
+//! inputs of 16 KiB and more; when several threads of a program hash such
+//! inputs at the same moment, one runs at full speed and the others at
+//! about two thirds of it. The multithreaded calls share the work among
+//! the cores themselves, so a program gets the most from one thread making
+//! them.
+//!
+//! # Key-dependent timing
+//!
+//! Hashing code treats secret key bytes, including derived keys, as data:
+//! they select neither branches, memory-access addresses, nor kernels.
+//! For a fixed public call shape, grouped calls do the same work whether
+//! their hashers' keys are equal or different. Key equality selects neither
+//! groups nor temporary storage sizes.
+//!
+//! Public call shape includes the mode kind (plain, keyed, or key derivation),
+//! message and output lengths, input layout, update boundaries, hasher indices,
+//! and size hints. Dispatch may also depend on CPU features and available
+//! processing resources. A batch supplied with one [`Mode`] shares a key by
+//! construction. Plain mode's fixed key is public.
+//!
+//! This is a software-level key-independence contract. Elapsed time varies
+//! with public call shape, scheduling, clock speed, and machine load. Caller
+//! callbacks and I/O have their own timing properties. Applications choose
+//! which lengths, modes, and operation patterns they expose to observers.
+//!
+//! # Memory
+//!
+//! - **A [`Hasher`] is about 18 KiB**; box it where that matters.
+//! - **These single-threaded calls allocate nothing**: [`convenience::hash`],
+//!   [`throughput::hash`], [`throughput::hash_many`], [`Hasher::update`](convenience::Hasher::update)
+//!   and [`Hasher::finalize`](convenience::Hasher::finalize), and [`OutputReader`].
+//!   [`Hasher::update_reader`](convenience::Hasher::update_reader) uses a 1 MiB buffer while it reads past
+//!   64 KiB, freed when it returns. [`throughput::hash_each`] keeps, on the
+//!   thread that calls it, 32 bytes for each chunk of the collection's
+//!   messages of 2 to 15 chunks and 16 for each such message: its first
+//!   collection and a larger one grow that storage, and a repeated
+//!   collection allocates nothing.
+//! - **Grouped incremental calls** use bounded stack tables and tree buffers.
+//!   [`throughput::update_each`] allocates and frees nothing.
+//!   [`throughput::update_each_multithreaded`] may allocate worker-job lists
+//!   when a large piece uses other cores.
+//! - **[`throughput::hash_multithreaded`]** allocates nothing below 512 KiB,
+//!   where it hashes on the calling thread. Above that length it keeps a list
+//!   of pieces it hands out, freed when it returns: 48 bytes for each 128 KiB of
+//!   input, and at most 200 bytes for each CPU (1 GiB on 16 CPUs: 390 KiB).
+//! - **Once per process**: the startup self-test's buffers, about 45 KiB
+//!   of the calling thread's stack while it runs (it allocates nothing),
+//!   and the threads: by default a worker per CPU beyond the first, each with the
+//!   standard library's stack, started by [`initialize_multithreaded`].
+//!
+//! # Panics
+//!
+//! A broken precondition of a call panics on the calling thread, and
+//! unwinds as usual.
+//!
+//! # Startup self-test
+//!
+//! **Every program calls [`initialize`] (or [`initialize_multithreaded`])
+//! once, before any other call of this crate**: a call before it panics, in
+//! every build, saying so. The check costs nothing: it is part of the
+//! platform load every call makes. **A program that makes multithreaded
+//! calls calls [`initialize_multithreaded`]**: a multithreaded call
+//! before it panics (one load per call).
+//!
+//! `initialize` checks the build and the CPU before the process first
+//! hashes, in well under a millisecond. It runs every assembly kernel built
+//! for this machine on fixed inputs and compares the outputs with fixed
+//! values official BLAKE3 generated. A mismatch stops the process, which no
+//! caller can catch: with `std` it names the code path on stderr and
+//! aborts; without it, the CPU's trap instruction stops it. Other threads
+//! that call `initialize` meanwhile wait for it.
+//!
+//! # Cargo Features
+//!
+//! This crate needs the standard library; the core alone builds without
+//! it, and has the `zeroize` and `serde` features.
+//!
+//! The build needs a C compiler that assembles the kernels (GCC 12 or
+//! later, or Clang); without one it stops and says so. This crate runs its
+//! assembly or not at all: for portable Rust, use official BLAKE3.
+//!
+//! [BLAKE3]: https://blake3.io
+
 #![allow(clippy::too_many_arguments)]
 
 // The stream's tests name the crate as a program does (src/stream_tests).
@@ -110,8 +302,8 @@ pub(crate) fn counted(what: Counted) {
     let _ = what;
 }
 
-/// [`initialize`], and start the threads that the multithreaded calls and
-/// [`stream`](throughput::stream) use: every program that makes such calls calls this once,
+/// [`initialize`], and start the threads that the multithreaded calls
+/// use: every program that makes such calls calls this once,
 /// before them, in place of `initialize`. It starts `threads - 1` workers,
 /// and each multithreaded call hashes on its calling thread and the
 /// workers (calls made at once share the workers), and on CPUs with SME2
@@ -218,10 +410,8 @@ pub mod throughput {
     /// [`Hasher::update`](crate::convenience::Hasher::update), using other CPU
     /// cores where that is faster: the same result, never slower. Pieces of
     /// 512 KiB and more use them, as [`hash_multithreaded`] does; shorter ones
-    /// hash on the calling thread. One `Hasher` may take both calls. When
-    /// reading the pieces keeps your thread busy, a [`stream`] is faster
-    /// ([`Stream::submit_reader`], or [`Stream::submit_with`]): it hashes each
-    /// piece while your thread reads the next. The program calls
+    /// hash on the calling thread. One `Hasher` may take both calls. The
+    /// program calls
     /// [`initialize_multithreaded`](crate::initialize_multithreaded) first.
     ///
     /// ```
@@ -272,7 +462,7 @@ pub mod throughput {
     /// [`hash`], using other CPU cores where that is faster: the same
     /// [`Hash`](struct@Hash), never slower. For a message whose bytes are not
     /// in blocks (a mapped file, say), [`update_multithreaded`] into a
-    /// [`Hasher`](crate::convenience::Hasher) takes any slice, at the same
+    /// [`Hasher`] takes any slice, at the same
     /// speed on the i7-12700K from 512 KiB to 1 GiB (about 1% slower at 1 MiB).
     ///
     /// ```
@@ -318,7 +508,7 @@ pub mod throughput {
 
     /// [`hash_each`], using other CPU cores where that is faster: the
     /// same hashes, never slower. Collections of 512 KiB and more in all use
-    /// them, as [`hash_multithreaded`](crate::throughput::hash_multithreaded) does.
+    /// them, as [`hash_multithreaded`] does.
     /// Requires `out.len() == items.len()`.
     ///
     /// ```
