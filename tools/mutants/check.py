@@ -136,6 +136,11 @@ def cpu_flags():
         fields = {k.strip(): v.strip() for k, v in fields.items()}
         if fields.get("vendor_id") == "AuthenticAMD" and fields.get("cpu family", "").isdigit() and int(fields["cpu family"]) >= 0x1A:
             flags.add("amd_family_ge_1a")
+        # And the other vendor, for the rows of the same test that differ on
+        # an Intel CPU with AVX-512 (an Ice Lake Xeon, November 10, 2026):
+        # neither an AMD wide-kernel machine's nor a CPU's without AVX-512.
+        if fields.get("vendor_id") == "GenuineIntel":
+            flags.add("genuine_intel")
         return flags
     if sys.platform == "darwin":
         out = subprocess.run(["sysctl", "hw.optional"], capture_output=True, text=True, check=True).stdout

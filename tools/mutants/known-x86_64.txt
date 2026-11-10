@@ -2,12 +2,50 @@
 # AVX2 without AVX-512), each with its reason; tools/mutants/check.py
 # fails on any other survivor and on any listed one now caught.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-files: src/block.rs src/convenience.rs src/each.rs src/ffi_avx2.rs src/ffi_partial.rs src/ffi_sse41.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/throughput.rs src/platform.rs src/self_test.rs src/tree.rs src/pair.rs src/stream.rs src/ffi_output.rs src/stream/frontend.rs src/stream/receiver.rs
+files: src/block.rs src/convenience.rs src/each.rs src/ffi_avx2.rs src/ffi_partial.rs src/ffi_sse41.rs src/finish.rs src/hasher.rs src/incremental.rs src/io.rs src/lanes.rs src/lib.rs src/many.rs src/park.rs src/throughput.rs src/platform.rs src/self_test.rs src/tree.rs src/pair.rs src/stream.rs src/ffi_output.rs src/stream/frontend.rs src/stream/receiver.rs src/admission.rs src/ffi_chunk_root.rs src/ffi_avx512_32.rs
 model files: src/finish.rs src/park.rs
+src/admission.rs	replace += with -= in <impl Future for Acquire<P, T>>::poll	1	equivalent: a ticket only tells one waiting request from the others queued; counting down, wrapping (this build has no overflow checks), tells them apart as well (John Servil, BLAKE3 #339)
+src/each.rs	delete ! in finalize_each	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 1024 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 128 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 192 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 256 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 320 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 384 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 448 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 512 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 576 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 640 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 704 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 768 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 832 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 896 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	delete match arm 960 in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace % with + in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace % with / in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace && with || in by_blocks_at_once	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace && with || in finalize_each	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace * with + in by_blocks_at_once	5	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace * with / in by_blocks_at_once	5	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace + with * in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace + with - in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace <= with > in finalize_each	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace == with != in by_blocks_at_once	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace == with != in finalize_each	3	[cpu has avx512f avx512vl] same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace == with != in finalize_each	4	[cpu lacks avx512f avx512vl] code for another machine: the sixteen-lane finish's own condition and its test record, behind `matches!(Platform::detect(), Platform::AVX512)`: a CPU without AVX-512 never takes it, and AVX-512 machines catch it (one place; the other three are NEON's, the same code on x86-64)
+src/each.rs	replace >= with < in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace >= with < in finalize_each	1	[cpu lacks avx512f avx512vl] code for another machine: the sixteen-lane finish's own condition and its test record, behind `matches!(Platform::detect(), Platform::AVX512)`: a CPU without AVX-512 never takes it, and AVX-512 machines catch it
 src/each.rs	replace hash_held with ()	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace | with & in by_blocks_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/each.rs	replace | with ^ in by_blocks_at_once	4	as on aarch64: survives (known-aarch64.txt): equivalent: the mode flags have none of CHUNK_START, CHUNK_END or ROOT, so OR and XOR join disjoint bits; on arm64: survives (known-arm64.txt): equivalent: the mode flags have none of CHUNK_START, CHUNK_END or ROOT, so OR and XOR join disjoint bits
 src/each.rs	replace | with ^ in hash_cohort	1	equivalent: | and ^ agree on flag bits that never overlap
+src/ffi_avx512_32.rs	replace entries -> [(&'static str, *const()); 3] with [("", Default::default()); 3]	1	[cpu lacks avx512f avx512vl amd_family_ge_1a] code for another machine: test-only accessors of the 32-lane kernels' entry points, read by the wide dispatch's tests and the self-test's count, which run only on AMD Zen 5 and later with AVX-512; those machines catch it (a Ryzen 9700X and an EPYC 9255, November 10, 2026)
+src/ffi_avx512_32.rs	replace entries -> [(&'static str, *const()); 3] with [("xyzzy", Default::default()); 3]	1	[cpu lacks avx512f avx512vl amd_family_ge_1a] code for another machine: test-only accessors of the 32-lane kernels' entry points, read by the wide dispatch's tests and the self-test's count, which run only on AMD Zen 5 and later with AVX-512; those machines catch it (a Ryzen 9700X and an EPYC 9255, November 10, 2026)
+src/ffi_avx512_32.rs	replace parent_entry -> *const() with Default::default()	1	[cpu lacks avx512f avx512vl amd_family_ge_1a] code for another machine: test-only accessors of the 32-lane kernels' entry points, read by the wide dispatch's tests and the self-test's count, which run only on AMD Zen 5 and later with AVX-512; those machines catch it (a Ryzen 9700X and an EPYC 9255, November 10, 2026)
+src/ffi_chunk_root.rs	replace test::variants -> Vec<bool> with vec![false]	1	[cpu lacks avx512f avx512vl] equivalent: without AVX-512 the tests' list of kernels is SSE4.1 alone already (with AVX-512 the list's own check catches it)
 src/ffi_output.rs	delete match arm Platform::AVX512 in lanes	1	[cpu lacks avx512f avx512vl] code for another machine: this CPU is never the AVX512 platform, so the arm is never taken. AVX-512 machines catch it
 src/ffi_output.rs	replace && with || in held_groups	1	[cpu lacks avx512f avx512vl] code for another machine: the sixteen-lane arm of the full groups and the eight-lane remainder after them run only where the platform is AVX-512 (width 16); on this CPU (AVX2) every group is eight wide and nothing remains after the full groups. AVX-512 machines catch it (test_held_key_groups_take_one_partition_pass; an EPYC 9255 and an Ice Lake Xeon, November 10, 2026)
+src/ffi_output.rs	replace && with || in input	3	[cpu lacks avx512f avx512vl] code for another machine: `input` describes a message for the sixteen-lane finish of finalize_each, which only an AVX-512 CPU takes; this CPU never calls it. AVX-512 machines catch it (incremental_roots_batch_all_modes_and_selected_indices)
 src/ffi_output.rs	replace + with * in held_groups	4	[cpu lacks avx512f avx512vl] code for another machine: the sixteen-lane arm of the full groups and the eight-lane remainder after them run only where the platform is AVX-512 (width 16); on this CPU (AVX2) every group is eight wide and nothing remains after the full groups. AVX-512 machines catch it (test_held_key_groups_take_one_partition_pass; an EPYC 9255 and an Ice Lake Xeon, November 10, 2026)
 src/ffi_output.rs	replace + with - in held_groups	4	[cpu lacks avx512f avx512vl] code for another machine: the sixteen-lane arm of the full groups and the eight-lane remainder after them run only where the platform is AVX-512 (width 16); on this CPU (AVX2) every group is eight wide and nothing remains after the full groups. AVX-512 machines catch it (test_held_key_groups_take_one_partition_pass; an EPYC 9255 and an Ice Lake Xeon, November 10, 2026)
 src/ffi_output.rs	replace += with *= in held_groups	1	[cpu lacks avx512f avx512vl] code for another machine: the sixteen-lane arm of the full groups and the eight-lane remainder after them run only where the platform is AVX-512 (width 16); on this CPU (AVX2) every group is eight wide and nothing remains after the full groups. AVX-512 machines catch it (test_held_key_groups_take_one_partition_pass; an EPYC 9255 and an Ice Lake Xeon, November 10, 2026)
@@ -15,6 +53,7 @@ src/ffi_output.rs	replace += with -= in held_groups	1	[cpu lacks avx512f avx512v
 src/ffi_output.rs	replace - with + in held_groups	1	[cpu lacks avx512f avx512vl] code for another machine: the sixteen-lane arm of the full groups and the eight-lane remainder after them run only where the platform is AVX-512 (width 16); on this CPU (AVX2) every group is eight wide and nothing remains after the full groups. AVX-512 machines catch it (test_held_key_groups_take_one_partition_pass; an EPYC 9255 and an Ice Lake Xeon, November 10, 2026)
 src/ffi_output.rs	replace - with / in held_groups	1	[cpu lacks avx512f avx512vl] code for another machine: the sixteen-lane arm of the full groups and the eight-lane remainder after them run only where the platform is AVX-512 (width 16); on this CPU (AVX2) every group is eight wide and nothing remains after the full groups. AVX-512 machines catch it (test_held_key_groups_take_one_partition_pass; an EPYC 9255 and an Ice Lake Xeon, November 10, 2026)
 src/ffi_output.rs	replace == with != in held_groups	1	[cpu lacks avx512f avx512vl] code for another machine: the sixteen-lane arm of the full groups and the eight-lane remainder after them run only where the platform is AVX-512 (width 16); on this CPU (AVX2) every group is eight wide and nothing remains after the full groups. AVX-512 machines catch it (test_held_key_groups_take_one_partition_pass; an EPYC 9255 and an Ice Lake Xeon, November 10, 2026)
+src/ffi_output.rs	replace == with != in input	4	[cpu lacks avx512f avx512vl] code for another machine: `input` describes a message for the sixteen-lane finish of finalize_each, which only an AVX-512 CPU takes; this CPU never calls it. AVX-512 machines catch it (incremental_roots_batch_all_modes_and_selected_indices)
 src/ffi_output.rs	replace >= with < in held_groups	1	[cpu lacks avx512f avx512vl] code for another machine: the sixteen-lane arm of the full groups and the eight-lane remainder after them run only where the platform is AVX-512 (width 16); on this CPU (AVX2) every group is eight wide and nothing remains after the full groups. AVX-512 machines catch it (test_held_key_groups_take_one_partition_pass; an EPYC 9255 and an Ice Lake Xeon, November 10, 2026)
 src/ffi_output.rs	replace input -> Option<Input<'_>> with None	1	[cpu lacks avx512f avx512vl] code for another machine: `input` describes a message for the sixteen-lane finish of finalize_each, which only an AVX-512 CPU takes; this CPU never calls it. AVX-512 machines catch it (incremental_roots_batch_all_modes_and_selected_indices)
 src/ffi_output.rs	replace | with & in input	3	[cpu lacks avx512f avx512vl] code for another machine: `input` describes a message for the sixteen-lane finish of finalize_each, which only an AVX-512 CPU takes; this CPU never calls it. AVX-512 machines catch it (incremental_roots_batch_all_modes_and_selected_indices)
@@ -23,15 +62,10 @@ src/ffi_output.rs	replace | with ^ in input	3	equivalent: mode flags (0, 16, 32,
 src/ffi_output.rs	replace | with ^ in self_test_shape	2	equivalent: fixture structural flags (3, 2, 4), mode flags (0, 16, 32, 64) and optional ROOT (8) occupy disjoint bits
 src/ffi_partial.rs	replace % with + in rotation	1	equivalent: k % 4 becomes k + 4, which adds 16 to each shuffle index; pshufb reads an index's low four bits (and bit 7, clear: the largest is 47), so the shuffle is the same
 src/ffi_partial.rs	replace | with ^ in rotation	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/finish.rs	delete ! in Finish::wait	1	a scheduling choice: `if poll()` breaks when the poll says to go on, so the waiter spins through its polls in place of parking; the count is still what it returns on. Loom passes it; the whole suite, run unnarrowed, spins into the clock on it (the stream tests)
 src/hasher.rs	replace - with + in feed	1	equivalent: ahead is read by the SME2 kernels alone (AArch64); on x86-64 the value passes through the walk to kernels that ignore it
 src/hasher.rs	replace - with / in feed	1	equivalent: ahead is read by the SME2 kernels alone (AArch64); on x86-64 the value passes through the walk to kernels that ignore it
 src/hasher.rs	replace < with <= in ChunkState<P>::fill_buf	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/hasher.rs	replace < with <= in fill	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/hasher.rs	replace <impl Feed<ChunkState<P>> for Kernels<'_, P, H>>::subtree_cv -> Option<Cv> with None	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/hasher.rs	replace > with < in feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/hasher.rs	replace > with == in feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/hasher.rs	replace > with >= in feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/hasher.rs	replace CvStack::array -> Option<&[Cv; DEPTH]> with Some(Box::leak(Box::new([Default::default(); DEPTH])))	1	test-only code (cfg(test)): the test's own accessor
 src/hasher.rs	replace | with ^ in ChunkState<P>::absorb	1	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
 src/hasher.rs	replace | with ^ in ChunkState<P>::output	2	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
@@ -44,6 +78,7 @@ src/incremental.rs	replace && with || in Hasher::update	1	same code: every test 
 src/incremental.rs	replace && with || in HasherCore::update_pooled	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace + with * in Hasher::update	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace + with - in Hasher::update	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/incremental.rs	replace / with * in HasherCore::push_group	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv -> Option<CVBytes> with None	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/incremental.rs	replace == with != in Hasher::update	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace >= with < in <impl hasher::Hooks for HasherHooks<'_>>::children	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -53,37 +88,45 @@ src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])>
 src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((1, Box::leak(Box::new([0; STAGE_LEN]))))	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((1, Box::leak(Box::new([1; STAGE_LEN]))))	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/io.rs	replace < with <= in fill	1	equivalent: one more read into an empty buffer, which returns 0 and ends the loop
-src/lanes.rs	delete ! in initialize	1	as on aarch64: survives (known-aarch64.txt): OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
+src/lanes.rs	delete ! in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace % with + in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace % with / in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace && with || in initialize	2	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
 src/lanes.rs	replace * with + in merge_to_children	1	array capacity: 2 + MAX children a call instead of 2 * MAX, the same tree in more calls
-src/lanes.rs	replace * with + in sources::Source::run_len	1	the pool's scheduling: how many of a job's pieces one claim takes (the claimed range stays consistent)
 src/lanes.rs	replace + with * in sources::Source::take_run	4	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace + with - in sources::Source::publish_job	1	another architecture's: `own`, the caller's own pieces, is nonzero only where the SME2 thread takes a prefix (cut_with_prefix on AArch64); on x86 own is 0 and base - 0 is base, so claimed is where it was. On AArch64 the change strands the job (the old hangs.txt had it)
 src/lanes.rs	replace + with - in sources::Source::take_run	4	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/lanes.rs	replace - with + in Pool::run_job	2	AArch64 only: `pieces - own`, where own, the caller's own pieces, is nonzero only with the SME2 thread's prefix; on x86-64 own is 0 and the sum is the difference (the wake count itself is tested, test_a_job_wakes_one_worker_a_piece_past_its_own)
-src/lanes.rs	replace / with % in sources::Source::run_len	1	the pool's scheduling: how many of a job's pieces one claim takes (the claimed range stays consistent)
-src/lanes.rs	replace << with >> in sources::Source::unregister	1	speed: the source's bit stays in ACTIVE, and find walks past the slot, whose pointer is null; register finds free slots by REGISTERED alone, so no slot is lost
-src/lanes.rs	replace > with < in initialize	1	as on aarch64: survives (known-aarch64.txt): speed: whether the pool starts its SME2 thread (without it the NEON workers do its share; the same results)
-src/lanes.rs	replace > with < in sme2_serve	1	as on aarch64: survives (known-aarch64.txt): speed: whether the SME2 thread runs a gathered task on NEON or in an SME2 session (equally correct)
-src/lanes.rs	replace > with == in initialize	1	as on aarch64: survives (known-aarch64.txt): speed: whether the pool starts its SME2 thread (without it the NEON workers do its share; the same results)
-src/lanes.rs	replace > with == in sme2_serve	1	as on aarch64: survives (known-aarch64.txt): speed: whether the SME2 thread runs a gathered task on NEON or in an SME2 session (equally correct)
+src/lanes.rs	replace - with + in Pool::run_job	3	OPEN: the pool's scheduling: `pieces - own`, where own, the caller's own pieces, is nonzero only with the SME2 thread's prefix; on x86-64 own is 0 and the sum is the difference (the wake count itself is tested, test_a_job_wakes_one_worker_a_piece_past_its_own). Two places survive every run; the third is caught in some (November 10, 2026)
+src/lanes.rs	replace - with / in Pool::run_job	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103). It survived the AVX-512 machines' whole runs of November 10, 2026, and the AVX2 machine's caught it
+src/lanes.rs	replace < with <= in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace < with == in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace < with > in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace == with != in sources::Source::publish_part	1	OPEN: the pool's scheduling: a part published while every worker is parked then wakes none of them, and the producer's own help hashes it; whether a test waits on that wake is the run's timing (caught in one of two whole runs on an EPYC 9255 and on a Ryzen 9700X, November 10, 2026)
+src/lanes.rs	replace > with < in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace > with < in sme2_serve	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace > with < in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace > with == in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace > with == in sme2_serve	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace > with == in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace > with >= in Task::run	1	equivalent: a subtree task at counter zero is more than one chunk (the pool splits at MIN_SPLIT_LEN and above), so len == CHUNK_LEN never reaches this branch
-src/lanes.rs	replace > with >= in initialize	1	as on aarch64: survives (known-aarch64.txt): equivalent: it differs only with one thread, where no SME2 thread starts and wake_sme2 finds none
-src/lanes.rs	replace > with >= in sme2_serve	1	as on aarch64: survives (known-aarch64.txt): speed: whether the SME2 thread runs a gathered task on NEON or in an SME2 session (equally correct)
-src/lanes.rs	replace > with >= in sources::Source::wake_for_waiting	1	the pool's scheduling: whether a waiting task wakes a parked worker; the caller takes what waits meanwhile
-src/lanes.rs	replace >= with < in sources::Source::publish	1	speed: when a stream's publisher or a worker tries a wake; a lone task the caller takes or wake_for_waiting wakes for (#99), so fewer or more wakes hash alike
+src/lanes.rs	replace > with >= in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace > with >= in sme2_serve	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace > with >= in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace >= with < in sources::serve	1	speed: the chain's wake for a second waiting item then comes when fewer than two wait; the parked workers still wake for work by publish's own wake
 src/lanes.rs	replace Pool::wake_for with ()	1	speed: how many workers are woken for a job's pieces; the caller takes every piece no worker took (run_job's loop on source.take), so any count, none included, hashes alike
-src/lanes.rs	replace all_workers_parked -> bool with true	1	a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before
-src/lanes.rs	replace prefix_for -> usize with 0	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
+src/lanes.rs	replace all_workers_parked -> bool with true	1	OPEN: the pool's scheduling: a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before; a run whose test then looks too soon catches it
+src/lanes.rs	replace prefix_for -> usize with 0	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/lanes.rs	replace prefix_for -> usize with 1	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
-src/lanes.rs	replace sme2_main with ()	1	another machine's code: the SME2 thread runs only where pool.sme2 is set (an SME2 build on a CPU with it); on x86 it is never started
+src/lanes.rs	replace sme2_main with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/lanes.rs	replace sources::Source::published -> usize with 0	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace sources::Source::published -> usize with 1	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lanes.rs	replace sources::Source::reserve_gpu_batch_for_test with ()	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace sources::Source::take_run -> bool with false	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/lanes.rs	replace sources::Source::take_run -> bool with true	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
-src/lanes.rs	replace sources::take_stream_task -> Option<Task> with None	1	another machine's code: the SME2 thread runs only where pool.sme2 is set (an SME2 build on a CPU with it); on x86 it is never started
+src/lanes.rs	replace sources::take_stream_task -> Option<Task> with None	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/lanes.rs	replace wake_sme2 with ()	1	another machine's code: the SME2 thread runs only where pool.sme2 is set (an SME2 build on a CPU with it); on x86 it is never started
 src/lanes.rs	replace | with ^ in Task::run_equal_members	4	equivalent: | and ^ agree on flag bits that never overlap
+src/lanes.rs	replace || with && in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	delete ! in compress_chunks_parallel	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	delete ! in prefetch_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	delete ! in prefetch_update_kernels	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -91,6 +134,9 @@ src/lib.rs	delete match arm Mode::Plain in Mode<'_>::key	1	equivalent: without t
 src/lib.rs	replace % with + in prefetch_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace % with / in prefetch_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace && with || in compress_chunks_parallel	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lib.rs	replace && with || in hash_many_rounded	1	equivalent: with `||` a count at or under the widest kernel enters the groups' loop, whose own condition (len > widest) is false at once, so nothing changes
+src/lib.rs	replace && with || in hash_serial_from	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lib.rs	replace && with || in lane_widths	1	[cpu has avx512f avx512vl amd_family_ge_1a] equivalent on this CPU: on Linux the condition is then wide_avx512() or true, and wide_avx512() holds here (AMD Zen 5 with AVX-512), so the widths are the same; other CPUs catch it
 src/lib.rs	replace && with || in prefetch_kernels	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace && with || in prefetch_update_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace * with +	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -117,25 +163,23 @@ src/lib.rs	replace << with >>	1	same code: every test binary hashes as the unmut
 src/lib.rs	replace == with != in prefetch_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace > with < in prefetch_update_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace > with == in prefetch_update_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lib.rs	replace > with >= in hash_many_rounded	2	equivalent: a count equal to the widest kernel has no rest to round (rounded_lanes(0) is None), so neither the `if` nor the loop runs one more time with a result that differs
 src/lib.rs	replace > with >= in prefetch_update_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace >= with < in hash_serial_from	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace >= with < in prefetch_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace >= with < in prefetch_update_kernels	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/lib.rs	replace __all_workers_parked -> bool with true	1	a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before
 src/lib.rs	replace hash_one_chunk_root -> Hash with Default::default()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/lib.rs	replace prefetch_cold with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/lib.rs	replace prefetch_kernels with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/lib.rs	replace prefetch_update_kernels with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
-src/lib.rs	replace ran_kernel with ()	1	[cpu lacks avx512f avx512vl] code for another machine: ran_kernel records SME2 and NEON hybrid entry points, and on x86 the wide AVX-512 ones; its readers are AArch64 tests and the wide dispatch tests, which an AVX-512 machine runs (they catch it there: the EPYC 9255, October 26)
 src/lib.rs	replace | with & in hash_one_chunk_root	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace | with ^ in Output::root_output_block	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in OutputReader::fill	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in compress_parents_parallel	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in hash_all_at_once	1	equivalent: | and ^ agree on flag bits that never overlap
+src/lib.rs	replace | with ^ in hash_many_rounded	1	the tests' record of the widths a count rounded to (ROUNDED_WIDTH): `|` and `^` agree unless one width is recorded twice in a reading, which no test's reading holds (three x86-64 machines' whole runs, November 10, 2026)
 src/lib.rs	replace | with ^ in hash_one_chunk_root	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/lib.rs	replace | with ^ in ran	1	test-only record of which kernels ran; on x86 nothing reads it (AArch64's kernel-coverage test does)
 src/lib.rs	replace || with && in compress_chunks_parallel	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/lib.rs	replace && with || in hash_many_rounded	1	equivalent: with `||` a count at or under the widest kernel enters the groups' loop, whose own condition (len > widest) is false at once, so nothing changes
-src/lib.rs	replace > with >= in hash_many_rounded	2	equivalent: a count equal to the widest kernel has no rest to round (rounded_lanes(0) is None), so neither the `if` nor the loop runs one more time with a result that differs
 src/many.rs	replace % with + in hash_blocks	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace % with + in hash_chunked	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace % with + in hash_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -248,6 +292,7 @@ src/platform.rs	replace < with > in prefetch_code	1	same code: every test binary
 src/platform.rs	replace << with >> in read_x86_features	5	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace << with >> in sme2_reported	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/platform.rs	replace <impl Drop for Sme2Turn>::drop with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/platform.rs	replace == with != in read_x86_features	1	[cpu has avx512f avx512vl genuine_intel] on this CPU every tested bit reads the same under these forms (an Intel CPU with AVX-512: an Ice Lake Xeon, November 10, 2026); the forms differ on CPUs with other feature sets
 src/platform.rs	replace == with != in read_x86_features	3	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace == with != in sme2_detect_uncached	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/platform.rs	replace == with != in sme2_reported	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -272,57 +317,101 @@ src/platform.rs	replace wide_avx512 -> bool with true	1	[cpu has avx512f avx512v
 src/platform.rs	replace | with & in read_x86_features	3	on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
 src/platform.rs	replace | with ^ in Platform::compress_blocks	1	equivalent: | and ^ agree on flag bits that never overlap
 src/platform.rs	replace | with ^ in read_x86_features	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/platform.rs	replace |= with &= in read_x86_features	1	[cpu has avx512f avx512vl genuine_intel] on this CPU every tested bit reads the same under these forms (an Intel CPU with AVX-512: an Ice Lake Xeon, November 10, 2026); the forms differ on CPUs with other feature sets
 src/platform.rs	replace |= with &= in read_x86_features	2	[cpu lacks avx512f avx512vl] on this CPU every tested bit reads the same under these forms (SSE4.1 and AVX2 present, AVX-512 absent); the forms differ on CPUs with other feature sets
+src/self_test.rs	delete ! in last_lanes	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace % with + in chunk_values	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace % with + in last_lanes	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace % with + in test::reference	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace % with / in chunk_values	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace % with / in last_lanes	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace % with / in test::reference	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace & with ^ in compiled_features_present	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace & with | in compiled_features_present	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace && with || in compiled_features_present	2	this CPU has LZCNT and BMI1: every form of the check reads them present; the case it guards is a CPU without them
 src/self_test.rs	replace * with +	24	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace * with + in chain	1	equivalent: the case has one message, so its length scales only message 0's offset, 0
 src/self_test.rs	replace * with + in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace * with + in last_lanes	12	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace * with + in outputs	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
-src/self_test.rs	replace * with + in test::reference	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace * with + in test::reference	5	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace * with /	24	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace * with / in chain	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace * with / in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
+src/self_test.rs	replace * with / in last_lanes	12	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace * with / in outputs	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
-src/self_test.rs	replace * with / in test::reference	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace * with / in test::reference	5	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace + with *	10	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace + with * in last_lanes	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace + with * in test::reference	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace + with -	10	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/self_test.rs	replace += with *= in run	1	[cpu lacks avx512f avx512vl] AVX-512 only: the wide kernels' self-test cases join the count only where the platform is AVX512 (test_self_test_run_checks_every_case checks the sum there)
-src/self_test.rs	replace += with -= in run	1	[cpu lacks avx512f avx512vl] AVX-512 only: the wide kernels' self-test cases join the count only where the platform is AVX512 (test_self_test_run_checks_every_case checks the sum there)
+src/self_test.rs	replace + with - in last_lanes	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace + with - in test::reference	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace += with *= in run	1	[cpu lacks avx512f avx512vl amd_family_ge_1a] AVX-512 only: the wide kernels' self-test cases join the count only where the platform is AVX512 (test_self_test_run_checks_every_case checks the sum there)
+src/self_test.rs	replace += with -= in run	1	[cpu lacks avx512f avx512vl amd_family_ge_1a] AVX-512 only: the wide kernels' self-test cases join the count only where the platform is AVX512 (test_self_test_run_checks_every_case checks the sum there)
 src/self_test.rs	replace - with +	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace - with + in last_lanes	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace - with + in test::reference	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace - with /	3	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace - with / in last_lanes	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace - with / in test::reference	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace / with % in chunk_values	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace / with * in chunk_values	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace << with >> in chunk_values	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace << with >> in compiled_features_present	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace == with != in chunk_values	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace == with != in compiled_features_present	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace == with != in last_lanes	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace == with != in test::reference	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace ^= with &= in run	1	as on aarch64: survives (known-aarch64.txt): test-only: the planted wrong digest's flip; as &= 1 the byte still changes wherever it is above 1, as every planted case's last byte is, so the digest is still wrong and the test still sees it
 src/self_test.rs	replace chunk_values -> usize with 0	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace chunk_values -> usize with 1	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace compiled_features_present with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/self_test.rs	replace last_lanes -> usize with 0	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/self_test.rs	replace last_lanes -> usize with 1	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/self_test.rs	replace | with & in chunk_values	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace | with & in last_lanes	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace | with ^ in chunk_values	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/self_test.rs	replace | with ^ in last_lanes	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	delete ! in Stream<'env, D>::finish	2	the two are run_waiting's and the GPU reclaim's: with no GPU built the reclaim is a constant no, and deleting either lets the pause fire after a pass that made progress, where it only spins and the loop proceeds; every outcome is the same
+src/stream.rs	delete ! in Stream<'env, D>::help	1	run_waiting's `!`: the pause then fires after a pass that ran a waiting task rather than after one that found none, where it only spins and the loop proceeds; every outcome is the same. The feed's `!` times out (timeouts-x86_64.txt)
+src/stream.rs	delete ! in Stream<'env, D>::reclaim	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	delete ! in Stream<'env, D>::reserve_gpu	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	delete field flags from struct Task expression in Stream<'env, D>::reclaim	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	delete field key from struct Task expression in Stream<'env, D>::reclaim	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	delete field left from struct Task expression in Stream<'env, D>::reclaim	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	delete field out from struct Task expression in Stream<'env, D>::reclaim	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace != with == in Stream<'env, D>::submit_long	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace && with || in Stream<'env, D>::collect	1	speed: collect then wakes a worker for a lone task whether or not it handed something back, or with no slot: a wake more
+src/stream.rs	replace && with || in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace + with *	1	equivalent: the long message's stack keeps MAX_DEPTH values for MAX_DEPTH + 1, still more than a 2^64-byte message's 48 pieces need
+src/stream.rs	replace + with * in task_slots	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace + with -	1	equivalent: the long message's stack keeps MAX_DEPTH - 1 values, still more than a 2^64-byte message's 48 pieces need
+src/stream.rs	replace + with - in task_slots	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace += with *= in Stream<'env, D>::deliver	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace += with *= in Stream<'env, D>::reserve_gpu	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace += with -= in Stream<'env, D>::deliver	3	speed: deliver's count wraps: collect and help act as if places came back when none did, waking or hashing a turn later, and a worker or the caller's own help takes the task; and two places in the GPU's branch, the same code where the GPU's code is not built
+src/stream.rs	replace += with -= in Stream<'env, D>::reserve_gpu	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace - with + in Stream<'env, D>::feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace - with + in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace - with / in Stream<'env, D>::feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace - with / in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace << with >>	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace == with != in Stream<'env, D>::submit_long	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace >= with < in Stream<'env, D>::feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace Stream<'env, D>::feed -> bool with false	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/stream.rs	replace Stream<'env, D>::pause with ()	1	the stop for a pause nothing can wake: it acts only when another fault strands the stream (the planted control on BLAKE3 #244 fails at once with it and hangs without); alone, a spin becomes a retry and every outcome is the same
+src/stream.rs	replace Stream<'env, D>::reclaim -> bool with false	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/stream.rs	replace Stream<'env, D>::reclaim -> bool with true	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/stream.rs	replace Stream<'env, D>::reclaim_at_finish -> bool with false	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/stream.rs	replace Stream<'env, D>::reclaim_at_finish -> bool with true	1	speed: where the GPU's code is not built (every x86-64 build), finish then reads a reclaim on every pass and never pauses: it spins through its passes until the work is delivered, and every outcome is the same
+src/stream.rs	replace Stream<'env, D>::reserve_gpu -> usize with 0	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/stream.rs	replace Stream<'env, D>::reserve_gpu -> usize with 1	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
+src/stream/receiver.rs	replace && with || in Core::forget	1	equivalent: forget(id, false) comes only from a result's retire, after its result has transferred and `done` is set; there `cancel || !done` is false, as `cancel && !done` is
+src/stream/receiver.rs	replace + with * in Receiver::core	1	equivalent: the ring holds every task published before a worker claims it, at most buffers + messages - 1 (a part holds a buffer and its message's slot, a batch job a slot), and buffers * messages is never less: a larger ring, never an overflow
 src/tree.rs	replace && with || in <impl Kernels for PlatformKernels<'_>>::children	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/tree.rs	replace && with || in <impl Kernels for PlatformKernels<'_>>::subtree	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/tree.rs	replace + with * in wide	1	SME2 only: the argument is `ahead`, consumed by the SME2 subtree path; on x86 subtree() returns None and serial calls pass 0
 src/tree.rs	replace + with - in wide	1	SME2 only: the argument is `ahead`, consumed by the SME2 subtree path; on x86 subtree() returns None and serial calls pass 0
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::children -> Option<[Cv; 2]> with None	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::subtree -> Option<usize> with None	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
-src/stream.rs	replace + with *	1	equivalent: the long message's stack keeps MAX_DEPTH values for MAX_DEPTH + 1, still more than a 2^64-byte message's 48 pieces need
-src/stream.rs	replace + with * in task_slots	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace + with -	1	equivalent: the long message's stack keeps MAX_DEPTH - 1 values, still more than a 2^64-byte message's 48 pieces need
-src/stream.rs	delete ! in Stream<'env, D>::finish	2	the two are run_waiting's and the GPU reclaim's: with no GPU built the reclaim is a constant no, and deleting either lets the pause fire after a pass that made progress, where it only spins and the loop proceeds; every outcome is the same
-src/stream.rs	delete ! in Stream<'env, D>::help	2	the two are the GPU feed's (a constant no where no GPU is built) and run_waiting's: deleting either lets the pause fire after a pass that made progress, where it only spins and the loop proceeds; every outcome is the same
-src/stream.rs	replace + with - in task_slots	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace Stream<'env, D>::pause with ()	1	the stop for a pause nothing can wake: it acts only when another fault strands the stream (the planted control on BLAKE3 #244 fails at once with it and hangs without); alone, a spin becomes a retry and every outcome is the same
-src/stream.rs	delete field flags from struct Task expression in Stream<'env, D>::reclaim	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	delete field key from struct Task expression in Stream<'env, D>::reclaim	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	delete field left from struct Task expression in Stream<'env, D>::reclaim	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	delete field out from struct Task expression in Stream<'env, D>::reclaim	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace Stream<'env, D>::reclaim -> bool with false	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
-src/stream.rs	replace Stream<'env, D>::reclaim -> bool with true	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
-src/stream/receiver.rs	replace && with || in Core::forget	1	equivalent: forget(id, false) comes only from a result's retire, after its result has transferred and `done` is set; there `cancel || !done` is false, as `cancel && !done` is
-src/stream/receiver.rs	replace + with * in Receiver::core	1	equivalent: the ring holds every task published before a worker claims it, at most buffers + messages - 1 (a part holds a buffer and its message's slot, a batch job a slot), and buffers * messages is never less: a larger ring, never an overflow

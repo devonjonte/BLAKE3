@@ -51,6 +51,16 @@ class Readers(unittest.TestCase):
                  patch("builtins.open", mock_open(read_data=f"processor: 0\n{field}\t: avx2 avx512f\n")):
                 self.assertEqual(check.cpu_flags(), {"avx2", "avx512f"})
 
+    def test_linux_names_the_two_vendor_facts_rows_depend_on(self):
+        read = lambda info: patch("builtins.open", mock_open(read_data=info))
+        with patch.object(check.sys, "platform", "linux"):
+            with read("vendor_id\t: GenuineIntel\ncpu family\t: 6\nflags\t: avx2 avx512f\n"):
+                self.assertEqual(check.cpu_flags(), {"avx2", "avx512f", "genuine_intel"})
+            with read("vendor_id\t: AuthenticAMD\ncpu family\t: 26\nflags\t: avx2 avx512f\n"):
+                self.assertEqual(check.cpu_flags(), {"avx2", "avx512f", "amd_family_ge_1a"})
+            with read("vendor_id\t: AuthenticAMD\ncpu family\t: 25\nflags\t: avx2\n"):
+                self.assertEqual(check.cpu_flags(), {"avx2"})
+
     def test_linux_reader_error_propagates(self):
         with patch.object(check.sys, "platform", "linux"), patch("builtins.open", side_effect=PermissionError("denied")), \
              self.assertRaises(PermissionError):
