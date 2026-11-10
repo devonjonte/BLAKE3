@@ -969,6 +969,10 @@ pub(super) mod tests {
         first.drain();
         finished.retire();
         first.close();
+        // Kept, in the list close fills: the address alone would also match
+        // a new allocation made where a freed core was (close as nothing
+        // passed this test so, the whole mutation run of November 10, 2026).
+        assert!(FREE.lock().unwrap().iter().any(|(_, _, kept)| Arc::as_ptr(kept) == core), "close keeps the core for the next receiver");
         let second = Receiver::new(Mode::Keyed(&key), 2, 1);
         assert_eq!(Arc::as_ptr(&second.core), core, "the kept core, not a new allocation");
         let mut message = run(second.message(None));
