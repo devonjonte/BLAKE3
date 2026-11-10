@@ -286,29 +286,38 @@ std::thread_local! {
     static HELD_GROUPS: core::cell::RefCell<Vec<Vec<usize>>> = const { core::cell::RefCell::new(Vec::new()) };
 }
 
-/// Hash held stages with an independent key per parent lane where
-/// available. Elsewhere, public mode chooses the cohorts; key values
-/// never determine grouping, allocation or dispatch.
+/// On x86-64 Linux, hash the held stages with an independent key per
+/// parent lane, when any of them is keyed and there are enough of them,
+/// and say so. The mode, the count and the platform, all public, choose;
+/// key values never determine grouping, allocation or dispatch. Every
+/// other target compiles `hash_held` as it was.
+#[cfg(all(feature = "std", blake3_avx512_ffi, target_os = "linux"))]
+fn independent_lanes(hashers: &mut [Hasher], held: &[usize]) -> bool {
+    let Some(&first) = held.first() else { return false };
+    let platform = hashers[first].core.chunk_state.platform;
+    // Public plain mode fixes every key to the IV: those share one pass.
+    if held.len() < INDEPENDENT_MIN || !matches!(platform, Platform::AVX2 | Platform::AVX512) || held.iter().all(|&i| hashers[i].core.chunk_state.flags == 0) {
+        return false;
+    }
+    crate::ffi_output::held_groups(hashers, held, platform);
+    #[cfg(test)]
+    HELD_GROUPS.with(|groups| groups.borrow_mut().push(held.to_vec()));
+    crate::counted(crate::Counted::HeldPass);
+    true
+}
+
+/// Hash the whole groups `held` names, one in each of those hashers'
+/// stages, and pass each group's subtree to its hasher's core. The plain
+/// hashers' groups hash together; a keyed or key-derivation hasher's group
+/// hashes alone, since its key is secret and must not decide the work
+/// (BLAKE3 #312): the mode alone, public, groups them.
 #[cfg(feature = "std")]
 fn hash_held(hashers: &mut [Hasher], held: &[usize]) {
-    let Some(&_first) = held.first() else { return };
-    // Public plain mode fixes every key to the IV.
-    if held.iter().all(|&i| hashers[i].core.chunk_state.flags == 0) {
-        hash_cohort::<TABLE>(hashers, held);
+    #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
+    if independent_lanes(hashers, held) {
         return;
     }
-    #[cfg(all(blake3_avx512_ffi, target_os = "linux"))]
-    {
-        let platform = hashers[_first].core.chunk_state.platform;
-        if held.len() >= INDEPENDENT_MIN && matches!(platform, Platform::AVX2 | Platform::AVX512) {
-            crate::ffi_output::held_groups(hashers, held, platform);
-            #[cfg(all(test, feature = "std"))]
-            HELD_GROUPS.with(|groups| groups.borrow_mut().push(held.to_vec()));
-            crate::counted(crate::Counted::HeldPass);
-            return;
-        }
-    }
-    // Other platforms retain public-mode cohorts in the same ready bound.
+    // Plain's key is the IV, the same for every plain hasher.
     let mut plain = arrayvec::ArrayVec::<usize, TABLE>::new();
     plain.extend(held.iter().copied().filter(|&i| hashers[i].core.chunk_state.flags == 0));
     if !plain.is_empty() {
