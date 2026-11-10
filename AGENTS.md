@@ -138,6 +138,8 @@ The part above (Philosophy, Strategy, Style) reads the same in the `AGENTS.md` o
 
 **One assignee makes the next move** (Zooko, November 9, 2026). Every open issue and pull request has one assignee, the person whose move is next. When your move is done, say in a comment what the next move is and assign the person who makes it. When nothing is left, close it. A pull request's author lands it the day its checks pass (CONTRIBUTING, "Branches and changes"). A Mac check is a job the author queues (`tools/runner/README.md`). An item that waits on nobody's move is closed, and one that waits on a decision names the decider. A workflow (`.github/workflows/one-assignee.yml`) assigns the author to any item left with none and asks when there are several.
 
+**A stalled item is taken** (Zooko, November 10, 2026). When an item blocks your work and its assignee has made no move in half a day, assign it to yourself, say so in a comment, and do it. The assignee says who moves next; it reserves the work for nobody.
+
 **State lives in the tracker's fields** (Zooko, November 9, 2026). Whose move is next, which release an item belongs to, and whether it is done are set in fields a tool can read: the assignee, the milestone, open or closed. Prose explains a state and never carries one alone. The milestones: `0.9` is done before that release; `After 0.9, before 1.0` waits for the release and is settled before the APIs freeze; an item with no milestone is undecided. To defer an item, move it.
 
 **Generated text is computed from what the page shows.** A sentence about the page's own contents is built from the same data as the page, so it names only what is on the page, whatever options produced it.
