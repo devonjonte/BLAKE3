@@ -275,8 +275,8 @@ class Hangs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, patch.object(check, "ROOT", d):
             shard = os.path.join(d, "tmp", "mutants-last", "run", "shard0")
             os.makedirs(shard)
-            json.dump({"outcomes": [{"phase_results": [{"phase": "Build", "duration": 42.4}, {"phase": "Test", "duration": 31.1}]}]},
-                      open(os.path.join(shard, "outcomes.json"), "w"))
+            with open(os.path.join(shard, "outcomes.json"), "w") as f:
+                json.dump({"outcomes": [{"phase_results": [{"phase": "Build", "duration": 42.4}, {"phase": "Test", "duration": 31.1}]}]}, f)
             out = io.StringIO()
             with redirect_stdout(out):
                 check.budget(check.time.monotonic() - 75)

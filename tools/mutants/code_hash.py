@@ -70,8 +70,12 @@ def verdict(state):
     assert binaries, f"{state}: no binary listed"
     if not os.path.exists(os.path.join(state, binaries[0] + ".base")):
         for name in binaries:
-            path = open(os.path.join(state, name + ".path")).read().strip()
-            open(os.path.join(state, name + ".base"), "w").write(open(os.path.join(state, name + ".stat")).read().strip() + " " + code_hash(path, os.environ["MUTANTS_B3SUM"]) + "\n")
+            with open(os.path.join(state, name + ".path")) as f:
+                path = f.read().strip()
+            with open(os.path.join(state, name + ".stat")) as f:
+                stat = f.read().strip()
+            with open(os.path.join(state, name + ".base"), "w") as f:
+                f.write(stat + " " + code_hash(path, os.environ["MUTANTS_B3SUM"]) + "\n")
         return "baseline"
     for name in binaries:
         stat = open(os.path.join(state, name + ".stat")).read().strip()

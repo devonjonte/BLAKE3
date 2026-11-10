@@ -844,7 +844,8 @@ def check_rows_exist(remove=False):
             lines = open(path).read().splitlines()
             keep = [l for l in lines if not (l.startswith("src/") and (os.path.basename(path), *l.split("\t")[:2]) in gone)]
             if keep != lines:
-                open(path, "w").write("\n".join(keep) + "\n")
+                with open(path, "w") as f:
+                    f.write("\n".join(keep) + "\n")
     elif stale:
         sys.exit(f"mutants: {len(stale)} rows name mutants the source no longer has; remove them")
     return listed
@@ -878,18 +879,75 @@ def size_note(diff):
 BUDGET_S = 60
 
 
+# What a check costs on this machine, kept beside its shards' worktrees: the
+# seconds of a shard's unmutated build and tests, and of a mutant's.
+RATE = os.path.join(WORKTREES, "rate.json")
+
+
+def rate_of(shards):
+    """(seconds of a shard's unmutated run, seconds of a mutant) from the
+    shards' cargo-mutants outcomes, or None with nothing to go by."""
+    spent = lambda o: sum(ph.get("duration", 0) for ph in o.get("phase_results", []))
+    unmutated = [spent(o) for outcomes in shards for o in outcomes if o.get("scenario") == "Baseline"]
+    mutants = [spent(o) for outcomes in shards for o in outcomes if o.get("scenario") != "Baseline"]
+    if not unmutated or not mutants:
+        return None
+    return sum(unmutated) / len(unmutated), sum(mutants) / len(mutants)
+
+
+def read_rate(path):
+    try:
+        with open(path) as f:
+            kept = json.load(f)
+        return float(kept["unmutated_s"]), float(kept["mutant_s"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def keep_rate(path, rate):
+    if rate is None:
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({"unmutated_s": rate[0], "mutant_s": rate[1]}, f)
+
+
+def estimate(mutants, shards, rate):
+    """Seconds for the fullest shard: its unmutated run, then its mutants.
+    None without a rate: the formula this replaced (6 s a mutant and 20)
+    read about twice the time taken on every machine measured (BLAKE3 #257)."""
+    if rate is None:
+        return None
+    return round(rate[0] + -(-mutants // shards) * rate[1])
+
+
+def plan_line(mutants, shards, rate):
+    about = estimate(mutants, shards, rate)
+    line = f"mutants: the change's {mutants} mutants on {shards} shard{'s' if shards > 1 else ''}"
+    if about is None:
+        return line
+    return line + f" (about {about} s, by this machine's last check{f': over the {BUDGET_S} s budget' if about > BUDGET_S else ''})"
+
+
 def budget(started):
     """The run's wall time against BUDGET_S, and, over it, where the time
     went (each shard's baseline build and its mutants' builds and tests,
     from cargo-mutants' outcomes): a check that grows slow says so on every
     run, to whoever runs it."""
     took = round(time.monotonic() - started)
+    shards = []
+    for path in glob.glob(os.path.join(ROOT, "tmp", "mutants-last", "run", "shard*", "outcomes.json")):
+        with open(path) as f:
+            shards.append(json.load(f).get("outcomes", []))
+    keep_rate(RATE, rate_of(shards))
     if took <= BUDGET_S:
         print(f"mutants: took {took} s, within the {BUDGET_S} s budget")
         return
     phases = collections.Counter()
     for path in glob.glob(os.path.join(ROOT, "tmp", "mutants-last", "*", "shard*", "outcomes.json")):
-        for o in json.load(open(path)).get("outcomes", []):
+        with open(path) as f:
+            outcomes = json.load(f).get("outcomes", [])
+        for o in outcomes:
             for ph in o.get("phase_results", []):
                 phases[ph.get("phase", "?")] += ph.get("duration", 0)
     spent = ", ".join(f"{k} {round(v)} s" for k, v in phases.most_common())
@@ -1080,8 +1138,7 @@ def main():
                   "at the same place stands for (--every-mutant runs them)", flush=True)
         planned = kept
         shards = shard_count(len(planned), wide_shards(os.cpu_count(), physical_memory()))
-        print(f"mutants: the change's {len(planned)} mutants on {shards} shard{'s' if shards > 1 else ''}"
-              + (f" (about {len(planned) * 6 // shards + 20} s, over the {BUDGET_S} s budget)" if len(planned) * 6 // shards + 20 > BUDGET_S else ""), flush=True)
+        print(plan_line(len(planned), shards, read_rate(RATE)), flush=True)
         found, functions, timed = run(files, ["--in-diff", path, *left_out], shards=shards, known=known, tknown=tknown) if planned else (collections.Counter(), {}, collections.Counter())
         if any(f in diff for f in LOOM_FILES):
             found, timed, functions = with_loom(found, timed, functions, run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True, known=known)[1])
@@ -1133,7 +1190,8 @@ def main():
                 return SAME_RELEASE_REASON if RELEASE_SAME["run"][k] else SAME_REASON
             return known[k][1] if k in known and known[k][1] not in SAME_REASONS else unclassified(k, 'survives')
         rows = sorted([f"{k}\t{n}\t{reason(k, n)}" for k, n in found.items()] + INACTIVE)
-        open(KNOWN, "w").write("\n".join(header + rows) + "\n")
+        with open(KNOWN, "w") as f:
+            f.write("\n".join(header + rows) + "\n")
         print(f"{KNOWN}: {sum(found.values())} survivors, {sum(1 for k in found if k not in known)} names new")
         theader = [l.rstrip("\n") for l in open(TIMEOUTS) if l.startswith("#")] if os.path.exists(TIMEOUTS) else \
             [f"# The mutants that time out on {platform.machine()}: no test fails, the clock stops one (tools/mutants/check.py, TIMEOUTS).",
@@ -1141,7 +1199,8 @@ def main():
         timed = {**{k: c for k, (c, r) in tknown.items() if open_pool(k, r)}, **timed}
         timed = {k: max(n, tknown[k][0]) if k in tknown and open_pool(k, tknown[k][1]) else n for k, n in timed.items()}
         trows = sorted([f"{k}\t{n}\t{tknown[k][1] if k in tknown else unclassified(k, 'times out')}" for k, n in timed.items()] + INACTIVE_TIMEOUTS)
-        open(TIMEOUTS, "w").write("\n".join(theader + trows) + "\n")
+        with open(TIMEOUTS, "w") as f:
+            f.write("\n".join(theader + trows) + "\n")
         print(f"{TIMEOUTS}: {sum(timed.values())} time-outs, {sum(1 for k in timed if k not in tknown)} names new")
         return
     unexplained = sorted(k for k, (_, reason) in {**tknown, **known}.items() if reason.startswith("UNCLASSIFIED"))

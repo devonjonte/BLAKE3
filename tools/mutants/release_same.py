@@ -96,10 +96,12 @@ def confirm(tree, target, places, build_args, env):
                 print(f"release_same: {key}: its diff does not apply ({r.stdout.strip()} {r.stderr.strip()}); other code", flush=True)
                 continue
             kept = keep_lines(original, open(path).read(), start_line)  # read before the write truncates
-            open(path, "w").write(kept)
+            with open(path, "w") as f:
+                f.write(kept)
             if build(tree, target, build_args, env) == base:
                 same.append(key)
         finally:
-            open(path, "w").write(original)
+            with open(path, "w") as f:
+                f.write(original)
     assert clean(tree), f"{tree}: a mutant left behind"
     return same
