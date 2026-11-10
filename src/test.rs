@@ -239,6 +239,12 @@ pub(crate) fn every_platform() -> Vec<crate::platform::Platform> {
 #[cfg(all(target_arch = "x86_64", blake3_sse41_ffi, feature = "std"))]
 fn test_whole_chunks_round_up_to_the_lanes() {
     use crate::{CHUNK_LEN, Ran};
+    // The startup self-test first: it runs inside a process's first call,
+    // on the calling thread, and its own cases round up (to 4 lanes on
+    // AVX2, to 4 and 8 on AVX-512), which the counts below would take for
+    // the message's. The 2-chunk message is asked first, so a self-test
+    // counted again fails here on every machine.
+    crate::initialize();
     let input = std::vec![0x5au8; 8 * CHUNK_LEN];
     let ran = |len: usize| {
         crate::RAN.with(|r| r.set(0));
@@ -246,8 +252,8 @@ fn test_whole_chunks_round_up_to_the_lanes() {
         std::hint::black_box(crate::convenience::hash(&input[..len]));
         (crate::RAN.with(|r| r.get()) & Ran::RoundedUp as u32 != 0, crate::ROUNDED_WIDTH.with(|w| w.get()))
     };
-    assert_eq!(ran(3 * CHUNK_LEN), (true, 4), "3 whole chunks: 4 lanes, one pass");
     assert_eq!(ran(2 * CHUNK_LEN), (false, 0), "2 whole chunks: the pair");
+    assert_eq!(ran(3 * CHUNK_LEN), (true, 4), "3 whole chunks: 4 lanes, one pass");
     assert_eq!(ran(4 * CHUNK_LEN), (false, 0), "4 whole chunks: 4 lanes already");
     assert_eq!(ran(8 * CHUNK_LEN), (false, 0), "8 whole chunks: 8 lanes already");
     if crate::platform::Platform::avx2().is_some() {
@@ -256,8 +262,19 @@ fn test_whole_chunks_round_up_to_the_lanes() {
         assert_eq!(ran(7 * CHUNK_LEN), (true, 8 | 4), "7 whole chunks on AVX2: 8 lanes, one pass; their 3 parents on 4");
         assert_eq!(ran(5 * CHUNK_LEN), (true, 8), "5 whole chunks on AVX2: 8 lanes, one pass");
     }
-    // 3 chunks and a partial take the spare lane, not the rounding.
-    assert_eq!(ran(3 * CHUNK_LEN + 500), (false, 0), "3 whole and a partial: the spare lane's pass");
+    // 3 chunks and a partial: on SSE4.1 and AVX2 the partial chunk takes
+    // the spare lane and nothing rounds. AVX-512 has no spare-lane pass at
+    // this count (spare_lane), so its 3 whole chunks round up to 4 lanes
+    // and the partial chunk follows alone.
+    #[cfg(blake3_avx512_ffi)]
+    let avx512 = crate::platform::Platform::avx512().is_some();
+    #[cfg(not(blake3_avx512_ffi))]
+    let avx512 = false;
+    assert_eq!(
+        ran(3 * CHUNK_LEN + 500),
+        if avx512 { (true, 4) } else { (false, 0) },
+        "3 whole and a partial: the spare lane's pass, or on AVX-512 the rounding"
+    );
     // AVX-512: 9 to 15 on 16 lanes; past 16, the whole group of 16 and the
     // rest rounded (19 = 16 + 3 on 4), or 32 lanes where that kernel runs.
     #[cfg(blake3_avx512_ffi)]
@@ -269,12 +286,17 @@ fn test_whole_chunks_round_up_to_the_lanes() {
             std::hint::black_box(crate::convenience::hash(&input[..len]));
             (crate::RAN.with(|r| r.get()) & Ran::RoundedUp as u32 != 0, crate::ROUNDED_WIDTH.with(|w| w.get()))
         };
-        // 11 chunks on 16 lanes; their 11 chaining values as 5 parent blocks and one left over: 5 parents on 8.
-        assert_eq!(ran(11 * CHUNK_LEN), (true, 16 | 8), "11 whole chunks on AVX-512: 16 lanes, their 5 parents on 8");
+        // 11 chunks on 16 lanes; their 11 chaining values as 5 parent
+        // blocks and one left over: 5 parents on 8; those 6 values as 3
+        // parent blocks: on 4.
+        assert_eq!(ran(11 * CHUNK_LEN), (true, 16 | 8 | 4), "11 whole chunks on AVX-512: 16 lanes, their 5 parents on 8, the 3 above on 4");
         assert_eq!(ran(16 * CHUNK_LEN), (false, 0), "16 whole chunks: 16 lanes already; 8 parents on 8");
         let wide = cfg!(target_os = "linux") && crate::platform::wide_avx512();
-        // 19 chunks: 32 lanes where that kernel runs, else 16 and 3 on 4; their 9 parents (4 blocks + 1 over) on... 4 blocks: no rounding.
-        assert_eq!(ran(19 * CHUNK_LEN), (true, if wide { 32 } else { 4 }), "19 whole chunks on AVX-512");
+        // 19 chunks: on 32 lanes where that kernel runs, else 16 as they
+        // are and 3 on 4. Either way their 19 chaining values make 9 parent
+        // blocks and one left over, 9 parents on 16; those 10 values make 5
+        // parent blocks, on 8.
+        assert_eq!(ran(19 * CHUNK_LEN), (true, if wide { 32 | 16 | 8 } else { 4 | 16 | 8 }), "19 whole chunks on AVX-512, and their parents on 16 and 8");
     }
 }
 
