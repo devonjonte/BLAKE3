@@ -217,6 +217,9 @@ fast-forward of its tip (so what was checked is what lands) once:
 - mutation testing passes on a change to the Rust
   (`python3 tools/mutants/check.py`: the mutants in the changed lines,
   in about a minute, the time it took printed at its end);
+- its commit message says what it adds to the library or removes, with
+  `python3 tools/size.py BASE REV`'s output where it changes the
+  library's code (a few minutes: it counts and builds);
 - the regression check finds no slowdown on AArch64 Linux in a VM and
   natively on an Apple M4 Max. A candidate that changes no compiled code
   needs no speed check: it would compare identical code. The Mac
