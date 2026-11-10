@@ -32,7 +32,7 @@ class CheckOutcomes(unittest.TestCase):
         self.assertIn("--probe", run.command)
 
     def test_gate_and_failure_outcomes_keep_their_meaning(self):
-        for code, outcome in [(0, "no regression"), (1, "regression"), (2, "no verdict")]:
+        for code, outcome in [(0, "no regression"), (1, "regression"), (2, "no verdict"), (3, "a side stopped")]:
             self.assertEqual(runner.check(self.job(), FakeRun(code), None, Path("/results")), outcome)
 
 

@@ -294,7 +294,9 @@ def check(job, run, work, out):
     and measures the job's scope (the module docstring). Its exit is the
     outcome: 0 completed (a probe gives no speed verdict), 1 a regression,
     2 no verdict (other programs kept the machine busy, or no scope given
-    to a bench that needs one)."""
+    to a bench that needs one), 3 a side's run stopped (a panic, a crash:
+    bench-hashes 0.21 names the side and quotes its last words; the job's
+    log has them, and no speed verdict follows)."""
     old, new = hex_commit(job, "old_commit"), hex_commit(job, "new_commit")
     fork, bench = run.checkouts(new, hex_commit(job, "bench_commit"))
     # --when-quiet: a Mac busy for a few seconds (a scan after a build, a
@@ -314,8 +316,8 @@ def check(job, run, work, out):
         run.run(cmd, cwd=bench)
         return "ok" if "probe" in job else "no regression"
     except subprocess.CalledProcessError as e:
-        if e.returncode in (1, 2):
-            return {1: "regression", 2: "no verdict"}[e.returncode]
+        if e.returncode in (1, 2, 3):
+            return {1: "regression", 2: "no verdict", 3: "a side stopped"}[e.returncode]
         raise
 
 
