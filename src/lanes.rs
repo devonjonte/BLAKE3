@@ -1019,7 +1019,7 @@ pub(crate) mod sources {
         /// The published tasks' places in the order published, a ring of
         /// as many words: publication `p`'s at `p % len`. Empty for a
         /// caller's jobs.
-        ring: Box<[AtomicUsize]>,
+        ring: Box<[OwnLine<AtomicUsize>]>,
         /// A caller's current job and its first number; the job stays the
         /// claimed numbers' until `finish.finished` passes them.
         job: AtomicPtr<Job<'static>>,
@@ -1069,7 +1069,7 @@ pub(crate) mod sources {
                         uncopied: core::sync::atomic::AtomicBool::new(false),
                     })
                     .collect(),
-                ring: (0..len).map(|_| AtomicUsize::new(0)).collect(),
+                ring: (0..len).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
                 job: AtomicPtr::new(core::ptr::null_mut()),
                 base: AtomicUsize::new(0),
                 finish: crate::finish::Finish::new(),
