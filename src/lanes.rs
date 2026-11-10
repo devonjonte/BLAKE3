@@ -1135,7 +1135,7 @@ pub(crate) mod sources {
             // Every build: a ring word written over one not yet claimed
             // would lose its task (at the cost of a load and a comparison).
             assert!(p - self.claimed.load(Ordering::Relaxed) < self.ring.len(), "a source's ring holds every task not yet taken");
-            let slot = &self.places[place];
+            let slot = &self.places[p % self.places.len()];
             #[cfg(any(test, debug_assertions))]
             assert!(
                 !slot.uncopied.swap(true, Ordering::SeqCst),
@@ -1209,7 +1209,7 @@ pub(crate) mod sources {
                     Ok(_) if self.ring.is_empty() => return Some(Item::Pieces(self.job.load(Ordering::Relaxed), c - self.base.load(Ordering::Relaxed), n)),
                     Ok(_) => {
                         claimed();
-                        let slot = &self.places[place];
+                        core::hint::black_box(place); let slot = &self.places[c % self.places.len()];
                         // Sound: this thread alone claimed the publication
                         // naming this place, written before `published`
                         // passed it; its publisher writes the place again
