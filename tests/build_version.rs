@@ -119,6 +119,41 @@ fn a_dirty_tree_is_named_by_its_tree_id_and_cargos_marker_is_no_change() {
     assert_ne!(tree, git(&r.0, &["rev-parse", "HEAD^^{tree}"]));
 }
 
+/// An edit Git's own index catches is in the name. Git reads a file's
+/// content again, whatever its recorded size and time say, when the file's
+/// time is no earlier than the index's own: the file may have changed
+/// after the index was written, unseen at Git's whole-second times. The
+/// name is made through a copy of the index, and a copy written later
+/// than the edit would trust the record. Here an edit keeps its file's
+/// size and time, in the second the index was written, ten seconds ago:
+/// `git add` in the checkout sees it, and so must the name. (Found as one
+/// run in about a hundred of the dirty-tree test above, when a second
+/// began between its edit and the copy.)
+#[test]
+fn an_edit_in_the_second_its_index_was_written_is_in_the_name() {
+    let r = repo("racy");
+    let commit = git(&r.0, &["rev-parse", "HEAD"]);
+    // Git's file times alone decide, as in a build of Git with whole seconds.
+    git(&r.0, &["config", "core.trustctime", "false"]);
+    let then = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
+    let set = |path: &Path| std::fs::File::options().write(true).open(path).unwrap().set_modified(then).unwrap();
+    let code = r.0.join("code.rs");
+    // The record: code.rs as committed, at `then`; the index written at `then`.
+    set(&code);
+    git(&r.0, &["add", "code.rs"]);
+    assert_eq!(name(&r.0, "0.8.0+dev"), format!("0.8.0+dev.{commit}"), "unchanged so far");
+    set(&r.0.join(".git/index"));
+    // The edit: the same size, the same time.
+    std::fs::write(&code, "two").unwrap();
+    set(&code);
+    let got = name(&r.0, "0.8.0+dev");
+    git(&r.0, &["add", "-A"]);
+    git(&r.0, &["commit", "-q", "-m", "the edit"]);
+    assert_eq!(git(&r.0, &["show", "HEAD:code.rs"]), "two", "Git's own index saw the edit");
+    let tree = git(&r.0, &["rev-parse", "HEAD^{tree}"]);
+    assert_eq!(got, format!("0.8.0+dev.{commit}.dirty.{tree}"));
+}
+
 #[test]
 fn a_package_is_named_from_its_vcs_info() {
     let r = Repo(scratch("package"));

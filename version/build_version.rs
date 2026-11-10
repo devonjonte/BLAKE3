@@ -57,11 +57,23 @@ pub fn build_version(krate: &Path, version: &str, scratch: &Path) -> (String, Ve
     }
     // The working tree as Git would commit it, through an index of our own.
     // A copy of the checkout's index keeps Git's record of unchanged files,
-    // so only changed ones are read.
+    // so only changed ones are read. The copy keeps the index's time too:
+    // Git reads again every file whose time is no earlier than its
+    // index's, since such a file may have changed after the record was
+    // made, unseen at whole-second times. A copy dated now would trust
+    // the record of a file edited in the second the index was written,
+    // and name an edited tree as its commit. The time is read before the
+    // copy: an index rewritten between the two is then dated early, and
+    // Git reads more files, never fewer.
     let index = scratch.join("build-version-index");
     let _ = std::fs::remove_file(&index);
+    let copy = |real: &Path| -> std::io::Result<()> {
+        let written = std::fs::metadata(real)?.modified()?;
+        std::fs::copy(real, &index)?;
+        std::fs::File::options().write(true).open(&index)?.set_modified(written)
+    };
     let prepared = match absolute(real_index) {
-        real if real.exists() => std::fs::copy(real, &index).ok().map(|_| String::new()),
+        real if real.exists() => copy(&real).ok().map(|_| String::new()),
         _ => git(dir, &["read-tree", "HEAD"], Some(&index)),
     };
     let exclude = format!(":(exclude){CARGO_MARKER}");
