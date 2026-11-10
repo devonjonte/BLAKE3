@@ -919,6 +919,14 @@ mod x86_features_test {
         let family: u32 = field("cpu family").parse().expect("cpu family");
         let want = features & AVX512 != 0 && amd && family >= 0x1A;
         assert_eq!(features & WIDE != 0, want, "vendor {amd}, family {family:#x}");
+        // The two words only an AMD CPU with AVX-512 puts to use, read
+        // rightly on every CPU: a vendor or a family misread on an Intel
+        // machine changed no feature there, and no test saw it.
+        let words = super::read_cpu_words();
+        if super::os_saves_avx(words.leaf1_ecx) {
+            assert_eq!(words.amd, amd, "the vendor CPUID's leaf 0 names");
+        }
+        assert_eq!(super::family(words.leaf1_eax), family, "leaf 1's family");
         // What the dispatch reads, against the same independent reading.
         #[cfg(blake3_avx512_ffi)]
         assert_eq!(super::wide_avx512(), want, "wide_avx512 on vendor {amd}, family {family:#x}");
