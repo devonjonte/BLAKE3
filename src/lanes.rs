@@ -1168,8 +1168,14 @@ pub(crate) mod sources {
         pub(crate) fn publish_part(&self, run: unsafe fn(*mut (), Platform), context: *mut (), members: usize) {
             let p = self.finish.published.load(Ordering::Relaxed);
             // Every build: an action written over one not yet claimed would
-            // lose it.
-            assert!(p - self.claimed.load(Ordering::Relaxed) < self.actions.len(), "a source's ring holds every action not yet taken");
+            // lose it. The load is Acquire, against the claimers' releasing
+            // CAS: every claim up to the one this load sees, and what its
+            // claimer did before it (its read of its action's words),
+            // happens before what follows here, the next write of those
+            // words (`take`). With a Relaxed load no machine differs, but
+            // the language's rules then order nothing between that read
+            // and this write.
+            assert!(p - self.claimed.load(Ordering::Acquire) < self.actions.len(), "a source's ring holds every action not yet taken");
             // Action p % len is free: `claimed` has passed its last
             // publication (the assertion above).
             self.actions[p % self.actions.len()].write(run, context, members);
@@ -1253,9 +1259,12 @@ pub(crate) mod sources {
                 // wrote these words before `published` passed c (the
                 // Acquire above), and its publisher writes them again, for
                 // publication c + len, only once it has seen `claimed` past
-                // c. So if the CAS below succeeds, `claimed` was c until
-                // then, no such write had begun, and these are c's words.
-                // Read after the claim, they could be a later action's.
+                // c, with an Acquire load (`publish_part`). The claims
+                // chain: each CAS acquires the one before it and releases.
+                // So if the CAS below succeeds, this read comes before it,
+                // it before the claim the publisher saw, and that before
+                // the publisher's next write: these are c's words. Read
+                // after the claim, they could be a later action's.
                 let action = (!self.actions.is_empty()).then(|| self.actions[c % self.actions.len()].read());
                 match self.claimed.compare_exchange_weak(c, c + n, Ordering::AcqRel, Ordering::Acquire) {
                     Ok(_) if !self.carries_tasks() => return Some(Item::Pieces(self.job.load(Ordering::Relaxed), c - self.base.load(Ordering::Relaxed), n)),
