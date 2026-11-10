@@ -58,8 +58,14 @@ lists what changed, each item with where it is described.
   completions stay in fixed entries.
 - **A stream with no worker stops at once** where it would wait forever
   (#276).
+- **A repeated collection allocates nothing** (#325): `hash_each` keeps
+  its messages' places and chunk values on the calling thread between
+  calls, where each call took them and freed them.
 
 ## Safer
+
+Where an entry says 0.8 has the fault, the remedy for a program on 0.8 is
+this release: no 0.8.x follows.
 
 - **`throughput::Stream::open` is private** (#308). In 0.8 it is public,
   safe and hidden from the docs, and a safe program could open a stream,
@@ -87,7 +93,7 @@ lists what changed, each item with where it is described.
   in a release build, a count of 128-byte messages past half of
   `usize::MAX` wrapped to zero blocks and returned an empty batch.
 - **`update_each` groups held hashers by public facts alone**, the mode
-  and the lengths, never by a key (#312).
+  and the lengths, never by a key (#312). 0.8 grouped them by key.
 
 ## Checked more
 
