@@ -40,5 +40,9 @@ assert "leftover" not in trees() and {"smoke-0", "smoke-1"} <= set(trees()), f"t
 before = trees()
 again, _, _ = check.run([FILE], shards=2, label="smoke")
 assert trees() == before, f"the second run reuses its worktrees: {before} -> {trees()}"
-assert again == found, f"the second run finds the same survivors: {dict(found)} -> {dict(again)}"
+# But for a mutant the pool's timing decides run by run: the tests' hook that says
+# every worker is parked, answering yes too soon, which a test sees or not
+# (the VM's first run of this on the second crate caught it, its second did not).
+steady = lambda names: {k: n for k, n in names.items() if "__all_workers_parked" not in k}
+assert steady(again) == steady(found), f"the second run finds the same survivors: {dict(found)} -> {dict(again)}"
 print(f"smoke: ok ({'the crate in ' + check.CRATE + '/' if check.CRATE else 'the crate at the root'}, {FILE})")
