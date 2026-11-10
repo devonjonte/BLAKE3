@@ -483,43 +483,82 @@ fn x86_features() -> u8 {
     features
 }
 
-/// [`x86_features`] from CPUID: leaf 1, and, where the CPU has AVX and the
-/// OS saves its registers (XSAVE, OSXSAVE, AVX, then XCR0), leaf 7. Every
-/// CPU with AVX has leaf 7.
+/// What CPUID and XCR0 say of this CPU, as the words [`features_of`]
+/// decides by. Reading is all this does: every decision but one is
+/// `features_of`'s, a function of these words alone, which its test tries
+/// on every CPU the words can describe. The one decision here is the
+/// order of reading: XCR0 and leaf 7 are read only where leaf 1 says the
+/// OS saves AVX's registers ([`os_saves_avx`]); XGETBV faults elsewhere.
+#[cfg(target_arch = "x86_64")]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct CpuWords {
+    /// CPUID leaf 1's EAX (the family) and ECX (SSE4.1, XSAVE, OSXSAVE, AVX).
+    leaf1_eax: u32,
+    leaf1_ecx: u32,
+    /// XCR0's low half: the register sets the OS saves. Zero where unread.
+    xcr0: u32,
+    /// CPUID leaf 7's EBX (AVX2, AVX-512 F and VL). Zero where unread.
+    leaf7_ebx: u32,
+    /// The vendor is "AuthenticAMD" (leaf 0). False where unread.
+    amd: bool,
+}
+
+/// Leaf 1's ECX says the CPU has XSAVE and AVX and the OS enabled XGETBV
+/// (OSXSAVE): bits 26, 27 and 28.
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
+const fn os_saves_avx(leaf1_ecx: u32) -> bool {
+    let avx = (1 << 26) | (1 << 27) | (1 << 28);
+    leaf1_ecx & avx == avx
+}
+
 #[cfg(target_arch = "x86_64")]
 #[cold]
 // Read by the x86 kernels' dispatch and the tests.
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
-fn read_x86_features() -> u8 {
+fn read_cpu_words() -> CpuWords {
     use core::arch::x86_64 as arch;
-    use x86_bits::*;
     // Sound: every x86-64 CPU has CPUID. (Safe since Rust 1.94; unsafe
     // before.)
     #[allow(unused_unsafe)]
     let leaf1 = unsafe { arch::__cpuid(1) };
+    let mut words = CpuWords { leaf1_eax: leaf1.eax, leaf1_ecx: leaf1.ecx, ..CpuWords::default() };
+    if os_saves_avx(leaf1.ecx) {
+        // Sound: OSXSAVE (bit 27) says the OS enabled XGETBV.
+        words.xcr0 = unsafe { arch::_xgetbv(0) } as u32;
+        // Sound: as leaf 1; leaf 7 exists where AVX does, and leaf 0 names
+        // the vendor.
+        #[allow(unused_unsafe)]
+        let (leaf7, leaf0) = unsafe { (arch::__cpuid_count(7, 0), arch::__cpuid(0)) };
+        words.leaf7_ebx = leaf7.ebx;
+        words.amd = (leaf0.ebx, leaf0.edx, leaf0.ecx) == (0x6874_7541, 0x6974_6e65, 0x444d_4163); // "AuthenticAMD"
+    }
+    words
+}
+
+/// [`x86_features`] of a CPU, from its words: SSE4.1 by leaf 1; AVX2 and
+/// AVX-512 (F and VL) by leaf 7 where the CPU has AVX and the OS saves
+/// the registers each needs (XSAVE, OSXSAVE, AVX, then XCR0's YMM bits,
+/// and for AVX-512 its opmask and ZMM bits too); the wide kernels' bit
+/// with AVX-512 on the CPUs [`wide_cpu`] names. No reading, no state: its
+/// test runs it on every combination of the bits it looks at.
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
+const fn features_of(words: CpuWords) -> u8 {
+    use x86_bits::*;
     let mut features = READ;
-    if leaf1.ecx & (1 << 19) != 0 {
+    if words.leaf1_ecx & (1 << 19) != 0 {
         features |= SSE41;
     }
-    let avx = (1 << 26) | (1 << 27) | (1 << 28);
-    if leaf1.ecx & avx == avx {
-        // Sound: OSXSAVE (bit 27) says the OS enabled XGETBV.
-        let xcr0 = unsafe { arch::_xgetbv(0) };
-        // Sound: as leaf 1; leaf 7 exists where AVX does.
-        #[allow(unused_unsafe)]
-        let leaf7 = unsafe { arch::__cpuid_count(7, 0) };
+    if os_saves_avx(words.leaf1_ecx) {
         let (ymm, zmm) = (0b110, 0b1110_0110);
-        if xcr0 & ymm == ymm && leaf7.ebx & (1 << 5) != 0 {
+        if words.xcr0 & ymm == ymm && words.leaf7_ebx & (1 << 5) != 0 {
             features |= AVX2;
         }
         let f_vl = (1 << 16) | (1 << 31);
-        if xcr0 & zmm == zmm && leaf7.ebx & f_vl == f_vl {
+        if words.xcr0 & zmm == zmm && words.leaf7_ebx & f_vl == f_vl {
             features |= AVX512;
-            // Sound: as leaf 1; leaf 0 names the vendor.
-            #[allow(unused_unsafe)]
-            let leaf0 = unsafe { arch::__cpuid(0) };
-            let amd = (leaf0.ebx, leaf0.edx, leaf0.ecx) == (0x6874_7541, 0x6974_6e65, 0x444d_4163); // "AuthenticAMD"
-            if wide_cpu(amd, family(leaf1.eax)) {
+            if wide_cpu(words.amd, family(words.leaf1_eax)) {
                 features |= WIDE;
             }
         }
@@ -527,11 +566,20 @@ fn read_x86_features() -> u8 {
     features
 }
 
+/// [`x86_features`] from CPUID: [`features_of`] this CPU's words.
+#[cfg(target_arch = "x86_64")]
+#[cold]
+// Read by the x86 kernels' dispatch and the tests.
+#[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
+fn read_x86_features() -> u8 {
+    features_of(read_cpu_words())
+}
+
 /// The display family of CPUID leaf 1's EAX: the base family, plus the
 /// extended family where the base is 0xF.
 #[cfg(target_arch = "x86_64")]
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
-fn family(eax: u32) -> u32 {
+const fn family(eax: u32) -> u32 {
     let base = (eax >> 8) & 0xF;
     if base == 0xF { base + ((eax >> 20) & 0xFF) } else { base }
 }
@@ -544,7 +592,7 @@ fn family(eax: u32) -> u32 {
 /// CPUs join the list when measured.
 #[cfg(target_arch = "x86_64")]
 #[cfg_attr(not(blake3_sse41_ffi), allow(dead_code))]
-fn wide_cpu(amd: bool, family: u32) -> bool {
+const fn wide_cpu(amd: bool, family: u32) -> bool {
     amd && family >= 0x1A
 }
 
@@ -759,6 +807,89 @@ mod x86_features_test {
         assert_eq!(features & SSE41 != 0, std::is_x86_feature_detected!("sse4.1"));
         assert_eq!(features & AVX2 != 0, std::is_x86_feature_detected!("avx2"));
         assert_eq!(features & AVX512 != 0, std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl"));
+    }
+
+    /// Every CPU the words can describe: each combination of the bits the
+    /// detection looks at, against the rule written out feature by feature,
+    /// with every other bit clear and then set (they decide nothing). On any
+    /// machine: no CPU has to be the one that shows a wrong bit.
+    #[test]
+    fn test_features_of_every_combination_of_the_bits() {
+        use super::x86_bits::*;
+        use super::{CpuWords, features_of};
+        let bit = |word: u32, n: u32| word & (1 << n) != 0;
+        let spread = |chosen: u32, places: &[u32], rest: bool| {
+            let mut word = if rest { !0u32 } else { 0 };
+            for (i, &place) in places.iter().enumerate() {
+                word = if chosen & (1 << i) != 0 { word | (1 << place) } else { word & !(1 << place) };
+            }
+            word
+        };
+        // The family: Intel's 6, AMD's Zen 4 (0x19), Zen 5 (0x1A) and the next (0x1B).
+        let families = [(0x6u32, 0u32, 0x6u32), (0xF, 0x0A, 0x19), (0xF, 0x0B, 0x1A), (0xF, 0x0C, 0x1B)];
+        let mut tried = 0;
+        for rest in [false, true] {
+            for ecx_bits in 0..16 {
+                for xcr0_bits in 0..32 {
+                    for ebx_bits in 0..8 {
+                        for amd in [false, true] {
+                            for (base, ext, family) in families {
+                                let ecx = spread(ecx_bits, &[19, 26, 27, 28], rest);
+                                let xcr0 = spread(xcr0_bits, &[1, 2, 5, 6, 7], rest);
+                                let ebx = spread(ebx_bits, &[5, 16, 31], rest);
+                                // Everything of EAX but the two family fields follows `rest`.
+                                let eax = (if rest { !0u32 & !(0xFF << 20) & !(0xF << 8) } else { 0 }) | (ext << 20) | (base << 8);
+                                let got = features_of(CpuWords { leaf1_eax: eax, leaf1_ecx: ecx, xcr0, leaf7_ebx: ebx, amd });
+                                // The rule, one feature at a time.
+                                let sse41 = bit(ecx, 19);
+                                let avx = bit(ecx, 26) && bit(ecx, 27) && bit(ecx, 28);
+                                let avx2 = avx && bit(xcr0, 1) && bit(xcr0, 2) && bit(ebx, 5);
+                                let avx512 = avx && [1, 2, 5, 6, 7].iter().all(|&n| bit(xcr0, n)) && bit(ebx, 16) && bit(ebx, 31);
+                                let wide = avx512 && amd && family >= 0x1A;
+                                let want = READ
+                                    | if sse41 { SSE41 } else { 0 }
+                                    | if avx2 { AVX2 } else { 0 }
+                                    | if avx512 { AVX512 } else { 0 }
+                                    | if wide { WIDE } else { 0 };
+                                assert_eq!(got, want, "ecx {ecx:#x} xcr0 {xcr0:#x} ebx {ebx:#x} amd {amd} family {family:#x}");
+                                tried += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(tried, 2 * 16 * 32 * 8 * 2 * 4);
+    }
+
+    /// The words are read where they may be: XCR0 and leaf 7 only where
+    /// leaf 1 says the OS saves AVX's registers, and they agree with what
+    /// the standard library finds here.
+    #[test]
+    fn test_cpu_words_are_read_where_leaf_one_allows() {
+        use super::{os_saves_avx, read_cpu_words};
+        for (ecx, saves) in [
+            (0u32, false),
+            (1 << 26, false),
+            ((1 << 26) | (1 << 27), false),
+            ((1 << 27) | (1 << 28), false),
+            ((1 << 26) | (1 << 28), false),
+            ((1 << 26) | (1 << 27) | (1 << 28), true),
+            (!0, true),
+            (!(1u32 << 27), false),
+        ] {
+            assert_eq!(os_saves_avx(ecx), saves, "ecx {ecx:#x}");
+        }
+        let words = read_cpu_words();
+        assert_eq!(words.leaf1_ecx & (1 << 19) != 0, std::is_x86_feature_detected!("sse4.1"));
+        assert_eq!(os_saves_avx(words.leaf1_ecx), std::is_x86_feature_detected!("avx"), "an OS that saves AVX's registers is how std finds AVX");
+        if os_saves_avx(words.leaf1_ecx) {
+            assert_eq!(words.xcr0 & 0b110, 0b110, "the OS saves XMM and YMM where std finds AVX");
+            assert_eq!(words.leaf7_ebx & (1 << 5) != 0, std::is_x86_feature_detected!("avx2"));
+            assert_eq!(words.leaf7_ebx & (1 << 3) != 0, std::is_x86_feature_detected!("bmi1"), "leaf 7's EBX, by a bit the kernels do not use");
+        } else {
+            assert_eq!((words.xcr0, words.leaf7_ebx, words.amd), (0, 0, false), "unread words are zero");
+        }
     }
 
     /// The wide kernels' CPUs: AMD from family 0x1A (Zen 5), from leaf 1's
