@@ -356,7 +356,7 @@ impl Storage {
     fn run_waiting(&self) -> bool {
         match self.source.take_task() {
             Some(task) => {
-                crate::lanes::run_task(task);
+                crate::lanes::run_task(&task);
                 true
             }
             None => false,
@@ -817,7 +817,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
             left: &*self.s.lefts[entry],
             ..Task::of(bytes, counter)
         };
-        self.hand_over(task);
+        self.hand_over(&task);
     }
 
     /// The ring offset of `len` free bytes at a 64-byte boundary (whole,
@@ -950,7 +950,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
             // count in place, until its count is zero.
             let bytes = unsafe { core::slice::from_raw_parts(t.input, PIECE) };
             let task = Task { key: self.key, flags: self.flags, out: t.out, left: t.left, ..Task::of(bytes, t.counter) };
-            self.hand_over(task);
+            self.hand_over(&task);
         }
         #[cfg(test)]
         crate::gpu::test::RECLAIMS.fetch_add(1, Ordering::Relaxed);
@@ -983,16 +983,20 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
 
     /// Hand the open task to the pool.
     fn publish(&mut self) {
-        if let Some(task) = self.open.take() {
+        // The open task is handed over where it lies: taken out first, its
+        // 1,640 bytes moved once here and again wherever a call by value
+        // was not inlined.
+        if let Some(task) = &self.open {
             // Before the push, whose lock orders it before the threads' reads.
             self.s.lefts[self.open_first].store(task.members, Ordering::Relaxed);
             self.hand_over(task);
+            self.open = None;
         }
     }
 
     /// Give `task` to the workers through the stream's source; with no
     /// slot, hash it on this thread now.
-    fn hand_over(&mut self, task: Task) {
+    fn hand_over(&self, task: &Task) {
         match self.slot {
             Some(_) => self.s.source.publish(task),
             None => crate::lanes::run_task(task),
@@ -1111,7 +1115,7 @@ mod test {
         task.key = *crate::IV;
         task.out = output.0.as_mut_ptr();
         task.left = &left;
-        storage.source.publish(task);
+        storage.source.publish(&task);
         assert!(storage.run_waiting(), "the waiting caller runs its queued task");
         assert_eq!(left.load(Ordering::Acquire), 0, "help completes the task");
         assert!(!storage.run_waiting(), "the completed task is taken once");
@@ -2031,7 +2035,7 @@ mod test {
                         });
                         let task = task.expect("the first piece");
                         assert_eq!((task.input as usize, task.counter), (held_input, 0), "the held claimer copied another task than the one it claimed");
-                        crate::lanes::run_task(task);
+                        crate::lanes::run_task(&task);
                     });
                     claimed_rx.recv().unwrap();
                     // Release the holder whatever happens below.

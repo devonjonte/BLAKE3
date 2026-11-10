@@ -1217,7 +1217,7 @@ mod ring_bound {
                 let task = task.expect("A's part, the one task published");
                 let (_, context) = task.action.expect("a part's task is an action");
                 assert!(core::ptr::eq(context.cast::<Slot>(), &core.slots[a_buffer]), "the held claimer has another task than the one it claimed");
-                crate::lanes::run_task(task);
+                crate::lanes::run_task(&task);
             });
             claimed_rx.recv().unwrap();
             // Release the holder whatever happens below.

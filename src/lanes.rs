@@ -1111,9 +1111,12 @@ pub(crate) mod sources {
                 #[cfg(all(test, blake3_gpu))]
                 gpu_batch_reserved: core::sync::atomic::AtomicBool::new(false),
                 claimed: OwnLine(AtomicUsize::new(0)),
+                // Each place holds a whole task from the start, so a
+                // publication writes its task's header and the members it
+                // holds alone (`push`).
                 places: (0..len)
                     .map(|_| Place {
-                        task: UnsafeCell::new(MaybeUninit::uninit()),
+                        task: UnsafeCell::new(MaybeUninit::new(Task::of(&[], 0))),
                         #[cfg(any(test, debug_assertions))]
                         uncopied: core::sync::atomic::AtomicBool::new(false),
                     })
@@ -1153,7 +1156,7 @@ pub(crate) mod sources {
         /// claimer. A stream keeps it by the count of its places (its
         /// TASK_SLOTS: a place comes round only after its task completed,
         /// BLAKE3 #302), checked in tests and debug builds.
-        pub(crate) fn publish(&self, task: Task) {
+        pub(crate) fn publish(&self, task: &Task) {
             self.push(task);
             if self.waiting() >= 2 {
                 noted(Noted::WakeTry);
@@ -1204,7 +1207,7 @@ pub(crate) mod sources {
 
         /// Write `task` to the next place in order and make it visible (the
         /// SME2 thread woken for it where there is one).
-        fn push(&self, task: Task) {
+        fn push(&self, task: &Task) {
             let p = self.finish.published.load(Ordering::Relaxed);
             // Every build: a task written over one not yet claimed would
             // be lost (at the cost of a load and a comparison).
@@ -1214,8 +1217,25 @@ pub(crate) mod sources {
             #[cfg(any(test, debug_assertions))]
             assert!(!slot.uncopied.swap(true, Ordering::SeqCst), "a publication met a task claimed and not yet copied (BLAKE3 #302)");
             // Sound: the place's last task was copied out by its claimer
-            // (the publisher's contract): no claimer is still to read it.
-            unsafe { (*slot.task.get()).write(task) };
+            // (the publisher's contract): no claimer is still to read it;
+            // and the place holds an initialized task (`new`).
+            let to = unsafe { (*slot.task.get()).assume_init_mut() };
+            // The header and the members the task holds, alone: a task of
+            // four 4 KiB messages moves 312 of its 1,640 bytes, a piece of
+            // a long message 120. Every field is named here, so a field
+            // added to Task fails to compile until it is written too.
+            let Task { action, input, len, counter, batch, key, flags, out, left, members, member } = task;
+            to.action = *action;
+            to.input = *input;
+            to.len = *len;
+            to.counter = *counter;
+            to.batch = *batch;
+            to.key = *key;
+            to.flags = *flags;
+            to.out = *out;
+            to.left = *left;
+            to.members = *members;
+            to.member[..*members].copy_from_slice(&member[..*members]);
             self.finish.published.store(p + 1, Ordering::Release);
             core::sync::atomic::fence(Ordering::SeqCst);
             if pool().sme2 {
@@ -1429,7 +1449,7 @@ pub(crate) mod sources {
         pub(crate) fn help(&'static self) -> bool {
             match self.take_task() {
                 Some(task) => {
-                    crate::lanes::run_task(task);
+                    crate::lanes::run_task(&task);
                     true
                 }
                 None => false,
@@ -1591,7 +1611,7 @@ pub(crate) mod sources {
             task.key = *crate::IV;
             task.out = output.0.as_mut_ptr();
             task.left = &left;
-            source.publish(task);
+            source.publish(&task);
             assert!(source.help(), "the waiting caller runs its queued task");
             assert_eq!(left.load(Ordering::Acquire), 0, "help completes the task");
             assert!(!source.help(), "the completed task is taken once");
@@ -1685,13 +1705,40 @@ pub(crate) mod sources {
             assert!(source.take_task().is_none(), "each action was taken once");
         }
 
+        /// A publication writes its task's header and the members it holds,
+        /// and leaves the place's other members as they were: a task of few
+        /// members moves a few cache lines where a whole task is 1,640
+        /// bytes (BLAKE3 #306). The digests cannot tell (the members past a
+        /// task's own are never read), so this counts the work.
+        #[test]
+        fn a_publication_writes_the_members_its_task_holds_alone() {
+            crate::initialize_multithreaded(core::num::NonZeroUsize::new(1));
+            let source = Source::new(1);
+            let mut full = Task::members(crate::IV, 0, None);
+            full.members = MEMBERS;
+            full.member = [Member { input: core::ptr::null(), len: 7, out: core::ptr::null_mut() }; MEMBERS];
+            source.publish(&full);
+            let task = source.take_task().expect("the full task");
+            assert_eq!(task.members, MEMBERS);
+            assert!(task.member.iter().all(|m| m.len == 7), "every member of a full task is written");
+            let mut two = Task::members(crate::IV, 0, None);
+            two.members = 2;
+            two.member[0].len = 1;
+            two.member[1].len = 2;
+            two.counter = 9;
+            source.publish(&two);
+            let task = source.take_task().expect("the task of two");
+            assert_eq!((task.members, task.counter, task.member[0].len, task.member[1].len), (2, 9, 1, 2), "the header and the task's own members");
+            assert!(task.member[2..].iter().all(|m| m.len == 7), "the members past the task's own are the place's last task's, unwritten");
+        }
+
         /// A publication into a place whose task is claimed and not yet
         /// copied breaks `publish`'s contract; the check stops it before
         /// the write (tests and debug builds).
         #[test]
         #[should_panic(expected = "a publication met a task claimed and not yet copied")]
         fn a_publication_into_a_place_still_to_be_copied_is_stopped() {
-            a_publication_while_the_first_task_is_held(Source::new(1), |source, i| source.publish(Task::of(&[], i)));
+            a_publication_while_the_first_task_is_held(Source::new(1), |source, i| source.publish(&Task::of(&[], i)));
         }
 
         /// Publish, hold the task's claimer before its copy, publish again.
@@ -1892,7 +1939,9 @@ impl Task {
     /// chunk zero (it may be the whole message), its pair of child chaining
     /// values; for any other, its chaining value (first 32 bytes). Then
     /// count down.
-    pub(crate) fn run(self, platform: Platform) {
+    /// By reference: a task is 1,640 bytes, and by value each call it was
+    /// not inlined into copied it whole.
+    pub(crate) fn run(&self, platform: Platform) {
         if let Some((run, context)) = self.action {
             // Sound: the producer holds the action's context through the
             // source's completion barrier, as it holds ordinary task data.
@@ -2066,7 +2115,7 @@ pub(crate) fn worker_count() -> usize {
     pool().workers()
 }
 
-pub(crate) fn run_task(task: Task) {
+pub(crate) fn run_task(task: &Task) {
     task.run(pool_platform());
 }
 
@@ -2108,8 +2157,8 @@ mod test {
         crate::initialize_multithreaded(core::num::NonZeroUsize::new(1));
         let source = sources::Source::new(4);
         source.reserve_gpu_batch_for_test();
-        source.publish(Task::of(&[], 0));
-        source.publish(Task::of(&[], 1));
+        source.publish(&Task::of(&[], 0));
+        source.publish(&Task::of(&[], 1));
         assert!(source.take_task().is_none());
         assert!(!source.take_run(0, 1, 2, |_| panic!("the run is too short")));
         assert!(source.take_task().is_none(), "a failed claim keeps the reservation");
@@ -2540,22 +2589,22 @@ mod test {
         let source: &'static sources::Source = Box::leak(Box::new(sources::Source::new(8)));
         let task = || Task::members(crate::IV, 0, None);
         counts();
-        source.publish(task());
+        source.publish(&task());
         assert_eq!(counts()[Noted::WakeTry as usize], 0, "one task waiting: the caller's");
-        source.publish(task());
+        source.publish(&task());
         assert_eq!(counts()[Noted::WakeTry as usize], 1, "two waiting: a wake");
-        source.publish(task());
+        source.publish(&task());
         assert_eq!(counts()[Noted::WakeTry as usize], 1, "three waiting: a wake");
         assert!(source.take_task().is_some());
         assert!(source.take_task().is_some());
         counts();
-        source.publish(task());
+        source.publish(&task());
         assert_eq!(counts()[Noted::WakeTry as usize], 1, "one waiting, then two: a wake");
         assert!(source.take_task().is_some() && source.take_task().is_some() && source.take_task().is_none());
         counts();
         source.wake_for_waiting();
         assert_eq!(counts()[Noted::WakeTry as usize], 0, "none waiting: no wake");
-        source.publish(task());
+        source.publish(&task());
         counts();
         source.wake_for_waiting();
         assert_eq!(counts()[Noted::WakeTry as usize], 1, "one waiting: a wake");
