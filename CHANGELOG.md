@@ -44,6 +44,10 @@ lists what changed, each item with where it is described.
   side** (#298): 1,024 open messages of 1 KiB arriving in 256-byte pieces
   take 68 to 71% less time a cycle on an M4 Max. Plain messages alone: a
   keyed hasher's key is secret, so it finishes by itself as before.
+- **A stream moves a task's header and the members it holds**, where it
+  moved all 1,640 bytes of every task three times (#314): the
+  multithreaded stream of 4 KiB messages takes 8% less time and of 16 KiB
+  13% less on an i7-12700K.
 
 ## Steadier
 
