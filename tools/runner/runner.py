@@ -89,7 +89,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import platform
 import tempfile
 import time
 from pathlib import Path
@@ -471,9 +470,12 @@ def process(path, out):
 
 
 def main():
-    assert len(sys.argv) in (2, 3), "usage: runner.py EXCHANGE [MACHINE] (the folder, or Git clone, holding jobs/ and results/; the machine's name, default the host's)"
-    machine = sys.argv[2] if len(sys.argv) == 3 else platform.node().split(".")[0]
+    assert len(sys.argv) in (2, 3), "usage: runner.py EXCHANGE [LABEL] (the folder, or Git clone, holding jobs/ and results/; a label for this machine, chosen by its operator)"
+    # The label is the operator's choice, never read from the machine: a
+    # host's own name can name its owner, and results are published.
+    machine = sys.argv[2] if len(sys.argv) == 3 else "local"
     exchange = Exchange(sys.argv[1], machine)
+    assert not exchange.shared or len(sys.argv) == 3, "a shared exchange needs a label for this machine: runner.py EXCHANGE LABEL"
     assert (CARGO_BIN / "cargo").exists(), f"no cargo at {CARGO_BIN}: install rustup for this account"
     (HOME / "tmp").mkdir(exist_ok=True)
     signal.signal(signal.SIGINT, on_signal)

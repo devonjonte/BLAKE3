@@ -20,7 +20,13 @@ code=$(cd "$(dirname "$0")" && pwd)
 checkout=$(cd "$code/../.." && pwd)
 installed=/Users/Shared/bench-runner
 shared=${EXCHANGE_REPO:-}
-machine=${MACHINE:-$(scutil --get ComputerName | tr -c 'A-Za-z0-9_-' '-' | sed 's/-*$//')}
+# A label for this machine in its results' names, the operator's choice
+# (never the computer's own name, which can name its owner); a shared
+# exchange publishes it, so there it must be given.
+machine=${MACHINE:-local}
+if [ -n "$shared" ] && [ -z "${MACHINE:-}" ]; then
+    echo "a shared exchange needs MACHINE=LABEL (a label of your choosing for this machine)"; exit 1
+fi
 if [ -n "$shared" ]; then
     # The runner's own clone of the shared exchange.
     runner=/Users/benchrunner/exchange
