@@ -185,7 +185,9 @@
 //! # Cargo Features
 //!
 //! This crate needs the standard library; the core alone builds without
-//! it, and has the `zeroize` and `serde` features.
+//! it. The `zeroize` and `serde` features (off by default) are the core's,
+//! passed on: `Zeroize` for its types, and `Serialize` and `Deserialize`
+//! for [`Hash`](struct@Hash).
 //!
 //! The build needs a C compiler that assembles the kernels (GCC 12 or
 //! later, or Clang); without one it stops and says so. This crate runs its
