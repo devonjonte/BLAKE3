@@ -953,7 +953,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
             Some(_) => {
                 // EXPERIMENT (not for landing: no bound keeps this safe): the
                 // places in publication order, as the old ring's slots.
-                static COUNT: AtomicUsize = AtomicUsize::new(0);
+                static COUNT: OwnLine<AtomicUsize> = OwnLine(AtomicUsize::new(0));
                 let place = COUNT.fetch_add(1, Ordering::Relaxed) % ENTRIES;
                 self.s.source.publish(place, task)
             }
