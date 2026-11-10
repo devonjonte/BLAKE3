@@ -434,6 +434,7 @@ src/stream.rs	replace - with + in Stream<'env, D>::feed	1	same code: every test 
 src/stream.rs	replace - with + in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace - with / in Stream<'env, D>::feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace - with / in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/stream.rs	replace << with >>	1	another machine's code: the long ring's size on x86-64 (LONG_RING_BYTES under cfg(target_arch = "x86_64"), BLAKE3 #349); AArch64 builds the line above it, whose mutant the stream's tests catch
 src/stream.rs	replace == with != in Stream<'env, D>::collect	1	[cpu has sme2] speed: collect wakes a worker for a lone task only when it handed something back; the SME2 thread takes the task (without SME2, tests/stream_collect_parked_workers hangs)
 src/stream.rs	replace == with != in Stream<'env, D>::finish	1	[cpu has sme2] speed: a waiting caller's pause in finish's loop when nothing came back and nothing waits (the SME2 thread takes stream tasks alone, so each pause decides only how soon the caller looks again)
 src/stream.rs	replace == with != in Stream<'env, D>::help	1	[cpu has sme2] speed: a waiting caller hashes a lone task only after handing something back; the SME2 thread takes the task
