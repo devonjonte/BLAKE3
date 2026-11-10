@@ -811,6 +811,30 @@ def check_rows_exist(remove=False):
     return listed
 
 
+def size_of(diff):
+    """(lines of code a diff adds, lines of code it removes): its `+` and
+    `-` lines that are neither blank nor a comment, the file headers apart."""
+    def code(sign):
+        return sum(1 for l in diff.splitlines()
+                   if l.startswith(sign) and not l.startswith(sign * 3) and l[1:].strip() and not l[1:].lstrip().startswith("//"))
+    return code("+"), code("-")
+
+
+def size_note(diff):
+    """What a change does to the size of the mutated code, said with its
+    plan: every line there is a line to test from here on (about four
+    mutants for every ten lines in a whole run, and a little of every
+    mutant's rebuild), so a change that removes more than it adds is said
+    as plainly as one that grows (BLAKE3 #257). Nothing for a change of
+    comments and blank lines alone."""
+    added, removed = size_of(diff)
+    if not added and not removed:
+        return ""
+    net = added - removed
+    return (f"mutants: the change adds {added} line{'' if added == 1 else 's'} of code to the mutated files and removes {removed} "
+            f"(net {'+' if net > 0 else ''}{net}{': less to test from here on' if net < 0 else ''})")
+
+
 # A change's check's budget (Zooko, November 6, 2026, BLAKE3 #257).
 BUDGET_S = 60
 
@@ -941,6 +965,8 @@ def main():
             print(f"mutants: the change since {since} touches no mutated file")
             budget(started)
             return
+        if size_note(diff):
+            print(size_note(diff), flush=True)
         path = os.path.join(tempfile.mkdtemp(prefix="mutants-diff-", dir=scratch_dir()), "change.diff")
         with open(path, "w") as f:
             f.write(diff)
