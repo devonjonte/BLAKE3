@@ -29,10 +29,20 @@ impl Drop for Repo {
     }
 }
 
-fn repo(name: &str) -> Repo {
-    let dir = std::env::temp_dir().join(format!("blake3-servil-build-version-{name}-{}", std::process::id()));
+/// A directory of this test's own under Cargo's scratch directory for
+/// integration tests, which is on the build's disk. The system's temporary
+/// directory is wherever TMPDIR points: in a VM whose checkout and TMPDIR
+/// sit on a mount shared with its host, each of these tests took 6 to 60
+/// seconds there (BLAKE3 #347) and milliseconds elsewhere.
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("build-version-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn repo(name: &str) -> Repo {
+    let dir = scratch(name);
     git(&dir, &["init", "-q"]);
     std::fs::write(dir.join("code.rs"), "one").unwrap();
     git(&dir, &["add", "code.rs"]);
@@ -95,9 +105,7 @@ fn a_dirty_tree_is_named_by_its_tree_id_and_cargos_marker_is_no_change() {
 
 #[test]
 fn a_package_is_named_from_its_vcs_info() {
-    let dir = std::env::temp_dir().join(format!("blake3-servil-build-version-package-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let r = Repo(dir);
+    let r = Repo(scratch("package"));
     let sha = "0123456789abcdef0123456789abcdef01234567";
     std::fs::write(r.0.join(".cargo_vcs_info.json"), format!("{{\n  \"git\": {{\n    \"sha1\": \"{sha}\",\n    \"dirty\": true\n  }}\n}}")).unwrap();
     assert_eq!(name(&r.0, "0.8.0+dev"), format!("0.8.0+dev.{sha}.dirty"));
