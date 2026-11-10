@@ -1322,12 +1322,17 @@ mod test {
     fn test_gpu_finish_reclaims_the_gpus_tasks() {
         let mut input = std::vec![0u8; (64 << 20) + 300];
         crate::test::paint_test_input(&mut input);
-        gpu_ready(Mode::Plain, &input);
+        // Keyed: the tasks finish rebuilds for the pool carry the stream's
+        // key and flags, which a plain stream (the IV, no flags) cannot
+        // tell from a task without them.
+        let key = [0x5c; 32];
+        let mode = Mode::Keyed(&key);
+        gpu_ready(mode, &input);
         let lens = [16 << 20; 4];
         let (batches, reclaims, feeds) = (gpu_batches(), crate::gpu::test::RECLAIMS.load(Ordering::Relaxed), crate::gpu::test::FEEDS.load(Ordering::Relaxed));
         let mut got = places(lens.len());
         stream(
-            Mode::Plain,
+            mode,
             |_| {},
             |s| {
                 // Warm-up commands may have been reclaimed by its finish. Wait
@@ -1357,10 +1362,10 @@ mod test {
         );
         assert!(crate::gpu::test::RECLAIMS.load(Ordering::Relaxed) > reclaims, "finish took the held batches back");
         for (i, got) in got.iter().enumerate() {
-            assert_eq!(*got, crate::convenience::hash(gpu_message(&input, i, lens[i])), "message {i}");
+            assert_eq!(*got, crate::convenience::hash_with(mode, gpu_message(&input, i, lens[i])), "message {i}");
         }
         // The commands end, dropping their outputs; the GPU serves the next stream.
-        gpu_stream_checked(Mode::Plain, &input, &lens, usize::MAX, false);
+        gpu_stream_checked(mode, &input, &lens, usize::MAX, false);
     }
 
     /// Places for `n` digests, each starting as zeros.
