@@ -49,6 +49,17 @@ lists what changed, each item with where it is described.
   hand it borrowed input, forget it (`mem::forget`) and free the input
   while the workers still read it. `throughput::stream`, which keeps the
   stream inside its scope, is the way in.
+- **The pipeline owns a submitted batch and its places** (#309, #317).
+  `submit_batch` takes the batch and a `Box` of places and hands both back
+  with the batch's event. Before, it borrowed them, and a safe program
+  that forgot the pipeline (`mem::forget`) could free them while workers
+  still wrote. A program that passed borrowed places now moves a box in
+  and takes it back.
+- **The C header says what a finished hasher takes** (#311): after
+  `b3_hasher_finalize`, only `b3_hasher_new`. A finished hasher is not
+  reset, and an update on it silently continued the old message. Official
+  BLAKE3's hasher may be finalized again and updated further; code ported
+  from it calls `b3_hasher_new` between messages.
 
 ## Checked more
 
@@ -75,10 +86,13 @@ lists what changed, each item with where it is described.
 - The pool and stream fix that lands before it (#276: a stream with no
   worker stops at once where it would wait forever).
 - The safety fixes that land before it, each with its record:
-  - the task ring's claim-then-copy race (#303: a worker held between
-    its claim and its copy could read the next task in its slot);
-  - the pipeline's batches and places owned while the workers write them
-    (#309: a forgotten pipeline freed borrowed storage under them);
+  - the task ring's claim-then-copy race (#302, repaired by #331 when it
+    lands: a worker held between its claim and its copy could run another
+    task in its slot; on the pipeline's batches it freed a job twice, a
+    segfault seen on x86-64 about once in a hundred runs of the small
+    batch cells; the repair also makes the pipeline's small cells 5 to 11%
+    faster on the i7-12700K, its ring carrying three words a task where a
+    1,640-byte task was written and copied);
   - `update_each`'s grouping by public mode, never by key (#312);
   - `Packed::new`'s checked capacity (#307).
 
