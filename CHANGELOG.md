@@ -40,6 +40,10 @@ lists what changed, each item with where it is described.
   #345): 3 inputs run on 4 lanes, 5 to 7 on 8, 9 to 15 on 16 and 17 to 31
   on 32 where those kernels run, each in one pass where the kernels took
   two or three; the spare lanes hash a copy whose result is dropped.
+- **On AArch64, many short messages fed in small pieces finish side by
+  side** (#298): 1,024 open messages of 1 KiB arriving in 256-byte pieces
+  take 68 to 71% less time a cycle on an M4 Max. Plain messages alone: a
+  keyed hasher's key is secret, so it finishes by itself as before.
 
 ## Steadier
 
@@ -73,6 +77,17 @@ lists what changed, each item with where it is described.
   reset, and an update on it silently continued the old message. Official
   BLAKE3's hasher may be finalized again and updated further; code ported
   from it calls `b3_hasher_new` between messages.
+- **A claimed task is never written over before its copy** (#302, #331).
+  A worker claimed a task in a stream's ring and then copied it, and a
+  worker delayed between the two could copy a later task written into the
+  same slot. 0.8's stream has this race. Now a stream's slot comes round
+  only after its task was copied, and the pipeline's worker reads its
+  task's three words before its claim, which leaves nothing to copy.
+- **`Batch::new` stops on a count whose blocks overflow** (#320). In 0.8,
+  in a release build, a count of 128-byte messages past half of
+  `usize::MAX` wrapped to zero blocks and returned an empty batch.
+- **`update_each` groups held hashers by public facts alone**, the mode
+  and the lengths, never by a key (#312).
 
 ## Checked more
 
@@ -90,16 +105,6 @@ lists what changed, each item with where it is described.
 - The x86-64 kernels that land before the release, each with its measured
   gain and its proof (the grouped AVX2 and AVX-512 finishing kernels,
   Zen 5's integer-register chunk root), and lane rounding's gain.
-- The safety fixes that land before it, each with its record:
-  - the task ring's claim-then-copy race (#302, repaired by #331 when it
-    lands: a worker held between its claim and its copy could run another
-    task in its slot; on the pipeline's batches it freed a job twice, a
-    segfault seen on x86-64 about once in a hundred runs of the small
-    batch cells; the repair also makes the pipeline's small cells 5 to 11%
-    faster on the i7-12700K, its ring carrying three words a task where a
-    1,640-byte task was written and copied);
-  - `update_each`'s grouping by public mode, never by key (#312);
-  - `Packed::new`'s checked capacity (#307).
 
 # blake3-servil 0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861, against official BLAKE3 1.8.7
 
