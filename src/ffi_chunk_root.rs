@@ -97,6 +97,11 @@ mod test {
         // variant alone would keep the list nonempty (a mutant hiding SSE4.1
         // survived there, the EPYC 9255, October 26).
         assert!(variants.contains(&false), "an x86-64 test machine has SSE4.1");
+        // And AVX-512 wherever the CPU has it: a list of SSE4.1 alone passed
+        // every test here on AVX-512 machines (the whole mutation run of
+        // November 10, 2026, on an EPYC 9255 and an Ice Lake Xeon).
+        #[cfg(blake3_avx512_ffi)]
+        assert_eq!(variants.contains(&true), Platform::avx512().is_some(), "the AVX-512 kernel is checked wherever the CPU has it");
         let mut buf = vec![0u8; CHUNK_LEN + 3];
         crate::test::paint_test_input(&mut buf);
         let keyed = crate::platform::words_from_le_bytes_32(&[0x42; 32]);
