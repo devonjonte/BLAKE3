@@ -775,6 +775,7 @@ pub(crate) fn require() {
     pool();
 }
 
+#[cfg(test)]
 /// Whether a call may leave the calling thread: the process has more
 /// than one CPU. Requires the pool (`require`).
 pub(crate) fn splits() -> bool {
@@ -1084,6 +1085,7 @@ pub(crate) mod sources {
             REGISTERED[slot].store(core::ptr::null_mut(), Ordering::SeqCst);
         }
 
+        #[cfg(test)]
         /// A stream's task to the workers, in the next place in order: one
         /// write, one Release store; then the SME2 thread first, and with
         /// two or more waiting and a worker parked, a worker.
@@ -1101,6 +1103,7 @@ pub(crate) mod sources {
             }
         }
 
+        #[cfg(test)]
         /// Write `task` to the next place in order and make it visible (the
         /// SME2 thread woken for it where there is one).
         fn push(&self, task: &Task) {
@@ -1276,6 +1279,7 @@ pub(crate) mod sources {
             self.finish.published.load(Ordering::Acquire).saturating_sub(self.claimed.load(Ordering::Acquire))
         }
 
+        #[cfg(test)]
         /// Wake a parked worker for a task this stream has published that no
         /// thread has taken: `publish` wakes one for the second task in
         /// waiting, expecting the caller to take a lone one, and a caller
@@ -1360,10 +1364,12 @@ pub(crate) mod sources {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn opened() {
         OPEN.fetch_add(1, Ordering::SeqCst);
     }
 
+    #[cfg(test)]
     pub(crate) fn closed() {
         OPEN.fetch_sub(1, Ordering::SeqCst);
     }
@@ -1656,6 +1662,7 @@ pub(crate) mod sources {
     }
 }
 
+#[cfg(test)]
 /// The longest part of a stream's input planned as tasks
 /// (a stream's piece): a task is a whole subtree within one part.
 pub(crate) const TASK_LEN: usize = 64 * CHUNK_LEN;
@@ -1717,6 +1724,7 @@ impl Task {
         }
     }
 
+    #[cfg(test)]
     /// An empty task of short messages (with `batch`, batches of messages
     /// of that length) in the mode of `key` and `flags`.
     pub(crate) fn members(key: &crate::CVWords, flags: u8, batch: Option<usize>) -> Task {
@@ -1872,6 +1880,7 @@ fn sme2_serve() -> ! {
 static SME2_THREAD: OnceLock<std::thread::Thread> = OnceLock::new();
 static SME2_PARKED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+#[cfg(test)]
 fn wake_sme2() {
     if SME2_PARKED.swap(false, Ordering::SeqCst) {
         if let Some(thread) = SME2_THREAD.get() {
@@ -1890,6 +1899,7 @@ pub(crate) fn assert_past_the_split(what: &str) {
     assert!(pool().threads == 1 || kinds & crate::Ran::Pool as u32 != 0, "{what} went to the pool");
 }
 
+#[cfg(test)]
 /// Run `task` on this thread, as a worker would.
 pub(crate) fn run_task(task: &Task) {
     task.run(pool_platform());

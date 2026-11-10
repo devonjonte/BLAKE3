@@ -21,7 +21,7 @@ fn input(len: usize) -> Vec<u8> {
 
 /// (input length, [hash, keyed hash, derived key]) for every official vector.
 fn vectors() -> Vec<(usize, [[u8; 32]; 3])> {
-    let text = include_str!("../../test_vectors/test_vectors.json");
+    let text = include_str!("../../../test_vectors/test_vectors.json");
     let json: serde_json::Value = serde_json::from_str(text).expect("the vectors are JSON");
     assert_eq!(json["key"], std::str::from_utf8(KEY).unwrap());
     assert_eq!(json["context_string"], CONTEXT);
@@ -34,7 +34,7 @@ fn vectors() -> Vec<(usize, [[u8; 32]; 3])> {
         .collect()
 }
 
-#[path = "../../tests/common/golden.rs"]
+#[path = "../../../tests/common/golden.rs"]
 mod golden;
 
 /// A test's expected digests, fixed: `want(m, data)` is the digest of

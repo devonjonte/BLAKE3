@@ -3,6 +3,10 @@
 //! stream. TRIAL of the two-crate layout (BLAKE3 #335).
 #![allow(clippy::too_many_arguments)]
 
+// The stream's tests name the crate as a program does (src/stream_tests).
+#[cfg(test)]
+extern crate self as blake3_servil;
+
 pub use blake3_servil_core::{BLOCK_LEN, BUILD_VERSION, CHUNK_LEN, ContextKey, Hash, HexError, KEY_LEN, Mode, OUT_LEN, OutputReader, convenience, initialize};
 
 // The core's inside, under the names this crate's files know it by.
@@ -42,14 +46,29 @@ mod park_sync {
     pub use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     pub use std::thread;
 }
-#[cfg(blake3_gpu)]
+#[cfg(all(test, blake3_gpu))]
 mod gpu;
 mod lanes;
 mod park;
+#[cfg(test)]
 mod stream;
 
 #[cfg(test)]
 mod forms_test;
+/// The stream through its calls, as a program made them: integration tests
+/// while the stream was public; unit tests now, since 0.9 ships no
+/// streaming API and compiles the stream for its tests alone. Under
+/// nextest each still runs in a process of its own.
+#[cfg(test)]
+mod stream_tests {
+    mod api_plan;
+    mod stream_collect_no_workers;
+    mod stream_collect_one_worker;
+    mod stream_collect_parked_workers;
+    mod stream_collect_with_workers;
+    mod stream_finish_parked_workers;
+    mod stream_one_cpu;
+}
 /// The tests' helpers, the core's own file: this crate's tests use the
 /// same messages, fixed values and guard pages.
 #[cfg(test)]
@@ -183,7 +202,11 @@ pub fn __all_workers_parked() -> bool {
 /// The throughput API: the core's, and the calls that use other cores.
 pub mod throughput {
     use crate::platform::Platform;
-    pub use crate::stream::{Stream, stream};
+    // 0.9 ships no streaming API: the stream is compiled for its tests
+    // alone, until the Pipeline (BLAKE3 #356) is built on it.
+    #[cfg(test)]
+    #[allow(unused_imports)]
+    pub(crate) use crate::stream::{Stream, stream};
     use crate::{Hash, Hasher, Mode, OUT_LEN};
     use blake3_servil_core::hazmat::each::{Item, hash_each_on};
     pub use blake3_servil_core::throughput::*;
