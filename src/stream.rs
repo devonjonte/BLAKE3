@@ -67,7 +67,7 @@ const RING_BYTES: usize = 2 << 20;
 #[cfg(not(target_arch = "x86_64"))]
 const LONG_RING_BYTES: usize = 8 << 20;
 #[cfg(target_arch = "x86_64")]
-const LONG_RING_BYTES: usize = 2 << 20;
+const LONG_RING_BYTES: usize = 4 << 20;
 
 /// The shortest message whose pieces go to the long ring: 4 MiB, past the
 /// caches where the 2 MiB ring is kept hot.
