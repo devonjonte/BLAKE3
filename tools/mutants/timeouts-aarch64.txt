@@ -17,6 +17,7 @@ src/lanes.rs	replace - with / in sources::find	1	find's own loop never empties `
 src/lanes.rs	replace > with >= in splits	1	a hang the test tests/stream_collect_no_workers.rs showed: as above: one thread counts as able to split
 src/lanes.rs	replace all_workers_parked -> bool with false	1	a test-only hook (__all_workers_parked): a no that never turns yes, so the stream tests wait for every worker parked, forever
 src/lanes.rs	replace run_task with ()	1	a hang the test stream::test::test_small_stream showed: a waiting task is not run by the caller; the stream waits for it
+src/lanes.rs	replace sme2_main with ()	1	the SME2 thread never starts, so the pool never comes to rest: the tests that wait for it (tests/allocations.rs's pool_ready, the stream_collect tests, stream_finish_parked_workers) wait for ever. Before c9ccafa2 they waited for the workers alone and this mutant survived, OPEN (#103)
 src/lanes.rs	replace sources::Source::finished with ()	1	a hang the test each::test::test_hash_each_multithreaded showed: finished pieces are never counted; the caller waits for them
 src/lanes.rs	replace sources::Source::publish_job -> usize with 1	1	a loop variant broken: a job's target is 1, which its pieces' count passes, so the caller's wait for them never ends; the clock stops the multithreaded tests
 src/lanes.rs	replace sources::Source::take -> Option<Item> with None	1	a hang the test lanes::test::test_hash_many_pool_agrees showed: no thread takes a piece; the caller waits for it
