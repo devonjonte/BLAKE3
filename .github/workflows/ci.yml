@@ -247,7 +247,12 @@ jobs:
     - run: cargo nextest run --release --lib --tests --no-run
     # The `emulated` profile's clock (.config/nextest.toml): a test runs
     # tens of times slower here than on the CPU.
-    - run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -${{ matrix.cpu.flag }} --" cargo nextest run -P emulated --release --lib --tests
+    # The emulator stops a test at the first instruction the CPU it plays
+    # lacks. It checks the test's own executable, which holds the library
+    # and its kernels, and not the system's libraries: as a Nehalem, the
+    # runner's dynamic loader (chosen for the real CPU) ran an AVX
+    # instruction before any test did.
+    - run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -${{ matrix.cpu.flag }} -chip_check_exe_only -- " cargo nextest run -P emulated --release --lib --tests
 
   x86_model:
     name: "the x86-64 proofs' model against the CPU"
