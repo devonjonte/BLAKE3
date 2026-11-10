@@ -1,6 +1,6 @@
 """Mutation testing against a list of the mutants known to survive.
 
-    python3 tools/mutants/check.py [--since REV | --whole] [--write] [--map] [--whole-suite] [--all-hangs]
+    python3 tools/mutants/check.py [--since REV | --whole] [--write] [--map] [--whole-suite] [--all-hangs] [--every-mutant]
 
 By default the check covers the change since the branch left origin/next
 (git merge-base; a minute for a day's change). --since REV names another
@@ -80,7 +80,11 @@ mutants over as many shards as they fill (more where the machine has the
 CPUs and memory: wide_shards), names each survivor beyond its row as soon
 as the shards end (SURVIVES SO FAR), takes the release build's second look
 (release_same) for new survivors alone and once for each place (the run
-that confirms them reuses the first run's builds), and ends with its time against the budget and where the time went. It leaves to the whole run, once per
+that confirms them reuses the first run's builds), and ends with its time against the budget and where the time went. It also leaves two sets of the
+change's mutants to the whole run (left_to_the_whole_run; --every-mutant
+runs them): a name whose row already explains every place of it the change
+plants, which can add no survivor; and the kinds of mutant a sibling at the
+same place stands for (SIBLING_KINDS), about three in ten. It leaves to the whole run, once per
 stable release, what it gives up: a changed test's or helper's effect on
 other code's mutants, a listed survivor now caught, and the lists' exact
 counts. Rows naming code the change removed it drops from every list.
@@ -910,6 +914,63 @@ def known_hangs(tknown, listed):
                   and count == places[k])
 
 
+# The kinds of mutant a change's check does not plant (a whole run plants
+# every kind). cargo-mutants replaces an operator with two or three others
+# at one place, and the tests nearly always treat them alike. In a record of
+# every test on every mutant (2,266 of the library's 2,489 x86-64 mutants,
+# an EPYC 9255, November 10, 2026, BLAKE3 #257) siblings had the same
+# outcome at 91% to 100% of their places, and with the kinds below left
+# out, no place lost its only survivor but those of `| with ^`: all 40 of
+# those survive or build to the same code (the lists call them equivalent:
+# flag bits that never overlap), and none was ever caught. What stays is the
+# sibling that survived wherever any did: `* with +`, `+ with -`, `- with
+# +`, `/ with %`, `% with +`, `| with &`, `& with |`, and for `<` and `>`
+# the boundary (`<=`, `>=`), the one an off-by-one lives behind. Three
+# mutants in ten (829 of 2,851), and so three tenths of a check's rebuilds.
+# The loss: a survivor that only a kind below would show waits for the
+# whole run. To revise: the same record, `check.py --whole --map`.
+SIBLING_KINDS = (
+    "replace * with /", "replace + with *", "replace - with /", "replace / with *", "replace % with /",
+    "replace += with *=", "replace -= with /=", "replace | with ^", "replace & with ^",
+    "replace < with ==", "replace < with >", "replace > with ==", "replace > with <",
+)
+
+
+def kind_patterns():
+    """cargo-mutants' --exclude-re for each of SIBLING_KINDS: the kind as a
+    mutant's whole change (`replace * with /` is not `replace *= with /=`)."""
+    return [": " + re.escape(kind) + r"( in |$)" for kind in SIBLING_KINDS]
+
+
+def explained(planned, known):
+    """The names a change plants only at places their rows already explain:
+    as many planned places as the row counts, or fewer. Such a name cannot
+    come out with more survivors than its row, so running it can add no
+    new survivor to a change's check (a place of it that now hangs, or is
+    now caught, is the whole run's to see)."""
+    places = collections.Counter(f"{m.group(1)}\t{m.group(2)}" for m in map(NAME.match, planned) if m)
+    return sorted(name for name, n in places.items() if name in known and n <= known[name][0])
+
+
+def left_to_the_whole_run(planned, known, every=False):
+    """(the planned mutants a change's check runs, the names left out as
+    explained by their rows, how many more are left out by kind)."""
+    if every:
+        return planned, [], 0
+    by_row = explained(planned, known)
+    rows, patterns = set(by_row), [re.compile(p) for p in kind_patterns()]
+    kept, by_kind = [], 0
+    for line in planned:
+        m = NAME.match(line)
+        if m and f"{m.group(1)}\t{m.group(2)}" in rows:
+            continue
+        if any(p.search(line) for p in patterns):
+            by_kind += 1
+            continue
+        kept.append(line)
+    return kept, by_row, by_kind
+
+
 def exclude_args(names):
     """cargo-mutants' --exclude-re for each name, every place of it: a
     name is "file<TAB>mutant", cargo-mutants' "file:line:column: mutant"."""
@@ -1010,10 +1071,18 @@ def main():
         # mutants), so the budget's cost shows before anything runs.
         planned = subprocess.run(["cargo", "mutants", "--list", *BUILD, "--in-diff", path, *[a for f in files for a in ("--file", f)]],
                                  cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()
+        every = "--every-mutant" in sys.argv
+        kept, by_row, by_kind = left_to_the_whole_run(planned, known, every)
+        left_out = exclude_args(by_row) + ([] if every else [arg for p in kind_patterns() for arg in ("--exclude-re", p)])
+        if len(kept) < len(planned):
+            print(f"mutants: {len(planned) - len(kept)} of the change's {len(planned)} mutants are left to the whole run: "
+                  f"{len(planned) - len(kept) - by_kind} at places their rows already explain, {by_kind} of kinds a sibling "
+                  "at the same place stands for (--every-mutant runs them)", flush=True)
+        planned = kept
         shards = shard_count(len(planned), wide_shards(os.cpu_count(), physical_memory()))
         print(f"mutants: the change's {len(planned)} mutants on {shards} shard{'s' if shards > 1 else ''}"
               + (f" (about {len(planned) * 6 // shards + 20} s, over the {BUDGET_S} s budget)" if len(planned) * 6 // shards + 20 > BUDGET_S else ""), flush=True)
-        found, functions, timed = run(files, ["--in-diff", path], shards=shards, known=known, tknown=tknown) if planned else (collections.Counter(), {}, collections.Counter())
+        found, functions, timed = run(files, ["--in-diff", path, *left_out], shards=shards, known=known, tknown=tknown) if planned else (collections.Counter(), {}, collections.Counter())
         if any(f in diff for f in LOOM_FILES):
             found, timed, functions = with_loom(found, timed, functions, run(LOOM_FILES, ["--in-diff", path], shards=1, label="loom", loom=True, known=known)[1])
         # Only the names with more survivors than the list: the run holds
