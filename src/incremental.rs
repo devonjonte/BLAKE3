@@ -8,7 +8,8 @@ use super::*;
 /// piece, in order, then [`finalize`](Hasher::finalize). The pieces may be
 /// of any lengths; the hash is the same as [`hash`](convenience::hash) of them all at once.
 /// Every call runs on the calling thread and returns with its input
-/// incorporated. For other cores, [`throughput::update_multithreaded`](crate::throughput::update_multithreaded);
+/// incorporated. For other cores, the crate `blake3-servil` has
+/// `throughput::update_multithreaded`;
 /// for many messages at once, [`throughput::update_each`](crate::throughput::update_each).
 ///
 /// A `Hasher` is about 18 KiB (it holds short pieces until it has 16 KiB

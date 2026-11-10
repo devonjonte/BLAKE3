@@ -1,6 +1,9 @@
-//! `blake3-servil` is a fast [BLAKE3] implementation for 64-bit Arm and
-//! x86-64. It produces the same digests as official BLAKE3, with a call
-//! for each way programs hash (the table below).
+//! `blake3-servil-core` is BLAKE3-Servil on one thread: a fast [BLAKE3]
+//! implementation for 64-bit Arm and x86-64, its assembly kernels (each
+//! proved against the specification) and every call that hashes on the
+//! thread that makes it. It produces the same digests as official BLAKE3.
+//! It starts no thread and uses no other core: the crate `blake3-servil`
+//! is this one, whole, with the calls that do.
 //!
 //! # Examples
 //!
@@ -58,7 +61,7 @@
 //!   other work: where it helps, a call fetches its code back into the
 //!   caches before it starts.
 //! - **[`throughput`]**, for power users: every way this crate makes
-//!   hashing fast (other cores, batches, collections, streams), tuned for
+//!   hashing fast (batches, collections, many hashers fed in turns), tuned for
 //!   call after call: an occasional call amid other work may run slower
 //!   than a convenience call would. The
 //!   program takes on more of the work: inputs come as
@@ -69,30 +72,24 @@
 //! The [`Hasher`] runs on the calling thread; its
 //! first update is treated as a call now and then (its code fetched first
 //! where that helps), and its later updates as call after call. The
-//! throughput calls that take it, [`throughput::update_multithreaded`]
-//! and [`throughput::update_each`], are tuned as throughput calls.
+//! throughput call that takes it, [`throughput::update_each`], is tuned
+//! as a throughput call.
 //!
 //! Start with the convenience calls; when a program needs more speed, it
 //! moves to the throughput ones.
 //!
 //! | Your data | Call |
 //! |---|---|
-//! | One message in memory | [`convenience::hash`], or for speed [`throughput::hash_multithreaded`] |
-//! | One message arriving in pieces | [`convenience::Hasher`], or for speed [`throughput::update_multithreaded`] |
-//! | Many messages of one length, in one buffer | [`throughput::hash_many_multithreaded`] |
-//! | Many 16- or 32-byte messages (a Merkle layer's leaves or digests) | [`throughput::hash_many_multithreaded`] over a [`throughput::Packed`] |
-//! | Many messages of different lengths, in memory | [`throughput::hash_each_multithreaded`] |
-//! | Many messages arriving at once (a server's uploads) | [`throughput::update_each`] |
-//! | A stream of messages read, made, or arriving | [`throughput::stream`] |
+//! | One message in memory | [`convenience::hash`], or for call after call [`throughput::hash`] |
+//! | One message arriving in pieces | [`convenience::Hasher`] |
+//! | Many messages of one length, in one buffer | [`throughput::hash_many`] |
+//! | Many 16- or 32-byte messages (a Merkle layer's leaves or digests) | [`throughput::hash_many`] over a [`throughput::Packed`] |
+//! | Many messages of different lengths, in memory | [`throughput::hash_each`] |
+//! | Many messages arriving at once (a server's uploads) | [`throughput::update_each`], then [`throughput::finalize_each`] |
 //!
-//! Each call returns once its hash is done, and uses other CPU cores
-//! where that is faster (the forms without `multithreaded` stay on the
-//! calling thread). A [stream](throughput::stream) is different: your program submits
-//! messages and goes on to read or make the next ones while other threads
-//! hash them; each digest arrives in the place your program named, a
-//! little later. Choose it when reading or making the data keeps your
-//! thread busy, such as files read from memory or a fast disk: it hashes
-//! the most bytes per second.
+//! Each call returns once its hash is done, on the calling thread. For
+//! long inputs and large batches on several cores, the crate
+//! `blake3-servil` adds a multithreaded form of each.
 //!
 //! Short messages hash fastest together: 1024 messages of 64 bytes in one
 //! [`throughput::hash_many`] call take about a fifth of the time of 1024
@@ -111,19 +108,7 @@
 //! **Apple M4 and later** have one matrix unit that this crate uses for
 //! inputs of 16 KiB and more; when several threads of a program hash such
 //! inputs at the same moment, one runs at full speed and the others at
-//! about two thirds of it. The multithreaded calls share the work among
-//! the cores themselves, so a program gets the most from one thread making
-//! them.
-//!
-//! **The GPU of an Apple silicon Mac** joins the CPU's threads on a
-//! [stream](throughput::stream)'s long messages, 4 MiB or more written in
-//! with [`Stream::submit_with`](throughput::Stream::submit_with), once the
-//! stream has kept sending them for 10 ms: it takes 8 MiB of the stream's
-//! waiting work at a time. On an Apple M4 Max, streams of 16 or more such
-//! messages ran in 0.79-0.85 of the time on the CPU alone, at 0.77-0.92 of
-//! its CPU time; shorter streams run as on the CPU alone. There is nothing
-//! to turn on, and the digests are the same; a pool of one thread keeps to
-//! its core.
+//! about two thirds of it.
 //!
 //! # Key-dependent timing
 //!
@@ -158,44 +143,19 @@
 //!   collection allocates nothing.
 //! - **Grouped incremental calls** use bounded stack tables and tree buffers.
 //!   [`throughput::update_each`] allocates and frees nothing.
-//!   [`throughput::update_each_multithreaded`] may allocate worker-job lists
-//!   when a large piece uses other cores.
-//! - **[`throughput::hash_multithreaded`]** allocates nothing below 512 KiB,
-//!   where it hashes on the calling thread. Above that length it keeps a list
-//!   of pieces it hands out, freed when it returns: 48 bytes for each 128 KiB of
-//!   input, and at most 200 bytes for each CPU (1 GiB on 16 CPUs: 390 KiB).
-//! - **A [stream](throughput::stream)** takes its storage (its 2 MiB ring, 8 MiB more for
-//!   messages of 4 MiB or more (2 MiB on x86-64), of which only the pages used are faulted in, and its entries)
-//!   from a pool the process keeps: a thread's first stream allocates it
-//!   and later streams reuse it, never freed. On an Apple silicon Mac, a
-//!   stream that has used the GPU keeps 64 MiB of memory the CPU and GPU
-//!   share, with its storage; the process's first such stream starts
-//!   Metal, about 160 ms on a thread of its own, and Metal's 16 threads.
 //! - **Once per process**: the startup self-test's buffers, about 45 KiB
-//!   of the calling thread's stack while it runs (it allocates nothing),
-//!   and the threads: by default a worker per CPU beyond the first, each with the
-//!   standard library's stack, started by [`initialize_multithreaded`].
+//!   of the calling thread's stack while it runs (it allocates nothing).
 //!
 //! # Panics
 //!
-//! **A panic inside a [stream](throughput::stream) ends the process**,
-//! wherever it starts: in your body, handler, `fill` or reader, or in the
-//! stream's own checks. Its message and backtrace print first; then the
-//! process aborts, since this crate's threads may still be reading your
-//! messages and writing your digests. So `catch_unwind` cannot recover a
-//! stream: a program that must go on past a failing read uses
-//! [`Stream::submit_reader`](throughput::Stream::submit_reader), which
-//! returns the read's error. A broken precondition of any other call panics
-//! on the calling thread, and unwinds as usual.
+//! A broken precondition of a call panics on the calling thread, and
+//! unwinds as usual.
 //!
 //! # Startup self-test
 //!
-//! **Every program calls [`initialize`] (or [`initialize_multithreaded`])
-//! once, before any other call of this crate**: a call before it panics, in
-//! every build, saying so. The check costs nothing: it is part of the
-//! platform load every call makes. **A program that makes multithreaded
-//! calls or streams calls [`initialize_multithreaded`]**: a
-//! multithreaded call or a stream before it panics (one load per call).
+//! **Every program calls [`initialize`] once, before any other call of
+//! this crate**: a call before it panics, in every build, saying so. The
+//! check costs nothing: it is part of the platform load every call makes.
 //!
 //! `initialize` checks the build and the CPU before the process first
 //! hashes, in well under a millisecond. It runs every assembly kernel built
@@ -1137,7 +1097,7 @@ pub fn hash_all_at_once(input: &[u8], key: &CVWords, chunk_counter: u64, flags: 
 }
 
 /// Run the startup self-test and detect the CPU: every program calls this
-/// (or [`initialize_multithreaded`]) once, before any other call of this
+/// once, before any other call of this
 /// crate, and a call before it panics. Under 0.2 ms, once per process
 /// (see the crate's documentation); later calls return at once.
 ///

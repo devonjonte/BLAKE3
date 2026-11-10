@@ -13,7 +13,7 @@
 //!   cannot go wrong. Bytes already in place become blocks with no copy
 //!   through [`Block::from_bytes`], and a batch through
 //!   [`Batch::from_blocks`] where its messages fill their blocks.
-//!   [`update_multithreaded`] and [`update_each`] alone take pieces of any
+//!   [`update_each`] alone takes pieces of any
 //!   length anywhere, into a [`Hasher`](crate::convenience::Hasher) (which
 //!   copies short ones into its own buffer); an aligned long piece runs
 //!   fastest.
@@ -79,7 +79,8 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// loop of [`hash`]: on an Apple M4 Max, 64-byte messages take about 10 to
 /// 20 ns each in batches of 16 or more, against about 50 for one [`hash`]
 /// each. Messages longer than 15 KiB cost what [`hash`] costs. For the
-/// same hashes over several cores, see [`hash_many_multithreaded`].
+/// same hashes over several cores, the crate `blake3-servil` has
+/// `hash_many_multithreaded`.
 ///
 /// A [`Packed`] of 16- or 32-byte messages is a batch too, as the program
 /// holds them, with no copy into blocks:
