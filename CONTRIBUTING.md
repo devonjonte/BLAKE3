@@ -285,8 +285,9 @@ lists what it takes and ticks each step:
    does; one from before the two became separate checkouts (0.18.3 and
    older) builds only inside it, and `check` says so.
 4. The long proofs, every kernel; the full mutation run.
-5. A paired package dry-run (below). The CLI needs the new library version,
-   which is not on crates.io yet; checking it alone cannot validate the pair.
+5. The packages' dry-run (below), the three together: the library needs
+   its version crate and the CLI the library, at versions crates.io does
+   not have yet, so no one of them can be checked alone.
 6. The pages, read as a newcomer would: the README's servil preface,
    `QUALITY.md` and `docs/quality-manual.md`, `CHANGELOG.md` (what
    changed for users, in their terms), the supported-platforms table
@@ -295,9 +296,10 @@ lists what it takes and ticks each step:
    retained for publication with the release and named on the map.
 8. Once the gates and human reviews accept that exact version commit,
    publish its tag and artifacts:
-   - the crates: publish the pair from the same staged checkout and lock
+   - the crates: publish the three from the same staged checkout and lock
      used for the dry-run, with `--locked` and the same explicit `-p` names.
-     Cargo publishes the dependency first. The CLI package is `b3sums`
+     Cargo publishes each dependency first: `blake3-servil-version` (the
+     build's version, `version/`), the library, the CLI. The CLI package is `b3sums`
      (crates.io's `b3sum` is official BLAKE3's);
    - b3sum's binaries, built from a clean tree at the tag on each machine
      by `sh tools/b3sum-release.sh` (statically linked on Linux), each
@@ -308,12 +310,12 @@ lists what it takes and ticks each step:
    - the GitHub release, its text the CHANGELOG entry.
 9. The eBASH submission, pinned to the tag (`supercop/README.md`).
 
-### Paired package dry-run, before either crate is published
+### The packages' dry-run, before any crate is published
 
 From the version-stamped checkout, with no tracked changes, use Cargo's
 multi-package support in a temporary parent workspace. The staged clone
 is clean; the candidate's manifests and Git tree stay unchanged. Select
-the two packages explicitly, so other path dependencies in the tree are
+the three packages explicitly, so other path dependencies in the tree are
 not publication targets:
 
 ```sh
@@ -324,18 +326,18 @@ commit=$(git rev-parse HEAD)
 stage=$(mktemp -d)
 git clone --shared --no-checkout . "$stage/checkout"
 git -C "$stage/checkout" checkout --detach "$commit"
-printf '[workspace]\nmembers = ["checkout", "checkout/b3sum"]\nresolver = "3"\n' > "$stage/Cargo.toml"
+printf '[workspace]\nmembers = ["checkout", "checkout/version", "checkout/b3sum"]\nresolver = "3"\n' > "$stage/Cargo.toml"
 cargo publish --dry-run --manifest-path "$stage/Cargo.toml" \
-    --target-dir "$stage/target" -p blake3-servil -p b3sums
-echo "Retain paired-package workspace: $stage"
+    --target-dir "$stage/target" -p blake3-servil-version -p blake3-servil -p b3sums
+echo "Retain the packages' workspace: $stage"
 )
 ```
 
 Cargo stages the unpublished library while verifying the CLI. Retain the
-workspace lock, logs and archives, with both artifact digests. The CLI's
+workspace lock, logs and archives, with each artifact's digests. The CLI's
 packaged lock must name the checksum of that exact library archive.
 Append `publish-dry-run: ok` to the commit-named release log only when the
-paired command succeeds; this is a dry-run, never permission to upload.
+command succeeds; this is a dry-run, never permission to upload.
 The final publication uses the same source and locked dependency resolution.
 
 ## Maintainers' notes

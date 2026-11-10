@@ -31,8 +31,8 @@ and the rest timed out or have no verdict.
     matching their survivor and timeout lists, from
     `python3 tools/mutants/check.py --whole` with the commit checked out.
   - check-builds: tmp/night/check-builds-C.log ending "every build passes".
-  - Publish dry run: tmp/night/publish-dry-run-C.log, from the paired
-    package dry-run in CONTRIBUTING.md, followed by "publish-dry-run: ok"
+  - Publish dry run: tmp/night/publish-dry-run-C.log, from the
+    packages' dry-run in CONTRIBUTING.md, followed by "publish-dry-run: ok"
     only on success.
 - The pages: README.md, QUALITY.md, CHANGELOG.md changed since the
   previous release (a release rewrites them for its readers).
@@ -222,7 +222,7 @@ def main():
     step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "every build passes"),
          f"sh tools/check-builds.sh > tmp/night/check-builds-{commit[:12]}.log")
     step("cargo publish --dry-run", log_ends_with(f"tmp/night/publish-dry-run-{commit[:12]}.log", "publish-dry-run: ok"),
-         f"paired package dry-run in CONTRIBUTING.md; save its output to tmp/night/publish-dry-run-{commit[:12]}.log and append 'publish-dry-run: ok' only on success")
+         f"the packages' dry-run in CONTRIBUTING.md; save its output to tmp/night/publish-dry-run-{commit[:12]}.log and append 'publish-dry-run: ok' only on success")
 
     if previous:
         changed = set(git("diff", "--name-only", previous, commit).split())
