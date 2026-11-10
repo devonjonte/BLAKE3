@@ -9,7 +9,23 @@ mod build_version;
 use std::path::Path;
 use std::process::Command;
 
+/// `what` and its time, on stderr: nextest prints a failed or timed-out
+/// test's output, so a test that hits the clock shows each step's time and
+/// ends on the step it was in (BLAKE3 #347: 6 to 60 seconds a test once
+/// in a VM, milliseconds elsewhere, with nothing to say where).
+fn timed<T>(what: std::fmt::Arguments, f: impl FnOnce() -> T) -> T {
+    eprint!("{what}: ");
+    let start = std::time::Instant::now();
+    let result = f();
+    eprintln!("{} ms", start.elapsed().as_millis());
+    result
+}
+
 fn git(dir: &Path, args: &[&str]) -> String {
+    timed(format_args!("git {args:?}"), || git_untimed(dir, args))
+}
+
+fn git_untimed(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -60,7 +76,7 @@ fn name(dir: &Path, version: &str) -> String {
     // package itself.
     let krate = if dir.join(".git").exists() { dir.join("version") } else { dir.to_owned() };
     std::fs::create_dir_all(&krate).unwrap();
-    let name = build_version::build_version(&krate, version, &scratch).0;
+    let name = timed(format_args!("build_version"), || build_version::build_version(&krate, version, &scratch).0);
     std::fs::remove_dir_all(&scratch).unwrap();
     name
 }
