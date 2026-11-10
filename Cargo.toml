@@ -1,5 +1,5 @@
 [package]
-name = "blake3-servil"
+name = "blake3-servil-core"
 # BLAKE3-Servil's own version series, from 0.1.0, based on upstream BLAKE3 1.8.7:
 # tools/gen-ver.py sets X.Y.Z+<commit> here and tags vX.Y.Z+<commit>.
 version = "0.8.0+dev"
@@ -9,6 +9,9 @@ repository = "https://github.com/servil-software-factory/BLAKE3"
 license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
 readme = "README.md"
 edition = "2024"
+# Its build script tells the crates that depend on it what it built
+# (DEP_BLAKE3_SERVIL_CORE_SME2: the SME2 kernels).
+links = "blake3_servil_core"
 # What a build from crates.io needs: the library, its assembly and build
 # script, the pages users read, the licences, and the file the tests include.
 include = ["/src", "/c", "/build.rs", "/README.md", "/CHANGELOG.md", "/QUALITY.md", "/LICENSE_*", "/tools/require_nextest.rs"]
@@ -30,43 +33,6 @@ zeroize = ["dep:zeroize", "arrayvec/zeroize"]
 [package.metadata.docs.rs]
 # Document the Serialize/Deserialize/Zeroize impls on docs.rs.
 features = ["serde", "zeroize"]
-
-# The integration tests exercise the pool and the queue, which need std.
-[[test]]
-name = "api_plan"
-required-features = ["std"]
-
-[[test]]
-name = "stream_one_cpu"
-required-features = ["std"]
-
-[[test]]
-name = "forked_child"
-required-features = ["std"]
-
-[[test]]
-name = "stream_collect_no_workers"
-required-features = ["std"]
-
-[[test]]
-name = "stream_collect_one_worker"
-required-features = ["std"]
-
-[[test]]
-name = "stream_collect_parked_workers"
-required-features = ["std"]
-
-[[test]]
-name = "stream_finish_parked_workers"
-required-features = ["std"]
-
-[[test]]
-name = "stream_collect_with_workers"
-required-features = ["std"]
-
-[[test]]
-name = "initialize_multithreaded_contract"
-required-features = ["std"]
 
 [dependencies]
 # BUILD_VERSION, in a crate of its own: its build script reruns on every
@@ -96,8 +62,6 @@ hex = "0.4.2"
 tempfile = "3.8.0"
 serde_json = "1.0.107"
 ciborium = "0.2.2"
-# tests/shuttle_*.rs: the pool's handshakes under a model checker.
-shuttle = "0.8"
 
 [build-dependencies]
 cc = "1.1.12"
@@ -125,10 +89,3 @@ incremental = true
 
 # The fairness probes (#213) use the pool, which needs std: the no_std
 # build (--no-default-features) leaves them out.
-[[example]]
-name = "fair_each"
-required-features = ["std"]
-
-[[example]]
-name = "fair_probe"
-required-features = ["std"]

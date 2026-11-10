@@ -174,5 +174,5 @@ fn a_package_is_named_from_its_vcs_info() {
 
 #[test]
 fn this_build_starts_with_the_crates_version() {
-    assert!(blake3_servil::BUILD_VERSION.starts_with(env!("CARGO_PKG_VERSION")), "{}", blake3_servil::BUILD_VERSION);
+    assert!(blake3_servil_core::BUILD_VERSION.starts_with(env!("CARGO_PKG_VERSION")), "{}", blake3_servil_core::BUILD_VERSION);
 }

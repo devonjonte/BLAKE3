@@ -12,11 +12,11 @@ use crate::{Hash, IV, Mode, OutputReader};
 /// The hash of `input`, on the calling thread.
 ///
 /// ```
-/// # blake3_servil::initialize();
-/// let hash = blake3_servil::convenience::hash(b"foo");
+/// # blake3_servil_core::initialize();
+/// let hash = blake3_servil_core::convenience::hash(b"foo");
 /// # let hash1 = hash;
 ///
-/// let mut hasher = blake3_servil::convenience::Hasher::new(blake3_servil::Mode::Plain, None);
+/// let mut hasher = blake3_servil_core::convenience::Hasher::new(blake3_servil_core::Mode::Plain, None);
 /// hasher.update(b"foo");
 /// let hash = hasher.finalize();
 /// # let hash2 = hash;
@@ -50,11 +50,11 @@ pub fn hash(input: &[u8]) -> Hash {
 /// derivation.
 ///
 /// ```
-/// # blake3_servil::initialize();
-/// use blake3_servil::{Mode, convenience};
+/// # blake3_servil_core::initialize();
+/// use blake3_servil_core::{Mode, convenience};
 /// let key = [7u8; 32];
 /// let mac = convenience::hash_with(Mode::Keyed(&key), b"foo");
-/// let mut hasher = blake3_servil::convenience::Hasher::new(Mode::Keyed(&key), None);
+/// let mut hasher = blake3_servil_core::convenience::Hasher::new(Mode::Keyed(&key), None);
 /// hasher.update(b"foo");
 /// assert_eq!(mac, hasher.finalize());
 /// ```
@@ -70,8 +70,8 @@ pub fn hash_with(mode: Mode, input: &[u8]) -> Hash {
 /// [`hash_with`]'s).
 ///
 /// ```
-/// # blake3_servil::initialize();
-/// use blake3_servil::{Mode, convenience};
+/// # blake3_servil_core::initialize();
+/// use blake3_servil_core::{Mode, convenience};
 /// let mut out = [0u8; 100];
 /// convenience::hash_xof(Mode::Plain, b"foo").fill(&mut out);
 /// assert_eq!(&out[..32], convenience::hash(b"foo").as_bytes());

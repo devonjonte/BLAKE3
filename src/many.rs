@@ -27,7 +27,7 @@ pub(crate) const TABLE: usize = 128;
 /// The bytes each message of `len` bytes takes in a batch: `len` rounded up
 /// to whole blocks, one block for an empty message.
 #[inline(always)]
-pub(crate) fn slot_len(len: usize) -> usize {
+pub fn slot_len(len: usize) -> usize {
     len.next_multiple_of(BLOCK_LEN).max(BLOCK_LEN)
 }
 
@@ -37,7 +37,7 @@ pub(crate) fn slot_len(len: usize) -> usize {
 /// builds: a Batch keeps them so). A slot is whole blocks ([`slot_len`]),
 /// or the message itself, packed ([`packed`]).
 #[inline]
-pub(crate) fn assert_slots(input: &[u8], len: usize, slot: usize, count: usize) {
+pub fn assert_slots(input: &[u8], len: usize, slot: usize, count: usize) {
     debug_assert!(slot == slot_len(len) || packed(len, slot), "a slot is whole blocks or a packed message");
     // In every build: the kernels read `slot * count` bytes from `input`,
     // so a wrong length would be read past its end (AGENTS: a check of a
@@ -67,7 +67,7 @@ pub(crate) fn packed(len: usize, slot: usize) -> bool {
 /// through the one-message path. Requires `input.len() == slot *
 /// outputs.len()` and every slot's bytes past `len` zero (a Batch's, or
 /// the crate's own).
-pub(crate) fn hash_many_on(input: &[u8], len: usize, slot: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
+pub fn hash_many_on(input: &[u8], len: usize, slot: usize, key: &CVWords, flags: u8, outputs: &mut [[u8; OUT_LEN]], platform: Platform) {
     // One-block messages first, on the path they took before slots (a
     // shared entry cost 64 B x 3 7% in the regression check).
     if len == BLOCK_LEN && outputs.len() >= 2 {
@@ -964,7 +964,7 @@ mod test {
         }
     }
 
-    /// hash_many (and hash_many_multithreaded) of `count` messages of
+    /// hash_many of `count` messages of
     /// `len` bytes against hash() one message at a time.
     fn check(len: usize, count: usize) {
         let input = messages(len, count);
@@ -972,12 +972,6 @@ mod test {
         crate::throughput::hash_many(crate::Mode::Plain, &crate::throughput::Batch::in_place(&crate::test::blocks(&input), len), &mut out);
         for (i, digest) in out.iter().enumerate() {
             assert_eq!(*digest, *crate::convenience::hash(message(&input, len, i)).as_bytes(), "message {i} of {count}, {len} bytes");
-        }
-        #[cfg(feature = "std")]
-        {
-            let mut mt = vec![[0u8; OUT_LEN]; count];
-            crate::throughput::hash_many_multithreaded(crate::Mode::Plain, &crate::throughput::Batch::in_place(&crate::test::blocks(&input), len), &mut mt);
-            assert_eq!(mt, out, "multithreaded, {count} messages of {len} bytes");
         }
     }
 

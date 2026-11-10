@@ -3,6 +3,8 @@ use crate::{BLOCK_LEN, CHUNK_LEN, CVBytes};
 include!("../tools/require_nextest.rs");
 use arrayvec::ArrayVec;
 
+pub(crate) use crate::test_support::*;
+
 /// Every symbol the assembly defines carries the crate's prefix,
 /// `blake3_servil_`, so a program that links official BLAKE3 as well (whose
 /// kernels are `blake3_*`) binds each crate's calls to its own kernels
@@ -71,46 +73,6 @@ fn test_official_kernels_and_ours_stay_apart() {
     }
 }
 
-/// Dropped, it releases a thread a test holds on its channel (`recv`): so
-/// a fault in the test fails it at once where it would strand the held
-/// thread, and the test with it, until the clock.
-#[cfg(feature = "std")]
-pub(crate) struct Released(pub(crate) std::sync::mpsc::Sender<()>);
-#[cfg(feature = "std")]
-impl Drop for Released {
-    fn drop(&mut self) {
-        let _ = self.0.send(());
-    }
-}
-
-/// `bytes` copied into whole blocks, zero after them: a message as the
-/// throughput calls take one.
-#[cfg(feature = "std")]
-pub(crate) fn message(bytes: &[u8]) -> std::vec::Vec<crate::throughput::Block> {
-    let mut blocks = std::vec![crate::throughput::Block::ZERO; bytes.len().div_ceil(crate::BLOCK_LEN).max(1)];
-    crate::throughput::Block::bytes_mut(&mut blocks)[..bytes.len()].copy_from_slice(bytes);
-    blocks
-}
-
-/// Each of `items` copied into blocks (`message`).
-#[cfg(feature = "std")]
-pub(crate) fn messages(items: &[&[u8]]) -> std::vec::Vec<std::vec::Vec<crate::throughput::Block>> {
-    items.iter().map(|i| message(i)).collect()
-}
-
-/// `owned`'s messages (from `message`) as hash_each's items, `items`'
-/// lengths.
-#[cfg(feature = "std")]
-pub(crate) fn items<'a>(owned: &'a [std::vec::Vec<crate::throughput::Block>], items: &[&[u8]]) -> std::vec::Vec<(&'a [crate::throughput::Block], usize)> {
-    owned.iter().zip(items).map(|(b, i)| (&b[..], i.len())).collect()
-}
-
-/// `bytes` (whole blocks) copied into blocks, as the batch calls take them.
-pub(crate) fn blocks(bytes: &[u8]) -> std::vec::Vec<crate::throughput::Block> {
-    assert_eq!(bytes.len() % crate::BLOCK_LEN, 0, "whole blocks");
-    bytes.chunks_exact(crate::BLOCK_LEN).map(|b| crate::throughput::Block(b.try_into().unwrap())).collect()
-}
-
 // Interesting input lengths to run tests on.
 pub const TEST_CASES: &[usize] = &[
     0,
@@ -160,66 +122,6 @@ pub const TEST_CASES_MAX: usize = 100 * CHUNK_LEN;
 // because that's the largest prime number less than 256. This makes it
 // unlikely to swapping any two adjacent input blocks or chunks will give the
 // same answer.
-
-// Golden, the fixed values' check, shared with the integration tests.
-#[cfg(feature = "std")]
-#[path = "../tests/common/golden.rs"]
-mod golden;
-#[cfg(feature = "std")]
-pub(crate) use golden::Golden;
-
-/// Official BLAKE3 1.8.7, the generator of the fixed values: its public
-/// calls, and its hidden portable kernels (`blake3::platform`) for the
-/// compression-level sweeps.
-#[cfg(feature = "std")]
-pub(crate) mod official {
-    use std::vec::Vec;
-    fn portable() -> blake3::platform::Platform {
-        blake3::platform::Platform::portable()
-    }
-    pub(crate) fn hash(mode: crate::Mode, input: &[u8]) -> [u8; 32] {
-        match mode {
-            crate::Mode::Plain => *blake3::hash(input).as_bytes(),
-            crate::Mode::Keyed(key) => *blake3::keyed_hash(key, input).as_bytes(),
-            crate::Mode::DeriveKey(context) => blake3::derive_key(context, input),
-            crate::Mode::DeriveKeyWith(_) => unreachable!("a context key's own mode is DeriveKey"),
-        }
-    }
-    /// `len` bytes of extended output from byte `skip`.
-    pub(crate) fn xof(mode: crate::Mode, input: &[u8], skip: u64, len: usize) -> Vec<u8> {
-        let mut hasher = match mode {
-            crate::Mode::Plain => blake3::Hasher::new(),
-            crate::Mode::Keyed(key) => blake3::Hasher::new_keyed(key),
-            crate::Mode::DeriveKey(context) => blake3::Hasher::new_derive_key(context),
-            crate::Mode::DeriveKeyWith(_) => unreachable!("a context key's own mode is DeriveKey"),
-        };
-        hasher.update(input);
-        let mut reader = hasher.finalize_xof();
-        reader.set_position(skip);
-        let mut out = std::vec![0u8; len];
-        reader.fill(&mut out);
-        out
-    }
-    pub(crate) fn compress_xof(cv: &[u32; 8], block: &[u8; 64], block_len: u8, counter: u64, flags: u8) -> [u8; 64] {
-        portable().compress_xof(cv, block, block_len, counter, flags)
-    }
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn hash_many<const N: usize>(inputs: &[&[u8; N]], key: &[u32; 8], counter: u64, increment: bool, flags: u8, start: u8, end: u8, out: &mut [u8]) {
-        let increment = if increment { blake3::IncrementCounter::Yes } else { blake3::IncrementCounter::No };
-        portable().hash_many::<N>(inputs, key, counter, increment, flags, start, end, out)
-    }
-    /// Each chunk's chaining value (a chunk of the plain hash, not the root).
-    pub(crate) fn chunk_cvs(input: &[u8], counter: u64) -> Vec<u8> {
-        input
-            .chunks(crate::CHUNK_LEN)
-            .enumerate()
-            .flat_map(|(i, c)| {
-                use blake3::hazmat::HasherExt;
-                blake3::Hasher::new().set_input_offset((counter + i as u64) * crate::CHUNK_LEN as u64).update(c).finalize_non_root()
-            })
-            .collect()
-    }
-}
 
 /// Every platform this CPU can run, not only detect()'s:
 /// the code paths of a platform narrower than detect()'s (SSE4.1's and
@@ -546,12 +448,6 @@ fn test_xof_groups_sweep_on_this_cpu() {
         crate::platform::Platform::detect().xof_many(cv, block, block_len, counter, flags, &mut out[..done]);
         done
     });
-}
-
-pub fn paint_test_input(buf: &mut [u8]) {
-    for (i, b) in buf.iter_mut().enumerate() {
-        *b = (i % 251) as u8;
-    }
 }
 
 #[cfg(blake3_avx512_ffi)]
@@ -1192,32 +1088,6 @@ mod unsafe_paths {
             }
         }
     }
-
-    /// A batch and an input, from two threads at once through the
-    /// multithreaded full forms.
-    #[test]
-    fn test_pool_from_two_callers() {
-        let batch = input(1024 * 64, 1);
-        let tree = input(65 * 1024 + 3, 2);
-        let mut expected = vec![[0u8; OUT_LEN]; 1024];
-        crate::throughput::hash_many(Mode::Plain, &crate::throughput::Batch::in_place(&crate::test::blocks(&batch), 64), &mut expected);
-        let expected_tree = crate::convenience::hash(&tree);
-        std::thread::scope(|scope| {
-            for caller in 0..2 {
-                let (batch, tree, expected) = (&batch, &tree, &expected);
-                scope.spawn(move || {
-                    let mut out = vec![[0u8; OUT_LEN]; 1024];
-                    crate::throughput::hash_many_multithreaded(Mode::Plain, &crate::throughput::Batch::in_place(&crate::test::blocks(batch), 64), &mut out);
-                    assert_eq!(&out, expected, "batch, caller {caller}");
-                    assert_eq!(
-                        crate::throughput::hash_multithreaded(crate::Mode::Plain, &crate::test::message(tree), tree.len()),
-                        expected_tree,
-                        "tree, caller {caller}"
-                    );
-                });
-            }
-        });
-    }
 }
 
 // Every kernel's reads and writes against guard pages: inputs placed to end
@@ -1229,54 +1099,7 @@ mod unsafe_paths {
 pub(crate) mod guard_pages {
     use crate::*;
 
-    /// `len` bytes with an inaccessible page before and after them, the
-    /// bytes flush against the page after (`at_end`) or before.
-    pub(crate) struct Guarded {
-        base: *mut u8,
-        total: usize,
-        start: usize,
-        len: usize,
-    }
-
-    impl Guarded {
-        pub(crate) fn new(len: usize, at_end: bool) -> Self {
-            let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
-            let body = len.div_ceil(page).max(1) * page;
-            let total = body + 2 * page;
-            let base = unsafe { libc::mmap(core::ptr::null_mut(), total, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_PRIVATE | libc::MAP_ANONYMOUS, -1, 0) };
-            assert_ne!(base, libc::MAP_FAILED, "mmap");
-            let base = base as *mut u8;
-            unsafe {
-                assert_eq!(libc::mprotect(base as *mut _, page, libc::PROT_NONE), 0);
-                assert_eq!(libc::mprotect(base.add(page + body) as *mut _, page, libc::PROT_NONE), 0);
-            }
-            let start = if at_end { page + body - len } else { page };
-            Guarded { base, total, start, len }
-        }
-
-        pub(crate) fn bytes(&mut self) -> &mut [u8] {
-            unsafe { core::slice::from_raw_parts_mut(self.base.add(self.start), self.len) }
-        }
-
-        /// Build shared views first; after this call the body is read-only.
-        #[cfg(all(target_os = "linux", blake3_avx512_ffi))]
-        pub(crate) fn read_only(&mut self) {
-            let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
-            assert_eq!(unsafe { libc::mprotect(self.base.add(page).cast(), self.total - 2 * page, libc::PROT_READ) }, 0);
-        }
-    }
-
-    impl Drop for Guarded {
-        fn drop(&mut self) {
-            unsafe { libc::munmap(self.base as *mut _, self.total) };
-        }
-    }
-
-    fn filled(len: usize, at_end: bool) -> Guarded {
-        let mut g = Guarded::new(len, at_end);
-        crate::test::paint_test_input(g.bytes());
-        g
-    }
+    use crate::test::guard::*;
 
     /// The one-chunk root kernels with the input flush against an
     /// inaccessible page, after it and before it: whole blocks are read in
@@ -1393,14 +1216,6 @@ pub(crate) mod guard_pages {
                 let mut g = filled(len, at_end);
                 let data = g.bytes().to_vec();
                 golden.add(crate::convenience::hash(g.bytes()).as_bytes(), || crate::test::official::hash(crate::Mode::Plain, &data).to_vec());
-                if len >= 64 * CHUNK_LEN && len % 7 == 0 {
-                    // The message's whole blocks flush against the page: the
-                    // throughput call may read to their end, no further.
-                    let mut blocks = filled(len.div_ceil(64) * 64, at_end);
-                    let message = blocks.bytes()[..len].to_vec();
-                    let input = crate::throughput::Block::from_bytes(blocks.bytes()).expect("a page-end region of whole blocks starts aligned");
-                    assert_eq!(crate::throughput::hash_multithreaded(crate::Mode::Plain, input, len), crate::convenience::hash(&message), "mt, {len} bytes");
-                }
             }
         }
         golden.check(0x477cad8a62ac89d1);
@@ -1426,18 +1241,6 @@ pub(crate) mod guard_pages {
                     let data = input.bytes().to_vec();
                     for (i, digest) in outputs.iter().enumerate() {
                         assert_eq!(*digest, *crate::convenience::hash(&data[i * slot..][..len]).as_bytes(), "{count} x {len} B, message {i}, at end {at_end}");
-                    }
-                    if slot * count >= 64 * CHUNK_LEN {
-                        let (_page, mt) = digests(count, at_end);
-                        crate::throughput::hash_many_multithreaded(
-                            Mode::Plain,
-                            &crate::throughput::Batch::in_place(
-                                crate::throughput::Block::from_bytes(input.bytes()).expect("a page-end batch starts aligned"),
-                                len,
-                            ),
-                            mt,
-                        );
-                        assert_eq!(&mt[..], &outputs[..], "mt, {count} x {len} B");
                     }
                 }
             }
@@ -1473,9 +1276,6 @@ pub(crate) mod guard_pages {
                     let (_page, got) = digests(count, !at_end);
                     crate::throughput::hash_each(Mode::Plain, &in_blocks, got);
                     assert_eq!(got, &want[..], "hash_each_with, {count} x {len} B, at end {at_end}");
-                    let (_page, got) = digests(count, at_end);
-                    crate::throughput::hash_each_multithreaded(Mode::Plain, &in_blocks, got);
-                    assert_eq!(got, &want[..], "hash_each_multithreaded_with, {count} x {len} B, at end {at_end}");
                     let mut hashers: Vec<crate::Hasher> = (0..count).map(|_| crate::Hasher::new(crate::Mode::Plain, None)).collect();
                     let pieces: Vec<(usize, &[u8])> = items.iter().copied().enumerate().collect();
                     crate::throughput::update_each(&mut hashers, &pieces);
@@ -1518,30 +1318,13 @@ pub(crate) mod guard_pages {
         }
     }
 
-    /// `count` digests' places flush against a guard page (after them, or
-    /// before): a call writes no byte outside its outputs.
-    fn places(count: usize, at_end: bool) -> (Guarded, &'static mut [Hash]) {
-        let mut g = Guarded::new(count * OUT_LEN, at_end);
-        // Sound: Hash is repr(transparent) over [u8; 32], align 1, and the
-        // pages live until the Guarded drops, after every use here.
-        let out = unsafe { core::slice::from_raw_parts_mut(g.bytes().as_mut_ptr() as *mut Hash, count) };
-        (g, out)
-    }
-
-    /// The same places as digests' bytes, for the calls that write those.
-    fn digests(count: usize, at_end: bool) -> (Guarded, &'static mut [[u8; OUT_LEN]]) {
-        let mut g = Guarded::new(count * OUT_LEN, at_end);
-        let out = unsafe { core::slice::from_raw_parts_mut(g.bytes().as_mut_ptr() as *mut [u8; OUT_LEN], count) };
-        (g, out)
-    }
-
     /// Every public call that reads a caller's bytes or writes into a
     /// caller's places, in every mode, its inputs and outputs each flush
     /// against a guard page, after them and then before: the convenience
-    /// calls, the single-message throughput calls, the Hasher's
-    /// multithreaded update, finalize_each, the stream's three ways in
-    /// with its digests, and the key and context themselves. With the
-    /// batch and collection tests above, no call is left out.
+    /// calls, the single-message throughput call, the Hasher's update,
+    /// finalize_each, and the key and context themselves. With the batch
+    /// and collection tests above, no call of this crate is left out
+    /// (the thread crate's tests do the same for its calls).
     #[test]
     fn test_every_call_inside_guard_pages() {
         let lens =
@@ -1579,51 +1362,12 @@ pub(crate) mod guard_pages {
                     let blocks = crate::throughput::Block::from_bytes(unsafe { core::slice::from_raw_parts(region.base.add(region.start), region.len) })
                         .expect("a page-end region of whole blocks starts aligned");
                     assert_eq!(*crate::throughput::hash(mode, blocks, len).as_bytes(), want, "throughput::hash, {what}");
-                    assert_eq!(*crate::throughput::hash_multithreaded(mode, blocks, len).as_bytes(), want, "hash_multithreaded, {what}");
                     let mut hasher = crate::Hasher::new(mode, None);
-                    crate::throughput::update_multithreaded(&mut hasher, flush.bytes());
-                    assert_eq!(*hasher.clone().finalize().as_bytes(), want, "update_multithreaded, {what}");
+                    hasher.update(flush.bytes());
+                    assert_eq!(*hasher.clone().finalize().as_bytes(), want, "update, {what}");
                     let (_out_page, out) = digests(1, !at_end);
                     crate::throughput::finalize_each(core::slice::from_mut(&mut hasher), &[0], out);
                     assert_eq!(out[0], want, "finalize_each, {what}");
-                    // A stream: the message where it is, the message written into
-                    // its rooms, and a batch of three, every digest into places
-                    // flush against a page.
-                    let count = 3;
-                    let slot = crate::many::slot_len(len);
-                    let mut batch = filled(slot * count, at_end);
-                    for i in 0..count {
-                        let m = &mut batch.bytes()[i * slot..][..slot];
-                        m[..len].copy_from_slice(&message);
-                        m[len..].fill(0);
-                    }
-                    let batch_blocks = crate::throughput::Block::from_bytes(unsafe { core::slice::from_raw_parts(batch.base.add(batch.start), batch.len) })
-                        .expect("a page-end batch starts aligned");
-                    let batch_in_place = crate::throughput::Batch::in_place(batch_blocks, len);
-                    let (_page_one, one) = places(1, !at_end);
-                    let (_page_with, with) = places(1, at_end);
-                    let (_page_batch, batched) = places(count, !at_end);
-                    let input: &[u8] = unsafe { core::slice::from_raw_parts(flush.base.add(flush.start), flush.len) };
-                    crate::throughput::stream(
-                        mode,
-                        |_| {},
-                        |s| {
-                            s.submit(blocks, len, &mut one[0]);
-                            s.submit_with(
-                                len,
-                                |at, room| {
-                                    room.copy_from_slice(&input[at..][..room.len()]);
-                                    room.len()
-                                },
-                                &mut with[0],
-                            );
-                            s.submit_batch(&batch_in_place, batched);
-                            s.finish();
-                        },
-                    );
-                    assert_eq!(*one[0].as_bytes(), want, "stream submit, {what}");
-                    assert_eq!(*with[0].as_bytes(), want, "stream submit_with, {what}");
-                    assert!(batched.iter().all(|h| *h.as_bytes() == want), "stream submit_batch, {what}");
                 }
             }
         }
@@ -1632,7 +1376,7 @@ pub(crate) mod guard_pages {
 }
 
 /// The Hasher's stage: pieces of many lengths across 16 KiB boundaries,
-/// update and update_multithreaded mixed, finalize midway and after more
+/// finalize midway and after more
 /// input, and subtrees at input offsets, against one-shot hashes.
 #[test]
 #[cfg(feature = "std")]
@@ -1646,11 +1390,7 @@ fn test_hasher_gathers() {
         let mut k = start;
         while done < input.len() {
             let n = pieces[k % pieces.len()].min(input.len() - done);
-            if k % 3 == 0 {
-                crate::throughput::update_multithreaded(&mut hasher, &input[done..done + n]);
-            } else {
-                hasher.update(&input[done..done + n]);
-            }
+            hasher.update(&input[done..done + n]);
             done += n;
             k += 1;
             if k % 5 == 0 {
@@ -1899,12 +1639,6 @@ impl SubtreeHasher for crate::Hasher {
         assert_ne!(self.count(), 0, "empty subtrees are never valid");
         self.clone().final_output().chaining_value()
     }
-}
-
-/// The parent node of two chaining values under `mode`.
-pub(crate) fn parent(left: &CVBytes, right: &CVBytes, mode: crate::Mode) -> crate::Output {
-    let (key, flags) = mode.key_and_flags();
-    crate::hasher::parent_output(left, right, &key, flags, crate::Platform::detect())
 }
 
 #[test]

@@ -1631,6 +1631,8 @@ mod test {
     /// guess.
     #[test]
     fn test_submit_reader_reads_and_fails_at_every_point() {
+        // The core's own tests initialize on their first call; a test here says so.
+        crate::initialize();
         let input: std::vec::Vec<u8> = (0..4 * PIECE + 99).map(|i| (i % 253) as u8).collect();
         let reader = |len: usize, fail_at: Option<usize>| Uneven::new(&input[..len], fail_at);
         let lens = [0, 1, 1000, PIECE - 1, PIECE, PIECE + 1, 2 * PIECE, 3 * PIECE + 7];

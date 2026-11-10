@@ -83,6 +83,10 @@ jobs:
     # behavior.
     - run: cargo nextest run --features=
     - run: cargo nextest run --features= --release
+    # The crate with the pool and the stream (threads/).
+    - name: threads
+      run: cargo nextest run --no-fail-fast && cargo nextest run --release && cargo test --doc
+      working-directory: ./threads
 
     # Test vectors.
     - name: test vectors
@@ -147,6 +151,9 @@ jobs:
       with:
         tool: cargo-c@0.10.26
     - run: cargo nextest run --lib --tests --features=serde,zeroize
+    - name: threads
+      run: cargo nextest run --lib --tests --no-fail-fast
+      working-directory: ./threads
     # QEMU 11.1.2, Debian's static build, pinned by its SHA-256 and BLAKE3
     # hashes: the runner's own (Ubuntu's 8.2.2) crashed itself now and then
     # emulating a test's intended panic (#113).
@@ -163,6 +170,12 @@ jobs:
         CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
         # tests/pool_fairness.rs measures the pool's shares by time, which an
         # emulator's scheduling decides: it skips (#213).
+        BLAKE3_EMULATED: 1
+    - name: threads, as a Cortex-A72
+      run: cargo nextest run --lib --tests
+      working-directory: ./threads
+      env:
+        CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
         BLAKE3_EMULATED: 1
     - name: C API
       run: cargo nextest run --release
@@ -207,6 +220,7 @@ jobs:
           cd /work
           ~/.cargo/bin/cargo nextest run
           ~/.cargo/bin/cargo test --doc
+          cd threads && ~/.cargo/bin/cargo nextest run --no-fail-fast
 
   # x86-64's three kernel widths, whichever CPU this runner is: the suites
   # as an AVX-512 CPU (Ice Lake server), as one with AVX2 and no AVX-512
@@ -256,6 +270,9 @@ jobs:
     # runner's dynamic loader (chosen for the real CPU) ran an AVX
     # instruction before any test did.
     - run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -${{ matrix.cpu.flag }} -chip_check_exe_only -- " cargo nextest run -P emulated --release --lib --tests
+    - name: threads, emulated
+      working-directory: ./threads
+      run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -${{ matrix.cpu.flag }} -chip_check_exe_only -- " cargo nextest run -P emulated --release --lib --tests
 
   x86_model:
     name: "the x86-64 proofs' model against the CPU"

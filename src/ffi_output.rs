@@ -254,7 +254,7 @@ mod tests {
     }
     #[test]
     fn independent_blocks_cvs_descriptors_and_output_against_guard_pages() {
-        use crate::test::guard_pages::Guarded;
+        use crate::test::guard::Guarded;
         crate::initialize();
         if lanes(Platform::detect()) == 0 {
             return;

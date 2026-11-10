@@ -18,23 +18,23 @@ use super::*;
 ///
 /// ```
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # blake3_servil::initialize();
+/// # blake3_servil_core::initialize();
 /// // Hash an input incrementally.
-/// let mut hasher = blake3_servil::convenience::Hasher::new(blake3_servil::Mode::Plain, None);
+/// let mut hasher = blake3_servil_core::convenience::Hasher::new(blake3_servil_core::Mode::Plain, None);
 /// hasher.update(b"foo");
 /// hasher.update(b"bar");
 /// hasher.update(b"baz");
 /// // finalize takes the Hasher: the next message gets a new one.
-/// assert_eq!(hasher.finalize(), blake3_servil::convenience::hash(b"foobarbaz"));
+/// assert_eq!(hasher.finalize(), blake3_servil_core::convenience::hash(b"foobarbaz"));
 ///
 /// // Extended output. OutputReader also implements Read and Seek.
 /// # #[cfg(feature = "std")] {
 /// let mut output = [0; 1000];
-/// let mut hasher = blake3_servil::convenience::Hasher::new(blake3_servil::Mode::Plain, None);
+/// let mut hasher = blake3_servil_core::convenience::Hasher::new(blake3_servil_core::Mode::Plain, None);
 /// hasher.update(b"foobarbaz");
 /// let mut output_reader = hasher.finalize_xof();
 /// output_reader.fill(&mut output);
-/// assert_eq!(&output[..32], blake3_servil::convenience::hash(b"foobarbaz").as_bytes());
+/// assert_eq!(&output[..32], blake3_servil_core::convenience::hash(b"foobarbaz").as_bytes());
 /// # }
 /// # Ok(())
 /// # }
@@ -65,12 +65,12 @@ impl Clone for Hasher {
 
 /// The bytes a Hasher gathers before they hash side by side: 16 chunks,
 /// the widest kernels' lanes.
-pub(crate) const STAGE_LEN: usize = 16 * CHUNK_LEN;
+pub const STAGE_LEN: usize = 16 * CHUNK_LEN;
 
 /// The tree's state behind a [`Hasher`]: its chunk, and the chaining values
 /// of its finished subtrees.
 #[derive(Clone)]
-pub(crate) struct HasherCore {
+pub struct HasherCore {
     pub(crate) key: CVWords,
     pub(crate) chunk_state: ChunkState,
     pub(crate) initial_chunk_counter: u64,
@@ -91,7 +91,17 @@ struct HasherHooks<'a> {
     flags: u8,
     chunk_platform: Platform,
     platform: Platform,
-    pooled: bool,
+    pooled: Option<Pool>,
+}
+
+/// Another crate's threads, for a Hasher's whole subtrees: `children`
+/// gives the two child chaining values of a subtree of `min_len` bytes or
+/// more (what `compress_subtree_to_parent_node` returns), hashed however
+/// its crate likes.
+#[derive(Clone, Copy)]
+pub struct Pool {
+    pub min_len: usize,
+    pub children: fn(&[u8], &CVWords, u64, u8) -> [u8; 2 * OUT_LEN],
 }
 
 impl hasher::Hooks for HasherHooks<'_> {
@@ -104,7 +114,7 @@ impl hasher::Hooks for HasherHooks<'_> {
         // kernels (about 0.2 us of other work between them puts the SME
         // unit in its slow state: `sme2`'s documentation).
         #[cfg(blake3_sme2)]
-        if !self.pooled && matches!(self.platform, Platform::SME2) && sme2::flat_takes(input.len()) {
+        if self.pooled.is_none() && matches!(self.platform, Platform::SME2) && sme2::flat_takes(input.len()) {
             // Safe: the SME2 platform is selected only where the CPU has it.
             return Some(unsafe { sme2::compress_subtree_flat_to_cv(input, ahead, self.key, counter, self.flags) });
         }
@@ -113,18 +123,9 @@ impl hasher::Hooks for HasherHooks<'_> {
 
     #[inline(always)]
     fn children(&self, input: &[u8], ahead: usize, counter: u64) -> [CVBytes; 2] {
-        #[cfg(feature = "std")]
-        let pool_takes = self.pooled && input.len() >= lanes::MIN_SPLIT_LEN;
-        #[cfg(not(feature = "std"))]
-        let pool_takes = false;
-        let pair = if pool_takes {
-            #[cfg(feature = "std")]
-            {
-                lanes::subtree_children(input, self.key, counter, self.flags)
-            }
-            #[cfg(not(feature = "std"))]
-            unreachable!()
-        } else if self.pooled {
+        let pair = if let Some(pool) = self.pooled.filter(|pool| input.len() >= pool.min_len) {
+            (pool.children)(input, self.key, counter, self.flags)
+        } else if self.pooled.is_some() {
             // Pooled, the subtrees below take the lock one at a time, and
             // the pool's own never use SME2.
             let own = platform::Sme2Turn::take(self.chunk_platform, input.len() >= SME2_SIZED_LEN);
@@ -142,7 +143,7 @@ type HasherKernels<'a> = hasher::Kernels<'a, Platform, HasherHooks<'a>>;
 
 /// A Hasher's kernels on its key and chunk state (see HasherHooks).
 #[inline(always)]
-fn kernels_on<'a>(key: &'a CVWords, chunk_state: &ChunkState, platform: Platform, pooled: bool) -> HasherKernels<'a> {
+fn kernels_on<'a>(key: &'a CVWords, chunk_state: &ChunkState, platform: Platform, pooled: Option<Pool>) -> HasherKernels<'a> {
     hasher::Kernels {
         key,
         flags: chunk_state.flags,
@@ -176,7 +177,7 @@ impl Hasher {
     /// on AArch64: `gather_part`),
     /// and the stage goes to the core as one update, its chunks side by
     /// side in the lanes.
-    fn gather(&mut self, input: &[u8], pooled: bool) -> &mut Self {
+    fn gather(&mut self, input: &[u8], pooled: Option<Pool>) -> &mut Self {
         self.gather_part(input, pooled, false);
         self
     }
@@ -185,7 +186,7 @@ impl Hasher {
     /// whole group (from offset zero) is kept for the caller to hash with
     /// others' (`held_group`), and the rest of `input`
     /// returned; else nothing is left.
-    pub(crate) fn gather_part<'a>(&mut self, mut input: &'a [u8], pooled: bool, hold: bool) -> &'a [u8] {
+    pub(crate) fn gather_part<'a>(&mut self, mut input: &'a [u8], pooled: Option<Pool>, hold: bool) -> &'a [u8] {
         self.core.assert_room(self.count(), input.len());
         while !input.is_empty() {
             // Whole groups skip the stage, and so does a fresh hasher's
@@ -303,14 +304,14 @@ impl Hasher {
         if self.count() == 0 && (CHUNK_LEN + 1..PREFETCH_BELOW).contains(&input.len()) {
             prefetch_cold(input.len(), self.core.chunk_state.platform, true);
         }
-        self.gather(input, false)
+        self.gather(input, None)
     }
 
-    /// [`throughput::update_multithreaded`](crate::throughput::update_multithreaded)'s work.
-    #[cfg(feature = "std")]
-    pub(crate) fn update_pooled(&mut self, input: &[u8]) -> &mut Self {
-        lanes::require();
-        self.gather(input, true)
+    /// [`update`](Hasher::update), its whole subtrees of `pool.min_len`
+    /// bytes and more hashed by `pool` (the thread crate's
+    /// `update_multithreaded`).
+    pub fn update_on(&mut self, input: &[u8], pool: Pool) -> &mut Self {
+        self.gather(input, Some(pool))
     }
 
     /// The [`struct@Hash`] of everything updated: the Hasher is finished, in place,
@@ -364,9 +365,9 @@ impl Hasher {
     /// # use std::fs::File;
     /// # use std::io;
     /// # fn main() -> io::Result<()> {
-    /// # blake3_servil::initialize();
+    /// # blake3_servil_core::initialize();
     /// // Hash standard input.
-    /// let mut hasher = blake3_servil::convenience::Hasher::new(blake3_servil::Mode::Plain, None);
+    /// let mut hasher = blake3_servil_core::convenience::Hasher::new(blake3_servil_core::Mode::Plain, None);
     /// hasher.update_reader(std::io::stdin().lock())?;
     /// println!("{}", hasher.finalize());
     /// # Ok(())
@@ -380,7 +381,7 @@ impl Hasher {
 }
 
 impl HasherCore {
-    pub(crate) fn new_internal(key: &CVWords, flags: u8) -> Self {
+    pub fn new_internal(key: &CVWords, flags: u8) -> Self {
         Self::new_from(key, flags, Platform::detect())
     }
 
@@ -415,13 +416,13 @@ impl HasherCore {
         // at offset zero; a positioned subtree's offset takes the core's path.
         debug_assert_eq!(self.initial_chunk_counter, 0, "a hasher at offset zero");
         let post_merge_stack_len = hasher::ones(chunk_counter);
-        let kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, false);
+        let kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, None);
         self.cv_stack.merge(&kernels, post_merge_stack_len);
     }
 
     /// The kernels on this Hasher's key and flags (see HasherKernels).
     #[inline(always)]
-    fn kernels(&self, platform: Platform, pooled: bool) -> HasherKernels<'_> {
+    fn kernels(&self, platform: Platform, pooled: Option<Pool>) -> HasherKernels<'_> {
         kernels_on(&self.key, &self.chunk_state, platform, pooled)
     }
 
@@ -471,7 +472,7 @@ impl HasherCore {
     /// (the group may be the root's), elsewhere its own. The group is one
     /// whole subtree, so nothing of it reaches the chunk state.
     #[cfg(feature = "std")]
-    pub(crate) fn push_group(&mut self, result: &[u8; BLOCK_LEN]) {
+    pub fn push_group(&mut self, result: &[u8; BLOCK_LEN]) {
         const CHUNKS: u64 = (STAGE_LEN / CHUNK_LEN) as u64;
         let counter = self.chunk_state.chunk_counter;
         assert!(self.chunk_state.count() == 0 && counter % CHUNKS == 0, "a held group starts at a group boundary, the core's chunk empty");
@@ -486,28 +487,26 @@ impl HasherCore {
 
     /// `update`'s loop; with `pooled`, whole subtrees of
     /// `lanes::MIN_SPLIT_LEN` and more go to the pool.
-    pub(crate) fn update_pooled(&mut self, input: &[u8], pooled: bool) -> &mut Self {
-        #[cfg(not(feature = "std"))]
-        let _ = pooled;
+    pub(crate) fn update_pooled(&mut self, input: &[u8], pooled: Option<Pool>) -> &mut Self {
         self.assert_room(self.count(), input.len());
         // The partial chunk first (hasher::fill), then whole subtrees and the
         // last chunk (hasher::feed), as src/hasher.rs describes.
         let fill_kernels = kernels_on(&self.key, &self.chunk_state, self.chunk_state.platform, pooled);
         let rest = hasher::fill(&fill_kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, input);
         // Pooled, the subtrees take the lock one at a time (children).
-        let turn = platform::Sme2Turn::take(self.chunk_state.platform, !pooled && rest.len() >= SME2_SIZED_LEN);
+        let turn = platform::Sme2Turn::take(self.chunk_state.platform, pooled.is_none() && rest.len() >= SME2_SIZED_LEN);
         let kernels = kernels_on(&self.key, &self.chunk_state, turn.platform(), pooled);
         hasher::feed(&kernels, &mut self.chunk_state, &mut self.cv_stack, self.initial_chunk_counter, rest);
         self
     }
 
-    pub(crate) fn final_output(&self) -> Output {
-        hasher::final_node(&self.kernels(self.chunk_state.platform, false), &self.chunk_state, &self.cv_stack)
+    pub fn final_output(&self) -> Output {
+        hasher::final_node(&self.kernels(self.chunk_state.platform, None), &self.chunk_state, &self.cv_stack)
     }
 
     /// The serial update: whole subtrees now, the last chunk kept.
-    pub(crate) fn update(&mut self, input: &[u8]) -> &mut Self {
-        self.update_pooled(input, false)
+    pub fn update(&mut self, input: &[u8]) -> &mut Self {
+        self.update_pooled(input, None)
     }
 
     /// Requires that `len` more bytes after `count` fit the subtree that
@@ -532,7 +531,7 @@ impl HasherCore {
     }
 
     /// Bytes so far, counted from the input offset.
-    pub(crate) fn count(&self) -> u64 {
+    pub fn count(&self) -> u64 {
         (self.chunk_state.chunk_counter - self.initial_chunk_counter) * CHUNK_LEN as u64 + self.chunk_state.count() as u64
     }
 }
@@ -699,7 +698,7 @@ mod test {
         let mut h = Hasher::new(Mode::Plain, None);
         h.update(&input[..STAGE_LEN]);
         h.update(&input[STAGE_LEN..STAGE_LEN + 100]);
-        let rest = h.gather_part(&input[STAGE_LEN + 100..2 * STAGE_LEN + 50], false, true);
+        let rest = h.gather_part(&input[STAGE_LEN + 100..2 * STAGE_LEN + 50], None, true);
         assert_eq!(rest.len(), 50, "the rest handed back");
         let (counter, bytes) = h.held_group().expect("a whole group held");
         assert_eq!((counter, &bytes[..]), ((STAGE_LEN / CHUNK_LEN) as u64, &input[STAGE_LEN..2 * STAGE_LEN]));

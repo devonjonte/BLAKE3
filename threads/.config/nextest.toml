@@ -1,0 +1,74 @@
+# cargo-nextest's profiles for this repository (tools/mutants/check.py).
+#
+# One clock a run, and only here: each profile's slow-timeout is the one
+# limit on a test's time in that run. Tests hold no watchdogs of their own,
+# and check.py's cargo-mutants limit is a backstop whose firing is an error,
+# not a verdict (two clocks over one test made its outcome depend on which
+# ran out first, and on the machine's load: an EPYC 9255, October 22).
+
+[profile.default]
+# A test still running at 60 s hangs: killed and named. It replaces the
+# integration tests' own watchdogs (20 s and 60 s) and the idle-park test's
+# 10 s wait. It is new to the tests without a watchdog, so measure the
+# slowest test of CI's debug and QEMU jobs before landing: the clock must
+# sit well above every test there.
+slow-timeout = { period = "60s", terminate-after = 1 }
+# pool_fairness times two callers for a second and reads their shares: a
+# probe of the machine as much as of the pool, which other load fails
+# (#240: 2 of 5 alone on a 4-vCPU guest, every shard of a mutation check).
+# It runs on purpose, `cargo nextest run -P machine`, with the machine to
+# itself; the pool's order of service has its own test in lanes::sources.
+default-filter = "not binary(pool_fairness)"
+
+[profile.machine]
+default-filter = "binary(pool_fairness)"
+slow-timeout = { period = "60s", terminate-after = 1 }
+
+[profile.emulated]
+# CI's x86_widths job: the suites under Intel's emulator, as a CPU the
+# runner is not (BLAKE3 #346). A test runs tens of times slower there: on
+# a four-CPU runner as an Ice Lake server, the slowest finished in 51 s
+# and one multithreaded test was still running at 60 s (November 10,
+# 2026). The clock sits well above that; a hang still ends and is named.
+slow-timeout = { period = "300s", terminate-after = 1 }
+# test_wide_bit_matches_cpuinfo compares the CPU's own report (emulated)
+# with the kernel's /proc/cpuinfo (the real machine's): as an Ice Lake
+# server on an AMD Zen 5 runner the two differ, as they should.
+default-filter = "not binary(pool_fairness) and not test(test_wide_bit_matches_cpuinfo)"
+
+[profile.mutants]
+# A mutant's tests stop at the first that fails, and the tests still running
+# end at once: a caught mutant costs the tests up to its first catcher. With
+# fail-fast's default (wait), a catch at 0.07 s still waited for any test the
+# mutant hung, to the clock: 42 of an EPYC run's 120 30-second test phases
+# were such catches (BLAKE3 #244). The ended tests read SIGTERM, which
+# check.py counts as no outcome. Each test in its own process.
+fail-fast = { max-fail = 1, terminate = "immediate" }
+# tests/pool_fairness.rs judges how the pool serves two callers by their
+# counts over two seconds, which six shards of mutants beside it decide
+# as much as the pool does: it failed the unmutated baseline under them
+# (i7-12700K, November 3; alone it reads 1.0-1.1 against its bound of
+# 1.5). It runs in the default profile, on a quiet machine (BLAKE3 #215).
+default-filter = "not binary(pool_fairness)"
+# A test still running at 15 s hangs: killed and named. The run's one
+# clock: check.py reports a mutant that only this clock stopped as CLOCK
+# ONLY, not as caught by a test. The slowest test takes under 1 s alone;
+# at 5 s this clock stopped an unmutated stream test (5,055 ms, a
+# compiled-out mutant, six shards on 48 threads: an EPYC 9255, October
+# 22), and six shards' baselines on the i7-12700K took 1.7 s at most
+# (November 9). 15 s is three times the EPYC's slowest; each hang, a
+# mutant that never ends, costs that much (at 30 s, two hangs were most of
+# a change's minute, BLAKE3 #257).
+slow-timeout = { period = "15s", terminate-after = 1 }
+# Each test's line once, as it ends, with its outcome and time.
+status-level = "all"
+final-status-level = "none"
+
+[profile.mutants-map]
+# As `mutants`, but every test runs on every mutant: the record names every
+# test that catches each one, with its time (check.py --map).
+fail-fast = false
+default-filter = "not binary(pool_fairness)"
+slow-timeout = { period = "30s", terminate-after = 1 }
+status-level = "all"
+final-status-level = "none"

@@ -7,13 +7,13 @@
 //! ```
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Once per process, before any other call (see Startup self-test).
-//! blake3_servil::initialize();
+//! blake3_servil_core::initialize();
 //!
 //! // Hash an input all at once.
-//! let hash1 = blake3_servil::convenience::hash(b"foobarbaz");
+//! let hash1 = blake3_servil_core::convenience::hash(b"foobarbaz");
 //!
 //! // Hash an input incrementally.
-//! let mut hasher = blake3_servil::convenience::Hasher::new(blake3_servil::Mode::Plain, None);
+//! let mut hasher = blake3_servil_core::convenience::Hasher::new(blake3_servil_core::Mode::Plain, None);
 //! hasher.update(b"foo");
 //! hasher.update(b"bar");
 //! hasher.update(b"baz");
@@ -24,7 +24,7 @@
 //! // Extended output. OutputReader also implements Read and Seek.
 //! # #[cfg(feature = "std")] {
 //! let mut output = [0; 1000];
-//! let mut hasher = blake3_servil::convenience::Hasher::new(blake3_servil::Mode::Plain, None);
+//! let mut hasher = blake3_servil_core::convenience::Hasher::new(blake3_servil_core::Mode::Plain, None);
 //! hasher.update(b"foobarbaz");
 //! let mut output_reader = hasher.finalize_xof();
 //! output_reader.fill(&mut output);
@@ -36,14 +36,14 @@
 //!
 //! // Many short messages in one call: a Batch lays them out in Blocks.
 //! # #[cfg(feature = "std")] {
-//! use blake3_servil::{throughput::{self, Batch}, Mode};
+//! use blake3_servil_core::{throughput::{self, Batch}, Mode};
 //! let mut batch = Batch::new(64, 3);
 //! for i in 0..3 {
 //!     batch.set(i, &[i as u8; 64]);
 //! }
 //! let mut hashes = [[0u8; 32]; 3];
 //! throughput::hash_many(Mode::Plain, &batch, &mut hashes);
-//! assert_eq!(hashes[2], *blake3_servil::convenience::hash(&[2u8; 64]).as_bytes());
+//! assert_eq!(hashes[2], *blake3_servil_core::convenience::hash(&[2u8; 64]).as_bytes());
 //! # }
 //! # Ok(())
 //! # }
@@ -241,13 +241,13 @@ extern crate std;
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_support;
 
 mod block;
 pub mod convenience;
 #[cfg(feature = "std")]
 mod each;
-#[cfg(blake3_gpu)]
-mod gpu;
 pub mod throughput;
 
 mod platform;
@@ -284,35 +284,9 @@ mod sse41;
 
 #[cfg(feature = "std")]
 mod io;
-/// The primitives src/finish.rs runs on: the standard library's here, and
-/// Shuttle's in tests/shuttle_finish.rs, which compiles that file beside its own
-/// `finish_sync`.
-#[cfg(feature = "std")]
-mod finish_sync {
-    pub use std::sync::Mutex;
-    pub use std::sync::atomic::{AtomicUsize, Ordering};
-    pub use std::thread;
-}
-#[cfg(feature = "std")]
-mod finish;
-/// The primitives src/park.rs runs on: the standard library's here, and
-/// Shuttle's in tests/shuttle_park.rs, which compiles that file beside its
-/// own `park_sync`.
-#[cfg(feature = "std")]
-mod park_sync {
-    pub use std::sync::OnceLock;
-    pub use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-    pub use std::thread;
-}
-#[cfg(feature = "std")]
-mod lanes;
 mod many;
 mod pair;
-#[cfg(feature = "std")]
-mod park;
 mod self_test;
-#[cfg(feature = "std")]
-mod stream;
 mod tree;
 
 /// A kind of kernel or path a call ran, for the tests that check which
@@ -452,27 +426,36 @@ pub const BLOCK_LEN: usize = 64;
 /// the maximum degree of parallelism used by the implementation equals the number of chunks.
 pub const CHUNK_LEN: usize = 1024;
 
-const MAX_DEPTH: usize = 54; // 2^54 * CHUNK_LEN = 2^64
+#[doc(hidden)]
+pub const MAX_DEPTH: usize = 54; // 2^54 * CHUNK_LEN = 2^64
 
 // A chunk's CV is words while its blocks compress (the kernels' form); the
 // hash_many interface hashes input bytes and parent nodes alike, so its
 // output CVs are bytes.
-type CVWords = [u32; 8];
-type CVBytes = [u8; 32]; // little-endian
+#[doc(hidden)]
+pub type CVWords = [u32; 8];
+#[doc(hidden)]
+pub type CVBytes = [u8; 32]; // little-endian
 
-const IV: &CVWords = &[0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19];
+#[doc(hidden)]
+pub const IV: &CVWords = &[0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19];
 
 // These are the internal flags that we use to domain separate root/non-root,
 // chunk/parent, and chunk beginning/middle/end. These get set at the high end
 // of the block flags word in the compression function, so their values start
 // high and go down.
-const CHUNK_START: u8 = 1 << 0;
-const CHUNK_END: u8 = 1 << 1;
+#[doc(hidden)]
+pub const CHUNK_START: u8 = 1 << 0;
+#[doc(hidden)]
+pub const CHUNK_END: u8 = 1 << 1;
 const PARENT: u8 = 1 << 2;
-const ROOT: u8 = 1 << 3;
-const KEYED_HASH: u8 = 1 << 4;
+#[doc(hidden)]
+pub const ROOT: u8 = 1 << 3;
+#[doc(hidden)]
+pub const KEYED_HASH: u8 = 1 << 4;
 const DERIVE_KEY_CONTEXT: u8 = 1 << 5;
-const DERIVE_KEY_MATERIAL: u8 = 1 << 6;
+#[doc(hidden)]
+pub const DERIVE_KEY_MATERIAL: u8 = 1 << 6;
 
 /// An output of the default size, 32 bytes, which provides constant-time
 /// equality checking.
@@ -716,7 +699,8 @@ impl fmt::Display for HexError {
 #[cfg(feature = "std")]
 impl std::error::Error for HexError {}
 
-type Output = hasher::Output<Platform>;
+#[doc(hidden)]
+pub type Output = hasher::Output<Platform>;
 
 impl Clone for Output {
     fn clone(&self) -> Self {
@@ -732,7 +716,7 @@ impl Clone for Output {
 }
 
 impl Output {
-    fn root_hash(&self) -> Hash {
+    pub fn root_hash(&self) -> Hash {
         debug_assert_eq!(self.counter, 0);
         Hash(self.root_bytes())
     }
@@ -1031,7 +1015,8 @@ fn compress_chunks_parallel(input: &[u8], key: &CVWords, chunk_counter: u64, fla
 // number of parents hashed. (If there's an odd input chaining value left over,
 // return it as an additional output.) These parents are never the root and
 // never empty; those cases use a different codepath.
-fn compress_parents_parallel(child_chaining_values: &[u8], key: &CVWords, flags: u8, platform: Platform, out: &mut [u8]) -> usize {
+#[doc(hidden)]
+pub fn compress_parents_parallel(child_chaining_values: &[u8], key: &CVWords, flags: u8, platform: Platform, out: &mut [u8]) -> usize {
     debug_assert_eq!(child_chaining_values.len() % OUT_LEN, 0, "wacky hash bytes");
     let num_children = child_chaining_values.len() / OUT_LEN;
     debug_assert!(num_children >= 2, "not enough children");
@@ -1075,7 +1060,8 @@ fn compress_parents_parallel(child_chaining_values: &[u8], key: &CVWords, flags:
 // This function is not used on inputs of 1 chunk or less. That's a
 // different codepath. Its arrays live in tree::root_children, out of line.
 #[inline]
-fn compress_subtree_to_parent_node(input: &[u8], ahead: usize, key: &CVWords, chunk_counter: u64, flags: u8, platform: Platform) -> [u8; BLOCK_LEN] {
+#[doc(hidden)]
+pub fn compress_subtree_to_parent_node(input: &[u8], ahead: usize, key: &CVWords, chunk_counter: u64, flags: u8, platform: Platform) -> [u8; BLOCK_LEN] {
     debug_assert!(input.len() > CHUNK_LEN);
     let kernels = tree::PlatformKernels { key, flags, platform };
     let [left, right] = tree::root_children(&kernels, input, ahead, chunk_counter);
@@ -1126,7 +1112,8 @@ fn hash_one_chunk_root(input: &[u8], key: &CVWords, flags: u8) -> Hash {
 // tree::hash.
 #[cfg(feature = "std")]
 #[inline]
-fn hash_all_at_once(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8, platform: Platform) -> Output {
+#[doc(hidden)]
+pub fn hash_all_at_once(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8, platform: Platform) -> Output {
     // The input is a complete subtree at chunk_counter, or the whole
     // input (including empty) at counter zero. Its byte offset fits u64.
     debug_assert!(chunk_counter <= u64::MAX / CHUNK_LEN as u64);
@@ -1155,9 +1142,9 @@ fn hash_all_at_once(input: &[u8], key: &CVWords, chunk_counter: u64, flags: u8, 
 /// (see the crate's documentation); later calls return at once.
 ///
 /// ```
-/// blake3_servil::initialize();
-/// let hash = blake3_servil::convenience::hash(b"foo");
-/// # let mut hasher = blake3_servil::convenience::Hasher::new(blake3_servil::Mode::Plain, None);
+/// blake3_servil_core::initialize();
+/// let hash = blake3_servil_core::convenience::hash(b"foo");
+/// # let mut hasher = blake3_servil_core::convenience::Hasher::new(blake3_servil_core::Mode::Plain, None);
 /// # hasher.update(b"foo");
 /// # assert_eq!(hash, hasher.finalize());
 /// ```
@@ -1166,95 +1153,35 @@ pub fn initialize() {
     platform::Platform::detect_unchecked().record();
 }
 
-/// [`initialize`], and start the threads that the multithreaded calls and
-/// [`stream`](throughput::stream) use: every program that makes such calls calls this once,
-/// before them, in place of `initialize`. It starts `threads - 1` workers,
-/// and each multithreaded call hashes on its calling thread and the
-/// workers (calls made at once share the workers), and on CPUs with SME2
-/// (Apple M4) the SME2 thread too; `None` means one thread
-/// a CPU (`std::thread::available_parallelism`, which follows the CPU
-/// affinity the program runs under). With 1, calls hash on their calling
-/// thread alone: no workers start, nor the SME2 thread. Otherwise it
-/// starts the first worker and returns; the first worker starts the others
-/// (each 20-30 us on Linux x86-64), and calls run on the workers started
-/// so far. The
-/// threads wait asleep whenever no call has work for them (their memory:
-/// see [Memory](crate#memory)). Later calls return at once, and must ask
-/// for the same number: another `Some` panics. A panic on a worker thread
-/// (a bug in this crate) ends the process, its message printed, rather
-/// than leaving the call that waits for that worker's piece waiting
-/// forever.
-///
-/// `None` counts logical CPUs, so on a CPU with SMT (Hyper-Threading) both
-/// threads of each core, and that is the faster default. On an EPYC 9255,
-/// the 16-input kernels leave much of a core waiting on its loads, and a
-/// core's second thread fills that time: two threads hash 1.4-1.7 times
-/// what one does, as with official BLAKE3. The 32-input AVX-512 kernel
-/// (Linux) keeps a core busier on its own, so a second thread adds less
-/// (1.1-1.3 times); even so, on 1 GiB 24 threads, one a core, took 4-14%
-/// longer than 48. A thread slowed by the other thread on its core, by an
-/// efficiency core or by another program takes fewer of a call's pieces,
-/// and the pieces shrink toward the end of the input, so the slowest thread
-/// finishes holding a small one. To leave CPUs to other work, pass fewer
-/// threads.
-///
-/// Several programs each with a full pool share the machine without
-/// trouble, and unevenly. On an i7-12700K (20 CPUs), N programs each
-/// streaming 64 KiB messages hashed 26 GB/s alone, 37-41 together at 2
-/// to 10, and 21-28 at 20 to 80 (400 to 1600 threads): the machine's
-/// total holds, and oversubscription costs it 31% at one program a core
-/// and 48% at four. What each program gets is the OS's choice among
-/// equal threads: at 20 programs the luckiest got 2.6 times the
-/// unluckiest, at 80, 8 times (bench-hashes #116, November 2026). A
-/// program that needs a predictable share beside others sizes its pool
-/// to its share of the machine.
-///
-/// The threads are this process's: in a child forked after they started,
-/// every multithreaded call and stream panics, saying so (the child has
-/// none of them). A program that forks initializes the pool in the process
-/// that hashes, after any fork; its single-threaded calls work anywhere.
-///
-/// Each thread that makes multithreaded calls keeps a little storage for
-/// them (its cut of the input, 48 KiB for inputs up to 64 MiB, and its
-/// job record), grown on its first call and on the first call that
-/// outgrows it, and otherwise untouched: after that, a call allocates
-/// nothing. This call prepares the calling thread's; a call from another
-/// thread prepares that thread's the first time.
-///
-/// ```
-/// blake3_servil::initialize_multithreaded(None);
-/// let message = vec![blake3_servil::throughput::Block::ZERO; (1 << 20) / 64];
-/// let hash = blake3_servil::throughput::hash_multithreaded(blake3_servil::Mode::Plain, &message, 1 << 20);
-/// assert_eq!(hash, blake3_servil::convenience::hash(&[0u8; 1 << 20]));
-/// ```
-#[cfg(feature = "std")]
-pub fn initialize_multithreaded(threads: Option<core::num::NonZeroUsize>) {
-    static STARTED: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    let cpus = || std::thread::available_parallelism().map_or(1, |n| n.get());
-    let started = *STARTED.get_or_init(|| {
-        let threads = threads.map_or_else(cpus, |n| n.get());
-        initialize();
-        lanes::initialize(threads);
-        threads
-    });
-    lanes::prepare_thread();
-    if let Some(threads) = threads {
-        assert_eq!(
-            started,
-            threads.get(),
-            "blake3-servil: the multithreaded calls were started with {started} threads; initialize_multithreaded cannot change that to {threads}"
-        );
-    }
-}
-
-/// Whether every worker of the multithreaded calls' pool is parked (false
-/// before [`initialize_multithreaded`]). Undocumented and unstable, for
-/// tests only: a test that needs the pool idle waits for this, not for a
-/// sleep that a loaded machine could outlast.
-#[cfg(feature = "std")]
+/// What a crate that adds threads builds on (blake3-servil's pool, stream
+/// and pipeline): the one-thread calls on a chosen platform, the tree's
+/// pieces, and the Hasher's inside. Not for programs: it changes with the
+/// two crates, which are released together.
 #[doc(hidden)]
-pub fn __all_workers_parked() -> bool {
-    lanes::all_workers_parked()
+#[cfg(feature = "std")]
+pub mod hazmat {
+    pub use crate::{
+        CHUNK_END, CHUNK_START, CVBytes, CVWords, DERIVE_KEY_MATERIAL, IV, KEYED_HASH, MAX_DEPTH, Output, ROOT, compress_parents_parallel,
+        compress_subtree_to_parent_node, hash_all_at_once, hash_many_serial, hash_serial, hash_serial_on,
+    };
+    pub mod platform {
+        pub use crate::platform::{MAX_SIMD_DEGREE, Platform, Sme2Turn, words_from_le_bytes_32};
+    }
+    pub mod many {
+        pub use crate::many::{assert_slots, hash_many_on, slot_len};
+    }
+    pub mod hasher {
+        pub use crate::hasher::{parent_output, subtree_len};
+    }
+    pub mod tree {
+        pub use crate::tree::left_len;
+    }
+    pub mod incremental {
+        pub use crate::incremental::{HasherCore, Pool, STAGE_LEN};
+    }
+    pub mod each {
+        pub use crate::each::{Item, MEMBERS, hash_each_on, prepare_thread, update_turn};
+    }
 }
 
 /// An alias to distinguish [`context_key`](throughput::context_key) outputs from other keys.
@@ -1301,7 +1228,8 @@ impl Mode<'_> {
     /// every call (October 24, the i7's disassembly of a caller); a
     /// constant mode folds to its constants, inlined.
     #[inline]
-    pub(crate) fn key(self, room: &mut core::mem::MaybeUninit<CVWords>) -> (&CVWords, u8) {
+    #[doc(hidden)]
+    pub fn key(self, room: &mut core::mem::MaybeUninit<CVWords>) -> (&CVWords, u8) {
         match self {
             Mode::Plain => (IV, 0),
             _ => {
@@ -1313,7 +1241,8 @@ impl Mode<'_> {
 
     /// The key words and flags this mode hashes with.
     #[inline]
-    fn key_and_flags(self) -> (CVWords, u8) {
+    #[doc(hidden)]
+    pub fn key_and_flags(self) -> (CVWords, u8) {
         match self {
             Mode::Plain => (*IV, 0),
             Mode::Keyed(key) => (platform::words_from_le_bytes_32(key), KEYED_HASH),
@@ -1328,7 +1257,8 @@ impl Mode<'_> {
 /// hash() in its modes and hash_multithreaded()'s short path all come
 /// through here.
 #[inline]
-fn hash_serial(input: &[u8], key: &CVWords, flags: u8) -> Hash {
+#[doc(hidden)]
+pub fn hash_serial(input: &[u8], key: &CVWords, flags: u8) -> Hash {
     hash_serial_from(Platform::detect(), input, key, flags, false)
 }
 
@@ -1462,13 +1392,15 @@ pub(crate) const SME2_SIZED_BATCH: usize = 16;
 /// piece runs the NEON hybrids); one chunk or less runs the scalar kernel
 /// on every platform.
 #[inline]
-fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) -> Hash {
+#[doc(hidden)]
+pub fn hash_serial_on(input: &[u8], key: &CVWords, flags: u8, platform: Platform) -> Hash {
     Hash(tree::hash(&tree::PlatformKernels { key, flags, platform }, input))
 }
 
 /// [`hash_many`] in the mode of `key` and `flags`, on the calling thread.
 #[inline]
-pub(crate) fn hash_many_serial(input: &[u8], message_len: usize, slot: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]]) {
+#[doc(hidden)]
+pub fn hash_many_serial(input: &[u8], message_len: usize, slot: usize, key: &CVWords, flags: u8, out: &mut [[u8; OUT_LEN]]) {
     hash_many_serial_from(Platform::detect(), input, message_len, slot, key, flags, out);
 }
 

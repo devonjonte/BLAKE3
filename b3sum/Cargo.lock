@@ -90,6 +90,15 @@ name = "blake3-servil"
 version = "0.8.0+dev"
 dependencies = [
  "arrayvec",
+ "blake3-servil-core",
+ "cc",
+]
+
+[[package]]
+name = "blake3-servil-core"
+version = "0.8.0+dev"
+dependencies = [
+ "arrayvec",
  "blake3-servil-version",
  "cc",
  "cfg-if",

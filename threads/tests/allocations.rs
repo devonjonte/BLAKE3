@@ -5,7 +5,7 @@
 //! library's worker threads where the call uses them.
 #![cfg(feature = "std")]
 
-#[path = "../tools/require_nextest.rs"]
+#[path = "../../tools/require_nextest.rs"]
 mod require_nextest;
 
 use blake3_servil::convenience::Hasher;

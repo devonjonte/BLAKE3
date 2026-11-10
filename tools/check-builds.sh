@@ -21,11 +21,13 @@ step python3 tools/gen-ver.py --check
 step cargo nextest run --cargo-quiet --release --no-default-features
 # nextest skips doc tests: the examples without std too, where Batch is absent.
 step cargo test -q --release --doc --no-default-features
-# One CPU, as in a one-CPU container: the pool has no worker thread, and
-# the caller hashes everything (the suites run on many CPUs and never
-# reach that path).
-step taskset -c 0 cargo nextest run --cargo-quiet --release --lib
 RUSTFLAGS="-D warnings" step cargo check -q --release --tests --examples
+# The crate with the pool (threads/). One CPU, as in a one-CPU container:
+# the pool has no worker thread, and the caller hashes everything (the
+# suites run on many CPUs and never reach that path).
+step sh -c 'cd threads && taskset -c 0 cargo nextest run --cargo-quiet --release --lib'
+RUSTFLAGS="-D warnings" step sh -c 'cd threads && cargo check -q --release --tests'
+RUSTFLAGS="-D warnings" step sh -c 'cd threads && cargo check -q --tests --target x86_64-unknown-linux-gnu'
 RUSTFLAGS="-D warnings" step cargo check -q --release --manifest-path b3sum/Cargo.toml
 # The C API (capi/): its Rust tests, and b3.h compiled as C11 and run.
 RUSTFLAGS="-D warnings" step cargo nextest run --cargo-quiet --release --manifest-path capi/Cargo.toml

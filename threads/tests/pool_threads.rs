@@ -6,7 +6,7 @@
 
 use core::num::NonZeroUsize;
 
-#[path = "common/golden.rs"]
+#[path = "../../tests/common/golden.rs"]
 #[allow(dead_code)]
 mod golden;
 

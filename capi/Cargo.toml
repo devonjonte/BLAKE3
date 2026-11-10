@@ -10,7 +10,7 @@ publish = false
 name = "b3_servil"
 
 [dependencies]
-blake3-servil = { path = ".." }
+blake3-servil = { path = "..", package = "blake3-servil-core" }
 
 [features]
 capi = []

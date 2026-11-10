@@ -13,16 +13,6 @@
 # slowest test of CI's debug and QEMU jobs before landing: the clock must
 # sit well above every test there.
 slow-timeout = { period = "60s", terminate-after = 1 }
-# pool_fairness times two callers for a second and reads their shares: a
-# probe of the machine as much as of the pool, which other load fails
-# (#240: 2 of 5 alone on a 4-vCPU guest, every shard of a mutation check).
-# It runs on purpose, `cargo nextest run -P machine`, with the machine to
-# itself; the pool's order of service has its own test in lanes::sources.
-default-filter = "not binary(pool_fairness)"
-
-[profile.machine]
-default-filter = "binary(pool_fairness)"
-slow-timeout = { period = "60s", terminate-after = 1 }
 
 [profile.emulated]
 # CI's x86_widths job: the suites under Intel's emulator, as a CPU the
@@ -34,7 +24,7 @@ slow-timeout = { period = "300s", terminate-after = 1 }
 # test_wide_bit_matches_cpuinfo compares the CPU's own report (emulated)
 # with the kernel's /proc/cpuinfo (the real machine's): as an Ice Lake
 # server on an AMD Zen 5 runner the two differ, as they should.
-default-filter = "not binary(pool_fairness) and not test(test_wide_bit_matches_cpuinfo)"
+default-filter = "not test(test_wide_bit_matches_cpuinfo)"
 
 [profile.mutants]
 # A mutant's tests stop at the first that fails, and the tests still running
@@ -49,7 +39,6 @@ fail-fast = { max-fail = 1, terminate = "immediate" }
 # as much as the pool does: it failed the unmutated baseline under them
 # (i7-12700K, November 3; alone it reads 1.0-1.1 against its bound of
 # 1.5). It runs in the default profile, on a quiet machine (BLAKE3 #215).
-default-filter = "not binary(pool_fairness)"
 # A test still running at 15 s hangs: killed and named. The run's one
 # clock: check.py reports a mutant that only this clock stopped as CLOCK
 # ONLY, not as caught by a test. The slowest test takes under 1 s alone;
@@ -68,7 +57,6 @@ final-status-level = "none"
 # As `mutants`, but every test runs on every mutant: the record names every
 # test that catches each one, with its time (check.py --map).
 fail-fast = false
-default-filter = "not binary(pool_fairness)"
 slow-timeout = { period = "30s", terminate-after = 1 }
 status-level = "all"
 final-status-level = "none"

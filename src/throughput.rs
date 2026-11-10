@@ -27,35 +27,9 @@
 pub use crate::block::Packed;
 pub use crate::block::{Batch, Block, Prepared};
 #[cfg(feature = "std")]
-pub use crate::each::{finalize_each, hash_each, hash_each_multithreaded, update_each, update_each_multithreaded};
-#[cfg(feature = "std")]
-pub use crate::stream::{Stream, stream};
+pub use crate::each::{finalize_each, hash_each, update_each};
 
 use crate::{ContextKey, DERIVE_KEY_CONTEXT, Hash, IV, Mode, OUT_LEN};
-
-/// [`Hasher::update`](crate::convenience::Hasher::update), using other CPU
-/// cores where that is faster: the same result, never slower. Pieces of
-/// 512 KiB and more use them, as [`hash_multithreaded`] does; shorter ones
-/// hash on the calling thread. One `Hasher` may take both calls. When
-/// reading the pieces keeps your thread busy, a [`stream`] is faster
-/// ([`Stream::submit_reader`], or [`Stream::submit_with`]): it hashes each
-/// piece while your thread reads the next. The program calls
-/// [`initialize_multithreaded`](crate::initialize_multithreaded) first.
-///
-/// ```
-/// # blake3_servil::initialize_multithreaded(None);
-/// use blake3_servil::{Mode, convenience::Hasher, throughput};
-/// let input = vec![7u8; 3 << 20];
-/// let mut hasher = Hasher::new(Mode::Plain, Some(input.len() as u64));
-/// for piece in input.chunks(64 * 1024) {
-///     throughput::update_multithreaded(&mut hasher, piece);
-/// }
-/// assert_eq!(hasher.finalize(), blake3_servil::convenience::hash(&input));
-/// ```
-#[cfg(feature = "std")]
-pub fn update_multithreaded<'h>(hasher: &'h mut crate::convenience::Hasher, input: &[u8]) -> &'h mut crate::convenience::Hasher {
-    hasher.update_pooled(input)
-}
 
 /// The hash in `mode` of the message of `len` bytes that starts `input`:
 /// a batch of one. The message starts a block, so on a cache line; the
@@ -64,9 +38,9 @@ pub fn update_multithreaded<'h>(hasher: &'h mut crate::convenience::Hasher, inpu
 /// [`convenience::hash`](crate::convenience::hash) is the faster call.
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil_core::initialize();
 /// # #[cfg(feature = "std")] {
-/// use blake3_servil::{Mode, convenience, throughput::{self, Batch}};
+/// use blake3_servil_core::{Mode, convenience, throughput::{self, Batch}};
 /// let mut message = Batch::new(100, 1);
 /// message.set(0, &[7u8; 100]);
 /// assert_eq!(throughput::hash(Mode::Plain, message.blocks(), 100), convenience::hash(&[7u8; 100]));
@@ -88,9 +62,9 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// next layer's batch ([`Batch::digests_mut`]).
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil_core::initialize();
 /// # #[cfg(feature = "std")] {
-/// use blake3_servil::{Mode, convenience, throughput::{self, Batch}};
+/// use blake3_servil_core::{Mode, convenience, throughput::{self, Batch}};
 /// let mut leaves = Batch::new(256, 1000);
 /// for i in 0..1000 {
 ///     leaves.set(i, &[7u8; 256]);
@@ -111,9 +85,9 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// holds them, with no copy into blocks:
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil_core::initialize();
 /// # #[cfg(feature = "std")] {
-/// use blake3_servil::{Mode, convenience, throughput::{self, Packed}};
+/// use blake3_servil_core::{Mode, convenience, throughput::{self, Packed}};
 /// let mut leaves = Packed::<32>::new(1000);
 /// for (i, leaf) in leaves.iter_mut().enumerate() {
 ///     leaf[0] = i as u8;
@@ -132,85 +106,6 @@ pub fn hash_many<P: Prepared>(mode: Mode, batch: &P, out: &mut [[u8; OUT_LEN]]) 
     crate::hash_many_serial(batch.bytes(), batch.message_len(), batch.slot(), key, flags, out);
 }
 
-/// [`hash_many`], using other CPU cores where that is faster: the same
-/// hashes, never slower.
-///
-/// ```
-/// # blake3_servil::initialize_multithreaded(None);
-/// use blake3_servil::Mode;
-/// let mut leaves = blake3_servil::throughput::Batch::new(256, 4096);
-/// (0..4096).for_each(|i| leaves.set(i, &[7u8; 256]));
-/// let mut hashes = vec![[0u8; 32]; 4096];
-/// blake3_servil::throughput::hash_many_multithreaded(Mode::Plain, &leaves, &mut hashes);
-/// assert!(hashes.iter().all(|h| h == blake3_servil::convenience::hash(&[7u8; 256]).as_bytes()));
-/// ```
-///
-/// **Speed**: below 512 KiB in all it runs on the calling thread, at
-/// [`hash_many`]'s speed; larger batches use the other cores too (on an
-/// Apple M4 Max, 64-byte messages from about 10 down to 3 ns each). It
-/// shares the cores with other callers as [`hash_multithreaded`] does.
-#[cfg(feature = "std")]
-// Inlined, so a constant mode folds to its constants (as
-// convenience::hash is: no mode stored for the call to read).
-#[inline(always)]
-pub fn hash_many_multithreaded<P: Prepared>(mode: Mode, batch: &P, out: &mut [[u8; OUT_LEN]]) {
-    crate::lanes::require();
-    let mut room = core::mem::MaybeUninit::uninit();
-    let (key, flags) = mode.key(&mut room);
-    // Its length against the digests here, on the caller's thread, as
-    // hash_many's kernels check it: a multiplication.
-    crate::many::assert_slots(batch.bytes(), batch.message_len(), batch.slot(), out.len());
-    crate::lanes::hash_many(batch.bytes(), batch.message_len(), batch.slot(), key, flags, out);
-}
-
-/// [`hash`], using other CPU cores where that is faster: the same
-/// [`Hash`](struct@Hash), never slower. For a message whose bytes are not
-/// in blocks (a mapped file, say), [`update_multithreaded`] into a
-/// [`Hasher`](crate::convenience::Hasher) takes any slice, at the same
-/// speed on the i7-12700K from 512 KiB to 1 GiB (about 1% slower at 1 MiB).
-///
-/// ```
-/// # blake3_servil::initialize_multithreaded(None);
-/// use blake3_servil::{Mode, throughput::{self, Block}};
-/// let message = vec![Block::ZERO; 1 << 14];
-/// let hash = throughput::hash_multithreaded(Mode::Plain, &message, 1 << 20);
-/// assert_eq!(hash, blake3_servil::convenience::hash(&[0u8; 1 << 20]));
-/// ```
-///
-/// **Speed**, on an Apple M4 Max (16 cores): below 512 KiB it hashes on the
-/// calling thread, at [`hash`](crate::convenience::hash)'s speed; from 512 KiB it uses the other cores
-/// too: about 14 GB/s at 1 MiB, 21 GB/s at 4 MiB, and 26 to 29 GB/s from
-/// 16 MiB, 2 to 5 times [`hash`](crate::convenience::hash). The extra threads wait asleep between calls and
-/// use no CPU then.
-///
-/// **Several callers at once**: calls from several threads of one program
-/// share the cores in turn, each getting a fair part; a call that finds the
-/// cores all busy hashes on its own thread, at [`hash`](crate::convenience::hash)'s speed.
-///
-/// **CPUs with performance and efficiency cores** (Intel's since Alder
-/// Lake): a multithreaded call or stream uses every core, and afterwards
-/// the OS sometimes leaves the calling thread on an efficiency core for a
-/// while, where single-threaded hashing runs at about half speed (AVX2's
-/// 256-bit operations run as two halves there). Measured on an i7-12700K
-/// under Linux 7.0: beside nonstop multithreaded streams, 7% of 16 KiB
-/// single-threaded hashes ran partly on an efficiency core, 2.2 times
-/// slower, about 6% on their average. A program that alternates the two
-/// and needs its single-threaded speed steady can keep that thread on the
-/// performance cores (`sched_setaffinity` on Linux).
-///
-/// The program calls [`initialize_multithreaded`](crate::initialize_multithreaded) first; a call before it
-/// panics.
-#[cfg(feature = "std")]
-// Inlined, so a constant mode folds to its constants (as
-// convenience::hash is: no mode stored for the call to read).
-#[inline]
-pub fn hash_multithreaded(mode: Mode, input: &[Block], len: usize) -> Hash {
-    crate::lanes::require();
-    let mut room = core::mem::MaybeUninit::uninit();
-    let (key, flags) = mode.key(&mut room);
-    crate::lanes::hash_with_key(&Block::bytes(input)[..len], key, flags)
-}
-
 /// Hash a key-derivation context string and return a [`ContextKey`].
 ///
 /// This has the same security requirement as key derivation. **The context
@@ -222,12 +117,12 @@ pub fn hash_multithreaded(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// # Example
 ///
 /// ```
-/// # blake3_servil::initialize();
-/// use blake3_servil::Mode;
+/// # blake3_servil_core::initialize();
+/// use blake3_servil_core::Mode;
 ///
-/// let context_key = blake3_servil::throughput::context_key("foo");
-/// let derived = blake3_servil::convenience::hash_with(Mode::DeriveKeyWith(&context_key), b"bar");
-/// assert_eq!(derived, blake3_servil::convenience::hash_with(Mode::DeriveKey("foo"), b"bar"));
+/// let context_key = blake3_servil_core::throughput::context_key("foo");
+/// let derived = blake3_servil_core::convenience::hash_with(Mode::DeriveKeyWith(&context_key), b"bar");
+/// assert_eq!(derived, blake3_servil_core::convenience::hash_with(Mode::DeriveKey("foo"), b"bar"));
 /// ```
 pub fn context_key(context: &str) -> ContextKey {
     crate::hash_serial(context.as_bytes(), IV, DERIVE_KEY_CONTEXT).0

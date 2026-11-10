@@ -51,7 +51,7 @@ pub enum Platform {
 /// accepted costs (Zooko, September 2026): two programs sharing the machine
 /// lose the cells where each held an SME unit, and their small batches
 /// 6-16%.
-pub(crate) struct Sme2Turn {
+pub struct Sme2Turn {
     platform: Platform,
     #[cfg(blake3_sme2)]
     held: bool,
@@ -68,7 +68,7 @@ static SME2_BUSY: Busy = Busy(core::sync::atomic::AtomicBool::new(false));
 
 impl Sme2Turn {
     #[inline]
-    pub(crate) fn take(platform: Platform, sme2_sized: bool) -> Self {
+    pub fn take(platform: Platform, sme2_sized: bool) -> Self {
         #[cfg(blake3_sme2)]
         if sme2_sized && matches!(platform, Platform::SME2) {
             use core::sync::atomic::Ordering;
@@ -97,7 +97,7 @@ impl Sme2Turn {
     }
 
     #[inline]
-    pub(crate) fn platform(&self) -> Platform {
+    pub fn platform(&self) -> Platform {
         self.platform
     }
 }
@@ -127,7 +127,7 @@ fn not_initialized() -> u8 {
         DETECTED.load(core::sync::atomic::Ordering::Relaxed)
     }
     #[cfg(not(test))]
-    panic!("blake3-servil: call blake3_servil::initialize() once, before any other call: it runs the startup self-test and detects the CPU")
+    panic!("blake3-servil: call blake3_servil_core::initialize() once, before any other call: it runs the startup self-test and detects the CPU")
 }
 
 /// x86-64's kernels for a CPU with the given features: the widest it
@@ -407,7 +407,6 @@ impl Platform {
 
     /// The SSE41 platform where this build has its kernels and the CPU its
     /// instructions.
-    #[cfg(test)]
     #[cfg(all(feature = "std", target_arch = "x86_64"))]
     pub fn sse41() -> Option<Self> {
         #[cfg(blake3_sse41_ffi)]
@@ -419,7 +418,6 @@ impl Platform {
 
     /// The AVX2 platform where this build has its kernels and the CPU its
     /// instructions.
-    #[cfg(test)]
     #[cfg(all(feature = "std", target_arch = "x86_64"))]
     pub fn avx2() -> Option<Self> {
         #[cfg(blake3_avx2_ffi)]
@@ -431,21 +429,19 @@ impl Platform {
 
     #[cfg(blake3_avx512_ffi)]
     #[cfg(target_arch = "x86_64")]
-    #[cfg(test)]
     #[cfg(feature = "std")]
     pub fn avx512() -> Option<Self> {
         if avx512_detected() { Some(Self::AVX512) } else { None }
     }
 
     #[cfg(blake3_neon)]
-    #[cfg(test)]
     pub fn neon() -> Option<Self> {
         // Assumed to be safe if the "neon" feature is on.
         Some(Self::NEON)
     }
 
     #[cfg(blake3_sme2)]
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(feature = "std")]
     pub fn sme2() -> Option<Self> {
         if sme2_detected() { Some(Self::SME2) } else { None }
     }

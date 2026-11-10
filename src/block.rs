@@ -63,9 +63,9 @@ impl core::fmt::Debug for Block {
 /// records).
 ///
 /// ```
-/// # blake3_servil::initialize();
+/// # blake3_servil_core::initialize();
 /// # #[cfg(feature = "std")] {
-/// use blake3_servil::{Mode, convenience, throughput::{self, Batch}};
+/// use blake3_servil_core::{Mode, convenience, throughput::{self, Batch}};
 /// let mut batch = Batch::new(100, 3);
 /// for i in 0..3 {
 ///     batch.set(i, &[i as u8; 100]);
@@ -128,8 +128,8 @@ impl<'a> Batch<'a> {
     /// messages in place, whatever their length, each at the start of its
     /// blocks and every byte past it zero (checked): the tests' layouts,
     /// batches beside guard pages among them.
-    #[cfg(test)]
-    pub(crate) fn in_place(blocks: &'a [Block], message_len: usize) -> Self {
+    #[doc(hidden)]
+    pub fn in_place(blocks: &'a [Block], message_len: usize) -> Self {
         let per = blocks_per(message_len);
         assert!(blocks.len() % per == 0, "{} blocks hold no whole number of {message_len}-byte messages", blocks.len());
         let slot = per * BLOCK_LEN;
@@ -480,7 +480,7 @@ mod test {
 mod packed_test {
     use super::*;
     use crate::Mode;
-    use crate::throughput::{hash_many, hash_many_multithreaded};
+    use crate::throughput::hash_many;
 
     #[test]
     fn packed_capacity_rejects_wrapping_message_counts() {
@@ -508,31 +508,25 @@ mod packed_test {
 
     /// A packed batch's digests are each message's hash, in every mode,
     /// at counts around the kernels' group of sixteen and beyond the
-    /// pool's split, 16 and 32 bytes a message, serial and multithreaded.
+    /// thread crate's split, 16 and 32 bytes a message.
     #[test]
     fn packed_messages_hash_as_each_message_alone() {
-        crate::initialize_multithreaded(None);
         let key = [9u8; 32];
         for (name, mode) in [("plain", Mode::Plain), ("keyed", Mode::Keyed(&key)), ("derive", Mode::DeriveKey("packed test"))] {
             for count in [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 33, 100, 1000, 40_000] {
                 let leaves = packed::<32>(count, 3);
                 let mut out = vec![[0u8; 32]; count];
                 hash_many(mode, &leaves, &mut out);
-                let mut out_mt = vec![[0u8; 32]; count];
-                hash_many_multithreaded(mode, &leaves, &mut out_mt);
                 for (i, leaf) in leaves.iter().enumerate() {
                     let want = *crate::convenience::hash_with(mode, leaf).as_bytes();
                     assert_eq!(out[i], want, "32 B, {count} messages, message {i}, {name}");
-                    assert_eq!(out_mt[i], want, "32 B multithreaded, {count} messages, message {i}, {name}");
                 }
                 let short = packed::<16>(count, 5);
                 let mut out = vec![[0u8; 32]; count];
                 hash_many(mode, &short, &mut out);
-                hash_many_multithreaded(mode, &short, &mut out_mt);
                 for (i, leaf) in short.iter().enumerate() {
                     let want = *crate::convenience::hash_with(mode, leaf).as_bytes();
                     assert_eq!(out[i], want, "16 B, {count} messages, message {i}, {name}");
-                    assert_eq!(out_mt[i], want, "16 B multithreaded, {count} messages, message {i}, {name}");
                 }
             }
         }

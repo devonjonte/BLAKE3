@@ -86,7 +86,7 @@ fn installed_consumer(kind: &str) -> String {
 fn from_c() {
     for kind in ["cdylib", "staticlib"] {
         let out = installed_consumer(kind);
-        blake3_servil::initialize_multithreaded(None);
+        blake3_servil::initialize();
         let input: Vec<u8> = (0..100000).map(|i| (i % 251) as u8).collect();
         let key = *b"whats the Elvish word for friend";
         let context = "BLAKE3 2019-12-27 16:29:52 test vectors context";
