@@ -55,10 +55,11 @@ loaded is itself, as a term, so the restored pointer is still an address the run
 **The theorem as the test** (job `source-mutants.sh` of the study): the 62 source mutants cargo-mutants
 plants in the six functions this theorem covers, each built for release, lifted and judged by building
 the theorem on its bytes. 3 compile to the unmutated bytes (the three the test suite lists as the same
-code); 50 are refuted: the theorem fails and a CPU that `bv_decide` names, run on the model, returns
-something else than the rule (`witness.py`, `Defs.lean`'s `agrees`); 7 are not proved (the script's
-case split no longer fits, or the named counterexample was spurious); 2 stop the lifter (they need the
-sign flag and R8); none is accepted. 103 s on six shards of the EPYC 9255 host.
+code); 55 are refuted: the theorem fails and, run on the model, the code returns something else than
+the rule on a CPU that `bv_decide` names (50) or on one of four real CPUs (5) (`witness.py`,
+`Defs.lean`'s `agrees`); 2 are not proved (the named counterexamples were spurious and the four CPUs
+agree); 2 stop the lifter (they need the sign flag and R8); none is accepted. 103 s on six shards of the
+EPYC 9255 host.
 
 Known limits, stated so nobody takes these for more than they are:
 
