@@ -310,7 +310,8 @@ impl Hasher {
 
     /// [`update`](Hasher::update), its whole subtrees of `pool.min_len`
     /// bytes and more hashed by `pool` (the thread crate's
-    /// `update_multithreaded`).
+    /// `update_multithreaded`). Not for programs: the crates' interface.
+    #[doc(hidden)]
     pub fn update_on(&mut self, input: &[u8], pool: Pool) -> &mut Self {
         self.gather(input, Some(pool))
     }
