@@ -31,3 +31,5 @@ name = "StackSpec"
 name = "Kernels"
 [[lean_lib]]
 name = "Proof_merge"
+[[lean_lib]]
+name = "MergeTree"

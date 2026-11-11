@@ -1,4 +1,5 @@
 import Cells
+import Kernels
 import MergeLoop
 open X86 Cells
 
@@ -102,11 +103,14 @@ theorem merged_done (k0 k1 : V) (fl : BitVec 8) (target len : BitVec 64) (es : C
   have e : es.length - target.toNat = 0 := by bv_omega
   simp only [merged, e]; rfl
 
-/-- The invariant "what is left to merge gives the whole result" after a turn. -/
+unseal Kernels.out in
+/-- The invariant "what is left to merge gives the whole result" after a turn: the two on top have
+become what a one-block kernel leaves for the key, the two values, counter 0, length 64 and the flags. -/
 theorem merged_turn {k0 k1 : V} {fl : BitVec 8} {target len : BitVec 64} {r0 r1 l0 l1 : V} {rest es0 : Cvs}
     (h : merged k0 k1 fl target ((r0, r1) :: (l0, l1) :: rest) = merged k0 k1 fl target es0)
     (hl : len.toNat = ((r0, r1) :: (l0, l1) :: rest).length) (ht : target < len) :
-    merged k0 k1 fl target (MergeCode.merged k0 k1 l0 l1 r0 r1 fl :: rest) = merged k0 k1 fl target es0 :=
+    merged k0 k1 fl target (((Kernels.out k0 k1 l0 l1 r0 r1 0#64 64#32 (fl.setWidth 32)).1,
+      (Kernels.out k0 k1 l0 l1 r0 r1 0#64 64#32 (fl.setWidth 32)).2) :: rest) = merged k0 k1 fl target es0 :=
   (merged_step k0 k1 fl target len r0 r1 l0 l1 rest hl ht).symm.trans h
 
 /-- The same invariant when the loop ends: the stack held is the whole result. -/

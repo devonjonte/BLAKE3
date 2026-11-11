@@ -8,12 +8,13 @@ Then, each in its own copy of this folder:
   - clauses of the source changed one at a time, the proof generated again from the changed source
     (the assembly is the same): the generator or Lean must reject it.
 usage: mutants_fn.py [JOBS]   (after ./prove_fn.sh; run from this folder)"""
-import os, shutil, subprocess, sys, tempfile, time
+import os, shutil, signal, subprocess, sys, tempfile, time
 from concurrent.futures import ThreadPoolExecutor
 
 here = os.path.dirname(os.path.abspath(__file__))
 jobs = int(sys.argv[1]) if len(sys.argv) > 1 else 4
 ROWS, SRC = "Lifted_merge.lean.rows", "hasher.ode"
+LIMIT = 600     # seconds a check may take; the right proof takes about 100
 code = [
     ("the PARENT flag is another bit", ".or 64 (.reg .rax) (.imm 0x4)", ".or 64 (.reg .rax) (.imm 0x8)", 1),
     ("the cell is one too high", ".sub 64 (.reg .rcx) (.imm 0x2)", ".sub 64 (.reg .rcx) (.imm 0x1)", 1),
@@ -57,8 +58,8 @@ def run(kind, what, old, new, n=1):
         shutil.copytree(here, w, symlinks=True, ignore=shutil.ignore_patterns("mut-*", "*.o"))
         os.symlink(os.path.join("..", "one"), os.path.join(d, "one"))     # the copy is one level deeper: its ../one is this
         if kind == "control":
-            # a line added to the code's file, so the copy checks the proof again and does not answer from what was built
-            with open(os.path.join(w, "Code_merge.lean"), "a") as f: f.write("\n-- the control's copy\n")
+            # a line added to the proof's file, so the copy checks the proof again and does not answer from what was built
+            with open(os.path.join(w, "Proof_merge.lean"), "a") as f: f.write("\n-- the control's copy\n")
         if kind == "code":
             t = open(os.path.join(w, ROWS)).read(); assert old in t, old
             with open(os.path.join(w, ROWS), "w") as f: f.write(nth_replace(t, old, new, n))
@@ -69,12 +70,14 @@ def run(kind, what, old, new, n=1):
             g = subprocess.run([sys.executable, "prove_fn.py", SRC, "merge", ROWS, "merge.layout", "Proof_merge.lean"], cwd=w, capture_output=True, text=True)
             if g.returncode != 0:
                 return kind, what, "REJECTED by the generator", time.time() - start, (g.stderr.strip().splitlines() or [""])[-1][:110]
+        # its own process group, so a check that runs out of time is stopped with its children (lake's lean)
+        pr = subprocess.Popen(["lake", "build", "Proof_merge"], cwd=w, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
         try:
-            r = subprocess.run(["lake", "build", "Proof_merge"], cwd=w, capture_output=True, text=True, timeout=900)
+            out, _ = pr.communicate(timeout=LIMIT)
         except subprocess.TimeoutExpired:
-            return kind, what, "NO VERDICT in 900 s", time.time() - start, ""
-        out = r.stdout + r.stderr
-        ok = r.returncode == 0 and "sorry" not in out
+            os.killpg(pr.pid, signal.SIGKILL); pr.communicate()
+            return kind, what, f"NO VERDICT in {LIMIT} s", time.time() - start, ""
+        ok = pr.returncode == 0 and "sorry" not in out
         first = next((l for l in out.splitlines() if "error" in l), "")[:110]
         return kind, what, "ACCEPTED" if ok else "REJECTED", time.time() - start, first
     finally:
@@ -83,13 +86,13 @@ def run(kind, what, old, new, n=1):
 
 k, w, verdict, secs, _ = run("control", "the unchanged copy", "", "")
 print(f"control: {verdict} in {secs:.0f} s", flush=True)
-if verdict != "ACCEPTED":
-    raise SystemExit("the control failed: the audit proves nothing")
+if verdict != "ACCEPTED" or secs < 20:
+    raise SystemExit("the control failed (or answered without checking): the audit proves nothing")
 todo = [("code", *m) for m in code] + [("clause", *m, 1) for m in clause]
-bad = 0
+tally = {}
 with ThreadPoolExecutor(jobs) as pool:
     for kind, what, verdict, secs, first in pool.map(lambda m: run(*m), todo):
         print(f"{verdict:<26} {secs:5.0f} s  {kind}: {what}" + (f"   [{first}]" if first else ""), flush=True)
-        bad += verdict == "ACCEPTED"
-n_rej = len(todo) - bad
-print(f"{n_rej} of {len(todo)} not accepted ({len(code)} changed instructions, {len(clause)} changed clauses); {bad} accepted")
+        key = "accepted" if verdict == "ACCEPTED" else "no verdict" if verdict.startswith("NO") else "rejected"
+        tally[key] = tally.get(key, 0) + 1
+print(f"{len(code)} changed instructions and {len(clause)} changed clauses: " + ", ".join(f"{n} {k}" for k, n in sorted(tally.items())))

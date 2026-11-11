@@ -142,4 +142,8 @@ theorem call_sse_runs {prog : Nat → Option (Instr × Nat)} (hk : ∀ pc x, Cod
       hc0 hc1 hb0 hb1 hb2 hb3 hlen hret hapart
   exact Cells.runs_then h (next rax' rcx' rdx' rsi' rdi' r8' r9' zf' cf' y0 y1 y2 y3 y4 y5 y6 y7 y8 y9 y10 y11 y12 y13 y14 y15)
 
+-- From here on what a kernel leaves is compared by name: a wrong length, counter or flag is then a
+-- mismatch at once, not a search through the compression function.
+attribute [irreducible] out
+
 end Kernels

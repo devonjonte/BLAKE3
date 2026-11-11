@@ -105,8 +105,28 @@ rejected. On the EPYC 9255 host it takes 1.9 ns a call where the crate's `to_hex
 12.8; a million random hashes agree. A candidate for the crate that uses it: branch
 `candidate/sam-hex-constant-time`.
 
-Limits: the recipe covers kernels that load, compute and store with no loop; the word level has no
-proofs yet; x86-64 only; the object proved is assembled on a Mac for x86-64 (the instructions' bytes
+**`./prove_fn.sh`: a function with a contract, from source to a checked theorem.** `merge` (the tree
+hashing's loop: while the stack holds more than `target` values, the top two become their parent) carries
+its contract in the source: `requires` (the stack held at `st`, the key, `target >= 1`, `flags < 256`),
+on its loop `invariant` (the stack held; what is left to merge gives the whole result) and `decreases`,
+and `ensures` (the stack merged to `target`). Clauses are the language's own expressions or name
+definitions of `StackSpec.lean`. `prove_fn.py` writes `Proof_merge.lean` from the clauses and the
+layout the compiler prints: `Pre`, `Inv` and `Post` over the machine's state (each variable where the
+compiler put it, the frame as the compiler keeps it), the three straight-line pieces (`enter`, `turn`,
+`leave`) by a symbolic run on memory in cells (`Cells.lean`) with the kernels' contracts at the calls
+(`Kernels.lean`) and a split where the invariant does not settle a condition, and
+**`merge_meets_its_contract`** by `Hoare.seq` and `Hoare.loop` (`one/Hoare.lean`): from any state where
+the `requires` clauses hold, the 93 instructions run without a fault, through however many turns, to
+the caller's return address, where the `ensures` clauses hold, its registers are back and no byte
+outside the frame and the stack's region has changed. About 100 s. `MergeTree.lean`: the stack the
+contract promises is the specification's `Blake3.mergeTo`, the function `alg/`'s `stack_is_the_tree`
+is about. Written by hand, once: `Cells.lean` (generic), `Kernels.lean`, `StackSpec.lean` (the data
+structure and its open and close lemmas), `MergeTree.lean`; nothing for the function itself.
+`python3 mutants_fn.py`: changed instructions and changed clauses, after a control.
+
+Limits: one loop, not nested; a loop-carried variable lives in a register; no call or condition outside
+the loop; the trace is not in this theorem; `push` and the hash itself carry no contract yet
+(`LabPush.lean` is only `push`'s run). For `hex`: the recipe covers kernels that load, compute and store with no loop; x86-64 only; the object proved is assembled on a Mac for x86-64 (the instructions' bytes
 are the ELF object's; the relocations differ); the constants' alignment is the assembler's.
 
 ## `equihash/`: another project's Lean function, tied to the bytes its Rust compiles to
