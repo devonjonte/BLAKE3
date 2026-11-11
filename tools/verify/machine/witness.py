@@ -19,3 +19,10 @@ for n, block in enumerate(blocks):
     seen.add(cpu)
     print(f"def witness{n} : Cpu := {cpu}")
     print(f'#eval s!"witness agrees: {{agrees witness{n}}}; code and rule: {{result witness{n}}}; leaf1.eax {{witness{n}.leaf1.eax}} leaf1.ecx {{witness{n}.leaf1.ecx}} leaf7.ebx {{witness{n}.leaf7.ebx}} xcr0 {{witness{n}.xcr0}} amd {{(words witness{n}).amd}}"')
+# and four real CPUs (Defs.lean's): an EPYC 9255, a Xeon 6330, an EPYC 7443, a Core 2. A failure on one of
+# them is a refutation too, of the kind a test gives, where the prover named no CPU that confirms.
+REAL = ["amd 0x00B00F21 0x7EDA320B 0xF1BF97A9 0xE7", "intel 0x000606A6 0x7FFEFBFF 0xF3BFB7EF 0xE7", "amd 0x00A00F11 0x7EDA320B 0x219C97A9 0x7", "intel 0x000106A5 0x0098E3BD 0 0"]
+for n, cpu in enumerate(REAL):
+    print(f"def real{n} : Cpu := {cpu}")
+    print(f'#eval s!"witness agrees: {{agrees real{n}}}; code and rule: {{result real{n}}}; leaf1.eax {{real{n}.leaf1.eax}} leaf1.ecx {{real{n}.leaf1.ecx}} leaf7.ebx {{real{n}.leaf7.ebx}} xcr0 {{real{n}.xcr0}} amd {{(words real{n}).amd}} (a real CPU)"')
+
