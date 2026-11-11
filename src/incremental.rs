@@ -273,7 +273,7 @@ impl Hasher {
     /// Hasher does not use it today; it is here so that one that does
     /// changes no caller (AGENTS, "Our APIs freeze at 1.0").
     pub fn new(mode: Mode, length_hint: Option<u64>) -> Self {
-        let _ = length_hint;
+        let _ = core::hint::black_box(length_hint);
         let (key, flags) = mode.key_and_flags();
         Self::from_core(HasherCore::new_internal(&key, flags))
     }
