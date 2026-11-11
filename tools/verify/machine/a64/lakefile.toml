@@ -1,0 +1,10 @@
+name = "a64"
+defaultTargets = ["Scan"]
+[[lean_lib]]
+name = "A64"
+[[lean_lib]]
+name = "Code"
+[[lean_lib]]
+name = "Mem"
+[[lean_lib]]
+name = "Scan"

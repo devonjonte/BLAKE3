@@ -45,3 +45,14 @@ Known limits, stated so nobody takes these for more than they are:
   the three RIP-relative loads to the object's data itself;
 - nothing here checks the models against a CPU or against Sail, as `cross_check_x86.py` does
   for the Python models.
+
+## `a64/`: the same loop on a second machine
+
+`fold.rs`'s `scan` as rustc 1.99.1 compiles it for AArch64 (nine instructions, a post-indexed
+store, a rotation folded into the EOR). `A64.lean` (130 lines) is a model of those nine
+instructions with a decoder from the instruction words, so the program is its words; `Scan.lean`
+proves the same statement as `loop/`: any length, the fold in W0, the scan in the slice, no other
+byte changed, and an observer's trace that is a function of the slice's address and length and
+the return address. The Lean function, the memory lemmas and the proof's structure are
+`loop/`'s; the port took twelve minutes. `python3 mutants.py`: 8 of 8 changed instructions
+rejected. Check: 2 s.
