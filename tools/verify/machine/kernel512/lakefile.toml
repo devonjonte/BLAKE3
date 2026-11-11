@@ -1,0 +1,27 @@
+name = "kernel"
+defaultTargets = ["Main"]
+
+[[require]]
+name = "Blake3Servil"
+path = "../../lean"
+
+[[lean_lib]]
+name = "Simd"
+[[lean_lib]]
+name = "Code"
+[[lean_lib]]
+name = "Run"
+[[lean_lib]]
+name = "Kernel"
+[[lean_lib]]
+name = "Flat"
+[[lean_lib]]
+name = "Round"
+[[lean_lib]]
+name = "Chain"
+[[lean_lib]]
+name = "Whole"
+[[lean_lib]]
+name = "Final"
+[[lean_lib]]
+name = "Main"
