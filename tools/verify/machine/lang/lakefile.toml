@@ -33,3 +33,5 @@ name = "Kernels"
 name = "Proof_merge"
 [[lean_lib]]
 name = "MergeTree"
+[[lean_lib]]
+name = "ReadingList"
