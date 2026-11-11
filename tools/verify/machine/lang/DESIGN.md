@@ -20,6 +20,30 @@ on a secret. For every instruction that can execute, checkable by a skeptical st
 - Contracts are in the source, in the language's own expressions: `requires`, `ensures`, and on a loop
   `invariant` and `decreases`. Where a property is mathematical a clause names a Lean definition.
 
+## Every function comes with its statement in Lean
+
+(Sam, November 11: "if we're going right-hand path, then let's go hard right. Let's make the translator
+the identity.") Nothing checks that a statement means what its author intended, so nothing should stand
+between what the author wrote and what Lean proved. A translator from clauses in the source to a Lean
+statement would be such a thing: trusted, or one more text to read.
+
+- A function's statement is written in Lean, by hand, in a file of its own that holds nothing else
+  (`Spec_merge.lean`: `Merge.statement`). The source names it. The reader reads that file.
+- Statements share one small vocabulary, read once (`Abi.lean`): `Abi.Meets prog entry contract`, where a
+  contract is the arguments, the stack the function may use, the regions it speaks of, `requires`,
+  `ensures` and `modifies`. Registers, frames and the calling convention are in that one definition, not
+  in every statement.
+- A statement speaks the specification's language (`Blake3.mergeTo`, `Blake3.CV`), never definitions made
+  for the proof's convenience. What is made for the proof stays internal and off the reading list.
+- What the compiler writes about registers and frames (`Pre`, `Inv`, `Post`), the loop's invariants and
+  the prover's hints are internal: Lean checks that they give the statement.
+- A function no user calls needs no reader at all: its statement is an interface between two proofs.
+
+State on November 11: `merge_meets : Merge.statement` is proved (`Meets_merge.lean`), from the compiler's
+theorem; that last step (70 lines) is still written by hand and is the generator's to write. The clauses
+`requires` and `ensures` in `hasher.ode` now say the same thing twice and are to go; `invariant`,
+`decreases` and the hints stay in the source.
+
 ## Pinning the blame
 
 **A failed check must say what is at fault: the code, the contract, the compiler, or the proof. Reliably

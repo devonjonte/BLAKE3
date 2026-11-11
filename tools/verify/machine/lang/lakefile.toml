@@ -35,3 +35,9 @@ name = "Proof_merge"
 name = "MergeTree"
 [[lean_lib]]
 name = "ReadingList"
+[[lean_lib]]
+name = "Abi"
+[[lean_lib]]
+name = "Spec_merge"
+[[lean_lib]]
+name = "Meets_merge"
