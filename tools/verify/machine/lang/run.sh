@@ -11,7 +11,17 @@ lake env lean --run Hasher.lean rust a_ > "$work/way_a.rs"
 lake env lean --run Hasher.lean asm b_ > "$work/way_b.S"
 # Way A: the printed Rust, compiled once to assembly. No standard library, no panic machinery.
 rustc --edition 2021 --crate-type lib --emit asm -C opt-level=3 -C panic=abort -C codegen-units=1 \
-  -o "$work/way_a.s" "$work/way_a.rs" 2> "$work/rustc.log"
+  -o "$work/way_a.raw.s" "$work/way_a.rs" 2> "$work/rustc.log"
+# rustc's assembly is written for LLVM's assembler: GNU as does not know `.prefalign` (rustc 1.99).
+# Here it becomes the plain alignment it prefers. (A shipped file would be printed from the proved
+# bytes, not taken from rustc's text.)
+python3 - "$work/way_a.raw.s" "$work/way_a.s" <<'ALIGN_PY'
+import re, sys
+text = open(sys.argv[1]).read()
+text, n = re.subn(r"^\t\.prefalign\t(\d+),.*$", r"\t.p2align\t\1", text, flags=re.M)
+with open(sys.argv[2], "w") as f: f.write(text)
+print(n, "prefalign directives rewritten")
+ALIGN_PY
 rm -rf "$work/bench"; cp -R "$here/bench" "$work/bench"
 rm -rf "$work/crate"; mkdir "$work/crate"; (cd "$crate" && git archive HEAD) | tar -x -C "$work/crate"
 cat "$here/labshim.rs" >> "$work/crate/src/lib.rs"
