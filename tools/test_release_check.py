@@ -16,7 +16,7 @@ spec.loader.exec_module(check)
 
 HEAD, OLD = "a" * 40, "b" * 40
 RUN = {"id": 7, "name": "tests", "event": "workflow_dispatch", "status": "completed", "conclusion": "success"}
-MUTATION_OK = "mutants: the whole run\nmutants: 12 survive, each known and explained\nmutants: 3 time out, each known (timeouts-x86_64.txt)\n"
+MUTATION_OK = f"mutants: BLAKE3-Servil at {HEAD}\nmutants: the whole run\nmutants: 12 survive, each known and explained\nmutants: 3 time out, each known (timeouts-x86_64.txt)\n"
 
 
 def job(conclusion="success", status="completed"):
@@ -70,7 +70,7 @@ class CI(unittest.TestCase):
 
 
 class ReleaseEvidence(unittest.TestCase):
-    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch", mutation_log=MUTATION_OK, power=("AC Power, 100%", "AC Power, 100%")):
+    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch", mutation_log=MUTATION_OK, core_log=MUTATION_OK, power=("AC Power, 100%", "AC Power, 100%")):
         jobs = [job(), job()] if ci_jobs is None else ci_jobs
         def git(*args):
             if args[0] == "rev-parse":
@@ -108,7 +108,13 @@ class ReleaseEvidence(unittest.TestCase):
             for name, text in [("check-release-vm", "no cell slower"), ("check-builds", "every build passes"), ("publish-dry-run", "publish-dry-run: ok")]:
                 (logs / f"{name}-{candidate}.log").write_text(text + "\n")
             if mutation_log is not None:
-                (logs / f"mutants-{candidate}.log").write_text(mutation_log)
+                # A real run prints the full SHA for each crate, even when this
+                # fixture's history is created by PreviousRelease below.
+                identity = (git_override or git)("rev-parse", "candidate")
+                text = ("mutants: the crate at the root\n" + core_log
+                        + "mutants: the crate in threads/\n" + mutation_log
+                        + "mutants: 2 crates took 99 s in all\n")
+                (logs / f"mutants-{candidate}.log").write_text(text.replace(HEAD, identity))
             output = io.StringIO()
             with patch.object(check, "MAIN", tmp), patch.object(check, "git", git_override or git), \
                  patch.object(check, "github", github), \
@@ -152,13 +158,13 @@ class ReleaseEvidence(unittest.TestCase):
         self.assertEqual(self.run_gate(old="c" * 40)[0], 1)
 
     def test_mutation_timeout_mismatch_is_no_verdict(self):
-        text = "mutants: the whole run\nmutants: 12 survive, each known and explained\nmutants: the time-outs differ from timeouts-x86_64.txt (no verdict on those mutants)\n"
+        text = f"mutants: BLAKE3-Servil at {HEAD}\nmutants: the whole run\nmutants: 12 survive, each known and explained\nmutants: the time-outs differ from timeouts-x86_64.txt (no verdict on those mutants)\n"
         code, output = self.run_gate(mutation_log=text)
         self.assertEqual(code, 2, output)
         self.assertIn("NO VERDICT  full mutation run", output)
 
     def test_mutation_survivor_failure_is_failed(self):
-        text = "mutants: the whole run\nmutants: the list and this run differ, or a listed mutant has no reason\nmutants: 3 time out, each known (timeouts-x86_64.txt)\n"
+        text = f"mutants: BLAKE3-Servil at {HEAD}\nmutants: the whole run\nmutants: the list and this run differ, or a listed mutant has no reason\nmutants: 3 time out, each known (timeouts-x86_64.txt)\n"
         code, output = self.run_gate(mutation_log=text)
         self.assertEqual(code, 1, output)
         self.assertIn("FAIL  full mutation run", output)
@@ -166,7 +172,7 @@ class ReleaseEvidence(unittest.TestCase):
     def test_a_mutation_log_must_name_the_whole_run(self):
         # check.py's first line names the run's scope; its default covers the change since
         # origin/next, and the gate wants the whole run (--whole).
-        tail = MUTATION_OK.split("\n", 1)[1]
+        tail = MUTATION_OK.split("\n", 2)[2]
         for text in ["mutants: the change since 0123456789ab\n" + tail, tail]:
             with self.subTest(text=text):
                 code, output = self.run_gate(mutation_log=text)
@@ -174,11 +180,40 @@ class ReleaseEvidence(unittest.TestCase):
                 self.assertIn("FAIL  full mutation run", output)
 
     def test_incomplete_mutation_log_is_open(self):
-        for text in [None, "", MUTATION_OK.splitlines()[0], MUTATION_OK + "interrupted\n"]:
+        for text in [None, "", f"mutants: BLAKE3-Servil at {HEAD}\nmutants: the whole run\n", MUTATION_OK + "interrupted\n"]:
             with self.subTest(text=text):
                 code, output = self.run_gate(mutation_log=text)
                 self.assertEqual(code, 1, output)
                 self.assertIn("OPEN  full mutation run", output)
+
+    def test_core_failure_cannot_hide_behind_thread_success(self):
+        text = (f"mutants: BLAKE3-Servil at {HEAD}\nmutants: the whole run\n"
+                "mutants: the list and this run differ, or a listed mutant has no reason\n"
+                "mutants: 0 time out, each known (timeouts-x86_64.txt)\n")
+        code, output = self.run_gate(core_log=text)
+        self.assertEqual(code, 1, output)
+        self.assertIn("FAIL  full mutation run, core and threads", output)
+
+    def test_both_crates_name_the_clean_candidate(self):
+        for bad in (MUTATION_OK.replace(HEAD, OLD), MUTATION_OK.replace(HEAD, HEAD + ", with uncommitted changes")):
+            for crate in ("core_log", "mutation_log"):
+                with self.subTest(crate=crate, log=bad):
+                    code, output = self.run_gate(**{crate: bad})
+                    self.assertEqual(code, 1, output)
+                    self.assertIn("FAIL  full mutation run", output)
+
+    def test_single_crate_and_truncated_combined_logs_stay_open(self):
+        combined = ("mutants: the crate at the root\n" + MUTATION_OK
+                    + "mutants: the crate in threads/\n" + MUTATION_OK
+                    + "mutants: 2 crates took 99 s in all\n")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(check, "MAIN", tmp):
+            path = Path(tmp) / "mutants.log"
+            path.write_text(combined)
+            self.assertIs(check.mutation_result("mutants.log", HEAD), True)
+            for text in (MUTATION_OK, combined.rsplit("\n", 2)[0], combined + "interrupted\n",
+                         combined.replace("mutants: the crate in threads/", "mutants: the crate at the root")):
+                path.write_text(text)
+                self.assertIsNone(check.mutation_result("mutants.log", HEAD), text)
 
     def test_mac_undecided_outcomes_remain_distinct(self):
         for verdict, label in [("timed out", "TIMED OUT"), ("no verdict", "NO VERDICT")]:

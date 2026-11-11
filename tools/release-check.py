@@ -27,8 +27,9 @@ and the rest timed out or have no verdict.
     with `--old-bench <bench commit>` when the old side predates the
     bench's calls (0.8: 5be5f236, the old API's bench), as in the Mac
     job's "old_bench_commit".
-  - Full mutation run: tmp/night/mutants-C.log with both final summaries
-    matching their survivor and timeout lists, from
+  - Full mutation run: tmp/night/mutants-C.log, with one complete section
+    per crate (core and threads), each naming this commit and matching its
+    survivor and timeout lists, from
     `python3 tools/mutants/check.py --whole` with the commit checked out.
   - check-builds: tmp/night/check-builds-C.log ending "every build passes".
   - Publish dry run: tmp/night/publish-dry-run-C.log, from the
@@ -102,17 +103,14 @@ def log_ends_with(path, text):
     return None if tail is None else text in tail
 
 
-def mutation_result(path):
-    """check.py exits zero only when both survivor and timeout lists agree,
-    and the log's first line names the whole run: a run over the change
-    alone (check.py's default) is no release gate, whatever its tail says."""
-    tail = log_tail(path)
-    if tail is None or not tail.strip():
+def mutation_crate(lines, commit):
+    """One crate's whole run, from its commit identity through both summaries."""
+    if not lines:
         return None
-    head = Path(os.path.join(MAIN, path)).read_text(errors="replace")[:4000]
-    if "mutants: the whole run" not in head.splitlines():
+    if lines[0] != f"mutants: BLAKE3-Servil at {commit}":
         return False
-    lines = tail.strip().splitlines()
+    if "mutants: the whole run" not in lines:
+        return False
     if len(lines) < 2:
         return None
     survivors, timeouts = lines[-2:]
@@ -125,6 +123,24 @@ def mutation_result(path):
     if re.fullmatch(r"mutants: the time-outs differ from .+ \(no verdict on those mutants\)", timeouts):
         return NO_VERDICT
     return None
+
+
+def mutation_result(path, commit):
+    """Both crates must pass. The last crate's result cannot stand for the first."""
+    full = Path(MAIN) / path
+    if not full.exists():
+        return None
+    lines = full.read_text(errors="replace").splitlines()
+    headers = ["mutants: the crate at the root", "mutants: the crate in threads/"]
+    found = [(i, line) for i, line in enumerate(lines) if line.startswith("mutants: the crate ")]
+    if [line for _, line in found] != headers:
+        return None
+    if found[0][0] != 0 or not re.fullmatch(r"mutants: 2 crates took \d+ s in all", lines[-1]):
+        return None
+    middle = found[1][0]
+    results = [mutation_crate(lines[1:middle], commit), mutation_crate(lines[middle + 1:-1], commit)]
+    # A failure stays visible beside an incomplete or undecided run.
+    return next((r for r in (False, None, NO_VERDICT) if r in results), True)
 
 
 def ci_result(run):
@@ -217,8 +233,8 @@ def main():
 
     step("VM check against the previous release", log_ends_with(f"tmp/night/check-release-vm-{commit[:12]}.log", "no cell slower"),
          f"(cd ../bench-hashes && cargo run --release -- check --fork {ROOT} --against {previous or '<the main line before this release>'} --cells all [--old-bench <bench commit>]) > tmp/night/check-release-vm-{commit[:12]}.log")
-    step("full mutation run", mutation_result(f"tmp/night/mutants-{commit[:12]}.log"),
-         f"python3 tools/mutants/check.py --whole > tmp/night/mutants-{commit[:12]}.log, the commit checked out (overnight; the whole run, since check.py alone covers the change since origin/main)")
+    step("full mutation run, core and threads", mutation_result(f"tmp/night/mutants-{commit[:12]}.log", commit),
+         f"python3 tools/mutants/check.py --whole > tmp/night/mutants-{commit[:12]}.log, the commit checked out (both crates; --whole, since the default covers the change since origin/next)")
     step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "every build passes"),
          f"sh tools/check-builds.sh > tmp/night/check-builds-{commit[:12]}.log")
     step("cargo publish --dry-run", log_ends_with(f"tmp/night/publish-dry-run-{commit[:12]}.log", "publish-dry-run: ok"),
