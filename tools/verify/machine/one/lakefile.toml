@@ -68,3 +68,5 @@ name = "MergeParts"
 name = "MergeTrace"
 [[lean_lib]]
 name = "MergeAll"
+[[lean_lib]]
+name = "CrossOneTable"
