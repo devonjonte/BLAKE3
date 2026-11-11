@@ -121,7 +121,6 @@ def Fn.rust (f : Fn) : String :=
 def rustFile (fs : List Fn) : String :=
   "// Printed from Lean (Lang.lean). Not written or edited by hand.\n#![no_std]\n#![allow(unused_parens)]\n" ++
   "#[repr(C, align(16))]\npub struct Aligned<const N: usize>([u8; N]);\n" ++
-  "#[panic_handler]\nfn panic(_: &core::panic::PanicInfo) -> ! { loop {} }\n" ++
   String.join (fs.map Fn.rust)
 
 /-! ## To x86-64 assembly (System V), with no compiler
