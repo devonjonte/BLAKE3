@@ -1,0 +1,13 @@
+name = "mc"
+defaultTargets = ["Proof"]
+
+[[lean_lib]]
+name = "X86"
+[[lean_lib]]
+name = "Spec"
+[[lean_lib]]
+name = "Code"
+[[lean_lib]]
+name = "Sym"
+[[lean_lib]]
+name = "Proof"
