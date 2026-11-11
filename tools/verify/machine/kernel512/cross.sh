@@ -10,7 +10,7 @@ lake build Simd Code CodeSse >/dev/null
 lake env lean --run Cross.lean > "$work/vectors.txt"
 cc -O1 -o "$work/cross" cross.c
 "$work/cross" "$work/vectors.txt"
-rm -rf "$work/wrong"; mkdir -p "$work/wrong"; cp Simd.lean Code.lean CodeSse.lean Cross.lean lakefile.toml lean-toolchain lake-manifest.json "$work/wrong/" 2>/dev/null || cp Simd.lean Code.lean CodeSse.lean Cross.lean lakefile.toml lean-toolchain "$work/wrong/"
+rm -rf "$work/wrong"; mkdir -p "$work/wrong"; cp Simd.lean Code.lean CodeSse.lean Cross.lean lakefile.toml lean-toolchain "$work/wrong/"
 python3 - "$work/wrong/Simd.lean" <<'PY'
 import sys
 p = sys.argv[1]; t = open(p).read()
