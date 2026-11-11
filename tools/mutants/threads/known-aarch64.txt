@@ -40,7 +40,6 @@ src/lanes.rs	replace > with >= in initialize	1	equivalent: it differs only with 
 src/lanes.rs	replace > with >= in sme2_serve	1	speed: whether the SME2 thread runs a gathered task on NEON or in an SME2 session (equally correct)
 src/lanes.rs	replace > with >= in sources::open	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace >= with < in poll_pause	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace >= with < in sources::Source::publish	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace >= with < in sources::serve	1	[cpu has sme2] speed: the chain's wake for a second waiting item (sources::serve, run_one's before #241) comes when fewer than two wait; the parked workers still wake for work by publish's own wake
 src/lanes.rs	replace >= with < in tree_threads	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace Pool::wake_for with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
@@ -50,37 +49,14 @@ src/lanes.rs	replace prefix_for -> usize with 0	1	speed: how the work is cut amo
 src/lanes.rs	replace prefix_for -> usize with 1	1	speed: how the work is cut among threads (every cut tiles the input, as the code's assertions and the tests check)
 src/lanes.rs	replace sources::<impl Drop for Held>::drop with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace sources::Source::unregister with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace sources::closed with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace sources::open -> bool with false	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace sources::open -> bool with true	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace sources::opened with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace sources::take_stream_task -> Option<Task> with None	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace sources::visible -> bool with false	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
-src/lanes.rs	replace wake_sme2 with ()	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace | with & in Task::run_equal_members	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace | with ^ in Task::run_equal_members	4	equivalent: | and ^ agree on flag bits that never overlap
 src/lanes.rs	replace || with && in cut_items	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lanes.rs	replace || with && in sources::visible	1	OPEN: the pool's scheduling under interleavings the tests leave to chance; Loom would force them (#103)
 src/lib.rs	replace __all_workers_parked -> bool with true	1	a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before
 src/park.rs	replace > with >= in Park::wake_for	1	speed: changes how many parked workers a publisher wakes or owes (BLAKE3 #119: every wake direct, the cascade alone and 8 direct measured 4-25% apart on the EPYC and the i7); no result waits on a worker waking: the publisher hashes every piece no worker takes, and finish.rs's handshake wakes a waiting caller
-src/stream.rs	delete ! in Stream<'env, D>::finish	2	[cpu has sme2] speed: a waiting caller's pause in finish's loop when nothing came back and nothing waits (the SME2 thread takes stream tasks alone, so each pause decides only how soon the caller looks again)
-src/stream.rs	delete ! in Stream<'env, D>::help	1	[cpu has sme2] speed: run_waiting's `!`: a waiting caller pauses after running a task rather than when it found none; the SME2 thread takes the lone task. The feed's `!` times out (timeouts-aarch64.txt)
-src/stream.rs	replace != with == in Stream<'env, D>::submit_long	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace && with || in Stream<'env, D>::collect	1	[cpu has sme2] speed: collect wakes a worker for a lone task whether or not it handed something back, or with no slot: a wake more
-src/stream.rs	replace && with || in Stream<'env, D>::finish	2	[cpu has sme2] speed: a waiting caller's pause in finish's loop when nothing came back and nothing waits (the SME2 thread takes stream tasks alone, so each pause decides only how soon the caller looks again)
-src/stream.rs	replace && with || in Stream<'env, D>::help	2	[cpu has sme2] speed: a waiting caller pauses only when it handed nothing back and ran no task, otherwise hashes or pauses as it may; the SME2 thread takes the task
-src/stream.rs	replace && with || in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace + with *	1	equivalent: the long message's stack keeps MAX_DEPTH values for MAX_DEPTH + 1, still more than a 2^64-byte message's 48 pieces need
-src/stream.rs	replace + with * in task_slots	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace + with -	1	equivalent: the long message's stack keeps MAX_DEPTH - 1 values, still more than a 2^64-byte message's 48 pieces need
-src/stream.rs	replace + with - in task_slots	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace += with *= in Stream<'env, D>::deliver	3	[cpu has sme2] speed: deliver reports no places handed back, so collect and help act as if nothing was done: a wake or a hashed task more; the SME2 thread takes the task; and two places in the GPU's branch, where the GPU's code is not built, same code
-src/stream.rs	replace += with -= in Stream<'env, D>::deliver	3	[cpu has sme2] speed: deliver's count wraps: collect and help act as if places came back when none did, waking or hashing a turn later; the SME2 thread takes the task; and two places in the GPU's branch, where the GPU's code is not built, same code
-src/stream.rs	replace - with + in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace - with / in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace << with >>	1	another machine's code: the long ring's size on x86-64 (LONG_RING_BYTES under cfg(target_arch = "x86_64"), BLAKE3 #349); AArch64 builds the line above it, whose mutant the stream's tests catch
-src/stream.rs	replace == with != in Stream<'env, D>::collect	1	[cpu has sme2] speed: collect wakes a worker for a lone task only when it handed something back; the SME2 thread takes the task (without SME2, tests/stream_collect_parked_workers hangs)
-src/stream.rs	replace == with != in Stream<'env, D>::finish	1	[cpu has sme2] speed: a waiting caller's pause in finish's loop when nothing came back and nothing waits (the SME2 thread takes stream tasks alone, so each pause decides only how soon the caller looks again)
-src/stream.rs	replace == with != in Stream<'env, D>::help	1	[cpu has sme2] speed: a waiting caller hashes a lone task only after handing something back; the SME2 thread takes the task
-src/stream.rs	replace == with != in Stream<'env, D>::submit_long	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace Stream<'env, D>::pause with ()	1	the stop for a pause nothing can wake: it acts only when another fault strands the stream (the planted control on BLAKE3 #244 fails at once with it and hangs without); alone, a spin becomes a retry and every outcome is the same

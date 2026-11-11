@@ -34,21 +34,14 @@ src/lanes.rs	replace sources::Source::published -> usize with 0	1	same code: eve
 src/lanes.rs	replace sources::Source::published -> usize with 1	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace sources::Source::reserve_gpu_batch_for_test with ()	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace sources::take_stream_task -> Option<Task> with None	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
-src/lanes.rs	replace wake_sme2 with ()	1	another machine's code: the SME2 thread runs only where pool.sme2 is set (an SME2 build on a CPU with it); on x86 it is never started
 src/lanes.rs	replace | with ^ in Task::run_equal_members	4	equivalent: | and ^ agree on flag bits that never overlap
 src/lanes.rs	replace || with && in sources::Source::take_run	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/park.rs	replace > with >= in Park::wake_for	1	equivalent: `later >= 0` adds `later` to the owed when it is 0, which is adding nothing; the `if` keeps an atomic add off the path of a job that owes none
-src/stream.rs	delete ! in Stream<'env, D>::finish	2	the two are run_waiting's and the GPU reclaim's: with no GPU built the reclaim is a constant no, and deleting either lets the pause fire after a pass that made progress, where it only spins and the loop proceeds; every outcome is the same
-src/stream.rs	delete ! in Stream<'env, D>::help	1	run_waiting's `!`: the pause then fires after a pass that ran a waiting task rather than after one that found none, where it only spins and the loop proceeds; every outcome is the same. The feed's `!` times out (timeouts-x86_64.txt)
 src/stream.rs	delete ! in Stream<'env, D>::reclaim	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	delete ! in Stream<'env, D>::reserve_gpu	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace != with == in Stream<'env, D>::submit_long	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace && with || in Stream<'env, D>::collect	1	speed: collect then wakes a worker for a lone task whether or not it handed something back, or with no slot: a wake more
 src/stream.rs	replace && with || in Stream<'env, D>::submit_long	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace + with *	1	equivalent: the long message's stack keeps MAX_DEPTH values for MAX_DEPTH + 1, still more than a 2^64-byte message's 48 pieces need
-src/stream.rs	replace + with * in task_slots	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/stream.rs	replace + with -	1	equivalent: the long message's stack keeps MAX_DEPTH - 1 values, still more than a 2^64-byte message's 48 pieces need
-src/stream.rs	replace + with - in task_slots	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace += with *= in Stream<'env, D>::deliver	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace += with *= in Stream<'env, D>::reserve_gpu	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace += with -= in Stream<'env, D>::deliver	3	speed: deliver's count wraps: collect and help act as if places came back when none did, waking or hashing a turn later, and a worker or the caller's own help takes the task; and two places in the GPU's branch, the same code where the GPU's code is not built
@@ -61,7 +54,6 @@ src/stream.rs	replace << with >>	1	same code: every test binary hashes as the un
 src/stream.rs	replace == with != in Stream<'env, D>::submit_long	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace >= with < in Stream<'env, D>::feed	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/stream.rs	replace Stream<'env, D>::feed -> bool with false	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
-src/stream.rs	replace Stream<'env, D>::pause with ()	1	the stop for a pause nothing can wake: it acts only when another fault strands the stream (the planted control on BLAKE3 #244 fails at once with it and hangs without); alone, a spin becomes a retry and every outcome is the same
 src/stream.rs	replace Stream<'env, D>::reclaim_at_finish -> bool with false	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/stream.rs	replace Stream<'env, D>::reclaim_at_finish -> bool with true	1	speed: where the GPU's code is not built (every x86-64 build), finish then reads a reclaim on every pass and never pauses: it spins through its passes until the work is delivered, and every outcome is the same
 src/stream.rs	replace Stream<'env, D>::reserve_gpu -> usize with 0	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)

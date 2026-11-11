@@ -3,10 +3,3 @@
 # nextest's clock stops one (tools/mutants/check.py, TIMEOUTS). Their own
 # outcome: neither caught nor survived.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-src/stream.rs	replace && with || in Stream<'env, D>::finish	1	a loop variant broken: finish's pause and reclaim run on the wrong condition, and a held GPU's tasks are never taken back; the clock stops the stream tests that reach it
-src/stream.rs	replace += with *= in Stream<'env, D>::deliver	2	a loop variant broken: a ring's tail never moves, so the writer waits for room that never comes; the clock stops the stream tests that reach it
-src/stream.rs	replace < with <= in Stream<'env, D>::finish	1	a loop variant broken: finish waits for one entry more than were submitted; the clock stops the stream tests that reach it
-src/stream.rs	replace == with != in Stream<'env, D>::finish	1	a loop variant broken: finish reclaims and pauses only when places came back, so a held GPU's tasks are never taken back; the clock stops the stream tests that reach it
-src/stream.rs	replace Stream<'env, D>::deliver -> usize with 0	1	a loop variant broken: finish counts nothing handed back and reclaims for ever; the clock stops the stream tests that reach it
-src/stream.rs	replace Stream<'env, D>::deliver -> usize with 1	1	a loop variant broken: the stream hands back no entry, so finish never returns; the clock stops the stream tests that reach it
-src/stream.rs	replace Stream<'env, D>::help with ()	1	a loop variant broken: help neither hands back nor hashes, so a writer waiting for room waits for ever; the clock stops the stream tests that reach it
