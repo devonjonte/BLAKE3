@@ -1,5 +1,5 @@
 name = "one"
-defaultTargets = ["ParentSpec", "Test", "MergeSpec", "Leak"]
+defaultTargets = ["ParentSpec", "Test", "MergeSpec", "MergeAll"]
 
 [[require]]
 name = "Blake3Servil"
@@ -62,3 +62,9 @@ name = "Stack"
 srcDir = "../alg"
 [[lean_lib]]
 name = "Leak"
+[[lean_lib]]
+name = "MergeParts"
+[[lean_lib]]
+name = "MergeTrace"
+[[lean_lib]]
+name = "MergeAll"

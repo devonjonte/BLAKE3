@@ -199,7 +199,7 @@ themselves 45 s. `RegionsX.lean` is `hex/Regions.lean` for this model, with whol
 outside a region. `python3 mutants_merge.py` changes one instruction of `merge` at a time: 10 of 11 are
 rejected; the eleventh changes a byte `merge` stores in its frame and nothing reads (`mutants-merge-20261111.txt`).
 
-Limits: this model has no trace, so nothing is said of timing here; the call through the GOT is taken to
+Limits: the call through the GOT is taken to
 reach the kernel its relocation names; `push`, the function that calls `merge`, and `final_node` are not
 proved, so `hasher_is_blake3` is joined to the code at this one function only; the case `len ≤ target`
 (no turn) and a `None` stack are not covered; the listing is llvm-objdump's.
@@ -216,4 +216,17 @@ chaining value, block, counter, length and flags are. The proof leaves the trace
 unification with a variable that may mention only those four, so a trace that depended on anything else
 would not check (it did not, until the return address was among them). Check: 7 s for both.
 
-Not done the same way: `merge` and the parent functions.
+**`merge`, all three in one statement** (`MergeParts.lean`, `MergeTrace.lean`, `MergeAll.lean`, written by
+`leakgen.py`, `tracegen.py` and `allgen.py` from the proofs above, so the same hypotheses and the same
+symbolic runs carry the trace). Each part's trace is a definition (`pre_avx_shows self arr keyp fp len`, …)
+whose text Lean was asked for and which compiles only because it mentions nothing but those arguments;
+the kernels' traces come from the two theorems above; `loopShows` puts the turns together.
+**`merge_whole`**: with `merge_is_mergeN`'s hypotheses, the recorded run of the whole function, the
+kernels' instructions included, ends with `merge_is_mergeN`'s result, and its trace is
+`mergeShows plat self p keyp rsp0 fp ra len target`: a function of where the arguments, the stack and the
+caller are, of the platform byte, the stack's length and the target. The stack's values, the key and the
+flags are not among its arguments. So for this one function of the crate the three properties hold of the
+same executions: the result the specification's algorithm asks for, no byte touched that it does not own
+or changed that it should not, and nothing secret in what it shows. Check: 45 s beyond `merge`'s own.
+
+Not done the same way: the parent functions.
