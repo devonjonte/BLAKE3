@@ -32,7 +32,7 @@ python3 - "$work" <<'COUNT_PY' | tee "$work/sizes.txt"
 import re, subprocess, sys
 work = sys.argv[1]
 text = subprocess.run(["llvm-objdump", "-d", "-C", "--no-show-raw-insn", f"{work}/target/release/labbench"], capture_output=True, text=True).stdout
-want = {"a_push": "way A push", "b_push": "way B push", "a_merge": "way A merge", "b_merge": "way B merge", "a_to_hex": "way A to_hex", "b_to_hex": "way B to_hex"}
+want = {"a_push": "way A push", "b_push": "way B push", "a_merge": "way A merge", "b_merge": "way B merge", "a_to_hex": "way A to_hex", "b_to_hex": "way B to_hex", "a_hash": "way A hash", "b_hash": "way B hash"}
 name, n, rows = None, 0, {}
 for line in text.splitlines():
     m = re.match(r"^[0-9a-f]+ <(.+)>:$", line)
@@ -43,6 +43,6 @@ for line in text.splitlines():
 if name: rows[name] = n
 for k, v in want.items(): print(f"{v}: {rows.get(k, '?')} instructions")
 for k, v in rows.items():
-    if re.search(r"labshim::merge|Hash>::to_hex|CvStack>::merge", k): print(f"hand Rust {k[:70]}: {v} instructions")
+    if re.search(r"labshim::merge|Hash>::to_hex|CvStack>::merge|core::hash_serial$|hash_all_at_once|hasher::fill|hasher::feed|hasher::final_node", k): print(f"hand Rust {k[:70]}: {v} instructions")
 COUNT_PY
 echo "three ways compared"

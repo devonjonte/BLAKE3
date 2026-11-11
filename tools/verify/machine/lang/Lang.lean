@@ -59,8 +59,10 @@ structure Fn where
   bufs : List (String × Nat)
   body : List Stmt
   ret : Exp
-  /-- The C-ABI functions it calls. -/
+  /-- The C-ABI functions it calls that are not written in this language (the kernels). -/
   externs : List String
+  /-- The variables to keep in registers (at most six get one); the rest live in the frame. -/
+  regs : List Var := []
   deriving Repr, Inhabited
 
 /-! ## To Rust -/
@@ -107,20 +109,20 @@ partial def arity (f : String) : List Stmt → Option Nat
   | _ :: rest => arity f rest
 
 def Fn.rust (f : Fn) : String :=
-  let ext := f.externs.map fun g =>
-    let n := (arity g f.body).getD 0
-    s!"    fn {g}({", ".intercalate ((List.range n).map fun i => s!"a{i}: u64")});\n"
   let params := ", ".intercalate (f.params.map fun p => s!"mut {p}: u64")
   let locals := String.join (f.locals.map fun x => s!"    let mut {x}: u64 = 0;\n")
   let bufs := String.join (f.bufs.map fun (b, n) =>
     s!"    let mut {b}_store = core::mem::MaybeUninit::<Aligned<{n}>>::uninit();\n    let {b}: u64 = {b}_store.as_mut_ptr() as u64;\n")
-  (if ext.isEmpty then "" else "extern \"C\" {\n" ++ String.join ext ++ "}\n") ++
   s!"#[no_mangle]\n#[allow(unused_mut, unused_assignments, unused_parens, unused_variables)]\npub unsafe extern \"C\" fn {f.name}({params}) -> u64 \{\n{locals}{bufs}{Stmts.rust "    " f.body}    {f.ret.rust}\n}\n"
 
-/-- A file of functions: no standard library, no panics, nothing but the functions. -/
+/-- A file of functions: no standard library, no panic machinery, nothing but the functions and the
+declarations of the kernels they call. -/
 def rustFile (fs : List Fn) : String :=
+  let exts := (fs.flatMap fun f => f.externs.map fun g => (g, (arity g f.body).getD 0)).eraseDups
+  let decl := exts.map fun (g, n) => s!"    fn {g}({", ".intercalate ((List.range n).map fun i => s!"a{i}: u64")});\n"
   "// Printed from Lean (Lang.lean). Not written or edited by hand.\n#![no_std]\n#![allow(unused_parens)]\n" ++
   "#[repr(C, align(16))]\npub struct Aligned<const N: usize>([u8; N]);\n" ++
+  (if decl.isEmpty then "" else "extern \"C\" {\n" ++ String.join decl ++ "}\n") ++
   String.join (fs.map Fn.rust)
 
 /-! ## To x86-64 assembly (System V), with no compiler
@@ -151,12 +153,23 @@ structure Layout where
 
 def idxOf (xs : List String) (x : String) : Nat := (xs.findIdx? (· == x)).getD 0
 
+/-- The most arguments any call passes. -/
+partial def maxArgs : List Stmt → Nat
+  | [] => 0
+  | .call _ args :: rest => max args.length (maxArgs rest)
+  | .ite _ t e :: rest => max (max (maxArgs t) (maxArgs e)) (maxArgs rest)
+  | .while _ b :: rest => max (maxArgs b) (maxArgs rest)
+  | _ :: rest => maxArgs rest
+
 def Fn.layout (f : Fn) : Layout :=
-  let vars := f.params ++ f.locals
+  let all := f.params ++ f.locals
+  let vars := f.regs ++ all.filter (fun x => !f.regs.contains x)
   let nreg := min vars.length homes.length
   let nslot := vars.length - nreg
-  -- the frame, from RSP up: the buffers, then the slots
-  let bufOff := f.bufs.foldl (fun (acc : List (String × Nat) × Nat) (b, n) => (acc.1 ++ [(b, acc.2)], acc.2 + n)) ([], 0)
+  -- the frame, from RSP up: arguments a call passes on the stack (the seventh on), the buffers, the slots
+  let outArgs := 8 * (maxArgs f.body - 6)
+  let outArgs := if outArgs % 16 == 0 then outArgs else outArgs + 8
+  let bufOff := f.bufs.foldl (fun (acc : List (String × Nat) × Nat) (b, n) => (acc.1 ++ [(b, acc.2)], acc.2 + n)) ([], outArgs)
   let slots := bufOff.2
   let raw := slots + 8 * nslot
   -- at a call RSP must be a multiple of 16: the return address and the pushes are 8 * (1 + nreg) bytes
@@ -225,7 +238,9 @@ mutual
       (Exp.asm L 0 s ++ Exp.asm L 1 d ++
         (List.range (k / 16)).flatMap (fun i => [s!"movups xmm0, xmmword ptr [rax + {16 * i}]", s!"movups xmmword ptr [rcx + {16 * i}], xmm0"]), n)
     | .call f args =>
-      ((args.zip abiArgs).map (fun (a, r) => argAsm L r a) ++ [s!"call CALL({f})"], n)
+      -- the seventh argument on goes to the bottom of the frame (through RAX), then the six registers
+      let onStack := ((args.drop 6).zipIdx).flatMap fun (a, i) => [argAsm L "rax" a, s!"mov qword ptr [rsp + {8 * i}], rax"]
+      (onStack ++ (args.zip abiArgs).map (fun (a, r) => argAsm L r a) ++ [s!"call CALL({f})"], n)
     | .ite c t e =>
       let lelse := s!".L{fn}_{n}"; let lend := s!".L{fn}_{n + 1}"
       let (tc, n1) := Stmts.asm L fn (n + 2) t

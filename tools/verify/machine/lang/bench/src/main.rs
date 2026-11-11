@@ -12,6 +12,35 @@ extern "C" {
     fn b_push(st: u64, cv: u64) -> u64;
     fn b_merge(st: u64, key: u64, flags: u64, plat: u64, target: u64) -> u64;
     fn b_to_hex(out: u64, hash: u64) -> u64;
+    fn a_hash(out: u64, input: u64, len: u64, key: u64, flags: u64, plat: u64) -> u64;
+    fn b_hash(out: u64, input: u64, len: u64, key: u64, flags: u64, plat: u64) -> u64;
+}
+type HashFn = unsafe extern "C" fn(u64, u64, u64, u64, u64, u64) -> u64;
+
+/// The whole hash by a Lean-written function, against the crate's `hash_serial`: every length to
+/// 2100, lengths around every chunk and block boundary to 70 KiB, and a megabyte; three modes.
+fn agree_hash(name: &str, hash: HashFn, plat: u64) -> u64 {
+    let mut s = 0xD1B54A32D192ED03u64;
+    let data: Vec<u8> = (0..(1 << 20) + 77).map(|_| rng(&mut s) as u8).collect();
+    let mut lens: Vec<usize> = (0..=2100).collect();
+    for k in 2..70 {
+        for d in [-65i64, -64, -63, -1, 0, 1, 63, 64, 65] {
+            lens.push((k * 1024 + d) as usize);
+        }
+    }
+    lens.extend([1 << 20, (1 << 20) + 1, (1 << 20) + 77, 31 * 1024, 33 * 1024 + 5]);
+    let mut cases = 0;
+    for (m, flags) in [0u8, 16, 64].into_iter().enumerate() {
+        let key: [u32; 8] = if m == 0 { *blake3_servil_core::IV } else { core::array::from_fn(|_| rng(&mut s) as u32) };
+        for &len in &lens {
+            let want = blake3_servil_core::hash_serial(&data[..len], &key, flags);
+            let mut out = [0u8; 32];
+            unsafe { hash(out.as_mut_ptr() as u64, data.as_ptr() as u64, len as u64, key.as_ptr() as u64, flags as u64, plat) };
+            assert_eq!(&out, want.as_bytes(), "{name}: the hash of {len} bytes, flags {flags}");
+            cases += 1;
+        }
+    }
+    cases
 }
 
 /// The stack as the Lean functions lay it out: the length, then from byte 32 the values.
@@ -94,6 +123,30 @@ fn main() {
     for (name, p, m, x) in [("way A (Lean, Rust printed, rustc)", a_push as PushFn, a_merge as MergeFn, a_to_hex as HexFn),
                             ("way B (Lean, assembly printed)", b_push as PushFn, b_merge as MergeFn, b_to_hex as HexFn)] {
         println!("{name}: {} random cases agree with the crate's Rust (push, merge, to_hex)", agree(name, p, m, x, plat));
+    }
+    for (name, h) in [("way A", a_hash as HashFn), ("way B", b_hash as HashFn)] {
+        println!("{name}: the whole hash agrees with the crate's hash_serial on {} inputs", agree_hash(name, h, plat));
+    }
+    {
+        let mut s = 99u64;
+        let data: Vec<u8> = (0..1 << 20).map(|_| rng(&mut s) as u8).collect();
+        let key = *blake3_servil_core::IV;
+        for len in [64usize, 1024, 4096, 16384, 1 << 20] {
+            let reps = (40_000_000 / (len as u64 + 200)).max(20);
+            let hand = least(15, reps, || {
+                std::hint::black_box(blake3_servil_core::hash_serial(std::hint::black_box(&data[..len]), &key, 0));
+            });
+            let mut out = [0u8; 32];
+            let mut ns = vec![];
+            for h in [a_hash as HashFn, b_hash as HashFn] {
+                ns.push(least(15, reps, || {
+                    unsafe { h(out.as_mut_ptr() as u64, std::hint::black_box(data.as_ptr()) as u64, len as u64, key.as_ptr() as u64, 0, plat) };
+                    std::hint::black_box(&out);
+                }));
+            }
+            println!("hash of {len} bytes, ns a call: the crate's hash_serial {:.1}, way A {:.1} ({:+.1}%), way B {:.1} ({:+.1}%)",
+                     hand, ns[0], 100.0 * (ns[0] / hand - 1.0), ns[1], 100.0 * (ns[1] / hand - 1.0));
+        }
     }
     // Costs. merge: a stack of 2 merged to 1 (one parent), and of 11 merged to 1 (ten parents).
     let mut s = 7u64;
