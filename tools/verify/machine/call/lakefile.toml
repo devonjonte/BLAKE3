@@ -10,3 +10,5 @@ name = "Mem"
 name = "Scan"
 [[lean_lib]]
 name = "Two"
+[[lean_lib]]
+name = "Decode"

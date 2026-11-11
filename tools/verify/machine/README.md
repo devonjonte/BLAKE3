@@ -18,6 +18,7 @@ What a reader reads and relies on, for each:
 - the machine (`X86.lean`, `loop/X86.lean`, `kernel/Simd.lean`): the instructions used, a state,
   one step. Whatever is not modelled is a fault;
 - the theorem's statement (`Proof.lean`, the end of `loop/Scan.lean`, `kernel/Main.lean`);
+- in `call/`, nothing about the disassembler: the program is its bytes (`Code.image`) read by a decoder written in Lean (`call/Decode.lean`, 100 lines for the 13 instruction forms), and each line of the listing is a lemma Lean checks. In the other folders:
 - that the `Code.lean` beside it is the machine code (`lift.py`, `kernel/lift_simd.py` from
   llvm-objdump's listing; `check.sh` here rebuilds the library and compares, for the first);
 - Lean, and its compiler for `bv_decide`'s checker (the `_native.bv_decide` axioms each file

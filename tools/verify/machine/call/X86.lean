@@ -61,8 +61,10 @@ inductive Opnd
   /-- `[base + index]` -/
   | memi (base index : Reg)
   | imm (v : BitVec 64)
+  deriving DecidableEq
 
 inductive Cond | e | ne
+  deriving DecidableEq
 
 inductive Instr
   | mov (w : Nat) (dst src : Opnd)
@@ -78,6 +80,7 @@ inductive Instr
   | ret
   | push (r : Reg)
   | pop (r : Reg)
+  deriving DecidableEq
 
 def byte (v : BitVec 64) (i : Nat) : BitVec 8 := (v >>> (8 * i)).setWidth 8
 

@@ -83,6 +83,8 @@ def lift(base, listing, symbols):
             if reloc is None and op == "jmp": ins = f".jmp {bv(base + int(a[0].split()[0], 16))}"
             else:
                 assert reloc in symbols, f"{op} to an unknown function: {reloc}"; ins = f".{op} {bv(symbols[reloc])}"
+                d = (symbols[reloc] - nxt) & 0xFFFFFFFF
+                raw = raw.split()[0] + " " + " ".join(f"{(d >> (8 * i)) & 0xFF:02x}" for i in range(4))
         elif op in ("ret", "cpuid", "xgetbv"):
             assert not a; ins = f".{op}"
         elif op in ("push", "pop"):
@@ -99,17 +101,24 @@ def main():
         for line in open(listing):
             m = re.match(r"^([0-9a-f]+) <(.+)>:$", line)
             if m: names[m.group(2)] = int(base, 16) + int(m.group(1), 16)
-    text = ["import X86", "", "/-! The compiled functions, as llvm-objdump reads them. Written by lift.py; not edited by hand. -/", "", f"namespace {ns}", "open X86", "",
-            "def table : List (Nat × Instr × Nat) := ["]
-    lemmas, count = [], 0
+    text = ["import X86", "import Decode", "", "/-! The compiled functions' bytes, as the linker places them (a call's displacement filled in), and what",
+            "the decoder makes of each instruction. Written by lift.py from llvm-objdump's listing; the listing is a hint:", "each line below is checked by Lean against `Decode.lean`. -/", "",
+            "set_option maxRecDepth 100000", f"namespace {ns}", "open X86", ""]
+    lemmas, image, count, first, at_end = [], [], 0, None, None
     for base, listing in parts:
         rows, name = lift(int(base, 16), listing, names)
-        text.append(f"  -- {name}")
         for at, nxt, ins, src in rows:
-            text.append(f"  (0x{at:X}, {ins}, 0x{nxt:X}),  -- {src}"); count += 1
-            lemmas.append(f"@[simp] theorem at_{at:X} : prog 0x{at:X} = some ({ins}, 0x{nxt:X}) := rfl")
-    text[-1] = text[-1].replace("),  -- ", ")   -- ", 1)
-    text += ["]", "", "/-- The instruction at an address, and the address after it. -/", "def prog (pc : Nat) : Option (Instr × Nat) := table.lookup pc", ""] + lemmas + ["", f"end {ns}", ""]
+            if first is None: first = at
+            assert at_end is None or at == at_end, f"a gap before 0x{at:X}"
+            at_end = nxt
+            raw = src[:24].split()
+            assert len(raw) == nxt - at, src
+            image += [int(b, 16) for b in raw]; count += 1
+            lemmas.append(f"theorem at_{at:X} : prog 0x{at:X} = some ({ins}, 0x{nxt:X}) := by decide  -- {src[24:].strip()}")
+    text += [f"def base : Nat := 0x{first:X}", "", "/-- The bytes, from `base` on. -/", "def image : List Nat := ["]
+    text += ["  " + ", ".join(f"0x{b:02X}" for b in image[i:i + 16]) + ("," if i + 16 < len(image) else "") for i in range(0, len(image), 16)]
+    text += ["]", "", "/-- The instruction at an address, and the address after it: the decoder on the bytes from there. -/",
+             "def prog (pc : Nat) : Option (Instr × Nat) := if base ≤ pc then decode pc (image.drop (pc - base)) else none", ""] + lemmas + ["", f"end {ns}", ""]
     with open(out, "w") as f:
         f.write("\n".join(text))
     print(count, "instructions")
