@@ -25,6 +25,22 @@ lists what changed, each item with where it is described.
   `b3sum --version`. A release reads its version; the code after one reads
   `X.Y.Z+dev` with its commit, and a dirty tree adds its Git tree id.
 
+## Slower, on purpose: a `throughput` call made now and then, on AArch64
+
+0.8 guessed with a clock whether a call came after a pause, and prefetched
+its kernels' code when it did. 0.9 has no such clock (#253): the call
+decides. So on AArch64 a `throughput` call made amid other work, where
+0.8's clock would have prefetched, is slower than 0.8:
+
+- `hash_multithreaded` of one message of 1.5 to 16 KiB;
+- `hash_many` over a batch of 2 to 8 short messages, on one thread or many.
+
+The remedy for one message is the call made for that pattern,
+`convenience::hash`, which prefetches on every call of 1 to 64 KiB. A
+small batch amid other work has no such call yet. Call after call, both
+are as fast as before or faster. The release runs give the figures; an
+Apple M6's are in #364.
+
 ## Faster, already on `next`
 
 - **A Hasher's in-place checkpoint copies only the bytes it has staged**
