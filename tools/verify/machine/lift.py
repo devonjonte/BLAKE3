@@ -12,7 +12,7 @@ for i, r in enumerate(R64):
 for r8, r in dict(al="rax", cl="rcx", dl="rdx", bl="rbx", sil="rsi", dil="rdi", spl="rsp", bpl="rbp").items():
     REG[r8] = (r, 8)
 PTR = {"byte": 8, "dword": 32, "qword": 64}
-CC = {"e": "e", "ne": "ne", "ae": "ae"}
+CC = {"e": "e", "ne": "ne", "ae": "ae", "b": "b"}
 
 def bv(n):
     return f"0x{n & (2**64 - 1):X}"
@@ -57,8 +57,11 @@ def lift(base, listing, symbols):
         elif op == "movzx":
             r, w = reg_only(a[0]); s, ws = operand(a[1]); assert w == 32 and ws == 8, args; ins = f".movzx {ws} .{r} {s}"
         elif op == "lea":
-            r, w = reg_only(a[0]); m = re.fullmatch(r"\[(\w+) \+ (0x[0-9a-f]+)\]", a[1]); assert w == 64 and m, args
-            ins = f".lea .{r} .{REG[m.group(1)][0]} {bv(int(m.group(2), 16))}"
+            r, w = reg_only(a[0]); m = re.fullmatch(r"\[(\w+) \+ (0x[0-9a-f]+)\]", a[1]); mi = re.fullmatch(r"\[(\w+) \+ (\w+)\]", a[1])
+            if w == 64 and m: ins = f".lea .{r} .{REG[m.group(1)][0]} {bv(int(m.group(2), 16))}"
+            elif w == 32 and m and REG[m.group(1)][1] == 64: ins = f".lea32 .{r} .{REG[m.group(1)][0]} {bv(int(m.group(2), 16))}"
+            elif w == 32 and mi and REG[mi.group(1)][1] == REG[mi.group(2)][1] == 64: ins = f".lea32i .{r} .{REG[mi.group(1)][0]} .{REG[mi.group(2)][0]}"
+            else: raise SystemExit(f"unknown instruction: lea {args}")
         elif op == "xchg":
             (x, wx), (y, wy) = reg_only(a[0]), reg_only(a[1]); assert wx == wy == 64, args; ins = f".xchg .{x} .{y}"
         elif op == "not":

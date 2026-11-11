@@ -64,12 +64,15 @@ inductive Opnd
   | mem (base : Reg) (disp : BitVec 64)
   | imm (v : BitVec 64)
 
-inductive Cond | e | ne | ae
+inductive Cond | e | ne | ae | b
 
 inductive Instr
   | mov (w : Nat) (dst src : Opnd)
   | movzx (ws : Nat) (dst : Reg) (src : Opnd)
   | lea (dst base : Reg) (disp : BitVec 64)
+  /-- `lea r32, [base + disp]` and `lea r32, [base + index]`: arithmetic only; the upper half is cleared. -/
+  | lea32 (dst base : Reg) (disp : BitVec 64)
+  | lea32i (dst base index : Reg)
   | xchg (a b : Reg)
   | not (w : Nat) (dst : Opnd)
   | and (w : Nat) (dst src : Opnd)
@@ -132,6 +135,7 @@ def holds (s : State) : Cond → Option Bool
   | .e => s.zf
   | .ne => s.zf.map (!·)
   | .ae => s.cf.map (!·)
+  | .b => s.cf
 
 /-- A logical result's flags: ZF by the result, CF clear. -/
 def logic (s : State) (w : Nat) (v : BitVec 64) : State :=
@@ -148,6 +152,8 @@ def step (cpu : Cpu) (i : Instr) (next : Nat) (s : State) : Option State :=
   | .mov w d x => do write s w d (← read s w x)
   | .movzx ws d x => do write s 32 (.reg d) (← read s ws x)
   | .lea d b disp => some (s.set d (s.get b + disp))
+  | .lea32 d b disp => some (s.set d (trunc 32 (s.get b + disp)))
+  | .lea32i d b i => some (s.set d (trunc 32 (s.get b + s.get i)))
   | .xchg a b => some ((s.set a (s.get b)).set b (s.get a))
   | .not w d => do write s w d (~~~(← read s w d))
   | .and w d x => do let v := (← read s w d) &&& (← read s w x); write (logic s w v) w d v
