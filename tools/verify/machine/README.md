@@ -56,3 +56,38 @@ byte changed, and an observer's trace that is a function of the slice's address 
 the return address. The Lean function, the memory lemmas and the proof's structure are
 `loop/`'s; the port took twelve minutes. `python3 mutants.py`: 8 of 8 changed instructions
 rejected. Check: 2 s.
+
+## `gen/`: the function is written in Lean, its Rust is printed, its proof is generated
+
+The question: if a function is written in Lean and its Rust is printed from that, can the proof
+that the compiled bytes compute the Lean function be had without writing it?
+
+- `Lang.lean` (110 lines): a language of 32-bit words (ten constructors: the carried value, the
+  word, a literal, xor, add, and, or, not, rotate, shift) with its meaning `Exp.eval`, an ordinary
+  Lean function, and its printing `Exp.rust`; and one loop, `Scan`: fold the body over a slice,
+  leaving each value where its word was. Eight functions are written in it.
+- `Rule.lean` (105 lines): the loop's rule, proved once, for any machine (the state is a type
+  parameter): if one turn of a compiled loop does one step of the function (`Turn`), the whole
+  loop does the whole fold for any length, changes no byte outside the slice, and shows an
+  observer only the slice's address and length. Its axioms: `propext`, `Quot.sound`.
+- `make.py`: Lean prints the Rust; rustc 1.99.1 compiles it (`opt-level=s`); llvm-objdump lists
+  it; for each function the script writes `Code_NAME.lean` and `Proof_NAME.lean`. It reads off
+  the listing where the loop keeps the carried value, the pointer, the count and any constant
+  (rustc put `mix`'s carried value in EDX, not EAX, a mask in R8, and turned `!w & m` into an
+  xor); a wrong reading is a proof that does not check. The proof of `Turn` is one symbolic run
+  of the loop's body and `bv_decide`; the rest is the rule.
+- Result: all eight functions (139 instructions) are proved with no line of proof written for
+  any of them: `NAME_is_its_lean_function`, for a slice of any length: the fold in EAX, the scan
+  in the slice, the frame restored, no other byte changed, and the trace a function of the
+  slice's address and length and the stack pointer. Everything from nothing: 8 s.
+- `mutants.py`: of 103 changed instructions 102 are rejected and one computes the same function
+  (`or` for `xor` on disjoint bits). Of fifteen changes to the printed Rust (a wrong printer or
+  compiler), the three that compute the same function are accepted, seven are rejected by the
+  proof, and five stop the lifter at an instruction form it does not know
+  (`mutants-20261111.txt`).
+
+Limits: one loop construct and one frame shape; `opt-level=s` (at 3 rustc unrolls these loops by
+four after a remainder loop: the rule would need a four-words-a-turn form, not written); each
+new function needed instruction forms the model lacked (`not`, a three-operand `lea`, a rotation
+by one, R8 and R9: ten minutes); the listing is llvm-objdump's; x86-64 only, though the rule is
+not.

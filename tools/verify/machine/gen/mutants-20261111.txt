@@ -1,0 +1,18 @@
+ACCEPTED	Mix	0x1024: .or 32 (.reg .r9) (.reg .rdx) -> .xor 32 (.reg .r9) (.reg .rdx)
+code: 103 changed instructions: 1 ACCEPTED, 102 rejected
+ok 	rejected	rotxor	a.rotate_left(5) -> a.rotate_left(6)
+ok 	accepted (the same function)	rotxor	(a.rotate_left(5) ^ w) -> (w ^ a.rotate_left(5))
+ok 	rejected (make.py cannot read the loop: AssertionError)	rotxor	*word = a; -> *word = w;
+ok 	rejected (make.py cannot read the loop: unknown instruction: sub edx, dword ptr [rdi + rcx])	addrot	a.wrapping_add(w) -> a.wrapping_sub(w)
+ok 	accepted (the same function)	addrot	a.wrapping_add(w) -> w.wrapping_add(a)
+ok 	rejected	mix	252645135u32 -> 252645134u32
+ok 	rejected	mix	(w >> 3) -> (w >> 2)
+ok 	rejected	sum	a.wrapping_add(w) -> a.wrapping_add(w) | 1
+ok 	rejected	quarter	2654435769u32 -> 2654435768u32
+ok 	accepted (the same function)	quarter	.rotate_left(16) -> .rotate_right(16)
+ok 	rejected	blend	(a & w) -> (a | w)
+ok 	rejected	invert	(!a.wrapping_add(w.rotate_left(1))) -> a.wrapping_add(w.rotate_left(1))
+ok 	rejected (make.py cannot read the loop: AssertionError: edx, [8*rax])	shift	(a >> 3) -> (a << 3)
+ok 	rejected (make.py cannot read the loop: AssertionError: rcx, [rdi + 4*rsi])	shift	for word in words.iter_mut() -> for word in words.iter_mut().skip(1)
+ok 	rejected (make.py cannot read the loop: unknown operand: 'dword ptr [rdi + rsi - 0x4]')	sum	for word in words.iter_mut() -> for word in words.iter_mut().rev()
+1 WRONG

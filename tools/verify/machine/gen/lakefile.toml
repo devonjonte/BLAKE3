@@ -1,0 +1,50 @@
+name = "gen"
+defaultTargets = ["Proof_Addrot", "Proof_Blend", "Proof_Invert", "Proof_Mix", "Proof_Quarter", "Proof_Rotxor", "Proof_Shift", "Proof_Sum"]
+[[lean_lib]]
+name = "Bytes"
+[[lean_lib]]
+name = "Fold"
+[[lean_lib]]
+name = "Rule"
+[[lean_lib]]
+name = "Lang"
+[[lean_lib]]
+name = "Attr"
+[[lean_lib]]
+name = "X86"
+[[lean_lib]]
+name = "MemX"
+[[lean_lib]]
+name = "Run"
+[[lean_lib]]
+name = "Code_Addrot"
+[[lean_lib]]
+name = "Proof_Addrot"
+[[lean_lib]]
+name = "Code_Blend"
+[[lean_lib]]
+name = "Proof_Blend"
+[[lean_lib]]
+name = "Code_Invert"
+[[lean_lib]]
+name = "Proof_Invert"
+[[lean_lib]]
+name = "Code_Mix"
+[[lean_lib]]
+name = "Proof_Mix"
+[[lean_lib]]
+name = "Code_Quarter"
+[[lean_lib]]
+name = "Proof_Quarter"
+[[lean_lib]]
+name = "Code_Rotxor"
+[[lean_lib]]
+name = "Proof_Rotxor"
+[[lean_lib]]
+name = "Code_Shift"
+[[lean_lib]]
+name = "Proof_Shift"
+[[lean_lib]]
+name = "Code_Sum"
+[[lean_lib]]
+name = "Proof_Sum"

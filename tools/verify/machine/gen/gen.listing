@@ -1,0 +1,159 @@
+
+gen.o:	file format mach-o 64-bit x86-64
+
+Disassembly of section __TEXT,__text:
+
+0000000000000000 <_addrot>:
+       0: 55                           	push	rbp
+       1: 48 89 e5                     	mov	rbp, rsp
+       4: 89 d0                        	mov	eax, edx
+       6: 48 85 f6                     	test	rsi, rsi
+       9: 74 1e                        	je	0x29 <_addrot+0x29>
+       b: 48 c1 e6 02                  	shl	rsi, 0x2
+       f: 31 c9                        	xor	ecx, ecx
+      11: 89 c2                        	mov	edx, eax
+      13: 8b 04 0f                     	mov	eax, dword ptr [rdi + rcx]
+      16: 01 d0                        	add	eax, edx
+      18: c1 c0 07                     	rol	eax, 0x7
+      1b: 31 d0                        	xor	eax, edx
+      1d: 89 04 0f                     	mov	dword ptr [rdi + rcx], eax
+      20: 48 83 c1 04                  	add	rcx, 0x4
+      24: 48 39 ce                     	cmp	rsi, rcx
+      27: 75 e8                        	jne	0x11 <_addrot+0x11>
+      29: 5d                           	pop	rbp
+      2a: c3                           	ret
+
+000000000000002b <_blend>:
+      2b: 55                           	push	rbp
+      2c: 48 89 e5                     	mov	rbp, rsp
+      2f: 89 d0                        	mov	eax, edx
+      31: 48 85 f6                     	test	rsi, rsi
+      34: 74 1c                        	je	0x52 <_blend+0x27>
+      36: 48 c1 e6 02                  	shl	rsi, 0x2
+      3a: 31 c9                        	xor	ecx, ecx
+      3c: 8b 14 0f                     	mov	edx, dword ptr [rdi + rcx]
+      3f: 21 d0                        	and	eax, edx
+      41: c1 c2 0d                     	rol	edx, 0xd
+      44: 09 d0                        	or	eax, edx
+      46: 89 04 0f                     	mov	dword ptr [rdi + rcx], eax
+      49: 48 83 c1 04                  	add	rcx, 0x4
+      4d: 48 39 ce                     	cmp	rsi, rcx
+      50: 75 ea                        	jne	0x3c <_blend+0x11>
+      52: 5d                           	pop	rbp
+      53: c3                           	ret
+
+0000000000000054 <_invert>:
+      54: 55                           	push	rbp
+      55: 48 89 e5                     	mov	rbp, rsp
+      58: 89 d0                        	mov	eax, edx
+      5a: 48 85 f6                     	test	rsi, rsi
+      5d: 74 1b                        	je	0x7a <_invert+0x26>
+      5f: 48 c1 e6 02                  	shl	rsi, 0x2
+      63: 31 c9                        	xor	ecx, ecx
+      65: 8b 14 0f                     	mov	edx, dword ptr [rdi + rcx]
+      68: d1 c2                        	rol	edx
+      6a: 01 d0                        	add	eax, edx
+      6c: f7 d0                        	not	eax
+      6e: 89 04 0f                     	mov	dword ptr [rdi + rcx], eax
+      71: 48 83 c1 04                  	add	rcx, 0x4
+      75: 48 39 ce                     	cmp	rsi, rcx
+      78: 75 eb                        	jne	0x65 <_invert+0x11>
+      7a: 5d                           	pop	rbp
+      7b: c3                           	ret
+
+000000000000007c <_mix>:
+      7c: 55                           	push	rbp
+      7d: 48 89 e5                     	mov	rbp, rsp
+      80: 48 85 f6                     	test	rsi, rsi
+      83: 74 37                        	je	0xbc <_mix+0x40>
+      85: 48 c1 e6 02                  	shl	rsi, 0x2
+      89: 31 c9                        	xor	ecx, ecx
+      8b: 41 b8 f0 f0 f0 f0            	mov	r8d, 0xf0f0f0f0
+      91: 8b 04 0f                     	mov	eax, dword ptr [rdi + rcx]
+      94: 81 e2 0f 0f 0f 0f            	and	edx, 0xf0f0f0f
+      9a: 41 89 c1                     	mov	r9d, eax
+      9d: 45 21 c1                     	and	r9d, r8d
+      a0: 41 09 d1                     	or	r9d, edx
+      a3: 45 31 c1                     	xor	r9d, r8d
+      a6: c1 e8 03                     	shr	eax, 0x3
+      a9: 44 01 c8                     	add	eax, r9d
+      ac: 89 04 0f                     	mov	dword ptr [rdi + rcx], eax
+      af: 48 83 c1 04                  	add	rcx, 0x4
+      b3: 89 c2                        	mov	edx, eax
+      b5: 48 39 ce                     	cmp	rsi, rcx
+      b8: 75 d7                        	jne	0x91 <_mix+0x15>
+      ba: eb 02                        	jmp	0xbe <_mix+0x42>
+      bc: 89 d0                        	mov	eax, edx
+      be: 5d                           	pop	rbp
+      bf: c3                           	ret
+
+00000000000000c0 <_quarter>:
+      c0: 55                           	push	rbp
+      c1: 48 89 e5                     	mov	rbp, rsp
+      c4: 89 d0                        	mov	eax, edx
+      c6: 48 85 f6                     	test	rsi, rsi
+      c9: 74 21                        	je	0xec <_quarter+0x2c>
+      cb: 48 c1 e6 02                  	shl	rsi, 0x2
+      cf: 31 c9                        	xor	ecx, ecx
+      d1: 8b 14 0f                     	mov	edx, dword ptr [rdi + rcx]
+      d4: 8d 84 10 b9 79 37 9e         	lea	eax, [rax + rdx - 0x61c88647]
+      db: c1 c0 10                     	rol	eax, 0x10
+      de: 31 d0                        	xor	eax, edx
+      e0: 89 04 0f                     	mov	dword ptr [rdi + rcx], eax
+      e3: 48 83 c1 04                  	add	rcx, 0x4
+      e7: 48 39 ce                     	cmp	rsi, rcx
+      ea: 75 e5                        	jne	0xd1 <_quarter+0x11>
+      ec: 5d                           	pop	rbp
+      ed: c3                           	ret
+
+00000000000000ee <_rotxor>:
+      ee: 55                           	push	rbp
+      ef: 48 89 e5                     	mov	rbp, rsp
+      f2: 89 d0                        	mov	eax, edx
+      f4: 48 85 f6                     	test	rsi, rsi
+      f7: 74 18                        	je	0x111 <_rotxor+0x23>
+      f9: 48 c1 e6 02                  	shl	rsi, 0x2
+      fd: 31 c9                        	xor	ecx, ecx
+      ff: c1 c0 05                     	rol	eax, 0x5
+     102: 33 04 0f                     	xor	eax, dword ptr [rdi + rcx]
+     105: 89 04 0f                     	mov	dword ptr [rdi + rcx], eax
+     108: 48 83 c1 04                  	add	rcx, 0x4
+     10c: 48 39 ce                     	cmp	rsi, rcx
+     10f: 75 ee                        	jne	0xff <_rotxor+0x11>
+     111: 5d                           	pop	rbp
+     112: c3                           	ret
+
+0000000000000113 <_shift>:
+     113: 55                           	push	rbp
+     114: 48 89 e5                     	mov	rbp, rsp
+     117: 89 d0                        	mov	eax, edx
+     119: 48 85 f6                     	test	rsi, rsi
+     11c: 74 1c                        	je	0x13a <_shift+0x27>
+     11e: 48 c1 e6 02                  	shl	rsi, 0x2
+     122: 31 c9                        	xor	ecx, ecx
+     124: 89 c2                        	mov	edx, eax
+     126: c1 ea 03                     	shr	edx, 0x3
+     129: 03 04 0f                     	add	eax, dword ptr [rdi + rcx]
+     12c: 31 d0                        	xor	eax, edx
+     12e: 89 04 0f                     	mov	dword ptr [rdi + rcx], eax
+     131: 48 83 c1 04                  	add	rcx, 0x4
+     135: 48 39 ce                     	cmp	rsi, rcx
+     138: 75 ea                        	jne	0x124 <_shift+0x11>
+     13a: 5d                           	pop	rbp
+     13b: c3                           	ret
+
+000000000000013c <_sum>:
+     13c: 55                           	push	rbp
+     13d: 48 89 e5                     	mov	rbp, rsp
+     140: 89 d0                        	mov	eax, edx
+     142: 48 85 f6                     	test	rsi, rsi
+     145: 74 15                        	je	0x15c <_sum+0x20>
+     147: 48 c1 e6 02                  	shl	rsi, 0x2
+     14b: 31 c9                        	xor	ecx, ecx
+     14d: 03 04 0f                     	add	eax, dword ptr [rdi + rcx]
+     150: 89 04 0f                     	mov	dword ptr [rdi + rcx], eax
+     153: 48 83 c1 04                  	add	rcx, 0x4
+     157: 48 39 ce                     	cmp	rsi, rcx
+     15a: 75 f1                        	jne	0x14d <_sum+0x11>
+     15c: 5d                           	pop	rbp
+     15d: c3                           	ret
