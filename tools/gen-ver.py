@@ -14,7 +14,7 @@ with his other projects.
 
 Every copy of the version carries it in full, hash included, whether or
 not today's tools check it, since future tools may (Zooko, October 20):
-the crate (crates.io, its docs) and its build version's crate
+both libraries (crates.io, their docs) and their build version's crate
 (version/, its exact dependency), the tag, and, where the repository has
 them, the CHANGELOG's title, b3sum's own version (`b3sum --version`) and
 its exact requirement on the crate (`=X.Y.Z+<hash>`: Cargo reads it up to
@@ -34,6 +34,8 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
+from pathlib import Path
 
 
 def git(*args):
@@ -62,34 +64,61 @@ def current():
     return m.group(1), m.group(2)
 
 
+# Dependency order for the published crates; the C package ships as libraries.
+PACKAGES = {
+    "blake3-servil-version": "version/Cargo.toml",
+    "blake3-servil-core": "Cargo.toml",
+    "blake3-servil": "threads/Cargo.toml",
+    "b3sums": "b3sum/Cargo.toml",
+    "blake3-servil-c": "capi/Cargo.toml",
+}
+PINS = {
+    "Cargo.toml": "blake3-servil-version",
+    "threads/Cargo.toml": "blake3-servil-core",
+    "b3sum/Cargo.toml": "blake3",
+}
+
+
+def check_copies(full):
+    """Each package, dependency pin, header and CLI lock names the same code."""
+    for name, path in PACKAGES.items():
+        manifest = tomllib.loads(Path(path).read_text())
+        if manifest["package"]["name"] != name or manifest["package"]["version"] != full:
+            sys.exit(f"{path}: expected {name} {full}")
+        if path in PINS and manifest["dependencies"][PINS[path]]["version"] != "=" + full:
+            sys.exit(f"{path}: {PINS[path]} must require ={full}")
+    if f'#define B3_VERSION "{full}"' not in Path("capi/b3.h").read_text().splitlines():
+        sys.exit(f"capi/b3.h: B3_VERSION must be {full}")
+    lock = tomllib.loads(Path("b3sum/Cargo.lock").read_text())
+    for name in PACKAGES.keys() - {"blake3-servil-c"}:
+        versions = [p["version"] for p in lock["package"] if p["name"] == name]
+        if versions != [full]:
+            sys.exit(f"b3sum/Cargo.lock: expected one {name} at {full}, found {versions}")
+
+
 def set_version(full, notes=True):
-    """Every copy of the version set to `full` (and the CHANGELOG's title
-    where `notes`: a release's notes name it): the files it changed."""
-    crate = re.search(r'^name = "(.*)"$', open("Cargo.toml").read(), re.M).group(1)
-    edit("Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
-    # The build version's crate (version/) goes with the library, exactly.
-    edit("Cargo.toml", r'^(blake3-servil-version = \{ version = ")[^"]*', rf"\g<1>={full}")
-    edit("version/Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
-    files = ["Cargo.toml", "version/Cargo.toml"]
-    if notes and os.path.exists("CHANGELOG.md"):
-        edit("CHANGELOG.md", rf"^# {crate} [^\s,]+", f"# {crate} {full}")
+    """Stamp the packages and their pins; keep a past release's notes with --dev."""
+    files = list(PACKAGES.values())
+    for path in files:
+        edit(path, r'^version = ".*"$', f'version = "{full}"')
+    for path, dependency in PINS.items():
+        edit(path, rf'^({dependency} = \{{ version = ")[^"]*', rf"\g<1>={full}")
+    if notes:
+        edit("CHANGELOG.md", r"^# blake3-servil [^\s,]+", f"# blake3-servil {full}")
         files.append("CHANGELOG.md")
-    if os.path.exists("b3sum/Cargo.toml"):
-        edit("b3sum/Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
-        edit("b3sum/Cargo.toml", r'^(blake3 = \{ version = ")[^"]*', rf"\g<1>={full}")
-        subprocess.run(["cargo", "update", "-q", "-p", crate, "-p", "blake3-servil-version", "-p", "b3sums"], cwd="b3sum", check=True)
-        edit("capi/Cargo.toml", r'^version = ".*"$', f'version = "{full}"')
-        edit("capi/b3.h", r'^#define B3_VERSION ".*"$', f'#define B3_VERSION "{full}"')
-        files += ["b3sum/Cargo.toml", "b3sum/Cargo.lock", "capi/Cargo.toml", "capi/b3.h"]
-    else:
-        subprocess.run(["cargo", "update", "-q", "-p", crate], check=True)
-        files.append("Cargo.lock")
-    return crate, files
+    edit("capi/b3.h", r'^#define B3_VERSION ".*"$', f'#define B3_VERSION "{full}"')
+    # The CLI's tracked lock contains all four published packages.
+    subprocess.run(["cargo", "update", "-q", *[a for name in PACKAGES if name != "blake3-servil-c" for a in ("-p", name)]],
+                   cwd="b3sum", check=True)
+    files += ["b3sum/Cargo.lock", "capi/b3.h"]
+    check_copies(full)
+    return files
 
 
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if sys.argv[1:] == ["--check"]:
     release, named = current()
+    check_copies(f"{release}+{named}")
     if named != "dev" and git("rev-parse", "HEAD^") != named:
         sys.exit(f"the version {release}+{named[:12]} names a release's code, and this commit is past that release's: "
                  f"set {release}+dev (python3 tools/gen-ver.py --dev)")
@@ -101,7 +130,7 @@ if sys.argv[1:] == ["--dev"]:
     if named == "dev":
         sys.exit(f"the version is {release}+dev already")
     full = f"{release}+dev"
-    _, files = set_version(full, notes=False)
+    files = set_version(full, notes=False)
     git("commit", "-q", "--no-verify", "-m", f"Version {full}: the code after {release}", "--", *files)
     print(full)
     sys.exit(0)
@@ -116,7 +145,7 @@ if tags and number(version) <= max(tags):
     sys.exit(f"{version} is not newer than the latest tag, v{'.'.join(map(str, max(tags)))}")
 
 full = f"{version}+{git('rev-parse', 'HEAD')}"
-crate, files = set_version(full)
+files = set_version(full)
 # --no-verify: the pre-commit hook's speed check measures code, and this
 # commit changes version strings alone (AGENTS: follow a rule for its purpose).
 git("commit", "-q", "--no-verify", "-m", f"Version {full}", "--", *files)
@@ -124,4 +153,5 @@ git("tag", f"v{full}")
 print(f"v{full}")
 # The dependency line for the release notes: the release commit by its full
 # hash, which Cargo fetches exactly, and the full version.
-print(f'{crate} = {{ git = "{git("remote", "get-url", "origin")}", rev = "{git("rev-parse", "HEAD")}", version = "={full}" }}')
+for crate in ("blake3-servil-core", "blake3-servil"):
+    print(f'{crate} = {{ git = "{git("remote", "get-url", "origin")}", rev = "{git("rev-parse", "HEAD")}", version = "={full}" }}')

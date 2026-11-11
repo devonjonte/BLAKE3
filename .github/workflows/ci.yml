@@ -34,8 +34,8 @@ jobs:
         components: rustfmt
     - name: cargo fmt --check, in each crate
       run: for d in $(git ls-files '*Cargo.toml' | xargs -n1 dirname); do (cd "$d" && cargo fmt --all -- --check) || exit 1; done
-    - name: Release-evidence tool controls
-      run: python3 tools/test_release_check.py
+    - name: Release-tool controls
+      run: python3 tools/test_release_check.py && python3 tools/test_gen_ver.py
 
   library_tests:
     name: ${{ matrix.target.name }} ${{ matrix.channel }}
