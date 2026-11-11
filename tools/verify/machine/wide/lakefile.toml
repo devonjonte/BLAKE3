@@ -1,0 +1,15 @@
+name = "wide"
+defaultTargets = ["Seven"]
+
+[[require]]
+name = "Blake3Servil"
+path = "../../lean"
+
+[[lean_lib]]
+name = "Wide"
+[[lean_lib]]
+name = "Rounds"
+[[lean_lib]]
+name = "RoundsProof"
+[[lean_lib]]
+name = "Seven"
