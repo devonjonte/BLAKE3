@@ -72,3 +72,5 @@ name = "MergeAll"
 name = "CrossOneTable"
 [[lean_lib]]
 name = "Observer"
+[[lean_lib]]
+name = "Hoare"
