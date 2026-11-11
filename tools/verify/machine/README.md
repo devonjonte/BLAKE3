@@ -196,7 +196,8 @@ the platform byte.
 
 Check: about three minutes from nothing with the kernels (which take most of it); the `Merge*` files
 themselves 45 s. `RegionsX.lean` is `hex/Regions.lean` for this model, with whole reads and writes
-outside a region. `python3 mutants_merge.py` changes one instruction of `merge` at a time.
+outside a region. `python3 mutants_merge.py` changes one instruction of `merge` at a time: 10 of 11 are
+rejected; the eleventh changes a byte `merge` stores in its frame and nothing reads (`mutants-merge-20261111.txt`).
 
 Limits: this model has no trace, so nothing is said of timing here; the call through the GOT is taken to
 reach the kernel its relocation names; `push`, the function that calls `merge`, and `final_node` are not

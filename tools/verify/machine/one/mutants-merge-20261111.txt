@@ -1,0 +1,12 @@
+rejected	the lower value from the wrong slot	.lea .r13 .rax 0xFFFFFFFFFFFFFFFE -> .lea .r13 .rax 0xFFFFFFFFFFFFFFFD
+rejected	the upper value from the lower slot	.lea .rdi .rax 0xFFFFFFFFFFFFFFFF -> .lea .rdi .rax 0xFFFFFFFFFFFFFFFE
+rejected	slots of sixteen bytes	.shl64 .r13 5 -> .shl64 .r13 4
+rejected	the result's first half stored twice	.storev false .r13 0x10 1 -> .storev false .r13 0x10 0
+rejected	no PARENT flag	.or 8 (.reg .rcx) (.imm 0x4) -> .or 8 (.reg .rcx) (.imm 0x0)
+rejected	a block length of 32	.mov 32 (.reg .rdx) (.imm 0x40) -> .mov 32 (.reg .rdx) (.imm 0x20)
+rejected	the counter not cleared	.xor 32 (.reg .rcx) (.reg .rcx) -> .or 32 (.reg .rcx) (.reg .rcx)
+rejected	the turns never counted down	.dec64 .r15 -> .dec64 .rax
+rejected	len + target turns	.sub 64 (.reg .r15) (.reg .rdx) -> .add 64 (.reg .r15) (.reg .rdx)
+rejected	R12 not restored	.pop .r12, 0x401B2 -> .pop .r13, 0x401B2
+ACCEPTED	a byte of the node's copy the kernel never reads	.mov 8 (.mem .rsp 0xE0) (.imm 0x40) -> .mov 8 (.mem .rsp 0xE0) (.imm 0x41)
+11 changed instructions: 1 ACCEPTED, 10 rejected
