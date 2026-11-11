@@ -4,7 +4,7 @@
 # the same bytes. Then a control: a model with PSHUFD's second selector read from the wrong bits
 # must be found to differ.
 set -eu
-here=$(cd "$(dirname "$0")" && pwd); work=${CROSS_WORK:-$(mktemp -d)}
+here=$(cd "$(dirname "$0")" && pwd); work=${CROSS_WORK:-$(mktemp -d)}; mkdir -p "$work"
 cd "$here"
 lake build Simd Code CodeSse >/dev/null
 lake env lean --run Cross.lean > "$work/vectors.txt"
