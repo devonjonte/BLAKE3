@@ -470,7 +470,7 @@ impl HasherCore {
     /// [`update`](Hasher::update) with a held group (STAGE_LEN bytes from a
     /// multiple of STAGE_LEN, the core's chunk empty: Hasher::take_held,
     /// its one caller), whose subtree value `result` holds as
-    /// [`lanes::Task`] computes it: at chunk zero its two halves' values
+    /// the pool's task computes it: at chunk zero its two halves' values
     /// (the group may be the root's), elsewhere its own. The group is one
     /// whole subtree, so nothing of it reaches the chunk state.
     #[cfg(feature = "std")]

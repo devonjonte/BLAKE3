@@ -369,8 +369,8 @@ impl<P: Blocks> ChunkState<P> {
 /// layout decides which case each process gets, so the same binary hashed
 /// 64-byte inputs 35-45% slower in some processes than in others (Zen 5).
 /// Aligning the block pins every process to the forwarding-friendly case
-/// (https://github.com/zooko/bench-hashes/issues/2,
-/// https://github.com/BLAKE3-team/BLAKE3/pull/582).
+/// (<https://github.com/zooko/bench-hashes/issues/2>,
+/// <https://github.com/BLAKE3-team/BLAKE3/pull/582>).
 #[repr(C, align(64))]
 pub struct Output<P> {
     pub block: [u8; BLOCK_LEN],

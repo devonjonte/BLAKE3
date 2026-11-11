@@ -3,7 +3,12 @@
 signature and the first sentence of its documentation, from rustdoc's own
 list (its JSON output), so the page names exactly what the crate offers.
 
-    python3 tools/api.py DOC.json > docs/core-api.md
+    python3 tools/api.py DOC.json                 # the list
+    python3 tools/api.py DOC.json --check PAGE    # PAGE's list is this one
+
+A page is its own opening, then the list from the line "## The crate's
+root" to its end; `--check` compares that part and prints what differs
+(tools/check-builds.sh runs it on docs/core-api.md).
 
 DOC.json: `RUSTC_BOOTSTRAP=1 cargo rustdoc --lib --features serde,zeroize --
 -Z unstable-options --output-format json` writes it under target/doc/.
@@ -58,6 +63,11 @@ def bound(b):
         t = b["trait_bound"]["trait"]
         s = t["path"].split("::")[-1]
         a = t.get("args")
+        if a and "angle_bracketed" in a:
+            xs = [ty(g["type"]) for g in a["angle_bracketed"]["args"] if "type" in g]
+            xs += [c["name"] + " = " + ty(c["binding"]["equality"]["type"]) for c in a["angle_bracketed"].get("constraints", []) if "type" in c.get("binding", {}).get("equality", {})]
+            if xs:
+                s += "<" + ", ".join(xs) + ">"
         if a and "parenthesized" in a:
             s += "(" + ", ".join(ty(x) for x in a["parenthesized"]["inputs"]) + ")" + ((" -> " + ty(a["parenthesized"]["output"])) if a["parenthesized"].get("output") else "")
         return s
@@ -201,4 +211,16 @@ def walk(mid, path, depth):
 root = ix[str(doc["root"])]
 crate = root["name"]
 walk(doc["root"], crate, 2)
-print("\n".join(out).strip() + "\n")
+listed = "\n".join(out).strip() + "\n"
+if sys.argv[2:3] == ["--check"]:
+    import difflib
+
+    page = open(sys.argv[3]).read()
+    start = "## The crate's root\n\n"
+    assert start in page, f"{sys.argv[3]}: no line \"## The crate's root\" to start its list"
+    shown = page[page.index(start) + len(start):]
+    if shown != listed:
+        sys.stdout.writelines(difflib.unified_diff(shown.splitlines(True), listed.splitlines(True), sys.argv[3], "the crate"))
+        sys.exit(f"{sys.argv[3]}: its list differs from the crate's; write the list again (python3 tools/api.py DOC.json)")
+else:
+    print(listed, end="")

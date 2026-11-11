@@ -7,10 +7,10 @@ the thread that makes it; the crate starts no thread. Its assembly
 kernels are each proved against the BLAKE3 specification.
 
 This page lists everything a program can name in the crate, as it stands
-today on the branch that becomes 0.9
-([`trial/two-crates-squashed`](https://github.com/servil-software-factory/BLAKE3/tree/trial/two-crates-squashed),
-at cb03835c). It changes with the code until the release; from the
-release on, the same list with every call's full documentation is at
+on [`next`](https://github.com/servil-software-factory/BLAKE3/tree/next),
+the branch that becomes 0.9; a check holds the list to the code. It
+changes with the code until the release; from the release on, the same
+list with every call's full documentation is at
 <https://servil-software-factory.github.io/BLAKE3/>. Progress toward the
 release: [BLAKE3 #357](https://github.com/servil-software-factory/BLAKE3/issues/357).
 
@@ -67,7 +67,7 @@ const fn from_bytes(bytes: [u8; 32]) -> Self
 const fn as_slice(&self) -> &[u8]
 fn from_slice(bytes: &[u8]) -> Result<Self, TryFromSliceError>
 fn to_hex(&self) -> ArrayString<{ _ }>
-fn from_hex(hex: impl AsRef) -> Result<Self, HexError>
+fn from_hex(hex: impl AsRef<[u8]>) -> Result<Self, HexError>
 ```
 
 Implements: `Clone`, `Copy`, `Debug`, `Deserialize`, `Display`, `Eq`, `From`, `FromStr`, `Hash`, `PartialEq`, `Serialize`, `Zeroize`.
@@ -208,4 +208,3 @@ Implements: `Clone`, `Copy`, `Debug`, `Eq`, `PartialEq`.
 ### `trait Prepared`
 
 The batch calls' input.
-

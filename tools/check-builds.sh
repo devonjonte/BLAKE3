@@ -50,4 +50,6 @@ step sh -c 'python3 tools/gen_x86_chunk_root.py | cmp - c/blake3_chunk_root_x86-
 step sh -c 'python3 tools/gen_avx512_32.py | cmp - c/blake3_avx512_32.S'
 step sh -c 'python3 tools/gen_output16.py | cmp - c/blake3_output16.S'
 step sh -c 'python3 tools/gen_output8.py | cmp - c/blake3_output8.S'
+# The core's API page lists what the crate offers, item for item.
+step sh -c 'RUSTC_BOOTSTRAP=1 cargo rustdoc -q --lib --features serde,zeroize -- -Z unstable-options --output-format json && python3 tools/api.py "$CARGO_TARGET_DIR/doc/blake3_servil_core.json" --check docs/core-api.md'
 echo "check-builds: every build passes"
