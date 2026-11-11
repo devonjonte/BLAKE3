@@ -24,9 +24,10 @@ parent (the specification's compression of the key, the two values, and the flag
 def merged (k0 k1 : V) (fl : BitVec 8) (target : BitVec 64) (es : Cvs) : Cvs :=
   MergeCode.mergeN k0 k1 fl (es.length - target.toNat) es
 
-/-- What a holder of the stack knows at once: the length's cell, the bytes owned, the bound. -/
+/-- What a holder of the stack knows at once: the length's cell, the bytes owned, the bound, and that
+the length word counts the values. -/
 theorem cells {m : Mem} {st len : BitVec 64} {es : Cvs} (h : holds m st len es) :
-    Quad m st len ∧ Region m st 1792#64 ∧ len ≤ 55#64 := ⟨h.2.2.1, h.2.2.2.2, h.2.1⟩
+    Quad m st len ∧ Region m st 1792#64 ∧ len ≤ 55#64 ∧ len.toNat = es.length := ⟨h.2.2.1, h.2.2.2.2, h.2.1, h.1⟩
 
 /-- The stack is in its own 1792 bytes: a memory that agrees on them holds it too. -/
 theorem frame {m m' : Mem} {st len : BitVec 64} {es : Cvs} (h : holds m st len es)
@@ -100,5 +101,18 @@ theorem merged_done (k0 k1 : V) (fl : BitVec 8) (target len : BitVec 64) (es : C
     (hl : len.toNat = es.length) (ht : ¬ target < len) : merged k0 k1 fl target es = es := by
   have e : es.length - target.toNat = 0 := by bv_omega
   simp only [merged, e]; rfl
+
+/-- The invariant "what is left to merge gives the whole result" after a turn. -/
+theorem merged_turn {k0 k1 : V} {fl : BitVec 8} {target len : BitVec 64} {r0 r1 l0 l1 : V} {rest es0 : Cvs}
+    (h : merged k0 k1 fl target ((r0, r1) :: (l0, l1) :: rest) = merged k0 k1 fl target es0)
+    (hl : len.toNat = ((r0, r1) :: (l0, l1) :: rest).length) (ht : target < len) :
+    merged k0 k1 fl target (MergeCode.merged k0 k1 l0 l1 r0 r1 fl :: rest) = merged k0 k1 fl target es0 :=
+  (merged_step k0 k1 fl target len r0 r1 l0 l1 rest hl ht).symm.trans h
+
+/-- The same invariant when the loop ends: the stack held is the whole result. -/
+theorem merged_exit {m : Mem} {st len target : BitVec 64} {k0 k1 : V} {fl : BitVec 8} {es es0 : Cvs}
+    (h : holds m st len es) (he : merged k0 k1 fl target es = merged k0 k1 fl target es0) (ht : ¬ target < len) :
+    holds m st len (merged k0 k1 fl target es0) := by
+  rw [← he, merged_done k0 k1 fl target len es h.1 ht]; exact h
 
 end Stack

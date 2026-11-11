@@ -44,6 +44,16 @@ theorem run_then {prog : Nat → Option (Instr × Nat)} {a b : Nat} {s s1 : Stat
   obtain ⟨s', h2, q⟩ := next
   exact ⟨s', by rw [steps_add, h, Option.bind_some, h2], q⟩
 
+/-- From this state the program runs, without a fault, to a state where `Q` holds. -/
+def Runs (prog : Nat → Option (Instr × Nat)) (s : State) (Q : State → Prop) : Prop := ∃ k s', steps prog k s = some s' ∧ Q s'
+
+theorem runs_then {prog : Nat → Option (Instr × Nat)} {a : Nat} {s s1 : State} {Q : State → Prop}
+    (h : steps prog a s = some s1) (next : Runs prog s1 Q) : Runs prog s Q := by
+  obtain ⟨k, s', h2, q⟩ := next
+  exact ⟨a + k, s', by rw [steps_add, h, Option.bind_some, h2], q⟩
+
+theorem runs_done {prog : Nat → Option (Instr × Nat)} {s : State} {Q : State → Prop} (q : Q s) : Runs prog s Q := ⟨0, s, rfl, q⟩
+
 /-! ## Reading through a put -/
 
 theorem read_put64_same (m : Mem) (a v : BitVec 64) : (m.put64 a v).read a 64 = some v := read_quad (quad_put64 m a v)
@@ -173,5 +183,19 @@ macro "mem_region" : tactic => `(tactic| ((repeat (with_reducible (first | apply
 
 /-- A byte away from every put is what it was. -/
 macro "mem_away" : tactic => `(tactic| simp (disch := bv_decide) only [put64_away, put128_away])
+
+open Lean Elab Tactic Meta in
+/-- Run a tactic on a goal that is a proposition; leave any other goal (a value still to be found) alone. -/
+elab "skip_unless_prop " t:tactic : tactic => do
+  if (← isProp (← (← getMainGoal).getType)) then evalTactic t else pure ()
+
+/-- What a lemma about memory asks of its user, whichever kind it is: a fact at hand, a cell of the
+memory after some puts, a region still owned, bytes no put touched, or bit-vector arithmetic. -/
+macro "mem_auto" : tactic => `(tactic| skip_unless_prop (first
+  | with_reducible assumption
+  | (mem_fact; done)
+  | mem_region
+  | (intros; mem_away; done)
+  | bv_decide))
 
 end Cells

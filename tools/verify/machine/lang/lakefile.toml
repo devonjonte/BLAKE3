@@ -29,3 +29,5 @@ name = "Code_merge"
 name = "StackSpec"
 [[lean_lib]]
 name = "Kernels"
+[[lean_lib]]
+name = "Proof_merge"

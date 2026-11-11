@@ -43,6 +43,37 @@ import json, re, sys
 TOKEN = re.compile(r"\s*(?:(//[^\n]*)|(0x[0-9a-fA-F_]+|\d[\d_]*)|([A-Za-z_][A-Za-z_0-9]*)|(\"[^\"]*\")|(<<|>>|<=|>=|==|!=|<-|\.\.|[-+&|()\[\]{}<>=,/]))")
 
 
+CLAUSES = ("spec", "ghost", "predicate", "region", "requires", "ensures", "modifies", "invariant", "decreases", "open", "assert")
+
+
+def contracts_of(text):
+    """The contract clauses of each function, and the text without them.
+
+    Clauses stand between a function's head and its `{`, and between a loop's `while CONDITION` and its
+    `{`; one a line, each starting with a word of CLAUSES. (`requires "words"` is a comment, as before.)
+    A line `callee NAME meets LEMMA (N)` at the top level names the lemma that is an external function's
+    contract, and how many facts it asks for. Returns ({fn: {"head": [(word, rest)], "loops": [[...], ...]}},
+    {extern: (lemma, n)}, text)."""
+    out, callees, kept, fn, where = {}, {}, [], None, None
+    for line in text.split("\n"):
+        s = line.split("//")[0].strip()
+        m = re.match(r"^fn\s+(\w+)\s*\(", s)
+        if m:
+            fn = m.group(1); out[fn] = {"head": [], "loops": []}; where = out[fn]["head"]; kept.append(line); continue
+        m = re.match(r"^callee\s+(\w+)\s+meets\s+([\w.]+)\s*\((\d+)\)$", s)
+        if m:
+            callees[m.group(1)] = (m.group(2), int(m.group(3))); kept.append(""); continue
+        if fn and re.match(r"^while\b", s) and not s.endswith("{"):
+            out[fn]["loops"].append([]); where = out[fn]["loops"][-1]; kept.append(line); continue
+        word = s.split(None, 1)[0] if s else ""
+        if where is not None and word in CLAUSES and not s.startswith('requires "'):
+            where.append((word, s[len(word):].strip())); kept.append(""); continue
+        if s.startswith("{") or s.endswith("{"):
+            where = None
+        kept.append(line)
+    return out, callees, "\n".join(kept)
+
+
 def tokens(text):
     out, at = [], 0
     while at < len(text):
@@ -376,7 +407,7 @@ def expand(name, lines, defs, env):
 
 def main():
     src, out = sys.argv[1], sys.argv[2]
-    source, data, kerns = kernels(open(src).read())
+    source, data, kerns = kernels(contracts_of(open(src).read())[2])
     p = Parser(tokens(source)); p.top()
     low = Lower(p)
     text = "import Lang\nopen L\n\n/-! Written by odec.py from " + src.split("/")[-1] + ". Not edited by hand. -/\n\nnamespace Ode\n\n"
@@ -401,10 +432,19 @@ def main():
         "  | [\"asm\", p] => IO.print (asmFile (rename p [] Ode.all) Ode.data)\n" \
         "  | [\"asm\", p, \"own\"] => IO.print (asmFile (rename p Ode.replaces Ode.all) Ode.data)\n" \
         "  | [\"asm\", p, \"only\", n] => IO.print (asmFile ((rename p [] Ode.all).filter (·.name == p ++ n)) (Ode.data.filter fun d => (Ode.all.filter (·.name == \"b3l_\" ++ n)).any fun f => f.body.any fun s => match s with | .ins t => (t.splitOn d.1).length > 1 | _ => false))\n" \
+        "  | [\"layout\", n] => match Ode.all.find? (·.name == \"b3l_\" ++ n) with\n" \
+        "    | some f => do\n" \
+        "      let L := f.layout\n" \
+        "      IO.println (\"saved \" ++ \" \".intercalate L.saved)\n" \
+        "      IO.println s!\"frame {L.frame}\"\n" \
+        "      for x in f.params ++ f.locals do IO.println s!\"home {x} {L.home x}\"\n" \
+        "      for b in f.bufs do IO.println s!\"buf {b.1} {L.bufAt b.1}\"\n" \
+        "    | none => IO.eprintln \"no such function\"\n" \
         "  | _ => IO.eprintln \"usage: rust PREFIX | asm PREFIX [own]\"\n"
     with open(out, "w") as f:
         f.write(text)
     print(f"{len(names)} functions: {', '.join(names)}")
 
 
-main()
+if __name__ == "__main__":
+    main()

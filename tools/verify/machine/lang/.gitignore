@@ -3,3 +3,9 @@ hex.S
 hex.o
 hex.listing
 Lifted_hex.lean.rows
+merge.S
+merge.o
+merge.listing
+merge.layout
+Lifted_merge.lean
+Lifted_merge.lean.rows

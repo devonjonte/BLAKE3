@@ -105,4 +105,41 @@ theorem call_sse_then {prog : Nat → Option (Instr × Nat)} (hk : ∀ pc x, Cod
       hc0 hc1 hb0 hb1 hb2 hb3 hlen hret hapart
   exact Cells.run_then h (next rax' rcx' rdx' rsi' rdi' r8' r9' zf' cf' y0 y1 y2 y3 y4 y5 y6 y7 y8 y9 y10 y11 y12 y13 y14 y15)
 
+/-- The call of the AVX kernel in a run: its contract's facts, then the rest of the run from the state it returns in. -/
+theorem call_avx_runs {prog : Nat → Option (Instr × Nat)} (hk : ∀ pc x, Code.prog pc = some x → prog pc = some x)
+    {cv0 cv1 b0 b1 b2 b3 : V} {ra : BitVec 64}
+    {rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r12 r13 r14 r15 : BitVec 64} {zf cf : Option Bool} {x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 : V} {mem : Mem}
+    {Q : State → Prop}
+    (hc0 : Vec mem rdi cv0) (hc1 : Vec mem (rdi + 16#64) cv1)
+    (hb0 : Vec mem rsi b0) (hb1 : Vec mem (rsi + 16#64) b1) (hb2 : Vec mem (rsi + 32#64) b2) (hb3 : Vec mem (rsi + 48#64) b3)
+    (hret : Quad mem rsp ra) (hapart : 32#64 ≤ rsp - rdi ∧ 8#64 ≤ rdi - rsp)
+    (next : ∀ (rax' rcx' rdx' rsi' rdi' r8' r9' : BitVec 64) (zf' cf' : Option Bool) (y0 y1 y2 y3 y4 y5 y6 y7 y8 y9 y10 y11 y12 y13 y14 y15 : V),
+      Runs prog ⟨rax', rcx', rdx', rbx, rsp + 8#64, rbp, rsi', rdi', r8', r9', r12, r13, r14, r15, zf', cf', y0, y1, y2, y3, y4, y5, y6, y7, y8, y9, y10, y11, y12, y13, y14, y15,
+          (mem.put128 rdi (out cv0 cv1 b0 b1 b2 b3 rcx ((rdx.setWidth 8).setWidth 32) ((r8.setWidth 8).setWidth 32)).1).put128 (rdi + 16#64)
+            (out cv0 cv1 b0 b1 b2 b3 rcx ((rdx.setWidth 8).setWidth 32) ((r8.setWidth 8).setWidth 32)).2, ra.toNat⟩ Q) :
+    Runs prog ⟨rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8, r9, r12, r13, r14, r15, zf, cf, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, mem, 0x30000⟩ Q := by
+  obtain ⟨rax', rcx', rdx', rsi', rdi', r8', r9', zf', cf', y0, y1, y2, y3, y4, y5, y6, y7, y8, y9, y10, y11, y12, y13, y14, y15, h⟩ :=
+    call_avx hk cv0 cv1 b0 b1 b2 b3 ra rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r12 r13 r14 r15 zf cf x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 mem
+      hc0 hc1 hb0 hb1 hb2 hb3 hret hapart
+  exact Cells.runs_then h (next rax' rcx' rdx' rsi' rdi' r8' r9' zf' cf' y0 y1 y2 y3 y4 y5 y6 y7 y8 y9 y10 y11 y12 y13 y14 y15)
+
+/-- The call of the SSE kernel in a run: its contract's facts, then the rest of the run from the state it returns in. -/
+theorem call_sse_runs {prog : Nat → Option (Instr × Nat)} (hk : ∀ pc x, Code.prog pc = some x → prog pc = some x)
+    {cv0 cv1 b0 b1 b2 b3 : V} {ra : BitVec 64}
+    {rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r12 r13 r14 r15 : BitVec 64} {zf cf : Option Bool} {x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 : V} {mem : Mem}
+    {Q : State → Prop}
+    (hc0 : Vec mem rdi cv0) (hc1 : Vec mem (rdi + 16#64) cv1)
+    (hb0 : Vec mem rsi b0) (hb1 : Vec mem (rsi + 16#64) b1) (hb2 : Vec mem (rsi + 32#64) b2) (hb3 : Vec mem (rsi + 48#64) b3)
+    (hlen : rdx = (rdx.setWidth 32).setWidth 64)
+    (hret : Quad mem rsp ra) (hapart : 32#64 ≤ rsp - rdi ∧ 8#64 ≤ rdi - rsp)
+    (next : ∀ (rax' rcx' rdx' rsi' rdi' r8' r9' : BitVec 64) (zf' cf' : Option Bool) (y0 y1 y2 y3 y4 y5 y6 y7 y8 y9 y10 y11 y12 y13 y14 y15 : V),
+      Runs prog ⟨rax', rcx', rdx', rbx, rsp + 8#64, rbp, rsi', rdi', r8', r9', r12, r13, r14, r15, zf', cf', y0, y1, y2, y3, y4, y5, y6, y7, y8, y9, y10, y11, y12, y13, y14, y15,
+          (mem.put128 rdi (out cv0 cv1 b0 b1 b2 b3 rcx (rdx.setWidth 32) (r8.setWidth 32)).1).put128 (rdi + 16#64)
+            (out cv0 cv1 b0 b1 b2 b3 rcx (rdx.setWidth 32) (r8.setWidth 32)).2, ra.toNat⟩ Q) :
+    Runs prog ⟨rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8, r9, r12, r13, r14, r15, zf, cf, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, mem, 0x20000⟩ Q := by
+  obtain ⟨rax', rcx', rdx', rsi', rdi', r8', r9', zf', cf', y0, y1, y2, y3, y4, y5, y6, y7, y8, y9, y10, y11, y12, y13, y14, y15, h⟩ :=
+    call_sse hk cv0 cv1 b0 b1 b2 b3 ra rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r12 r13 r14 r15 zf cf x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 mem
+      hc0 hc1 hb0 hb1 hb2 hb3 hlen hret hapart
+  exact Cells.runs_then h (next rax' rcx' rdx' rsi' rdi' r8' r9' zf' cf' y0 y1 y2 y3 y4 y5 y6 y7 y8 y9 y10 y11 y12 y13 y14 y15)
+
 end Kernels
