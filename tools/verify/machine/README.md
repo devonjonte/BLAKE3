@@ -1,8 +1,17 @@
 # Experiments: compiled code proved in Lean (#361)
 
-Seven experiments, each a Lean project of its own (`lake build` in its folder). None is a gate.
-Each theorem is about machine code as llvm-objdump lists it, run on a small model of x86-64
-written here, against a function written in Lean.
+Twelve folders, each a Lean project of its own (`lake build` in its folder). None is a gate.
+Each theorem is about machine code as llvm-objdump lists it, run on a small model of x86-64 (one
+of AArch64) written here, against a function written in Lean. The table has the first seven; the
+sections after it have `a64/`, `gen/`, `hex/`, `alg/`, `eq/`, `CvStack::merge` and the kernels'
+traces (both in `one/`).
+
+**What each theorem is about: one build's bytes.** The listings are rustc 1.99.1's plain release
+build for x86-64 Linux (two of the folders: Mach-O objects made on a Mac). Another compiler, another
+optimisation level, `codegen-units`, `target-cpu`, LTO or inlining into a user's crate give other
+bytes, of which these theorems say nothing. The `other_compiler.sh` scripts (here and in `one/`)
+and the paragraphs "Another compiler" and "Other build settings" below show the proofs checking,
+unedited, on some of those other bytes, and where they stop.
 
 | Folder | The code | The theorem | Check |
 |---|---|---|---|
