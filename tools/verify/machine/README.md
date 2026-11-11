@@ -1,6 +1,6 @@
 # Experiments: compiled code proved in Lean (#361)
 
-Six experiments, each a Lean project of its own (`lake build` in its folder). None is a gate.
+Seven experiments, each a Lean project of its own (`lake build` in its folder). None is a gate.
 Each theorem is about machine code as llvm-objdump lists it, run on a small model of x86-64
 written here, against a function written in Lean.
 
@@ -12,6 +12,7 @@ written here, against a function written in Lean.
 | `kernel/` | `blake3_servil_compress_in_place_sse41` of `c/blake3_sse41_x86-64_unix.S` (94 instructions, 467 executed) | for every chaining value, block, counter, length and flags it leaves the first eight words of the specification's `BLAKE3_COMPRESS` (`../lean/Generic.lean` at 32-bit words) and changes nothing else | 50 s |
 | `kernel512/` | `blake3_servil_compress_in_place_avx512` of `c/blake3_avx512_x86-64_unix.S` (76 instructions, 362 executed; VEX and EVEX forms on XMM registers, `vprord` among them) | the same statement | 48 s |
 | `wide/` | the seven rounds of `blake3_servil_hash_many_avx512`'s sixteen-lane loop (784 instructions on ZMM registers; not the loads, the loop or the stores around them) | in every lane they are the specification's seven rounds on that lane's words, the message permuted between rounds as the specification permutes it | 60 s |
+| `one/` | **two functions of the core crate as rustc compiled them** (`hasher::parent_output`, 23 instructions; `Output::chaining_value`, 29, which calls a compression kernel chosen by the platform's byte) **and both one-block kernels**, 222 instructions in one program on one model (`one/Machine.lean`: 14 general and 16 XMM registers, byte memory with ownership, aligned moves that fault off alignment) | the two functions, one after the other, leave the specification's **parent chaining value** of two children under any key and flags (`parent_cv_by_the_crates_code`); the kernel's run inside `chaining_value` is taken from the kernel's contract | 105 s |
 
 What a reader reads and relies on, for each:
 
@@ -28,6 +29,12 @@ What a reader reads and relies on, for each:
 Each folder's `mutants.py` changes one instruction at a time and requires the build to fail.
 
 Known limits, stated so nobody takes these for more than they are:
+
+- `one/` is the first with one model for kernels and compiled Rust; the others still have their own copies;
+- `one/`'s Rust functions come from the two-crate trial (784fb406) built by rustc 1.99.1 for x86-64 Linux; their
+  listing is `one/rust-functions.s`; a call through the GOT is taken to reach the kernel its relocation names;
+- `one/ParentOutputProof.lean` and `one/ChainingValueProof*.lean` were written by scripts not kept here (the list
+  of each function's memory writes, in order, is all they needed); `one/gen_kernel.py` writes the kernels' proofs;
 
 - four copies of the model, not yet one: `loop/X86.lean` (and `call/X86.lean`, with two more registers, `call` and `jmp`) has byte memory with ownership and the observer's
   trace; `kernel/Simd.lean` has 128-bit cells for memory and no trace; `X86.lean` neither;

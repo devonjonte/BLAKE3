@@ -1,0 +1,41 @@
+name = "one"
+defaultTargets = ["ParentCv", "Test"]
+
+[[require]]
+name = "Blake3Servil"
+path = "../../lean"
+
+[[lean_lib]]
+name = "Machine"
+[[lean_lib]]
+name = "MemLemmas"
+[[lean_lib]]
+name = "ParentOutput"
+[[lean_lib]]
+name = "ChainingValue"
+[[lean_lib]]
+name = "Sse"
+[[lean_lib]]
+name = "Avx"
+[[lean_lib]]
+name = "Code"
+[[lean_lib]]
+name = "Spec32"
+[[lean_lib]]
+name = "Test"
+[[lean_lib]]
+name = "Run"
+[[lean_lib]]
+name = "Flat"
+[[lean_lib]]
+name = "SseProof"
+[[lean_lib]]
+name = "AvxProof"
+[[lean_lib]]
+name = "ParentOutputProof"
+[[lean_lib]]
+name = "ChainingValueProof"
+[[lean_lib]]
+name = "ParentCv"
+[[lean_lib]]
+name = "ChainingValueProofBase"
