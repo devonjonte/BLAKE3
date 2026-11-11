@@ -24,7 +24,8 @@ import sys
 p, here = sys.argv[1:3]; t = open(p).read()
 with open(p, "w") as f: f.write(t.replace('path = "../../lean"', f'path = "{here}/../../lean"'))
 PY
-(cd "$work/wrong" && lake build Simd Code CodeSse >/dev/null 2>&1 && lake env lean --run Cross.lean > "$work/wrong-vectors.txt")
+(cd "$work/wrong" && lake build Simd Code CodeSse > "$work/wrong-build.log" 2>&1 || { tail -n 20 "$work/wrong-build.log"; exit 1; })
+(cd "$work/wrong" && lake env lean --run Cross.lean > "$work/wrong-vectors.txt")
 if "$work/cross" "$work/wrong-vectors.txt" > "$work/wrong.out"; then echo "the control passed: a wrong PSHUFD was not noticed"; exit 1; fi
 tail -n 1 "$work/wrong.out" | sed 's/^/control (a wrong PSHUFD): /'
 echo "cross-check done"
