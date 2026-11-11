@@ -5,6 +5,8 @@ authors = ["John Servil", "Devon Jonte", "Sam Shackleton"]
 description = "the BLAKE3 hash function on every core: blake3-servil-core's kernels behind a shared thread pool"
 repository = "https://github.com/servil-software-factory/BLAKE3"
 license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
+# The repository's page: what BLAKE3-Servil is, for whoever finds this crate.
+readme = "../README.md"
 edition = "2024"
 include = ["/src", "/build.rs", "/LICENSE_*"]
 
