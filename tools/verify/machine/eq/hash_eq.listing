@@ -1,0 +1,15 @@
+0000000000000000 <_hash_eq>:
+       0: 55                           	push	rbp
+       1: 48 89 e5                     	mov	rbp, rsp
+       4: 0f 10 07                     	movups	xmm0, xmmword ptr [rdi]
+       7: 0f 10 4f 10                  	movups	xmm1, xmmword ptr [rdi + 0x10]
+       b: 0f 10 16                     	movups	xmm2, xmmword ptr [rsi]
+       e: 0f 10 5e 10                  	movups	xmm3, xmmword ptr [rsi + 0x10]
+      12: 66 0f 74 c2                  	pcmpeqb	xmm0, xmm2
+      16: 66 0f 74 cb                  	pcmpeqb	xmm1, xmm3
+      1a: 66 0f db c1                  	pand	xmm0, xmm1
+      1e: 66 0f d7 c0                  	pmovmskb	eax, xmm0
+      22: 3d ff ff 00 00               	cmp	eax, 0xffff
+      27: 0f 94 c0                     	sete	al
+      2a: 5d                           	pop	rbp
+      2b: c3                           	ret

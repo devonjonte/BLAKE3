@@ -155,3 +155,19 @@ On an older Xeon and on an ARM VM the kernels' proofs first failed: `bv_decide` 
 seconds, and one round's problem took longer there than on the machines it was written on. The round lemmas
 now allow 900 seconds. The durable fix is to keep each `bv_decide`'s certificate in the repository
 (`bv_decide?` writes it, `bv_check` reads it), so that checking runs no solver; it is not done.
+
+## `eq/`: `Hash == Hash` is equality and shows nothing of either hash
+
+`impl PartialEq for Hash` is `constant_time_eq::constant_time_eq_32` (0.4.2), a dependency's code
+that runs when a user compares hashes. `probe.rs` compiles exactly that call (rustc 1.99.1,
+x86-64): fourteen instructions, in which LLVM turned the crate's xor-and-or loop into two
+`pcmpeqb`, a `pand` and a `pmovmskb`. `hash_eq_is_equality`: it returns 1 in AL when the 32 bytes
+are equal and 0 when not, changes no byte but the eight below the stack pointer, and its trace is
+`eqLeak` of the two hashes' addresses and the stack pointer, in which no byte of either hash
+occurs. Check 2 s; `python3 mutants.py`: 11 of 11 changed instructions rejected.
+
+With `hex/` this is the pair: the comparison users are told to use is constant-time in the code
+as compiled; the hexadecimal is not.
+
+Limits: the function is compiled alone (in the crate it is inlined into its callers); x86-64 only;
+`pcmpeqb`, `pand`, `pmovmskb` and `sete` are not yet in the cross-check against a processor.

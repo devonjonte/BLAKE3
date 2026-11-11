@@ -1,0 +1,10 @@
+[package]
+name = "probe"
+version = "0.0.0"
+edition = "2021"
+[lib]
+crate-type = ["staticlib"]
+[dependencies]
+constant_time_eq = "=0.4.2"
+[profile.release]
+panic = "abort"
