@@ -15,3 +15,5 @@ name = "Sym"
 name = "Defs"
 [[lean_lib]]
 name = "Proof"
+[[lean_lib]]
+name = "CrossTable"
