@@ -1,9 +1,9 @@
 # Experiments: compiled code proved in Lean (#361)
 
-Twelve folders, each a Lean project of its own (`lake build` in its folder). None is a gate.
+Thirteen folders, each a Lean project of its own (`lake build` in its folder). None is a gate.
 Each theorem is about machine code as llvm-objdump lists it, run on a small model of x86-64 (one
 of AArch64) written here, against a function written in Lean. The table has the first seven; the
-sections after it have `a64/`, `gen/`, `hex/`, `alg/`, `eq/`, `CvStack::merge` and the kernels'
+sections after it have `equihash/`, `a64/`, `gen/`, `hex/`, `alg/`, `eq/`, `CvStack::merge` and the kernels'
 traces (both in `one/`).
 
 **What each theorem is about: one build's bytes.** The listings are rustc 1.99.1's plain release
@@ -81,6 +81,34 @@ Known limits, stated so nobody takes these for more than they are:
   and `cross.sh` here for the first model (this folder's `X86.lean`: the 71 instructions of four builds of
   detection that are not CPUID, XGETBV, a jump, a call or a stack move); `loop/`'s and `call/`'s copies,
   `wide/`'s and `a64/`'s are not; no model is checked against Sail, as `cross_check_x86.py` does for the Python models.
+
+## `equihash/`: another project's Lean function, tied to the bytes its Rust compiles to
+
+[craftsoldier/equihash-lean](https://github.com/craftsoldier/equihash-lean) proves Zcash's Equihash
+verifiers correct against the protocol specification, on Lean functions transcribed from the Rust by
+hand. This folder is a trial of the link that work leaves to trust: one of its functions,
+`Params.new?` (its transcription of `Params::new` of `zakura-equihash 4.0.0`), and the thirty
+instructions rustc 1.99.1 makes of that Rust function (release, x86-64; `params_new.listing`).
+
+- `Theirs.lean`: their definition, copied character for character (Copyright 2026 Julian Abraham,
+  MIT OR Apache-2.0), because their repository builds with Mathlib and Lean 4.35 and this one with
+  neither. Importing it is the next step.
+- `X86.lean`: the first folder's model with R8, `div r32` (a fault on a zero divisor or a quotient past
+  32 bits) and one more condition. Not checked against a processor yet.
+- `Proof.lean`, `params_new_code`: from any registers, with the twelve bytes at `out` apart from the
+  sixteen bytes of stack used, the code returns without a fault, restores what the convention keeps,
+  and writes the tag 1, `n` and `k` exactly when `accepts n k` (the condition on two `u32`s, as
+  bit-vectors); otherwise the tag 0 and nothing else. One symbolic run and `bv_decide`; 10 s.
+- `Bridge.lean`, `new?_eq` and **`params_new_is_new?`**: `accepts` is their `Params.new?` on the two
+  numbers (which is written over the naturals: nothing wraps, since `k < n` keeps `k + 1` below
+  `2^32`), so the compiled code writes `Some(Params { n, k })` exactly when `Params.new? n k` is
+  `some`, for all `2^64` pairs.
+- `python3 mutants.py`: of 11 changed instructions 9 are rejected; the two accepted compute the same
+  function (`n <= 513` in place of 512, where `n` is a multiple of 8; `k > n` in place of `k >= n`
+  for the first rejection, where `k = n` is rejected by the checks that follow).
+
+Limits: one function, straight-line; one build (a Mach-O object for x86-64 made on a Mac); the trace
+is not stated; their definition is a copy.
 
 ## `a64/`: the same loop on a second machine
 

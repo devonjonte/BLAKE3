@@ -1,0 +1,31 @@
+0000000000000d50 <__RNvMNtCslGntOAICRyN_8equihash6paramsNtB2_6Params3new>:
+     d50: 55                           	push	rbp
+     d51: 48 89 e5                     	mov	rbp, rsp
+     d54: 45 31 c0                     	xor	r8d, r8d
+     d57: 39 f2                        	cmp	edx, esi
+     d59: 73 3c                        	jae	0xd97 <__RNvMNtCslGntOAICRyN_8equihash6paramsNtB2_6Params3new+0x47>
+     d5b: 89 f0                        	mov	eax, esi
+     d5d: 83 e0 07                     	and	eax, 0x7
+     d60: 75 35                        	jne	0xd97 <__RNvMNtCslGntOAICRyN_8equihash6paramsNtB2_6Params3new+0x47>
+     d62: 89 d1                        	mov	ecx, edx
+     d64: 83 fa 03                     	cmp	edx, 0x3
+     d67: 72 2e                        	jb	0xd97 <__RNvMNtCslGntOAICRyN_8equihash6paramsNtB2_6Params3new+0x47>
+     d69: 44 8d 41 01                  	lea	r8d, [rcx + 0x1]
+     d6d: 89 f0                        	mov	eax, esi
+     d6f: 31 d2                        	xor	edx, edx
+     d71: 41 f7 f0                     	div	r8d
+     d74: 45 31 c0                     	xor	r8d, r8d
+     d77: 81 fe 00 02 00 00            	cmp	esi, 0x200
+     d7d: 77 18                        	ja	0xd97 <__RNvMNtCslGntOAICRyN_8equihash6paramsNtB2_6Params3new+0x47>
+     d7f: 85 d2                        	test	edx, edx
+     d81: 75 14                        	jne	0xd97 <__RNvMNtCslGntOAICRyN_8equihash6paramsNtB2_6Params3new+0x47>
+     d83: 83 c0 f8                     	add	eax, -0x8
+     d86: 83 f8 10                     	cmp	eax, 0x10
+     d89: 77 0c                        	ja	0xd97 <__RNvMNtCslGntOAICRyN_8equihash6paramsNtB2_6Params3new+0x47>
+     d8b: 89 77 04                     	mov	dword ptr [rdi + 0x4], esi
+     d8e: 89 4f 08                     	mov	dword ptr [rdi + 0x8], ecx
+     d91: 41 b8 01 00 00 00            	mov	r8d, 0x1
+     d97: 44 89 07                     	mov	dword ptr [rdi], r8d
+     d9a: 48 89 f8                     	mov	rax, rdi
+     d9d: 5d                           	pop	rbp
+     d9e: c3                           	ret

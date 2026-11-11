@@ -1,0 +1,16 @@
+name = "equihash"
+defaultTargets = ["Bridge"]
+[[lean_lib]]
+name = "Attr"
+[[lean_lib]]
+name = "X86"
+[[lean_lib]]
+name = "Code"
+[[lean_lib]]
+name = "Sym"
+[[lean_lib]]
+name = "Theirs"
+[[lean_lib]]
+name = "Proof"
+[[lean_lib]]
+name = "Bridge"
