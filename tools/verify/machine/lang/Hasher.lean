@@ -220,11 +220,8 @@ def hash : Fn where
 
 def all : List Fn := [push, merge, toHex, hash]
 
-/-- The functions under another prefix, so that two printings link into one program. -/
-def named (prefix_ : String) : List Fn := all.map fun f => { f with name := prefix_ ++ f.name.drop 4 }
-
 def main (args : List String) : IO Unit :=
   match args with
-  | ["rust", p] => IO.print (rustFile (named p))
-  | ["asm", p] => IO.print (asmFile (named p))
+  | ["rust", p] => IO.print (rustFile (rename p [] all))
+  | ["asm", p] => IO.print (asmFile (rename p [] all))
   | _ => IO.eprintln "usage: rust PREFIX | asm PREFIX"

@@ -16,7 +16,8 @@ else
   main=Hasher.lean
 fi
 lake env lean --run "$main" rust a_ > "$work/way_a.rs"
-lake env lean --run "$main" asm b_ > "$work/way_b.S"
+# LAB_OWN=1 (with the ode source): the assembly calls the kernels written in the source, not the crate's.
+if [ "${LAB_OWN:-0}" = 1 ]; then lake env lean --run "$main" asm b_ own > "$work/way_b.S"; else lake env lean --run "$main" asm b_ > "$work/way_b.S"; fi
 # Way A: the printed Rust, compiled once to assembly. No standard library, no panic machinery.
 rustc --edition 2021 --crate-type lib --emit asm -C opt-level=3 -C panic=abort -C codegen-units=1 \
   -o "$work/way_a.raw.s" "$work/way_a.rs" 2> "$work/rustc.log"
@@ -33,7 +34,8 @@ ALIGN_PY
 rm -rf "$work/bench"; cp -R "$here/bench" "$work/bench"
 rm -rf "$work/crate"; mkdir "$work/crate"; (cd "$crate" && git archive HEAD) | tar -x -C "$work/crate"
 cat "$here/labshim.rs" >> "$work/crate/src/lib.rs"
-(cd "$work/bench" && LAB_ASM="$work" CARGO_TARGET_DIR="$work/target" cargo build --release > "$work/cargo.log" 2>&1) || { tail -n 30 "$work/cargo.log"; exit 1; }
+features=""; grep -q "^b_compress_avx512:" "$work/way_b.S" && features="--features own_kernel"
+(cd "$work/bench" && LAB_ASM="$work" CARGO_TARGET_DIR="$work/target" cargo build --release $features > "$work/cargo.log" 2>&1) || { tail -n 30 "$work/cargo.log"; exit 1; }
 "$work/target/release/labbench" | tee "$work/bench.txt"
 # What each way's code is: instructions a function.
 python3 - "$work" <<'COUNT_PY' | tee "$work/sizes.txt"

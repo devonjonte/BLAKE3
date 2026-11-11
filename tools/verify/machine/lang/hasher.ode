@@ -220,3 +220,80 @@ fn hash(out, input, len, key, flags, plat)
     parent_to(out, top, t, pf)
   }
 }
+
+// ---- The machine level: a kernel, written here instead of in an assembly file ----
+
+data iv = 0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A
+
+// BLAKE3's compression of one block, in place, on AVX-512VL. The state's four rows are XMM0 to
+// XMM3; the message, as the rounds take it, is XMM4 to XMM7.
+// cv: RDI, block: RSI, block_len: DL, counter: RCX, flags: R8B.
+kernel compress_avx512 replaces "blake3_servil_compress_in_place_avx512" {
+  // Half of a column or diagonal step: add the message words, mix, rotate by r1 and r2.
+  def g(m, r1, r2) {
+    vpaddd  xmm0, xmm0, $m
+    vpaddd  xmm0, xmm0, xmm1
+    vpxord  xmm3, xmm3, xmm0
+    vprord  xmm3, xmm3, $r1
+    vpaddd  xmm2, xmm2, xmm3
+    vpxord  xmm1, xmm1, xmm2
+    vprord  xmm1, xmm1, $r2
+  }
+  // Rows turned so that the diagonals become columns, and back.
+  def turn(a, b, c) {
+    vpshufd xmm0, xmm0, $a
+    vpshufd xmm3, xmm3, $b
+    vpshufd xmm2, xmm2, $c
+  }
+  vmovdqu xmm0, xmmword ptr [rdi]
+  vmovdqu xmm1, xmmword ptr [rdi + 16]
+  movzx   eax, r8b
+  movzx   edx, dl
+  shl     rax, 32
+  add     rdx, rax
+  vmovq   xmm3, rcx
+  vmovq   xmm4, rdx
+  vpunpcklqdq xmm3, xmm3, xmm4
+  vmovaps xmm2, xmmword ptr [rip + #iv]
+  vmovups xmm8, xmmword ptr [rsi]
+  vmovups xmm9, xmmword ptr [rsi + 16]
+  vshufps xmm4, xmm8, xmm9, 136
+  vshufps xmm5, xmm8, xmm9, 221
+  vmovups xmm8, xmmword ptr [rsi + 32]
+  vmovups xmm9, xmmword ptr [rsi + 48]
+  vshufps xmm6, xmm8, xmm9, 136
+  vshufps xmm7, xmm8, xmm9, 221
+  vpshufd xmm6, xmm6, 0x93
+  vpshufd xmm7, xmm7, 0x93
+  mov     al, 7
+@round:
+  g(xmm4, 16, 12)
+  g(xmm5, 8, 7)
+  turn(0x93, 0x4E, 0x39)
+  g(xmm6, 16, 12)
+  g(xmm7, 8, 7)
+  turn(0x39, 0x4E, 0x93)
+  dec     al
+  jz      @done
+  // The message's words permuted for the next round.
+  vshufps xmm8, xmm4, xmm5, 214
+  vpshufd xmm9, xmm4, 0x0F
+  vpshufd xmm4, xmm8, 0x39
+  vshufps xmm8, xmm6, xmm7, 250
+  vpblendd xmm9, xmm9, xmm8, 0xAA
+  vpunpcklqdq xmm8, xmm7, xmm5
+  vpblendd xmm8, xmm8, xmm6, 0x88
+  vpshufd xmm8, xmm8, 0x78
+  vpunpckhdq xmm5, xmm5, xmm7
+  vpunpckldq xmm6, xmm6, xmm5
+  vpshufd xmm7, xmm6, 0x1E
+  vmovdqa xmm5, xmm9
+  vmovdqa xmm6, xmm8
+  jmp     @round
+@done:
+  vpxor   xmm0, xmm0, xmm2
+  vpxor   xmm1, xmm1, xmm3
+  vmovdqu xmmword ptr [rdi], xmm0
+  vmovdqu xmmword ptr [rdi + 16], xmm1
+  ret
+}

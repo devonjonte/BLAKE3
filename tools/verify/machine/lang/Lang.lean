@@ -48,6 +48,10 @@ inductive Stmt
   | while (c : Cond) (body : List Stmt)
   /-- The contract is broken: stop the program. -/
   | trap
+  /-- One machine instruction, or a label, as its assembly text: the machine level, where the
+      programmer chooses every instruction and register (kernels). A prototype's stand-in for a
+      value of the machine model's own instruction type. -/
+  | ins (text : String)
   deriving Repr, Inhabited
 
 structure Fn where
@@ -63,6 +67,8 @@ structure Fn where
   externs : List String
   /-- The variables to keep in registers (at most six get one); the rest live in the frame. -/
   regs : List Var := []
+  /-- A kernel: its body is machine instructions; nothing is added around them. -/
+  naked : Bool := false
   deriving Repr, Inhabited
 
 /-! ## To Rust -/
@@ -95,6 +101,7 @@ mutual
     | .ite c t e => s!"{ind}if {c.rust} \{\n{Stmts.rust (ind ++ "    ") t}{ind}} else \{\n{Stmts.rust (ind ++ "    ") e}{ind}}\n"
     | .while c b => s!"{ind}while {c.rust} \{\n{Stmts.rust (ind ++ "    ") b}{ind}}\n"
     | .trap => s!"{ind}core::arch::asm!(\"ud2\", options(noreturn));\n"
+    | .ins text => s!"{ind}compile_error!(\"a machine instruction has no Rust: {text}\");\n"
   def Stmts.rust (ind : String) : List Stmt → String
     | [] => ""
     | s :: rest => Stmt.rust ind s ++ Stmts.rust ind rest
@@ -123,7 +130,7 @@ def rustFile (fs : List Fn) : String :=
   "// Printed from Lean (Lang.lean). Not written or edited by hand.\n#![no_std]\n#![allow(unused_parens)]\n" ++
   "#[repr(C, align(16))]\npub struct Aligned<const N: usize>([u8; N]);\n" ++
   (if decl.isEmpty then "" else "extern \"C\" {\n" ++ String.join decl ++ "}\n") ++
-  String.join (fs.map Fn.rust)
+  String.join ((fs.filter (!·.naked)).map Fn.rust)
 
 /-! ## To x86-64 assembly (System V), with no compiler
 
@@ -251,6 +258,7 @@ mutual
       let (bc, n1) := Stmts.asm L fn (n + 2) b
       ([lhead ++ ":"] ++ c.asmUnless L lexit ++ bc ++ [s!"jmp {lhead}", lexit ++ ":"], n1)
     | .trap => (["ud2"], n)
+    | .ins text => ([text], n)
   partial def Stmts.asm (L : Layout) (fn : String) (n : Nat) : List Stmt → List String × Nat
     | [] => ([], n)
     | s :: rest =>
@@ -268,12 +276,37 @@ def Fn.asm (f : Fn) : String :=
     L.saved.reverse.map (fun r => s!"pop {r}") ++ ["ret"]
   let line (s : String) := if s.endsWith ":" then s ++ "\n" else "    " ++ s ++ "\n"
   s!".global {f.name}\n.global _{f.name}\n.p2align 4\n{f.name}:\n_{f.name}:\n" ++
-    String.join ((prologue ++ body ++ epilogue).map line)
+    String.join ((if f.naked then body else prologue ++ body ++ epilogue).map line)
 
-def asmFile (fs : List Fn) : String :=
+/-- Every call of `old` becomes a call of `new`. -/
+partial def retarget (old new : String) : List Stmt → List Stmt
+  | [] => []
+  | .call g args :: rest => .call (if g == old then new else g) args :: retarget old new rest
+  | .ite c t e :: rest => .ite c (retarget old new t) (retarget old new e) :: retarget old new rest
+  | .while c b :: rest => .while c (retarget old new b) :: retarget old new rest
+  | s :: rest => s :: retarget old new rest
+
+/-- The functions under a prefix in place of `b3l_`, their calls of one another too, with each kernel
+in `own` called in place of the symbol it replaces. -/
+def rename (prefix_ : String) (own : List (String × String)) (fs : List Fn) : List Fn :=
+  let pre (s : String) := if s.startsWith "b3l_" then prefix_ ++ s.drop 4 else s
+  fs.map fun f =>
+    let body := own.foldl (fun b (old, new) => retarget old new b) f.body
+    let body := fs.foldl (fun b g => retarget g.name (pre g.name) b) body
+    { f with name := pre f.name, body := (body.map fun s => match s with
+        | .ins text => Stmt.ins (text.replace "b3l_" prefix_)
+        | s => s) }
+
+/-- Constants the code names: a label and its 32-bit words, 64-byte aligned. -/
+def dataAsm (items : List (String × List Nat)) : String :=
+  if items.isEmpty then "" else
+  "#ifdef __APPLE__\n.static_data\n#else\n.section .rodata\n#endif\n" ++
+  String.join (items.map fun (name, words) => s!".p2align 6\n{name}:\n" ++ String.join (words.map fun w => s!"    .long {w}\n")) ++ ".text\n"
+
+def asmFile (fs : List Fn) (data : List (String × List Nat) := []) : String :=
   "// Printed from Lean (Lang.lean). Not written or edited by hand.\n" ++
   "#if defined(__ELF__) && defined(__linux__)\n.section .note.GNU-stack,\"\",%progbits\n#endif\n" ++
   "#ifdef __APPLE__\n#define CALL(f) _##f\n#else\n#define CALL(f) f@PLT\n#endif\n" ++
-  ".intel_syntax noprefix\n.text\n" ++ String.join (fs.map Fn.asm)
+  ".intel_syntax noprefix\n" ++ dataAsm data ++ ".text\n" ++ String.join (fs.map Fn.asm)
 
 end L

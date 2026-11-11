@@ -23,8 +23,22 @@ what the assembly is printed from, so this compiler is not trusted for either.
 
     EXPR: numbers, names, u8[ADDR] u32[ADDR] u64[ADDR], + - & | << >>, ( ), NAME(ARGS) of an expression def
     COND: EXPR (< | > | <= | >= | == | !=) EXPR      (unsigned)
+
+The machine level, for kernels: the programmer chooses every instruction and register.
+
+    data NAME = WORD, WORD, ...              32-bit words, 64-byte aligned; `#NAME` names them in an instruction
+    kernel NAME replaces "symbol" {          a function whose body is instructions, one a line
+      def NAME(a, b) {                       instructions, substituted where used; `$a` is the argument
+        vpaddd xmm0, xmm0, $a
+      }
+      for k in A..B {                        unrolled; `$k` is the number
+      }
+      NAME(xmm4, 16)                         a use of a def
+      @here:                                 a label; `@here` names it in a jump
+      vpaddd xmm0, xmm0, xmm1                anything else is an instruction
+    }
 """
-import re, sys
+import json, re, sys
 
 TOKEN = re.compile(r"\s*(?:(//[^\n]*)|(0x[0-9a-fA-F_]+|\d[\d_]*)|([A-Za-z_][A-Za-z_0-9]*)|(\"[^\"]*\")|(<<|>>|<=|>=|==|!=|<-|\.\.|[-+&|()\[\]{}<>=,/]))")
 
@@ -290,19 +304,85 @@ class Lower:
             f"  body := [" + ",".join("\n    " + self.lean_s(s, bufs, "    ") for s in low) + f"]\n  ret := {self.lean_e(fn['ret'], bufs)}\n"
 
 
+def kernels(text):
+    """Take the `data` and `kernel` declarations out of the source: (the rest, data, kernels)."""
+    data, kerns, rest, lines, i = [], [], [], text.split("\n"), 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r"^data\s+(\w+)\s*=\s*(.*)$", line)
+        if m:
+            data.append((m.group(1), [int(w.strip().replace("_", ""), 0) for w in m.group(2).split("//")[0].split(",")])); i += 1; continue
+        m = re.match(r'^kernel\s+(\w+)\s+replaces\s+"([^"]+)"\s*\{\s*$', line)
+        if m:
+            j = i + 1
+            while lines[j] != "}":
+                j += 1
+            kerns.append((m.group(1), m.group(2), lines[i + 1:j])); i = j + 1; continue
+        rest.append(line); i += 1
+    return "\n".join(rest), data, kerns
+
+
+def expand(name, lines, defs, env):
+    """A kernel's lines as instructions: defs and fors expanded, `$x`, `@label` and `#data` replaced."""
+    out, i = [], 0
+    def block(start):
+        depth, j = 1, start
+        while depth:
+            s = lines[j].split("//")[0].strip()
+            depth += s.endswith("{"); depth -= s == "}"; j += 1
+        return lines[start:j - 1], j
+    while i < len(lines):
+        s = lines[i].split("//")[0].strip(); i += 1
+        if not s:
+            continue
+        m = re.fullmatch(r"def\s+(\w+)\(([^)]*)\)\s*\{", s)
+        if m:
+            body, i = block(i); defs[m.group(1)] = ([a.strip() for a in m.group(2).split(",") if a.strip()], body); continue
+        m = re.fullmatch(r"for\s+(\w+)\s+in\s+(\d+)\.\.(\d+)\s*\{", s)
+        if m:
+            body, i = block(i)
+            for k in range(int(m.group(2)), int(m.group(3))):
+                out += expand(name, body, defs, {**env, m.group(1): str(k)})
+            continue
+        for k, v in env.items():
+            s = re.sub(r"\$" + k + r"\b", v, s)
+        m = re.fullmatch(r"(\w+)\((.*)\)", s)
+        if m and m.group(1) in defs:
+            params, body = defs[m.group(1)]
+            args = [a.strip() for a in m.group(2).split(",")] if m.group(2).strip() else []
+            assert len(args) == len(params), f"{m.group(1)}: {len(params)} arguments"
+            out += expand(name, body, defs, dict(zip(params, args))); continue
+        s = re.sub(r"@(\w+)", lambda g: f".Lode_{name}_{g.group(1)}", s)
+        s = re.sub(r"#(\w+)", lambda g: f".Lode_data_{g.group(1)}", s)
+        out.append(re.sub(r"\s+", " ", s))
+    return out
+
+
 def main():
     src, out = sys.argv[1], sys.argv[2]
-    p = Parser(tokens(open(src).read())); p.top()
+    source, data, kerns = kernels(open(src).read())
+    p = Parser(tokens(source)); p.top()
     low = Lower(p)
     text = "import Lang\nopen L\n\n/-! Written by odec.py from " + src.split("/")[-1] + ". Not edited by hand. -/\n\nnamespace Ode\n\n"
     names = []
     for f in p.fns:
         text += low.function(*f) + "\n"; names.append(f[0])
-    text += f"def all : List Fn := [{', '.join(names)}]\n\nend Ode\n\n" \
+    replaces = []
+    for name, symbol, lines in kerns:
+        ins = expand(name, lines, {}, {})
+        text += f"/-- The kernel `{name}`: {sum(1 for x in ins if not x.endswith(':'))} instructions, in place of `{symbol}`. -/\n" \
+            f"def {name} : Fn where\n  name := \"b3l_{name}\"\n  params := []\n  locals := []\n  bufs := []\n  externs := []\n  naked := true\n" \
+            "  body := [" + ",".join("\n    .ins " + json.dumps(x) for x in ins) + "]\n  ret := (.const 0)\n\n"
+        names.append(name); replaces.append((symbol, f"b3l_{name}"))
+    q = lambda s: json.dumps(s)
+    text += f"def all : List Fn := [{', '.join(names)}]\n\n" \
+        f"/-- Each kernel written here, and the symbol it takes the place of. -/\ndef replaces : List (String × String) := [{', '.join(f'({q(a)}, {q(b)})' for a, b in replaces)}]\n\n" \
+        f"def data : List (String × List Nat) := [{', '.join(f'({q('.Lode_data_' + n)}, {ws})' for n, ws in data)}]\n\nend Ode\n\n" \
         "def main (args : List String) : IO Unit :=\n  match args with\n" \
-        "  | [\"rust\", p] => IO.print (rustFile (Ode.all.map fun f => { f with name := p ++ f.name.drop 4 }))\n" \
-        "  | [\"asm\", p] => IO.print (asmFile (Ode.all.map fun f => { f with name := p ++ f.name.drop 4 }))\n" \
-        "  | _ => IO.eprintln \"usage: rust PREFIX | asm PREFIX\"\n"
+        "  | [\"rust\", p] => IO.print (rustFile (rename p [] Ode.all))\n" \
+        "  | [\"asm\", p] => IO.print (asmFile (rename p [] Ode.all) Ode.data)\n" \
+        "  | [\"asm\", p, \"own\"] => IO.print (asmFile (rename p Ode.replaces Ode.all) Ode.data)\n" \
+        "  | _ => IO.eprintln \"usage: rust PREFIX | asm PREFIX [own]\"\n"
     with open(out, "w") as f:
         f.write(text)
     print(f"{len(names)} functions: {', '.join(names)}")

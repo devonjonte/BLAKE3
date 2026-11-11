@@ -17,6 +17,44 @@ extern "C" {
 }
 type HashFn = unsafe extern "C" fn(u64, u64, u64, u64, u64, u64) -> u64;
 
+#[cfg(feature = "own_kernel")]
+extern "C" {
+    /// The one-block kernel written in the language's machine level.
+    fn b_compress_avx512(cv: *mut u32, block: *const u8, block_len: u8, counter: u64, flags: u8);
+    /// The crate's, written by hand in assembly.
+    fn blake3_servil_compress_in_place_avx512(cv: *mut u32, block: *const u8, block_len: u8, counter: u64, flags: u8);
+}
+
+/// The kernel written in the language against the crate's: random inputs, then the time of each.
+#[cfg(feature = "own_kernel")]
+fn kernel(plat: u64) {
+    if plat != 5 {
+        println!("the kernel written in the language is for AVX-512: not run on this machine");
+        return;
+    }
+    let mut s = 0xA076_1D64_78BD_642Fu64;
+    for _ in 0..200_000 {
+        let cv: [u32; 8] = core::array::from_fn(|_| rng(&mut s) as u32);
+        let mut block = [0u8; 64];
+        for c in block.chunks_mut(8) {
+            c.copy_from_slice(&rng(&mut s).to_le_bytes());
+        }
+        let (len, counter, flags) = ((rng(&mut s) % 65) as u8, rng(&mut s), rng(&mut s) as u8);
+        let (mut a, mut b) = (cv, cv);
+        unsafe {
+            blake3_servil_compress_in_place_avx512(a.as_mut_ptr(), block.as_ptr(), len, counter, flags);
+            b_compress_avx512(b.as_mut_ptr(), block.as_ptr(), len, counter, flags);
+        }
+        assert_eq!(a, b, "the kernel written in the language against the crate's");
+    }
+    println!("the kernel written in the language: 200000 random compressions agree with the crate's assembly");
+    let block = [7u8; 64];
+    let mut cv = [1u32; 8];
+    let hand = least(25, 2_000_000, || unsafe { blake3_servil_compress_in_place_avx512(cv.as_mut_ptr(), block.as_ptr(), 64, 0, 0) });
+    let own = least(25, 2_000_000, || unsafe { b_compress_avx512(cv.as_mut_ptr(), block.as_ptr(), 64, 0, 0) });
+    println!("one compression, ns a call (each feeding the next): the crate's assembly {hand:.2}, written in the language {own:.2}");
+}
+
 /// The whole hash by a Lean-written function, against the crate's `hash_serial`: every length to
 /// 2100, lengths around every chunk and block boundary to 70 KiB, and a megabyte; three modes.
 fn agree_hash(name: &str, hash: HashFn, plat: u64) -> u64 {
@@ -124,6 +162,8 @@ fn main() {
                             ("way B (Lean, assembly printed)", b_push as PushFn, b_merge as MergeFn, b_to_hex as HexFn)] {
         println!("{name}: {} random cases agree with the crate's Rust (push, merge, to_hex)", agree(name, p, m, x, plat));
     }
+    #[cfg(feature = "own_kernel")]
+    kernel(plat);
     for (name, h) in [("way A", a_hash as HashFn), ("way B", b_hash as HashFn)] {
         println!("{name}: the whole hash agrees with the crate's hash_serial on {} inputs", agree_hash(name, h, plat));
     }

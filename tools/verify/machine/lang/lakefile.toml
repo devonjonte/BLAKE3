@@ -1,4 +1,8 @@
 name = "lang"
-defaultTargets = ["Lang"]
+defaultTargets = ["Sem"]
 [[lean_lib]]
 name = "Lang"
+[[lean_lib]]
+name = "Sem"
+[[lean_lib]]
+name = "HasherOde"
