@@ -7,7 +7,8 @@ sections after it have `a64/`, `gen/`, `hex/`, `alg/`, `eq/`, `CvStack::merge` a
 traces (both in `one/`).
 
 **What each theorem is about: one build's bytes.** The listings are rustc 1.99.1's plain release
-build for x86-64 Linux (two of the folders: Mach-O objects made on a Mac). Another compiler, another
+build for x86-64 Linux (the test subjects of `loop/`, `call/`, `gen/` and the kernels' objects were
+made on a Mac for x86-64, as each folder says). Another compiler, another
 optimisation level, `codegen-units`, `target-cpu`, LTO or inlining into a user's crate give other
 bytes, of which these theorems say nothing. The `other_compiler.sh` scripts (here and in `one/`)
 and the paragraphs "Another compiler" and "Other build settings" below show the proofs checking,
