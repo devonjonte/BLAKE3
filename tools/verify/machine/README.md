@@ -233,6 +233,16 @@ or changed that it should not, and nothing secret in what it shows. Check: 45 s 
 
 Not done the same way: the parent functions.
 
+**Another compiler** (`other_compiler.sh`, `other-compilers/merge-1.98.0.listing`, `recode.py`). rustc 1.98.0
+compiles `merge` to the same hundred instructions as 1.99.1 but for two stores: the other order, and
+`movups` where 1.99.1 has `movaps`. The script lifts that listing in place of 1.99.1's and builds every
+theorem about `merge` again: the table and its lemmas are written again by script, Lean is asked again
+what each part shows, and **no proof text is edited**: `merge_is_mergeN`, `merge_runs_mergeTo` and
+`merge_whole` check for 1.98.0's code (the trace differs in the order of two addresses, as the code
+does). About three minutes. What this does not show: a compiler that restructures a function (the
+beta of November 10 no longer inlines the pushes in `to_hex`: 49 instructions and two calls a byte where
+1.99.1 has 39 and none) needs a new proof, not a re-run.
+
 `cross_one.sh` checks `Machine.lean`, the model under all of this folder's theorems, against the
 processor: every instruction of the five programs (258 distinct; 225 once jumps, calls, the stack's
 moves and the constants the linker places are left to the proofs), forty random states each, comparing

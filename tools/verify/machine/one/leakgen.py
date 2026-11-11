@@ -3,7 +3,7 @@
 MergeWhole.lean): the same hypotheses and the same symbolic run, with the trace recorded. Pass 1
 (`probe`) asks Lean what each segment shows; pass 2 (`final`) states it as a definition, which
 compiles only if the trace mentions public values alone, and proves it.
-usage: leakgen.py probe|final"""
+usage: leakgen.py probe; lake env lean LeakProbe.lean > probe.out; leakgen.py extract; leakgen.py final"""
 import re, subprocess, sys, pathlib
 here = pathlib.Path(__file__).resolve().parent
 SEG = {  # name: (file, steps, public arguments of the trace)
@@ -116,4 +116,17 @@ def main():
     (here / target).write_text("\n".join(out))
     print("wrote", target)
 
-main()
+def extract():
+    """Lean's answer to the probe (`lake env lean LeakProbe.lean > probe.out`) -> leak-probe.txt: one line a
+    goal, the part's name and the list it shows. A part that ends in a branch has two goals."""
+    raw = (here / "probe.out").read_text()
+    goals = [re.sub(r"\s+", " ", g).strip() for g in re.findall(r"^⊢ (\[.*?\]) =\n\s+hideL", raw, re.M | re.S)]
+    names = [n for n in SEG for _ in range(2 if n.startswith("post") else 1)]
+    assert len(goals) == len(names), (len(goals), len(names))
+    (here / "leak-probe.txt").write_text("".join(f"{n}\t{g}\n" for n, g in zip(names, goals)))
+    print("wrote leak-probe.txt:", len(goals), "lists")
+
+if len(sys.argv) > 1 and sys.argv[1] == "extract":
+    extract()
+else:
+    main()
