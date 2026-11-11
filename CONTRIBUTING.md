@@ -221,11 +221,16 @@ fast-forward of its tip (so what was checked is what lands) once:
   `python3 tools/size.py BASE REV`'s output where it changes the
   library's code (a few minutes: it counts and builds);
 - the regression check finds no slowdown on AArch64 Linux in a VM and
-  natively on an Apple M4 Max. A candidate that changes no compiled code
+  natively on the shared queue's Mac, over every cell (`--cells all`:
+  about twenty minutes there). A candidate that changes no compiled code
   needs no speed check: it would compare identical code. The Mac
   check is a job you queue yourself, through the shared exchange
-  (`tools/runner/README.md`, "Running a job"; about twenty minutes), and
-  its result is a link on the pull request. Whoever made the candidate lands it once every check has passed,
+  (`tools/runner/README.md`, "Running a job"), and
+  its result is a link on the pull request. Every cell, since a change
+  checked at the points its author expected can slow one nobody named;
+  a cell slower where the change means it to be (a call outside the
+  pattern its API is tuned for) is recorded with its number in the
+  commit message. Whoever made the candidate lands it once every check has passed,
 the same day: no review gate stands between a passing candidate and
 `next`.
 
@@ -280,7 +285,8 @@ lists what it takes and ticks each step:
    `sh tools/check-builds.sh`. Pull-request CI normally checks a synthetic
    merge, so its head-SHA label alone is not evidence for the release commit.
 3. `bench-hashes check --against <previous release tag> --cells all`, on
-   the VM and the Mac: each commit was checked against its parent alone,
+   the VM, on the shared queue's Mac, and on an Apple M4 Max, the Mac the
+   kernels were tuned on: each commit was checked against its parent alone,
    and this sees what small slowdowns add up to. When the old side
    predates the bench's calls, `--old-bench <bench commit>` builds it with
    a bench that calls it the same way (the runner's "old_bench_commit").
