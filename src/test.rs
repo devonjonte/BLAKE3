@@ -870,6 +870,58 @@ fn test_hex_encoding_decoding() {
     assert_eq!(_result.to_string(), "invalid hex character: 0x80");
 }
 
+/// to_hex and from_hex compute each character by arithmetic (no table
+/// indexed by the hash, no branch on it: BLAKE3 #370), so they are held
+/// to the table and the match they replace, over every byte value: each
+/// byte in each position of the hash encodes as the table says and
+/// decodes back; each character, in either position of a pair, decodes
+/// as the match says or is refused, and the error names the first
+/// refused character.
+#[test]
+fn test_hex_matches_the_table_for_every_byte() {
+    let table = b"0123456789abcdef";
+    let value = |c: u8| match c {
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'0'..=b'9' => Some(c - b'0'),
+        _ => None,
+    };
+    for b in 0..=255u8 {
+        for position in [0, 1, 17, 31] {
+            let mut bytes = [0x5au8; 32];
+            bytes[position] = b;
+            let hex = crate::Hash::from_bytes(bytes).to_hex();
+            let want: std::vec::Vec<u8> = bytes.iter().flat_map(|&x| [table[(x >> 4) as usize], table[(x & 0xf) as usize]]).collect();
+            assert_eq!(hex.as_bytes(), &want[..], "byte {b:#04x} at {position}");
+            assert_eq!(*crate::Hash::from_hex(hex.as_bytes()).unwrap().as_bytes(), bytes, "byte {b:#04x} at {position}, back");
+        }
+    }
+    for c in 0..=255u8 {
+        for at in [0usize, 1, 34, 63] {
+            let mut text = [b'7'; 64];
+            text[at] = c;
+            let got = crate::Hash::from_hex(text);
+            match value(c) {
+                Some(v) => {
+                    let mut want = [0x77u8; 32];
+                    want[at / 2] = if at % 2 == 0 { v << 4 | 7 } else { 7 << 4 | v };
+                    assert_eq!(*got.expect("a hex character").as_bytes(), want, "character {c:#04x} at {at}");
+                }
+                None => {
+                    let message = std::format!("{}", got.expect_err("no hex character"));
+                    let named = if c < 128 { std::format!("{:?}", c as char) } else { std::format!("0x{c:x}") };
+                    assert_eq!(message, std::format!("invalid hex character: {named}"), "character {c:#04x} at {at}");
+                }
+            }
+        }
+    }
+    // Two refused characters: the error names the first.
+    let mut text = [b'0'; 64];
+    text[40] = b'g';
+    text[9] = b'-';
+    assert_eq!(std::format!("{}", crate::Hash::from_hex(text).unwrap_err()), "invalid hex character: '-'");
+}
+
 #[test]
 fn test_hash_conversions() {
     let bytes1 = [42; 32];

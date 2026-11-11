@@ -534,6 +534,11 @@ impl Hash {
 
     /// Encode a `Hash` in lowercase hexadecimal.
     ///
+    /// Each character is computed from its four bits by arithmetic: no
+    /// table is indexed by the hash and no branch is taken on it, so the
+    /// call's time and memory accesses are the same for every hash (a
+    /// hash may be a secret: a keyed hash's tag, a derived key).
+    ///
     /// The returned [`ArrayString`] is a fixed size and doesn't allocate memory
     /// on the heap. Note that [`ArrayString`] doesn't provide constant-time
     /// equality checking, so if you need to compare hashes, prefer the `Hash`
@@ -541,11 +546,13 @@ impl Hash {
     ///
     /// [`ArrayString`]: https://docs.rs/arrayvec/0.5.1/arrayvec/struct.ArrayString.html
     pub fn to_hex(&self) -> ArrayString<{ 2 * OUT_LEN }> {
+        // 0..=9 are '0' + n; 10..=15 are 'a' + n - 10, which is '0' + n + 39:
+        // (n + 6) >> 4 is 1 exactly for those.
+        let character = |n: u8| (b'0' + n + ((n + 6) >> 4) * 39) as char;
         let mut s = ArrayString::new();
-        let table = b"0123456789abcdef";
         for &b in self.0.iter() {
-            s.push(table[(b >> 4) as usize] as char);
-            s.push(table[(b & 0xf) as usize] as char);
+            s.push(character(b >> 4));
+            s.push(character(b & 0xf));
         }
         s
     }
@@ -557,24 +564,40 @@ impl Hash {
     /// results in an error. An input length other than 64 also results in an
     /// error.
     ///
+    /// For 64 hexadecimal characters, the call's time and memory accesses
+    /// are the same whatever they are: each is decoded by arithmetic, all
+    /// 64 always. An input that is refused is then searched for the
+    /// character the error names.
+    ///
     /// Note that `Hash` also implements `FromStr`, so `Hash::from_hex("...")`
     /// is equivalent to `"...".parse()`.
     pub fn from_hex(hex: impl AsRef<[u8]>) -> Result<Self, HexError> {
-        fn hex_val(byte: u8) -> Result<u8, HexError> {
-            match byte {
-                b'A'..=b'F' => Ok(byte - b'A' + 10),
-                b'a'..=b'f' => Ok(byte - b'a' + 10),
-                b'0'..=b'9' => Ok(byte - b'0'),
-                _ => Err(HexError(HexErrorInner::InvalidByte(byte))),
-            }
+        /// (the character's value, 0xff where it is a hex character and 0
+        /// where not), with no branch: a difference below its range's size
+        /// leaves the subtraction negative, whose sign fills the mask.
+        fn hex_val(byte: u8) -> (u8, u8) {
+            let digit = byte.wrapping_sub(b'0');
+            let letter = (byte | 0x20).wrapping_sub(b'a');
+            let is_digit = ((digit as i16 - 10) >> 8) as u8;
+            let is_letter = ((letter as i16 - 6) >> 8) as u8;
+            ((digit & is_digit) | (letter.wrapping_add(10) & is_letter), is_digit | is_letter)
         }
         let hex_bytes: &[u8] = hex.as_ref();
         if hex_bytes.len() != OUT_LEN * 2 {
             return Err(HexError(HexErrorInner::InvalidLen(hex_bytes.len())));
         }
         let mut hash_bytes: [u8; OUT_LEN] = [0; OUT_LEN];
+        let mut all = 0xff;
         for i in 0..OUT_LEN {
-            hash_bytes[i] = 16 * hex_val(hex_bytes[2 * i])? + hex_val(hex_bytes[2 * i + 1])?;
+            let (high, high_is) = hex_val(hex_bytes[2 * i]);
+            let (low, low_is) = hex_val(hex_bytes[2 * i + 1]);
+            hash_bytes[i] = high << 4 | low;
+            all &= high_is & low_is;
+        }
+        if all != 0xff {
+            // Refused: the first character that is none, for the error.
+            let byte = *hex_bytes.iter().find(|&&b| hex_val(b).1 == 0).expect("a refused input holds a character that is no hex character");
+            return Err(HexError(HexErrorInner::InvalidByte(byte)));
         }
         Ok(Hash::from(hash_bytes))
     }
