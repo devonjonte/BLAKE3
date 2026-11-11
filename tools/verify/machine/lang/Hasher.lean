@@ -101,23 +101,65 @@ def parentTo (dst left right pf : Exp) : List Stmt := [
   compress (.buf "pcv") (.buf "block") (.const 64) (.const 0) pf,
   .copy 32 dst (.buf "pcv")]
 
+/-- `ptrs[i] := base + (i << shift)` for `i` below `count` (a number). -/
+def fillPtrs (base : Exp) (shift count : Nat) : List Stmt := [
+  .set "i" (.const 0),
+  .while (.ltu (.var "i") (.const count)) [
+    .store 64 (.add (.buf "ptrs") (.shl (.var "i") 3)) (.add base (.shl (.var "i") shift)),
+    .set "i" (.add (.var "i") (.const 1))]]
+
+/-- `m` parents at once on AVX-512: the `2 * m` values at `src` become their `m` parents at `dst`. -/
+def parentsMany (src dst : String) (m : Nat) : List Stmt :=
+  fillPtrs (.buf src) 6 m ++
+  [.call "blake3_servil_hash_many_avx512" [.buf "ptrs", .const m, .const 1, .var "key", .const 0, .const 0, .var "pf", .const 0, .const 0, .buf dst]]
+
+/-- The value at `t` (a subtree that ends the chunks counted in `tc`, in units of its own size) goes
+on the stack as the specification's algorithm has it: merged with the top while the count is even. -/
+def pushMerging : List Stmt := [
+  .while (.eq (.and (.var "tc") (.const 1)) (.const 0)) ([
+    .set "slen" (.sub (.var "slen") (.const 1)),
+    .set "top" (cvAt (.buf "st") (.var "slen"))] ++
+    parentTo (.var "t") (.var "top") (.var "t") (.var "pf") ++ [
+    .set "tc" (.shr (.var "tc") 1)]),
+  .copy 32 (cvAt (.buf "st") (.var "slen")) (.var "t"),
+  .set "slen" (.add (.var "slen") (.const 1))]
+
 def hash : Fn where
   name := "b3l_hash"
   params := ["out", "input", "len", "key", "flags", "plat"]
-  locals := ["p", "rem", "counter", "n", "i", "tc", "top", "first", "f", "j", "lastp", "pf", "slen", "t"]
+  locals := ["p", "rem", "counter", "n", "i", "tc", "top", "first", "f", "j", "lastp", "pf", "slen", "t", "done", "kp", "pp"]
   regs := ["p", "rem", "counter", "i", "n", "key"]
-  bufs := [("st", 1792), ("cvs", 512), ("ptrs", 128), ("block", 64), ("cv", 32), ("pcv", 32)]
+  bufs := [("st", 1792), ("cvs", 1024), ("par", 512), ("ptrs", 256), ("block", 64), ("cv", 32), ("pcv", 32)]
   externs := ["blake3_servil_compress_in_place_avx512", "blake3_servil_compress_in_place_sse41",
-    "blake3_servil_hash_many_avx512", "blake3_servil_hash_many_avx2", "blake3_servil_hash_many_sse41"]
+    "blake3_servil_hash_many_avx512", "blake3_servil_hash_many_avx2", "blake3_servil_hash_many_sse41",
+    "blake3_servil_avx512_k32", "blake3_servil_avx512_p16"]
   body := [
     .set "p" (.var "input"),
     .set "rem" (.var "len"),
     .set "counter" (.const 0),
     .set "slen" (.const 0),
+    .set "done" (.const 0),
     .set "pf" (.or (.var "flags") (.const PARENT)),
-    -- Whole chunks, while more than one chunk's bytes are left: sixteen at a time.
+    -- AVX-512: 32 chunks at a time while more than 32 KiB are left, by the 32-lane kernel; their 32
+    -- values become one by the 16-lane parent kernel and four rounds of hash_many.
+    .ite (.eq (.var "plat") (.const 5)) [
+      .set "kp" (.or (.var "flags") (.const (CHUNK_START * 256 + CHUNK_END * 65536 + 64 * 16777216))),
+      .set "pp" (.or (.var "pf") (.const (64 * 16777216))),
+      .while (.ltu (.const 32768) (.var "rem")) (
+        fillPtrs (.var "p") 10 32 ++
+        [.call "blake3_servil_avx512_k32" [.buf "ptrs", .const 16, .var "key", .var "counter", .var "kp", .buf "cvs"]] ++
+        fillPtrs (.buf "cvs") 6 16 ++
+        [.call "blake3_servil_avx512_p16" [.buf "ptrs", .const 1, .var "key", .const 0, .var "pp", .buf "par"]] ++
+        parentsMany "par" "cvs" 8 ++ parentsMany "cvs" "par" 4 ++ parentsMany "par" "cvs" 2 ++ parentsMany "cvs" "par" 1 ++
+        [.set "t" (.buf "par"),
+         .set "tc" (.add (.shr (.var "counter") 5) (.const 1))] ++
+        pushMerging ++
+        [.set "p" (.add (.var "p") (.const 32768)),
+         .set "rem" (.sub (.var "rem") (.const 32768)),
+         .set "counter" (.add (.var "counter") (.const 32))])] [],
+    -- Whole chunks, up to sixteen at a time, while more than one chunk's bytes are left.
     .while (.ltu (.const 1024) (.var "rem")) [
-      .set "n" (.shr (.sub (.var "rem") (.const 1)) 10),
+      .set "n" (.shr (.var "rem") 10),
       .ite (.ltu (.const 16) (.var "n")) [.set "n" (.const 16)] [],
       .set "i" (.const 0),
       .while (.ltu (.var "i") (.var "n")) [
@@ -128,56 +170,52 @@ def hash : Fn where
         [.ite (.eq (.var "plat") (.const 4))
           [.call "blake3_servil_hash_many_avx2" [.buf "ptrs", .var "n", .const 16, .var "key", .var "counter", .const 1, .var "flags", .const CHUNK_START, .const CHUNK_END, .buf "cvs"]]
           [.call "blake3_servil_hash_many_sse41" [.buf "ptrs", .var "n", .const 16, .var "key", .var "counter", .const 1, .var "flags", .const CHUNK_START, .const CHUNK_END, .buf "cvs"]]],
-      -- Each chunk's value: merged with the stack's top while the count of chunks is even, then pushed.
-      .set "i" (.const 0),
-      .while (.ltu (.var "i") (.var "n")) ([
-        .set "t" (.add (.buf "cvs") (.shl (.var "i") 5)),
-        .set "tc" (.add (.add (.var "counter") (.var "i")) (.const 1)),
-        .while (.eq (.and (.var "tc") (.const 1)) (.const 0)) ([
-          .set "slen" (.sub (.var "slen") (.const 1)),
-          .set "top" (cvAt (.buf "st") (.var "slen"))] ++
-          parentTo (.var "t") (.var "top") (.var "t") (.var "pf") ++ [
-          .set "tc" (.shr (.var "tc") 1)]),
-        .copy 32 (cvAt (.buf "st") (.var "slen")) (.var "t"),
-        .set "slen" (.add (.var "slen") (.const 1)),
-        .set "i" (.add (.var "i") (.const 1))]),
       .set "p" (.add (.var "p") (.shl (.var "n") 10)),
       .set "rem" (.sub (.var "rem") (.shl (.var "n") 10)),
+      .set "i" (.const 0),
+      .while (.ltu (.var "i") (.var "n")) [
+        .set "t" (.add (.buf "cvs") (.shl (.var "i") 5)),
+        .set "tc" (.add (.add (.var "counter") (.var "i")) (.const 1)),
+        -- The message's last chunk is not pushed: the root is folded from it.
+        .set "done" (.const 0),
+        .ite (.eq (.var "rem") (.const 0)) [.ite (.eq (.add (.var "i") (.const 1)) (.var "n")) [.set "done" (.const 1)] []] [],
+        .ite (.eq (.var "done") (.const 1)) [.copy 32 (.buf "cv") (.var "t")] pushMerging,
+        .set "i" (.add (.var "i") (.const 1))],
       .set "counter" (.add (.var "counter") (.var "n"))],
-    -- The last chunk: at most 1024 bytes, block by block.
-    .copy 32 (.buf "cv") (.var "key"),
-    .set "first" (.const CHUNK_START),
-    .while (.ltu (.const 64) (.var "rem")) [
-      .set "f" (.or (.var "flags") (.var "first")),
-      compress (.buf "cv") (.var "p") (.const 64) (.var "counter") (.var "f"),
-      .set "first" (.const 0),
-      .set "p" (.add (.var "p") (.const 64)),
-      .set "rem" (.sub (.var "rem") (.const 64))],
-    -- Its last block: whole from the input, or copied into a zeroed block.
-    .ite (.eq (.var "rem") (.const 64))
-      [.set "lastp" (.var "p")]
-      ((List.range 8).map (fun k => Stmt.store 64 (.add (.buf "block") (.const (8 * k))) (.const 0)) ++ [
-        .set "j" (.const 0),
-        .while (.ltu (.var "j") (.var "rem")) [
-          .store 8 (.add (.buf "block") (.var "j")) (.load 8 (.add (.var "p") (.var "j"))),
-          .set "j" (.add (.var "j") (.const 1))],
-        .set "lastp" (.buf "block")]),
-    .set "f" (.or (.or (.var "flags") (.var "first")) (.const CHUNK_END)),
-    .ite (.eq (.var "slen") (.const 0))
-      [ -- One chunk: it is the root.
-        .set "f" (.or (.var "f") (.const ROOT)),
-        compress (.buf "cv") (.var "lastp") (.var "rem") (.var "counter") (.var "f"),
-        .copy 32 (.var "out") (.buf "cv")]
-      ([compress (.buf "cv") (.var "lastp") (.var "rem") (.var "counter") (.var "f"),
-        .set "t" (.buf "cv"),
-        -- Fold the stack from the top; the last parent is the root.
-        .while (.ltu (.const 1) (.var "slen")) ([
-          .set "slen" (.sub (.var "slen") (.const 1)),
-          .set "top" (cvAt (.buf "st") (.var "slen"))] ++
-          parentTo (.var "t") (.var "top") (.var "t") (.var "pf")),
-        .set "pf" (.or (.var "pf") (.const ROOT)),
-        .set "top" (cvAt (.buf "st") (.const 0))] ++
-        parentTo (.var "out") (.var "top") (.var "t") (.var "pf"))]
+    .ite (.eq (.var "done") (.const 0)) [
+      -- The last chunk, at most 1024 bytes, block by block.
+      .copy 32 (.buf "cv") (.var "key"),
+      .set "first" (.const CHUNK_START),
+      .while (.ltu (.const 64) (.var "rem")) [
+        .set "f" (.or (.var "flags") (.var "first")),
+        compress (.buf "cv") (.var "p") (.const 64) (.var "counter") (.var "f"),
+        .set "first" (.const 0),
+        .set "p" (.add (.var "p") (.const 64)),
+        .set "rem" (.sub (.var "rem") (.const 64))],
+      -- Its last block: whole from the input, or copied into a zeroed block.
+      .ite (.eq (.var "rem") (.const 64))
+        [.set "lastp" (.var "p")]
+        ((List.range 8).map (fun k => Stmt.store 64 (.add (.buf "block") (.const (8 * k))) (.const 0)) ++ [
+          .set "j" (.const 0),
+          .while (.ltu (.var "j") (.var "rem")) [
+            .store 8 (.add (.buf "block") (.var "j")) (.load 8 (.add (.var "p") (.var "j"))),
+            .set "j" (.add (.var "j") (.const 1))],
+          .set "lastp" (.buf "block")]),
+      .set "f" (.or (.or (.var "flags") (.var "first")) (.const CHUNK_END)),
+      -- One chunk alone is the root.
+      .ite (.eq (.var "slen") (.const 0)) [.set "f" (.or (.var "f") (.const ROOT))] [],
+      compress (.buf "cv") (.var "lastp") (.var "rem") (.var "counter") (.var "f"),
+      .ite (.eq (.var "slen") (.const 0)) [.copy 32 (.var "out") (.buf "cv")] []] [],
+    .ite (.ne (.var "slen") (.const 0)) ([
+      .set "t" (.buf "cv"),
+      -- Fold the stack from the top; the last parent is the root.
+      .while (.ltu (.const 1) (.var "slen")) ([
+        .set "slen" (.sub (.var "slen") (.const 1)),
+        .set "top" (cvAt (.buf "st") (.var "slen"))] ++
+        parentTo (.var "t") (.var "top") (.var "t") (.var "pf")),
+      .set "pf" (.or (.var "pf") (.const ROOT)),
+      .set "top" (cvAt (.buf "st") (.const 0))] ++
+      parentTo (.var "out") (.var "top") (.var "t") (.var "pf")) []]
   ret := .const 0
 
 def all : List Fn := [push, merge, toHex, hash]
