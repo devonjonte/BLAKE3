@@ -1,0 +1,222 @@
+// The hasher of blake3-servil-core in an implementation language of our own (a prototype).
+// Every value is a 64-bit word; memory is reached through addresses; nothing is hidden: no
+// bounds checks, no allocation, no unwinding. What a caller owes is in `requires`; `trap`
+// stops the program where that is broken.
+
+const CHUNK_START = 1
+const CHUNK_END   = 2
+const PARENT      = 4
+const ROOT        = 8
+const AVX512      = 5          // the platform's number, as the library records it
+const AVX2        = 4
+
+extern compress_avx512/5  = "blake3_servil_compress_in_place_avx512"
+extern compress_sse41/5   = "blake3_servil_compress_in_place_sse41"
+extern hash_many_avx512/10 = "blake3_servil_hash_many_avx512"
+extern hash_many_avx2/10   = "blake3_servil_hash_many_avx2"
+extern hash_many_sse41/10  = "blake3_servil_hash_many_sse41"
+extern chunks32/6         = "blake3_servil_avx512_k32"
+extern parents16/6        = "blake3_servil_avx512_p16"
+
+// The stack of chaining values: its length (a word) at offset 0, and from offset 32 up to 55
+// values of 32 bytes each.
+def cv_at(st, i) = st + 32 + (i << 5)
+
+// The one-block kernel the platform has.
+def compress(cv, block, block_len, counter, flags) {
+  if plat == AVX512 { compress_avx512(cv, block, block_len, counter, flags) }
+  else              { compress_sse41(cv, block, block_len, counter, flags) }
+}
+
+// dst becomes the parent of the values at left and right, under the flags in pf.
+// dst may be left or right.
+def parent_to(dst, left, right, pf) {
+  copy 32 block      <- left
+  copy 32 block + 32 <- right
+  copy 32 pcv        <- key
+  compress(pcv, block, 64, 0, pf)
+  copy 32 dst        <- pcv
+}
+
+fn push(st, cv)
+  requires "the stack at st holds fewer than 55 values"
+{
+  var len = u64[st]
+  if len >= 55 { trap }
+  copy 32 cv_at(st, len) <- cv
+  u64[st] = len + 1
+}
+
+// While the stack holds more than target values, its top two become their parent.
+fn merge(st, key, flags, plat, target)
+  requires "target >= 1, or the stack holds at most target values"
+{
+  buf block[64]
+  buf pcv[32]
+  var len = u64[st]
+  var pf = flags | PARENT
+  while target < len {
+    if len < 2 { trap }
+    var at = cv_at(st, len - 2)
+    parent_to(at, at, at + 32, pf)
+    len = len - 1
+    u64[st] = len
+  }
+  return len
+}
+
+// A hexadecimal digit of a number below 16, with no table and no branch.
+def hex_digit(n) = n + 48 + ((0 - ((n + 6) >> 4)) & 39)
+
+// The 64 hexadecimal characters of the 32 bytes at hash, written at out. No address and no
+// branch depends on the hash's bytes.
+fn to_hex(out, hash) {
+  var i = 0
+  while i < 32 {
+    var b = u8[hash + i]
+    u8[out + (i << 1)]     = hex_digit(b >> 4)
+    u8[out + (i << 1) + 1] = hex_digit(b & 15)
+    i = i + 1
+  }
+  return 64
+}
+
+// ---- The whole hash: BLAKE3 of len bytes at input under key and flags, 32 bytes to out ----
+
+def fill_ptrs(base, shift, count) {
+  i = 0
+  while i < count {
+    u64[ptrs + (i << 3)] = base + (i << shift)
+    i = i + 1
+  }
+}
+
+// m parents at once on AVX-512: the 2 m values at src become their m parents at dst.
+def parents_many(src, dst, m) {
+  fill_ptrs(src, 6, m)
+  hash_many_avx512(ptrs, m, 1, key, 0, 0, pf, 0, 0, dst)
+}
+
+// The value at t goes on the stack as the specification's algorithm has it: merged with the top
+// while the count tc is even.
+def push_merging() {
+  while tc & 1 == 0 {
+    slen = slen - 1
+    top = cv_at(st, slen)
+    parent_to(t, top, t, pf)
+    tc = tc >> 1
+  }
+  copy 32 cv_at(st, slen) <- t
+  slen = slen + 1
+}
+
+fn hash(out, input, len, key, flags, plat)
+  reg p, rem, counter, i, n, key
+{
+  buf st[1792]
+  buf cvs[1024]
+  buf par[512]
+  buf ptrs[256]
+  buf block[64]
+  buf cv[32]
+  buf pcv[32]
+  var p = input
+  var rem = len
+  var counter = 0
+  var slen = 0
+  var done = 0
+  var pf = flags | PARENT
+  var i = 0
+  var n = 0
+  var tc = 0
+  var top = 0
+  var t = 0
+  var f = 0
+
+  // AVX-512: 32 chunks at a time while more than 32 KiB are left, by the 32-lane kernel; their 32
+  // values become one by the 16-lane parent kernel and four rounds of hash_many.
+  if plat == AVX512 {
+    var kp = flags | (CHUNK_START << 8) | (CHUNK_END << 16) | (64 << 24)
+    var pp = pf | (64 << 24)
+    while rem > 32768 {
+      fill_ptrs(p, 10, 32)
+      chunks32(ptrs, 16, key, counter, kp, cvs)
+      fill_ptrs(cvs, 6, 16)
+      parents16(ptrs, 1, key, 0, pp, par)
+      parents_many(par, cvs, 8)
+      parents_many(cvs, par, 4)
+      parents_many(par, cvs, 2)
+      parents_many(cvs, par, 1)
+      t = par
+      tc = (counter >> 5) + 1
+      push_merging()
+      p = p + 32768
+      rem = rem - 32768
+      counter = counter + 32
+    }
+  }
+
+  // Whole chunks, up to sixteen at a time, while more than one chunk's bytes are left.
+  while rem > 1024 {
+    n = rem >> 10
+    if n > 16 { n = 16 }
+    fill_ptrs(p, 10, n)
+    if plat == AVX512 { hash_many_avx512(ptrs, n, 16, key, counter, 1, flags, CHUNK_START, CHUNK_END, cvs) }
+    else { if plat == AVX2 { hash_many_avx2(ptrs, n, 16, key, counter, 1, flags, CHUNK_START, CHUNK_END, cvs) }
+           else            { hash_many_sse41(ptrs, n, 16, key, counter, 1, flags, CHUNK_START, CHUNK_END, cvs) } }
+    p = p + (n << 10)
+    rem = rem - (n << 10)
+    i = 0
+    while i < n {
+      t = cvs + (i << 5)
+      tc = counter + i + 1
+      // The message's last chunk is not pushed: the root is folded from it.
+      done = 0
+      if rem == 0 { if i + 1 == n { done = 1 } }
+      if done == 1 { copy 32 cv <- t } else { push_merging() }
+      i = i + 1
+    }
+    counter = counter + n
+  }
+
+  if done == 0 {
+    // The last chunk, at most 1024 bytes, block by block.
+    copy 32 cv <- key
+    var first = CHUNK_START
+    while rem > 64 {
+      f = flags | first
+      compress(cv, p, 64, counter, f)
+      first = 0
+      p = p + 64
+      rem = rem - 64
+    }
+    // Its last block: whole from the input, or copied into a zeroed block.
+    var lastp = p
+    if rem != 64 {
+      for k in 0..8 { u64[block + (k << 3)] = 0 }
+      var j = 0
+      while j < rem {
+        u8[block + j] = u8[p + j]
+        j = j + 1
+      }
+      lastp = block
+    }
+    f = flags | first | CHUNK_END
+    if slen == 0 { f = f | ROOT }                // one chunk alone is the root
+    compress(cv, lastp, rem, counter, f)
+    if slen == 0 { copy 32 out <- cv }
+  }
+
+  if slen != 0 {
+    // Fold the stack from the top; the last parent is the root.
+    t = cv
+    while slen > 1 {
+      slen = slen - 1
+      top = cv_at(st, slen)
+      parent_to(t, top, t, pf)
+    }
+    pf = pf | ROOT
+    top = cv_at(st, 0)
+    parent_to(out, top, t, pf)
+  }
+}

@@ -1,14 +1,22 @@
 #!/bin/bash
 # The same functions three ways (BLAKE3 #361): the crate's hand-written Rust, the Rust that Lean
 # prints (compiled by rustc to assembly: way A), the assembly Lean prints itself (way B).
-# usage: run.sh CRATE_DIR WORK_DIR   (CRATE_DIR: a checkout of blake3-servil-core; it is copied, and
+# usage: [LAB_SOURCE=ode] run.sh CRATE_DIR WORK_DIR   (CRATE_DIR: a checkout of blake3-servil-core; it is copied, and
 # the copy gets labshim.rs appended to its src/lib.rs). Needs lake, cargo, rustc, cc, llvm-objdump.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd); crate="$1"; work="$2"; mkdir -p "$work"
 cd "$here"
 lake build Lang > "$work/lake.log" 2>&1
-lake env lean --run Hasher.lean rust a_ > "$work/way_a.rs"
-lake env lean --run Hasher.lean asm b_ > "$work/way_b.S"
+# The functions: written as Lean values (Hasher.lean), or, with LAB_SOURCE=ode, in the language of our
+# own (hasher.ode), which odec.py turns into Lean values first.
+if [ "${LAB_SOURCE:-lean}" = ode ]; then
+  python3 odec.py hasher.ode "$work/HasherOde.lean" | tee "$work/odec.txt"
+  cp "$work/HasherOde.lean" HasherOde.lean; main=HasherOde.lean
+else
+  main=Hasher.lean
+fi
+lake env lean --run "$main" rust a_ > "$work/way_a.rs"
+lake env lean --run "$main" asm b_ > "$work/way_b.S"
 # Way A: the printed Rust, compiled once to assembly. No standard library, no panic machinery.
 rustc --edition 2021 --crate-type lib --emit asm -C opt-level=3 -C panic=abort -C codegen-units=1 \
   -o "$work/way_a.raw.s" "$work/way_a.rs" 2> "$work/rustc.log"
