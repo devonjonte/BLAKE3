@@ -28,6 +28,12 @@ What a reader reads and relies on, for each:
 
 Each folder's `mutants.py` changes one instruction at a time and requires the build to fail.
 
+**Another compiler, the first folder** (`other_compiler.sh`, `other-compilers/Code-1.98.0.lean`): rustc
+1.98.0 and 1.97.0 compile `read_x86_features` with two registers exchanged and three instructions in
+another order. The theorem checks on that code with no edit of the proof, in 4 s. (It did not at
+first: the proof named each instruction's lemma by its address; it now takes them by an attribute,
+`code_at`, as the later folders do.) 1.99.0 and the beta of November 10 give 1.99.1's bytes.
+
 Known limits, stated so nobody takes these for more than they are:
 
 - `one/` is the first with one model for kernels and compiled Rust; the others still have their own copies;

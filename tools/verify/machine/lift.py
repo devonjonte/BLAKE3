@@ -89,7 +89,7 @@ def main():
         for line in open(listing):
             m = re.match(r"^[0-9a-f]+ <(.+)>:$", line)
             if m: names[m.group(1)] = int(base, 16)
-    text = ["import X86", "", "/-! The compiled functions, as llvm-objdump reads them. Written by lift.py; not edited by hand. -/", "", f"namespace {ns}", "open X86", "",
+    text = ["import X86", "import Attr", "", "/-! The compiled functions, as llvm-objdump reads them. Written by lift.py; not edited by hand. -/", "", f"namespace {ns}", "open X86", "",
             "def table : List (Nat × Instr × Nat) := ["]
     lemmas, count = [], 0
     for base, listing in parts:
@@ -97,7 +97,7 @@ def main():
         text.append(f"  -- {name}")
         for at, nxt, ins, src in rows:
             text.append(f"  (0x{at:X}, {ins}, 0x{nxt:X}),  -- {src}"); count += 1
-            lemmas.append(f"@[simp] theorem at_{at:X} : prog 0x{at:X} = some ({ins}, 0x{nxt:X}) := rfl")
+            lemmas.append(f"@[code_at] theorem at_{at:X} : prog 0x{at:X} = some ({ins}, 0x{nxt:X}) := rfl")
     text[-1] = text[-1].replace("),  -- ", ")   -- ", 1)
     text += ["]", "", "/-- The instruction at an address, and the address after it. -/", "def prog (pc : Nat) : Option (Instr × Nat) := table.lookup pc", ""] + lemmas + ["", f"end {ns}", ""]
     with open(out, "w") as f:

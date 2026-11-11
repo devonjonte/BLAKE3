@@ -1,4 +1,5 @@
 import X86
+import Attr
 
 /-! The compiled functions, as llvm-objdump reads them. Written by lift.py; not edited by hand. -/
 
@@ -98,89 +99,89 @@ def table : List (Nat × Instr × Nat) := [
 /-- The instruction at an address, and the address after it. -/
 def prog (pc : Nat) : Option (Instr × Nat) := table.lookup pc
 
-@[simp] theorem at_1000 : prog 0x1000 = some (.sub 64 (.reg .rsp) (.imm 0x18), 0x1004) := rfl
-@[simp] theorem at_1004 : prog 0x1004 = some (.lea .rdi .rsp 0x4, 0x1009) := rfl
-@[simp] theorem at_1009 : prog 0x1009 = some (.call 0x2000, 0x100E) := rfl
-@[simp] theorem at_100E : prog 0x100E = some (.mov 32 (.reg .rax) (.mem .rsp 0x8), 0x1012) := rfl
-@[simp] theorem at_1012 : prog 0x1012 = some (.mov 32 (.reg .rcx) (.reg .rax), 0x1014) := rfl
-@[simp] theorem at_1014 : prog 0x1014 = some (.not 32 (.reg .rcx), 0x1016) := rfl
-@[simp] theorem at_1016 : prog 0x1016 = some (.shr 32 (.reg .rax) 19, 0x1019) := rfl
-@[simp] theorem at_1019 : prog 0x1019 = some (.and 32 (.reg .rax) (.imm 0x1), 0x101C) := rfl
-@[simp] theorem at_101C : prog 0x101C = some (.add 8 (.reg .rax) (.reg .rax), 0x101E) := rfl
-@[simp] theorem at_101E : prog 0x101E = some (.or 8 (.reg .rax) (.imm 0xFFFFFFFFFFFFFF80), 0x1020) := rfl
-@[simp] theorem at_1020 : prog 0x1020 = some (.test 32 (.reg .rcx) (.imm 0x1C000000), 0x1026) := rfl
-@[simp] theorem at_1026 : prog 0x1026 = some (.jcc .ne 0x108D, 0x1028) := rfl
-@[simp] theorem at_1028 : prog 0x1028 = some (.mov 32 (.reg .rcx) (.mem .rsp 0xC), 0x102C) := rfl
-@[simp] theorem at_102C : prog 0x102C = some (.mov 32 (.reg .rdx) (.mem .rsp 0x10), 0x1030) := rfl
-@[simp] theorem at_1030 : prog 0x1030 = some (.not 32 (.reg .rcx), 0x1032) := rfl
-@[simp] theorem at_1032 : prog 0x1032 = some (.mov 32 (.reg .rsi) (.reg .rdx), 0x1034) := rfl
-@[simp] theorem at_1034 : prog 0x1034 = some (.shr 8 (.reg .rsi) 3, 0x1038) := rfl
-@[simp] theorem at_1038 : prog 0x1038 = some (.and 8 (.reg .rsi) (.imm 0x4), 0x103C) := rfl
-@[simp] theorem at_103C : prog 0x103C = some (.xor 32 (.reg .rdi) (.reg .rdi), 0x103E) := rfl
-@[simp] theorem at_103E : prog 0x103E = some (.test 8 (.reg .rcx) (.imm 0x6), 0x1041) := rfl
-@[simp] theorem at_1041 : prog 0x1041 = some (.not 32 (.reg .rdx), 0x1043) := rfl
-@[simp] theorem at_1043 : prog 0x1043 = some (.movzx 8 .rsi (.reg .rsi), 0x1047) := rfl
-@[simp] theorem at_1047 : prog 0x1047 = some (.cmovcc .ne .rsi (.reg .rdi), 0x104A) := rfl
-@[simp] theorem at_104A : prog 0x104A = some (.or 8 (.reg .rax) (.reg .rsi), 0x104D) := rfl
-@[simp] theorem at_104D : prog 0x104D = some (.and 32 (.reg .rcx) (.imm 0xE6), 0x1053) := rfl
-@[simp] theorem at_1053 : prog 0x1053 = some (.and 32 (.reg .rdx) (.imm 0x80010000), 0x1059) := rfl
-@[simp] theorem at_1059 : prog 0x1059 = some (.or 32 (.reg .rdx) (.reg .rcx), 0x105B) := rfl
-@[simp] theorem at_105B : prog 0x105B = some (.jcc .ne 0x108D, 0x105D) := rfl
-@[simp] theorem at_105D : prog 0x105D = some (.mov 32 (.reg .rcx) (.mem .rsp 0x4), 0x1061) := rfl
-@[simp] theorem at_1061 : prog 0x1061 = some (.mov 32 (.reg .rdx) (.reg .rcx), 0x1063) := rfl
-@[simp] theorem at_1063 : prog 0x1063 = some (.not 32 (.reg .rdx), 0x1065) := rfl
-@[simp] theorem at_1065 : prog 0x1065 = some (.test 32 (.reg .rdx) (.imm 0xF00), 0x106B) := rfl
-@[simp] theorem at_106B : prog 0x106B = some (.setcc .e (.reg .rdx), 0x106E) := rfl
-@[simp] theorem at_106E : prog 0x106E = some (.and 32 (.reg .rcx) (.imm 0xFF00000), 0x1074) := rfl
-@[simp] theorem at_1074 : prog 0x1074 = some (.cmp 32 (.reg .rcx) (.imm 0xA00001), 0x107A) := rfl
-@[simp] theorem at_107A : prog 0x107A = some (.setcc .ae (.reg .rcx), 0x107D) := rfl
-@[simp] theorem at_107D : prog 0x107D = some (.and 8 (.reg .rdx) (.mem .rsp 0x14), 0x1081) := rfl
-@[simp] theorem at_1081 : prog 0x1081 = some (.and 8 (.reg .rdx) (.reg .rcx), 0x1083) := rfl
-@[simp] theorem at_1083 : prog 0x1083 = some (.shl 8 (.reg .rdx) 4, 0x1086) := rfl
-@[simp] theorem at_1086 : prog 0x1086 = some (.or 8 (.reg .rdx) (.reg .rax), 0x1088) := rfl
-@[simp] theorem at_1088 : prog 0x1088 = some (.or 8 (.reg .rdx) (.imm 0x8), 0x108B) := rfl
-@[simp] theorem at_108B : prog 0x108B = some (.mov 32 (.reg .rax) (.reg .rdx), 0x108D) := rfl
-@[simp] theorem at_108D : prog 0x108D = some (.add 64 (.reg .rsp) (.imm 0x18), 0x1091) := rfl
-@[simp] theorem at_1091 : prog 0x1091 = some (.ret, 0x1092) := rfl
-@[simp] theorem at_2000 : prog 0x2000 = some (.mov 32 (.reg .rax) (.imm 0x1), 0x2005) := rfl
-@[simp] theorem at_2005 : prog 0x2005 = some (.xor 32 (.reg .rcx) (.reg .rcx), 0x2007) := rfl
-@[simp] theorem at_2007 : prog 0x2007 = some (.mov 64 (.reg .rsi) (.reg .rbx), 0x200A) := rfl
-@[simp] theorem at_200A : prog 0x200A = some (.cpuid, 0x200C) := rfl
-@[simp] theorem at_200C : prog 0x200C = some (.xchg .rsi .rbx, 0x200F) := rfl
-@[simp] theorem at_200F : prog 0x200F = some (.mov 32 (.mem .rdi 0x0) (.reg .rax), 0x2011) := rfl
-@[simp] theorem at_2011 : prog 0x2011 = some (.mov 32 (.mem .rdi 0x4) (.reg .rcx), 0x2014) := rfl
-@[simp] theorem at_2014 : prog 0x2014 = some (.not 32 (.reg .rcx), 0x2016) := rfl
-@[simp] theorem at_2016 : prog 0x2016 = some (.mov 64 (.mem .rdi 0x8) (.imm 0x0), 0x201E) := rfl
-@[simp] theorem at_201E : prog 0x201E = some (.mov 8 (.mem .rdi 0x10) (.imm 0x0), 0x2022) := rfl
-@[simp] theorem at_2022 : prog 0x2022 = some (.test 32 (.reg .rcx) (.imm 0x1C000000), 0x2028) := rfl
-@[simp] theorem at_2028 : prog 0x2028 = some (.jcc .ne 0x206F, 0x202A) := rfl
-@[simp] theorem at_202A : prog 0x202A = some (.push .rbx, 0x202B) := rfl
-@[simp] theorem at_202B : prog 0x202B = some (.mov 64 (.reg .rbx) (.reg .rdi), 0x202E) := rfl
-@[simp] theorem at_202E : prog 0x202E = some (.call 0x3000, 0x2033) := rfl
-@[simp] theorem at_2033 : prog 0x2033 = some (.mov 32 (.mem .rbx 0x8) (.reg .rax), 0x2036) := rfl
-@[simp] theorem at_2036 : prog 0x2036 = some (.mov 32 (.reg .rax) (.imm 0x7), 0x203B) := rfl
-@[simp] theorem at_203B : prog 0x203B = some (.xor 32 (.reg .rcx) (.reg .rcx), 0x203D) := rfl
-@[simp] theorem at_203D : prog 0x203D = some (.mov 64 (.reg .rsi) (.reg .rbx), 0x2040) := rfl
-@[simp] theorem at_2040 : prog 0x2040 = some (.cpuid, 0x2042) := rfl
-@[simp] theorem at_2042 : prog 0x2042 = some (.xchg .rsi .rbx, 0x2045) := rfl
-@[simp] theorem at_2045 : prog 0x2045 = some (.xor 32 (.reg .rax) (.reg .rax), 0x2047) := rfl
-@[simp] theorem at_2047 : prog 0x2047 = some (.xor 32 (.reg .rcx) (.reg .rcx), 0x2049) := rfl
-@[simp] theorem at_2049 : prog 0x2049 = some (.mov 64 (.reg .rdi) (.reg .rbx), 0x204C) := rfl
-@[simp] theorem at_204C : prog 0x204C = some (.cpuid, 0x204E) := rfl
-@[simp] theorem at_204E : prog 0x204E = some (.xchg .rdi .rbx, 0x2051) := rfl
-@[simp] theorem at_2051 : prog 0x2051 = some (.mov 32 (.mem .rbx 0xC) (.reg .rsi), 0x2054) := rfl
-@[simp] theorem at_2054 : prog 0x2054 = some (.xor 32 (.reg .rdi) (.imm 0x68747541), 0x205A) := rfl
-@[simp] theorem at_205A : prog 0x205A = some (.xor 32 (.reg .rdx) (.imm 0x69746E65), 0x2060) := rfl
-@[simp] theorem at_2060 : prog 0x2060 = some (.or 32 (.reg .rdx) (.reg .rdi), 0x2062) := rfl
-@[simp] theorem at_2062 : prog 0x2062 = some (.xor 32 (.reg .rcx) (.imm 0x444D4163), 0x2068) := rfl
-@[simp] theorem at_2068 : prog 0x2068 = some (.or 32 (.reg .rcx) (.reg .rdx), 0x206A) := rfl
-@[simp] theorem at_206A : prog 0x206A = some (.setcc .e (.mem .rbx 0x10), 0x206E) := rfl
-@[simp] theorem at_206E : prog 0x206E = some (.pop .rbx, 0x206F) := rfl
-@[simp] theorem at_206F : prog 0x206F = some (.ret, 0x2070) := rfl
-@[simp] theorem at_3000 : prog 0x3000 = some (.xor 32 (.reg .rcx) (.reg .rcx), 0x3002) := rfl
-@[simp] theorem at_3002 : prog 0x3002 = some (.xgetbv, 0x3005) := rfl
-@[simp] theorem at_3005 : prog 0x3005 = some (.shl 64 (.reg .rdx) 32, 0x3009) := rfl
-@[simp] theorem at_3009 : prog 0x3009 = some (.or 64 (.reg .rax) (.reg .rdx), 0x300C) := rfl
-@[simp] theorem at_300C : prog 0x300C = some (.ret, 0x300D) := rfl
+@[code_at] theorem at_1000 : prog 0x1000 = some (.sub 64 (.reg .rsp) (.imm 0x18), 0x1004) := rfl
+@[code_at] theorem at_1004 : prog 0x1004 = some (.lea .rdi .rsp 0x4, 0x1009) := rfl
+@[code_at] theorem at_1009 : prog 0x1009 = some (.call 0x2000, 0x100E) := rfl
+@[code_at] theorem at_100E : prog 0x100E = some (.mov 32 (.reg .rax) (.mem .rsp 0x8), 0x1012) := rfl
+@[code_at] theorem at_1012 : prog 0x1012 = some (.mov 32 (.reg .rcx) (.reg .rax), 0x1014) := rfl
+@[code_at] theorem at_1014 : prog 0x1014 = some (.not 32 (.reg .rcx), 0x1016) := rfl
+@[code_at] theorem at_1016 : prog 0x1016 = some (.shr 32 (.reg .rax) 19, 0x1019) := rfl
+@[code_at] theorem at_1019 : prog 0x1019 = some (.and 32 (.reg .rax) (.imm 0x1), 0x101C) := rfl
+@[code_at] theorem at_101C : prog 0x101C = some (.add 8 (.reg .rax) (.reg .rax), 0x101E) := rfl
+@[code_at] theorem at_101E : prog 0x101E = some (.or 8 (.reg .rax) (.imm 0xFFFFFFFFFFFFFF80), 0x1020) := rfl
+@[code_at] theorem at_1020 : prog 0x1020 = some (.test 32 (.reg .rcx) (.imm 0x1C000000), 0x1026) := rfl
+@[code_at] theorem at_1026 : prog 0x1026 = some (.jcc .ne 0x108D, 0x1028) := rfl
+@[code_at] theorem at_1028 : prog 0x1028 = some (.mov 32 (.reg .rcx) (.mem .rsp 0xC), 0x102C) := rfl
+@[code_at] theorem at_102C : prog 0x102C = some (.mov 32 (.reg .rdx) (.mem .rsp 0x10), 0x1030) := rfl
+@[code_at] theorem at_1030 : prog 0x1030 = some (.not 32 (.reg .rcx), 0x1032) := rfl
+@[code_at] theorem at_1032 : prog 0x1032 = some (.mov 32 (.reg .rsi) (.reg .rdx), 0x1034) := rfl
+@[code_at] theorem at_1034 : prog 0x1034 = some (.shr 8 (.reg .rsi) 3, 0x1038) := rfl
+@[code_at] theorem at_1038 : prog 0x1038 = some (.and 8 (.reg .rsi) (.imm 0x4), 0x103C) := rfl
+@[code_at] theorem at_103C : prog 0x103C = some (.xor 32 (.reg .rdi) (.reg .rdi), 0x103E) := rfl
+@[code_at] theorem at_103E : prog 0x103E = some (.test 8 (.reg .rcx) (.imm 0x6), 0x1041) := rfl
+@[code_at] theorem at_1041 : prog 0x1041 = some (.not 32 (.reg .rdx), 0x1043) := rfl
+@[code_at] theorem at_1043 : prog 0x1043 = some (.movzx 8 .rsi (.reg .rsi), 0x1047) := rfl
+@[code_at] theorem at_1047 : prog 0x1047 = some (.cmovcc .ne .rsi (.reg .rdi), 0x104A) := rfl
+@[code_at] theorem at_104A : prog 0x104A = some (.or 8 (.reg .rax) (.reg .rsi), 0x104D) := rfl
+@[code_at] theorem at_104D : prog 0x104D = some (.and 32 (.reg .rcx) (.imm 0xE6), 0x1053) := rfl
+@[code_at] theorem at_1053 : prog 0x1053 = some (.and 32 (.reg .rdx) (.imm 0x80010000), 0x1059) := rfl
+@[code_at] theorem at_1059 : prog 0x1059 = some (.or 32 (.reg .rdx) (.reg .rcx), 0x105B) := rfl
+@[code_at] theorem at_105B : prog 0x105B = some (.jcc .ne 0x108D, 0x105D) := rfl
+@[code_at] theorem at_105D : prog 0x105D = some (.mov 32 (.reg .rcx) (.mem .rsp 0x4), 0x1061) := rfl
+@[code_at] theorem at_1061 : prog 0x1061 = some (.mov 32 (.reg .rdx) (.reg .rcx), 0x1063) := rfl
+@[code_at] theorem at_1063 : prog 0x1063 = some (.not 32 (.reg .rdx), 0x1065) := rfl
+@[code_at] theorem at_1065 : prog 0x1065 = some (.test 32 (.reg .rdx) (.imm 0xF00), 0x106B) := rfl
+@[code_at] theorem at_106B : prog 0x106B = some (.setcc .e (.reg .rdx), 0x106E) := rfl
+@[code_at] theorem at_106E : prog 0x106E = some (.and 32 (.reg .rcx) (.imm 0xFF00000), 0x1074) := rfl
+@[code_at] theorem at_1074 : prog 0x1074 = some (.cmp 32 (.reg .rcx) (.imm 0xA00001), 0x107A) := rfl
+@[code_at] theorem at_107A : prog 0x107A = some (.setcc .ae (.reg .rcx), 0x107D) := rfl
+@[code_at] theorem at_107D : prog 0x107D = some (.and 8 (.reg .rdx) (.mem .rsp 0x14), 0x1081) := rfl
+@[code_at] theorem at_1081 : prog 0x1081 = some (.and 8 (.reg .rdx) (.reg .rcx), 0x1083) := rfl
+@[code_at] theorem at_1083 : prog 0x1083 = some (.shl 8 (.reg .rdx) 4, 0x1086) := rfl
+@[code_at] theorem at_1086 : prog 0x1086 = some (.or 8 (.reg .rdx) (.reg .rax), 0x1088) := rfl
+@[code_at] theorem at_1088 : prog 0x1088 = some (.or 8 (.reg .rdx) (.imm 0x8), 0x108B) := rfl
+@[code_at] theorem at_108B : prog 0x108B = some (.mov 32 (.reg .rax) (.reg .rdx), 0x108D) := rfl
+@[code_at] theorem at_108D : prog 0x108D = some (.add 64 (.reg .rsp) (.imm 0x18), 0x1091) := rfl
+@[code_at] theorem at_1091 : prog 0x1091 = some (.ret, 0x1092) := rfl
+@[code_at] theorem at_2000 : prog 0x2000 = some (.mov 32 (.reg .rax) (.imm 0x1), 0x2005) := rfl
+@[code_at] theorem at_2005 : prog 0x2005 = some (.xor 32 (.reg .rcx) (.reg .rcx), 0x2007) := rfl
+@[code_at] theorem at_2007 : prog 0x2007 = some (.mov 64 (.reg .rsi) (.reg .rbx), 0x200A) := rfl
+@[code_at] theorem at_200A : prog 0x200A = some (.cpuid, 0x200C) := rfl
+@[code_at] theorem at_200C : prog 0x200C = some (.xchg .rsi .rbx, 0x200F) := rfl
+@[code_at] theorem at_200F : prog 0x200F = some (.mov 32 (.mem .rdi 0x0) (.reg .rax), 0x2011) := rfl
+@[code_at] theorem at_2011 : prog 0x2011 = some (.mov 32 (.mem .rdi 0x4) (.reg .rcx), 0x2014) := rfl
+@[code_at] theorem at_2014 : prog 0x2014 = some (.not 32 (.reg .rcx), 0x2016) := rfl
+@[code_at] theorem at_2016 : prog 0x2016 = some (.mov 64 (.mem .rdi 0x8) (.imm 0x0), 0x201E) := rfl
+@[code_at] theorem at_201E : prog 0x201E = some (.mov 8 (.mem .rdi 0x10) (.imm 0x0), 0x2022) := rfl
+@[code_at] theorem at_2022 : prog 0x2022 = some (.test 32 (.reg .rcx) (.imm 0x1C000000), 0x2028) := rfl
+@[code_at] theorem at_2028 : prog 0x2028 = some (.jcc .ne 0x206F, 0x202A) := rfl
+@[code_at] theorem at_202A : prog 0x202A = some (.push .rbx, 0x202B) := rfl
+@[code_at] theorem at_202B : prog 0x202B = some (.mov 64 (.reg .rbx) (.reg .rdi), 0x202E) := rfl
+@[code_at] theorem at_202E : prog 0x202E = some (.call 0x3000, 0x2033) := rfl
+@[code_at] theorem at_2033 : prog 0x2033 = some (.mov 32 (.mem .rbx 0x8) (.reg .rax), 0x2036) := rfl
+@[code_at] theorem at_2036 : prog 0x2036 = some (.mov 32 (.reg .rax) (.imm 0x7), 0x203B) := rfl
+@[code_at] theorem at_203B : prog 0x203B = some (.xor 32 (.reg .rcx) (.reg .rcx), 0x203D) := rfl
+@[code_at] theorem at_203D : prog 0x203D = some (.mov 64 (.reg .rsi) (.reg .rbx), 0x2040) := rfl
+@[code_at] theorem at_2040 : prog 0x2040 = some (.cpuid, 0x2042) := rfl
+@[code_at] theorem at_2042 : prog 0x2042 = some (.xchg .rsi .rbx, 0x2045) := rfl
+@[code_at] theorem at_2045 : prog 0x2045 = some (.xor 32 (.reg .rax) (.reg .rax), 0x2047) := rfl
+@[code_at] theorem at_2047 : prog 0x2047 = some (.xor 32 (.reg .rcx) (.reg .rcx), 0x2049) := rfl
+@[code_at] theorem at_2049 : prog 0x2049 = some (.mov 64 (.reg .rdi) (.reg .rbx), 0x204C) := rfl
+@[code_at] theorem at_204C : prog 0x204C = some (.cpuid, 0x204E) := rfl
+@[code_at] theorem at_204E : prog 0x204E = some (.xchg .rdi .rbx, 0x2051) := rfl
+@[code_at] theorem at_2051 : prog 0x2051 = some (.mov 32 (.mem .rbx 0xC) (.reg .rsi), 0x2054) := rfl
+@[code_at] theorem at_2054 : prog 0x2054 = some (.xor 32 (.reg .rdi) (.imm 0x68747541), 0x205A) := rfl
+@[code_at] theorem at_205A : prog 0x205A = some (.xor 32 (.reg .rdx) (.imm 0x69746E65), 0x2060) := rfl
+@[code_at] theorem at_2060 : prog 0x2060 = some (.or 32 (.reg .rdx) (.reg .rdi), 0x2062) := rfl
+@[code_at] theorem at_2062 : prog 0x2062 = some (.xor 32 (.reg .rcx) (.imm 0x444D4163), 0x2068) := rfl
+@[code_at] theorem at_2068 : prog 0x2068 = some (.or 32 (.reg .rcx) (.reg .rdx), 0x206A) := rfl
+@[code_at] theorem at_206A : prog 0x206A = some (.setcc .e (.mem .rbx 0x10), 0x206E) := rfl
+@[code_at] theorem at_206E : prog 0x206E = some (.pop .rbx, 0x206F) := rfl
+@[code_at] theorem at_206F : prog 0x206F = some (.ret, 0x2070) := rfl
+@[code_at] theorem at_3000 : prog 0x3000 = some (.xor 32 (.reg .rcx) (.reg .rcx), 0x3002) := rfl
+@[code_at] theorem at_3002 : prog 0x3002 = some (.xgetbv, 0x3005) := rfl
+@[code_at] theorem at_3005 : prog 0x3005 = some (.shl 64 (.reg .rdx) 32, 0x3009) := rfl
+@[code_at] theorem at_3009 : prog 0x3009 = some (.or 64 (.reg .rax) (.reg .rdx), 0x300C) := rfl
+@[code_at] theorem at_300C : prog 0x300C = some (.ret, 0x300D) := rfl
 
 end Code

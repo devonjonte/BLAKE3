@@ -35,7 +35,7 @@ for at, old, new in muts:
     assert len(hit) == 1 and old in lines[hit[0]], (at, old)
     lines[hit[0]] = lines[hit[0]].replace(old, new, 1)
     # the per-address lemma must change with it, as lift.py would write it
-    lem = [i for i, l in enumerate(lines) if l.startswith(f"@[simp] theorem at_{at[2:]} ")]
+    lem = [i for i, l in enumerate(lines) if l.startswith(f"@[code_at] theorem at_{at[2:]} ")]
     assert len(lem) == 1 and old in lines[lem[0]]
     lines[lem[0]] = lines[lem[0]].replace(old, new, 1)
     p.write_text("".join(lines)); t = time.time()

@@ -2,6 +2,8 @@ name = "mc"
 defaultTargets = ["Proof"]
 
 [[lean_lib]]
+name = "Attr"
+[[lean_lib]]
 name = "X86"
 [[lean_lib]]
 name = "Spec"
