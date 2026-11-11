@@ -1,9 +1,9 @@
 # Experiments: compiled code proved in Lean (#361)
 
-Thirteen folders, each a Lean project of its own (`lake build` in its folder). None is a gate.
+Fourteen folders, each a Lean project of its own (`lake build` in its folder). None is a gate.
 Each theorem is about machine code as llvm-objdump lists it, run on a small model of x86-64 (one
 of AArch64) written here, against a function written in Lean. The table has the first seven; the
-sections after it have `equihash/`, `a64/`, `gen/`, `hex/`, `alg/`, `eq/`, `CvStack::merge` and the kernels'
+sections after it have `lang/`, `equihash/`, `a64/`, `gen/`, `hex/`, `alg/`, `eq/`, `CvStack::merge` and the kernels'
 traces (both in `one/`).
 
 **What each theorem is about: one build's bytes.** The listings are rustc 1.99.1's plain release
@@ -81,6 +81,33 @@ Known limits, stated so nobody takes these for more than they are:
   and `cross.sh` here for the first model (this folder's `X86.lean`: the 71 instructions of four builds of
   detection that are not CPUID, XGETBV, a jump, a call or a stack move); `loop/`'s and `call/`'s copies,
   `wide/`'s and `a64/`'s are not; no model is checked against Sail, as `cross_check_x86.py` does for the Python models.
+
+## `lang/`: an implementation language of our own, whose compiler proves its assembly
+
+The direction since November 11: no Rust in the library's own code. Functions are written in a small
+language made for the job (`hasher.ode`): at the word level (variables, loads, stores, calls, `if`,
+`while`; the compiler picks registers) or at the machine level (the programmer chooses every
+instruction: kernels), with `def` and `for` running at compile time. `odec.py` turns the source into
+values of Lean's `L.Fn` (`Lang.lean`), from which Lean prints the assembly; `Sem.lean` is an
+interpreter of the word level. Written in it and run against the crate (`run.sh`, `bench/`): `push`,
+`merge`, a table-free `to_hex`, the whole one-shot hash, the one-block AVX-512 compression, and `hex`.
+
+**`./prove.sh`: from source to a checked theorem, with no proof written by hand.** For the kernel `hex`
+(the hash's hexadecimal: 45 SSE2 instructions, no table, no branch) and its `contract` in the source:
+the assembler and the lifter give the object's bytes back, `prove.py` writes the statement from the
+contract and the proof by a recipe for straight-line kernels (a symbolic run with the observer beside
+the machine; `rfl` finds the trace and fails if it mentions the bytes read; `bv_decide` for each
+written vector), and Lean checks **`hex_meets_its_contract`** (`Proof_hex.lean`): the 64 bytes written
+are `Hex.hex8` of the 32 read (`HexSpec.lean`), no other byte changes, the callee's registers are
+kept, and what an observer sees is one list fixed by the addresses, whatever the hash is. Check: 1 s.
+`python3 mutants_hex.py`: the unchanged copy is accepted (the control), 10 of 10 changed instructions
+rejected. On the EPYC 9255 host it takes 1.9 ns a call where the crate's `to_hex` (a table) takes
+12.8; a million random hashes agree. A candidate for the crate that uses it: branch
+`candidate/sam-hex-constant-time`.
+
+Limits: the recipe covers kernels that load, compute and store with no loop; the word level has no
+proofs yet; x86-64 only; the object proved is assembled on a Mac for x86-64 (the instructions' bytes
+are the ELF object's; the relocations differ); the constants' alignment is the assembler's.
 
 ## `equihash/`: another project's Lean function, tied to the bytes its Rust compiles to
 

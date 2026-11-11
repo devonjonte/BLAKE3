@@ -2,5 +2,4 @@ HasherOde.lean
 hex.S
 hex.o
 hex.listing
-Lifted_hex.lean
 Lifted_hex.lean.rows
