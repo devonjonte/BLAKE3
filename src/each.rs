@@ -792,6 +792,19 @@ fn left_len(n: usize) -> usize {
 mod test {
     use super::*;
 
+    #[test]
+    fn prepare_thread_reserves_collection_storage() {
+        // nextest gives this test a fresh thread-local store.
+        SHARED.with(|s| assert_eq!((s.borrow().messages.capacity(), s.borrow().cvs.capacity()), (0, 0)));
+        prepare_thread();
+        SHARED.with(|s| {
+            let s = s.borrow();
+            assert!(s.messages.capacity() >= PREPARED_MESSAGES);
+            assert!(s.cvs.capacity() >= PREPARED_CVS);
+            assert!(s.messages.is_empty() && s.cvs.is_empty());
+        });
+    }
+
     #[cfg(all(blake3_avx512_ffi, target_os = "linux", feature = "std"))]
     #[test]
     fn finalize_each_groups_only_full_output_lanes() {
