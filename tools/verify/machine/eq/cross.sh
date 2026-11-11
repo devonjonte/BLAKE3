@@ -10,8 +10,8 @@ lake build X86 CrossTable >/dev/null
 lake env lean --run Cross.lean 200 > "$work/vectors.txt"
 cc -O1 -o "$work/cross" cross.c
 "$work/cross" "$work/vectors.txt"
-rm -rf "$work/wrong"; mkdir -p "$work/wrong"; cp X86.lean CrossTable.lean Cross.lean lean-toolchain "$work/wrong/"
-printf 'name = "wrong"\n[[lean_lib]]\nname = "X86"\n[[lean_lib]]\nname = "CrossTable"\n' > "$work/wrong/lakefile.toml"
+rm -rf "$work/wrong"; mkdir -p "$work/wrong"; cp Bytes.lean X86.lean CrossTable.lean Cross.lean lean-toolchain "$work/wrong/"
+printf 'name = "wrong"\n[[lean_lib]]\nname = "Bytes"\n[[lean_lib]]\nname = "X86"\n[[lean_lib]]\nname = "CrossTable"\n' > "$work/wrong/lakefile.toml"
 python3 wrong_model.py "$work/wrong/X86.lean"
 (cd "$work/wrong" && lake build X86 CrossTable > "$work/wrong-build.log" 2>&1 || { tail -n 20 "$work/wrong-build.log"; exit 1; })
 (cd "$work/wrong" && lake env lean --run Cross.lean 200 > "$work/wrong-vectors.txt")
