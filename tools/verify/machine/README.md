@@ -202,3 +202,17 @@ Limits: this model has no trace, so nothing is said of timing here; the call thr
 reach the kernel its relocation names; `push`, the function that calls `merge`, and `final_node` are not
 proved, so `hasher_is_blake3` is joined to the code at this one function only; the case `len ≤ target`
 (no turn) and a `None` stack are not covered; the listing is llvm-objdump's.
+
+## `one/Leak.lean`: the one-block kernels show only addresses
+
+`Machine.lean` has no observer. `Leak.lean` adds one without touching it: `stepL` is the model's own `step`
+with what it shows recorded beside it (each address read or written; where each jump, call and return
+goes), and `stepsL_core` proves the recorded run is the model's run, so a theorem about the trace is about
+the same executions as the theorems about the result. `sse41_kernel_shows_only_addresses` and
+`avx512_kernel_shows_only_addresses`: there is a trace, fixed by the chaining value's address, the
+block's, the stack pointer and the return address, that every run of the kernel shows, whatever the
+chaining value, block, counter, length and flags are. The proof leaves the trace to be found by
+unification with a variable that may mention only those four, so a trace that depended on anything else
+would not check (it did not, until the return address was among them). Check: 7 s for both.
+
+Not done the same way: `merge` and the parent functions.
