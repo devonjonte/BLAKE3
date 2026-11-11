@@ -1,25 +1,25 @@
-rejected	3.7s	0x1016	.shr 32 (.reg .rax) 19 -> .shr 32 (.reg .rax) 18
-ACCEPTED	3.8s	0x1020	(.imm 0x1C000000) -> (.imm 0x14000000)
+rejected	3.6s	0x1016	.shr 32 (.reg .rax) 19 -> .shr 32 (.reg .rax) 18
+ACCEPTED	3.9s	0x1020	(.imm 0x1C000000) -> (.imm 0x14000000)
 rejected	3.8s	0x1026	.jcc .ne -> .jcc .e
-rejected	3.7s	0x1034	.shr 8 (.reg .rsi) 3 -> .shr 8 (.reg .rsi) 2
+rejected	3.6s	0x1034	.shr 8 (.reg .rsi) 3 -> .shr 8 (.reg .rsi) 2
 rejected	3.7s	0x103E	(.imm 0x6) -> (.imm 0x4)
 rejected	3.7s	0x1047	.cmovcc .ne -> .cmovcc .e
-rejected	3.8s	0x104D	(.imm 0xE6) -> (.imm 0xE4)
+rejected	3.6s	0x104D	(.imm 0xE6) -> (.imm 0xE4)
 rejected	3.7s	0x1053	(.imm 0x80010000) -> (.imm 0x10000)
-rejected	3.7s	0x1059	.or 32 -> .and 32
-rejected	3.7s	0x105B	.jcc .ne -> .jcc .e
-rejected	3.7s	0x1065	(.imm 0xF00) -> (.imm 0x700)
+rejected	3.6s	0x1059	.or 32 -> .and 32
+rejected	3.6s	0x105B	.jcc .ne -> .jcc .e
+rejected	3.6s	0x1065	(.imm 0xF00) -> (.imm 0x700)
 ACCEPTED	3.9s	0x1074	(.imm 0xA00001) -> (.imm 0xA00002)
-rejected	3.8s	0x1074	(.imm 0xA00001) -> (.imm 0x900001)
-rejected	3.8s	0x107A	.setcc .ae -> .setcc .e
-rejected	3.8s	0x1083	.shl 8 (.reg .rdx) 4 -> .shl 8 (.reg .rdx) 3
+rejected	3.6s	0x1074	(.imm 0xA00001) -> (.imm 0x900001)
+rejected	3.6s	0x107A	.setcc .ae -> .setcc .e
+rejected	3.6s	0x1083	.shl 8 (.reg .rdx) 4 -> .shl 8 (.reg .rdx) 3
 rejected	3.7s	0x1088	(.imm 0x8) -> (.imm 0x0)
-rejected	3.6s	0x101E	(.imm 0xFFFFFFFFFFFFFF80) -> (.imm 0x0)
+rejected	3.7s	0x101E	(.imm 0xFFFFFFFFFFFFFF80) -> (.imm 0x0)
 rejected	3.5s	0x108D	(.imm 0x18) -> (.imm 0x10)
 rejected	3.8s	0x2022	(.imm 0x1C000000) -> (.imm 0x14000000)
 rejected	2.3s	0x2036	(.imm 0x7) -> (.imm 0x6)
-rejected	3.8s	0x2054	(.imm 0x68747541) -> (.imm 0x68747540)
-rejected	3.8s	0x2068	.or 32 -> .and 32
+rejected	3.7s	0x2054	(.imm 0x68747541) -> (.imm 0x68747540)
+rejected	3.7s	0x2068	.or 32 -> .and 32
 rejected	3.8s	0x2051	(.mem .rbx 0xC) -> (.mem .rbx 0x8)
-rejected	3.6s	0x206E	.pop .rbx -> .pop .rsi
+rejected	3.7s	0x206E	.pop .rbx -> .pop .rsi
 rejected	2.3s	0x3000	.xor 32 (.reg .rcx) (.reg .rcx) -> .mov 32 (.reg .rcx) (.imm 0x1)

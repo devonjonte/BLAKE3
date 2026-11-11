@@ -11,6 +11,15 @@ theorem eq_add_add (a c d : BitVec 64) : (a + c == a + d) = (c == d) := by bv_de
 theorem eq_self_add (a d : BitVec 64) : (a == a + d) = (0 == d) := by bv_decide
 theorem eq_add_self (a c : BitVec 64) : (a + c == a) = (c == 0) := by bv_decide
 
+/-- A 64-bit value stored and loaded again is itself, as a term: so a pointer the code saves on the
+stack and restores (a frame register) is still `base + constant` when it is next used as an address. -/
+theorem join64 (v : BitVec 64) :
+    (BitVec.setWidth 64 (BitVec.setWidth 8 (v >>> 0)) ||| BitVec.setWidth 64 (BitVec.setWidth 8 (v >>> 8)) <<< 8 |||
+      BitVec.setWidth 64 (BitVec.setWidth 8 (v >>> 16)) <<< 16 ||| BitVec.setWidth 64 (BitVec.setWidth 8 (v >>> 24)) <<< 24 |||
+      BitVec.setWidth 64 (BitVec.setWidth 8 (v >>> 32)) <<< 32 ||| BitVec.setWidth 64 (BitVec.setWidth 8 (v >>> 40)) <<< 40 |||
+      BitVec.setWidth 64 (BitVec.setWidth 8 (v >>> 48)) <<< 48 ||| BitVec.setWidth 64 (BitVec.setWidth 8 (v >>> 56)) <<< 56) = v := by
+  bv_decide
+
 theorem run_ite (prog : Nat → Option (Instr × Nat)) (cpu : Cpu) (n : Nat) (c : Prop) [Decidable c] (a b : State) :
     run prog cpu n (if c then a else b) = if c then run prog cpu n a else run prog cpu n b := by
   split <;> rfl

@@ -34,6 +34,14 @@ another order. The theorem checks on that code with no edit of the proof, in 4 s
 first: the proof named each instruction's lemma by its address; it now takes them by an attribute,
 `code_at`, as the later folders do.) 1.99.0 and the beta of November 10 give 1.99.1's bytes.
 
+**Other build settings, the same proof** (job `detect-builds.sh` of the study, on the EPYC 9255 host):
+`panic=abort`, `debug-assertions`, `overflow-checks` and `codegen-units=1` give the same 84 instructions;
+`opt-level` 2 and 1 give others (38 differ) and the theorem checks unedited in 7 s; `opt-level=s` gives
+others again (it keeps the frame's address in RBX, which the callee saves on the stack and restores) and
+the theorem checks once the symbolic run has one more lemma, `Sym.join64` (a 64-bit value stored and
+loaded is itself, as a term, so the restored pointer is still an address the run can compare);
+`-C target-cpu=native` uses `bextr` and R8, which this first model does not have, so the lifter stops.
+
 Known limits, stated so nobody takes these for more than they are:
 
 - `one/` is the first with one model for kernels and compiled Rust; the others still have their own copies;

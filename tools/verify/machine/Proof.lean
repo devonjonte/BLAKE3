@@ -40,7 +40,7 @@ macro "run_code" : tactic => `(tactic|
   simp (config := {maxSteps := 10000000, implicitDefEqProofs := false}) only [entry, Sym.run_mk, Sym.run_zero, step,
     X86.read, write, State.get, State.set, trunc, store, load, byteAt, byte, done, logic, holds, cpuidOf,
     code_at,
-    Sym.sub_lit, Sym.add_add, Sym.eq_add_add, Sym.eq_self_add, Sym.eq_add_self, Sym.run_ite, Sym.run_bite,
+    Sym.join64, Sym.sub_lit, Sym.add_add, Sym.eq_add_add, Sym.eq_self_add, Sym.eq_add_self, Sym.run_ite, Sym.run_bite,
     Option.bind_eq_bind, Option.bind_some, Option.pure_def, Option.map_some, bind_pure_comp, List.lookup_cons, List.lookup_nil,
     Nat.reduceEqDiff, Nat.reduceMul, ↓reduceIte, BitVec.reduceAdd, BitVec.reduceNeg, BitVec.reduceEq, BitVec.reduceBEq,
     BitVec.reduceAnd, BitVec.reduceHShiftRight, BitVec.reduceSetWidth, BitVec.ofNat_eq_ofNat, BitVec.reduceHShiftLeft,

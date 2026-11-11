@@ -72,6 +72,7 @@ def lift(base, listing, symbols):
         elif op.startswith("j") and op[1:] in CC:
             ins = f".jcc .{CC[op[1:]]} {bv(base + int(a[0].split()[0], 16))}"
         elif op == "call":
+            reloc = re.sub(r"^\.text(?:\.unlikely|\.hot|\.startup)?\.", "", reloc or "")   # a call to a function by its section's name
             assert reloc in symbols, f"call to an unknown function: {reloc}"; ins = f".call {bv(symbols[reloc])}"
         elif op in ("ret", "cpuid", "xgetbv"):
             assert not a; ins = f".{op}"
