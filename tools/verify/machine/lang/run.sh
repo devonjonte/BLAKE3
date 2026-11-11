@@ -1,0 +1,38 @@
+#!/bin/bash
+# The same functions three ways (BLAKE3 #361): the crate's hand-written Rust, the Rust that Lean
+# prints (compiled by rustc to assembly: way A), the assembly Lean prints itself (way B).
+# usage: run.sh CRATE_DIR WORK_DIR   (CRATE_DIR: a checkout of blake3-servil-core; it is copied, and
+# the copy gets labshim.rs appended to its src/lib.rs). Needs lake, cargo, rustc, cc, llvm-objdump.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd); crate="$1"; work="$2"; mkdir -p "$work"
+cd "$here"
+lake build Lang > "$work/lake.log" 2>&1
+lake env lean --run Hasher.lean rust a_ > "$work/way_a.rs"
+lake env lean --run Hasher.lean asm b_ > "$work/way_b.S"
+# Way A: the printed Rust, compiled once to assembly. No standard library, no panic machinery.
+rustc --edition 2021 --crate-type lib --emit asm -C opt-level=3 -C panic=abort -C codegen-units=1 \
+  -o "$work/way_a.s" "$work/way_a.rs" 2> "$work/rustc.log"
+rm -rf "$work/bench"; cp -R "$here/bench" "$work/bench"
+rm -rf "$work/crate"; mkdir "$work/crate"; (cd "$crate" && git archive HEAD) | tar -x -C "$work/crate"
+cat "$here/labshim.rs" >> "$work/crate/src/lib.rs"
+(cd "$work/bench" && LAB_ASM="$work" CARGO_TARGET_DIR="$work/target" cargo build --release > "$work/cargo.log" 2>&1) || { tail -n 30 "$work/cargo.log"; exit 1; }
+"$work/target/release/labbench" | tee "$work/bench.txt"
+# What each way's code is: instructions a function.
+python3 - "$work" <<'COUNT_PY' | tee "$work/sizes.txt"
+import re, subprocess, sys
+work = sys.argv[1]
+text = subprocess.run(["llvm-objdump", "-d", "-C", "--no-show-raw-insn", f"{work}/target/release/labbench"], capture_output=True, text=True).stdout
+want = {"a_push": "way A push", "b_push": "way B push", "a_merge": "way A merge", "b_merge": "way B merge", "a_to_hex": "way A to_hex", "b_to_hex": "way B to_hex"}
+name, n, rows = None, 0, {}
+for line in text.splitlines():
+    m = re.match(r"^[0-9a-f]+ <(.+)>:$", line)
+    if m:
+        if name: rows[name] = n
+        name, n = m.group(1), 0; continue
+    if re.match(r"^\s+[0-9a-f]+:\s+\S", line) and not re.search(r"\s(nop|int3|ud2)\b", line): n += 1
+if name: rows[name] = n
+for k, v in want.items(): print(f"{v}: {rows.get(k, '?')} instructions")
+for k, v in rows.items():
+    if re.search(r"labshim::merge|Hash>::to_hex|CvStack>::merge", k): print(f"hand Rust {k[:70]}: {v} instructions")
+COUNT_PY
+echo "three ways compared"

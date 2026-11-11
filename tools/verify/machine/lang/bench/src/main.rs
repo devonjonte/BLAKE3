@@ -1,0 +1,163 @@
+//! The same three functions, three ways: the crate's hand-written Rust (through `labshim`, added to the
+//! crate for this lab), the Rust Lean printed (compiled by rustc to assembly: way A), and the assembly
+//! Lean printed itself (way B). First that they agree, then what each costs. Single executions on one
+//! machine: inventory, no speed verdict.
+use blake3_servil_core::labshim as hand;
+use std::time::Instant;
+
+extern "C" {
+    fn a_push(st: u64, cv: u64) -> u64;
+    fn a_merge(st: u64, key: u64, flags: u64, plat: u64, target: u64) -> u64;
+    fn a_to_hex(out: u64, hash: u64) -> u64;
+    fn b_push(st: u64, cv: u64) -> u64;
+    fn b_merge(st: u64, key: u64, flags: u64, plat: u64, target: u64) -> u64;
+    fn b_to_hex(out: u64, hash: u64) -> u64;
+}
+
+/// The stack as the Lean functions lay it out: the length, then from byte 32 the values.
+#[repr(C, align(64))]
+#[derive(Clone)]
+struct LStack {
+    len: u64,
+    pad: [u64; 3],
+    cvs: [[u8; 32]; 55],
+}
+
+fn rng(state: &mut u64) -> u64 {
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    *state
+}
+
+fn random_cv(s: &mut u64) -> [u8; 32] {
+    let mut cv = [0u8; 32];
+    for chunk in cv.chunks_mut(8) {
+        chunk.copy_from_slice(&rng(s).to_le_bytes());
+    }
+    cv
+}
+
+type PushFn = unsafe extern "C" fn(u64, u64) -> u64;
+type MergeFn = unsafe extern "C" fn(u64, u64, u64, u64, u64) -> u64;
+type HexFn = unsafe extern "C" fn(u64, u64) -> u64;
+
+fn agree(name: &str, push: PushFn, merge: MergeFn, to_hex: HexFn, plat: u64) -> u64 {
+    let mut s = 0x9E3779B97F4A7C15u64;
+    let mut cases = 0u64;
+    for round in 0..20_000u64 {
+        let n = 1 + (rng(&mut s) % 54) as usize;
+        let target = 1 + (rng(&mut s) % n as u64) as usize;
+        let key: [u32; 8] = core::array::from_fn(|_| rng(&mut s) as u32);
+        let flags = [0u8, 16, 64][(round % 3) as usize];
+        let mut h = hand::new_stack();
+        let mut l = LStack { len: 0, pad: [0; 3], cvs: [[0; 32]; 55] };
+        for _ in 0..n {
+            let cv = random_cv(&mut s);
+            hand::push(&mut h, cv);
+            unsafe { push(&mut l as *mut LStack as u64, cv.as_ptr() as u64) };
+        }
+        hand::merge(&mut h, &key, flags, target);
+        let len = unsafe { merge(&mut l as *mut LStack as u64, key.as_ptr() as u64, flags as u64, plat, target as u64) };
+        assert_eq!(len as usize, hand::len(&h), "{name}: the length after merge");
+        assert_eq!(l.len as usize, hand::len(&h), "{name}: the stored length");
+        for i in 0..hand::len(&h) {
+            assert_eq!(l.cvs[i], hand::get(&h, i), "{name}: value {i} after merge of {n} to {target}");
+        }
+        let hash = random_cv(&mut s);
+        let mut out = [0u8; 64];
+        let got = unsafe { to_hex(out.as_mut_ptr() as u64, hash.as_ptr() as u64) };
+        assert_eq!(got, 64);
+        assert_eq!(&out[..], blake3_servil_core::Hash::from_bytes(hash).to_hex().as_bytes(), "{name}: to_hex");
+        cases += 1;
+    }
+    cases
+}
+
+/// The least of `tries` timings of `f` run `reps` times, in nanoseconds a call.
+fn least(tries: usize, reps: u64, mut f: impl FnMut()) -> f64 {
+    let mut best = f64::MAX;
+    for _ in 0..tries {
+        let t = Instant::now();
+        for _ in 0..reps {
+            f();
+        }
+        best = best.min(t.elapsed().as_nanos() as f64 / reps as f64);
+    }
+    best
+}
+
+fn main() {
+    blake3_servil_core::initialize();
+    let plat = hand::platform_number() as u64;
+    println!("platform {plat}");
+    for (name, p, m, x) in [("way A (Lean, Rust printed, rustc)", a_push as PushFn, a_merge as MergeFn, a_to_hex as HexFn),
+                            ("way B (Lean, assembly printed)", b_push as PushFn, b_merge as MergeFn, b_to_hex as HexFn)] {
+        println!("{name}: {} random cases agree with the crate's Rust (push, merge, to_hex)", agree(name, p, m, x, plat));
+    }
+    // Costs. merge: a stack of 2 merged to 1 (one parent), and of 11 merged to 1 (ten parents).
+    let mut s = 7u64;
+    let key: [u32; 8] = core::array::from_fn(|_| rng(&mut s) as u32);
+    let cvs: Vec<[u8; 32]> = (0..11).map(|_| random_cv(&mut s)).collect();
+    let hash = random_cv(&mut s);
+    for depth in [2usize, 11] {
+        let mut h0 = hand::new_stack();
+        let mut l0 = LStack { len: 0, pad: [0; 3], cvs: [[0; 32]; 55] };
+        for cv in &cvs[..depth] {
+            hand::push(&mut h0, *cv);
+            unsafe { b_push(&mut l0 as *mut LStack as u64, cv.as_ptr() as u64) };
+        }
+        let hand_ns = least(15, 200_000, || {
+            let mut h = h0.clone();
+            hand::merge(&mut h, &key, 0, 1);
+            std::hint::black_box(&h);
+        });
+        let hand_clone = least(15, 200_000, || {
+            let h = h0.clone();
+            std::hint::black_box(&h);
+        });
+        let mut times = vec![];
+        for m in [a_merge as MergeFn, b_merge as MergeFn] {
+            let ns = least(15, 200_000, || {
+                let mut l = LStack { len: depth as u64, pad: [0; 3], cvs: l0.cvs };
+                unsafe { m(&mut l as *mut LStack as u64, key.as_ptr() as u64, 0, plat, 1) };
+                std::hint::black_box(&l);
+            });
+            times.push(ns);
+        }
+        let l_clone = least(15, 200_000, || {
+            let l = LStack { len: depth as u64, pad: [0; 3], cvs: l0.cvs };
+            std::hint::black_box(&l);
+        });
+        println!("merge {depth} to 1, ns a call (the copy of the stack taken off): hand Rust {:.1}, way A {:.1}, way B {:.1}",
+                 hand_ns - hand_clone, times[0] - l_clone, times[1] - l_clone);
+    }
+    let h = blake3_servil_core::Hash::from_bytes(hash);
+    let hand_hex = least(15, 2_000_000, || {
+        std::hint::black_box(std::hint::black_box(&h).to_hex());
+    });
+    let mut out = [0u8; 64];
+    let mut hex = vec![];
+    for x in [a_to_hex as HexFn, b_to_hex as HexFn] {
+        hex.push(least(15, 2_000_000, || {
+            unsafe { x(out.as_mut_ptr() as u64, std::hint::black_box(hash.as_ptr()) as u64) };
+            std::hint::black_box(&out);
+        }));
+    }
+    println!("to_hex, ns a call: hand Rust (table) {:.1}, way A {:.1}, way B {:.1}", hand_hex, hex[0], hex[1]);
+    let mut l = LStack { len: 0, pad: [0; 3], cvs: [[0; 32]; 55] };
+    let mut hs = hand::new_stack();
+    let cv = cvs[0];
+    let hand_push = least(15, 2_000_000, || {
+        hand::clear(&mut hs);
+        hand::push(&mut hs, std::hint::black_box(cv));
+    });
+    let mut pushes = vec![];
+    for p in [a_push as PushFn, b_push as PushFn] {
+        pushes.push(least(15, 2_000_000, || {
+            l.len = 0;
+            unsafe { p(&mut l as *mut LStack as u64, std::hint::black_box(cv.as_ptr()) as u64) };
+        }));
+    }
+    println!("push, ns a call: hand Rust {:.1}, way A {:.1}, way B {:.1}", hand_push, pushes[0], pushes[1]);
+}

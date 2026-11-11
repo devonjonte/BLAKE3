@@ -1,0 +1,4 @@
+name = "lang"
+defaultTargets = ["Lang"]
+[[lean_lib]]
+name = "Lang"
