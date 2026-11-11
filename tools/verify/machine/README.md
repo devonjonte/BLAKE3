@@ -170,7 +170,9 @@ With `hex/` this is the pair: the comparison users are told to use is constant-t
 as compiled; the hexadecimal is not.
 
 Limits: the function is compiled alone (in the crate it is inlined into its callers); x86-64 only;
-`pcmpeqb`, `pand`, `pmovmskb` and `sete` are not yet in the cross-check against a processor.
+`cross.sh` here runs the eleven instructions that are not the frame's push, pop and return on the
+processor against this folder's model (200 random states each), with a control whose `pmovmskb` reads
+the wrong bit.
 
 ## `one/Merge*.lean`: `CvStack::merge`, whole, joined to the algorithm
 
@@ -230,3 +232,9 @@ same executions: the result the specification's algorithm asks for, no byte touc
 or changed that it should not, and nothing secret in what it shows. Check: 45 s beyond `merge`'s own.
 
 Not done the same way: the parent functions.
+
+`cross_one.sh` checks `Machine.lean`, the model under all of this folder's theorems, against the
+processor: every instruction of the five programs (258 distinct; 225 once jumps, calls, the stack's
+moves and the constants the linker places are left to the proofs), forty random states each, comparing
+fourteen registers, sixteen vector registers, ZF and CF where the model defines them, and 1024 bytes
+of memory; then a control whose 32-bit writes keep the upper half. Needs AVX-512 F and VL.

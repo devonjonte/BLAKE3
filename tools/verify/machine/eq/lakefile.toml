@@ -12,3 +12,5 @@ name = "Code"
 name = "Regions"
 [[lean_lib]]
 name = "Eq"
+[[lean_lib]]
+name = "CrossTable"
