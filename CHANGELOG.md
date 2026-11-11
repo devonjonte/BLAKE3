@@ -65,6 +65,13 @@ Apple M6's are in #364.
   multithreaded stream of 4 KiB messages takes 8% less time and of 16 KiB
   13% less on an i7-12700K.
 
+- **On x86-64, packed leaves and a batch's messages of 1 to 63 bytes
+  run eight at a time on AVX2 and sixteen on AVX-512** (#297), on the
+  kernels `finalize_each` uses: a single-threaded Merkle tree over 16- or
+  32-byte leaves takes 45 to 57% less time on two EPYC 7443. One cell
+  pays: the multithreaded tree of 1,048,576 leaves of 32 B on that
+  machine's 96 threads takes 6% more (#372).
+
 ## Steadier
 
 - **After preparation, the pool's calls allocate nothing** (#325): a
