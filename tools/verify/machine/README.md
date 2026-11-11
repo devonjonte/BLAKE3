@@ -84,6 +84,9 @@ Known limits, stated so nobody takes these for more than they are:
 
 ## `lang/`: an implementation language of our own, whose compiler proves its assembly
 
+What the language and its prover are for, and what a failed check must say (the code, the contract, the
+compiler or the proof), is in `lang/DESIGN.md`: read that first.
+
 The direction since November 11: no Rust in the library's own code. Functions are written in a small
 language made for the job (`hasher.ode`): at the word level (variables, loads, stores, calls, `if`,
 `while`; the compiler picks registers) or at the machine level (the programmer chooses every
