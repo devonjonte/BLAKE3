@@ -12,4 +12,6 @@ name = "Code"
 [[lean_lib]]
 name = "Sym"
 [[lean_lib]]
+name = "Defs"
+[[lean_lib]]
 name = "Proof"
