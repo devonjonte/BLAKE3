@@ -430,7 +430,7 @@ fn fill_all(fill: &mut impl FnMut(usize, &mut [u8]) -> usize, at: usize, room: &
         let left = room.len() - done;
         let n = fill(at + done, &mut room[done..]);
         assert!(n != 0, "fill wrote nothing with {left} of its {} bytes left: its source ended before the message's length", room.len());
-        assert!(n <= left, "fill says it wrote {n} bytes into a room of {left}");
+        assert!(n <= left, "fill says it wrote {n} bytes into a room of {left}.");
         done += n;
     }
 }
