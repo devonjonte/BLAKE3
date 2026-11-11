@@ -76,8 +76,10 @@ Known limits, stated so nobody takes these for more than they are:
   `Blake3.parentNode … .cv`; the older folders' theorems do not import it;
 - `kernel/lift_simd.py` reads a Mach-O object (as assembled on a Mac for x86-64) and resolves
   the three RIP-relative loads to the object's data itself;
-- nothing here checks the models against a CPU or against Sail, as `cross_check_x86.py` does
-  for the Python models.
+- against processors: four of the models are checked (`kernel512/cross.sh` for the kernels' SIMD model,
+  `hex/cross.sh` for the model of `gen/` and `hex/`, `one/cross_one.sh` for `Machine.lean`, `eq/cross.sh`);
+  the first model (this folder's `X86.lean`, with CPUID and XGETBV), `loop/`'s and `call/`'s copies, `wide/`'s
+  and `a64/`'s are not; no model is checked against Sail, as `cross_check_x86.py` does for the Python models.
 
 ## `a64/`: the same loop on a second machine
 
