@@ -1,26 +1,36 @@
-# An experiment: the compiled x86-64 detection, proved in Lean (#361)
+# Experiments: compiled code proved in Lean (#361)
 
-`lake build` checks, in a few seconds, one theorem (`Proof.lean`):
+Three experiments, each a Lean project of its own (`lake build` in its folder). None is a gate.
+Each theorem is about machine code as llvm-objdump lists it, run on a small model of x86-64
+written here, against a function written in Lean.
 
-> From any registers and on any CPU, the 84 instructions rustc and LLVM made of
-> `read_x86_features` (with `read_cpu_words` and `_xgetbv`, which it calls) run to their
-> return without a fault and leave in AL the byte the rule gives for that CPU; the stack
-> pointer is popped, RBX and RBP are as they were.
+| Folder | The code | The theorem | Check |
+|---|---|---|---|
+| `.` | `read_x86_features` as rustc 1.99.1 builds it (84 instructions, three functions) | on every CPU, from any registers, it returns the rule's byte (`Spec.lean`) without a fault | 3 s |
+| `loop/` | `scan` of `loop/fold.rs` (15 instructions, a loop), rustc 1.99.1, `opt-level=s` | for a slice of any length: the result, the slice's new contents, no other byte changed, the stack restored; and what it lets an observer see (addresses touched, each jump's direction) is a function of the slice's address and length alone | 1 s |
+| `kernel/` | `blake3_servil_compress_in_place_sse41` of `c/blake3_sse41_x86-64_unix.S` (94 instructions, 467 executed) | for every chaining value, block, counter, length and flags it leaves the first eight words of the specification's `BLAKE3_COMPRESS` (`../lean/Generic.lean` at 32-bit words) and changes nothing else | 50 s |
 
-What a reader has to read, and trust:
+What a reader reads and relies on, for each:
 
-- `Spec.lean`: the rule, a feature at a time (50 lines).
-- `X86.lean`: the machine (200 lines): the 23 instructions this code uses, a state, one step.
-  Whatever it does not model is a fault: reading a byte never written, a branch on a flag left
-  undefined, a CPUID leaf other than 0, 1 and 7, XGETBV where the OS has not enabled it.
-- The theorem's statement, with `words` and `entry` above it.
-- That `Code.lean` is the library's machine code: `check.sh` builds the library, disassembles
-  the three functions with llvm-objdump, lifts them again (`lift.py`) and compares.
-- Lean, and its compiler for `bv_decide`'s checker (the `_native.bv_decide` axioms printed at
-  the end; the three standard axioms otherwise).
+- the specification (`Spec.lean`; `Spec` in `loop/Scan.lean`; `../lean/Generic.lean`);
+- the machine (`X86.lean`, `loop/X86.lean`, `kernel/Simd.lean`): the instructions used, a state,
+  one step. Whatever is not modelled is a fault;
+- the theorem's statement (`Proof.lean`, the end of `loop/Scan.lean`, `kernel/Main.lean`);
+- that the `Code.lean` beside it is the machine code (`lift.py`, `kernel/lift_simd.py` from
+  llvm-objdump's listing; `check.sh` here rebuilds the library and compares, for the first);
+- Lean, and its compiler for `bv_decide`'s checker (the `_native.bv_decide` axioms each file
+  prints; otherwise the three standard axioms).
 
-Not to be read or trusted: `Sym.lean` and the proof's steps (Lean checks them).
+Each folder's `mutants.py` changes one instruction at a time and requires the build to fail.
 
-`mutants.py` changes one instruction at a time, 25 times, and builds each: 23 are rejected,
-and the two accepted change nothing the code computes (a test of OSXSAVE made twice; a
-comparison constant between two values the compared word cannot take).
+Known limits, stated so nobody takes these for more than they are:
+
+- three models, not yet one: `loop/X86.lean` has byte memory with ownership and the observer's
+  trace; `kernel/Simd.lean` has 128-bit cells for memory and no trace; `X86.lean` neither;
+- the kernel's theorem is against the generic text at `BitVec 32`; `../lean/Bridge.lean` proves
+  that text at `UInt32` is the specification, and the step between the two word types is not
+  written;
+- `kernel/lift_simd.py` reads a Mach-O object (as assembled on a Mac for x86-64) and resolves
+  the three RIP-relative loads to the object's data itself;
+- nothing here checks the models against a CPU or against Sail, as `cross_check_x86.py` does
+  for the Python models.
