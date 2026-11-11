@@ -1,0 +1,122 @@
+0000000000000000 <merge>:
+       0: 55                           	push	rbp
+       1: 48 89 e5                     	mov	rbp, rsp
+       4: 41 57                        	push	r15
+       6: 41 56                        	push	r14
+       8: 41 55                        	push	r13
+       a: 41 54                        	push	r12
+       c: 53                           	push	rbx
+       d: 48 83 e4 c0                  	and	rsp, -0x40
+      11: 48 81 ec 80 01 00 00         	sub	rsp, 0x180
+      18: 48 8b 07                     	mov	rax, qword ptr [rdi]
+      1b: 49 89 c7                     	mov	r15, rax
+      1e: 49 29 d7                     	sub	r15, rdx
+      21: 0f 86 84 01 00 00            	jbe	0x1ab <merge+0x1ab>
+      27: 48 89 fb                     	mov	rbx, rdi
+      2a: 4c 8d 67 09                  	lea	r12, [rdi + 0x9]
+      2e: 4c 8b 36                     	mov	r14, qword ptr [rsi]
+      31: 0f b6 4e 28                  	movzx	ecx, byte ptr [rsi + 0x28]
+      35: 0f b6 56 29                  	movzx	edx, byte ptr [rsi + 0x29]
+      39: 88 54 24 3a                  	mov	byte ptr [rsp + 0x3a], dl
+      3d: 80 c9 04                     	or	cl, 0x4
+      40: 88 4c 24 3b                  	mov	byte ptr [rsp + 0x3b], cl
+      44: 0f b6 c9                     	movzx	ecx, cl
+      47: 89 4c 24 3c                  	mov	dword ptr [rsp + 0x3c], ecx
+      4b: eb 47                        	jmp	0x94 <merge+0x94>
+      4d: 0f 1f 00                     	nop	dword ptr [rax]
+      50: 44 8b 44 24 3c               	mov	r8d, dword ptr [rsp + 0x3c]
+      55: ff 15 00 00 00 00            	call	qword ptr [rip]         # 0x5b <merge+0x5b>
+		0000000000000057:  R_X86_64_GOTPCREL	blake3_servil_compress_in_place_avx512-0x4
+      5b: 4d 01 e5                     	add	r13, r12
+      5e: 0f 28 44 24 40               	movaps	xmm0, xmmword ptr [rsp + 0x40]
+      63: 0f 28 4c 24 50               	movaps	xmm1, xmmword ptr [rsp + 0x50]
+      68: 0f 29 8c 24 30 01 00 00      	movaps	xmmword ptr [rsp + 0x130], xmm1
+      70: 0f 29 84 24 20 01 00 00      	movaps	xmmword ptr [rsp + 0x120], xmm0
+      78: 41 0f 11 4d 10               	movups	xmmword ptr [r13 + 0x10], xmm1
+      7d: 41 0f 11 45 00               	movups	xmmword ptr [r13], xmm0
+      82: 48 8b 03                     	mov	rax, qword ptr [rbx]
+      85: 48 ff c8                     	dec	rax
+      88: 48 89 03                     	mov	qword ptr [rbx], rax
+      8b: 49 ff cf                     	dec	r15
+      8e: 0f 84 17 01 00 00            	je	0x1ab <merge+0x1ab>
+      94: 48 83 f8 01                  	cmp	rax, 0x1
+      98: 0f 86 1c 01 00 00            	jbe	0x1ba <merge+0x1ba>
+      9e: 80 7b 08 01                  	cmp	byte ptr [rbx + 0x8], 0x1
+      a2: 75 e1                        	jne	0x85 <merge+0x85>
+      a4: 4c 8d 68 fe                  	lea	r13, [rax - 0x2]
+      a8: 49 83 fd 37                  	cmp	r13, 0x37
+      ac: 0f 83 33 01 00 00            	jae	0x1e5 <merge+0x1e5>
+      b2: 48 8d 78 ff                  	lea	rdi, [rax - 0x1]
+      b6: 48 83 f8 38                  	cmp	rax, 0x38
+      ba: 0f 83 13 01 00 00            	jae	0x1d3 <merge+0x1d3>
+      c0: 49 c1 e5 05                  	shl	r13, 0x5
+      c4: 48 c1 e7 05                  	shl	rdi, 0x5
+      c8: 43 0f 10 04 2c               	movups	xmm0, xmmword ptr [r12 + r13]
+      cd: 43 0f 10 4c 2c 10            	movups	xmm1, xmmword ptr [r12 + r13 + 0x10]
+      d3: 0f 29 4c 24 50               	movaps	xmmword ptr [rsp + 0x50], xmm1
+      d8: 0f 29 44 24 40               	movaps	xmmword ptr [rsp + 0x40], xmm0
+      dd: 41 0f 10 04 3c               	movups	xmm0, xmmword ptr [r12 + rdi]
+      e2: 41 0f 10 4c 3c 10            	movups	xmm1, xmmword ptr [r12 + rdi + 0x10]
+      e8: 48 8d 44 24 60               	lea	rax, [rsp + 0x60]
+      ed: 0f 11 48 10                  	movups	xmmword ptr [rax + 0x10], xmm1
+      f1: 0f 11 00                     	movups	xmmword ptr [rax], xmm0
+      f4: 0f 28 44 24 40               	movaps	xmm0, xmmword ptr [rsp + 0x40]
+      f9: 0f 28 4c 24 50               	movaps	xmm1, xmmword ptr [rsp + 0x50]
+      fe: 0f 28 54 24 60               	movaps	xmm2, xmmword ptr [rsp + 0x60]
+     103: 0f 28 5c 24 70               	movaps	xmm3, xmmword ptr [rsp + 0x70]
+     108: 0f 29 9c 24 b0 00 00 00      	movaps	xmmword ptr [rsp + 0xb0], xmm3
+     110: 0f 29 94 24 a0 00 00 00      	movaps	xmmword ptr [rsp + 0xa0], xmm2
+     118: 0f 29 8c 24 90 00 00 00      	movaps	xmmword ptr [rsp + 0x90], xmm1
+     120: 0f 29 84 24 80 00 00 00      	movaps	xmmword ptr [rsp + 0x80], xmm0
+     128: 41 0f 10 06                  	movups	xmm0, xmmword ptr [r14]
+     12c: 41 0f 10 4e 10               	movups	xmm1, xmmword ptr [r14 + 0x10]
+     131: 48 8d 84 24 c0 00 00 00      	lea	rax, [rsp + 0xc0]
+     139: 0f 29 00                     	movaps	xmmword ptr [rax], xmm0
+     13c: 0f 29 48 10                  	movaps	xmmword ptr [rax + 0x10], xmm1
+     140: c6 84 24 e0 00 00 00 40      	mov	byte ptr [rsp + 0xe0], 0x40
+     148: 48 c7 84 24 e8 00 00 00 00 00 00 00  	mov	qword ptr [rsp + 0xe8], 0x0
+     154: 0f b6 44 24 3b               	movzx	eax, byte ptr [rsp + 0x3b]
+     159: 88 84 24 f0 00 00 00         	mov	byte ptr [rsp + 0xf0], al
+     160: 0f b6 44 24 3a               	movzx	eax, byte ptr [rsp + 0x3a]
+     165: 88 84 24 f1 00 00 00         	mov	byte ptr [rsp + 0xf1], al
+     16c: 41 0f 10 06                  	movups	xmm0, xmmword ptr [r14]
+     170: 41 0f 10 4e 10               	movups	xmm1, xmmword ptr [r14 + 0x10]
+     175: 0f 29 4c 24 50               	movaps	xmmword ptr [rsp + 0x50], xmm1
+     17a: 0f 29 44 24 40               	movaps	xmmword ptr [rsp + 0x40], xmm0
+     17f: 48 8d 7c 24 40               	lea	rdi, [rsp + 0x40]
+     184: 48 8d b4 24 80 00 00 00      	lea	rsi, [rsp + 0x80]
+     18c: ba 40 00 00 00               	mov	edx, 0x40
+     191: 31 c9                        	xor	ecx, ecx
+     193: 3c 05                        	cmp	al, 0x5
+     195: 0f 84 b5 fe ff ff            	je	0x50 <merge+0x50>
+     19b: 44 8b 44 24 3c               	mov	r8d, dword ptr [rsp + 0x3c]
+     1a0: ff 15 00 00 00 00            	call	qword ptr [rip]         # 0x1a6 <merge+0x1a6>
+		00000000000001a2:  R_X86_64_GOTPCREL	blake3_servil_compress_in_place_sse41-0x4
+     1a6: e9 b0 fe ff ff               	jmp	0x5b <merge+0x5b>
+     1ab: 48 8d 65 d8                  	lea	rsp, [rbp - 0x28]
+     1af: 5b                           	pop	rbx
+     1b0: 41 5c                        	pop	r12
+     1b2: 41 5d                        	pop	r13
+     1b4: 41 5e                        	pop	r14
+     1b6: 41 5f                        	pop	r15
+     1b8: 5d                           	pop	rbp
+     1b9: c3                           	ret
+     1ba: 48 8d 3d 00 00 00 00         	lea	rdi, [rip]              # 0x1c1 <merge+0x1c1>
+		00000000000001bd:  R_X86_64_PC32	anon.ca1b143d474a7c0262ca85b73fe90ed2.1.llvm.14722400685512977257-0x4
+     1c1: 48 8d 15 00 00 00 00         	lea	rdx, [rip]              # 0x1c8 <merge+0x1c8>
+		00000000000001c4:  R_X86_64_PC32	anon.ca1b143d474a7c0262ca85b73fe90ed2.3.llvm.14722400685512977257-0x4
+     1c8: be 27 00 00 00               	mov	esi, 0x27
+     1cd: ff 15 00 00 00 00            	call	qword ptr [rip]         # 0x1d3 <merge+0x1d3>
+		00000000000001cf:  R_X86_64_GOTPCREL	core::panicking::panic_fmt-0x4
+     1d3: 48 8d 15 00 00 00 00         	lea	rdx, [rip]              # 0x1da <merge+0x1da>
+		00000000000001d6:  R_X86_64_PC32	anon.ca1b143d474a7c0262ca85b73fe90ed2.5.llvm.14722400685512977257-0x4
+     1da: be 37 00 00 00               	mov	esi, 0x37
+     1df: ff 15 00 00 00 00            	call	qword ptr [rip]         # 0x1e5 <merge+0x1e5>
+		00000000000001e1:  R_X86_64_GOTPCREL	core::panicking::panic_bounds_check-0x4
+     1e5: 48 8d 15 00 00 00 00         	lea	rdx, [rip]              # 0x1ec <merge+0x1ec>
+		00000000000001e8:  R_X86_64_PC32	anon.ca1b143d474a7c0262ca85b73fe90ed2.4.llvm.14722400685512977257-0x4
+     1ec: be 37 00 00 00               	mov	esi, 0x37
+     1f1: 4c 89 ef                     	mov	rdi, r13
+     1f4: ff 15 00 00 00 00            	call	qword ptr [rip]         # 0x1fa <merge+0x1fa>
+		00000000000001f6:  R_X86_64_GOTPCREL	core::panicking::panic_bounds_check-0x4
+

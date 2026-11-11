@@ -2,6 +2,8 @@ import ParentOutput
 import ChainingValue
 import Sse
 import Avx
+import Merge
+import Attr
 
 /-! The four functions as one program, and one lemma an instruction. Written from lift_one.py's tables. -/
 
@@ -9,7 +11,7 @@ set_option maxRecDepth 1000000
 namespace Code
 open X86
 
-def table : List (Nat × Instr × Nat) := ParentOutput.table ++ ChainingValue.table ++ Sse.table ++ Avx.table
+def table : List (Nat × Instr × Nat) := ParentOutput.table ++ ChainingValue.table ++ Sse.table ++ Avx.table ++ Merge.table
 
 def prog (pc : Nat) : Option (Instr × Nat) := table.lookup pc
 
@@ -235,5 +237,107 @@ theorem at_30167 : prog 0x30167 = some (.vpxor 1 1 (.x 3), 0x3016B) := rfl
 theorem at_3016B : prog 0x3016B = some (.storev false .rdi 0x0 0, 0x3016F) := rfl
 theorem at_3016F : prog 0x3016F = some (.storev false .rdi 0x10 1, 0x30174) := rfl
 theorem at_30174 : prog 0x30174 = some (.ret, 0x30175) := rfl
+
+-- `CvStack::merge`
+@[merge_at] theorem at_40000 : prog 0x40000 = some (.push .rbp, 0x40001) := rfl
+@[merge_at] theorem at_40001 : prog 0x40001 = some (.mov 64 (.reg .rbp) (.reg .rsp), 0x40004) := rfl
+@[merge_at] theorem at_40004 : prog 0x40004 = some (.push .r15, 0x40006) := rfl
+@[merge_at] theorem at_40006 : prog 0x40006 = some (.push .r14, 0x40008) := rfl
+@[merge_at] theorem at_40008 : prog 0x40008 = some (.push .r13, 0x4000A) := rfl
+@[merge_at] theorem at_4000A : prog 0x4000A = some (.push .r12, 0x4000C) := rfl
+@[merge_at] theorem at_4000C : prog 0x4000C = some (.push .rbx, 0x4000D) := rfl
+@[merge_at] theorem at_4000D : prog 0x4000D = some (.and 64 (.reg .rsp) (.imm 0xFFFFFFFFFFFFFFC0), 0x40011) := rfl
+@[merge_at] theorem at_40011 : prog 0x40011 = some (.sub 64 (.reg .rsp) (.imm 0x180), 0x40018) := rfl
+@[merge_at] theorem at_40018 : prog 0x40018 = some (.mov 64 (.reg .rax) (.mem .rdi 0x0), 0x4001B) := rfl
+@[merge_at] theorem at_4001B : prog 0x4001B = some (.mov 64 (.reg .r15) (.reg .rax), 0x4001E) := rfl
+@[merge_at] theorem at_4001E : prog 0x4001E = some (.sub 64 (.reg .r15) (.reg .rdx), 0x40021) := rfl
+@[merge_at] theorem at_40021 : prog 0x40021 = some (.jbe 0x401AB, 0x40027) := rfl
+@[merge_at] theorem at_40027 : prog 0x40027 = some (.mov 64 (.reg .rbx) (.reg .rdi), 0x4002A) := rfl
+@[merge_at] theorem at_4002A : prog 0x4002A = some (.lea .r12 .rdi 0x9, 0x4002E) := rfl
+@[merge_at] theorem at_4002E : prog 0x4002E = some (.mov 64 (.reg .r14) (.mem .rsi 0x0), 0x40031) := rfl
+@[merge_at] theorem at_40031 : prog 0x40031 = some (.movzx8 .rcx (.mem .rsi 0x28), 0x40035) := rfl
+@[merge_at] theorem at_40035 : prog 0x40035 = some (.movzx8 .rdx (.mem .rsi 0x29), 0x40039) := rfl
+@[merge_at] theorem at_40039 : prog 0x40039 = some (.mov 8 (.mem .rsp 0x3A) (.reg .rdx), 0x4003D) := rfl
+@[merge_at] theorem at_4003D : prog 0x4003D = some (.or 8 (.reg .rcx) (.imm 0x4), 0x40040) := rfl
+@[merge_at] theorem at_40040 : prog 0x40040 = some (.mov 8 (.mem .rsp 0x3B) (.reg .rcx), 0x40044) := rfl
+@[merge_at] theorem at_40044 : prog 0x40044 = some (.movzx8 .rcx (.reg .rcx), 0x40047) := rfl
+@[merge_at] theorem at_40047 : prog 0x40047 = some (.mov 32 (.mem .rsp 0x3C) (.reg .rcx), 0x4004B) := rfl
+@[merge_at] theorem at_4004B : prog 0x4004B = some (.jmp 0x40094, 0x4004D) := rfl
+@[merge_at] theorem at_4004D : prog 0x4004D = some (.nop, 0x40050) := rfl
+@[merge_at] theorem at_40050 : prog 0x40050 = some (.mov 32 (.reg .r8) (.mem .rsp 0x3C), 0x40055) := rfl
+@[merge_at] theorem at_40055 : prog 0x40055 = some (.call 0x30000, 0x4005B) := rfl
+@[merge_at] theorem at_4005B : prog 0x4005B = some (.add 64 (.reg .r13) (.reg .r12), 0x4005E) := rfl
+@[merge_at] theorem at_4005E : prog 0x4005E = some (.movv true 0 (.m .rsp 0x40), 0x40063) := rfl
+@[merge_at] theorem at_40063 : prog 0x40063 = some (.movv true 1 (.m .rsp 0x50), 0x40068) := rfl
+@[merge_at] theorem at_40068 : prog 0x40068 = some (.storev true .rsp 0x130 1, 0x40070) := rfl
+@[merge_at] theorem at_40070 : prog 0x40070 = some (.storev true .rsp 0x120 0, 0x40078) := rfl
+@[merge_at] theorem at_40078 : prog 0x40078 = some (.storev false .r13 0x10 1, 0x4007D) := rfl
+@[merge_at] theorem at_4007D : prog 0x4007D = some (.storev false .r13 0x0 0, 0x40082) := rfl
+@[merge_at] theorem at_40082 : prog 0x40082 = some (.mov 64 (.reg .rax) (.mem .rbx 0x0), 0x40085) := rfl
+@[merge_at] theorem at_40085 : prog 0x40085 = some (.dec64 .rax, 0x40088) := rfl
+@[merge_at] theorem at_40088 : prog 0x40088 = some (.mov 64 (.mem .rbx 0x0) (.reg .rax), 0x4008B) := rfl
+@[merge_at] theorem at_4008B : prog 0x4008B = some (.dec64 .r15, 0x4008E) := rfl
+@[merge_at] theorem at_4008E : prog 0x4008E = some (.je 0x401AB, 0x40094) := rfl
+@[merge_at] theorem at_40094 : prog 0x40094 = some (.cmp 64 (.reg .rax) (.imm 0x1), 0x40098) := rfl
+@[merge_at] theorem at_40098 : prog 0x40098 = some (.jbe 0x401BA, 0x4009E) := rfl
+@[merge_at] theorem at_4009E : prog 0x4009E = some (.cmp 8 (.mem .rbx 0x8) (.imm 0x1), 0x400A2) := rfl
+@[merge_at] theorem at_400A2 : prog 0x400A2 = some (.jne 0x40085, 0x400A4) := rfl
+@[merge_at] theorem at_400A4 : prog 0x400A4 = some (.lea .r13 .rax 0xFFFFFFFFFFFFFFFE, 0x400A8) := rfl
+@[merge_at] theorem at_400A8 : prog 0x400A8 = some (.cmp 64 (.reg .r13) (.imm 0x37), 0x400AC) := rfl
+@[merge_at] theorem at_400AC : prog 0x400AC = some (.jae 0x401E5, 0x400B2) := rfl
+@[merge_at] theorem at_400B2 : prog 0x400B2 = some (.lea .rdi .rax 0xFFFFFFFFFFFFFFFF, 0x400B6) := rfl
+@[merge_at] theorem at_400B6 : prog 0x400B6 = some (.cmp 64 (.reg .rax) (.imm 0x38), 0x400BA) := rfl
+@[merge_at] theorem at_400BA : prog 0x400BA = some (.jae 0x401D3, 0x400C0) := rfl
+@[merge_at] theorem at_400C0 : prog 0x400C0 = some (.shl64 .r13 5, 0x400C4) := rfl
+@[merge_at] theorem at_400C4 : prog 0x400C4 = some (.shl64 .rdi 5, 0x400C8) := rfl
+@[merge_at] theorem at_400C8 : prog 0x400C8 = some (.movvi false 0 .r12 .r13 0x0, 0x400CD) := rfl
+@[merge_at] theorem at_400CD : prog 0x400CD = some (.movvi false 1 .r12 .r13 0x10, 0x400D3) := rfl
+@[merge_at] theorem at_400D3 : prog 0x400D3 = some (.storev true .rsp 0x50 1, 0x400D8) := rfl
+@[merge_at] theorem at_400D8 : prog 0x400D8 = some (.storev true .rsp 0x40 0, 0x400DD) := rfl
+@[merge_at] theorem at_400DD : prog 0x400DD = some (.movvi false 0 .r12 .rdi 0x0, 0x400E2) := rfl
+@[merge_at] theorem at_400E2 : prog 0x400E2 = some (.movvi false 1 .r12 .rdi 0x10, 0x400E8) := rfl
+@[merge_at] theorem at_400E8 : prog 0x400E8 = some (.lea .rax .rsp 0x60, 0x400ED) := rfl
+@[merge_at] theorem at_400ED : prog 0x400ED = some (.storev false .rax 0x10 1, 0x400F1) := rfl
+@[merge_at] theorem at_400F1 : prog 0x400F1 = some (.storev false .rax 0x0 0, 0x400F4) := rfl
+@[merge_at] theorem at_400F4 : prog 0x400F4 = some (.movv true 0 (.m .rsp 0x40), 0x400F9) := rfl
+@[merge_at] theorem at_400F9 : prog 0x400F9 = some (.movv true 1 (.m .rsp 0x50), 0x400FE) := rfl
+@[merge_at] theorem at_400FE : prog 0x400FE = some (.movv true 2 (.m .rsp 0x60), 0x40103) := rfl
+@[merge_at] theorem at_40103 : prog 0x40103 = some (.movv true 3 (.m .rsp 0x70), 0x40108) := rfl
+@[merge_at] theorem at_40108 : prog 0x40108 = some (.storev true .rsp 0xB0 3, 0x40110) := rfl
+@[merge_at] theorem at_40110 : prog 0x40110 = some (.storev true .rsp 0xA0 2, 0x40118) := rfl
+@[merge_at] theorem at_40118 : prog 0x40118 = some (.storev true .rsp 0x90 1, 0x40120) := rfl
+@[merge_at] theorem at_40120 : prog 0x40120 = some (.storev true .rsp 0x80 0, 0x40128) := rfl
+@[merge_at] theorem at_40128 : prog 0x40128 = some (.movv false 0 (.m .r14 0x0), 0x4012C) := rfl
+@[merge_at] theorem at_4012C : prog 0x4012C = some (.movv false 1 (.m .r14 0x10), 0x40131) := rfl
+@[merge_at] theorem at_40131 : prog 0x40131 = some (.lea .rax .rsp 0xC0, 0x40139) := rfl
+@[merge_at] theorem at_40139 : prog 0x40139 = some (.storev true .rax 0x0 0, 0x4013C) := rfl
+@[merge_at] theorem at_4013C : prog 0x4013C = some (.storev true .rax 0x10 1, 0x40140) := rfl
+@[merge_at] theorem at_40140 : prog 0x40140 = some (.mov 8 (.mem .rsp 0xE0) (.imm 0x40), 0x40148) := rfl
+@[merge_at] theorem at_40148 : prog 0x40148 = some (.mov 64 (.mem .rsp 0xE8) (.imm 0x0), 0x40154) := rfl
+@[merge_at] theorem at_40154 : prog 0x40154 = some (.movzx8 .rax (.mem .rsp 0x3B), 0x40159) := rfl
+@[merge_at] theorem at_40159 : prog 0x40159 = some (.mov 8 (.mem .rsp 0xF0) (.reg .rax), 0x40160) := rfl
+@[merge_at] theorem at_40160 : prog 0x40160 = some (.movzx8 .rax (.mem .rsp 0x3A), 0x40165) := rfl
+@[merge_at] theorem at_40165 : prog 0x40165 = some (.mov 8 (.mem .rsp 0xF1) (.reg .rax), 0x4016C) := rfl
+@[merge_at] theorem at_4016C : prog 0x4016C = some (.movv false 0 (.m .r14 0x0), 0x40170) := rfl
+@[merge_at] theorem at_40170 : prog 0x40170 = some (.movv false 1 (.m .r14 0x10), 0x40175) := rfl
+@[merge_at] theorem at_40175 : prog 0x40175 = some (.storev true .rsp 0x50 1, 0x4017A) := rfl
+@[merge_at] theorem at_4017A : prog 0x4017A = some (.storev true .rsp 0x40 0, 0x4017F) := rfl
+@[merge_at] theorem at_4017F : prog 0x4017F = some (.lea .rdi .rsp 0x40, 0x40184) := rfl
+@[merge_at] theorem at_40184 : prog 0x40184 = some (.lea .rsi .rsp 0x80, 0x4018C) := rfl
+@[merge_at] theorem at_4018C : prog 0x4018C = some (.mov 32 (.reg .rdx) (.imm 0x40), 0x40191) := rfl
+@[merge_at] theorem at_40191 : prog 0x40191 = some (.xor 32 (.reg .rcx) (.reg .rcx), 0x40193) := rfl
+@[merge_at] theorem at_40193 : prog 0x40193 = some (.cmp 8 (.reg .rax) (.imm 0x5), 0x40195) := rfl
+@[merge_at] theorem at_40195 : prog 0x40195 = some (.je 0x40050, 0x4019B) := rfl
+@[merge_at] theorem at_4019B : prog 0x4019B = some (.mov 32 (.reg .r8) (.mem .rsp 0x3C), 0x401A0) := rfl
+@[merge_at] theorem at_401A0 : prog 0x401A0 = some (.call 0x20000, 0x401A6) := rfl
+@[merge_at] theorem at_401A6 : prog 0x401A6 = some (.jmp 0x4005B, 0x401AB) := rfl
+@[merge_at] theorem at_401AB : prog 0x401AB = some (.lea .rsp .rbp 0xFFFFFFFFFFFFFFD8, 0x401AF) := rfl
+@[merge_at] theorem at_401AF : prog 0x401AF = some (.pop .rbx, 0x401B0) := rfl
+@[merge_at] theorem at_401B0 : prog 0x401B0 = some (.pop .r12, 0x401B2) := rfl
+@[merge_at] theorem at_401B2 : prog 0x401B2 = some (.pop .r13, 0x401B4) := rfl
+@[merge_at] theorem at_401B4 : prog 0x401B4 = some (.pop .r14, 0x401B6) := rfl
+@[merge_at] theorem at_401B6 : prog 0x401B6 = some (.pop .r15, 0x401B8) := rfl
+@[merge_at] theorem at_401B8 : prog 0x401B8 = some (.pop .rbp, 0x401B9) := rfl
+@[merge_at] theorem at_401B9 : prog 0x401B9 = some (.ret, 0x401BA) := rfl
 
 end Code

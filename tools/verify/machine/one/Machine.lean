@@ -232,6 +232,19 @@ inductive Instr
   | jmp (target : Nat)
   | call (target : Nat)
   | ret
+  -- added for `CvStack::merge`
+  | and (w : Nat) (dst src : Opnd)
+  | xor (w : Nat) (dst src : Opnd)
+  /-- LEA r64, [base + disp] -/
+  | lea (dst base : Reg) (disp : BitVec 64)
+  /-- JBE: taken when CF or ZF is set. JAE: when CF is clear. -/
+  | jbe (target : Nat)
+  | jae (target : Nat)
+  | nop
+  /-- DEC r64: ZF from the result, CF as it was. -/
+  | dec64 (r : Reg)
+  /-- A vector load from `[base + index + disp]`. -/
+  | movvi (aligned : Bool) (dst : Nat) (base index : Reg) (disp : BitVec 64)
 
 def read (s : State) (w : Nat) : Opnd → Option (BitVec 64)
   | .reg r => some (trunc w (s.get r))
@@ -312,6 +325,20 @@ def step (i : Instr) (next : Nat) (s : State) : Option State :=
   | .jmp t => some { s with pc := t }
   | .call t => (s.mem.write (s.rsp - 8) (BitVec.ofNat 64 next) 64).map fun m => { s with rsp := s.rsp - 8, mem := m, pc := t }
   | .ret => (s.mem.read s.rsp 64).map fun to => { s with rsp := s.rsp + 8, pc := to.toNat }
+  | .and w d x => do
+    let v := (← read s w d) &&& (← read s w x)
+    write { s with zf := some (trunc w v == 0), cf := some false } w d v
+  | .xor w d x => do
+    let v := (← read s w d) ^^^ (← read s w x)
+    write { s with zf := some (trunc w v == 0), cf := some false } w d v
+  | .lea d b disp => some (s.set d (s.get b + disp))
+  | .jbe t => s.zf.bind fun z => s.cf.map fun c => if c || z then { s with pc := t } else s
+  | .jae t => s.cf.map fun c => if c then s else { s with pc := t }
+  | .nop => some s
+  | .dec64 r => some ({ s with zf := some (s.get r - 1 == 0) }.set r (s.get r - 1))
+  | .movvi al d b i disp =>
+    if al && !aligned16 (s.get b + s.get i + disp) then none
+    else (s.mem.read128 (s.get b + s.get i + disp)).map fun v => s.setx d v
 
 /-- Exactly `k` instructions. -/
 def steps (prog : Nat → Option (Instr × Nat)) : Nat → State → Option State

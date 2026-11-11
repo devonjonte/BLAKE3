@@ -11,10 +11,12 @@ import os, re, subprocess, sys
 listing, func, base, out, ns = sys.argv[1:6]
 base = int(base, 16)
 obj, calls = None, {}
+panics_from = None   # the function's panic blocks start here: they are left out, so a jump to one is a fault
 rest = sys.argv[6:]
 while rest:
     if rest[0] == "--object": obj = rest[1]; rest = rest[2:]
     elif rest[0] == "--call": k, v = rest[1].split("=", 1); calls[k] = int(v, 16); rest = rest[2:]
+    elif rest[0] == "--panics-from": panics_from = int(rest[1], 16); rest = rest[2:]
     else: raise SystemExit(f"unknown argument {rest[0]}")
 OD = os.environ.get("OBJDUMP", "llvm-objdump")
 symbols, data = {}, {}
@@ -80,10 +82,15 @@ UNALIGNED = ("movups", "movdqu", "vmovups", "vmovdqu")
 rows, ended = [], False
 for at, size, op, args, reloc, raw in insns:
     a = [x.strip() for x in args.split(",")] if args else []
+    if panics_from is not None and at - start >= panics_from:
+        continue
     if ended:
         assert op.startswith("nop") or op in ("int3", "ud2"), f"code after the return: {op}"; continue
     at2, nxt = base + at - start, base + at - start + size
-    if op in ALIGNED + UNALIGNED:
+    mi = re.fullmatch(r"xmmword ptr \[(\w+) \+ (\w+)(?: \+ (0x[0-9a-f]+))?\]", a[1]) if len(a) > 1 else None
+    if op in ALIGNED + UNALIGNED and mi and mi.group(2) in REG and is_xmm(a[0]):
+        ins = f".movvi {'true' if op in ALIGNED else 'false'} {xmm(a[0])} .{REG[mi.group(1)][0]} .{REG[mi.group(2)][0]} {bv(int(mi.group(3), 16) if mi.group(3) else 0)}"
+    elif op in ALIGNED + UNALIGNED:
         if is_xmm(a[0]):
             s, mem = vsrc(a[1], reloc); ins = f".movv {'true' if (op in ALIGNED and mem) else 'false'} {xmm(a[0])} {s}"
         else:
@@ -98,15 +105,19 @@ for at, size, op, args, reloc, raw in insns:
         ins = f".{op.replace('vpxord', 'vpxor')} {xmm(a[0])} {xmm(a[1])} {vsrc(a[2], reloc)[0]}"
     elif op == "vprord": ins = f".vprord {xmm(a[0])} {vsrc(a[1], reloc)[0]} {int(a[2], 16)}"
     elif op in ("vshufps", "vpblendd"): ins = f".{op} {xmm(a[0])} {xmm(a[1])} {vsrc(a[2], reloc)[0]} {int(a[3], 16)}"
-    elif op in ("mov", "or", "add", "sub", "cmp"):
+    elif op in ("mov", "or", "add", "sub", "cmp", "and", "xor"):
         (d, wd), (s, ws) = opnd(a[0]), opnd(a[1]); w = wd or ws; assert w and (not wd or not ws or wd == ws), args
         ins = f".{op} {w} {d} {s}"
     elif op == "movzx":
         r, w = REG[a[0]]; s, ws = opnd(a[1]); assert w == 32 and ws == 8, args; ins = f".movzx8 .{r} {s}"
     elif op == "shl": r, w = REG[a[0]]; assert w == 64; ins = f".shl64 .{r} {int(a[1], 16)}"
-    elif op == "dec": r, w = REG[a[0]]; assert w == 8; ins = f".decb .{r}"
+    elif op == "dec":
+        r, w = REG[a[0]]; assert w in (8, 64); ins = f".decb .{r}" if w == 8 else f".dec64 .{r}"
+    elif op == "lea":
+        r, w = REG[a[0]]; assert w == 64; b, d = memref(a[1]); ins = f".lea .{r} .{b} {bv(d)}"
+    elif op.startswith("nop"): ins = ".nop"
     elif op in ("push", "pop"): r, w = REG[a[0]]; assert w == 64; ins = f".{op} .{r}"
-    elif op in ("je", "jne", "jmp"): ins = f".{op} 0x{base + int(a[0].split()[0], 16) - start:X}"
+    elif op in ("je", "jne", "jmp", "jbe", "jae"): ins = f".{op} 0x{base + int(a[0].split()[0], 16) - start:X}"
     elif op == "call":
         assert reloc in calls, f"call to a function with no address given: {reloc}"; ins = f".call 0x{calls[reloc]:X}"
     elif op == "ret": ins = ".ret"; ended = True

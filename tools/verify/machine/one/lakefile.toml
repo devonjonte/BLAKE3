@@ -1,5 +1,5 @@
 name = "one"
-defaultTargets = ["ParentSpec", "Test"]
+defaultTargets = ["ParentSpec", "Test", "MergeTurn"]
 
 [[require]]
 name = "Blake3Servil"
@@ -43,3 +43,11 @@ name = "ChainingValueProofBase"
 name = "Bridge32"
 [[lean_lib]]
 name = "ParentSpec"
+[[lean_lib]]
+name = "Merge"
+[[lean_lib]]
+name = "Attr"
+[[lean_lib]]
+name = "RegionsX"
+[[lean_lib]]
+name = "MergeTurn"
