@@ -6,7 +6,7 @@ description = "the BLAKE3 hash function on every core: blake3-servil-core's kern
 repository = "https://github.com/servil-software-factory/BLAKE3"
 license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
 edition = "2024"
-include = ["/src", "/build.rs", "/blake3_gpu.*", "/LICENSE_*"]
+include = ["/src", "/build.rs", "/LICENSE_*"]
 
 [features]
 # 0.8's dependents name `std`; this crate always needs it (TRIAL: to go

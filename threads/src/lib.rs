@@ -240,8 +240,6 @@ mod park_sync {
     pub use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     pub use std::thread;
 }
-#[cfg(all(test, blake3_gpu))]
-mod gpu;
 mod lanes;
 mod park;
 #[cfg(test)]

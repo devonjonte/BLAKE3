@@ -84,32 +84,20 @@ const ENTRIES: usize = 1024;
 /// of its own, and the stream hands entries back in order, each once its
 /// task completes, with at most ENTRIES out. Say task X, in the place task
 /// p is about to take, is still incomplete. Then every entry from X's first
-/// on is still out. Of the tasks from X to p, every one but two kinds holds
+/// on is still out. Of the tasks from X to p, every one but one holds
 /// an entry from X's on: the one task that was open (gathering short
 /// messages) when X, a piece of a long message, went out, and is published
-/// after it with older entries; and, with the GPU, a piece the GPU gave
-/// back at a finish, published again under the entry it already had (at
-/// most HELD of them). So at least TASK_SLOTS + 1 - 1 - HELD of those
+/// after it with older entries. So at least TASK_SLOTS + 1 - 1 of those
 /// tasks' entries are out, more than ENTRIES: X has completed. With ENTRIES
 /// places the margin was zero: the open task's entry handed back while the
 /// first piece of a long message was still claimed and uncopied, and the
 /// last piece took its place (test
 /// a_publication_never_meets_a_claimed_uncopied_task).
-///
-/// HELD bounds the GPU's duplicates cumulatively, not only at an instant:
-/// a reclaim runs only in `finish`, `finish` commits no new GPU work, and
-/// `finish` cannot return while X's entry is out. So while X is uncopied
-/// the GPU gives back at most the HELD pieces its commands then hold. A
-/// change that feeds the GPU or reclaims anywhere else, or that hands
-/// entries back out of order, changes this bound.
 const TASK_SLOTS: usize = task_slots();
 
 /// TASK_SLOTS' count (a function, so that a mutation test names its rule).
 const fn task_slots() -> usize {
-    #[cfg(not(blake3_gpu))]
-    return ENTRIES + 1;
-    #[cfg(blake3_gpu)]
-    return ENTRIES + 1 + crate::gpu::HELD;
+    ENTRIES + 1
 }
 
 /// One message, one piece of a long one, or one part of a batch, from its
@@ -142,15 +130,7 @@ enum Kind {
     /// by reserving it again from the tail: no end kept, so an entry stays
     /// 56 bytes. With the end kept, 64 bytes made multithreaded streams of
     /// 512 B messages 3.6% slower, Mac check 1893.)
-    Piece {
-        counter: u64,
-        last: bool,
-        long: bool,
-        /// In the GPU ring, not the long ring (where the GPU's code is built).
-        #[cfg(blake3_gpu)]
-        gpu: bool,
-        out: *mut Hash,
-    },
+    Piece { counter: u64, last: bool, long: bool, out: *mut Hash },
     /// A part of a batch of messages of `message_len` bytes laid out as
     /// hash_many takes them (an empty batch: one part of none), its
     /// digests written into the batch's space; the batch's last part holds
@@ -278,12 +258,6 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
             tail: 0,
             long_head: 0,
             long_tail: 0,
-            #[cfg(blake3_gpu)]
-            gpu_head: 0,
-            #[cfg(blake3_gpu)]
-            gpu_tail: 0,
-            #[cfg(blake3_gpu)]
-            gpu_run: 0..0,
             open: None,
             stack: arrayvec::ArrayVec::new(),
             pieces: 0,
@@ -306,13 +280,6 @@ struct Storage {
     /// LONG_RING_BYTES for the pieces of long messages written in place
     /// (`Stream::submit_long`), reached as the ring is.
     long_ring: *mut u8,
-    /// The storage's GPU ring and commands, made when its first long
-    /// message finds the GPU engaged, kept with it.
-    #[cfg(blake3_gpu)]
-    gpu: Option<crate::gpu::Gpu>,
-    /// The storage's run of long messages, which engages the GPU.
-    #[cfg(blake3_gpu)]
-    run: crate::gpu::Run,
     pieces_out: Box<[OwnLine<Out<64>>]>,
     /// For a task's first entry, the count of the task's entries still
     /// unhashed: on lines of their own (128 bytes, as the adjacent-line
@@ -349,10 +316,6 @@ impl Storage {
             entries: std::vec![Entry { len: 0, kind: Kind::Abandoned, first: 0, ring_end: 0 }; ENTRIES].into_boxed_slice(),
             ring: ring(RING_BYTES),
             long_ring: ring(LONG_RING_BYTES),
-            #[cfg(blake3_gpu)]
-            gpu: None,
-            #[cfg(blake3_gpu)]
-            run: crate::gpu::Run::new(),
             pieces_out: (0..ENTRIES).map(|_| OwnLine(Out(UnsafeCell::new([0; 64])))).collect(),
             lefts: (0..ENTRIES).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
         }
@@ -435,18 +398,7 @@ fn fill_all(fill: &mut impl FnMut(usize, &mut [u8]) -> usize, at: usize, room: &
 /// Part `i` of a message in `pieces` parts, its digest at `out`: the
 /// message whole, or a piece.
 fn part_kind(i: usize, pieces: usize, out: *mut Hash, long: bool) -> Kind {
-    if pieces == 1 {
-        Kind::Message { out }
-    } else {
-        Kind::Piece {
-            counter: (i * PIECE / CHUNK_LEN) as u64,
-            last: i + 1 == pieces,
-            long,
-            #[cfg(blake3_gpu)]
-            gpu: false,
-            out,
-        }
-    }
+    if pieces == 1 { Kind::Message { out } } else { Kind::Piece { counter: (i * PIECE / CHUNK_LEN) as u64, last: i + 1 == pieces, long, out } }
 }
 
 /// The messages of one [`stream`] call, and the places for their digests,
@@ -472,15 +424,6 @@ pub struct Stream<'env, D> {
     /// The long ring's bytes reserved, and freed, as `head` and `tail`.
     long_head: usize,
     long_tail: usize,
-    /// The GPU ring's bytes reserved, and freed, as `head` and `tail`.
-    #[cfg(blake3_gpu)]
-    gpu_head: usize,
-    #[cfg(blake3_gpu)]
-    gpu_tail: usize,
-    /// The positions in the source of the latest run of tasks the GPU may
-    /// take: whole pieces in its ring, published one after another.
-    #[cfg(blake3_gpu)]
-    gpu_run: core::ops::Range<usize>,
     /// Short messages gathered, not yet handed to the pool.
     open: Option<Task>,
     /// A long message being handed back: its pieces' chaining values so
@@ -531,9 +474,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// `room` before writing it). The stream reuses the bytes once `out`
     /// is handed back; a stream keeps 2 MiB of them, and for messages of
     /// 4 MiB or more 8 MiB more (2 MiB on x86-64), and `submit_with` waits for room as
-    /// `submit` does. On an Apple silicon Mac, a run of messages of 4 MiB or
-    /// more is shared with the GPU (the crate's "Which call to use"); their
-    /// rooms are then in 64 MiB of memory the GPU shares, on the same terms.
+    /// `submit` does.
     pub fn submit_with(&mut self, len: usize, mut fill: impl FnMut(usize, &mut [u8]) -> usize, out: &'env mut Hash) {
         let out: *mut Hash = out;
         if len >= LONG {
@@ -557,27 +498,9 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     /// length's test).
     #[inline(never)]
     fn submit_long(&mut self, len: usize, fill: &mut impl FnMut(usize, &mut [u8]) -> usize, out: *mut Hash) {
-        // With the GPU engaged, the GPU ring, whose whole pieces the GPU may
-        // take (crate::gpu); a pool asked for one thread has no slot, and
-        // keeps to its CPU core (AGENTS: the GPU wherever it is efficient).
-        #[cfg(blake3_gpu)]
-        let gpu = self.slot.is_some() && self.s.run.engaged() && crate::gpu::ready();
-        #[cfg(blake3_gpu)]
-        let gpu_ring = if gpu { self.s.gpu.get_or_insert_with(|| crate::gpu::Gpu::new(crate::gpu::RING_BYTES)).ring } else { core::ptr::null_mut() };
         let pieces = len.div_ceil(PIECE);
         for i in 0..pieces {
             let part_len = (len - i * PIECE).min(PIECE);
-            #[cfg(blake3_gpu)]
-            let room = if gpu {
-                let at = self.reserve_gpu(part_len);
-                // Sound: as below, in the GPU ring.
-                unsafe { core::slice::from_raw_parts_mut(gpu_ring.add(at), part_len) }
-            } else {
-                let at = self.reserve_long(part_len);
-                // Sound: as below.
-                unsafe { core::slice::from_raw_parts_mut(self.s.long_at(at), part_len) }
-            };
-            #[cfg(not(blake3_gpu))]
             let room = {
                 let at = self.reserve_long(part_len);
                 // Sound: [at, at + part_len) is reserved and free in the long
@@ -593,25 +516,8 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
             let end = self.head;
             #[allow(unused_mut)]
             let mut kind = part_kind(i, pieces, out, true);
-            #[cfg(blake3_gpu)]
-            if let Kind::Piece { gpu: in_gpu, .. } = &mut kind {
-                *in_gpu = gpu;
-            }
             let entry = self.add_entry(part_len, kind, end);
             self.hand_over_piece(entry, room.as_ptr(), part_len, (i * PIECE / CHUNK_LEN) as u64);
-            #[cfg(blake3_gpu)]
-            if gpu {
-                if part_len == PIECE {
-                    // Published last, at position p - 1: the run of tasks the
-                    // GPU may take goes on, or starts there.
-                    let p = self.s.source.published();
-                    if self.gpu_run.end != p - 1 {
-                        self.gpu_run.start = p - 1;
-                    }
-                    self.gpu_run.end = p;
-                }
-                self.feed();
-            }
         }
     }
 
@@ -662,18 +568,7 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
                 }
                 Some(_) => false,
             };
-            let kind = if i == 0 && last {
-                Kind::Message { out }
-            } else {
-                Kind::Piece {
-                    counter: (i * PIECE / CHUNK_LEN) as u64,
-                    last,
-                    long: false,
-                    #[cfg(blake3_gpu)]
-                    gpu: false,
-                    out,
-                }
-            };
+            let kind = if i == 0 && last { Kind::Message { out } } else { Kind::Piece { counter: (i * PIECE / CHUNK_LEN) as u64, last, long: false, out } };
             // [at, at + n): this piece's reserved room, written.
             let input = self.s.ring_at(at);
             self.add_part(input, n, kind, end, out as *mut u8);
@@ -841,18 +736,6 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
         at
     }
 
-    /// `reserve`, in the GPU ring.
-    #[cfg(blake3_gpu)]
-    fn reserve_gpu(&mut self, len: usize) -> usize {
-        let (at, taken) = room(self.gpu_head, crate::gpu::RING_BYTES, len);
-        while !has_room(self.gpu_head, self.gpu_tail, crate::gpu::RING_BYTES, taken) {
-            self.publish();
-            self.help();
-        }
-        self.gpu_head += taken;
-        at
-    }
-
     /// `reserve`, in the long ring.
     fn reserve_long(&mut self, len: usize) -> usize {
         let (at, taken) = room(self.long_head, LONG_RING_BYTES, len);
@@ -885,36 +768,22 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     pub fn finish(&mut self) {
         self.publish();
         while self.delivered < self.next {
-            // No new GPU batches at the end; and with nothing else to do,
-            // the GPU's tasks in flight back to the pool (crate::gpu).
-            if self.deliver() == 0 && !self.s.run_waiting() && !self.reclaim_at_finish() {
+            if self.deliver() == 0 && !self.s.run_waiting() {
                 self.pause();
             }
         }
     }
 
-    /// `reclaim`, where the GPU's code is built.
-    #[inline(always)]
-    fn reclaim_at_finish(&mut self) -> bool {
-        // A load a command first: the finish's loop asks on every pass, and
-        // reclaim's frame holds room for every task the commands may hold.
-        #[cfg(blake3_gpu)]
-        if self.s.gpu.as_ref().is_some_and(|gpu| gpu.in_flight()) {
-            return self.reclaim();
-        }
-        false
-    }
-
     /// Hand back what is done; with nothing done, hash a waiting task or
     /// pause.
     fn help(&mut self) {
-        if self.deliver() == 0 && !self.feed() && !self.s.run_waiting() {
+        if self.deliver() == 0 && !self.s.run_waiting() {
             self.pause();
         }
     }
 
-    /// The pause in `finish` and `help`, where nothing was handed back,
-    /// fed or run. With no slot, every task this stream hands over is
+    /// The pause in `finish` and `help`, where nothing was handed back
+    /// or run. With no slot, every task this stream hands over is
     /// hashed on this thread before the call returns (and every caller
     /// of `help` publishes its open task first), so a pause with nothing
     /// done can never be woken: a broken invariant, stopped at once
@@ -922,47 +791,6 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
     fn pause(&self) {
         assert!(self.slot.is_some(), "a stream with no slot can make no progress: its tasks hash on the calling thread, so nothing it waits for can finish");
         core::hint::spin_loop();
-    }
-
-    /// Give the GPU a batch of the stream's tasks if it may take one now
-    /// (`crate::gpu::feed`): whether it did. Nothing where the GPU's code
-    /// is not built.
-    #[inline(always)]
-    fn feed(&mut self) -> bool {
-        // First the run's length, the stream's own: a stream without a
-        // batch's run of GPU pieces (every stream of short messages) asks
-        // nothing of the GPU's commands or the source.
-        #[cfg(blake3_gpu)]
-        if self.gpu_run.end - self.gpu_run.start >= crate::gpu::BATCH {
-            if let Some(gpu) = self.s.gpu.as_ref() {
-                return crate::gpu::feed(gpu, self.s.source, self.gpu_run.start, self.gpu_run.end, &self.key, self.flags);
-            }
-        }
-        false
-    }
-
-    /// The GPU's tasks still in flight, taken back and published again for
-    /// the pool's workers (`crate::gpu::Gpu::reclaim`): whether there were
-    /// any. Out of line, as finish's last resort.
-    #[cfg(blake3_gpu)]
-    #[cold]
-    #[inline(never)]
-    fn reclaim(&mut self) -> bool {
-        let Some(gpu) = self.s.gpu.as_ref() else { return false };
-        let mut back = arrayvec::ArrayVec::<crate::gpu::Held, { crate::gpu::HELD }>::new();
-        if !gpu.reclaim(|t| back.push(t)) {
-            return false;
-        }
-        for t in back {
-            // Sound: the piece stays in the GPU ring, and its output and
-            // count in place, until its count is zero.
-            let bytes = unsafe { core::slice::from_raw_parts(t.input, PIECE) };
-            let task = Task { key: self.key, flags: self.flags, out: t.out, left: t.left, ..Task::of(bytes, t.counter) };
-            self.hand_over(&task);
-        }
-        #[cfg(test)]
-        crate::gpu::test::RECLAIMS.fetch_add(1, Ordering::Relaxed);
-        true
     }
 
     /// A new entry of `len` bytes, waiting for room when every entry is in
@@ -1037,13 +865,6 @@ impl<'env, D: FnMut(&'env mut [Hash])> Stream<'env, D> {
                     self.pieces = 0;
                 }
                 Kind::Piece { counter, last, long, out, .. } => {
-                    #[cfg(blake3_gpu)]
-                    if let Kind::Piece { gpu: true, .. } = kind {
-                        self.gpu_tail += room(self.gpu_tail, crate::gpu::RING_BYTES, len).1;
-                    } else if long {
-                        self.long_tail += room(self.long_tail, LONG_RING_BYTES, len).1;
-                    }
-                    #[cfg(not(blake3_gpu))]
                     if long {
                         self.long_tail += room(self.long_tail, LONG_RING_BYTES, len).1;
                     }
@@ -1121,253 +942,6 @@ mod test {
         assert!(storage.run_waiting(), "the waiting caller runs its queued task");
         assert_eq!(left.load(Ordering::Acquire), 0, "help completes the task");
         assert!(!storage.run_waiting(), "the completed task is taken once");
-    }
-
-    /// The GPU's batches so far, in this process.
-    #[cfg(blake3_gpu)]
-    fn gpu_batches() -> usize {
-        crate::gpu::test::GPU_BATCHES.load(Ordering::Relaxed)
-    }
-
-    /// Message `i` of a GPU test's stream: `len` bytes of `input`, 0, 64 or
-    /// 128 bytes in.
-    #[cfg(blake3_gpu)]
-    fn gpu_message(input: &[u8], i: usize, len: usize) -> &[u8] {
-        &input[64 * (i % 3)..][..len]
-    }
-
-    /// One stream of messages of `lens` bytes of `input` (gpu_message),
-    /// written in reads of up to `read` bytes, in `mode`, back to back:
-    /// their digests, every place handed back once, in order.
-    #[cfg(blake3_gpu)]
-    fn gpu_stream(mode: Mode, input: &[u8], lens: &[usize], read: usize, collect: bool) -> std::vec::Vec<Hash> {
-        let mut got = places(lens.len());
-        let want_handed: std::vec::Vec<(usize, usize)> = got.iter().map(|h| (h as *const Hash as usize, 1)).collect();
-        let mut handed = std::vec::Vec::new();
-        stream(mode, record(&mut handed), |s| {
-            for (i, out) in got.iter_mut().enumerate() {
-                s.submit_with(
-                    lens[i],
-                    |at, room| {
-                        let n = room.len().min(read);
-                        room[..n].copy_from_slice(&gpu_message(input, i, lens[i])[at..][..n]);
-                        n
-                    },
-                    out,
-                );
-                if collect {
-                    s.collect();
-                }
-            }
-            s.finish();
-            assert_eq!((s.gpu_tail, s.long_tail), (s.gpu_head, s.long_head), "every piece back frees exactly its room");
-        });
-        assert!(handed == want_handed, "every place handed back once, in order");
-        got
-    }
-
-    /// `gpu_stream`, each digest checked against the CPU's.
-    #[cfg(blake3_gpu)]
-    fn gpu_stream_checked(mode: Mode, input: &[u8], lens: &[usize], read: usize, collect: bool) {
-        for (i, got) in gpu_stream(mode, input, lens, read, collect).iter().enumerate() {
-            assert_eq!(*got, crate::convenience::hash_with(mode, gpu_message(input, i, lens[i])), "message {i}, {} bytes", lens[i]);
-        }
-    }
-
-    /// Engage every run (crate::gpu::Run: its timing is the machine's, and
-    /// a gap of 5 ms between streams, a finish's or a check's, ends one),
-    /// wait until the GPU is ready (its start runs on a thread of its own),
-    /// then establish one GPU batch on a 16 MiB message. Holding CPU claims
-    /// until that batch is taken makes this a setup condition, not a race.
-    #[cfg(blake3_gpu)]
-    fn gpu_ready(mode: Mode, input: &[u8]) {
-        crate::gpu::test::ENGAGED.store(true, Ordering::Relaxed);
-        while !crate::gpu::ready() {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        let before = gpu_batches();
-        let mut got = Hash::from_bytes([0; 32]);
-        stream(
-            mode,
-            |_| {},
-            |s| {
-                if let Some(gpu) = &s.s.gpu {
-                    // Reclaimed commands may still occupy every slot from
-                    // the previous stream. The setup needs a free command
-                    // before holding the CPU claims for its GPU batch.
-                    gpu.wait_idle_for_test();
-                }
-                s.s.source.reserve_gpu_batch_for_test();
-                s.submit_with(
-                    16 << 20,
-                    |at, room| {
-                        room.copy_from_slice(&input[at..][..room.len()]);
-                        room.len()
-                    },
-                    &mut got,
-                );
-                assert!(gpu_batches() > before, "the GPU took the setup batch before finish");
-                // Complete the GPU-owned first batch before finish can reclaim
-                // it. Its digest must exercise the GPU's output in this mode.
-                s.s.gpu.as_ref().expect("the setup submitted a GPU batch").wait_idle_for_test();
-                assert_eq!(s.s.lefts[0].load(Ordering::Acquire), 0, "the GPU completed the first setup piece");
-                s.finish();
-            },
-        );
-        assert_eq!(got, crate::convenience::hash_with(mode, &input[..16 << 20]));
-    }
-
-    /// Long messages with the GPU taking batches, in every mode, among
-    /// short ones and messages whose last piece is partial, written in
-    /// reads of up to 1000 bytes, past the GPU ring's 64 MiB (so it
-    /// wraps): each digest the CPU's, handed back once, in order; with
-    /// collect after each, and finishing at once. (Job 1911's confirm
-    /// baseline: the 1000-byte reads' stream took no batch.)
-    #[cfg(blake3_gpu)]
-    #[test]
-    fn test_gpu_stream_against_hash_with() {
-        let mut input = std::vec![0u8; (64 << 20) + 300];
-        crate::test::paint_test_input(&mut input);
-        let key = [9u8; 32];
-        let lens: std::vec::Vec<usize> = (0..48)
-            .map(|i| {
-                [16 << 20, (4 << 20) + 1, 100, (5 << 20) + 1023, 64 << 20, (4 << 20) - 1, 16 << 20, 16 << 20, (6 << 20) + 7, (64 << 20) + 1, 8 << 20, 0][i % 12]
-            })
-            .collect();
-        for (mode, collect, read) in
-            [(Mode::Plain, false, 1000), (Mode::Keyed(&key), true, usize::MAX), (Mode::DeriveKey("gpu stream test"), false, usize::MAX)]
-        {
-            gpu_ready(mode, &input);
-            // The setup establishes GPU digest coverage in this mode.
-            // The mixed stream checks every result whichever worker wins.
-            gpu_stream_checked(mode, &input, &lens, read, collect);
-        }
-    }
-
-    /// Streams of one long message each, 40 back to back: the digests stay
-    /// right with the GPU taking batches in some and each
-    /// finish reclaiming what it holds, and the storage's GPU ring and
-    /// commands serve each next stream.
-    #[cfg(blake3_gpu)]
-    #[test]
-    fn test_gpu_streams_of_one_message() {
-        let mut input = std::vec![0u8; (64 << 20) + 300];
-        crate::test::paint_test_input(&mut input);
-        gpu_ready(Mode::Plain, &input);
-        let lens = [16 << 20, 64 << 20, 32 << 20];
-        let want: std::vec::Vec<Hash> = lens.iter().map(|&len| crate::convenience::hash(gpu_message(&input, 0, len))).collect();
-        let got: std::vec::Vec<Hash> = (0..40).map(|i| gpu_stream(Mode::Plain, &input, &[lens[i % 3]], usize::MAX, false)[0]).collect();
-        for (i, got) in got.iter().enumerate() {
-            assert_eq!(*got, want[i % 3], "stream {i}, {} bytes", lens[i % 3]);
-        }
-    }
-
-    /// The GPU ring's arithmetic, exact on every machine (the caller's
-    /// own): 16 messages of 4 MiB, 1024 whole pieces, fill the GPU ring to
-    /// its end with no lap skipped and no wait for room, the other rings
-    /// keep none of their bytes, and the GPU's run holds every piece.
-    #[cfg(blake3_gpu)]
-    #[test]
-    fn test_gpu_ring_fills_to_its_end_and_its_run_holds_every_piece() {
-        let mut input = std::vec![0u8; (64 << 20) + 300];
-        crate::test::paint_test_input(&mut input);
-        gpu_ready(Mode::Plain, &input);
-        let message = &input[..4 << 20];
-        let mut got = places(crate::gpu::RING_BYTES / message.len());
-        stream(
-            Mode::Plain,
-            |_| {},
-            |s| {
-                for out in got.iter_mut() {
-                    s.submit_with(
-                        message.len(),
-                        |at, room| {
-                            room.copy_from_slice(&message[at..][..room.len()]);
-                            room.len()
-                        },
-                        out,
-                    );
-                }
-                assert_eq!((s.gpu_head, s.long_head, s.head), (crate::gpu::RING_BYTES, 0, 0), "1024 pieces end the GPU ring's first lap exactly");
-                assert_eq!(s.delivered, 0, "and nothing waited for room");
-                assert_eq!(s.gpu_run.end - s.gpu_run.start, 1024, "the GPU's run holds every piece");
-                s.finish();
-                assert_eq!(s.gpu_tail, crate::gpu::RING_BYTES, "every piece back frees exactly its room");
-            },
-        );
-        assert!(got.iter().all(|h| *h == crate::convenience::hash(message)));
-    }
-
-    /// A stream asks its GPU for a claim only where its run of GPU pieces
-    /// could hold a batch (`feed`'s first test, the stream's own): a long
-    /// message of half a batch's pieces, then short messages that wait for
-    /// room, which ask nothing of the GPU's commands or the source.
-    #[cfg(blake3_gpu)]
-    #[test]
-    fn test_gpu_feed_asks_only_with_a_batch_s_run() {
-        let mut input = std::vec![0u8; (64 << 20) + 300];
-        crate::test::paint_test_input(&mut input);
-        gpu_ready(Mode::Plain, &input);
-        let lens: std::vec::Vec<usize> = core::iter::once(4 << 20).chain(core::iter::repeat_n(1 << 20, 40)).collect();
-        let feeds = crate::gpu::test::FEEDS.load(Ordering::Relaxed);
-        gpu_stream_checked(Mode::Plain, &input, &lens, usize::MAX, false);
-        assert_eq!(crate::gpu::test::FEEDS.load(Ordering::Relaxed), feeds, "64 GPU pieces, half a batch: no feed");
-    }
-
-    /// A stream whose GPU commands do not end until it has finished: its
-    /// finish takes their tasks back for the pool (the GPU's outputs, when
-    /// they come, dropped), and every digest is right. The held stream fits
-    /// in the GPU ring: a GPU that never ends would leave a longer one
-    /// waiting for room, its oldest tasks the GPU's.
-    #[cfg(blake3_gpu)]
-    #[test]
-    fn test_gpu_finish_reclaims_the_gpus_tasks() {
-        let mut input = std::vec![0u8; (64 << 20) + 300];
-        crate::test::paint_test_input(&mut input);
-        // Keyed: the tasks finish rebuilds for the pool carry the stream's
-        // key and flags, which a plain stream (the IV, no flags) cannot
-        // tell from a task without them.
-        let key = [0x5c; 32];
-        let mode = Mode::Keyed(&key);
-        gpu_ready(mode, &input);
-        let lens = [16 << 20; 4];
-        let (batches, reclaims, feeds) = (gpu_batches(), crate::gpu::test::RECLAIMS.load(Ordering::Relaxed), crate::gpu::test::FEEDS.load(Ordering::Relaxed));
-        let mut got = places(lens.len());
-        stream(
-            mode,
-            |_| {},
-            |s| {
-                // Warm-up commands may have been reclaimed by its finish. Wait
-                // for their callbacks before holding the commands of this run.
-                s.s.gpu.as_ref().expect("the warm-up created GPU storage").wait_idle_for_test();
-                s.s.source.reserve_gpu_batch_for_test();
-                crate::gpu::test::HOLD.store(true, Ordering::Release);
-                for (i, out) in got.iter_mut().enumerate() {
-                    s.submit_with(
-                        lens[i],
-                        |at, room| {
-                            room.copy_from_slice(&gpu_message(&input, i, lens[i])[at..][..room.len()]);
-                            room.len()
-                        },
-                        out,
-                    );
-                }
-                assert!(gpu_batches() > batches, "the held run owns a GPU batch before finish");
-                s.finish();
-            },
-        );
-        crate::gpu::test::HOLD.store(false, Ordering::Release);
-        assert!(
-            gpu_batches() > batches,
-            "the GPU took batches; {} feed attempts found a free command (a positive count locates the failure in the source's task claim)",
-            crate::gpu::test::FEEDS.load(Ordering::Relaxed) - feeds
-        );
-        assert!(crate::gpu::test::RECLAIMS.load(Ordering::Relaxed) > reclaims, "finish took the held batches back");
-        for (i, got) in got.iter().enumerate() {
-            assert_eq!(*got, crate::convenience::hash_with(mode, gpu_message(&input, i, lens[i])), "message {i}");
-        }
-        // The commands end, dropping their outputs; the GPU serves the next stream.
-        gpu_stream_checked(mode, &input, &lens, usize::MAX, false);
     }
 
     /// Places for `n` digests, each starting as zeros.

@@ -3,11 +3,6 @@
 # nextest's clock stops one (tools/mutants/check.py, TIMEOUTS). Their own
 # outcome: neither caught nor survived.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
-src/gpu.rs	replace == with != in Gpu::in_flight	1	a loop variant broken: finish reclaims only when no command is in flight, so a stream whose GPU is held never ends; the clock stops the stream tests that reach it
-src/gpu.rs	replace Gpu::in_flight -> bool with false	1	a loop variant broken: finish never takes the GPU's tasks back, so a stream whose GPU is held never ends; the clock stops the stream tests that reach it
-src/gpu.rs	replace Gpu::reclaim -> bool with false	1	a loop variant broken: finish never takes the GPU's tasks back, so a stream whose GPU is held never ends; the clock stops the stream tests that reach it
-src/gpu.rs	replace Gpu::reclaim -> bool with true	1	a loop variant broken: finish counts a reclaim that took nothing back, and loops on it while the GPU is held; the clock stops the stream tests that reach it
-src/stream.rs	delete ! in Stream<'env, D>::reclaim	1	a loop variant broken: the tasks taken back are never published again, so their entries are never handed back; the clock stops the stream tests that reach it
 src/stream.rs	replace && with || in Stream<'env, D>::finish	1	a loop variant broken: finish's pause and reclaim run on the wrong condition, and a held GPU's tasks are never taken back; the clock stops the stream tests that reach it
 src/stream.rs	replace += with *= in Stream<'env, D>::deliver	2	a loop variant broken: a ring's tail never moves, so the writer waits for room that never comes; the clock stops the stream tests that reach it
 src/stream.rs	replace < with <= in Stream<'env, D>::finish	1	a loop variant broken: finish waits for one entry more than were submitted; the clock stops the stream tests that reach it
@@ -15,7 +10,3 @@ src/stream.rs	replace == with != in Stream<'env, D>::finish	1	a loop variant bro
 src/stream.rs	replace Stream<'env, D>::deliver -> usize with 0	1	a loop variant broken: finish counts nothing handed back and reclaims for ever; the clock stops the stream tests that reach it
 src/stream.rs	replace Stream<'env, D>::deliver -> usize with 1	1	a loop variant broken: the stream hands back no entry, so finish never returns; the clock stops the stream tests that reach it
 src/stream.rs	replace Stream<'env, D>::help with ()	1	a loop variant broken: help neither hands back nor hashes, so a writer waiting for room waits for ever; the clock stops the stream tests that reach it
-src/stream.rs	replace Stream<'env, D>::reclaim -> bool with false	1	a loop variant broken: finish never takes the GPU's tasks back, so a stream whose GPU is held never ends; the clock stops the stream tests that reach it
-src/stream.rs	replace Stream<'env, D>::reclaim -> bool with true	1	a loop variant broken: finish counts a reclaim that took nothing back, and loops on it while the GPU is held; the clock stops the stream tests that reach it
-src/stream.rs	replace Stream<'env, D>::reclaim_at_finish -> bool with false	1	a loop variant broken: finish never takes the GPU's tasks back, so a stream whose GPU is held never ends; the clock stops the stream tests that reach it
-src/stream.rs	replace Stream<'env, D>::reclaim_at_finish -> bool with true	1	a loop variant broken: finish counts a reclaim on every pass and never pauses or hands back what the reclaim published; the clock stops the stream tests that reach it

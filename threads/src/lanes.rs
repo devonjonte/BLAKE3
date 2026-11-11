@@ -1003,7 +1003,7 @@ pub(crate) mod sources {
     struct Place {
         task: UnsafeCell<MaybeUninit<Task>>,
         /// Whether the place holds a published task not yet copied out (by
-        /// its claimer's copy, or the GPU's callback): set as the task is
+        /// its claimer's copy): set as the task is
         /// published, cleared after the copy. The check of `publish`'s
         /// contract, in tests and debug builds alone; release builds carry
         /// none.
@@ -1013,9 +1013,6 @@ pub(crate) mod sources {
 
     #[repr(align(128))]
     pub(crate) struct Source {
-        /// A GPU-path fixture reserves its first batch from CPU claims.
-        #[cfg(all(test, blake3_gpu))]
-        gpu_batch_reserved: core::sync::atomic::AtomicBool,
         claimed: OwnLine<AtomicUsize>,
         /// A stream's tasks, publication `p`'s in place `p % len`; empty for
         /// a caller's jobs.
@@ -1035,8 +1032,7 @@ pub(crate) mod sources {
     // copied out by its claimer: the publisher's contract (`publish`),
     // checked in tests and debug builds. It is read by the one thread
     // whose CAS claimed the publication in it, across the Release store
-    // of `published` and the Acquire load. The GPU reads its claimed
-    // places on the stream's own thread, inside `take_run`'s callback.
+    // of `published` and the Acquire load.
     // `owner` is behind its lock; the rest is atomics.
     unsafe impl Sync for Source {}
     unsafe impl Send for Source {}
@@ -1053,8 +1049,6 @@ pub(crate) mod sources {
         /// published (a stream's: `publish`), or none (a caller's jobs).
         pub(crate) fn new(len: usize) -> Source {
             Source {
-                #[cfg(all(test, blake3_gpu))]
-                gpu_batch_reserved: core::sync::atomic::AtomicBool::new(false),
                 claimed: OwnLine(AtomicUsize::new(0)),
                 // Each place holds a whole task from the start, so a
                 // publication writes its task's header and the members it
@@ -1173,10 +1167,6 @@ pub(crate) mod sources {
                 }
                 // Read after the publication Acquire: the fixture reserved
                 // its batch before publishing this task.
-                #[cfg(all(test, blake3_gpu))]
-                if self.gpu_batch_reserved.load(Ordering::SeqCst) {
-                    return None;
-                }
                 // A job's pieces go in runs, consecutive, sized to the work
                 // left (guided self-scheduling): each worker reads its input
                 // front to back, so a mapped file from storage meets the
@@ -1201,49 +1191,6 @@ pub(crate) mod sources {
                     Err(now) => c = now,
                 }
             }
-        }
-
-        /// Establish the GPU-claim precondition of its finish/reclaim test.
-        /// The first successful GPU claim restores ordinary CPU service.
-        #[cfg(all(test, blake3_gpu))]
-        pub(crate) fn reserve_gpu_batch_for_test(&self) {
-            self.gpu_batch_reserved.store(true, Ordering::SeqCst);
-        }
-
-        /// Claim the `n` oldest waiting tasks at once, for a stream's GPU
-        /// (`crate::gpu::feed`): when they lie at positions `from..to`
-        /// (the run its GPU may take, all published: `to` is at most the
-        /// count published); `f` reads them in place. Whether it claimed
-        /// them. Only the stream's own thread calls this, so no slot it
-        /// reads is written meanwhile (that thread alone publishes).
-        #[cfg(blake3_gpu)]
-        pub(crate) fn take_run(&self, from: usize, to: usize, n: usize, f: impl FnOnce(&mut dyn Iterator<Item = &Task>)) -> bool {
-            debug_assert!(to <= self.finish.published.load(Ordering::Relaxed), "a GPU's run lies among the tasks published");
-            let c = self.claimed.load(Ordering::Acquire);
-            if c < from || c + n > to {
-                return false;
-            }
-            if self.claimed.compare_exchange(c, c + n, Ordering::AcqRel, Ordering::Acquire).is_err() {
-                return false;
-            }
-            #[cfg(test)]
-            self.gpu_batch_reserved.store(false, Ordering::SeqCst);
-            // Sound: this thread alone took publications c..c + n, written
-            // before `published` passed them, a stream's, in order; it is
-            // the stream's own thread, which alone writes the places.
-            let place = |i: usize| &self.places[i % self.places.len()];
-            f(&mut (c..c + n).map(|i| unsafe { (*place(i).task.get()).assume_init_ref() }));
-            #[cfg(any(test, debug_assertions))]
-            for i in c..c + n {
-                place(i).uncopied.store(false, Ordering::SeqCst);
-            }
-            true
-        }
-
-        /// The count of tasks published (a stream's own, on its thread).
-        #[cfg(blake3_gpu)]
-        pub(crate) fn published(&self) -> usize {
-            self.finish.published.load(Ordering::Relaxed)
         }
 
         /// Get the number of pieces one claim takes of `waiting` pieces of a
@@ -1561,36 +1508,6 @@ pub(crate) mod sources {
                 let _go = crate::test::Released(go_tx);
                 publish(source, 1);
             });
-        }
-
-        /// The GPU's claim: the oldest `n` waiting tasks, all of them in the
-        /// run it may take; one step, the tasks read in place, and `claimed`
-        /// past them.
-        #[cfg(blake3_gpu)]
-        #[test]
-        fn test_take_run_claims_the_oldest_n_in_the_run() {
-            let source = Source::new(8);
-            for i in 0..8 {
-                // Sound: no worker sees an unregistered source. As `publish`
-                // fills a place.
-                unsafe { (*source.places[i].task.get()).write(Task::of(&[], i as u64)) };
-                source.places[i].uncopied.store(true, Ordering::SeqCst);
-            }
-            let counters = |from: usize, to: usize, n: usize| {
-                let mut seen = std::vec::Vec::new();
-                source.take_run(from, to, n, |tasks| seen.extend(tasks.map(|t| t.counter))).then_some(seen)
-            };
-            source.finish.published.store(3, Ordering::Relaxed);
-            assert_eq!(counters(0, 3, 4), None, "3 in the run: 4 is too many");
-            assert_eq!(counters(1, 3, 2), None, "the oldest waiting is before the run");
-            assert_eq!(counters(0, 1, 2), None, "the second is past the run");
-            assert_eq!(counters(0, 2, 2), Some(std::vec![0, 1]), "the oldest 2 at once");
-            assert_eq!(source.claimed.load(Ordering::Relaxed), 2);
-            source.finish.published.store(8, Ordering::Relaxed);
-            assert_eq!(counters(0, 8, 3), Some(std::vec![2, 3, 4]));
-            assert_eq!(counters(0, 8, 3), Some(std::vec![5, 6, 7]), "the last three, the run's end");
-            assert_eq!(counters(0, 8, 1), None, "nothing waits");
-            assert!(source.places.iter().all(|place| !place.uncopied.load(Ordering::SeqCst)), "the GPU's callback counts every place it read as copied");
         }
 
         /// Unregistering one source leaves the others registered: its bit
@@ -1933,23 +1850,6 @@ mod test {
         assert!(!at_rest(3, 3, true, false), "the SME2 thread is still starting, or at work");
         assert!(!at_rest(2, 3, true, true), "a worker is at work");
         assert!(!at_rest(2, 3, false, false));
-    }
-
-    /// Fake task payloads stay off workers. The fixture's reservation blocks
-    /// CPU claims, survives a failed GPU claim and ends at a successful one.
-    #[cfg(blake3_gpu)]
-    #[test]
-    fn gpu_fixture_reserves_its_batch_until_the_gpu_claims_it() {
-        crate::initialize_multithreaded(core::num::NonZeroUsize::new(1));
-        let source = sources::Source::new(4);
-        source.reserve_gpu_batch_for_test();
-        source.publish(&Task::of(&[], 0));
-        source.publish(&Task::of(&[], 1));
-        assert!(source.take_task().is_none());
-        assert!(!source.take_run(0, 1, 2, |_| panic!("the run is too short")));
-        assert!(source.take_task().is_none(), "a failed claim keeps the reservation");
-        assert!(source.take_run(0, 2, 1, |tasks| assert_eq!(tasks.count(), 1)));
-        assert!(source.take_task().is_some(), "CPU service resumes after the GPU claim");
     }
 
     /// A call gives its place among the pool's callers back: alone in its
