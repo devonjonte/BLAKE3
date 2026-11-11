@@ -58,7 +58,7 @@ theorem round1 (V0 V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V11 V12 V13 V14 V15 M0 M1 M2 M
     Vector.set_mk, List.set_toArray, List.set_cons_succ, List.set_cons_zero, Fin.isValue, Fin.getElem_fin,
     Vector.getElem_mk, List.getElem_toArray, List.getElem_cons_succ, List.getElem_cons_zero,
     Vector.mk.injEq, Array.mk.injEq, List.cons.injEq, and_true]
-  bv_decide
+  bv_decide (config := { timeout := 900 })
 
 set_option maxRecDepth 1000000 in
 set_option maxHeartbeats 0 in
@@ -78,7 +78,7 @@ theorem round2 (V0 V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V11 V12 V13 V14 V15 M0 M1 M2 M
     Vector.set_mk, List.set_toArray, List.set_cons_succ, List.set_cons_zero, Fin.isValue, Fin.getElem_fin,
     Vector.getElem_mk, List.getElem_toArray, List.getElem_cons_succ, List.getElem_cons_zero,
     Vector.mk.injEq, Array.mk.injEq, List.cons.injEq, and_true]
-  bv_decide
+  bv_decide (config := { timeout := 900 })
 
 set_option maxRecDepth 1000000 in
 set_option maxHeartbeats 0 in
@@ -98,7 +98,7 @@ theorem round3 (V0 V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V11 V12 V13 V14 V15 M0 M1 M2 M
     Vector.set_mk, List.set_toArray, List.set_cons_succ, List.set_cons_zero, Fin.isValue, Fin.getElem_fin,
     Vector.getElem_mk, List.getElem_toArray, List.getElem_cons_succ, List.getElem_cons_zero,
     Vector.mk.injEq, Array.mk.injEq, List.cons.injEq, and_true]
-  bv_decide
+  bv_decide (config := { timeout := 900 })
 
 set_option maxRecDepth 1000000 in
 set_option maxHeartbeats 0 in
@@ -118,7 +118,7 @@ theorem round4 (V0 V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V11 V12 V13 V14 V15 M0 M1 M2 M
     Vector.set_mk, List.set_toArray, List.set_cons_succ, List.set_cons_zero, Fin.isValue, Fin.getElem_fin,
     Vector.getElem_mk, List.getElem_toArray, List.getElem_cons_succ, List.getElem_cons_zero,
     Vector.mk.injEq, Array.mk.injEq, List.cons.injEq, and_true]
-  bv_decide
+  bv_decide (config := { timeout := 900 })
 
 set_option maxRecDepth 1000000 in
 set_option maxHeartbeats 0 in
@@ -138,7 +138,7 @@ theorem round5 (V0 V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V11 V12 V13 V14 V15 M0 M1 M2 M
     Vector.set_mk, List.set_toArray, List.set_cons_succ, List.set_cons_zero, Fin.isValue, Fin.getElem_fin,
     Vector.getElem_mk, List.getElem_toArray, List.getElem_cons_succ, List.getElem_cons_zero,
     Vector.mk.injEq, Array.mk.injEq, List.cons.injEq, and_true]
-  bv_decide
+  bv_decide (config := { timeout := 900 })
 
 set_option maxRecDepth 1000000 in
 set_option maxHeartbeats 0 in
@@ -158,7 +158,7 @@ theorem round6 (V0 V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V11 V12 V13 V14 V15 M0 M1 M2 M
     Vector.set_mk, List.set_toArray, List.set_cons_succ, List.set_cons_zero, Fin.isValue, Fin.getElem_fin,
     Vector.getElem_mk, List.getElem_toArray, List.getElem_cons_succ, List.getElem_cons_zero,
     Vector.mk.injEq, Array.mk.injEq, List.cons.injEq, and_true]
-  bv_decide
+  bv_decide (config := { timeout := 900 })
 
 set_option maxRecDepth 1000000 in
 set_option maxHeartbeats 0 in
@@ -178,5 +178,5 @@ theorem round7 (V0 V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V11 V12 V13 V14 V15 M0 M1 M2 M
     Vector.set_mk, List.set_toArray, List.set_cons_succ, List.set_cons_zero, Fin.isValue, Fin.getElem_fin,
     Vector.getElem_mk, List.getElem_toArray, List.getElem_cons_succ, List.getElem_cons_zero,
     Vector.mk.injEq, Array.mk.injEq, List.cons.injEq, and_true]
-  bv_decide
+  bv_decide (config := { timeout := 900 })
 

@@ -31,7 +31,7 @@ theorem body (v0 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15 m0 m1 m2 m3 
   subst hpc hv0 hv1 hv2 hv3 hm0 hm1 hm2 hm3
   run_code []
   refine ⟨_, rfl, rfl, ⟨?_, ?_, ?_, ?_⟩, ⟨rfl, rfl, rfl, rfl⟩, ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩, rfl, rfl, rfl⟩
-  all_goals (eval_spec; open_ops; bv_decide)
+  all_goals (eval_spec; open_ops; bv_decide (config := { timeout := 900 }))
 
 set_option maxRecDepth 1000000 in
 set_option maxHeartbeats 0 in
@@ -48,11 +48,11 @@ theorem perm (m0 m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15 : BitVec 32)
   subst hpc hm0 hm1 hm2 hm3
   run_code [hal]
   refine ⟨_, rfl, rfl, ⟨?_, ?_, ?_, ?_⟩, ⟨rfl, rfl, rfl, rfl⟩, ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩, rfl, rfl, ?_⟩
-  · eval_spec; open_ops; bv_decide
-  · eval_spec; open_ops; bv_decide
-  · eval_spec; open_ops; bv_decide
-  · eval_spec; open_ops; bv_decide
-  · simp only []; bv_decide
+  · eval_spec; open_ops; bv_decide (config := { timeout := 900 })
+  · eval_spec; open_ops; bv_decide (config := { timeout := 900 })
+  · eval_spec; open_ops; bv_decide (config := { timeout := 900 })
+  · eval_spec; open_ops; bv_decide (config := { timeout := 900 })
+  · simp only []; bv_decide (config := { timeout := 900 })
 
 set_option maxRecDepth 1000000 in
 set_option maxHeartbeats 0 in
@@ -78,9 +78,9 @@ theorem finish (v0 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15 : BitVec 3
       rw [put128_other _ _ _ x (by bv_omega), put128_other _ _ _ x (by bv_omega)])]
     exact hret
   have e0 : mk4 v0 v1 v2 v3 ^^^ mk4 v8 v9 v10 v11 = mk4 (v0 ^^^ v8) (v1 ^^^ v9) (v2 ^^^ v10) (v3 ^^^ v11) := by
-    open_ops; bv_decide
+    open_ops; bv_decide (config := { timeout := 900 })
   have e1 : mk4 v4 v5 v6 v7 ^^^ mk4 v12 v13 v14 v15 = mk4 (v4 ^^^ v12) (v5 ^^^ v13) (v6 ^^^ v14) (v7 ^^^ v15) := by
-    open_ops; bv_decide
+    open_ops; bv_decide (config := { timeout := 900 })
   run_code [hal, write_vec o0, w1, r1, e0, e1]
   exact ⟨_, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
@@ -105,7 +105,7 @@ theorem start (cv0 cv1 b0 b1 b2 b3 : V) (s : State) (hpc : s.pc = 0x30000)
   refine ⟨_, rfl, rfl, ⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_⟩, ?_, ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩⟩
   all_goals (try eval_spec)
   all_goals (try open_ops)
-  all_goals bv_decide
+  all_goals bv_decide (config := { timeout := 900 })
 
 theorem body' (v m : Vector (BitVec 32) 16) (s : State) (hpc : s.pc = 0x30064)
     (hv : Rows s v) (hm : Msgs s m) :

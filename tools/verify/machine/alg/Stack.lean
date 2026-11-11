@@ -268,4 +268,26 @@ theorem pushes_give_the_tree {st : List CV} (h : Pushes key mode chunks st (chun
 
 #print axioms pushes_give_the_tree
 
+/-- The specification's chunk nodes of an input (section 4.2), as `Blake3.blake3` makes them. -/
+def chunksOf (input : ByteArray) : Array Node :=
+  (Array.range (max 1 ((input.size + 1023) / 1024))).map fun i =>
+    chunkNode key mode (input.extract (1024 * i) (1024 * (i + 1))) i
+
+/-- **The hasher's algorithm is BLAKE3.** For any key, mode, input and output length: push every
+chunk but the last, merge, fold the last chunk's node in, and take the root's output: the bytes
+are the specification's `blake3`. What is left to prove about the code is that each compiled
+function computes its part of this: a chunk's node, a parent's chaining value, the stack's
+moves, the output's bytes. -/
+theorem hasher_is_blake3 (input : ByteArray) (outLen : Nat) :
+    output (finish key mode
+        (mergeTo key mode (ones ((chunksOf key mode input).size - 1))
+          (pushed key mode (chunksOf key mode input) ((chunksOf key mode input).size - 1)))
+        ((chunksOf key mode input)[(chunksOf key mode input).size - 1]!)) outLen
+      = blake3 key mode input outLen := by
+  have hn : 0 < (chunksOf key mode input).size := by simp [chunksOf]; omega
+  rw [stack_is_the_tree key mode _ hn]
+  rfl
+
+#print axioms hasher_is_blake3
+
 end Blake3

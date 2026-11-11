@@ -36,4 +36,4 @@ theorem body (v0 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15 m0 m1 m2 m3 
   subst hpc hv0 hv1 hv2 hv3 hm0 hm1 hm2 hm3
   run_kernel
   refine ⟨_, rfl, rfl, ⟨?_, ?_, ?_, ?_⟩, ⟨rfl, rfl, rfl, rfl⟩, ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩, rfl⟩
-  all_goals (simp only [rnd]; eval_spec; open_ops; bv_decide)
+  all_goals (simp only [rnd]; eval_spec; open_ops; bv_decide (config := { timeout := 900 }))

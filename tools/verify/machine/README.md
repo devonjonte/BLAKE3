@@ -116,6 +116,13 @@ instructions, 324 executed; `to_hex.listing` is llvm-objdump's, `lift_hex.py` ma
   and three closing steps; check 12 s. `python3 mutants.py`: 36 of 36 changed instructions
   rejected (`mutants-20261111.txt`).
 
+`cross.sh` checks the model under `gen/` and this folder against the processor: the 64 instruction forms
+of the proved programs that are not jumps or stack moves, 2,560 random states, registers, ZF and CF (4,760
+flag values) and 512 bytes of memory compared: no difference on an EPYC 9255 and a Xeon Gold 6330; a model
+whose 32-bit writes keep the upper half differs on 1,120. Binsec 0.11.3, run on a binary that links the
+crate, reports the same four instructions of `to_hex` as memory-access leaks when the hash is secret, and
+the SSE4.1 one-block kernel secure; it cannot read the AVX-512 kernel.
+
 Limits: the loop's count is fixed (sixteen turns), so the run needs no invariant; the table's
 contents and address are hypotheses (the lifter turns the RIP-relative `lea` into a parameter and
 does not read the object's data); the listing is llvm-objdump's.
@@ -132,6 +139,8 @@ the top. `Stack.lean` (270 lines) states those three functions as Lean functions
   `Blake3.tree`'s root;
 - `pushes_give_the_tree`: the same after any run of pushes of whole subtrees of `2^a` chunks
   where `2^a` divides the chunks so far (what `feed` pushes).
+- `hasher_is_blake3`: for any key, mode, input and output length, the output of the node so
+  made is `Blake3.blake3`'s bytes.
 
 Axioms: `propext`, `Quot.sound`. Check: half a second. `python3 mutants.py`: with any of eight
 wrong definitions (children swapped, a merge one value early or late, a wrong count of bits) the
@@ -139,3 +148,10 @@ proof no longer checks. Nothing in it mentions Rust or machine code: a proof tha
 `merge`, `push` and `final_node` run these functions is what would join it to the code, and is
 not written. Not covered: `final_node`'s case of an empty last chunk; that `subtree_len`'s
 lengths are such powers of two.
+
+## Checking elsewhere: what went wrong once
+
+On an older Xeon and on an ARM VM the kernels' proofs first failed: `bv_decide` gives its SAT solver ten
+seconds, and one round's problem took longer there than on the machines it was written on. The round lemmas
+now allow 900 seconds. The durable fix is to keep each `bv_decide`'s certificate in the repository
+(`bv_decide?` writes it, `bv_check` reads it), so that checking runs no solver; it is not done.
