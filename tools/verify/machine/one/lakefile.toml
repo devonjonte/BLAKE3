@@ -1,5 +1,5 @@
 name = "one"
-defaultTargets = ["ParentCv", "Test"]
+defaultTargets = ["ParentSpec", "Test"]
 
 [[require]]
 name = "Blake3Servil"
@@ -39,3 +39,7 @@ name = "ChainingValueProof"
 name = "ParentCv"
 [[lean_lib]]
 name = "ChainingValueProofBase"
+[[lean_lib]]
+name = "Bridge32"
+[[lean_lib]]
+name = "ParentSpec"

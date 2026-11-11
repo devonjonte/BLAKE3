@@ -38,9 +38,9 @@ Known limits, stated so nobody takes these for more than they are:
 
 - four copies of the model, not yet one: `loop/X86.lean` (and `call/X86.lean`, with two more registers, `call` and `jmp`) has byte memory with ownership and the observer's
   trace; `kernel/Simd.lean` has 128-bit cells for memory and no trace; `X86.lean` neither;
-- the kernel's theorem is against the generic text at `BitVec 32`; `../lean/Bridge.lean` proves
-  that text at `UInt32` is the specification, and the step between the two word types is not
-  written;
+- `one/Bridge32.lean` proves the generic text at `BitVec 32` (what every theorem here is stated with) equal, bit for
+  bit, to the specification's own `Blake3.BLAKE3_COMPRESS`, and `one/ParentSpec.lean` that the parent result is
+  `Blake3.parentNode … .cv`; the older folders' theorems do not import it;
 - `kernel/lift_simd.py` reads a Mach-O object (as assembled on a Mac for x86-64) and resolves
   the three RIP-relative loads to the object's data itself;
 - nothing here checks the models against a CPU or against Sail, as `cross_check_x86.py` does
