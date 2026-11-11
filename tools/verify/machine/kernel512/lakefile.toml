@@ -25,3 +25,5 @@ name = "Whole"
 name = "Final"
 [[lean_lib]]
 name = "Main"
+[[lean_lib]]
+name = "CodeSse"

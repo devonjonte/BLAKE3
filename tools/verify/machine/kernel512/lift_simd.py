@@ -76,7 +76,7 @@ for at, size, op, args, reloc, raw in insns:
 text = ["import Simd", "", f"/-! `{func}` of {os.path.basename(obj)}, as llvm-objdump reads it. Written by lift_simd.py. -/", "",
         "set_option maxRecDepth 100000", f"namespace {ns}", "open Simd", "", f"def entry : Nat := 0x{base:X}", "", "def table : List (Nat × Instr × Nat) := ["]
 text += [f"  (0x{at:X}, {ins}, 0x{nxt:X}){',' if i + 1 < len(rows) else ''}  -- {s}" for i, (at, nxt, ins, s) in enumerate(rows)]
-text += ["]", "", "def prog (pc : Nat) : Option (Instr × Nat) := table.lookup pc", ""]
+text += ["]", "", "/-- Each instruction's bytes, in the table's order (for the cross-check against a CPU). -/", "def bytes : List String := [" + ", ".join('"' + s.split("  ")[0].replace(" ", "") + '"' for _, _, _, s in rows) + "]", "", "def prog (pc : Nat) : Option (Instr × Nat) := table.lookup pc", ""]
 text += [f"theorem at_{at:X} : prog 0x{at:X} = some ({ins}, 0x{nxt:X}) := rfl" for at, nxt, ins, _ in rows]
 text += ["", f"end {ns}", ""]
 open(out, "w").write("\n".join(text))

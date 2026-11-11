@@ -87,6 +87,9 @@ def table : List (Nat × Instr × Nat) := [
   (0x3874, .ret, 0x3875)  -- c3                       ret 
 ]
 
+/-- Each instruction's bytes, in the table's order (for the cross-check against a CPU). -/
+def bytes : List String := ["c5fa6f07", "c5fa6f4f10", "410fb6c0", "0fb6d2", "48c1e020", "4801c2", "c4e1f96ed9", "c4e1f96ee2", "c5e16cdc", "c5f8281500000000", "c5781006", "c578104e10", "c4c138c6e188", "c4c138c6e9dd", "c578104620", "c578104e30", "c4c138c6f188", "c4c138c6f9dd", "c5f970f693", "c5f970ff93", "b007", "c5f9fec4", "c5f9fec1", "62f16508efd8", "62f1650872c310", "c5e9fed3", "62f17508efca", "62f1750872c10c", "c5f9fec5", "c5f9fec1", "62f16508efd8", "62f1650872c308", "c5e9fed3", "62f17508efca", "62f1750872c107", "c5f970c093", "c5f970db4e", "c5f970d239", "c5f9fec6", "c5f9fec1", "62f16508efd8", "62f1650872c310", "c5e9fed3", "62f17508efca", "62f1750872c10c", "c5f9fec7", "c5f9fec1", "62f16508efd8", "62f1650872c308", "c5e9fed3", "62f17508efca", "62f1750872c107", "c5f970c039", "c5f970db4e", "c5f970d293", "fec8", "7445", "c558c6c5d6", "c57970cc0f", "c4c17970e039", "c548c6c7fa", "c4433102c8aa", "c5416cc5", "c4633902c688", "c4417970c078", "c5d16aef", "c5c962f5", "c5f970fe1e", "c5797fcd", "c5797fc6", "e901ffffff", "c5f9efc2", "c5f1efcb", "c5fa7f07", "c5fa7f4f10", "c3"]
+
 def prog (pc : Nat) : Option (Instr × Nat) := table.lookup pc
 
 theorem at_3700 : prog 0x3700 = some (.movv 0 (.m .rdi 0x0), 0x3704) := rfl
