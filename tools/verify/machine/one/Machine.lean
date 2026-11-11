@@ -48,6 +48,29 @@ def punpcklqdq (x y : V) : V := y.extractLsb' 0 64 ++ x.extractLsb' 0 64
 def punpckldq (x y : V) : V := mk4 (dw x 0) (dw y 0) (dw x 1) (dw y 1)
 def punpckhdq (x y : V) : V := mk4 (dw x 2) (dw y 2) (dw x 3) (dw y 3)
 
+/-! Byte and word forms (SSE2), added for a hexadecimal encoder. -/
+
+/-- PADDB: bytes added, each wrapping. -/
+def paddb (x y : V) : V :=
+  (by8 x 15 + by8 y 15) ++ (by8 x 14 + by8 y 14) ++ (by8 x 13 + by8 y 13) ++ (by8 x 12 + by8 y 12) ++ (by8 x 11 + by8 y 11) ++
+    (by8 x 10 + by8 y 10) ++ (by8 x 9 + by8 y 9) ++ (by8 x 8 + by8 y 8) ++ (by8 x 7 + by8 y 7) ++ (by8 x 6 + by8 y 6) ++
+    (by8 x 5 + by8 y 5) ++ (by8 x 4 + by8 y 4) ++ (by8 x 3 + by8 y 3) ++ (by8 x 2 + by8 y 2) ++ (by8 x 1 + by8 y 1) ++ (by8 x 0 + by8 y 0)
+/-- PCMPGTB: a byte of ones where the byte of `x` is greater than the byte of `y`, as signed numbers. -/
+def gtb (x y : V) (i : Nat) : BitVec 8 := if (by8 y i).slt (by8 x i) then 0xFF else 0
+def pcmpgtb (x y : V) : V :=
+  gtb x y 15 ++ gtb x y 14 ++ gtb x y 13 ++ gtb x y 12 ++ gtb x y 11 ++ gtb x y 10 ++ gtb x y 9 ++ gtb x y 8 ++
+    gtb x y 7 ++ gtb x y 6 ++ gtb x y 5 ++ gtb x y 4 ++ gtb x y 3 ++ gtb x y 2 ++ gtb x y 1 ++ gtb x y 0
+/-- PUNPCKLBW: the low eight bytes of `x` and of `y`, interleaved, `x`'s first. PUNPCKHBW: the high eight. -/
+def punpcklbw (x y : V) : V :=
+  by8 y 7 ++ by8 x 7 ++ by8 y 6 ++ by8 x 6 ++ by8 y 5 ++ by8 x 5 ++ by8 y 4 ++ by8 x 4 ++
+    by8 y 3 ++ by8 x 3 ++ by8 y 2 ++ by8 x 2 ++ by8 y 1 ++ by8 x 1 ++ by8 y 0 ++ by8 x 0
+def punpckhbw (x y : V) : V :=
+  by8 y 15 ++ by8 x 15 ++ by8 y 14 ++ by8 x 14 ++ by8 y 13 ++ by8 x 13 ++ by8 y 12 ++ by8 x 12 ++
+    by8 y 11 ++ by8 x 11 ++ by8 y 10 ++ by8 x 10 ++ by8 y 9 ++ by8 x 9 ++ by8 y 8 ++ by8 x 8
+/-- PSRLW by an immediate below 16: each 16-bit word shifted right. -/
+def psrlw (x : V) (n : Nat) : V :=
+  (w16 x 7 >>> n) ++ (w16 x 6 >>> n) ++ (w16 x 5 >>> n) ++ (w16 x 4 >>> n) ++ (w16 x 3 >>> n) ++ (w16 x 2 >>> n) ++ (w16 x 1 >>> n) ++ (w16 x 0 >>> n)
+
 inductive Reg | rax | rcx | rdx | rbx | rsp | rbp | rsi | rdi | r8 | r9 | r12 | r13 | r14 | r15
   deriving DecidableEq
 
@@ -245,6 +268,13 @@ inductive Instr
   | dec64 (r : Reg)
   /-- A vector load from `[base + index + disp]`. -/
   | movvi (aligned : Bool) (dst : Nat) (base index : Reg) (disp : BitVec 64)
+  -- byte and word forms (SSE2); a memory operand of these must be 16-byte aligned
+  | pand (dst : Nat) (src : Src)
+  | paddb (dst : Nat) (src : Src)
+  | pcmpgtb (dst : Nat) (src : Src)
+  | punpcklbw (dst : Nat) (src : Src)
+  | punpckhbw (dst : Nat) (src : Src)
+  | psrlw (dst : Nat) (n : Nat)
 
 def read (s : State) (w : Nat) : Opnd → Option (BitVec 64)
   | .reg r => some (trunc w (s.get r))
@@ -339,6 +369,12 @@ def step (i : Instr) (next : Nat) (s : State) : Option State :=
   | .movvi al d b i disp =>
     if al && !aligned16 (s.get b + s.get i + disp) then none
     else (s.mem.read128 (s.get b + s.get i + disp)).map fun v => s.setx d v
+  | .pand d x => do some (s.setx d (s.xmm d &&& (← src s true x)))
+  | .paddb d x => do some (s.setx d (paddb (s.xmm d) (← src s true x)))
+  | .pcmpgtb d x => do some (s.setx d (pcmpgtb (s.xmm d) (← src s true x)))
+  | .punpcklbw d x => do some (s.setx d (punpcklbw (s.xmm d) (← src s true x)))
+  | .punpckhbw d x => do some (s.setx d (punpckhbw (s.xmm d) (← src s true x)))
+  | .psrlw d n => if n < 16 then some (s.setx d (psrlw (s.xmm d) n)) else none
 
 /-- Exactly `k` instructions. -/
 def steps (prog : Nat → Option (Instr × Nat)) : Nat → State → Option State

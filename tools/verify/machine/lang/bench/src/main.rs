@@ -21,6 +21,8 @@ type HashFn = unsafe extern "C" fn(u64, u64, u64, u64, u64, u64) -> u64;
 extern "C" {
     /// The one-block kernel written in the language's machine level.
     fn b_compress_avx512(cv: *mut u32, block: *const u8, block_len: u8, counter: u64, flags: u8);
+    /// The hexadecimal kernel written in the language, proved against its contract.
+    fn b_hex(out: *mut u8, hash: *const u8);
     /// The crate's, written by hand in assembly.
     fn blake3_servil_compress_in_place_avx512(cv: *mut u32, block: *const u8, block_len: u8, counter: u64, flags: u8);
 }
@@ -53,6 +55,36 @@ fn kernel(plat: u64) {
     let hand = least(25, 2_000_000, || unsafe { blake3_servil_compress_in_place_avx512(cv.as_mut_ptr(), block.as_ptr(), 64, 0, 0) });
     let own = least(25, 2_000_000, || unsafe { b_compress_avx512(cv.as_mut_ptr(), block.as_ptr(), 64, 0, 0) });
     println!("one compression, ns a call (each feeding the next): the crate's assembly {hand:.2}, written in the language {own:.2}");
+}
+
+/// The proved hexadecimal kernel against the crate's `to_hex`: random hashes, then the time of each.
+#[cfg(feature = "own_kernel")]
+fn hex_kernel() {
+    let mut s = 0x2545F4914F6CDD1Du64;
+    for _ in 0..1_000_000 {
+        let hash = random_cv(&mut s);
+        let mut out = [0u8; 64];
+        unsafe { b_hex(out.as_mut_ptr(), hash.as_ptr()) };
+        assert_eq!(&out[..], blake3_servil_core::Hash::from_bytes(hash).to_hex().as_bytes(), "the hexadecimal kernel");
+    }
+    for b in 0..=255u8 {
+        let hash = [b; 32];
+        let mut out = [0u8; 64];
+        unsafe { b_hex(out.as_mut_ptr(), hash.as_ptr()) };
+        assert_eq!(&out[..], blake3_servil_core::Hash::from_bytes(hash).to_hex().as_bytes());
+    }
+    println!("the hexadecimal kernel: 1000000 random hashes and every byte value agree with the crate's to_hex");
+    let hash = random_cv(&mut s);
+    let h = blake3_servil_core::Hash::from_bytes(hash);
+    let hand = least(25, 5_000_000, || {
+        std::hint::black_box(std::hint::black_box(&h).to_hex());
+    });
+    let mut out = [0u8; 64];
+    let own = least(25, 5_000_000, || {
+        unsafe { b_hex(out.as_mut_ptr(), std::hint::black_box(hash.as_ptr())) };
+        std::hint::black_box(&out);
+    });
+    println!("to_hex, ns a call: the crate's Rust (a table) {hand:.2}, the kernel written in the language (no table, proved) {own:.2}");
 }
 
 /// The whole hash by a Lean-written function, against the crate's `hash_serial`: every length to
@@ -164,6 +196,8 @@ fn main() {
     }
     #[cfg(feature = "own_kernel")]
     kernel(plat);
+    #[cfg(feature = "own_kernel")]
+    hex_kernel();
     for (name, h) in [("way A", a_hash as HashFn), ("way B", b_hash as HashFn)] {
         println!("{name}: the whole hash agrees with the crate's hash_serial on {} inputs", agree_hash(name, h, plat));
     }

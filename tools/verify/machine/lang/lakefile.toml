@@ -1,8 +1,21 @@
 name = "lang"
-defaultTargets = ["Sem"]
+defaultTargets = ["Proof_hex"]
+
+[[require]]
+name = "one"
+path = "../one"
+
 [[lean_lib]]
 name = "Lang"
 [[lean_lib]]
 name = "Sem"
 [[lean_lib]]
 name = "HasherOde"
+[[lean_lib]]
+name = "HexSpec"
+[[lean_lib]]
+name = "Attr_hex"
+[[lean_lib]]
+name = "Code_hex"
+[[lean_lib]]
+name = "Proof_hex"

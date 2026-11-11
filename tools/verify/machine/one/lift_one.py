@@ -97,8 +97,8 @@ for at, size, op, args, reloc, raw in insns:
             assert a[0].startswith("xmmword ptr "), args
             r, d = memref(a[0][len("xmmword ptr "):]); ins = f".storev {'true' if op in ALIGNED else 'false'} .{r} {bv(d)} {xmm(a[1])}"
     elif op in ("movq", "vmovq"): r, w = REG[a[1]]; assert w == 64; ins = f".movq {xmm(a[0])} .{r}"
-    elif op in ("paddd", "pxor", "por", "pshufb", "punpcklqdq", "punpckldq", "punpckhdq"): ins = f".{op} {xmm(a[0])} {vsrc(a[1], reloc)[0]}"
-    elif op in ("pslld", "psrld"): ins = f".{op} {xmm(a[0])} {int(a[1], 16)}"
+    elif op in ("paddd", "pxor", "por", "pshufb", "punpcklqdq", "punpckldq", "punpckhdq", "pand", "paddb", "pcmpgtb", "punpcklbw", "punpckhbw"): ins = f".{op} {xmm(a[0])} {vsrc(a[1], reloc)[0]}"
+    elif op in ("pslld", "psrld", "psrlw"): ins = f".{op} {xmm(a[0])} {int(a[1], 16)}"
     elif op in ("pshufd", "shufps", "pblendw"): ins = f".{op} {xmm(a[0])} {vsrc(a[1], reloc)[0]} {int(a[2], 16)}"
     elif op == "vpshufd": ins = f".pshufd {xmm(a[0])} {vsrc(a[1], reloc)[0]} {int(a[2], 16)}"
     elif op in ("vpaddd", "vpxord", "vpxor", "vpunpcklqdq", "vpunpckldq", "vpunpckhdq"):

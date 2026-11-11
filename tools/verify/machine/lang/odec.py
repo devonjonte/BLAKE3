@@ -304,20 +304,36 @@ class Lower:
             f"  body := [" + ",".join("\n    " + self.lean_s(s, bufs, "    ") for s in low) + f"]\n  ret := {self.lean_e(fn['ret'], bufs)}\n"
 
 
+contracts = []
+
+
 def kernels(text):
     """Take the `data` and `kernel` declarations out of the source: (the rest, data, kernels)."""
     data, kerns, rest, lines, i = [], [], [], text.split("\n"), 0
+    contracts.clear()
     while i < len(lines):
         line = lines[i]
         m = re.match(r"^data\s+(\w+)\s*=\s*(.*)$", line)
         if m:
             data.append((m.group(1), [int(w.strip().replace("_", ""), 0) for w in m.group(2).split("//")[0].split(",")])); i += 1; continue
-        m = re.match(r'^kernel\s+(\w+)\s+replaces\s+"([^"]+)"\s*\{\s*$', line)
+        m = re.match(r'^kernel\s+(\w+)(?:\s+replaces\s+"([^"]+)")?\s*\{\s*$', line)
         if m:
             j = i + 1
             while lines[j] != "}":
                 j += 1
             kerns.append((m.group(1), m.group(2), lines[i + 1:j])); i = j + 1; continue
+        m = re.match(r"^contract\s+(\w+)\s*\{\s*$", line)
+        if m:
+            j = i + 1
+            while lines[j] != "}":
+                j += 1
+            c = {"name": m.group(1)}
+            for l in lines[i + 1:j]:
+                l = l.split("//")[0].strip()
+                if l.startswith("spec"): c["spec"] = l.split()[1]
+                elif l.startswith("reads"): c["reads"] = (l.split()[1].rstrip(":"), [x.strip() for x in l.split(":", 1)[1].split(",")])
+                elif l.startswith("writes"): c["writes"] = (l.split()[1].rstrip(":"), [x.strip() for x in l.split(":", 1)[1].split(",")])
+            contracts.append(c); i = j + 1; continue
         rest.append(line); i += 1
     return "\n".join(rest), data, kerns
 
@@ -370,10 +386,12 @@ def main():
     replaces = []
     for name, symbol, lines in kerns:
         ins = expand(name, lines, {}, {})
-        text += f"/-- The kernel `{name}`: {sum(1 for x in ins if not x.endswith(':'))} instructions, in place of `{symbol}`. -/\n" \
+        text += f"/-- The kernel `{name}`: {sum(1 for x in ins if not x.endswith(':'))} instructions" + (f", in place of `{symbol}`" if symbol else "") + ". -/\n" \
             f"def {name} : Fn where\n  name := \"b3l_{name}\"\n  params := []\n  locals := []\n  bufs := []\n  externs := []\n  naked := true\n" \
             "  body := [" + ",".join("\n    .ins " + json.dumps(x) for x in ins) + "]\n  ret := (.const 0)\n\n"
-        names.append(name); replaces.append((symbol, f"b3l_{name}"))
+        names.append(name)
+        if symbol:
+            replaces.append((symbol, f"b3l_{name}"))
     q = lambda s: json.dumps(s)
     text += f"def all : List Fn := [{', '.join(names)}]\n\n" \
         f"/-- Each kernel written here, and the symbol it takes the place of. -/\ndef replaces : List (String × String) := [{', '.join(f'({q(a)}, {q(b)})' for a, b in replaces)}]\n\n" \
@@ -382,6 +400,7 @@ def main():
         "  | [\"rust\", p] => IO.print (rustFile (rename p [] Ode.all))\n" \
         "  | [\"asm\", p] => IO.print (asmFile (rename p [] Ode.all) Ode.data)\n" \
         "  | [\"asm\", p, \"own\"] => IO.print (asmFile (rename p Ode.replaces Ode.all) Ode.data)\n" \
+        "  | [\"asm\", p, \"only\", n] => IO.print (asmFile ((rename p [] Ode.all).filter (·.name == p ++ n)) (Ode.data.filter fun d => (Ode.all.filter (·.name == \"b3l_\" ++ n)).any fun f => f.body.any fun s => match s with | .ins t => (t.splitOn d.1).length > 1 | _ => false))\n" \
         "  | _ => IO.eprintln \"usage: rust PREFIX | asm PREFIX [own]\"\n"
     with open(out, "w") as f:
         f.write(text)
