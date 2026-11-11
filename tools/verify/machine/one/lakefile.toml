@@ -1,5 +1,5 @@
 name = "one"
-defaultTargets = ["ParentSpec", "Test", "MergeTurn"]
+defaultTargets = ["ParentSpec", "Test", "MergeSpec"]
 
 [[require]]
 name = "Blake3Servil"
@@ -51,3 +51,12 @@ name = "Attr"
 name = "RegionsX"
 [[lean_lib]]
 name = "MergeTurn"
+[[lean_lib]]
+name = "MergeLoop"
+[[lean_lib]]
+name = "MergeWhole"
+[[lean_lib]]
+name = "MergeSpec"
+[[lean_lib]]
+name = "Stack"
+srcDir = "../alg"

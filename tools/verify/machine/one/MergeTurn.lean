@@ -6,6 +6,8 @@ import SseProof
 import AvxProof
 open X86
 
+namespace MergeCode
+
 /-! # One turn of `CvStack::merge`'s loop, as compiled
 
 `merge` (hasher.rs) is `for _ in target..len { cvs[len-2] = parent(cvs[len-2], cvs[len-1]); len -= 1 }`.
@@ -630,3 +632,5 @@ theorem turn_sse (self arr keyp fp len n : BitVec 64) (l0 l1 r0 r1 k0 k1 : V) (f
 
 #print axioms turn_avx
 #print axioms turn_sse
+
+end MergeCode

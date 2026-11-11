@@ -172,19 +172,33 @@ as compiled; the hexadecimal is not.
 Limits: the function is compiled alone (in the crate it is inlined into its callers); x86-64 only;
 `pcmpeqb`, `pand`, `pmovmskb` and `sete` are not yet in the cross-check against a processor.
 
-## `one/MergeTurn.lean`: one turn of `CvStack::merge`'s loop, through either kernel
+## `one/Merge*.lean`: `CvStack::merge`, whole, joined to the algorithm
 
-`merge` (hasher.rs) is the stack's loop: `cvs[len-2] = parent(cvs[len-2], cvs[len-1]); len -= 1`. Its
-machine code in the two-crate trial (`merge.listing`, 100 instructions lifted; the three panic blocks are
-left out of the program, so a jump to one is a fault) has an aligned 384-byte frame, a bounds check on
-each index, an assertion, and a call through the GOT to the AVX-512 or the SSE4.1 one-block kernel by
-the platform byte. `turn_avx` and `turn_sse`: from the loop's head with `2 ≤ len ≤ 55`, the two top
-values and the key where they are, and the frame, the stack and the key apart: 426 (or 532)
-instructions later the lower slot holds `merged` (the first eight words of the specification's
-compression of the key and the two values, by the kernels' contracts), the length is one less, and the
-program is at the loop's head or its exit; nothing outside `merge`'s frame, that slot and the length
-changes; no panic site is reached. Check: 32 s. `RegionsX.lean` is `hex/Regions.lean` for this model,
-with whole reads and writes outside a region.
+`merge` (hasher.rs) is the stack's loop: `for _ in target..len { cvs[len-2] = parent(cvs[len-2], cvs[len-1]); len -= 1 }`.
+Its machine code in the two-crate trial (`merge.listing`; 100 instructions lifted; the three panic blocks
+are left out of the program, so a jump to one is a fault) saves six registers, makes an aligned 384-byte
+frame, checks each index, asserts, and calls the AVX-512 or the SSE4.1 one-block kernel through the GOT by
+the platform byte.
 
-Not done here: the loop's induction, the prologue and the return (see `TIMELOG.md` of the study for how
-far that got), and the trace (this model has none).
+- `MergeTurn.lean`: `turn_avx`, `turn_sse`: one turn of the loop (426 or 532 instructions): the lower slot
+  gets `merged`, the first eight words of the specification's compression of the key and the two top
+  values, by the kernels' contracts; the length goes down by one; nothing else changes outside the frame.
+- `MergeLoop.lean`: `loop`: any number of turns, by induction: memory holds `mergeN n es`.
+- `MergeWhole.lean`: `prologue`, `epilogue` and **`merge_is_mergeN`**: called with `1 ≤ target < len ≤ 55`,
+  the stack's values `es` in its array, the key and the kernels' structure where its arguments say, and
+  its own stack owned and apart from them: `merge` returns to its caller with RBX, RBP and R12 to R15
+  restored, the length `target`, the array holding `mergeN (len - target) es`, the tag as it was, and no
+  byte changed outside its stack, the array and the length. No panic site is reached.
+- `MergeSpec.lean`: **`merge_runs_mergeTo`**: read as the specification's chaining values, that stack is
+  `Blake3.mergeTo` of the stack before: the function `alg/Stack.lean` proves a hasher may merge with
+  (`hasher_is_blake3`). So for this function the chain is whole: bytes, model, Lean function, algorithm,
+  specification.
+
+Check: about three minutes from nothing with the kernels (which take most of it); the `Merge*` files
+themselves 45 s. `RegionsX.lean` is `hex/Regions.lean` for this model, with whole reads and writes
+outside a region. `python3 mutants_merge.py` changes one instruction of `merge` at a time.
+
+Limits: this model has no trace, so nothing is said of timing here; the call through the GOT is taken to
+reach the kernel its relocation names; `push`, the function that calls `merge`, and `final_node` are not
+proved, so `hasher_is_blake3` is joined to the code at this one function only; the case `len ≤ target`
+(no turn) and a `None` stack are not covered; the listing is llvm-objdump's.
