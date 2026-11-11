@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""What the library holds, counted five ways, at a commit or as a change.
+"""What the library holds, counted five ways, at a commit or as a change:
+its crates together (the core, and the crate with the pool where the tree
+has one).
 
     python3 tools/size.py [REV]            the measures at REV (default HEAD)
     python3 tools/size.py BASE REV         both, and what the change adds
@@ -40,7 +42,9 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TEST_FILES = re.compile(r"src/(test|.*_tests)\.rs$")
+# A module's declaration with the attributes before it: `mod name;`, or
+# an inline module's opening.
+MODULE = re.compile(r'((?:#\[[^\]]*\]\s*)+)(?:pub(?:\([a-z]+\))? )?mod (\w+)\s*([;{])')
 
 
 def git(*args):
@@ -81,13 +85,59 @@ def split_rust(text):
     return code, comment, test, cfg
 
 
+def crates(rev):
+    """The library's crates at `rev`, each by its folder ("" the root's):
+    the core, and the crate with the pool where the tree has it (#335)."""
+    return [""] + (["threads/"] if files(rev, "threads/Cargo.toml") else [])
+
+
+def for_tests_alone(attributes):
+    """Whether a `cfg` among `attributes` compiles its item for tests
+    alone: `cfg(test)`, or an `all(...)` that names `test` and neither
+    `any` nor `not`."""
+    for condition in re.findall(r"#\[cfg\((.*?)\)\]", attributes, re.S):
+        if condition == "test" or (condition.startswith("all(") and re.search(r"\btest\b", condition) and "any(" not in condition and "not(" not in condition):
+            return True
+    return False
+
+
+def test_only(texts):
+    """The files and folders, of `texts` (path: Rust source), compiled for
+    tests alone, each found where another file names it under such a
+    `cfg`: a declared module's file (its `#[path]`, or its name) and the
+    folder of its children; an inline module's folder, and the files it
+    includes."""
+    found = set()
+    for path, text in texts.items():
+        beside = os.path.dirname(path)
+        # A module's children sit beside lib.rs or mod.rs, or in a folder
+        # named for any other file.
+        below = beside if os.path.basename(path) in ("lib.rs", "mod.rs", "main.rs") else path[:-3]
+        for m in MODULE.finditer(text):
+            attributes, name, opening = m.groups()
+            if not for_tests_alone(attributes):
+                continue
+            given = re.search(r'#\[path = "([^"]+)"\]', attributes)
+            if opening == ";":
+                found.add(os.path.normpath(os.path.join(beside, given.group(1))) if given else os.path.join(below, name + ".rs"))
+            else:
+                depth, end = 1, m.end()
+                while depth and end < len(text):
+                    depth += {"{": 1, "}": -1}.get(text[end], 0)
+                    end += 1
+                found |= {os.path.normpath(os.path.join(beside, f)) for f in re.findall(r'include!\("([^"]+)"\)', text[m.end():end])}
+            found.add(os.path.join(below, name) + "/")
+    return found
+
+
 def lines_of(rev):
     out = {"library code": 0, "library comments": 0, "unit tests": 0, "build conditions": 0}
-    for f in files(rev, "src", "build.rs", "version"):
-        if not f.endswith(".rs"):
-            continue
-        text = git("show", f"{rev}:{f}")
-        if TEST_FILES.search(f):
+    sources = [f for c in crates(rev) for f in files(rev, c + "src", c + "build.rs") if f.endswith(".rs")]
+    sources += [f for f in files(rev, "version") if f.endswith(".rs")]
+    texts = {f: git("show", f"{rev}:{f}") for f in sources}
+    tests = test_only(texts)
+    for f, text in texts.items():
+        if f in tests or any(f.startswith(t) for t in tests if t.endswith("/")):
             out["unit tests"] += len(text.split("\n"))
             continue
         code, comment, test, cfg = split_rust(text)
@@ -96,7 +146,7 @@ def lines_of(rev):
         out["unit tests"] += test
         out["build conditions"] += cfg
     count = lambda fs: sum(len(git("show", f"{rev}:{f}").split("\n")) for f in fs)
-    out["integration tests"] = count(f for f in files(rev, "tests", "test_vectors/src") if f.endswith(".rs"))
+    out["integration tests"] = count(f for f in files(rev, "tests", "threads/tests", "test_vectors/src") if f.endswith(".rs"))
     out["generated assembly"] = count(f for f in files(rev, "c") if f.endswith(".S"))
     out["generators and tools"] = count(f for f in files(rev, "tools") if f.endswith((".py", ".sh", ".rs", ".lean")))
     return out
@@ -106,30 +156,58 @@ def checkout(rev, into):
     subprocess.run(["git", "-C", ROOT, "worktree", "add", "--detach", "--quiet", into, rev], check=True)
 
 
+def crate_dirs(tree):
+    """(the crate's folder, its mutation lists' folder) for each crate of a checkout."""
+    dirs = [(tree, os.path.join(tree, "tools", "mutants"))]
+    if os.path.exists(os.path.join(tree, "threads", "Cargo.toml")):
+        dirs.append((os.path.join(tree, "threads"), os.path.join(tree, "tools", "mutants", "threads")))
+    return dirs
+
+
+def lib_name(crate):
+    """The crate's library, as rustdoc and the build name their files."""
+    meta = json.loads(subprocess.run(["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=crate, capture_output=True, text=True, check=True).stdout)
+    package = next(p for p in meta["packages"] if os.path.dirname(p["manifest_path"]) == os.path.realpath(crate))
+    return next(t["name"] for t in package["targets"] if "lib" in t["kind"]).replace("-", "_")
+
+
 def mutants(tree):
-    listed = set()
-    for name in sorted(os.listdir(os.path.join(tree, "tools", "mutants"))):
-        if name.startswith("known-") and name.endswith(".txt"):
-            for line in open(os.path.join(tree, "tools", "mutants", name)):
-                if line.startswith("files:"):
-                    listed |= set(line.split()[1:])
-    if not listed:
-        return None
-    args = ["cargo", "mutants", "--list"] + [a for f in sorted(listed) if os.path.exists(os.path.join(tree, f)) for a in ("--file", f)]
-    try:
-        return len(subprocess.run(args, cwd=tree, capture_output=True, text=True, check=True).stdout.splitlines())
-    except (OSError, subprocess.CalledProcessError):
-        return None
+    """Every crate's mutants, in the files its lists name."""
+    total = 0
+    for crate, lists in crate_dirs(tree):
+        listed = set()
+        for name in sorted(os.listdir(lists)) if os.path.isdir(lists) else []:
+            if name.startswith("known-") and name.endswith(".txt"):
+                for line in open(os.path.join(lists, name)):
+                    if line.startswith("files:"):
+                        listed |= set(line.split()[1:])
+        if not listed:
+            return None
+        args = ["cargo", "mutants", "--list"] + [a for f in sorted(listed) if os.path.exists(os.path.join(crate, f)) for a in ("--file", f)]
+        try:
+            total += len(subprocess.run(args, cwd=crate, capture_output=True, text=True, check=True).stdout.splitlines())
+        except (OSError, subprocess.CalledProcessError):
+            return None
+    return total
 
 
 def public_items(tree, target):
+    """Every crate's public items: the core's, and what the crate with the
+    pool adds (its own items, and one for each re-export of the core's)."""
     env = dict(os.environ, RUSTC_BOOTSTRAP="1", CARGO_TARGET_DIR=target)
-    try:
-        subprocess.run(["cargo", "rustdoc", "--lib", "--quiet", "--", "-Z", "unstable-options", "--output-format", "json"],
-                       cwd=tree, env=env, capture_output=True, text=True, check=True)
-        doc = json.load(open(os.path.join(target, "doc", "blake3_servil.json")))
-    except (OSError, subprocess.CalledProcessError, ValueError):
-        return None
+    total = 0
+    for crate, _ in crate_dirs(tree):
+        try:
+            subprocess.run(["cargo", "rustdoc", "--lib", "--quiet", "--", "-Z", "unstable-options", "--output-format", "json"],
+                           cwd=crate, env=env, capture_output=True, text=True, check=True)
+            doc = json.load(open(os.path.join(target, "doc", lib_name(crate) + ".json")))
+        except (OSError, subprocess.CalledProcessError, ValueError, StopIteration):
+            return None
+        total += count_items(doc)
+    return total
+
+
+def count_items(doc):
     index, seen, count = doc["index"], set(), 0
 
     def item(i):
@@ -169,22 +247,23 @@ def public_items(tree, target):
 
 def machine_code(tree, target):
     """(the assembly kernels' bytes, the compiled Rust's): the text of
-    each object in the release build's library, the kernels' by their
+    each object in each crate's release library, the kernels' by their
     file names."""
     env = dict(os.environ, CARGO_TARGET_DIR=target)
-    try:
-        subprocess.run(["cargo", "build", "--release", "--lib", "--quiet"], cwd=tree, env=env, capture_output=True, text=True, check=True)
-        out = subprocess.run(["size", os.path.join(target, "release", "libblake3_servil.rlib")], capture_output=True, text=True, check=True).stdout
-    except (OSError, subprocess.CalledProcessError):
-        return None, None
     kernels = rust = 0
-    for line in out.splitlines()[1:]:
-        fields = line.split()
-        if len(fields) >= 6 and fields[0].isdigit():
-            if re.search(r"blake3_\w+\.o", fields[5]):
-                kernels += int(fields[0])
-            else:
-                rust += int(fields[0])
+    for crate, _ in crate_dirs(tree):
+        try:
+            subprocess.run(["cargo", "build", "--release", "--lib", "--quiet"], cwd=crate, env=env, capture_output=True, text=True, check=True)
+            out = subprocess.run(["size", os.path.join(target, "release", f"lib{lib_name(crate)}.rlib")], capture_output=True, text=True, check=True).stdout
+        except (OSError, subprocess.CalledProcessError, StopIteration):
+            return None, None
+        for line in out.splitlines()[1:]:
+            fields = line.split()
+            if len(fields) >= 6 and fields[0].isdigit():
+                if re.search(r"blake3_\w+\.o", fields[5]):
+                    kernels += int(fields[0])
+                else:
+                    rust += int(fields[0])
     return (kernels, rust) if kernels and rust else (None, None)
 
 
