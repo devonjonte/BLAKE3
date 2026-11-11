@@ -1,0 +1,32 @@
+61000	61001	.push .rbx
+61001	61002	.push .rbp
+61002	61004	.push .r12
+61004	61007	.mov 64 (.reg .rbx) (.reg .rdi)
+61007	6100A	.mov 64 (.reg .rbp) (.reg .rsi)
+6100A	6100D	.mov 64 (.reg .rax) (.reg .rbx)
+6100D	61010	.mov 64 (.reg .rax) (.mem .rax 0x0)
+61010	61013	.mov 64 (.reg .r12) (.reg .rax)
+61013	61016	.mov 64 (.reg .rax) (.reg .r12)
+61016	6101D	.mov 64 (.reg .rcx) (.imm 0x37)
+6101D	61020	.cmp 64 (.reg .rax) (.reg .rcx)
+61020	61022	.jae 0x61024
+61022	61024	.jmp 0x61026
+61026	61029	.mov 64 (.reg .rax) (.reg .rbp)
+61029	6102C	.mov 64 (.reg .rcx) (.reg .rbx)
+6102C	61030	.add 64 (.reg .rcx) (.imm 0x20)
+61030	61033	.mov 64 (.reg .rdx) (.reg .r12)
+61033	61037	.shl64 .rdx 5
+61037	6103A	.add 64 (.reg .rcx) (.reg .rdx)
+6103A	6103D	.movv false 0 (.m .rax 0x0)
+6103D	61040	.storev false .rcx 0x0 0
+61040	61044	.movv false 0 (.m .rax 0x10)
+61044	61048	.storev false .rcx 0x10 0
+61048	6104B	.mov 64 (.reg .rax) (.reg .r12)
+6104B	6104F	.add 64 (.reg .rax) (.imm 0x1)
+6104F	61052	.mov 64 (.reg .rcx) (.reg .rbx)
+61052	61055	.mov 64 (.mem .rcx 0x0) (.reg .rax)
+61055	6105C	.mov 64 (.reg .rax) (.imm 0x0)
+6105C	6105E	.pop .r12
+6105E	6105F	.pop .rbp
+6105F	61060	.pop .rbx
+61060	61061	.ret

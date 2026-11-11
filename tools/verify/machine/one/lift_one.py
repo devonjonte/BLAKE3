@@ -120,6 +120,7 @@ for at, size, op, args, reloc, raw in insns:
     elif op in ("je", "jne", "jmp", "jbe", "jae"): ins = f".{op} 0x{base + int(a[0].split()[0], 16) - start:X}"
     elif op == "call":
         assert reloc in calls, f"call to a function with no address given: {reloc}"; ins = f".call 0x{calls[reloc]:X}"
+    elif op == "ud2": continue   # a trap: no instruction is there, so reaching it is a fault
     elif op == "ret": ins = ".ret"; ended = True
     else: raise SystemExit(f"unknown instruction: {op} {args}")
     rows.append((at2, nxt, ins, f"{raw:<26} {op} {args}"))

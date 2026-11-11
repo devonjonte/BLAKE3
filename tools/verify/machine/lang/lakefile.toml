@@ -19,3 +19,13 @@ name = "Attr_hex"
 name = "Code_hex"
 [[lean_lib]]
 name = "Proof_hex"
+[[lean_lib]]
+name = "Cells"
+[[lean_lib]]
+name = "Code_push"
+[[lean_lib]]
+name = "Code_merge"
+[[lean_lib]]
+name = "StackSpec"
+[[lean_lib]]
+name = "Kernels"
