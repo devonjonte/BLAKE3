@@ -14,3 +14,5 @@ name = "ByteLemmas"
 name = "Regions"
 [[lean_lib]]
 name = "Hex"
+[[lean_lib]]
+name = "CrossTable"
