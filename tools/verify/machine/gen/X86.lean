@@ -71,6 +71,8 @@ inductive Instr
   | shl (w : Nat) (dst : Opnd) (n : Nat)
   | shr (w : Nat) (dst : Opnd) (n : Nat)
   | jmp (target : Nat)
+  /-- Any length of NOP: padding before a loop. -/
+  | nop
   | not (w : Nat) (dst : Opnd)
   /-- `lea r32, [base + index + disp]`: arithmetic only, no memory is touched. -/
   | lea32 (dst base index : Reg) (disp : BitVec 64)
@@ -140,7 +142,7 @@ def seen (s : State) : Opnd → List Obs
 def touched (s : State) : Instr → List Obs
   | .mov _ d x | .xor _ d x | .and _ d x | .or _ d x | .add _ d x | .test _ d x | .cmp _ d x => seen s d ++ seen s x
   | .shl _ d _ | .shr _ d _ | .not _ d => seen s d
-  | .rol32 _ _ | .jcc _ _ | .jmp _ | .lea32 _ _ _ _ => []
+  | .rol32 _ _ | .jcc _ _ | .jmp _ | .lea32 _ _ _ _ | .nop => []
   | .ret | .pop _ => [.addr s.rsp]
   | .push _ => [.addr (s.rsp - 8)]
 
@@ -170,6 +172,7 @@ def step (i : Instr) (next : Nat) (s : State) : Option State :=
   -- A shift right's CF is the last bit out: left unmodelled.
   | .shr w d n => do let v := trunc w (← read s w d) >>> n; write { s with zf := some (v == 0), cf := none } w d v
   | .jmp t => some { s with pc := t }
+  | .nop => some s
   | .not w d => do write s w d (~~~ (← read s w d))
   | .lea32 d b i disp => some (s.set d ((s.get b + s.get i + disp) &&& 0xFFFFFFFF))
   -- A rotate leaves ZF alone; CF is the bit rotated in, left unmodelled.

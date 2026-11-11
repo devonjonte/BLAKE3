@@ -79,6 +79,8 @@ class Row:
             self.target = int(a[0].split()[0], 16); self.lean = None
         elif op == "jmp":
             self.target = int(a[0].split()[0], 16); self.lean = None
+        elif op == "nop":
+            self.lean = ".nop"
         elif op == "ret":
             assert not a; self.lean = ".ret"
         elif op in ("push", "pop"):
@@ -347,12 +349,15 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--target", default="x86_64-apple-darwin")
     p.add_argument("--objdump", default="llvm-objdump")
+    p.add_argument("--opt", default="s", help="rustc's opt-level")
+    p.add_argument("--flag", action="append", default=[], help="another flag for rustc, e.g. -Cllvm-args=-unroll-runtime=false")
     p.add_argument("--rust", help="compile this Rust in place of what Lean prints (to test that a wrong printer is caught)")
     a = p.parse_args()
     run = lambda *c, **k: subprocess.run(c, cwd=here, check=True, capture_output=True, text=True, **k).stdout
+    if not a.rust: run("lake", "build", "Fold")
     printed = pathlib.Path(a.rust).read_text() if a.rust else "#![allow(unused_parens)]\n" + run("lake", "env", "lean", "--run", "Lang.lean")
     (here / "gen.rs").write_text(printed)
-    run("rustc", "--edition", "2021", "--target", a.target, "-C", "opt-level=s", "-C", "panic=abort",
+    run("rustc", "--edition", "2021", "--target", a.target, "-C", f"opt-level={a.opt}", *a.flag, "-C", "panic=abort",
         "--crate-type", "lib", "--emit", "obj", "-o", "gen.o", "gen.rs")
     listing = run(a.objdump, "-d", "--x86-asm-syntax=intel", "gen.o")
     (here / "gen.listing").write_text(listing)

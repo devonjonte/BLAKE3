@@ -1,0 +1,37 @@
+rejected	0x1000: .mov 64 (.reg .rax) (.reg .rdi) -> .mov 64 (.reg .rax) (.reg .rsi)
+rejected	0x1003: .mov 32 (.reg .rcx) (.imm 0x2) -> .mov 32 (.reg .rcx) (.imm 0x3)
+rejected	0x1010: .movzx8 .rdi (.mems .rsi .rcx 1 0xFFFFFFFFFFFFFFFE) -> .movzx8 .rdi (.mems .rsi .rcx 1 0xFFFFFFFFFFFFFFFF)
+rejected	0x1018: .shr 32 (.reg .r8) 4 -> .shr 32 (.reg .r8) 5
+rejected	0x101C: .movzx8 .r8 (.memi .r8 .rdx) -> .movzx8 .r8 (.memi .rdi .rdx)
+rejected	0x1021: .mov 8 (.mems .rsp .rcx 2 0xFFFFFFFFFFFFFFBC) (.reg .r8) -> .mov 8 (.mems .rsp .rcx 1 0xFFFFFFFFFFFFFFBC) (.reg .r8)
+rejected	0x1021: .mov 8 (.mems .rsp .rcx 2 0xFFFFFFFFFFFFFFBC) (.reg .r8) -> .mov 8 (.mems .rsp .rcx 2 0xFFFFFFFFFFFFFFBC) (.reg .rdi)
+rejected	0x1026: .and 32 (.reg .rdi) (.imm 0xF) -> .and 32 (.reg .rdi) (.imm 0xE)
+rejected	0x1026: .and 32 (.reg .rdi) (.imm 0xF) -> .or 32 (.reg .rdi) (.imm 0xF)
+rejected	0x102D: .mov 8 (.mems .rsp .rcx 2 0xFFFFFFFFFFFFFFBD) (.reg .rdi) -> .mov 8 (.mems .rsp .rcx 1 0xFFFFFFFFFFFFFFBD) (.reg .rdi)
+rejected	0x1032: .movzx8 .rdi (.mems .rsi .rcx 1 0xFFFFFFFFFFFFFFFF) -> .movzx8 .rdi (.mems .rsi .rcx 1 0xFFFFFFFFFFFFFFFE)
+rejected	0x103A: .shr 32 (.reg .r8) 4 -> .shr 32 (.reg .r8) 5
+rejected	0x103E: .movzx8 .r8 (.memi .r8 .rdx) -> .movzx8 .r8 (.memi .rdi .rdx)
+rejected	0x1043: .mov 8 (.mems .rsp .rcx 2 0xFFFFFFFFFFFFFFBE) (.reg .r8) -> .mov 8 (.mems .rsp .rcx 1 0xFFFFFFFFFFFFFFBE) (.reg .r8)
+rejected	0x1043: .mov 8 (.mems .rsp .rcx 2 0xFFFFFFFFFFFFFFBE) (.reg .r8) -> .mov 8 (.mems .rsp .rcx 2 0xFFFFFFFFFFFFFFBE) (.reg .rdi)
+rejected	0x1048: .and 32 (.reg .rdi) (.imm 0xF) -> .and 32 (.reg .rdi) (.imm 0xE)
+rejected	0x1048: .and 32 (.reg .rdi) (.imm 0xF) -> .or 32 (.reg .rdi) (.imm 0xF)
+rejected	0x104F: .mov 8 (.mems .rsp .rcx 2 0xFFFFFFFFFFFFFFBF) (.reg .rdi) -> .mov 8 (.mems .rsp .rcx 1 0xFFFFFFFFFFFFFFBF) (.reg .rdi)
+rejected	0x1054: .add 64 (.reg .rcx) (.imm 0x2) -> .add 64 (.reg .rcx) (.imm 0x3)
+rejected	0x1054: .add 64 (.reg .rcx) (.imm 0x2) -> .add 64 (.reg .rcx) (.imm 0x4)
+rejected	0x1058: .cmp 64 (.reg .rcx) (.imm 0x22) -> .cmp 64 (.reg .rcx) (.imm 0x23)
+rejected	0x105C: .jcc .ne 0x1010 -> .jcc .e 0x1010
+rejected	0x105E: .mov 32 (.mem .rsp 0xFFFFFFFFFFFFFFBC) (.imm 0x40) -> .mov 32 (.mem .rsp 0xFFFFFFFFFFFFFFBC) (.imm 0x41)
+rejected	0x1066: .mov 32 (.reg .rcx) (.mem .rsp 0xFFFFFFFFFFFFFFFC) -> .mov 32 (.reg .rcx) (.mem .rsp 0xFFFFFFFFFFFFFFFD)
+rejected	0x106D: .loadv 0 (.mem .rsp 0xFFFFFFFFFFFFFFCC) -> .loadv 0 (.mem .rsp 0xFFFFFFFFFFFFFFCD)
+rejected	0x106D: .loadv 0 (.mem .rsp 0xFFFFFFFFFFFFFFCC) -> .loadv 1 (.mem .rsp 0xFFFFFFFFFFFFFFCC)
+rejected	0x1072: .loadv 1 (.mem .rsp 0xFFFFFFFFFFFFFFDC) -> .loadv 1 (.mem .rsp 0xFFFFFFFFFFFFFFDD)
+rejected	0x1072: .loadv 1 (.mem .rsp 0xFFFFFFFFFFFFFFDC) -> .loadv 2 (.mem .rsp 0xFFFFFFFFFFFFFFDC)
+rejected	0x1077: .loadv 2 (.mem .rsp 0xFFFFFFFFFFFFFFEC) -> .loadv 2 (.mem .rsp 0xFFFFFFFFFFFFFFED)
+rejected	0x1077: .loadv 2 (.mem .rsp 0xFFFFFFFFFFFFFFEC) -> .loadv 0 (.mem .rsp 0xFFFFFFFFFFFFFFEC)
+rejected	0x107C: .storev (.mem .rax 0x30) 2 -> .storev (.mem .rax 0x30) 0
+rejected	0x1080: .storev (.mem .rax 0x20) 1 -> .storev (.mem .rax 0x20) 2
+rejected	0x1084: .storev (.mem .rax 0x10) 0 -> .storev (.mem .rax 0x10) 1
+rejected	0x1088: .mov 32 (.reg .rcx) (.mem .rsp 0xFFFFFFFFFFFFFFBC) -> .mov 32 (.reg .rcx) (.mem .rsp 0xFFFFFFFFFFFFFFBD)
+rejected	0x108E: .mov 64 (.reg .rcx) (.mem .rsp 0xFFFFFFFFFFFFFFC0) -> .mov 64 (.reg .rcx) (.mem .rsp 0xFFFFFFFFFFFFFFC1)
+rejected	0x1097: .mov 32 (.reg .rcx) (.mem .rsp 0xFFFFFFFFFFFFFFC8) -> .mov 32 (.reg .rcx) (.mem .rsp 0xFFFFFFFFFFFFFFC9)
+36 changed instructions: 36 rejected

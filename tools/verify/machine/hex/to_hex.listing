@@ -1,0 +1,41 @@
+0000000000000000 <<blake3_servil_core::Hash>::to_hex>:
+       0: 48 89 f8                     	mov	rax, rdi
+       3: b9 02 00 00 00               	mov	ecx, 0x2
+       8: 48 8d 15 00 00 00 00         	lea	rdx, [rip]              # 0xf <<blake3_servil_core::Hash>::to_hex+0xf>
+		000000000000000b:  R_X86_64_PC32	.Lanon.97f7e84ed2f134ab44669e3619439283.40-0x4
+       f: 90                           	nop
+      10: 0f b6 7c 0e fe               	movzx	edi, byte ptr [rsi + rcx - 0x2]
+      15: 41 89 f8                     	mov	r8d, edi
+      18: 41 c1 e8 04                  	shr	r8d, 0x4
+      1c: 45 0f b6 04 10               	movzx	r8d, byte ptr [r8 + rdx]
+      21: 44 88 44 4c bc               	mov	byte ptr [rsp + 2*rcx - 0x44], r8b
+      26: 83 e7 0f                     	and	edi, 0xf
+      29: 0f b6 3c 17                  	movzx	edi, byte ptr [rdi + rdx]
+      2d: 40 88 7c 4c bd               	mov	byte ptr [rsp + 2*rcx - 0x43], dil
+      32: 0f b6 7c 0e ff               	movzx	edi, byte ptr [rsi + rcx - 0x1]
+      37: 41 89 f8                     	mov	r8d, edi
+      3a: 41 c1 e8 04                  	shr	r8d, 0x4
+      3e: 45 0f b6 04 10               	movzx	r8d, byte ptr [r8 + rdx]
+      43: 44 88 44 4c be               	mov	byte ptr [rsp + 2*rcx - 0x42], r8b
+      48: 83 e7 0f                     	and	edi, 0xf
+      4b: 0f b6 3c 17                  	movzx	edi, byte ptr [rdi + rdx]
+      4f: 40 88 7c 4c bf               	mov	byte ptr [rsp + 2*rcx - 0x41], dil
+      54: 48 83 c1 02                  	add	rcx, 0x2
+      58: 48 83 f9 22                  	cmp	rcx, 0x22
+      5c: 75 b2                        	jne	0x10 <<blake3_servil_core::Hash>::to_hex+0x10>
+      5e: c7 44 24 bc 40 00 00 00      	mov	dword ptr [rsp - 0x44], 0x40
+      66: 8b 4c 24 fc                  	mov	ecx, dword ptr [rsp - 0x4]
+      6a: 89 48 40                     	mov	dword ptr [rax + 0x40], ecx
+      6d: 0f 10 44 24 cc               	movups	xmm0, xmmword ptr [rsp - 0x34]
+      72: 0f 10 4c 24 dc               	movups	xmm1, xmmword ptr [rsp - 0x24]
+      77: 0f 10 54 24 ec               	movups	xmm2, xmmword ptr [rsp - 0x14]
+      7c: 0f 11 50 30                  	movups	xmmword ptr [rax + 0x30], xmm2
+      80: 0f 11 48 20                  	movups	xmmword ptr [rax + 0x20], xmm1
+      84: 0f 11 40 10                  	movups	xmmword ptr [rax + 0x10], xmm0
+      88: 8b 4c 24 bc                  	mov	ecx, dword ptr [rsp - 0x44]
+      8c: 89 08                        	mov	dword ptr [rax], ecx
+      8e: 48 8b 4c 24 c0               	mov	rcx, qword ptr [rsp - 0x40]
+      93: 48 89 48 04                  	mov	qword ptr [rax + 0x4], rcx
+      97: 8b 4c 24 c8                  	mov	ecx, dword ptr [rsp - 0x38]
+      9b: 89 48 0c                     	mov	dword ptr [rax + 0xc], ecx
+      9e: c3                           	ret

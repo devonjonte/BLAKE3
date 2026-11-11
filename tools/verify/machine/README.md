@@ -86,8 +86,36 @@ that the compiled bytes compute the Lean function be had without writing it?
   proof, and five stop the lifter at an instruction form it does not know
   (`mutants-20261111.txt`).
 
-Limits: one loop construct and one frame shape; `opt-level=s` (at 3 rustc unrolls these loops by
-four after a remainder loop: the rule would need a four-words-a-turn form, not written); each
+Limits: one loop construct and one frame shape; the build is `opt-level=s`. At `opt-level=3` rustc
+unrolls these loops by four after a remainder loop, which the rule does not cover; at `opt-level=3`
+with `-C llvm-args=-unroll-runtime=false` the loops keep their shape and all eight generated proofs
+check unchanged (`make.py --opt 3 --flag=-Cllvm-args=-unroll-runtime=false`). That flag on the
+library's own Rust changes no machine code that bench-hashes' ten check points run (one machine);
+`opt-level=s` for it makes one of the ten slower by 7% (another machine). Each
 new function needed instruction forms the model lacked (`not`, a three-operand `lea`, a rotation
 by one, R8 and R9: ten minutes); the listing is llvm-objdump's; x86-64 only, though the rule is
 not.
+
+## `hex/`: a function of the public API, with a loop, a table and the red zone
+
+`blake3_servil_core::Hash::to_hex` as rustc 1.99.1 compiled it in the two-crate trial (39
+instructions, 324 executed; `to_hex.listing` is llvm-objdump's, `lift_hex.py` makes `Code.lean`).
+
+- `to_hex_is_hex`: called with the output's address in RDI and the hash's in RSI, the table
+  `0123456789abcdef` where the code's relocation points, the 68 bytes below the stack pointer and
+  the output's 68 bytes owned and apart: it returns with the output's address in RAX, the length
+  64 and `hex` of the 32 bytes in the output, every byte outside the output and the red zone as
+  it was, and an observer's trace `hexLeak`.
+- `the_trace_depends_on_the_hash`: two hashes that differ in a nibble give different traces: the
+  table is read at `table + nibble`. The function is not constant-time in the hash. That matters
+  only where the hash is a secret (a keyed hash's tag before it is compared, a derived key); the
+  upstream library's `to_hex` is the same code. The theorem that states the trace is what shows
+  it.
+- `Regions.lean`: memory kept by region (`over m base inside written`), so a read passes all of a
+  region's writes in one step and a write changes one table. The whole proof is one symbolic run
+  and three closing steps; check 12 s. `python3 mutants.py`: 36 of 36 changed instructions
+  rejected (`mutants-20261111.txt`).
+
+Limits: the loop's count is fixed (sixteen turns), so the run needs no invariant; the table's
+contents and address are hypotheses (the lifter turns the RIP-relative `lea` into a parameter and
+does not read the object's data); the listing is llvm-objdump's.
