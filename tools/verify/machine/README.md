@@ -119,3 +119,23 @@ instructions, 324 executed; `to_hex.listing` is llvm-objdump's, `lift_hex.py` ma
 Limits: the loop's count is fixed (sixteen turns), so the run needs no invariant; the table's
 contents and address are hypotheses (the lifter turns the RIP-relative `lea` into a parameter and
 does not read the object's data); the listing is llvm-objdump's.
+
+## `alg/`: the hasher's stack computes the specification's tree (no code named)
+
+The specification defines the tree from the top (`Blake3.tree`: split at the largest power of
+two below the number of chunks). The crate's `hasher.rs` builds it from the bottom with a stack:
+`push` merges the stack to as many values as the chunk counter has one bits and puts the next
+subtree's chaining value on top; `final_node` folds the last chunk's node into the stack from
+the top. `Stack.lean` (270 lines) states those three functions as Lean functions and proves:
+
+- `stack_is_the_tree`: for any `n ≥ 1` chunks pushed one by one, the final node is
+  `Blake3.tree`'s root;
+- `pushes_give_the_tree`: the same after any run of pushes of whole subtrees of `2^a` chunks
+  where `2^a` divides the chunks so far (what `feed` pushes).
+
+Axioms: `propext`, `Quot.sound`. Check: half a second. `python3 mutants.py`: with any of eight
+wrong definitions (children swapped, a merge one value early or late, a wrong count of bits) the
+proof no longer checks. Nothing in it mentions Rust or machine code: a proof that the compiled
+`merge`, `push` and `final_node` run these functions is what would join it to the code, and is
+not written. Not covered: `final_node`'s case of an empty last chunk; that `subtree_len`'s
+lengths are such powers of two.
