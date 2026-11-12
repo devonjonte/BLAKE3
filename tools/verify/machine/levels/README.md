@@ -14,7 +14,13 @@ was; values are merged as they arrive, so the caller holds back whatever may be 
    third arrives; above the bottom a pair becomes its parent at once, for by then a later value exists.
    So every chunk's value is added, the last too, and `lroot` makes the root by one fold.
 
-3520 bytes against the stack's 1792.
+**Memory** (Sam, November 12: its cost is in lines and pages touched, not in bytes). The levels are 3520
+bytes and the stack 1792: either is within one page if it starts on one. Counted from the layouts, not
+measured: a level is one cache line when the levels start on a 64-byte boundary, so a parent reads one
+line and writes half of another; the stack's values are 32 bytes from byte 32, so every second pair lies
+across two lines. Over 1024 values the levels touch 11 lines (the count's and ten levels), the stack 6
+and its two scratch buffers. All of it stays in the first-level cache in both. Not yet arranged: Ode
+aligns a buffer in a frame to 16 bytes, so `hash2`'s levels are not promised a 64-byte boundary.
 
 ## Tried (Threadripper 7975WX; single runs: inventory, no speed verdict)
 
@@ -51,8 +57,19 @@ What a reader of each design's contracts reads (`reading.py` on Lean's lists, `.
 | only the levels' (the two contracts 19, the levels' layout and counts 23, two words of `Contract` 4, **the specification's tree and output 45**) | 91 |
 
 The 45 lines are the point: the levels' contracts say "the specification's tree"; the stack's say
-"`mergeTo`", and that the stack makes the tree is other theorems (`stack_is_the_tree`,
-`Add.keeps_the_tree`: 139 lines to read on their own) and the caller's business.
+"`mergeTo`". So the 186 and the 228 are not like for like. A reader who wants to know that the stack
+makes BLAKE3's tree must also read the statement that says so (`Blake3.stack_is_the_tree`):
+
+| to know "this makes the specification's tree" | lines |
+|---|---|
+| the stack's three contracts and `stack_is_the_tree` | 225 |
+| the levels' two contracts | 228, of which 14 go further than the stack's (the root's output bytes) |
+
+And on the stack's side two things are then still in no statement: that the caller passes the count's
+one bits as `target` and holds back the last chunk, and the fold that makes the root (code inside
+`hash`). Neither count matters to a reader of the user's contract once the whole hash is proved: that
+reader reads `Hash.byteContract`'s list and no inner contract. These lines are what a maintainer or an
+auditor of the part reads.
 
 ## What the two share, and what they do not
 
