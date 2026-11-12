@@ -1,5 +1,5 @@
 name = "arm"
-defaultTargets = ["Quiet_hex_neon", "HexNeonRun", "Proof_hex_neon", "HexNeonBytes"]
+defaultTargets = ["Quiet_hex_neon", "HexNeonRun", "Proof_hex_neon", "HexNeonBytes", "Proof_push_arm"]
 
 # Google DeepMind's AArch64 model and proof library (Apache-2.0), unchanged, at a named commit.
 [[require]]
@@ -35,3 +35,9 @@ name = "HexNeonRun"
 
 [[lean_lib]]
 name = "HexNeonBytes"
+
+[[lean_lib]]
+name = "PushCells"
+
+[[lean_lib]]
+name = "Proof_push_arm"

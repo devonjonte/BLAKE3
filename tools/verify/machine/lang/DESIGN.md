@@ -249,11 +249,15 @@ logic assertion of theirs. To write `push`, `merge` and `add` once for both:
   their `read8` under a permission, or a `SepProp` built from the window), and what `keeps`, `turns` and
   `fills` mean there. `Abi.Contract` itself needs only the pieces, so it can live in `spec/` too, with
   `Abi.Meets` given per machine: ours as it is, theirs by `subroutine_ok`.
-- The compiler then has two printers for word-level code (x86-64 exists; AArch64 is to write) and two
-  proof generators (ours over `Cells.lean`; theirs over their `wp_*` tactics, which today's kernel proof
-  shows step our code without change), and one source.
+- The compiler then has two printers for word-level code and two proof generators (ours over
+  `Cells.lean`; theirs over their `wp_*` tactics), and one source.
 
-Not started. The kernel `hex_neon` did not need it because its contract's data is a list of bytes.
+Started from the other end (November 12): the source's `push` is printed for AArch64 by a trial printer
+(`odec.py … aarch64-fn`, straight-line functions) and proved on Google's model by their tactics alone,
+with nothing written for the proof (`../arm/prove_arm_fn.sh`): so the printer and the generator are the
+small part. What is missing is the contract: on AArch64 `push` is proved against a statement about cells
+(`PushCells.lean`), because `Push.contract` speaks of the x86-64 model's memory. The layouts are the work.
+The kernel `hex_neon` did not need it because its contract's data is a list of bytes.
 
 ## No code the proof shows is never reached
 

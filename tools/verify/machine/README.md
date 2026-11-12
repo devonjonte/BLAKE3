@@ -473,6 +473,13 @@ threads) and checks everything; then the audit runs.
   a general register, a branch, an indexed load), three weaker statements and one blind observer: 7 of
   7 refused.
 - `Observer.lean`, `WpKernel.lean`, `KernelAttr.lean`: written once for all kernels.
+- **`./prove_arm_fn.sh push`: a word-level function on both architectures from one source function.**
+  `odec.py … aarch64-fn push` is a second printer (a trial: straight-line functions that call nothing): the
+  `push` of `lang/hasher.ode`, whose x86-64 code `push_meets` is about, printed for AArch64 (18
+  instructions) and proved on Google's model: `push_arm_ok` (`Proof_push_arm.lean`, generated; their
+  tactics alone; Lean's three axioms; one second). Its contract there is in cells (`PushCells.lean`: the
+  count goes up by one, the two vectors are copied to the next place), not yet `Push.contract`: the
+  contracts must first name no machine (`lang/DESIGN.md`).
 
 `spec/HexText.lean` (16 lines, Lean's core library only) is the hexadecimal itself, `Hex.char` and
 `Hex.text`: the one specification both architectures' contracts name.

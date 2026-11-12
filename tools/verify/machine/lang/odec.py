@@ -474,9 +474,62 @@ def kernel_aarch64(src, name):
             + "".join(("" if x.endswith(":") else "        ") + x + "\n" for x in ins))
 
 
+def fn_aarch64(src, name):
+    """A word-level function of the source as AArch64 assembly: a second printer, for straight-line functions
+    that call nothing (a trial: loads, stores, copies of 32 bytes, arithmetic). Parameters stay in X0..X5,
+    locals take X9..X15, expressions are computed in X16, X17 and X8, left to right; nothing is optimised."""
+    source, _, _ = kernels(contracts_of(open(src).read())[2])
+    P = Parser(tokens(source)); P.top()
+    low = Lower(P)
+    fdef = next(f for f in P.fns if f[0] == name)
+    fn = {"params": fdef[1], "locals": [], "bufs": [], "externs": [], "ret": ("const", 0)}
+    body = low.stmts(fdef[4], {}, fn)
+    assert not fn["bufs"] and len(fn["params"]) <= 6 and len(fn["locals"]) <= 7, "the AArch64 trial printer: no buffers, at most seven locals"
+    home = {x: f"x{i}" for i, x in enumerate(fn["params"])}
+    home.update({x: f"x{9 + i}" for i, x in enumerate(fn["locals"])})
+    temps, out = ["x16", "x17", "x8"], []
+
+    def ev(e, d):
+        """The value of e into temps[d]."""
+        t_, k = temps[d], e[0]
+        if k == "const":
+            assert e[1] < 65536, "a constant of 16 bits"; out.append(f"mov {t_}, #{e[1]}")
+        elif k == "var": out.append(f"mov {t_}, {home[e[1]]}")
+        elif k == "load":
+            ev(e[2], d); out.append({64: f"ldr {t_}, [{t_}]", 32: f"ldr w{t_[1:]}, [{t_}]", 8: f"ldrb w{t_[1:]}, [{t_}]"}[e[1]])
+        elif k in ("shl", "shr"):
+            ev(e[1], d); out.append(f"{'lsl' if k == 'shl' else 'lsr'} {t_}, {t_}, #{e[2]}")
+        else:
+            ev(e[1], d); ev(e[2], d + 1)
+            out.append(f"{dict(add='add', sub='sub', **{'and': 'and', 'or': 'orr'})[k]} {t_}, {t_}, {temps[d + 1]}")
+
+    for s in body:
+        k = s[0]
+        if k == "set": ev(s[2], 0); out.append(f"mov {home[s[1]]}, x16")
+        elif k == "store":
+            ev(s[3], 0); ev(s[2], 1)
+            out.append({64: "str x16, [x17]", 32: "str w16, [x17]", 8: "strb w16, [x17]"}[s[1]])
+        elif k == "copy":
+            assert s[1] % 32 == 0, "a copy of a multiple of 32 bytes"
+            ev(s[3], 0); ev(s[2], 1)
+            for i in range(s[1] // 32):
+                out += [f"ldp q0, q1, [x16, #{32 * i}]", f"stp q0, q1, [x17, #{32 * i}]"]
+        else:
+            sys.exit(f"{name}: the AArch64 trial printer has no `{k}` yet")
+    if fn.get("returns"): ev(fn["ret"], 0); out.append("mov x0, x16")
+    out.append("ret")
+    return ("// Printed by odec.py from " + src.split("/")[-1] + ". Not written or edited by hand.\n"
+            "#if defined(__ELF__) && defined(__linux__)\n.section .note.GNU-stack,\"\",%progbits\n#endif\n"
+            "        .text\n        .balign 4\n"
+            f"#ifdef __APPLE__\n        .globl  _b3l_{name}\n_b3l_{name}:\n#else\n        .globl  b3l_{name}\n"
+            f"        .type   b3l_{name}, %function\nb3l_{name}:\n#endif\n" + "".join("        " + x + "\n" for x in out))
+
+
 def main():
     if len(sys.argv) == 4 and sys.argv[2] == "aarch64":
         sys.stdout.write(kernel_aarch64(sys.argv[1], sys.argv[3])); return
+    if len(sys.argv) == 4 and sys.argv[2] == "aarch64-fn":
+        sys.stdout.write(fn_aarch64(sys.argv[1], sys.argv[3])); return
     src, out = sys.argv[1], sys.argv[2]
     source, data, kerns = kernels(contracts_of(open(src).read())[2])
     p = Parser(tokens(source)); p.top()

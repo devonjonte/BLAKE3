@@ -5,3 +5,4 @@ lake-manifest.json
 build.log
 again/
 t
+build-*.log
