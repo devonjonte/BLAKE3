@@ -285,6 +285,36 @@ The invariant needs no witness of its own: `enter` proves it is reached.
 - Only Lean's three standard axioms. (Today: 547 of `bv_decide`'s as well. They are to go.)
 - Lean should read the object's bytes itself. (Today the lifter and llvm-objdump are trusted for that.)
 
+### The lists on November 12, in layers
+
+Lines a reader must read to know what each theorem says (`#reading_list`), by who else reads them too:
+
+| theorem | all | the machine and what "meets" means | the specification | the data in memory | this function: contract, instructions |
+|---|---|---|---|---|---|
+| `hex_meets` (x86-64) | 513 | 446 (machine 336, `Abi` 66, observer 40, 4) | 5 (`HexText`) | 6 | 8, 48 |
+| `push_meets` | 481 | 417 (machine 343, `Abi` 68, 6) | 6 | 17 | 9, 32 |
+| `merge_meets` | 838 | 417 | 112 (BLAKE3 100, `mergeTo` 9, 3) | 17 | 15, 102 and the two kernels' 175 |
+| `merge_sse_meets` | 827 | 417 | 112 | 17 | 15, 91 and 175 |
+| `add_meets` | 902 | 417 | 112 | 17 | 15 (`Add.contract`, `Merge.result`), 39 and its callees' 127 and 175 |
+| `hex_neon_bytes_ok` (AArch64) | 6,126 | 6,106 (Google's trusted model) | 5 (`HexText`) | | 12, 3 |
+| `hex_neon_quiet` | 7,677 | 7,629 (the same, and 1,400 of system calls that `execInst` carries) | | | 46 (our observer), 2 |
+
+What the table says:
+
+- **A caller costs its reader its own contract and instructions, and no callee's contract.** `add_meets`
+  is `merge_meets` and 64 lines: `Add.contract` (10), `add`'s instructions (39), `push`'s (29), less
+  `Merge.contract` itself, which `add`'s reader never reads (only `Merge.result`, which `Add.contract`
+  names). `Push.contract` is not on the list at all. An internal contract is read by maintainers.
+- **Instructions are most of what is specific to a function**, and they are the lifter's reading of the
+  object, not checked by Lean on x86-64. On AArch64 they are 32 words in one line: Google's decoder is
+  in the model. That is the case for a decoder of our own, or for their kind of model, on x86-64.
+- **Google's model is twelve times ours to read, and it is not ours alone**: the same 6,106 lines stand
+  under their Signal verification. Ours (417 lines) stands under nothing but this library. A reader who
+  has read theirs for another reason reads 20 lines for our theorem.
+- The kernels' instructions (175 lines) are on every list that reaches a kernel: with the kernels
+  proved against contracts of their own (they are: `Kernels.lean`), a caller's list should name the
+  kernel's contract and not its instructions. Not done: `Code_merge.prog` holds them, so they count.
+
 ## Share what can be shared
 
 Machine models are trusted, so they are worth sharing with everyone who needs one. For AArch64 use the
