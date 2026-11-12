@@ -256,6 +256,18 @@ compiler does not yet do it:
 - Both codes are printed from the one function `push` of `hasher.ode` (`odec.py … aarch64-fn` is the
   second printer, a trial for straight-line functions).
 
+What a reader reads (`#reading_list`, lines):
+
+| | `push_meets_bytes` (x86-64) | `push_arm_meets` (AArch64) |
+|---|---|---|
+| shared by both: the contract and its data (`Contract` 28, `StackBytes` 17, `PushContract` 8, the specification's types 3) | 56 | 56 |
+| what meeting a contract means on this machine | 76 (`Abi` 57, `AbiBytes` 14, 5 small) | 21 (`ArmAbi`) |
+| the machine model | 343 | 6,113 (Google's, shared with their Signal work) |
+| the code | 31 | 3 (the words; Lean decodes them) |
+| total | 508 (`push_meets`, in the model's own cells: 480) | 6,193 |
+
+Of what is written for `push` itself a reader reads eight lines, once, for both architectures.
+
 What it took, and what it shows:
 
 - On x86-64 the existing proof was kept: `Stack.At_iff_bytes` (`StackAsBytes.lean`, by hand, 227 lines
