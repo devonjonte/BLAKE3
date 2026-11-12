@@ -147,6 +147,16 @@ result compared with the contract, read in parts by `#pieces`: eight examples in
 stack of 55 values (28,381 instructions). An example that breaks the contract is run through the source's
 meaning (`Sem.lean`) as well, which says whether the source and contract or the compiler's code is at
 fault. A contract none of whose examples meets it is refused. A test by running, not a proof.
+**An audit for any function (`python3 mutants_code.py NAME`, November 12):** each instruction in turn is
+made a no-op; the proof must refuse, and the examples say first whether they see it. The control is an
+unchanged copy, checked again. `push`: 26 of 27 refused (all 26 seen by an example too). `add`: 29 of 31
+refused. The three accepted are instructions the contracts do not need: `mov rax, 0` at the end of each
+(their contracts promise nothing of the result), and in `add` a `mov rdi, rbx` when RDI still holds that
+value. Dead code the compiler should not emit. Three of `add`'s that the proof refuses the examples do
+not see, and each is the point of a contract: without the reload of RDI after `push` returns, `add`
+still works with this `push`, which happens to leave RDI alone; its contract does not promise that, so
+the proof does not accept it.
+
 **Every contract can be used (November 12).** `Abi.Contract.Usable` (some stack and memory give the
 contract all it asks) and `Usable.lean`: `Merge.usable`, `Push.usable`, `Add.usable`, `Hex.usable`, each
 proved on an empty stack and zeroes. `prove_fn.sh` refuses a function whose contract has no such theorem.
