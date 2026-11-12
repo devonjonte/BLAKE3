@@ -152,8 +152,21 @@ Examples belong to a contract (`Example_merge.lean` for `Merge.contract`): every
 is tried on them, `merge_sse` as `merge`. `add`'s examples run through its calls (a few hundred to a
 thousand instructions); to the source's meaning, when blame is asked, a call is the callee's own source.
 
-Not yet: a call's result used by the caller; calls inside loops or under conditions; the budget read
-from the callee's contract instead of written beside it; the callee line generated from what was built.
+**A loop that calls** (`merge_steps`): `merge` a third way, one level at a time, each turn a call of
+`merge` with a target one less than the count. Its invariant is `merge`'s own; a turn's proof is the
+call rule and three lemmas about the specification (merging to a target and then to a smaller one is
+merging to the smaller one). The generator needed nothing new for it but to let a call stand in a
+loop's turn: proved on its first run, 38 instructions, its examples through up to 30,592.
+
+**Stack budgets add up, and so a contract's budget says who can implement it.** `merge_steps` does what
+`Merge.contract` says, word for word, and cannot meet it: the contract gives 256 bytes of stack, and a
+function that calls `merge` needs `merge`'s 256, a return address and its own frame. Its contract
+(`MergeSteps.contract`) is the same text with 512. A budget is part of what a caller relies on, so it
+belongs in the contract; but it is the one line of a contract that depends on how the function is
+built. To think about: a budget stated as "what the code needs", derived, with the contract naming it.
+
+Not yet: a call's result used by the caller; calls under conditions; the budget read from the callee's
+contract instead of written beside it; the callee line generated from what was built.
 
 ## A requirement is stated once; proved where it can be, tested where it cannot
 

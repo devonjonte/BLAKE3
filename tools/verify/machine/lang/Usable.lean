@@ -1,5 +1,6 @@
 import Abi
 import Spec_merge
+import Spec_mergesteps
 import Spec_push
 import Spec_add
 import Spec_hex
@@ -32,6 +33,13 @@ theorem Merge.usable : (Merge.contract 0x100000#64 0x200000#64 0#64 5#64 1#64 ze
   · simp only [Merge.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, Abi.AllApart, Abi.Apart]; decide
   · simp only [Merge.contract]; decide
   · simp only [Merge.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
+    exact ⟨zeroMem_stack _, zeroMem_cv _⟩
+
+theorem MergeSteps.usable : (MergeSteps.contract 0x100000#64 0x200000#64 0#64 5#64 1#64 zeroCv []).Usable := by
+  refine ⟨0x7ff00000#64, zeroMem, zeroMem_region _ _, ?_, ?_, ?_⟩
+  · simp only [MergeSteps.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, Abi.AllApart, Abi.Apart]; decide
+  · simp only [MergeSteps.contract]; decide
+  · simp only [MergeSteps.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
     exact ⟨zeroMem_stack _, zeroMem_cv _⟩
 
 theorem Push.usable : (Push.contract 0x100000#64 0x200000#64 zeroCv []).Usable := by

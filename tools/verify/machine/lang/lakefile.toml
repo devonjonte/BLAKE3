@@ -95,3 +95,15 @@ name = "Checked_merge_sse"
 name = "Example_add"
 [[lean_lib]]
 name = "Usable"
+[[lean_lib]]
+name = "Spec_mergesteps"
+[[lean_lib]]
+name = "Lemmas_merge_steps"
+[[lean_lib]]
+name = "Code_merge_steps"
+[[lean_lib]]
+name = "Proof_merge_steps"
+[[lean_lib]]
+name = "Example_mergesteps"
+[[lean_lib]]
+name = "Checked_merge_steps"

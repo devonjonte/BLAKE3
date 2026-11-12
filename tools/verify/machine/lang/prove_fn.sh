@@ -37,7 +37,7 @@ targets="Proof_$name"
 if [ "$checked" = 1 ]; then
   at=$(python3 -c "import re,sys; print(hex(int(sys.argv[2],0)+int(next(re.match(r'^([0-9a-f]+) <'+sys.argv[3]+'>:',l).group(1) for l in open(sys.argv[1]) if re.match(r'^[0-9a-f]+ <'+sys.argv[3]+'>:',l)),16)))" "$name.listing" "$base" "b3l_${name}_checked")
   python3 ../one/lift_one.py "$name.listing" "b3l_${name}_checked" "$at" "Lifted_${name}_checked.lean" "Lifted_${name}_checked" --call "b3l_$name=$base"
-  python3 gen_code.py "$name" "Lifted_$name.lean.rows" "Code_$name.lean" "Lifted_${name}_checked.lean.rows"
+  python3 gen_code.py "$name" "Lifted_$name.lean.rows" "Code_$name.lean" "Lifted_${name}_checked.lean.rows" $withs
   python3 check_fn.py proof hasher.ode "$name" "$name.checks" "Lifted_${name}_checked.lean.rows" "$base" "Checked_$name.lean"
   targets="Proof_$name Checked_$name"
 else

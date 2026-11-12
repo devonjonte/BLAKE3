@@ -143,6 +143,31 @@ fn add(st, key, flags, plat, cv, target)
     with k; (new :: cvs)
 }
 
+// merge a third way: one level at a time, each by a call of merge with a target one less than the count.
+// It meets what Merge.contract says, with more stack (MergeSteps.contract): a loop that calls a function of
+// ours by its contract, whatever code meets it.
+fn merge_steps(st, key, flags, plat, target)
+  meets MergeSteps.contract(k: Blake3.CV, cvs: List Blake3.CV)
+  uses Lemmas_merge_steps
+  leave by Merge.exit
+{
+  var len = u64[st]
+  while target < len
+    ghost now: List Blake3.CV
+    invariant Stack.At(st, now)
+    invariant len == Stack.count(now)                                                     by MergeSteps.count
+    invariant Merge.result(k, flags, target, now) == Merge.result(k, flags, target, cvs)  by MergeSteps.result
+    invariant Cv.At(key, k)
+    decreases len
+  {
+    len = len - 1
+    merge(st, key, flags, plat, len)
+      with k; now
+      keep Cv.At(key, k)
+  }
+  return len
+}
+
 def hex_digit(n) = n + 48 + ((0 - ((n + 6) >> 4)) & 39)
 
 // The 64 hexadecimal characters of the 32 bytes at hash, written at out. No address and no

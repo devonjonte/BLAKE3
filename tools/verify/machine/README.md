@@ -147,6 +147,14 @@ result compared with the contract, read in parts by `#pieces`: eight examples in
 stack of 55 values (28,381 instructions). An example that breaks the contract is run through the source's
 meaning (`Sem.lean`) as well, which says whether the source and contract or the compiler's code is at
 fault. A contract none of whose examples meets it is refused. A test by running, not a proof.
+**`merge_steps` (November 12): a loop that calls a function by its contract.** `merge` a third way: one
+level at a time, each turn a call of `merge` with a target one less than the count.
+`./prove_fn.sh merge_steps 0xA0000`: its examples meet the contract through the calls (up to 30,592
+instructions); `merge_steps_meets : ∀ …, Abi.Meets Code_merge_steps.prog 0xA0000 (MergeSteps.contract …)`,
+generated, checked on the generator's first run. `MergeSteps.contract` is `Merge.contract`'s text with 512
+bytes of stack in place of 256: a function that calls `merge` cannot fit in `merge`'s own budget.
+Lemmas by hand: `Lemmas_merge_steps.lean` (80 lines: merging in steps is merging).
+
 **An audit for any function (`python3 mutants_code.py NAME`, November 12):** each instruction in turn is
 made a no-op; the proof must refuse, and the examples say first whether they see it. The control is an
 unchanged copy, checked again. Its first run accepted three: `mov rax, 0` at the end of `push` and of
