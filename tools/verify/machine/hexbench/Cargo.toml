@@ -1,0 +1,15 @@
+[package]
+name = "hexbench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# The library at the commit to compare with, checked out beside this repository as `crate`
+# (a pinned-run job does that; see hex-speed.sh in the study).
+[dependencies]
+blake3 = { package = "blake3-servil", path = "../../../../../crate" }
+
+[build-dependencies]
+cc = "1"
+
+[workspace]
