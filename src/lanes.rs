@@ -990,6 +990,7 @@ pub(crate) mod sources {
 
         /// Write `task` to the ring and make it visible (the SME2 thread
         /// woken for it where there is one).
+        #[inline(always)]
         fn push(&self, task: Task) {
             let p = self.finish.published.load(Ordering::Relaxed);
             // Every build: a task written over one not yet taken would be
