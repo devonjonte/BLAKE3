@@ -33,6 +33,7 @@ for line in out.splitlines():
     elif line.startswith("accepts "): accepts = line[8:]
     elif line.startswith(("read |", "update |")): pieces.append([x.strip() for x in line.split("|")])
     elif line.startswith("returns "): returns = [x.strip() for x in line[8:].split("|", 1)]
+if returns and not re.fullmatch(r"[A-Za-z_]\w*", returns[0]): returns[0] = "result_"     # `fun _ => ...`: a name Lean made up
 assert params and accepts is not None and returns, f"could not read {CNAME}:\n{out}"
 sample = lambda layout: re.sub(r"\.layout$", ".sample", layout)
 q = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')

@@ -67,3 +67,13 @@ name = "BytesLemmas"
 name = "Lemmas_hex"
 [[lean_lib]]
 name = "Meets_hex"
+[[lean_lib]]
+name = "Spec_push"
+[[lean_lib]]
+name = "Lemmas_push"
+[[lean_lib]]
+name = "Code_push"
+[[lean_lib]]
+name = "Proof_push"
+[[lean_lib]]
+name = "Example_push"

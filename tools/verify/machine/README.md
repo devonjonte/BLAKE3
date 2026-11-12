@@ -147,6 +147,12 @@ result compared with the contract, read in parts by `#pieces`: eight examples in
 stack of 55 values (28,381 instructions). An example that breaks the contract is run through the source's
 meaning (`Sem.lean`) as well, which says whether the source and contract or the compiler's code is at
 fault. A contract none of whose examples meets it is refused. A test by running, not a proof.
+**`push` (November 12): a function with no loop.** `Spec_push.lean`: `Push.contract` (the value at `cv`
+becomes the newest of a stack of fewer than 55). `./prove_fn.sh push 0x70000`: three examples meet the
+contract and a full stack is not one (2 s); `push_meets : ∀ st cv new cvs, Abi.Meets Code_push.prog
+0x70000 (Push.contract st cv new cvs)` checked in 13 s, on the generator's first run. 27 instructions;
+reading list 480 lines (the contract 9, the instructions 31). Lemmas by hand: `Lemmas_push.lean` (35 lines).
+
 **`hex` against its contract, quietly (November 12).** `Spec_hex.lean` is what is claimed: `Hex.contract`
 (the 64 bytes at `out` become the hexadecimal of the 32 at `hash`; nothing else changes; no stack).
 `Meets_hex.lean`: **`hex_meets : ∀ out inp, Abi.MeetsQuietly Code_hex.prog 0x50000 (Hex.contract out inp)`**:

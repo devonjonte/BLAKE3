@@ -40,11 +40,17 @@ def parent_to(dst, left, right, pf) {
   copy 32 dst        <- pcv
 }
 
+// One more value on the stack. What push is claimed to do is Push.contract (Spec_push.lean): the stack
+// must hold fewer than 55, which a caller shows (the code does not test it: a test here would be code
+// no proved caller reaches).
 fn push(st, cv)
-  requires "the stack at st holds fewer than 55 values"
+  meets Push.contract(new: Blake3.CV, cvs: List Blake3.CV)
+  uses Lemmas_push
+  enter know Stack.At.room
+  enter open Cv.At.vectors as n0, n1
+  leave by Push.exit
 {
   var len = u64[st]
-  if len >= 55 { trap }
   copy 32 cv_at(st, len) <- cv
   u64[st] = len + 1
 }

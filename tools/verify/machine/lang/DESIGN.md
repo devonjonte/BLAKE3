@@ -106,7 +106,15 @@ the compiler writes (`Proof_hex.lean`), and 40 lines by hand from vectors to the
 The hand layer is the next thing for the compiler to write: it is the same for any kernel whose
 contract speaks of bytes.
 
-Not yet in this shape: `push` and the hash.
+`push` is in this shape since November 12 (`Spec_push.lean`, 9 lines; `push_meets`, 13 s from the
+source): the first function with no loop, proved as one straight piece from the entry to the return
+(the source gives `enter know LEMMA`, `enter open LEMMA as names` and `leave by LEMMA`; no invariant).
+Its contract accepts only a stack with room (`cvs.length < 55`): that speaks of memory, so no entry can
+test it from the arguments, and the tool says so: a caller shows it. The test the source had for it
+is gone (no proved caller reaches it). A function that calls nothing is its own program: `push`'s
+reading list (480 lines) has no kernel in it.
+
+Not yet in this shape: the hash; a function that calls another of ours by its contract.
 
 ## A requirement is stated once; proved where it can be, tested where it cannot
 

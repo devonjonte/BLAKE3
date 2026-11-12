@@ -18,3 +18,8 @@ Lifted_merge.lean
 Lifted_merge.lean.rows
 Lifted_merge_checked.lean
 Lifted_merge_checked.lean.rows
+Lifted_push*
+Try_*.lean
+*.pieces.lean
+*.checks.lean
+*.try.build.log

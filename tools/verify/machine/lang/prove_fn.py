@@ -58,8 +58,9 @@ body = low.stmts(fdef[4], {}, fn)
 params = fdef[1]
 head = clauses[name]["head"]
 loops = clauses[name]["loops"]
-assert len(loops) == 1, "one loop, for now"
-loop = loops[0]
+assert len(loops) <= 1, "one loop at most, for now"
+STRAIGHT = not loops                     # no loop: one straight-line piece from the entry to the return
+loop = loops[0] if loops else []
 sym_extern = {symbol: ext for ext, (symbol, _) in P.externs.items()}
 
 # ---------------------------------------------------------------- the layout
@@ -96,8 +97,8 @@ rows = [l.rstrip("\n").split("\t") for l in open(rows_path)]
 code = {int(a, 16): (ins, int(n, 16)) for a, n, ins in rows}
 ENTRY = int(rows[0][0], 16)
 back = [(int(a, 16), int(re.search(r"0x([0-9A-F]+)", ins).group(1), 16)) for a, n, ins in rows if ins.startswith(".jmp") and int(re.search(r"0x([0-9A-F]+)", ins).group(1), 16) <= int(a, 16)]
-assert len(back) == 1, "one loop"
-HEAD = back[0][1]
+assert len(back) == (0 if STRAIGHT else 1), "one loop"
+HEAD = back[0][1] if back else None
 JUMP = re.compile(r"\.(jae|jne|je|jmp|call) 0x([0-9A-F]+)")
 
 
@@ -232,16 +233,17 @@ mm = re.match(r"^([\w.]+)\((.*)\)$", one(head, "meets", "the function must name 
 CNAME, fn_ghosts = mm.group(1), binders(mm.group(2))
 uses = [u.strip() for w, rest in head if w == "uses" for u in rest.split(",")]
 LEAVE = re.match(r"^by\s+([\w.]+)$", one(head, "leave", "the function must name the lemma that gives its ensures when the loop ends: leave by LEMMA")).group(1)
-enter_opens = [re.match(r"^open\s+([\w.]+)\s+as\s+(.*)$", rest).groups() for w, rest in head if w == "enter"]
+enter_opens = [re.match(r"^open\s+([\w.]+)\s+as\s+(.*)$", rest).groups() for w, rest in head if w == "enter" and rest.startswith("open")]
+enter_knows = [re.match(r"^know\s+([\w.]+)$", rest).group(1) for w, rest in head if w == "enter" and rest.startswith("know")]
 loop_ghosts = [b for w, rest in loop if w == "ghost" for b in binders(rest)]
 invariants = [split_by(rest) for w, rest in loop if w == "invariant"]
-decreases = one(loop, "decreases", "the loop must say what gets smaller: decreases VARIABLE")
+decreases = None if STRAIGHT else one(loop, "decreases", "the loop must say what gets smaller: decreases VARIABLE")
 opens = [re.match(r"^([\w.]+)\s+as\s+(.*)$", rest).groups() for w, rest in loop if w == "open"]
 asserts = [rest for w, rest in loop if w == "assert"]
 
 # where the loop is in the function
-wi = next(i for i, s in enumerate(body) if s[0] == "while")
-before, wcond, wbody, after = body[:wi], body[wi][1], body[wi][2], body[wi + 1:]
+wi = next((i for i, s in enumerate(body) if s[0] == "while"), len(body))
+before, wcond, wbody, after = body[:wi], (body[wi][1] if wi < len(body) else None), (body[wi][2] if wi < len(body) else []), body[wi + 1:]
 
 
 def sets(ss):
@@ -275,7 +277,7 @@ for s_ in wbody:
     for x in changed:
         if x in first_use or not mentions(s_, x): continue
         first_use[x] = "set" if (s_[0] == "set" and s_[1] == x and x not in reads(s_[2])) else "read"
-live = {x for x in changed if x in reads(wcond[1]) | reads(wcond[2]) | reads(fn["ret"]) or first_use.get(x) == "read"}
+live = {x for x in changed if x in (reads(wcond[1]) | reads(wcond[2]) if wcond else set()) | reads(fn["ret"]) or first_use.get(x) == "read"}
 for x in live: assert slot_of(x) is None, f"{x} changes in the loop and lives in the frame: not yet"
 # a variable set before the loop and not in it: the invariant must say what it is (`invariant x == E`)
 frozen = {}
@@ -285,7 +287,7 @@ for cl, _ in invariants:
     m = re.match(r"^(\w+)\s*==\s*(.*)$", cl)
     if m and m.group(1) in fn["locals"] and m.group(1) not in changed:
         frozen[m.group(1)] = Clause(m.group(2)).expr(base_env, "?")
-for x in sets(before): assert x in frozen or x in changed, f"the invariant must say what {x} is (invariant {x} == ...)"
+for x in ([] if STRAIGHT else sets(before)): assert x in frozen or x in changed, f"the invariant must say what {x} is (invariant {x} == ...)"
 inv_user = [(cl, by) for cl, by in invariants if not (re.match(r"^(\w+)\s*==", cl) and re.match(r"^(\w+)", cl).group(1) in frozen)]
 
 
@@ -314,7 +316,7 @@ param_slot = [(p, slot_of(p)) for p in params if slot_of(p) is not None]
 unpushed = [r for r in CALLEE_SAVED if r not in saved]
 
 # (text, how it is proved of a state that was run to, its name when the invariant is taken apart)
-inv_fixed = [f"s.pc = 0x{HEAD:X}", f"s.rsp = {at(C0)}"] + [f"s.{r} = {p}" for p, r in param_reg] + [f"s.{r} = sv.{r}" for r in unpushed]
+inv_fixed = [f"s.pc = 0x{HEAD or 0:X}", f"s.rsp = {at(C0)}"] + [f"s.{r} = {p}" for p, r in param_reg] + [f"s.{r} = sv.{r}" for r in unpushed]
 inv_mem = [(f"Region s.mem fb {F}#64", "mem_region", "hF"), (f"Quad s.mem (fb + {F}#64) ra", "mem_fact", "hRa")] + \
     [(f"Quad s.mem (fb + {F - 8 * (i + 1)}#64) sv.{r}", "mem_fact", f"hS{i}") for i, r in enumerate(saved)] + \
     [(f"Quad s.mem {at(o)} {p}", "mem_fact", f"hPs{i}") for i, (p, o) in enumerate(param_slot)] + \
@@ -334,10 +336,11 @@ L = ["import Cells", "import Kernels", "import AbiProof", f"import Spec_{name}"]
      f"Written by prove_fn.py from {src.split('/')[-1]} and the compiler's layout; not edited by hand, and not to be read",
      f"but for its last theorem's statement: Lean checks the rest. The frame: {F} bytes below the stack pointer at entry",
      f"(`fb` is its lowest address), the caller's {', '.join(saved)} at its top.", "-/", "",
-     f"namespace Proof_{name}", "", "set_option maxRecDepth 1000000", "set_option maxHeartbeats 0", "set_option linter.unusedVariables false", "",
-     f"/-- What holds each time the loop's head is reached: the source's `invariant` clauses, each variable where the",
-     f"compiler keeps it, and the frame as the compiler keeps it. -/",
-     f"def Inv {ARGDECL} (s : State) : Prop :=\n  " + " ∧\n  ".join(inv_fixed + [c for c, _, _ in inv_mem]) + " ∧\n  " + (f"∃ {ex}, " if ex else "") + inv_inner, ""]
+     f"namespace Proof_{name}", "", "set_option maxRecDepth 1000000", "set_option maxHeartbeats 0", "set_option linter.unusedVariables false", ""]
+if not STRAIGHT:
+    L += [f"/-- What holds each time the loop's head is reached: the source's `invariant` clauses, each variable where the",
+          f"compiler keeps it, and the frame as the compiler keeps it. -/",
+          f"def Inv {ARGDECL} (s : State) : Prop :=\n  " + " ∧\n  ".join(inv_fixed + [c for c, _, _ in inv_mem]) + " ∧\n  " + (f"∃ {ex}, " if ex else "") + inv_inner, ""]
 
 STATE = lambda names: "⟨" + ", ".join(names) + f", zf, cf, {', '.join(XS.split())}, mem, pc⟩"
 INTROS = "intro rax' rcx' rdx' rsi' rdi' r8' r9' zf' cf' y0 y1 y2 y3 y4 y5 y6 y7 y8 y9 y10 y11 y12 y13 y14 y15"
@@ -444,6 +447,46 @@ def open_with(lemma, names, mem, i, ind):
     return [f"{ind}have_by hO{i} := {lemma} (m := {mem})", f"{ind}obtain ⟨{names}, hO{i}⟩ := hO{i}", f"{ind}try norm_addr at hO{i}", f"{ind}split_ands hO{i}"] + \
         [f"{ind}try subst {g}" for g, _ in loop_ghosts]
 
+
+# ---------------------------------------------------------------- a function with no loop: one piece
+def know_with(lemma, mem, i, ind):
+    """A lemma whose conclusion is facts to have at hand: its hypotheses found."""
+    return [f"{ind}have_by hE{i} := {lemma} (m := {mem})", f"{ind}try norm_addr at hE{i}", f"{ind}split_ands hE{i}"]
+
+
+if STRAIGHT:
+    wp = paths(body, dict(base_env))
+    assert not any(e[0] == "call" for ev, _ in wp for e in ev), "a call in a function with no loop: not yet"
+    ENTER = [f"  obtain {STATE(REGS)} := s",
+             "  obtain ⟨hpc, hsp, hargs, hbx, hbp, h12, h13, h14, h15, hmem, hF, hRa, hAp, hAcc, hReq⟩ := hP",
+             f"  simp only [{OPEN_C}] at hpc hsp hargs hbx hbp h12 h13 h14 h15 hmem hF hRa",
+             "  simp only [List.length_cons, List.length_nil, List.take, List.cons.injEq, and_true] at hargs",
+             f"  obtain ⟨{', '.join(f'ha{i}' for i in range(len(params)))}⟩ := hargs",
+             f"  subst pc rsp {' '.join(ABI[:len(params)])} {' '.join(CALLEE_SAVED)} mem"] + known("  ", "m0", False)
+    for i, lemma in enumerate(enter_knows): ENTER += know_with(lemma, "m0", i, "  ")
+    for i, (lemma, names) in enumerate(enter_opens): ENTER += open_with(lemma, names, "m0", i, "  ")
+
+    def leaf(ev, ind):
+        return run_piece(ev, ENTRY, "ret", [], ind) + \
+            [f"{ind}refine runs_done ⟨rfl, by simp only [{CNAME}, Abi.Contract.framed]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩",
+             f"{ind}all_goals try dsimp only"] + outside_goal(ind, False) + [f"{ind}· simp only [{OPEN_C}]", f"{ind}  apply {LEAVE} <;> mem_auto"]
+
+    ALL = f"({' '.join(params)} : BitVec 64) " + " ".join(f"({g} : {t})" for g, t in fn_ghosts)
+    L += [f"theorem whole {ARGDECL}",
+          f"    (s : State) (hP : {PRE} s) : ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ {POST} s' := by"] + ENTER + \
+         tree(wp, set(), leaf, "  ") + ["",
+          f"/-- **`{name}`, as assembled, meets its contract, whatever its arguments.** -/",
+          f"theorem {name}_meets : ∀ {ALL},",
+          f"    Abi.Meets Code_{name}.prog 0x{ENTRY:X} ({CNAME} {CARGS}) := by",
+          f"  intro {CARGS}",
+          f"  refine Abi.meets_of_triple {F}#64 (by dsimp only [{CNAME}]; decide) (by dsimp only [{CNAME}]; decide) (fun fb ra sv m0 => ?_)",
+          "  intro s hP",
+          f"  exact whole {ARGUSE} s hP", "",
+          f"#print axioms {name}_meets", "", f"end Proof_{name}", ""]
+    with open(out_path, "w") as f:
+        f.write("\n".join(L))
+    print(f"{name}: {len(rows)} instructions, frame {F} bytes, no loop; {len(wp)} way(s) through; wrote {out_path}")
+    sys.exit(0)
 
 # ---------------------------------------------------------------- enter
 ep = paths(before, dict(base_env))

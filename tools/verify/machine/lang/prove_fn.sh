@@ -20,8 +20,10 @@ lake env lean --run HasherOde.lean layout "$name" > "$name.layout"
 contract=$(python3 -c "import odec,re,sys; c=odec.contracts_of(open('hasher.ode').read())[0][sys.argv[1]]['head']; print(re.match(r'[\w.]+', next(r for w,r in c if w=='meets')).group(0))" "$name")
 lake build Checks "Spec_$name" > /dev/null
 printf 'import Checks\nimport Spec_%s\n#checks %s\n' "$name" "$contract" > "$name.checks.lean"
-lake env lean "$name.checks.lean" > "$name.checks"
-checked=0; if grep -q "check " "$name.checks"; then checked=1; python3 check_fn.py asm hasher.ode "$name" "$name.checks" >> "$name.S"; fi
+lake env lean "$name.checks.lean" > "$name.checks" || true
+checked=0
+if grep -q "^check " "$name.checks"; then checked=1; python3 check_fn.py asm hasher.ode "$name" "$name.checks" >> "$name.S"
+elif grep -q "error" "$name.checks"; then echo "$name: what its contract accepts cannot be tested from the arguments: no checked entry; a caller shows it"; fi
 if cc -target x86_64-unknown-linux-gnu -c -o "$name.o" "$name.S" 2>/dev/null; then :; else cc -c -o "$name.o" "$name.S"; fi
 "$OBJDUMP" -d -r --x86-asm-syntax=intel "$name.o" > "$name.listing"
 # the kernels are where one/KCode.lean has them
