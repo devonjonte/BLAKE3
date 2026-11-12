@@ -96,8 +96,17 @@ Rules that kept it simple:
   its result as the other's. The source needs no hint.)
 - **An audit begins with a control**: an unchanged copy, forced to check again, must be accepted.
 
-Not yet in this shape: the kernel `hex` (its contract is still clauses in the source, turned into a
-statement by `prove.py`, and its theorem has the trace, which `Abi.Meets` does not); `push` and the hash.
+`hex` is in this shape since November 12: `Spec_hex.lean` (13 lines: `Hex.char`, `Hex.text`,
+`Hex.contract`) and `hex_meets : ∀ out inp, Abi.MeetsQuietly Code_hex.prog 0x50000 (Hex.contract out inp)`:
+the contract met whatever the hash is, and one list of what an observer of time and cache sees, the
+same for every hash. Its reader reads 513 lines, of which 67 are `hex`'s own (the contract 13, bytes in
+memory 6, the 45 instructions 48). Its proof has two layers: the kernel's theorem about vectors, which
+the compiler writes (`Proof_hex.lean`), and 40 lines by hand from vectors to the contract's bytes
+(`Meets_hex.lean`; `BytesLemmas.lean` is written once for all code that moves bytes sixteen at a time).
+The hand layer is the next thing for the compiler to write: it is the same for any kernel whose
+contract speaks of bytes.
+
+Not yet in this shape: `push` and the hash.
 
 ## A requirement is stated once; proved where it can be, tested where it cannot
 

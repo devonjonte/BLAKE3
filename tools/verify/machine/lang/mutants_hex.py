@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Does the generated proof of `hex` notice a changed instruction? One instruction is changed in
-Code_hex.lean (the table and its lemma alike) and `lake build Proof_hex` must fail.
+"""Does the proof of `hex` notice a changed instruction or a false statement? One instruction is changed in
+Code_hex.lean (the table and its lemma alike), or one line of what is claimed (Spec_hex.lean, Spec_bytes.lean,
+the theorem's own line), and `lake build Meets_hex` must fail. The control: the unchanged copy, built afresh,
+must be accepted.
 usage: mutants_hex.py [--jobs N]"""
 import argparse, concurrent.futures, pathlib, shutil, subprocess, tempfile
 here = pathlib.Path(__file__).resolve().parent
@@ -17,7 +19,23 @@ MUTANTS = [  # (address, old, new, what)
     ("50004", ".movv false 1 (.m .rsi 0x10)", ".movv false 1 (.m .rsi 0x0)", "the first half twice"),
 ]
 
+STATEMENTS = [  # (file, old, new, what)
+    ("Spec_hex.lean", "[Hex.char (b >>> 4), Hex.char (b &&& 15#8)]", "[Hex.char (b &&& 15#8), Hex.char (b >>> 4)]", "a byte's low four bits come first"),
+    ("Spec_hex.lean", "then n + 0x30#8 else n + 0x57#8", "then n + 0x30#8 else n + 0x37#8", "the letters are capitals"),
+    ("Spec_hex.lean", "if n < 10#8 then", "if n < 11#8 then", "ten is written as a digit"),
+    ("Spec_hex.lean", "(Bytes.layout 64).fills out (Hex.text hash)", "(Bytes.layout 64).fills out (Hex.text hash.reverse)", "the hash is written backwards"),
+    ("Spec_hex.lean", "(Bytes.layout 64).fills out (Hex.text hash)", "(Bytes.layout 63).fills out (Hex.text hash)", "only 63 bytes may change"),
+    ("Spec_hex.lean", "reads := [(Bytes.layout 32).keeps inp hash]", "reads := [(Bytes.layout 31).keeps inp hash]", "the hash is 31 bytes"),
+    ("Spec_hex.lean", "args := [out, inp]", "args := [inp, out]", "the arguments the other way round"),
+    ("Spec_hex.lean", "returns := fun _ => True", "returns := fun r => r = 0#64", "it returns zero"),
+    ("Meets_hex.lean", "Abi.MeetsQuietly Code_hex.prog 0x50000", "Abi.MeetsQuietly Code_hex.prog 0x50004", "it is entered at its second instruction"),
+    ("Meets_hex.lean", "(fun hash : List (BitVec 8) => Hex.contract out inp hash)", "(fun hash : List (BitVec 8) => Hex.contract out (inp + (hash.headD 0#8).zeroExtend 64) hash)", "the hash's place depends on the hash"),
+    ("Spec_bytes.lean", "m (a + BitVec.ofNat 64 i) = some bs[i]", "m (a + BitVec.ofNat 64 (i + 1)) = some bs[i]", "bytes are in memory one place later"),
+]
+
 def one(job):
+    if len(job) == 4 and job[0] is not None and job[0].endswith(".lean"):
+        return statement(job)
     at, old, new, what = job
     with tempfile.TemporaryDirectory(dir=here.parent) as d:
         work = pathlib.Path(d) / "m"
@@ -32,11 +50,28 @@ def one(job):
                 text = text.replace(l, l.replace(old, new))
             (work / "Code_hex.lean").write_text(text)
         try:
-            r = subprocess.run(["lake", "build", "Proof_hex"], cwd=work, capture_output=True, text=True, timeout=900)
+            r = subprocess.run(["lake", "build", "Meets_hex"], cwd=work, capture_output=True, text=True, timeout=900)
         except subprocess.TimeoutExpired:
             return "rejected (time limit)", what, f"{at}: {old} -> {new}"
         bad = r.returncode != 0 or "sorryAx" in r.stdout
         return ("rejected" if bad else "ACCEPTED"), what, f"{at}: {old} -> {new}"
+
+def statement(job):
+    file, old, new, what = job
+    with tempfile.TemporaryDirectory(dir=here.parent) as d:
+        work = pathlib.Path(d) / "m"
+        shutil.copytree(here, work, ignore=shutil.ignore_patterns(".lake", "bench", "*.log"))
+        (pathlib.Path(d) / "one").symlink_to((here.parent / "one").resolve())
+        text = (work / file).read_text()
+        if text.count(old) != 1:
+            return "malformed", what, f"{file}: {old}"
+        (work / file).write_text(text.replace(old, new))
+        try:
+            r = subprocess.run(["lake", "build", "Meets_hex"], cwd=work, capture_output=True, text=True, timeout=900)
+        except subprocess.TimeoutExpired:
+            return "rejected (time limit)", what, f"{file}: {old} -> {new}"
+        bad = r.returncode != 0 or "sorryAx" in r.stdout
+        return ("rejected" if bad else "ACCEPTED"), what, f"{file}: {new}"
 
 def main():
     p = argparse.ArgumentParser(); p.add_argument("--jobs", type=int, default=3); a = p.parse_args()
@@ -50,5 +85,11 @@ def main():
             counts[verdict] = counts.get(verdict, 0) + 1
             print(f"{verdict}\t{what}\t{change}", flush=True)
     print(f"{len(MUTANTS)} changed instructions: " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
+    counts = {}
+    with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
+        for verdict, what, change in pool.map(one, STATEMENTS):
+            counts[verdict] = counts.get(verdict, 0) + 1
+            print(f"{verdict}\t{what}\t{change}", flush=True)
+    print(f"{len(STATEMENTS)} false statements: " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
 
 main()

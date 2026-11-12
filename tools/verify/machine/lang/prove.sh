@@ -3,7 +3,8 @@
 #   1. odec.py turns the source into Lean values, and Lean prints the assembly;
 #   2. the assembler makes an object, and the lifter reads the object's bytes back (llvm-objdump);
 #   3. prove.py writes the theorem from the source's contract and its proof by recipe;
-#   4. Lean checks that those bytes meet the contract.
+#   4. Lean checks that those bytes meet the contract: the kernel's own theorem about vectors (Proof_hex),
+#      then `hex_meets : ∀ out inp, Abi.MeetsQuietly Code_hex.prog 0x50000 (Hex.contract out inp)` (Meets_hex).
 # Then the audit: instructions changed one at a time must each fail the proof.
 # Needs python3, cc (clang, or gcc on x86-64 Linux), llvm-objdump (OBJDUMP), lake. The object is ELF.
 set -eu
@@ -17,7 +18,7 @@ if cc -target x86_64-unknown-linux-gnu -c -o "$name.o" "$name.S" 2>/dev/null; th
 "$OBJDUMP" -d -r --x86-asm-syntax=intel "$name.o" | awk "/<_?b3l_$name>:/,/ret/" > "$name.listing"
 python3 ../one/lift_one.py "$name.listing" "$(head -n 1 "$name.listing" | sed 's/.*<\(.*\)>:/\1/')" $base "Lifted_$name.lean" "Lifted_$name" --object "$name.o"
 python3 prove.py hasher.ode "$name" "Lifted_$name.lean.rows" $base .
-if lake build "Proof_$name" > "$name.build.log" 2>&1 && ! grep -q -E "error|sorry" "$name.build.log"; then
+if lake build "Proof_$name" "Meets_$name" > "$name.build.log" 2>&1 && ! grep -q -E "error|sorry" "$name.build.log"; then
   grep -E "Build completed" "$name.build.log"
 else
   grep -E "error|sorry" "$name.build.log" | head -n 5

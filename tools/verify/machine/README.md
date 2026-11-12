@@ -147,8 +147,15 @@ result compared with the contract, read in parts by `#pieces`: eight examples in
 stack of 55 values (28,381 instructions). An example that breaks the contract is run through the source's
 meaning (`Sem.lean`) as well, which says whether the source and contract or the compiler's code is at
 fault. A contract none of whose examples meets it is refused. A test by running, not a proof.
-`Spec_hex.lean`, `Spec_bytes.lean` and `Abi.MeetsQuietly` are the statement `hex` is to be proved against
-next (its present proof, `Proof_hex.lean`, is still of the older shape).
+**`hex` against its contract, quietly (November 12).** `Spec_hex.lean` is what is claimed: `Hex.contract`
+(the 64 bytes at `out` become the hexadecimal of the 32 at `hash`; nothing else changes; no stack).
+`Meets_hex.lean`: **`hex_meets : ∀ out inp, Abi.MeetsQuietly Code_hex.prog 0x50000 (Hex.contract out inp)`**:
+the assembled code meets the contract whatever the hash is, and what an observer of time and of the cache
+sees is one list, the same for every hash. `./prove.sh` checks it (about 3 s after the model is built).
+Reading list: 513 lines (the machine 336, `Abi` 66, the observer 40, the 45 instructions 48, the contract
+13, bytes in memory 6, 4 others); axioms: 3 standard and 5 of `bv_decide`. `python3 mutants_hex.py`: the
+control accepted, 10 of 10 changed instructions and 11 of 11 false statements rejected (60 s). The layer
+from the kernel's vectors to the contract's bytes (`Meets_hex.lean`, 40 lines) is still written by hand.
 
 Limits: one loop, not nested; a loop-carried variable lives in a register; no call or condition outside
 the loop; the trace is not in this theorem; `push` and the hash itself carry no contract yet. For `hex`: the recipe covers kernels that load, compute and store with no loop; x86-64 only; the object proved is assembled on a Mac for x86-64 (the instructions' bytes
