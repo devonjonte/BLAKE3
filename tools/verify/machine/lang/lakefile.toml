@@ -123,3 +123,5 @@ name = "Meets_hex_bytes"
 name = "MergeAsBytes"
 [[lean_lib]]
 name = "Meets_merge_bytes"
+[[lean_lib]]
+name = "UsableBytes"

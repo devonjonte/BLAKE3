@@ -299,6 +299,10 @@ What it took, and what it shows:
   (`merge_meets_bytes`, `add_meets_bytes`, `Meets_merge_bytes.lean`: by the same two lemmas about the
   stack and a chaining value as pieces, a few lines each). `Merge.merged` there is `Merge.result` here,
   word for word, until the audit that names `Spec_merge.lean` is moved.
+- Each of the four, read for x86-64, comes with its theorem that it can be used (`UsableBytes.lean`).
+- The kernel `hex` in this form is what the candidate for the library holds: branch
+  `candidate/sam-hex-proved` of the fork, folder `tools/verify/hex` (what the two theorems need and
+  nothing else: 23 Lean files for x86-64, 12 for AArch64, three shared), made from this folder by a script.
 - Not done: `merge` and `add` on AArch64 (loops and calls in the second printer and its proof generator,
   and a compression kernel with a contract there); the compression kernels' contracts in this form; the
   bytes-to-cells step generated; "quietly" stated once for both machines.

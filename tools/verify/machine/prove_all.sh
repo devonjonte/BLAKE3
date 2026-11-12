@@ -29,7 +29,7 @@ run push         lang ./prove_fn.sh push 0x70000
 run merge_sse    lang ./prove_fn.sh merge_sse 0x90000
 run add-and-swap lang ./swap.sh
 run merge_steps  lang ./prove_fn.sh merge_steps 0xA0000
-run any-machine  lang sh -c 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ]'
+run any-machine  lang sh -c 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes UsableBytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ] && grep -q "usable_bytes. depends on axioms" any.log'
 run hex_neon     arm  env MUTANTS=$hexaudit ./prove_arm.sh
 run push-aarch64 arm  env MUTANTS=$hexaudit ./prove_arm_fn.sh
 if [ "${AUDIT:-0}" = 1 ]; then
