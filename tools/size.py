@@ -245,6 +245,14 @@ def count_items(doc):
     return count
 
 
+def is_kernel_object(name):
+    """Whether an object of the library's archive is an assembly kernel's:
+    the C compiler's objects are `HASH-blake3_NAME.o`, NAME as the file in
+    c/ has it (`blake3_sse41_x86-64_unix`, hyphen included); the Rust
+    compiler's end in `.rcgu.o`."""
+    return not name.endswith(".rcgu.o") and re.search(r"(?:^|-)blake3_[\w-]+\.o$", name) is not None
+
+
 def machine_code(tree, target):
     """(the assembly kernels' bytes, the compiled Rust's): the text of
     each object in each crate's release library, the kernels' by their
@@ -260,7 +268,7 @@ def machine_code(tree, target):
         for line in out.splitlines()[1:]:
             fields = line.split()
             if len(fields) >= 6 and fields[0].isdigit():
-                if re.search(r"blake3_\w+\.o", fields[5]):
+                if is_kernel_object(fields[5]):
                     kernels += int(fields[0])
                 else:
                     rust += int(fields[0])

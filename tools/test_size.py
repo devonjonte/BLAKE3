@@ -62,5 +62,29 @@ mod io;
             self.assertEqual(size.test_only({"src/lib.rs": attribute + "\nmod real;\nmod plain;\n"}), set(), attribute)
 
 
+class MachineCode(unittest.TestCase):
+    def test_an_x86_kernel_object_is_a_kernel_whatever_its_file_is_called(self):
+        """The x86-64 kernels' files have a hyphen (`x86-64`); counted by a
+        name without one, 65,888 bytes of kernels went under Rust."""
+        kernels = [
+            "0f7afa8371890fd-blake3_sse41_x86-64_unix.o",
+            "0f7afa8371890fd-blake3_avx512_x86-64_unix.o",
+            "0f7afa8371890fd-blake3_chunk_root_x86-64_unix.o",
+            "0f7afa8371890fd-blake3_avx512_32.o",
+            "0f7afa8371890fd-blake3_output16.o",
+            "db3b6bfb95261072-blake3_neon_hybrid_aarch64.o",
+            "db3b6bfb95261072-blake3_sme2_aarch64.o",
+        ]
+        rust = [
+            "blake3_servil-e4ee6835151a42ec.blake3_servil.cgu.00.rcgu.o",
+            "blake3_servil-e4ee6835151a42ec.blake3_servil.cgu.15.rcgu.o",
+            "lib.rmeta",
+        ]
+        for name in kernels:
+            self.assertTrue(size.is_kernel_object(name), name)
+        for name in rust:
+            self.assertFalse(size.is_kernel_object(name), name)
+
+
 if __name__ == "__main__":
     unittest.main()
