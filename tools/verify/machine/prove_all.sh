@@ -39,6 +39,7 @@ run levels-model levels python3 model.py 3000
 run ladd         lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh ladd 0xB0000
 run lroot        lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh lroot 0xC0000
 run node_out     lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh node_out 0xD0000
+run pad          lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh pad 0xE0000
 run any-machine  lang sh -c 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes UsableBytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ] && grep -q "usable_bytes. depends on axioms" any.log'
 run direct       lang sh -c 'python3 direct_fn.py push Push.contract Push.byteContract 64 StackAsBytes Cv.opens Stack.opens && python3 direct_fn.py merge Merge.contract Merge.byteContract 256 MergeAsBytes Cv.opens Stack.opens Merge.merged_eq && lake build Direct_push Direct_merge > direct.log 2>&1 && ! grep -q -E "error|sorry" direct.log && grep -q "Direct_push.push_meets. depends on axioms" direct.log && grep -q "Direct_merge.merge_meets. depends on axioms" direct.log'
 run hash-tried   lang sh -c 'lake build TrySem HasherOde HashContract > /dev/null 2>&1; lake env lean HashTry.lean > hashtry.log 2>&1 && grep -q "104 examples meet it, 0 do not" hashtry.log && grep -q "holds on 104" hashtry.log'
@@ -52,6 +53,7 @@ if [ "${AUDIT:-0}" = 1 ]; then
   run audit-ladd   lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py ladd "${JOBS:-6}"
   run audit-lroot  lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py lroot "${JOBS:-6}"
   run audit-node_out lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py node_out "${JOBS:-6}"
+  run audit-pad    lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py pad "${JOBS:-6}"
   run audit-spec   lang python3 mutants_spec.py "${JOBS:-6}"
   run audit-hash   lang python3 mutants_hash.py
 fi

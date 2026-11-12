@@ -169,3 +169,15 @@ name = "Example_nodeout"
 name = "Code_node_out"
 [[lean_lib]]
 name = "Proof_node_out"
+[[lean_lib]]
+name = "Spec_pad"
+[[lean_lib]]
+name = "Lemmas_pad"
+[[lean_lib]]
+name = "Sample_bytes"
+[[lean_lib]]
+name = "Example_pad"
+[[lean_lib]]
+name = "Code_pad"
+[[lean_lib]]
+name = "Proof_pad"

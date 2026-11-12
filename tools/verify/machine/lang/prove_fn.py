@@ -504,8 +504,10 @@ def prove_inv(ind, old_outside, turn):
          f"{ind}all_goals try dsimp only"]
     for text, tac, _ in inv_mem:
         t += [f"{ind}· {tac}"] if tac else outside_goal(ind, old_outside)
-    t += [f"{ind}· " + "; ".join(["apply Exists.intro"] * n_ex) if n_ex else f"{ind}· skip",
-          f"{ind}  refine ⟨" + ", ".join(["?_"] * (len(inv_frozen) + len(inv_clauses))) + "⟩"]
+    # one clause alone is the goal itself (an anonymous constructor would open the clause's own definition)
+    n_parts = len(inv_frozen) + len(inv_clauses)
+    t += [f"{ind}· " + "; ".join(["apply Exists.intro"] * n_ex) if n_ex else f"{ind}· skip"]
+    if n_parts > 1: t.append(f"{ind}  refine ⟨" + ", ".join(["?_"] * n_parts) + "⟩")
     for c, in_reg in inv_frozen: t.append(f"{ind}  · {'rfl' if in_reg else 'mem_fact'}")
     for (cl, by, frm), pred in zip(inv_user, inv_pred):
         if turn and len(by) == 1: t.append(f"{ind}  · apply {by[0]} <;> mem_auto")

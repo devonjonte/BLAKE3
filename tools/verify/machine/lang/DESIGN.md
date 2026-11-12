@@ -379,6 +379,34 @@ from memory to memory (`Try.compress`) was computed again at every byte read, si
 definition that returns a function as one of more arguments; sixteen compressions took minutes. Computed
 once when the kernel is called (`compressNow`), the 104 examples take two and a half minutes.
 
+## The whole hash, by small functions on the levels (Sam, November 12: "Yay!")
+
+The theorem a user wants is `Hash.byteContract`'s: the function they call computes BLAKE3. The way to it
+is a hash made of small functions, each one loop at most, each called by its contract and by nothing
+else, on the levels (`ladd`, `lroot`): slow first (one block at a time through the one-block kernels),
+wholly proved; the many-input kernels come in behind contracts afterwards.
+
+- **The node in memory is the specification's own** (`Spec_node.lean`, `Node.At`): `h`, the block `m`,
+  the counter, the block length, the flags, 120 bytes. A chunk's function fills one
+  (`Blake3.chunkNode` is its statement, word for word); `node_out` compresses one, as a chaining value
+  or as the root. So whether a chunk is the root is decided where it is known, by the caller, with no
+  flag threaded through the chunk's code.
+- **Facts about the specification alone are proved once, apart from any machine** (`../alg/Chunk.lean`):
+  a chunk's node is a fold over its blocks (`chunkNode_eq`, the invariant of the chunk's loop); BLAKE3's
+  32 bytes are the bytes of the root's first eight output words (`blake3_32`).
+- **Bytes are a third kind of cell** (`Cells.lean`: `Byte`, beside words and vectors), with the same
+  three things: a read finds its cell through the puts, a write needs the byte owned, a fact stays
+  under a put that is apart. `pad` is the first function proved with them.
+- **Six parameters, C's convention, for now.** The machine model has the fourteen registers the code
+  uses (no `r10`, `r11`), and `odec.py` now refuses a seventh parameter (the printers dropped it
+  without a word). The chunk's function wants seven things; it takes the key where the specification
+  puts it (the node's `h` starts as the key). Ode's own convention (below) lifts this; it is not needed
+  for a slow proved hash, and it changes no source and no contract when it comes.
+
+Parked on Sam's word (November 12, late): making x86-64 theorems speak of the object's bytes (a decoder
+to read and trust), and removing `bv_decide`'s axioms (a dependency on another project's library, or
+larger proofs). Neither is on the way to the whole hash.
+
 ## Two designs of one thing, side by side: the stack and the levels (Sam, November 12)
 
 `../levels/` holds the tree of chaining values in a second design (Sam's, from earlier work on BLAKE3):

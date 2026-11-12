@@ -162,6 +162,26 @@ fn lroot(out, lv, key, flags, plat)
   copy 32 out <- acc
 }
 
+// A chunk's last block as a compression reads it: the n bytes at src (at most 64), then zeros to 64. What
+// pad is claimed to do is Pad.contract (../lang/Spec_pad.lean). One loop writes all 64 bytes, the highest
+// first: a byte of the message where there is one, a zero past its end.
+fn pad(block, src, n)
+  meets Pad.contract(bytes: List (BitVec 8))
+  uses Lemmas_pad
+  leave by Pad.exit
+{
+  var i = 64
+  while i > 0
+    invariant Pad.Mid(block, src, bytes, n, i)   by Pad.Mid.copy | Pad.Mid.zero   from Pad.Mid.start
+    decreases i
+    open Pad.Mid.next as b when i - 1 < n
+  {
+    i = i - 1
+    if i < n { u8[block + i] = u8[src + i] }
+    else     { u8[block + i] = 0 }
+  }
+}
+
 // A node's compression: its chaining value, or with root = ROOT the first 32 bytes of its output. What
 // node_out is claimed to do is NodeOut.contract (../lang/Spec_nodeout.lean): the node in memory is the
 // specification's own (h, the block m, the counter, the block length, the flags), 120 bytes.
