@@ -77,7 +77,10 @@ def has_call(ss):
     return any(s[0] == "call" or (s[0] == "ite" and (has_call(s[2]) or has_call(s[3]))) or (s[0] == "while" and has_call(s[2])) for s in ss)
 
 
-C0 = 8 if has_call(body) else 0          # where a callee's return address goes, below the frame
+own_calls = clauses[name].get("calls", [])            # calls of this file's functions, by their contracts
+OWN = {f"b3l_{n}": (n, info) for n, info in odec.own.items()}
+# below the frame: where a callee's return address goes, and under it the most stack a callee's contract may use
+C0 = (8 + max([odec.own[c["callee"]]["budget"] for c in own_calls] or [0])) if has_call(body) else 0
 F = C0 + frame + 8 * len(saved)          # bytes the function owns below the stack pointer it is entered with
 REGS = "rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r12 r13 r14 r15".split()
 ABI = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
@@ -232,7 +235,8 @@ def one(items, word, what):
 mm = re.match(r"^([\w.]+)\((.*)\)$", one(head, "meets", "the function must name its contract: meets CONTRACT(ghost: Type, ...)"))
 CNAME, fn_ghosts = mm.group(1), binders(mm.group(2))
 uses = [u.strip() for w, rest in head if w == "uses" for u in rest.split(",")]
-LEAVE = re.match(r"^by\s+([\w.]+)$", one(head, "leave", "the function must name the lemma that gives its ensures when the loop ends: leave by LEMMA")).group(1)
+LEAVE = None if (STRAIGHT and not any(w == "leave" for w, _ in head)) else \
+    re.match(r"^by\s+([\w.]+)$", one(head, "leave", "the function must name the lemma that gives its ensures when the loop ends: leave by LEMMA")).group(1)
 enter_opens = [re.match(r"^open\s+([\w.]+)\s+as\s+(.*)$", rest).groups() for w, rest in head if w == "enter" and rest.startswith("open")]
 enter_knows = [re.match(r"^know\s+([\w.]+)$", rest).group(1) for w, rest in head if w == "enter" and rest.startswith("know")]
 loop_ghosts = [b for w, rest in loop if w == "ghost" for b in binders(rest)]
@@ -331,7 +335,8 @@ preds = [p for i, p in enumerate(inv_pred) if p and p not in inv_pred[:i]]
 ex = "".join(f"({g} : {t}) " for g, t in loop_ghosts)
 inv_inner = " ∧\n    ".join([c for c, _ in inv_frozen] + inv_clauses)
 
-L = ["import Cells", "import Kernels", "import AbiProof", f"import Spec_{name}"] + [f"import {u}" for u in uses] + [f"import Code_{name}", "open X86 Cells", "",
+L = ["import Cells", "import Kernels", "import AbiProof"] + (["import AbiCall"] if own_calls else []) + [f"import Spec_{CNAME.split('.')[0].lower()}"] + [f"import {u}" for u in uses] + \
+    [f"import {odec.own[c]['theorem'].rsplit('.', 1)[0]}" for c in dict.fromkeys(x["callee"] for x in own_calls)] + [f"import Code_{name}", "open X86 Cells", "",
      f"/-! # `{name}`, as assembled, meets `{CNAME}`", "",
      f"Written by prove_fn.py from {src.split('/')[-1]} and the compiler's layout; not edited by hand, and not to be read",
      f"but for its last theorem's statement: Lean checks the rest. The frame: {F} bytes below the stack pointer at entry",
@@ -456,7 +461,8 @@ def know_with(lemma, mem, i, ind):
 
 if STRAIGHT:
     wp = paths(body, dict(base_env))
-    assert not any(e[0] == "call" for ev, _ in wp for e in ev), "a call in a function with no loop: not yet"
+    kinds = {e[1] in OWN for ev, _ in wp for e in ev if e[0] == "call"}
+    assert kinds <= {True}, "a call of a kernel in a function with no loop: not yet"
     ENTER = [f"  obtain {STATE(REGS)} := s",
              "  obtain ⟨hpc, hsp, hargs, hbx, hbp, h12, h13, h14, h15, hmem, hF, hRa, hAp, hAcc, hReq⟩ := hP",
              f"  simp only [{OPEN_C}] at hpc hsp hargs hbx hbp h12 h13 h14 h15 hmem hF hRa",
@@ -465,11 +471,77 @@ if STRAIGHT:
              f"  subst pc rsp {' '.join(ABI[:len(params)])} {' '.join(CALLEE_SAVED)} mem"] + known("  ", "m0", False)
     for i, lemma in enumerate(enter_knows): ENTER += know_with(lemma, "m0", i, "  ")
     for i, (lemma, names) in enumerate(enter_opens): ENTER += open_with(lemma, names, "m0", i, "  ")
+    NORM = "add_sub_lit, BitVec.add_assoc, BitVec.add_zero, BitVec.reduceAdd, BitVec.reduceSub"
+    LISTS = "abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true"
+
+    def finish(ind, out_fact):
+        """The return: the contract's Post of the state run to."""
+        t = [f"{ind}refine runs_done ⟨rfl, by simp only [{CNAME}, Abi.Contract.framed]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩",
+             f"{ind}all_goals try dsimp only"]
+        t += [f"{ind}· intro x hx hmod", f"{ind}  exact {out_fact} x hx hmod"] if out_fact else outside_goal(ind, False)
+        t += [f"{ind}· simp only [{OPEN_C}]"]
+        t += [f"{ind}  apply {LEAVE} <;> mem_auto"] if LEAVE else [f"{ind}  repeat' (with_reducible apply And.intro)", f"{ind}  all_goals (first | trivial | assumption)"]
+        return t
 
     def leaf(ev, ind):
-        return run_piece(ev, ENTRY, "ret", [], ind) + \
-            [f"{ind}refine runs_done ⟨rfl, by simp only [{CNAME}, Abi.Contract.framed]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩",
-             f"{ind}all_goals try dsimp only"] + outside_goal(ind, False) + [f"{ind}· simp only [{OPEN_C}]", f"{ind}  apply {LEAVE} <;> mem_auto"]
+        if not any(e[0] == "call" for e in ev):
+            return run_piece(ev, ENTRY, "ret", [], ind) + finish(ind, None)
+        # calls of our own functions, each by its contract: the state at a return is known by what the contract
+        # promises; what holds of its memory is said again (the frame's cells, what is kept, the bytes outside)
+        pieces, calls = segments(ENTRY, ev, "ret")
+        call_stmts = [s for s in body if s[0] == "call"]
+        assert len(call_stmts) == len(calls) == len(own_calls), "calls under conditions: not yet"
+        ras = [int(n, 16) for a, n, ins in rows if ins.startswith(".call")]
+        slots = [(F, "ra")] + [(F - 8 * (i + 1), f"sv.{r}") for i, r in enumerate(saved)] + [(o, p_) for p_, o in param_slot]
+        t, prev = [], "m0"
+        for i, ((sym, target), stmt, oc) in enumerate(zip(calls, call_stmts, own_calls), 1):
+            callee, info = OWN[sym]
+            assert callee == oc["callee"] and target == info["at"], (callee, oc, hex(target))
+            args = " ".join([lean_low(a, base_env) for a in stmt[2]] + oc["with"])
+            CK, OPENK = f"{info['contract']} {args}", f"{info['contract']}, {LISTS}"
+            st = "⟨" + ", ".join(f"{r}_{i}" for r in REGS) + f", zf_{i}, cf_{i}, " + ", ".join(f"y{i}_{j}" for j in range(16)) + f", mem{i}, pc_{i}⟩"
+            hs = f"hpc{i} hsp{i} hbx{i} hbp{i} h12_{i} h13_{i} h14_{i} h15_{i} hens{i} hout{i} hown{i}"
+            t += [f"{ind}refine runs_then (a := {pieces[i - 1]}) (s1 := ?_) ?_ ?_", f"{ind}case refine_2 => run_fn []; rfl",
+                  f"{ind}refine Abi.call_meets (c := {CK}) (ra := {ras[i - 1]}#64)",
+                  f"{ind}  (Abi.Meets.mono Code_{name}.has_{info['code']} ({info['theorem']} {args})) rfl rfl ?_ ?_ ?_ ?_ ?_ ?_",
+                  f"{ind}· dsimp only; mem_fact",
+                  f"{ind}· dsimp only [{info['contract']}]; mem_subregion",
+                  f"{ind}· dsimp only",
+                  f"{ind}  simp only [{OPENK}, Abi.AllApart, Abi.Apart, BitVec.reduceAdd]",
+                  f"{ind}  try simp only [{NORM}]",
+                  f"{ind}  repeat' (with_reducible apply And.intro)",
+                  f"{ind}  all_goals bv_decide",
+                  f"{ind}· simp only [{info['contract']}]",
+                  f"{ind}  repeat' (with_reducible apply And.intro)",
+                  f"{ind}  all_goals assumption",
+                  f"{ind}· dsimp only",
+                  f"{ind}  simp only [{OPENK}]",
+                  f"{ind}  repeat' (with_reducible apply And.intro)",
+                  f"{ind}  all_goals (first | mem_auto | (apply_frame <;> mem_auto))",
+                  f"{ind}· intro s{i} {hs}"]
+            ind += "  "
+            t += [f"{ind}obtain {st} := s{i}",
+                  f"{ind}dsimp only at {hs}",
+                  f"{ind}subst pc_{i} rsp_{i} rbx_{i} rbp_{i} r12_{i} r13_{i} r14_{i} r15_{i}",
+                  f"{ind}simp only [{OPENK}] at hens{i}",
+                  f"{ind}split_ands hens{i}",
+                  f"{ind}simp only [{OPENK}, {NORM}] at hout{i}",
+                  f"{ind}have hF{i} : Region mem{i} fb {F}#64 := hown{i} fb {F}#64 (by mem_region)"]
+            for j, (off, v) in enumerate(slots):
+                t.append(f"{ind}have hS{i}_{j} : Quad mem{i} {at(off)} {v} := X86.Quad.frame (by mem_fact) (fun x hx => hout{i} x (by bv_decide) (by bv_decide))")
+            for j, cl in enumerate(oc["keep"]):
+                c = Clause(cl); prop = c.clause(base_env, f"mem{i}")
+                assert c.pred, f"keep {cl}: a predicate of memory, Name(args)"
+                t.append(f"{ind}have hK{i}_{j} : {prop} := {c.pred}.frame (m := {prev}) (by assumption) (fun x hx => by rw [hout{i} x (by bv_decide) (by bv_decide)]; first | rfl | mem_away)")
+            t += [f"{ind}have hOut{i} : {outside.replace('s.mem x', f'mem{i} x')} := by",
+                  f"{ind}  intro x hx hmod", f"{ind}  have hx' := hx", f"{ind}  have hmod' := hmod",
+                  f"{ind}  simp only [{UNFOLD_X}] at hx' hmod'",
+                  f"{ind}  rw [hout{i} x (by bv_decide) (by bv_decide)]",
+                  f"{ind}  " + ("first | rfl | mem_away" if i == 1 else f"refine Eq.trans ?_ (hOut{i - 1} x hx hmod); first | rfl | mem_away"),
+                  f"{ind}clear hout{i} hown{i}"]
+            prev = f"mem{i}"
+        t += [f"{ind}refine runs_then (a := {pieces[-1]}) (s1 := ?_) ?_ ?_", f"{ind}case refine_2 => run_fn []; rfl"]
+        return t + finish(ind, f"hOut{len(calls)}")
 
     ALL = f"({' '.join(params)} : BitVec 64) " + " ".join(f"({g} : {t})" for g, t in fn_ghosts)
     L += [f"theorem whole {ARGDECL}",
@@ -485,7 +557,8 @@ if STRAIGHT:
           f"#print axioms {name}_meets", "", f"end Proof_{name}", ""]
     with open(out_path, "w") as f:
         f.write("\n".join(L))
-    print(f"{name}: {len(rows)} instructions, frame {F} bytes, no loop; {len(wp)} way(s) through; wrote {out_path}")
+    print(f"{name}: {len(rows)} instructions, frame {F} bytes, no loop; {len(wp)} way(s) through" +
+          (f"; {len(own_calls)} calls by contract" if own_calls else "") + f"; wrote {out_path}")
     sys.exit(0)
 
 # ---------------------------------------------------------------- enter

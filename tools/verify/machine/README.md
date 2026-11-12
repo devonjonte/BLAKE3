@@ -147,6 +147,15 @@ result compared with the contract, read in parts by `#pieces`: eight examples in
 stack of 55 values (28,381 instructions). An example that breaks the contract is run through the source's
 meaning (`Sem.lean`) as well, which says whether the source and contract or the compiler's code is at
 fault. A contract none of whose examples meets it is refused. A test by running, not a proof.
+**`add` (November 12): a function that calls two others by their contracts.** `Spec_add.lean`:
+`Add.contract` (a chunk's value arrives: the stack turns into `Merge.result` of the stack with the value on
+it). `./prove_fn.sh add 0x80000`: `add_meets : ∀ …, Abi.Meets Code_add.prog 0x80000 (Add.contract …)`,
+generated, checked in about 30 s: at each call `Abi.call_meets` with the callee's theorem (`push_meets`,
+`merge_meets`) and nothing of its code. `./swap.sh`: with `merge_sse` (another implementation, proved to
+meet `Merge.contract`) named in the one `callee` line, `add` is proved again; 4 of 143 generated lines
+differ. Once, for all functions: `one/Dom.lean` (`steps_dom`: no run changes which addresses are the
+program's), `AbiCall.lean` (`Abi.Meets.mono`, `Abi.call_meets`).
+
 **`push` (November 12): a function with no loop.** `Spec_push.lean`: `Push.contract` (the value at `cv`
 becomes the newest of a stack of fewer than 55). `./prove_fn.sh push 0x70000`: three examples meet the
 contract and a full stack is not one (2 s); `push_meets : ∀ st cv new cvs, Abi.Meets Code_push.prog

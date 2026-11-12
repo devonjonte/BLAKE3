@@ -56,14 +56,34 @@ def contracts_of(text):
     contract, and how many facts it asks for. Returns ({fn: {"head": [(word, rest)], "loops": [[...], ...]}},
     {extern: (lemma, n)}, text)."""
     out, callees, kept, fn, where = {}, {}, [], None, None
+    own.clear()
     for line in text.split("\n"):
         s = line.split("//")[0].strip()
         m = re.match(r"^fn\s+(\w+)\s*\(", s)
         if m:
-            fn = m.group(1); out[fn] = {"head": [], "loops": []}; where = out[fn]["head"]; kept.append(line); continue
+            fn = m.group(1); out[fn] = {"head": [], "loops": [], "calls": []}; where = out[fn]["head"]; kept.append(line); continue
         m = re.match(r"^callee\s+(\w+)\s+meets\s+([\w.]+)\s*\((\d+)\)$", s)
         if m:
             callees[m.group(1)] = (m.group(2), int(m.group(3))); kept.append(""); continue
+        # a function of this file, called by its contract: where it is assembled, its contract, the theorem
+        # that it meets it, and the stack its contract may use
+        m = re.match(r"^callee\s+(\w+)\s+at\s+(0x[0-9a-fA-F]+)\s+meets\s+([\w.]+)\s+by\s+([\w.]+)\s+budget\s+(\d+)(?:\s+code\s+(\w+))?$", s)
+        if m:
+            own[m.group(1)] = {"at": int(m.group(2), 16), "contract": m.group(3), "theorem": m.group(4), "budget": int(m.group(5)),
+                               "code": m.group(6) or m.group(1)}       # whose instructions stand there (Code_X.lean)
+            kept.append(""); continue
+        # in a function's body: a call of such a function, then what the prover needs at it, one a line:
+        # `with TERM; TERM` (what its contract is stated for besides the arguments) and `keep CLAUSE` (what
+        # still holds after it, besides what its contract promises)
+        m = re.match(r"^(\w+)\(.*\)$", s)
+        if fn and where is None and m and m.group(1) in own:
+            out[fn]["calls"].append({"callee": m.group(1), "with": [], "keep": []}); kept.append(line); continue
+        word0 = s.split(None, 1)[0] if s else ""
+        if fn and where is None and word0 in ("with", "keep") and out[fn]["calls"]:
+            rest = s[len(word0):].strip()
+            if word0 == "with": out[fn]["calls"][-1]["with"] = [x.strip() for x in rest.split(";")]
+            else: out[fn]["calls"][-1]["keep"].append(rest)
+            kept.append(""); continue
         if fn and re.match(r"^while\b", s) and not s.endswith("{"):
             out[fn]["loops"].append([]); where = out[fn]["loops"][-1]; kept.append(line); continue
         word = s.split(None, 1)[0] if s else ""
@@ -293,7 +313,8 @@ class Lower:
                     assert len(args) == len(params), f"{s[1]}: {len(params)} arguments"
                     out += self.stmts(body, dict(zip(params, args)), fn)
                 else:
-                    sym, n = self.p.externs[s[1]]
+                    own = {f[0]: len(f[1]) for f in self.p.fns}        # a function of this file is called by its symbol
+                    sym, n = (f"b3l_{s[1]}", own[s[1]]) if s[1] in own and s[1] not in self.p.externs else self.p.externs[s[1]]
                     args = [self.expr(a, env) for a in s[2]]
                     assert len(args) == n, f"{s[1]} takes {n} arguments"
                     for a in args:
@@ -338,6 +359,7 @@ class Lower:
 
 contracts = []
 other = {}      # kernels for other architectures than x86-64: {arch: [(name, lines)]}
+own = {}        # functions of this file that others call by contract: {name: {at, contract, theorem, budget}}
 
 
 def kernels(text):

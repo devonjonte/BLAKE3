@@ -102,6 +102,21 @@ theorem quad_put64_far (m : Mem) (a w b v : BitVec 64) (h : 8#64 ≤ b - a ∧ 8
 
 theorem add_sub_lit (a c d : BitVec 64) : a + c - d = a + (c - d) := by bv_decide
 
+/-- A part of a region the program owns. -/
+theorem region_sub {m : Mem} {b n : BitVec 64} (h : Region m b n) (c k : BitVec 64) (hc : c ≤ c + k ∧ c + k ≤ n) :
+    Region m (b + c) k := by
+  intro d hd
+  rw [BitVec.add_assoc]
+  exact h (c + d) (by obtain ⟨h1, h2⟩ := hc; bv_omega)
+
+/-- The first bytes of a region the program owns. -/
+theorem region_prefix {m : Mem} {b n : BitVec 64} (h : Region m b n) (k : BitVec 64) (hk : k ≤ n) : Region m b k :=
+  fun d hd => h d (by bv_omega)
+
+/-- A quadword is in its own eight bytes: a memory that agrees on them holds it too. -/
+theorem X86.Quad.frame {m m' : Mem} {a v : BitVec 64} (h : Quad m a v) (same : ∀ x : BitVec 64, x - a < 8#64 → m' x = m x) : Quad m' a v :=
+  quad_congr (fun x hx => same x (by bv_omega)) h
+
 /-! ## The tactics -/
 
 /-- A fact that is several facts joined by "and", taken apart (cells stay whole). -/
@@ -156,6 +171,9 @@ macro "mem_fact" : tactic => `(tactic| ((try simp only [add_sub_lit, BitVec.add_
 
 /-- A region is still owned under any puts. -/
 macro "mem_region" : tactic => `(tactic| ((repeat (with_reducible (first | apply region_put64 | apply region_put128))); with_reducible assumption))
+
+/-- The same for a part of a region at hand (the stack lent to a callee is part of the frame). -/
+macro "mem_subregion" : tactic => `(tactic| ((try simp only [add_sub_lit, BitVec.add_assoc, BitVec.add_zero, BitVec.reduceAdd, BitVec.reduceSub]); (repeat (with_reducible (first | apply region_put64 | apply region_put128))); first | with_reducible assumption | ((with_reducible apply region_sub (by assumption)); bv_decide) | ((with_reducible apply region_prefix (by assumption)); bv_decide)))
 
 /-- A byte away from every put is what it was. -/
 macro "mem_away" : tactic => `(tactic| simp (disch := bv_decide) only [put64_away, put128_away])
@@ -214,3 +232,39 @@ elab "forget_about " x:ident " except" keep:(ppSpace colGt ident)* : tactic => w
   replaceMainGoal [g]
 
 end Cells
+
+/-- What a table holds an instruction for is one of its addresses. -/
+theorem lookup_mem_keys {β : Type} : ∀ (l : List (Nat × β)) (a : Nat) (b : β), l.lookup a = some b → a ∈ l.map (·.1)
+  | [], _, _, h => by simp [List.lookup] at h
+  | (k, v) :: rest, a, b, h => by
+    simp only [List.lookup] at h
+    by_cases e : a == k
+    · simp only [beq_iff_eq] at e; simp [e]
+    · simp only [e] at h; simp only [List.map_cons, List.mem_cons]; exact Or.inr (lookup_mem_keys rest a b h)
+
+/-- What the first of two tables holds, the two together hold. -/
+theorem lookup_append_left {β : Type} : ∀ (l1 l2 : List (Nat × β)) (a : Nat) (b : β), l1.lookup a = some b → (l1 ++ l2).lookup a = some b
+  | [], _, _, _, h => by simp [List.lookup] at h
+  | (k, v) :: rest, l2, a, b, h => by
+    simp only [List.cons_append, List.lookup] at h ⊢
+    by_cases e : a == k
+    · simp only [e] at h ⊢; exact h
+    · simp only [e] at h ⊢; exact lookup_append_left rest l2 a b h
+
+/-- Looking something up in two tables together: in the first, or else in the second. -/
+theorem lookup_append_or {β : Type} : ∀ (l1 l2 : List (Nat × β)) (a : Nat), (l1 ++ l2).lookup a = (l1.lookup a).or (l2.lookup a)
+  | [], _, _ => by simp [List.lookup]
+  | (k, v) :: rest, l2, a => by
+    simp only [List.cons_append, List.lookup]
+    by_cases e : a == k
+    · simp only [e, Option.some_or]
+    · simp only [e]; exact lookup_append_or rest l2 a
+
+open Lean Elab Tactic Meta in
+/-- For a goal `P m args` about memory: apply `P.frame` (by convention, the lemma that `P` depends on its own
+bytes only), whatever `P` is. -/
+elab "apply_frame" : tactic => withMainContext do
+  let t ← instantiateMVars (← getMainTarget)
+  match t.getAppFn with
+  | .const n _ => evalTactic (← `(tactic| apply $(mkIdent (n ++ `frame))))
+  | _ => throwError "apply_frame: the goal is not a predicate applied to memory"

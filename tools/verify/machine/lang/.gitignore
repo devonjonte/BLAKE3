@@ -23,3 +23,11 @@ Try_*.lean
 *.pieces.lean
 *.checks.lean
 *.try.build.log
+Lifted_*
+add.*
+push.*
+merge_sse.*
+*.prove.log
+swap.log
+build.log
+rl.lean

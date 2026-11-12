@@ -76,3 +76,6 @@ name = "Observer"
 name = "Hoare"
 [[lean_lib]]
 name = "KCode"
+
+[[lean_lib]]
+name = "Dom"

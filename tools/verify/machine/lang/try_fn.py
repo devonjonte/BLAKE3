@@ -25,7 +25,7 @@ CNAME = re.match(r"[\w.]+", next(r for w, r in clauses[name]["head"] if w == "me
 NS = CNAME.rsplit(".", 1)[0]
 ENTRY = int(open(rows_path).readline().split("\t")[0], 16)
 with open(f"{name}.pieces.lean", "w") as f:
-    f.write(f"import Checks\nimport Spec_{name}\n#pieces {CNAME}\n")
+    f.write(f"import Checks\nimport Spec_{CNAME.split('.')[0].lower()}\n#pieces {CNAME}\n")
 out = subprocess.run(["lake", "env", "lean", f"{name}.pieces.lean"], capture_output=True, text=True).stdout
 params, pieces, accepts, returns = [], [], None, None
 for line in out.splitlines():

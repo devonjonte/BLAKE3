@@ -18,17 +18,21 @@ lake env lean --run HasherOde.lean asm b3l_ only "$name" > "$name.S"
 lake env lean --run HasherOde.lean layout "$name" > "$name.layout"
 # what the contract accepts of its arguments, read from the contract; the checked entry's code is made from it
 contract=$(python3 -c "import odec,re,sys; c=odec.contracts_of(open('hasher.ode').read())[0][sys.argv[1]]['head']; print(re.match(r'[\w.]+', next(r for w,r in c if w=='meets')).group(0))" "$name")
-lake build Checks "Spec_$name" > /dev/null
-printf 'import Checks\nimport Spec_%s\n#checks %s\n' "$name" "$contract" > "$name.checks.lean"
+# the contract Xyz.contract is in Spec_xyz.lean
+spec=$(python3 -c "import sys; print('Spec_' + sys.argv[1].split('.')[0].lower())" "$contract")
+lake build Checks "$spec" > /dev/null
+printf 'import Checks\nimport %s\n#checks %s\n' "$spec" "$contract" > "$name.checks.lean"
 lake env lean "$name.checks.lean" > "$name.checks" || true
 checked=0
 if grep -q "^check " "$name.checks"; then checked=1; python3 check_fn.py asm hasher.ode "$name" "$name.checks" >> "$name.S"
 elif grep -q "error" "$name.checks"; then echo "$name: what its contract accepts cannot be tested from the arguments: no checked entry; a caller shows it"; fi
 if cc -target x86_64-unknown-linux-gnu -c -o "$name.o" "$name.S" 2>/dev/null; then :; else cc -c -o "$name.o" "$name.S"; fi
 "$OBJDUMP" -d -r --x86-asm-syntax=intel "$name.o" > "$name.listing"
-# the kernels are where one/KCode.lean has them
+# the kernels are where one/KCode.lean has them; a function of this file that is called is where its `callee` line says
+owncalls=$(python3 -c "import odec,sys; c=odec.contracts_of(open('hasher.ode').read())[0][sys.argv[1]].get('calls',[]); print(' '.join('--call b3l_%s=%s' % (n, hex(odec.own[n]['at'])) for n in dict.fromkeys(x['callee'] for x in c)))" "$name")
+withs=$(python3 -c "import odec,sys,os; c=odec.contracts_of(open('hasher.ode').read())[0][sys.argv[1]].get('calls',[]); ns=list(dict.fromkeys(odec.own[x['callee']]['code'] for x in c)); ns.sort(key=lambda n: 'import KCode' not in open('Code_%s.lean' % n).read()); print(' '.join('--with %s%s' % (n, '+k' if 'import KCode' in open('Code_%s.lean' % n).read() else '') for n in ns))" "$name")
 python3 ../one/lift_one.py "$name.listing" "b3l_$name" "$base" "Lifted_$name.lean" "Lifted_$name" \
-  --call blake3_servil_compress_in_place_avx512=0x30000 --call blake3_servil_compress_in_place_sse41=0x20000
+  --call blake3_servil_compress_in_place_avx512=0x30000 --call blake3_servil_compress_in_place_sse41=0x20000 $owncalls
 targets="Proof_$name"
 if [ "$checked" = 1 ]; then
   at=$(python3 -c "import re,sys; print(hex(int(sys.argv[2],0)+int(next(re.match(r'^([0-9a-f]+) <'+sys.argv[3]+'>:',l).group(1) for l in open(sys.argv[1]) if re.match(r'^[0-9a-f]+ <'+sys.argv[3]+'>:',l)),16)))" "$name.listing" "$base" "b3l_${name}_checked")
@@ -37,7 +41,7 @@ if [ "$checked" = 1 ]; then
   python3 check_fn.py proof hasher.ode "$name" "$name.checks" "Lifted_${name}_checked.lean.rows" "$base" "Checked_$name.lean"
   targets="Proof_$name Checked_$name"
 else
-  python3 gen_code.py "$name" "Lifted_$name.lean.rows" "Code_$name.lean"
+  python3 gen_code.py "$name" "Lifted_$name.lean.rows" "Code_$name.lean" $withs
 fi
 # first the quick answer: the function run on its examples (Example_NAME.lean) and compared with the contract.
 # At least one example must meet what the contract requires (a contract nothing can meet proves nothing),

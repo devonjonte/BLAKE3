@@ -88,6 +88,61 @@ fn merge(st, key, flags, plat, target)
 }
 
 // A hexadecimal digit of a number below 16, with no table and no branch.
+// A chunk's value arrives: it goes on the stack, and the stack is merged down to `target` values.
+// What add is claimed to do is Add.contract (Spec_add.lean). It calls push and merge: each by its
+// contract, whatever code meets it.
+// merge again, another way: always by the SSE4.1 kernel, whatever the platform. It meets the same contract
+// (Merge.contract says `plat` chooses the kernel and changes nothing else), so a caller proved against the
+// contract is proved with either (swap.sh).
+def parent_to_sse(dst, left, right, pf) {
+  copy 32 block      <- left
+  copy 32 block + 32 <- right
+  copy 32 pcv        <- key
+  compress_sse41(pcv, block, 64, 0, pf)
+  copy 32 dst        <- pcv
+}
+
+fn merge_sse(st, key, flags, plat, target)
+  meets Merge.contract(k: Blake3.CV, cvs: List Blake3.CV)
+  uses Lemmas_merge
+  leave by Merge.exit
+{
+  buf block[64]
+  buf pcv[32]
+  var len = u64[st]
+  var pf = flags | PARENT
+  while target < len
+    ghost now: List Blake3.CV
+    invariant Stack.At(st, now)                                                           by Stack.At.merge_top
+    invariant len == Stack.count(now)                                                     by Stack.count_merge_top
+    invariant Merge.result(k, flags, target, now) == Merge.result(k, flags, target, cvs)  by Merge.turn
+    invariant Cv.At(key, k)
+    invariant pf == flags | PARENT
+    decreases len
+    open Stack.At.top2 as r, l, rest, r0, r1, l0, l1
+    open Cv.At.vectors as k0, k1
+  {
+    var at = cv_at(st, len - 2)
+    parent_to_sse(at, at, at + 32, pf)
+    len = len - 1
+    u64[st] = len
+  }
+  return len
+}
+
+callee push  at 0x70000 meets Push.contract  by Proof_push.push_meets   budget 64
+callee merge at 0x60000 meets Merge.contract by Proof_merge.merge_meets budget 256
+
+fn add(st, key, flags, plat, cv, target)
+  meets Add.contract(k: Blake3.CV, new: Blake3.CV, cvs: List Blake3.CV)
+{
+  push(st, cv)
+    with new; cvs
+    keep Cv.At(key, k)
+  merge(st, key, flags, plat, target)
+    with k; (new :: cvs)
+}
+
 def hex_digit(n) = n + 48 + ((0 - ((n + 6) >> 4)) & 39)
 
 // The 64 hexadecimal characters of the 32 bytes at hash, written at out. No address and no

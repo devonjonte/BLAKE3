@@ -37,8 +37,15 @@ def table : List (Nat × Instr × Nat) := [
   (0x7004D, .ret, 0x7004E)
 ]
 
-/-- This function's instructions: the whole program (it calls nothing). -/
-def prog (pc : Nat) : Option (Instr × Nat) := table.lookup pc
+/-- Every instruction of the program: this function's (it calls nothing). -/
+def whole : List (Nat × Instr × Nat) := table
+
+def prog (pc : Nat) : Option (Instr × Nat) := whole.lookup pc
+
+/-- The addresses the program has an instruction at. -/
+def keys : List Nat := whole.map (·.1)
+
+theorem keys_of : ∀ pc x, prog pc = some x → pc ∈ keys := fun pc x h => lookup_mem_keys whole pc x h
 
 @[ode_at] theorem at_70000 : prog 0x70000 = some (.push .rbx, 0x70001) := rfl
 @[ode_at] theorem at_70001 : prog 0x70001 = some (.push .rbp, 0x70002) := rfl

@@ -114,7 +114,43 @@ test it from the arguments, and the tool says so: a caller shows it. The test th
 is gone (no proved caller reaches it). A function that calls nothing is its own program: `push`'s
 reading list (480 lines) has no kernel in it.
 
-Not yet in this shape: the hash; a function that calls another of ours by its contract.
+Not yet in this shape: the hash.
+
+## A function calls another by its contract, and by nothing else
+
+(November 12.) `add` is the step the hasher takes when a chunk's value arrives: `push`, then `merge` down
+to a target. Its proof uses of the two callees their theorems `Abi.Meets … contract` and nothing of
+their code:
+
+- **At a call** the caller shows what the callee's contract asks, of the state at the callee's first
+  instruction: the arguments, the return address on the stack, the stack the contract may use (a part of
+  the caller's frame: the compiler's frame is its own needs, 8 bytes, and the largest budget of a callee),
+  the pieces apart, `accepts`, `requires`. All by the tactics already there.
+- **At the return** the state is known only by what the contract promises: the registers a callee
+  keeps, `ensures`, every byte outside the callee's stack and what it may modify as it was. What holds
+  of the new memory is said again: the frame's own cells (the compiler knows them), what the source
+  says is kept (`keep Cv.At(key, k)`, by the convention's `Cv.At.frame`), and the bytes outside the
+  caller's own frame and pieces. Then the run goes on.
+- **The stack lent is the caller's again.** No instruction maps or unmaps memory, so after any run the
+  same addresses are the program's (`one/Dom.lean`, `steps_dom`, proved once over the model's
+  instructions). `Abi.Meets` did not have to say it.
+- **The program** of a caller is its instructions with its callees' (`gen_code.py --with`), and a
+  callee's theorem holds in it (`Abi.Meets.mono`, `Code_add.has_push`).
+
+What the source gives for a call: which code stands behind the contract, once at the top
+(`callee merge at 0x60000 meets Merge.contract by Proof_merge.merge_meets budget 256`); and at the call
+what the contract is stated for besides the arguments (`with k; (new :: cvs)`) and what is kept across
+it. `add`'s whole source is ten lines.
+
+**Swapping an implementation** (`./swap.sh`): `merge_sse` is another `merge` (always the SSE4.1 kernel;
+77 instructions) proved to meet the same `Merge.contract`. With that one `callee` line changed, `add`
+is proved again from its source: 4 of the generated proof's 143 lines differ (two names, twice). This
+is what a maintainer gets: change the code behind a contract, prove the new code against the contract,
+and every caller's proof stands as generated.
+
+Not yet: a call's result used by the caller; calls inside loops or under conditions; the budget read
+from the callee's contract instead of written beside it; examples run through a caller (`try_fn.py`
+knows no calls); the callee line generated from what was built.
 
 ## A requirement is stated once; proved where it can be, tested where it cannot
 

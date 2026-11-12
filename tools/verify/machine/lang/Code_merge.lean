@@ -107,11 +107,21 @@ def table : List (Nat × Instr × Nat) := [
   (0x6015D, .ret, 0x6015E)
 ]
 
-/-- This function's instructions and the two kernels' (one/KCode.lean) as one program. -/
-def prog (pc : Nat) : Option (Instr × Nat) := (KCode.prog pc).or (table.lookup pc)
+def pre0 : List (Nat × Instr × Nat) := KCode.table
+
+/-- Every instruction of the program: the two kernels' (one/KCode.lean), then this function's. -/
+def whole : List (Nat × Instr × Nat) := pre0 ++ table
+
+def prog (pc : Nat) : Option (Instr × Nat) := whole.lookup pc
+
+/-- The addresses the program has an instruction at. -/
+def keys : List Nat := whole.map (·.1)
+
+theorem keys_of : ∀ pc x, prog pc = some x → pc ∈ keys := fun pc x h => lookup_mem_keys whole pc x h
 
 theorem has_kernels : ∀ pc x, KCode.prog pc = some x → prog pc = some x := by
-  intro pc x h; simp only [prog, h, Option.some_or]
+  intro pc x h
+  exact lookup_append_left pre0 table pc x (h)
 
 @[ode_at] theorem at_60000 : prog 0x60000 = some (.push .rbx, 0x60001) := rfl
 @[ode_at] theorem at_60001 : prog 0x60001 = some (.push .rbp, 0x60002) := rfl
