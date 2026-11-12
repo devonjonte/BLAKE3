@@ -381,6 +381,10 @@ class Lower:
         return ".trap"
 
     def function(self, name, params, regs, requires, body):
+        # The printers take a function's arguments from the six registers of C's convention and no further:
+        # a seventh parameter would be read from nowhere.
+        assert len(params) <= 6, f"{name}: {len(params)} parameters; a function takes at most six"
+        assert len(set(params)) == len(params), f"{name}: a parameter is named twice"
         fn = {"params": params, "locals": [], "bufs": [], "externs": [], "ret": ("const", 0)}
         # buffers are known before expressions are printed: collect them first
         low = self.stmts(body, {}, fn)

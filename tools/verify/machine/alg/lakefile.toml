@@ -1,5 +1,5 @@
 name = "alg"
-defaultTargets = ["Stack"]
+defaultTargets = ["Stack", "Chunk"]
 
 [[require]]
 name = "Blake3"
@@ -7,3 +7,6 @@ path = "../../../../c2sp/BLAKE3"
 
 [[lean_lib]]
 name = "Stack"
+
+[[lean_lib]]
+name = "Chunk"

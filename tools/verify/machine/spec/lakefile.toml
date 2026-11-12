@@ -14,6 +14,11 @@ name = "HexText"
 name = "Stack"
 srcDir = "../alg"
 
+# A chunk as a fold over its blocks and the output's first 32 bytes: also a file of ../alg.
+[[lean_lib]]
+name = "Chunk"
+srcDir = "../alg"
+
 [[lean_lib]]
 name = "Contract"
 
