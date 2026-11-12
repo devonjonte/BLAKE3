@@ -1,7 +1,7 @@
 import Spec_stack
 import BytesLemmas
 import StackBytesLemmas
-import AbiBytes
+import BytesAt
 import PushContract
 import Spec_push
 open X86 Cells
@@ -13,44 +13,6 @@ stack, in the 16-byte vectors and 8-byte cells code moves. `../spec/StackBytes.l
 naming no machine. Here they are shown to be the same statement: memory holds the stack at `st` exactly
 when the bytes at `st` are bytes that hold it. So a contract written with the layouts of bytes
 (`Abi.Layout.ofBytes`) is met by the code that meets the one written with `Stack.layout` and `Cv.layout`. -/
-
-theorem Bytes.At.nil (m : Mem) (a : BitVec 64) : Bytes.At m a [] := fun i h => absurd h (by simp)
-
-theorem Bytes.At.cons_iff {m : Mem} {a : BitVec 64} {x : BitVec 8} {l : List (BitVec 8)} :
-    Bytes.At m a (x :: l) ↔ m a = some x ∧ Bytes.At m (a + 1#64) l := by
-  have e : ∀ i : Nat, a + 1#64 + BitVec.ofNat 64 i = a + BitVec.ofNat 64 (i + 1) := by
-    intro i; rw [BitVec.add_assoc, Nat.add_comm, BitVec.ofNat_add]
-  constructor
-  · intro h
-    refine ⟨?_, fun i hi => ?_⟩
-    · have h0 : m (a + BitVec.ofNat 64 0) = some ((x :: l)[0]'(by simp)) := h 0 (by simp)
-      rw [show a + BitVec.ofNat 64 0 = a from BitVec.add_zero a] at h0
-      exact h0
-    · rw [e]
-      exact h (i + 1) (by simpa using hi)
-  · rintro ⟨h0, h1⟩ i hi
-    cases i with
-    | zero =>
-      rw [show a + BitVec.ofNat 64 0 = a from BitVec.add_zero a]
-      exact h0
-    | succ j =>
-      rw [← e]
-      exact h1 j (by simpa using hi)
-
-theorem Bytes.At.append_iff {m : Mem} {l2 : List (BitVec 8)} : ∀ {l1 : List (BitVec 8)} {a : BitVec 64},
-    Bytes.At m a (l1 ++ l2) ↔ Bytes.At m a l1 ∧ Bytes.At m (a + BitVec.ofNat 64 l1.length) l2
-  | [], a => by simp [Bytes.At.nil]
-  | x :: l1, a => by
-    have e : a + 1#64 + BitVec.ofNat 64 l1.length = a + BitVec.ofNat 64 (l1.length + 1) := by
-      rw [BitVec.add_assoc, Nat.add_comm, BitVec.ofNat_add]
-    rw [List.cons_append, Bytes.At.cons_iff, Bytes.At.cons_iff, Bytes.At.append_iff (l1 := l1), List.length_cons, e, and_assoc]
-
-theorem Bytes.At.unique {m : Mem} {a : BitVec 64} {l1 l2 : List (BitVec 8)} (h1 : Bytes.At m a l1) (h2 : Bytes.At m a l2)
-    (hl : l1.length = l2.length) : l1 = l2 := by
-  apply List.ext_getElem hl
-  intro i hi1 hi2
-  have := (h1 i hi1).symm.trans (h2 i hi2)
-  exact Option.some.inj this
 
 theorem Bytes.le64_eq (n : Nat) : Bytes.le64 n =
     [(BitVec.ofNat 64 n).extractLsb' 0 8, (BitVec.ofNat 64 n).extractLsb' 8 8, (BitVec.ofNat 64 n).extractLsb' 16 8,
@@ -133,18 +95,6 @@ theorem Cvs.At_iff_bytes (m : Mem) (a : BitVec 64) : ∀ cvs : List Blake3.CV,
       List.append_nil, Bytes.At.append_iff, Cv.bytes_flat_length, List.length_reverse]
     rw [e1, e2, ih, Cv.At_iff_bytes]
     exact and_comm
-
-/-- The bytes of an owned region, read out of memory. -/
-theorem Bytes.of_region {m : Mem} {a : BitVec 64} (n : Nat) (hn : n < 2 ^ 64) (h : Region m a (BitVec.ofNat 64 n)) :
-    ∃ b : List (BitVec 8), b.length = n ∧ Bytes.At m a b := by
-  refine ⟨(List.range n).map fun i => (m (a + BitVec.ofNat 64 i)).getD 0, by simp, ?_⟩
-  intro i hi
-  have hi' : i < n := by simpa using hi
-  have hs := h (BitVec.ofNat 64 i) (by rw [BitVec.lt_def]; simp only [BitVec.toNat_ofNat]; omega)
-  simp only [List.getElem_map, List.getElem_range]
-  cases hm : m (a + BitVec.ofNat 64 i) with
-  | none => rw [hm] at hs; cases hs
-  | some x => rfl
 
 /-- **This model's memory holds the hasher's stack at `st` exactly when the bytes at `st` are bytes that
 hold it** (`Stack.Holds`, which names no machine). -/

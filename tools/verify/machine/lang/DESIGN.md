@@ -238,8 +238,8 @@ one kernel, their repository unchanged; `../arm/`.) What we learned by doing it:
 ## Two architectures: contracts that name no machine
 
 A contract is written once, of bytes at addresses, and names no machine; each machine model says once
-what it means for its code to meet such a contract. Done for `push` (November 12), by hand where the
-compiler does not yet do it:
+what it means for its code to meet such a contract. Done for `push` and for the kernel `hex` (November
+12), by hand where the compiler does not yet do it. For `push`:
 
 - **`spec/Contract.lean`** (read once): `Bytes.Layout` (a size, and what it means for a list of bytes to
   hold a value), `Bytes.Piece`, `keeps` / `turns` / `fills`, `Bytes.Contract` (arguments, what is
@@ -268,6 +268,12 @@ What a reader reads (`#reading_list`, lines):
 
 Of what is written for `push` itself a reader reads eight lines, once, for both architectures.
 
+For `hex` the same: `spec/HexContract.lean` (`Hex.byteContract`: the 64 bytes at `out` become `Hex.text`
+of the 32 at `hash`), `hex_meets_bytes` on x86-64 (`Meets_hex_bytes.lean`; with what an observer sees, as
+`hex_meets`) and `hex_neon_meets` on AArch64 (`arm/HexNeonBytes.lean`). So the one thing meant for the
+library has one contract, in one file, for both architectures. (The observer's half is still stated per
+machine: `Abi.MeetsQuietly` here, `hex_neon_quiet` there.)
+
 What it took, and what it shows:
 
 - On x86-64 the existing proof was kept: `Stack.At_iff_bytes` (`StackAsBytes.lean`, by hand, 227 lines
@@ -285,9 +291,12 @@ What it took, and what it shows:
   implement a contract" (above) becomes a property of a machine's reading, not of the contract.
 - A piece the function does not change: on our model the frame clause says so; in their logic the
   specification names the piece's bytes and gives the same bytes back.
-- Not done: the kernels' contracts in this form; `merge` and `add` on AArch64 (loops and calls in the
-  second printer and its proof generator); the bytes-to-cells step generated; an audit of the AArch64
-  `push` (the kernel `hex_neon` has one).
+- Not done: `merge` and `add` in this form (on x86-64 the two lemmas `Cv.piece_keeps` and
+  `Stack.piece_turns` give it at once; `Merge.result` must move to `spec/` first, and an audit names it
+  where it is) and on AArch64 (loops and calls in the second printer and its proof generator, and a
+  compression kernel with a contract there); the compression kernels' contracts in this form; the
+  bytes-to-cells step generated; "quietly" stated once for both machines; an audit of the AArch64 `push`
+  (the kernel `hex_neon` has one).
 
 ## No code the proof shows is never reached
 

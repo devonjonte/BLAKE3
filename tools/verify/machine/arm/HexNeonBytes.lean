@@ -1,5 +1,7 @@
 import Arm64
 import ProofLib
+import HexContract
+import ArmAbi
 import Proof_hex_neon
 open Arm64 ProofLib
 
@@ -135,3 +137,54 @@ theorem hex_neon_bytes_ok (prog : Program) (h_code : hex_neon_code.holds prog) :
     simpa only [sepConj_assoc] using hq
 
 #print axioms hex_neon_bytes_ok
+
+/-! ## The contract that names no machine
+
+`Hex.byteContract` (`../spec/HexContract.lean`) is what the x86-64 kernel is proved to meet on our model
+(`../lang/Meets_hex_bytes.lean`). Here the AArch64 kernel meets it, read for AArch64 (`ArmAbi.spec`). -/
+
+theorem Hex.text_length (l : List (BitVec 8)) : (Hex.text l).length = 2 * l.length := by
+  induction l with
+  | nil => rfl
+  | cons b rest ih =>
+    have e : Hex.text (b :: rest) = [Hex.char (b >>> 4), Hex.char (b &&& 15#8)] ++ Hex.text rest := rfl
+    rw [e, List.length_append, ih, List.length_cons]
+    simp only [List.length_cons, List.length_nil]
+    omega
+
+/-- **The AArch64 kernel `hex_neon` meets `Hex.byteContract`.** -/
+theorem hex_neon_meets (prog : Program) (h_code : hex_neon_code.holds prog) (out inp : BitVec 64) (hash : List (BitVec 8)) :
+    prog.subroutineOk "b3l_hex_neon" (ArmAbi.spec (Hex.byteContract out inp hash)) := by
+  refine subroutine_ok_refine (hex_neon_bytes_ok prog h_code) ?_
+  intro r R s0 hp
+  simp only [ArmAbi.spec, Hex.byteContract, sepConj_assoc] at hp
+  obtain ⟨⟨hargs, -, hrl, hr⟩, hp⟩ := (satisfies_pure_sepConj _ _ _).1 hp
+  obtain ⟨b0, rfl⟩ := List.length_eq_one_iff.1 hrl
+  obtain ⟨hl0, he0⟩ := hr ((Bytes.plain 32).keeps inp hash, b0) (by simp)
+  have hlen : b0.length = 32 := hl0
+  have he : b0 = hash := he0
+  clear hl0 he0 hr hrl
+  subst he
+  simp only [List.length_cons, List.length_nil, List.take, List.cons.injEq, and_true] at hargs
+  obtain ⟨h0, h1⟩ := hargs
+  simp only [List.map, List.zipWith, ArmAbi.all, ArmAbi.owns, Bytes.Layout.fills, Bytes.Layout.keeps, Bytes.plain,
+    sepConj_emp, sepConj_assoc] at hp
+  rw [sepExists_sepConj_left] at hp
+  obtain ⟨old, hp⟩ := (satisfies_sepExists _ _).1 hp
+  simp only [sepConj_assoc] at hp
+  obtain ⟨⟨hol, -⟩, hp⟩ := (satisfies_pure_sepConj _ _ _).1 hp
+  refine ⟨⟨out, inp, b0, old⟩, ?_, ?_⟩
+  · simp only [sepConj_assoc]
+    refine (satisfies_pure_sepConj _ _ _).2 ⟨⟨h0.symm, h1.symm, hlen, hol⟩, ?_⟩
+    exact Satisfies.of_eq hp (by sep_eq)
+  · intro sf hq
+    simp only [sepConj_assoc] at hq
+    simp only [ArmAbi.spec, Hex.byteContract, List.map, List.zipWith, ArmAbi.all, ArmAbi.owns, Bytes.Layout.fills,
+      Bytes.Layout.keeps, Bytes.plain, sepConj_emp, sepConj_assoc, pure_true_sepConj]
+    rw [sepExists_sepConj_left]
+    refine (satisfies_sepExists _ _).2 ⟨Hex.text b0, ?_⟩
+    simp only [sepConj_assoc]
+    refine (satisfies_pure_sepConj _ _ _).2 ⟨⟨by rw [Hex.text_length, hlen], trivial⟩, ?_⟩
+    exact Satisfies.of_eq hq (by sep_eq)
+
+#print axioms hex_neon_meets

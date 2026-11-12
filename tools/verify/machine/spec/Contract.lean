@@ -30,6 +30,9 @@ def Layout.turns {α : Type} (l : Layout α) (a : BitVec 64) (v w : α) : Piece 
 /-- The thing at `a` holds `w` at the return; at the call the bytes there may be anything. -/
 def Layout.fills {α : Type} (l : Layout α) (a : BitVec 64) (w : α) : Piece := ⟨a, l.size, fun _ => True, (l.holds · w)⟩
 
+/-- `n` bytes, as they are. -/
+def plain (n : Nat) : Layout (List (BitVec 8)) := ⟨n, fun b v => b = v⟩
+
 /-- What a caller owes a function and what it gets. -/
 structure Contract where
   /-- The arguments, in order (at most six). -/

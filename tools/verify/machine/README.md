@@ -490,6 +490,9 @@ threads) and checks everything; then the audit runs.
   is the statement in bytes). `spec/` holds what names no machine: `Contract.lean`, `StackBytes.lean`
   (`Stack.Holds`), `PushContract.lean`, `HexText.lean`, and the algorithm's `Stack` (the file of `alg/`).
   Not audited yet on the AArch64 side.
+- **`hex` the same way:** `Hex.byteContract` (`spec/HexContract.lean`) is met by the x86-64 kernel on our
+  model (`hex_meets_bytes`, `lang/Meets_hex_bytes.lean`, with what an observer sees) and by the AArch64
+  kernel on Google's (`hex_neon_meets`, `HexNeonBytes.lean`).
 
 `spec/HexText.lean` (16 lines, Lean's core library only) is the hexadecimal itself, `Hex.char` and
 `Hex.text`: the one specification both architectures' contracts name.
