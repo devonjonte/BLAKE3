@@ -33,3 +33,4 @@ build.log
 rl.lean
 any.log
 Direct_*.lean
+index_tmp.lean

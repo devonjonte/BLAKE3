@@ -7,3 +7,4 @@ again/
 t
 build-*.log
 audit-*.log
+index_tmp.lean

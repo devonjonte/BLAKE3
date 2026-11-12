@@ -47,3 +47,8 @@ name = "PushBytes"
 
 [[lean_lib]]
 name = "ArmAbi"
+
+# What a reader must read, asked of Lean: the file of ../lang.
+[[lean_lib]]
+name = "ReadingList"
+srcDir = "../lang"
