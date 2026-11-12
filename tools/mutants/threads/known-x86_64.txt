@@ -4,7 +4,7 @@
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
 files: src/finish.rs src/lanes.rs src/park.rs src/stream.rs src/lib.rs
 model files: src/finish.rs src/park.rs
-src/finish.rs	delete ! in Finish::wait	1	OPEN: the pool's scheduling: `if poll()` leaves the polls for the park as soon as a poll did work; whether a test then hangs depends on the machine: it survives on five x86-64 machines of 16 to 112 threads (whole runs at 5c0247cd, November 12), and times out on aarch64 (timeouts-aarch64.txt)
+src/finish.rs	delete ! in Finish::wait	1	OPEN: the pool's scheduling: `if poll()` leaves the polls for the park as soon as a poll did work; whether a test then hangs depends on the machine: it survives on five x86-64 machines of 16 to 112 threads (whole runs at 5c0247cd, November 12), and on aarch64 since the first pipeline's tests went (known-aarch64.txt)
 src/lanes.rs	delete ! in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	delete ! in sources::take_stream_task	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace && with || in initialize	2	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
