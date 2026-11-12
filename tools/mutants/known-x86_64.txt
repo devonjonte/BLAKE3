@@ -133,6 +133,8 @@ src/lib.rs	replace prefetch_kernels with ()	1	same code: every test binary of a 
 src/lib.rs	replace prefetch_update_kernels with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/lib.rs	replace | with & in hash_all_at_once	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace | with & in hash_one_chunk_root	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/lib.rs	replace | with ^ in Hash::from_hex	1	equivalent: `high << 4 | low` joins a high nibble and a value below 16 for every text that is accepted, and a refused text's bytes are never returned
+src/lib.rs	replace | with ^ in Hash::from_hex::hex_val	2	equivalent: a character is a digit or a letter, never both, so the two masks are never both set, and neither are the two values they select
 src/lib.rs	replace | with ^ in Output::root_output_block	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in OutputReader::fill	1	equivalent: | and ^ agree on flag bits that never overlap
 src/lib.rs	replace | with ^ in compress_parents_parallel	1	equivalent: | and ^ agree on flag bits that never overlap
