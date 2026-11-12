@@ -78,6 +78,7 @@ def run(kind, what, old, new, n=1):
         w = os.path.join(d, "w")
         shutil.copytree(snapshot, w, symlinks=True)
         os.symlink(os.path.join("..", "one"), os.path.join(d, "one"))     # the copy is one level deeper: its ../one is this
+        os.symlink(os.path.join("..", "spec"), os.path.join(d, "spec"))   # and its ../spec
         if kind == "control":
             # a line added to the proof's file, so the copy checks the proof again and does not answer from what was built
             with open(os.path.join(w, "Proof_merge.lean"), "a") as f: f.write("\n-- the control's copy\n")

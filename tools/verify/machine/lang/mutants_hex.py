@@ -20,9 +20,9 @@ MUTANTS = [  # (address, old, new, what)
 ]
 
 STATEMENTS = [  # (file, old, new, what)
-    ("Spec_hex.lean", "[Hex.char (b >>> 4), Hex.char (b &&& 15#8)]", "[Hex.char (b &&& 15#8), Hex.char (b >>> 4)]", "a byte's low four bits come first"),
-    ("Spec_hex.lean", "then n + 0x30#8 else n + 0x57#8", "then n + 0x30#8 else n + 0x37#8", "the letters are capitals"),
-    ("Spec_hex.lean", "if n < 10#8 then", "if n < 11#8 then", "ten is written as a digit"),
+    ("../spec/HexText.lean", "[char (b >>> 4), char (b &&& 15#8)]", "[char (b &&& 15#8), char (b >>> 4)]", "a byte's low four bits come first"),
+    ("../spec/HexText.lean", "then n + 0x30#8 else n + 0x57#8", "then n + 0x30#8 else n + 0x37#8", "the letters are capitals"),
+    ("../spec/HexText.lean", "if n < 10#8 then", "if n < 11#8 then", "ten is written as a digit"),
     ("Spec_hex.lean", "(Bytes.layout 64).fills out (Hex.text hash)", "(Bytes.layout 64).fills out (Hex.text hash.reverse)", "the hash is written backwards"),
     ("Spec_hex.lean", "(Bytes.layout 64).fills out (Hex.text hash)", "(Bytes.layout 63).fills out (Hex.text hash)", "only 63 bytes may change"),
     ("Spec_hex.lean", "reads := [(Bytes.layout 32).keeps inp hash]", "reads := [(Bytes.layout 31).keeps inp hash]", "the hash is 31 bytes"),
@@ -41,6 +41,7 @@ def one(job):
         work = pathlib.Path(d) / "m"
         shutil.copytree(here, work, ignore=shutil.ignore_patterns(".lake", "bench", "*.log"))
         (pathlib.Path(d) / "one").symlink_to((here.parent / "one").resolve())     # the machine model, by its relative path
+        (pathlib.Path(d) / "spec").symlink_to((here.parent / "spec").resolve())   # and the shared specification
         text = (work / "Code_hex.lean").read_text()
         if at is not None:
             lines = [l for l in text.split("\n") if f"0x{at}," in l or f"at_{at} " in l]
@@ -62,7 +63,13 @@ def statement(job):
         work = pathlib.Path(d) / "m"
         shutil.copytree(here, work, ignore=shutil.ignore_patterns(".lake", "bench", "*.log"))
         (pathlib.Path(d) / "one").symlink_to((here.parent / "one").resolve())
+        if file.startswith("../spec/"):      # a change of the shared specification: in a copy of it, never in place
+            shutil.copytree(here.parent / "spec", pathlib.Path(d) / "spec", ignore=shutil.ignore_patterns(".lake"))
+        else:
+            (pathlib.Path(d) / "spec").symlink_to((here.parent / "spec").resolve())
         text = (work / file).read_text()
+        if file.startswith("../spec/"):      # without the specification's own example, so that the machine proof is what must object
+            text = text[:text.index("/-- For example")]
         if text.count(old) != 1:
             return "malformed", what, f"{file}: {old}"
         (work / file).write_text(text.replace(old, new))
