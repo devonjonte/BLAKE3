@@ -109,3 +109,9 @@ name = "Example_mergesteps"
 name = "Checked_merge_steps"
 [[lean_lib]]
 name = "AddTree"
+[[lean_lib]]
+name = "AbiBytes"
+[[lean_lib]]
+name = "StackAsBytes"
+[[lean_lib]]
+name = "Meets_push_bytes"

@@ -235,29 +235,47 @@ one kernel, their repository unchanged; `../arm/`.) What we learned by doing it:
   the facts about it hold by `rfl`. A candidate to offer them.
 - **One specification for both architectures**: `../spec/HexText.lean`, no machine in it.
 
-## Next for two architectures: contracts that name no machine
+## Two architectures: contracts that name no machine
 
-Today a contract that speaks of bytes as a list is shared by both architectures (`Hex.text`: one file,
-no machine in it). A contract that speaks of a data structure in memory is not: `Stack.At` is a
-predicate over the x86-64 model's memory, and on Google's model the same stack would be a separation
-logic assertion of theirs. To write `push`, `merge` and `add` once for both:
+A contract is written once, of bytes at addresses, and names no machine; each machine model says once
+what it means for its code to meet such a contract. Done for `push` (November 12), by hand where the
+compiler does not yet do it:
 
-- **A layout says what the bytes of a thing are, relative to its address, and names no memory**: a size
-  and a relation between a window of bytes (offset to byte) and the value. `Stack.layout`, `Cv.layout`
-  and `Bytes.layout` become such definitions, in the folder `spec/` with `Hex.text`.
-- **Each machine says once how a window of its memory is read** (ours: `fun i => m (a + i)`; theirs:
-  their `read8` under a permission, or a `SepProp` built from the window), and what `keeps`, `turns` and
-  `fills` mean there. `Abi.Contract` itself needs only the pieces, so it can live in `spec/` too, with
-  `Abi.Meets` given per machine: ours as it is, theirs by `subroutine_ok`.
-- The compiler then has two printers for word-level code and two proof generators (ours over
-  `Cells.lean`; theirs over their `wp_*` tactics), and one source.
+- **`spec/Contract.lean`** (read once): `Bytes.Layout` (a size, and what it means for a list of bytes to
+  hold a value), `Bytes.Piece`, `keeps` / `turns` / `fills`, `Bytes.Contract` (arguments, what is
+  accepted, the pieces read and updated, what is returned). No memory and no machine in it.
+- **`spec/StackBytes.lean`**: the data. `Cv.bytes`; `Stack.Holds b cvs` (1792 bytes: the count in eight,
+  24 not used, the values oldest first, the rest not used; at most 55).
+- **`spec/PushContract.lean`**: `Push.byteContract`, seven lines, the words of `Push.contract`.
+- **x86-64** (`lang/AbiBytes.lean`, read once): `Abi.ofBytes c stack` reads a `Bytes.Contract` for our
+  model (a piece holds when the bytes memory has at its address are bytes of which its statement holds),
+  and `Abi.Meets` applies as before. `push_meets_bytes` (`Meets_push_bytes.lean`).
+- **AArch64** (`arm/ArmAbi.lean`, read once): `ArmAbi.spec c` reads it as a specification of Google's
+  logic (a piece is owned bytes of which its statement holds; arguments in X0 to X5).
+  `push_arm_meets` (`arm/PushBytes.lean`).
+- Both codes are printed from the one function `push` of `hasher.ode` (`odec.py … aarch64-fn` is the
+  second printer, a trial for straight-line functions).
 
-Started from the other end (November 12): the source's `push` is printed for AArch64 by a trial printer
-(`odec.py … aarch64-fn`, straight-line functions) and proved on Google's model by their tactics alone,
-with nothing written for the proof (`../arm/prove_arm_fn.sh`): so the printer and the generator are the
-small part. What is missing is the contract: on AArch64 `push` is proved against a statement about cells
-(`PushCells.lean`), because `Push.contract` speaks of the x86-64 model's memory. The layouts are the work.
-The kernel `hex_neon` did not need it because its contract's data is a list of bytes.
+What it took, and what it shows:
+
+- On x86-64 the existing proof was kept: `Stack.At_iff_bytes` (`StackAsBytes.lean`, by hand, 227 lines
+  with its lemmas) shows the model's own predicate is the statement in bytes, so
+  `Abi.ofBytes (Push.byteContract …) 64 = Push.contract …` and the theorem carries over. The honest end
+  is for `Spec_stack.lean` to go: the compiler's proofs would open a layout in bytes into the cells code
+  touches, by lemmas like these, written once a data structure.
+- On AArch64 the compiler's proof is against cells (their tactics alone, nothing written), and a file
+  by hand (`PushBytes.lean`, 144 lines) goes from the bytes to the cells and back (their rule
+  `subroutine_ok_refine_frame`). The lemmas
+  about lists of bytes (`spec/StackBytesLemmas.lean`: room for one more; the stack with one more) are
+  shared by both architectures in principle; x86-64 does not use them yet.
+- **The stack budget is not in the contract**: it differs by machine and by compiler. `Abi.ofBytes` takes
+  it; Google's logic gives the code its own stack without a number. So "a budget decides who can
+  implement a contract" (above) becomes a property of a machine's reading, not of the contract.
+- A piece the function does not change: on our model the frame clause says so; in their logic the
+  specification names the piece's bytes and gives the same bytes back.
+- Not done: the kernels' contracts in this form; `merge` and `add` on AArch64 (loops and calls in the
+  second printer and its proof generator); the bytes-to-cells step generated; an audit of the AArch64
+  `push` (the kernel `hex_neon` has one).
 
 ## No code the proof shows is never reached
 

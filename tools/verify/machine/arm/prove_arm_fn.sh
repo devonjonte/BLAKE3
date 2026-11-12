@@ -5,7 +5,9 @@
 #   1. odec.py prints the function's AArch64 assembly; it must be the file kept here (NAME.S);
 #   2. the assembler makes an ELF object; its instruction words are read back;
 #   3. gen_fn_arm.py writes Proof_NAME_arm.lean from the words and the contract named (PushCells.lean), which
-#      must be the file kept here; Lean checks it.
+#      must be the file kept here; Lean checks it;
+#   4. PushBytes.lean (by hand): the same code meets Push.byteContract (../spec/PushContract.lean), the
+#      contract that names no machine, which the x86-64 code meets too (../lang/Meets_push_bytes.lean).
 # usage: ./prove_arm_fn.sh [NAME [SPECFILE SPEC]]
 set -eu
 here=$(cd "$(dirname "$0")" && pwd); cd "$here"
@@ -30,3 +32,13 @@ else
   fail "Lean does not accept the proof"
 fi
 echo "the compiler's proof of $name (AArch64) on Google's model: checked"
+# The contract that names no machine (../spec), where there is one for this function (by hand, so far).
+if [ "$name" = push ]; then
+  if lake build PushBytes > "build-$name-bytes.log" 2>&1 && ! grep -q -E "error|sorry" "build-$name-bytes.log"; then
+    grep -E "push_arm_meets. depends" -A1 "build-$name-bytes.log" | head -n 3
+    echo "push (AArch64) meets Push.byteContract, the contract the x86-64 code meets: checked"
+  else
+    grep -E "error|sorry" -A5 "build-$name-bytes.log" | head -n 20
+    echo "push (AArch64) meets Push.byteContract: NOT checked"; exit 1
+  fi
+fi

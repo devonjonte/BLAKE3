@@ -5,6 +5,11 @@ defaultTargets = ["ParentSpec", "Test", "MergeSpec", "MergeAll"]
 name = "Blake3Servil"
 path = "../../lean"
 
+# What names no machine: the algorithm (`Stack`, of ../alg) and the data as bytes.
+[[require]]
+name = "spec"
+path = "../spec"
+
 [[lean_lib]]
 name = "Machine"
 [[lean_lib]]
@@ -57,9 +62,6 @@ name = "MergeLoop"
 name = "MergeWhole"
 [[lean_lib]]
 name = "MergeSpec"
-[[lean_lib]]
-name = "Stack"
-srcDir = "../alg"
 [[lean_lib]]
 name = "Leak"
 [[lean_lib]]

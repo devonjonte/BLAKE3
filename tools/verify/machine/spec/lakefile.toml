@@ -1,5 +1,27 @@
 name = "spec"
-defaultTargets = ["HexText"]
+defaultTargets = ["HexText", "StackBytesLemmas", "PushContract"]
+
+# The specification (C2SP's BLAKE3 in Lean).
+[[require]]
+name = "Blake3"
+path = "../../../../c2sp/BLAKE3"
 
 [[lean_lib]]
 name = "HexText"
+
+# The algorithm over the specification (`Blake3.CV`, the tree's stack): the file of ../alg.
+[[lean_lib]]
+name = "Stack"
+srcDir = "../alg"
+
+[[lean_lib]]
+name = "Contract"
+
+[[lean_lib]]
+name = "StackBytes"
+
+[[lean_lib]]
+name = "PushContract"
+
+[[lean_lib]]
+name = "StackBytesLemmas"

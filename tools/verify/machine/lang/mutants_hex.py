@@ -4,7 +4,7 @@ Code_hex.lean (the table and its lemma alike), or one line of what is claimed (S
 the theorem's own line), and `lake build Meets_hex` must fail. The control: the unchanged copy, built afresh,
 must be accepted.
 usage: mutants_hex.py [--jobs N]"""
-import argparse, concurrent.futures, pathlib, shutil, subprocess, tempfile
+import argparse, re, concurrent.futures, pathlib, shutil, subprocess, tempfile
 here = pathlib.Path(__file__).resolve().parent
 MUTANTS = [  # (address, old, new, what)
     ("5002E", ".psrlw 2 4", ".psrlw 2 3", "the high bits shifted by three"),
@@ -64,15 +64,25 @@ def statement(job):
         shutil.copytree(here, work, ignore=shutil.ignore_patterns(".lake", "bench", "*.log"))
         (pathlib.Path(d) / "one").symlink_to((here.parent / "one").resolve())
         if file.startswith("../spec/"):      # a change of the shared specification: in a copy of it, never in place
-            shutil.copytree(here.parent / "spec", pathlib.Path(d) / "spec", ignore=shutil.ignore_patterns(".lake"))
+            copy = pathlib.Path(d) / "spec"
+            shutil.copytree(here.parent / "spec", copy, ignore=shutil.ignore_patterns(".lake", "lake-manifest.json"))
+            # the copy is one level deeper than the folder it copies: name what it requires by where it is
+            conf = (copy / "lakefile.toml").read_text()
+            for line in re.findall(r'^(?:path|srcDir) = "(\.\.[^"]*)"$', conf, re.M):
+                conf = conf.replace(f'"{line}"', f'"{(here.parent / "spec" / line).resolve()}"')
+            (copy / "lakefile.toml").write_text(conf)
+            (work / "lake-manifest.json").unlink()      # it names the specification's requirements by the old place; Lake writes it anew
         else:
             (pathlib.Path(d) / "spec").symlink_to((here.parent / "spec").resolve())
         text = (work / file).read_text()
         if file.startswith("../spec/"):      # without the specification's own example, so that the machine proof is what must object
             text = text[:text.index("/-- For example")]
-        if text.count(old) != 1:
+        if old is None:
+            (work / file).write_text(text)      # the control of this way of checking: nothing changed but the copying
+        elif text.count(old) != 1:
             return "malformed", what, f"{file}: {old}"
-        (work / file).write_text(text.replace(old, new))
+        else:
+            (work / file).write_text(text.replace(old, new))
         try:
             r = subprocess.run(["lake", "build", "Meets_hex"], cwd=work, capture_output=True, text=True, timeout=900)
         except subprocess.TimeoutExpired:
@@ -86,6 +96,11 @@ def main():
     control = one((None, "", "", "the unchanged code"))
     assert control[0] == "ACCEPTED", f"the unchanged proof does not build in a copy: {control}"
     print("control: the unchanged code is accepted", flush=True)
+    # The same for a change of the shared specification, which is made in a copy of ../spec: the copy,
+    # unchanged, must build too.
+    control = statement(("../spec/HexText.lean", None, None, "the unchanged specification, in a copy"))
+    assert control[0] == "ACCEPTED", f"the unchanged proof does not build over a copy of the specification: {control}"
+    print("control: the unchanged specification, in a copy, is accepted", flush=True)
     counts = {}
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
         for verdict, what, change in pool.map(one, MUTANTS):

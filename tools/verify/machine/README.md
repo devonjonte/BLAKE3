@@ -478,13 +478,18 @@ threads) and checks everything; then the audit runs.
   a general register, a branch, an indexed load), three weaker statements and one blind observer: 7 of
   7 refused.
 - `Observer.lean`, `WpKernel.lean`, `KernelAttr.lean`: written once for all kernels.
-- **`./prove_arm_fn.sh push`: a word-level function on both architectures from one source function.**
+- **`./prove_arm_fn.sh push`: one source function, one contract, two architectures, two machine models.**
   `odec.py … aarch64-fn push` is a second printer (a trial: straight-line functions that call nothing): the
   `push` of `lang/hasher.ode`, whose x86-64 code `push_meets` is about, printed for AArch64 (18
   instructions) and proved on Google's model: `push_arm_ok` (`Proof_push_arm.lean`, generated; their
-  tactics alone; Lean's three axioms; one second). Its contract there is in cells (`PushCells.lean`: the
-  count goes up by one, the two vectors are copied to the next place), not yet `Push.contract`: the
-  contracts must first name no machine (`lang/DESIGN.md`).
+  tactics alone; Lean's three axioms; one second), against a statement about cells (`PushCells.lean`).
+  Then, by hand (`PushBytes.lean`, 144 lines): **`push_arm_meets`: the AArch64 code meets
+  `Push.byteContract`** (`spec/PushContract.lean`), a contract that names no machine, read for AArch64 by
+  `ArmAbi.lean`. The x86-64 code meets the same contract on our model: `push_meets_bytes`
+  (`lang/Meets_push_bytes.lean`, from `push_meets` by `lang/StackAsBytes.lean`: the model's own `Stack.At`
+  is the statement in bytes). `spec/` holds what names no machine: `Contract.lean`, `StackBytes.lean`
+  (`Stack.Holds`), `PushContract.lean`, `HexText.lean`, and the algorithm's `Stack` (the file of `alg/`).
+  Not audited yet on the AArch64 side.
 
 `spec/HexText.lean` (16 lines, Lean's core library only) is the hexadecimal itself, `Hex.char` and
 `Hex.text`: the one specification both architectures' contracts name.
