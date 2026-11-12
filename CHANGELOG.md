@@ -120,9 +120,7 @@ it is faster than 0.8 there (3 KiB by 28 to 30%).
   run eight at a time on AVX2 and sixteen on AVX-512** (#297), on the
   kernels `finalize_each` uses: a single-threaded Merkle tree over 16- or
   32-byte leaves takes 74 to 78% less time on a Ryzen 9700X and an EPYC
-  9275F (sixteen lanes), and 45 to 57% less on two EPYC 7443 (eight). One
-  cell pays, on that last machine alone: its multithreaded tree of
-  1,048,576 leaves of 32 B, on 96 threads, takes 6% more (#372).
+  9275F (sixteen lanes), and 45 to 57% less on two EPYC 7443 (eight).
 - **`Packed<16>` and `Packed<32>`**: a batch of 16- or 32-byte messages
   (Merkle leaves, digests) hashed without the program writing each into a
   block of its own first (#289).
