@@ -282,12 +282,12 @@ src/self_test.rs	replace * with +	24	same code: every test binary hashes as the 
 src/self_test.rs	replace * with + in chain	1	equivalent: the case has one message, so its length scales only message 0's offset, 0
 src/self_test.rs	replace * with + in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace * with + in outputs	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
-src/self_test.rs	replace * with + in test::reference	5	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace * with + in test::reference	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace * with /	24	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace * with / in chain	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace * with / in chunk_values	1	AArch64 only: chunk values serve the AArch64 cases; no x86 case uses them
 src/self_test.rs	replace * with / in outputs	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
-src/self_test.rs	replace * with / in test::reference	5	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
+src/self_test.rs	replace * with / in test::reference	1	AArch64 only: the AArch64 CASES table is cfg(target_arch = "aarch64"), compiled out on x86
 src/self_test.rs	replace + with *	10	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace + with -	10	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace += with *= in run	1	[cpu lacks avx512f avx512vl amd_family_ge_1a] AVX-512 only: the wide kernels' self-test cases join the count only where the platform is AVX512 (test_self_test_run_checks_every_case checks the sum there)
