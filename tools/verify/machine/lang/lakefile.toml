@@ -107,3 +107,5 @@ name = "Proof_merge_steps"
 name = "Example_mergesteps"
 [[lean_lib]]
 name = "Checked_merge_steps"
+[[lean_lib]]
+name = "AddTree"

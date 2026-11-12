@@ -147,6 +147,13 @@ result compared with the contract, read in parts by `#pieces`: eight examples in
 stack of 55 values (28,381 instructions). An example that breaks the contract is run through the source's
 meaning (`Sem.lean`) as well, which says whether the source and contract or the compiler's code is at
 fault. A contract none of whose examples meets it is refused. A test by running, not a proof.
+**`add` and the specification's tree (`AddTree.lean`).** `Add.keeps_the_tree`: if the stack holds the
+chaining values of the complete subtrees of the first `m` chunks (`Blake3.Stk`, `alg/Stack.lean`), the
+value that arrives is chunk `m`'s and the target is the number of one bits of `m + 1`, then what
+`Add.contract` says is left is that stack for `m + 1` chunks. From `alg/`'s `merge_lazy`; axioms
+`propext`, `Quot.sound`. With `add_meets` this is the hasher's step for a whole chunk, from the bytes
+that run to the specification's tree.
+
 **`merge_steps` (November 12): a loop that calls a function by its contract.** `merge` a third way: one
 level at a time, each turn a call of `merge` with a target one less than the count.
 `./prove_fn.sh merge_steps 0xA0000`: its examples meet the contract through the calls (up to 30,592
