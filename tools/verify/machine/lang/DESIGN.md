@@ -149,6 +149,27 @@ longer give one of those and forget another (the mistake "the key is not said to
 stack" cannot be written). `Merge.contract` is six lines: `args`, `stack`, `accepts`, `reads`,
 `updates`, `returns`.
 
+## Arm: Google's model, and an observer of our own
+
+(Sam, November 11: use the AArch64 model of `google-deepmind/code-verification`. November 12: done for
+one kernel, their repository unchanged; `../arm/`.) What we learned by doing it:
+
+- **Their trusted part is enough to state our contracts**: a decoder from the 32-bit words, `execInst`,
+  `Step`, and `subroutine_ok` (total correctness with a frame; the stack pointer and callee-saved
+  registers kept). Our contract in bytes (`Hex.text`) is a `Spec` of theirs, 6 lines.
+- **Their proof library does the stepping** (`wp_init`, `wp_steps`: 32 NEON instructions in seconds) and
+  leaves us the arithmetic: eight equalities of 64-bit values, which `bv_decide` closes. Their
+  `wp_done` does not hand back what it cannot close; `SepWP.of_eq` (three lines, ours) replaces the
+  spatial context by the specification's and leaves the value goals. A generator for Arm writes that
+  step and the tactic for the goals; the rest is theirs.
+- **They have no observer** (side channels are outside their scope). Ours is small: what an instruction
+  shows is its fetch, the addresses it reads and writes, and where it sends control; it is defined for
+  the kinds of instruction our kernels use and says "no account" for the rest. The theorem is the
+  textbook one: two machines that differ only in what memory holds and in the vector registers show
+  the same. It needs no program logic: each instruction is decoded by the kernel (`decide +kernel`) and
+  the facts about it hold by `rfl`. A candidate to offer them.
+- **One specification for both architectures**: `../spec/HexText.lean`, no machine in it.
+
 ## No code the proof shows is never reached
 
 (Sam, November 12.) A check that the proof shows can never fail is dead code: it costs instructions, it is

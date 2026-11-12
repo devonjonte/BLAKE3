@@ -414,8 +414,29 @@ NEON (`hex_neon.S`, 32 instructions, no table, no branch).
   hash is unchanged. From `hex_neon_ok` by their rule `subroutine_ok_refine`. Axioms: Lean's three and
   72 of `bv_decide` (64 of them one a character, in the lemma from vectors to text).
 
+- `HexNeonQuiet.lean` (written by `gen_quiet.py`; needs their trusted definitions only): their model has
+  no observer of time or cache, so the file defines one (`Obs`, `obsInstr`, `runObs`: fetches, the
+  addresses read and written, where control goes) and proves **`hex_neon_quiet`**: two machines that
+  agree on the general registers, the stack pointer, the program counter and on which memory is mapped
+  with which permissions, and differ in any way in what memory holds and in the vector registers, show
+  the same while the 32 instructions run; and **`hex_neon_observed`**: every one of the 32 is an
+  instruction the observer has an account of. Lean's three axioms only; checked in a second.
+  `python3 mutants_quiet.py`: the control accepted; three changes of code that show the hash (a move to
+  a general register, a branch, an indexed load), three weaker statements and one blind observer: 7 of
+  7 refused.
+
 `spec/HexText.lean` (16 lines, Lean's core library only) is the hexadecimal itself, `Hex.char` and
 `Hex.text`: the one specification both architectures' contracts name.
 
-Not yet: anything about what an observer sees (their model has no observer); the kernel written
-in our language with the proof generated; SME2 (their model has no SVE or SME).
+| | x86-64 (`lang/`, our model) | AArch64 (`arm/`, Google's model) |
+|---|---|---|
+| the contract | `Hex.contract`: 64 bytes at `out` become `Hex.text` of the 32 at `hash` | `hexBytesSpec`: the same words |
+| the theorem | `hex_meets` (`Abi.MeetsQuietly`) | `hex_neon_bytes_ok` (`subroutineOk`) |
+| what an observer sees | in the same theorem: one list for every hash | `hex_neon_quiet`, a second theorem, about the 32 words run in order |
+| axioms | 3 + 5 of `bv_decide` | 3 + 72 of `bv_decide`; the observer's theorems 3 |
+| instructions | 45 SSE2 | 32 NEON |
+
+Not yet: the observer's theorem joined to their `Step` (it runs the words in order; that the model
+fetches exactly these from memory is `hex_neon_ok`'s part); an instruction's own time (Arm's DIT; no
+model has it); the kernel written in our language with these files generated; SME2 (their model has no
+SVE or SME).
