@@ -552,6 +552,32 @@ fn scratch_layout(n: usize) -> (usize, usize) {
     (cvs, half)
 }
 
+#[cfg(test)]
+mod scratch_layout_tests {
+    use super::*;
+
+    /// For every size the flat walk takes, its three buffers are where
+    /// the comment says: the pointer table from 0, then the chaining
+    /// values at 1 KiB mod 4 KiB, then the level above them at 3 KiB mod
+    /// 4 KiB, each with the room of a padded group of sixteen parents'
+    /// inputs (32 values), and all inside the scratch. A layout that puts
+    /// the level above before the scratch's start is otherwise noticed
+    /// only where the write faults: on macOS the tests passed with it.
+    #[test]
+    fn test_scratch_layout_keeps_the_buffers_apart_and_inside() {
+        let mut n = FLAT_MIN_CHUNKS;
+        while n <= FLAT_MAX_CHUNKS {
+            let (cvs, half) = scratch_layout(n);
+            let padded = 2 * GROUP;
+            assert!(8 * n <= cvs, "{n} chunks: the pointer table runs into the values");
+            assert!(cvs + OUT_LEN * n.max(padded) <= half, "{n} chunks: the values run into the level above");
+            assert!(half + OUT_LEN * (n / 2).max(padded) <= SCRATCH, "{n} chunks: the level above runs past the scratch");
+            assert_eq!((cvs % 4096, half % 4096), (1024, 3072), "{n} chunks: the buffers' places mod 4 KiB");
+            n *= 2;
+        }
+    }
+}
+
 /// Chunks per group of the kernel with an integer lane: sixteen on SME2,
 /// two on the integer units (c/blake3_sme2_hybrid_aarch64.S).
 pub const HYBRID_GROUP: usize = 18;
