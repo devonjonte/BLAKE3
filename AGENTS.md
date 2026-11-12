@@ -34,26 +34,7 @@ Use one clear mechanism wherever it serves. When approaches perform similarly, c
 - To find the habit to keep, ask what goes right when a reader follows the rule in your draft, and write that as what to do. Then reread the rule as a newcomer would: each habit it names is one to take up.
 - Frame positively: show the promising, successful aspects of the recommended path. Mention an alternative only when its trade-offs deserve our attention.
 - The reader has limited working memory and limited ability to search back through recent text. Include only what the current focus needs.
-
-Sixteen actions that improve writing:
-1. Sand off filler words
-2. Find the real actors
-3. Restore actions to verbs
-4. Delete empty verbs
-5. Prefer characters as subjects
-6. Put subjects and verbs together
-7. Put verbs and objects together
-8. Make the opening familiar
-9. Put new and important information last
-10. Repair topic flow
-11. Repair stress flow
-12. Establish a clear topic sentence
-13. Make subjects consistent across a passage
-14. Control passive voice deliberately
-15. Name responsibility
-16. Trim metadiscourse
-
-BLAKE3-Servil's `tools/claudish.py` warns on a few patterns that sound like a language model or work against these rules: contrasts built on a negation, prohibitions, stock vocabulary, filler, mid-sentence dashes, and sentences too long or too chained to hold in mind. Run it on what you write, a page or a draft commit message or comment (`python3 tools/claudish.py [--kind commit|comment|pr|doc] FILE...`, or `-` to read a draft from stdin; the kind sets a length budget). Each warning marks a sentence to reread; your judgment, guided by the aims above, decides what changes. Often the sentence stands, and sometimes the whole paragraph wants rewriting.
+- Write plain, natural English: put real actors as subjects and actions in verbs, and cut filler and throat-clearing.
 
 ## Presentation: every item costs the reader
 
