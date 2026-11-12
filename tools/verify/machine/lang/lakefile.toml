@@ -5,6 +5,10 @@ defaultTargets = ["Proof_hex"]
 name = "one"
 path = "../one"
 
+[[require]]
+name = "spec"
+path = "../spec"
+
 [[lean_lib]]
 name = "Lang"
 [[lean_lib]]

@@ -6,17 +6,13 @@ open Arm64 ProofLib
 /-! # The NEON `hex` kernel: the contract in bytes
 
 `HexNeonProof.lean` proves the kernel against a statement in 16-byte vectors. Here the same code meets the
-statement a reader wants, in the words used on x86-64: the 64 bytes at `out` become `Hex.text` of the 32
+statement a reader wants, in the words used on x86-64 (`Hex.text`, `../spec/HexText.lean`): the 64 bytes at `out` become `Hex.text` of the 32
 bytes at `inp`. From `hex_neon_ok` by their rule `subroutine_ok_refine`; the rest is bytes to vectors and
 back. -/
 
 set_option maxRecDepth 200000
 
 namespace Hex
-
-/-- The hexadecimal of bytes: two characters a byte, its high four bits first. -/
-def text (bs : List (BitVec 8)) : List (BitVec 8) :=
-  bs.flatMap fun (b : BitVec 8) => [char (b >>> 4), char (b &&& 15#8)]
 
 /-- The sixteen bytes of a vector, lowest first. -/
 def bytes16 (v : BitVec 128) : List (BitVec 8) :=

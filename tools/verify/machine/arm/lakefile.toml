@@ -8,6 +8,10 @@ git = "https://github.com/google-deepmind/code-verification"
 rev = "b0f729accbc21a0413e7ca4e1da43fa45b5f2e1b"
 subDir = "arm64-semantics/ProofLib"
 
+[[require]]
+name = "spec"
+path = "../spec"
+
 [[lean_lib]]
 name = "HexNeonRun"
 

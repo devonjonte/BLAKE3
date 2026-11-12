@@ -414,6 +414,8 @@ NEON (`hex_neon.S`, 32 instructions, no table, no branch).
   hash is unchanged. From `hex_neon_ok` by their rule `subroutine_ok_refine`. Axioms: Lean's three and
   72 of `bv_decide` (64 of them one a character, in the lemma from vectors to text).
 
-Not yet: one file of specification shared by both architectures (`Hex.char` and `Hex.text` are written
-out again here); anything about what an observer sees (their model has no observer); the kernel written
+`spec/HexText.lean` (16 lines, Lean's core library only) is the hexadecimal itself, `Hex.char` and
+`Hex.text`: the one specification both architectures' contracts name.
+
+Not yet: anything about what an observer sees (their model has no observer); the kernel written
 in our language with the proof generated; SME2 (their model has no SVE or SME).

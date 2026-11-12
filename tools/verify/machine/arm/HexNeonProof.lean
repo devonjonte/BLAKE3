@@ -1,5 +1,6 @@
 import Arm64
 import ProofLib
+import HexText
 open Arm64 ProofLib
 
 /-! # The NEON `hex` kernel on Google DeepMind's AArch64 model
@@ -19,9 +20,6 @@ here of what the hash's value shows. Axioms: Lean's three and eight of `bv_decid
 set_option maxRecDepth 200000
 
 namespace Hex
-
-/-- The character of a number below 16: `0` to `9`, then `a` to `f`. -/
-def char (n : BitVec 8) : BitVec 8 := if n < 10#8 then n + 0x30#8 else n + 0x57#8
 
 /-- Byte `i` of a vector. -/
 def byte (v : BitVec 128) (i : Nat) : BitVec 8 := v.extractLsb' (8 * i) 8
