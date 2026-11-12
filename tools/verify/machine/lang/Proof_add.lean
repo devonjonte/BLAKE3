@@ -120,7 +120,7 @@ theorem whole (fb st key flags plat cv target ra : BitVec 64) (sv : Abi.Saved) (
         rw [hout2 x (by bv_decide) (by bv_decide)]
         refine Eq.trans ?_ (hOut1 x hx hmod); first | rfl | mem_away
       clear hout2 hown2
-      refine runs_then (a := 9) (s1 := ?_) ?_ ?_
+      refine runs_then (a := 8) (s1 := ?_) ?_ ?_
       case refine_2 => run_fn []; rfl
       refine runs_done ⟨rfl, by simp only [Add.contract, Abi.Contract.framed]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩
       all_goals try dsimp only

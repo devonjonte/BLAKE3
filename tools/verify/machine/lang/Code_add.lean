@@ -5,7 +5,7 @@ import Code_merge
 import Code_push
 open X86
 
-/-! `add` as assembled: 31 instructions. Written from the lifter's rows. -/
+/-! `add` as assembled: 30 instructions. Written from the lifter's rows. -/
 
 set_option maxRecDepth 100000
 namespace Code_add
@@ -33,15 +33,14 @@ def table : List (Nat × Instr × Nat) := [
   (0x80034, .mov 64 (.reg .rcx) (.reg .r13), 0x80037),
   (0x80037, .mov 64 (.reg .r8) (.reg .r15), 0x8003A),
   (0x8003A, .call 0x60000, 0x8003F),
-  (0x8003F, .mov 64 (.reg .rax) (.imm 0x0), 0x80046),
-  (0x80046, .add 64 (.reg .rsp) (.imm 0x8), 0x8004A),
-  (0x8004A, .pop .r15, 0x8004C),
-  (0x8004C, .pop .r14, 0x8004E),
-  (0x8004E, .pop .r13, 0x80050),
-  (0x80050, .pop .r12, 0x80052),
-  (0x80052, .pop .rbp, 0x80053),
-  (0x80053, .pop .rbx, 0x80054),
-  (0x80054, .ret, 0x80055)
+  (0x8003F, .add 64 (.reg .rsp) (.imm 0x8), 0x80043),
+  (0x80043, .pop .r15, 0x80045),
+  (0x80045, .pop .r14, 0x80047),
+  (0x80047, .pop .r13, 0x80049),
+  (0x80049, .pop .r12, 0x8004B),
+  (0x8004B, .pop .rbp, 0x8004C),
+  (0x8004C, .pop .rbx, 0x8004D),
+  (0x8004D, .ret, 0x8004E)
 ]
 
 def pre0 : List (Nat × Instr × Nat) := KCode.table
@@ -113,14 +112,13 @@ theorem has_push : ∀ pc x, Code_push.prog pc = some x → prog pc = some x := 
 @[ode_at] theorem at_80034 : prog 0x80034 = some (.mov 64 (.reg .rcx) (.reg .r13), 0x80037) := rfl
 @[ode_at] theorem at_80037 : prog 0x80037 = some (.mov 64 (.reg .r8) (.reg .r15), 0x8003A) := rfl
 @[ode_at] theorem at_8003A : prog 0x8003A = some (.call 0x60000, 0x8003F) := rfl
-@[ode_at] theorem at_8003F : prog 0x8003F = some (.mov 64 (.reg .rax) (.imm 0x0), 0x80046) := rfl
-@[ode_at] theorem at_80046 : prog 0x80046 = some (.add 64 (.reg .rsp) (.imm 0x8), 0x8004A) := rfl
-@[ode_at] theorem at_8004A : prog 0x8004A = some (.pop .r15, 0x8004C) := rfl
-@[ode_at] theorem at_8004C : prog 0x8004C = some (.pop .r14, 0x8004E) := rfl
-@[ode_at] theorem at_8004E : prog 0x8004E = some (.pop .r13, 0x80050) := rfl
-@[ode_at] theorem at_80050 : prog 0x80050 = some (.pop .r12, 0x80052) := rfl
-@[ode_at] theorem at_80052 : prog 0x80052 = some (.pop .rbp, 0x80053) := rfl
-@[ode_at] theorem at_80053 : prog 0x80053 = some (.pop .rbx, 0x80054) := rfl
-@[ode_at] theorem at_80054 : prog 0x80054 = some (.ret, 0x80055) := rfl
+@[ode_at] theorem at_8003F : prog 0x8003F = some (.add 64 (.reg .rsp) (.imm 0x8), 0x80043) := rfl
+@[ode_at] theorem at_80043 : prog 0x80043 = some (.pop .r15, 0x80045) := rfl
+@[ode_at] theorem at_80045 : prog 0x80045 = some (.pop .r14, 0x80047) := rfl
+@[ode_at] theorem at_80047 : prog 0x80047 = some (.pop .r13, 0x80049) := rfl
+@[ode_at] theorem at_80049 : prog 0x80049 = some (.pop .r12, 0x8004B) := rfl
+@[ode_at] theorem at_8004B : prog 0x8004B = some (.pop .rbp, 0x8004C) := rfl
+@[ode_at] theorem at_8004C : prog 0x8004C = some (.pop .rbx, 0x8004D) := rfl
+@[ode_at] theorem at_8004D : prog 0x8004D = some (.ret, 0x8004E) := rfl
 
 end Code_add

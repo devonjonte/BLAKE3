@@ -226,6 +226,11 @@ one more thing to read, and keeping it would say we do not believe the proof. `m
 stack of fewer than two values; its contract and invariant exclude that, so the trap is gone (93
 instructions became 88). Where a check is wanted because a caller is not proved, it is the checked entry's.
 
+The audit that makes each instruction a no-op in turn (`mutants_code.py`) finds what else the contract
+does not need: it accepted the removal of `mov rax, 0` from `push` and `add` (their source returns
+nothing) and of a move in `add` of a value already in place. The first is gone: a function whose source
+returns nothing sets no result. The second wants the compiler to know what a register holds.
+
 ## Pinning the blame
 
 **A failed check must say what is at fault: the code, the contract, the compiler, or the proof. Reliably

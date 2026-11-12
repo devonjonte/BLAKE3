@@ -69,6 +69,8 @@ structure Fn where
   regs : List Var := []
   /-- A kernel: its body is machine instructions; nothing is added around them. -/
   naked : Bool := false
+  /-- The source returns nothing: no instruction sets a result. -/
+  noResult : Bool := false
   deriving Repr, Inhabited
 
 /-! ## To Rust -/
@@ -272,7 +274,7 @@ def Fn.asm (f : Fn) : String :=
   let prologue := L.saved.map (fun r => s!"push {r}") ++ (if L.frame == 0 then [] else [s!"sub rsp, {L.frame}"]) ++
     (f.params.zip abiArgs).map (fun (p, r) => s!"mov {L.home p}, {r}")
   let (body, _) := Stmts.asm L f.name 0 f.body
-  let epilogue := Exp.asm L 0 f.ret ++ (if L.frame == 0 then [] else [s!"add rsp, {L.frame}"]) ++
+  let epilogue := (if f.noResult then [] else Exp.asm L 0 f.ret) ++ (if L.frame == 0 then [] else [s!"add rsp, {L.frame}"]) ++
     L.saved.reverse.map (fun r => s!"pop {r}") ++ ["ret"]
   let line (s : String) := if s.endsWith ":" then s ++ "\n" else "    " ++ s ++ "\n"
   s!".global {f.name}\n.global _{f.name}\n.p2align 4\n{f.name}:\n_{f.name}:\n" ++

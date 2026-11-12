@@ -96,7 +96,9 @@ def run(kind, what, old, new, n=1):
             g = subprocess.run([sys.executable, "gen_code.py", "merge", ROWS, "Code_merge.lean", ROWS2], cwd=w, capture_output=True, text=True)
         elif kind == "clause":
             lines = open(os.path.join(w, SRC)).read().split("\n")
-            at = [i for i, l in enumerate(lines) if old in l]; assert len(at) == 1, old
+            first = next(i for i, l in enumerate(lines) if l.startswith("fn merge("))      # merge's own lines: others have such clauses too
+            last = next(i for i in range(first, len(lines)) if lines[i] == "}")
+            at = [i for i in range(first, last) if old in lines[i]]; assert len(at) == 1, old
             if new is None: del lines[at[0]]
             else: lines[at[0]] = lines[at[0]].replace(old, new)
             with open(os.path.join(w, SRC), "w") as f: f.write("\n".join(lines))

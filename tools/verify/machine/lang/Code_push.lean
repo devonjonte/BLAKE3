@@ -2,7 +2,7 @@ import Machine
 import Cells
 open X86
 
-/-! `push` as assembled: 27 instructions. Written from the lifter's rows. -/
+/-! `push` as assembled: 26 instructions. Written from the lifter's rows. -/
 
 set_option maxRecDepth 100000
 namespace Code_push
@@ -30,11 +30,10 @@ def table : List (Nat × Instr × Nat) := [
   (0x70038, .add 64 (.reg .rax) (.imm 0x1), 0x7003C),
   (0x7003C, .mov 64 (.reg .rcx) (.reg .rbx), 0x7003F),
   (0x7003F, .mov 64 (.mem .rcx 0x0) (.reg .rax), 0x70042),
-  (0x70042, .mov 64 (.reg .rax) (.imm 0x0), 0x70049),
-  (0x70049, .pop .r12, 0x7004B),
-  (0x7004B, .pop .rbp, 0x7004C),
-  (0x7004C, .pop .rbx, 0x7004D),
-  (0x7004D, .ret, 0x7004E)
+  (0x70042, .pop .r12, 0x70044),
+  (0x70044, .pop .rbp, 0x70045),
+  (0x70045, .pop .rbx, 0x70046),
+  (0x70046, .ret, 0x70047)
 ]
 
 /-- Every instruction of the program: this function's (it calls nothing). -/
@@ -69,10 +68,9 @@ theorem keys_of : ∀ pc x, prog pc = some x → pc ∈ keys := fun pc x h => lo
 @[ode_at] theorem at_70038 : prog 0x70038 = some (.add 64 (.reg .rax) (.imm 0x1), 0x7003C) := rfl
 @[ode_at] theorem at_7003C : prog 0x7003C = some (.mov 64 (.reg .rcx) (.reg .rbx), 0x7003F) := rfl
 @[ode_at] theorem at_7003F : prog 0x7003F = some (.mov 64 (.mem .rcx 0x0) (.reg .rax), 0x70042) := rfl
-@[ode_at] theorem at_70042 : prog 0x70042 = some (.mov 64 (.reg .rax) (.imm 0x0), 0x70049) := rfl
-@[ode_at] theorem at_70049 : prog 0x70049 = some (.pop .r12, 0x7004B) := rfl
-@[ode_at] theorem at_7004B : prog 0x7004B = some (.pop .rbp, 0x7004C) := rfl
-@[ode_at] theorem at_7004C : prog 0x7004C = some (.pop .rbx, 0x7004D) := rfl
-@[ode_at] theorem at_7004D : prog 0x7004D = some (.ret, 0x7004E) := rfl
+@[ode_at] theorem at_70042 : prog 0x70042 = some (.pop .r12, 0x70044) := rfl
+@[ode_at] theorem at_70044 : prog 0x70044 = some (.pop .rbp, 0x70045) := rfl
+@[ode_at] theorem at_70045 : prog 0x70045 = some (.pop .rbx, 0x70046) := rfl
+@[ode_at] theorem at_70046 : prog 0x70046 = some (.ret, 0x70047) := rfl
 
 end Code_push

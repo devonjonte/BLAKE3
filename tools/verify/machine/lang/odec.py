@@ -305,7 +305,7 @@ class Lower:
             elif k == "trap":
                 out.append(("trap",))
             elif k == "return":
-                fn["ret"] = self.expr(s[1], env)
+                fn["ret"] = self.expr(s[1], env); fn["returns"] = True
             elif k == "call":
                 if s[1] in self.p.sdefs:
                     params, body = self.p.sdefs[s[1]]
@@ -354,7 +354,7 @@ class Lower:
         return (f"/-- `{name}`, from the source.\n{doc}-/\n" if doc else "") + \
             f"def {name} : Fn where\n  name := \"b3l_{name}\"\n  params := {q(params)}\n  locals := {q(fn['locals'])}\n" \
             f"  regs := {q(regs)}\n  bufs := [{', '.join(f'(\"{b}\", {n})' for b, n in fn['bufs'])}]\n  externs := {q(fn['externs'])}\n" \
-            f"  body := [" + ",".join("\n    " + self.lean_s(s, bufs, "    ") for s in low) + f"]\n  ret := {self.lean_e(fn['ret'], bufs)}\n"
+            f"  body := [" + ",".join("\n    " + self.lean_s(s, bufs, "    ") for s in low) + f"]\n  ret := {self.lean_e(fn['ret'], bufs)}\n" + ("" if fn.get("returns") else "  noResult := true\n")
 
 
 contracts = []

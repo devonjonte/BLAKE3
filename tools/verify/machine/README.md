@@ -149,10 +149,11 @@ meaning (`Sem.lean`) as well, which says whether the source and contract or the 
 fault. A contract none of whose examples meets it is refused. A test by running, not a proof.
 **An audit for any function (`python3 mutants_code.py NAME`, November 12):** each instruction in turn is
 made a no-op; the proof must refuse, and the examples say first whether they see it. The control is an
-unchanged copy, checked again. `push`: 26 of 27 refused (all 26 seen by an example too). `add`: 29 of 31
-refused. The three accepted are instructions the contracts do not need: `mov rax, 0` at the end of each
-(their contracts promise nothing of the result), and in `add` a `mov rdi, rbx` when RDI still holds that
-value. Dead code the compiler should not emit. Three of `add`'s that the proof refuses the examples do
+unchanged copy, checked again. Its first run accepted three: `mov rax, 0` at the end of `push` and of
+`add` (the source returns nothing, the contracts promise nothing of the result), and in `add` a
+`mov rdi, rbx` when RDI still holds that value: instructions no contract needs. The compiler no longer
+sets a result the source does not return. Now `push`: 26 of 26 refused (each seen by an example too);
+`add`: 29 of 30 (the move is still emitted). Three of `add`'s that the proof refuses the examples do
 not see, and each is the point of a contract: without the reload of RDI after `push` returns, `add`
 still works with this `push`, which happens to leave RDI alone; its contract does not promise that, so
 the proof does not accept it.
@@ -173,7 +174,7 @@ program's), `AbiCall.lean` (`Abi.Meets.mono`, `Abi.call_meets`).
 **`push` (November 12): a function with no loop.** `Spec_push.lean`: `Push.contract` (the value at `cv`
 becomes the newest of a stack of fewer than 55). `./prove_fn.sh push 0x70000`: three examples meet the
 contract and a full stack is not one (2 s); `push_meets : ∀ st cv new cvs, Abi.Meets Code_push.prog
-0x70000 (Push.contract st cv new cvs)` checked in 13 s, on the generator's first run. 27 instructions;
+0x70000 (Push.contract st cv new cvs)` checked in 13 s, on the generator's first run. 26 instructions;
 reading list 480 lines (the contract 9, the instructions 31). Lemmas by hand: `Lemmas_push.lean` (35 lines).
 
 **`hex` against its contract, quietly (November 12).** `Spec_hex.lean` is what is claimed: `Hex.contract`

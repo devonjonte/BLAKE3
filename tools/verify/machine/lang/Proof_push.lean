@@ -42,7 +42,7 @@ theorem whole (fb st cv ra : BitVec 64) (sv : Abi.Saved) (new : Blake3.CV) (cvs 
   obtain ⟨n0, n1, hO0⟩ := hO0
   try norm_addr at hO0
   split_ands hO0
-  refine runs_then (a := 27) (s1 := ?_) ?_ ?_
+  refine runs_then (a := 26) (s1 := ?_) ?_ ?_
   case refine_2 => run_fn []; rfl
   refine runs_done ⟨rfl, by simp only [Push.contract, Abi.Contract.framed]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩
   all_goals try dsimp only
