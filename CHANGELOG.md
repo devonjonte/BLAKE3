@@ -104,11 +104,10 @@ small batch amid other work has no such call yet. Call after call, both
 are as fast as before or faster. The release runs give the figures; an
 Apple M6's are in #364.
 
-**Cause not yet known: single-threaded `hash_many` over a batch of 2 or 4
-messages, after a brief pause (20 μs).** 4.4% and 3.2% more time on two
-EPYC 7443; level on an i7-12700K. The two sides were measured under two
-versions of the benchmark, so the library's part in it is not yet
-separated (#369).
+**Cause not yet known, on AMD Zen 5: `convenience::hash` of 4 KiB made
+after other work** takes 5 to 6% more time than 0.8 on a Ryzen 9700X, an
+EPYC 9275F and an EPYC 9255 (#376). The same call on the lengths beside
+it is faster than 0.8 there (3 KiB by 28 to 30%).
 
 ## Faster
 
