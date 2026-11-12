@@ -261,10 +261,14 @@ is a run anyone can repeat); the checked entry tried on examples; the examples' 
 
 A theorem "from every state where the `requires` clauses hold ..." is true of any code if no such state
 exists. (Shown: `requires target >= 1` and `requires target < 1` together were accepted by Lean.) Since
-November 12 `prove_fn.sh` refuses a contract none of whose examples meets what it requires (6 s). That is
-a test; the aim stays a proved witness: a state in which its `requires` clauses hold, and that state run
-through the code with the `ensures` clauses checked on the result. The invariant needs none of its own:
-`enter` proves it is reached.
+November 12 `prove_fn.sh` refuses a contract none of whose examples meets what it requires (6 s), and a
+contract with no theorem that it can be used: `Abi.Contract.Usable` (in `Abi.lean`, four lines to read)
+says some stack and memory give the contract all it asks, and `Usable.lean` proves it of each contract
+(`Merge.usable`, `Push.usable`, `Add.usable`, `Hex.usable`) on the plainest memory there is: an empty
+stack, zeroes. So the two together: a theorem that the requirements do not contradict one another, and
+examples that are worth something, run through the code and compared with the contract. Not yet: the
+examples' own states proved to be what they are meant to be (their builders are tested, not proved).
+The invariant needs no witness of its own: `enter` proves it is reached.
 
 ## What a reader must read
 

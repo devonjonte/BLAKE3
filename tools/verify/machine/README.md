@@ -147,6 +147,10 @@ result compared with the contract, read in parts by `#pieces`: eight examples in
 stack of 55 values (28,381 instructions). An example that breaks the contract is run through the source's
 meaning (`Sem.lean`) as well, which says whether the source and contract or the compiler's code is at
 fault. A contract none of whose examples meets it is refused. A test by running, not a proof.
+**Every contract can be used (November 12).** `Abi.Contract.Usable` (some stack and memory give the
+contract all it asks) and `Usable.lean`: `Merge.usable`, `Push.usable`, `Add.usable`, `Hex.usable`, each
+proved on an empty stack and zeroes. `prove_fn.sh` refuses a function whose contract has no such theorem.
+
 **`add` (November 12): a function that calls two others by their contracts.** `Spec_add.lean`:
 `Add.contract` (a chunk's value arrives: the stack turns into `Merge.result` of the stack with the value on
 it). `./prove_fn.sh add 0x80000`: `add_meets : ∀ …, Abi.Meets Code_add.prog 0x80000 (Add.contract …)`,

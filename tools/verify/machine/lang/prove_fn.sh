@@ -51,6 +51,10 @@ if [ -f "$examples.lean" ]; then
   lake build "Code_$name" "$examples" Checks TrySem HasherOde > "$name.try.build.log" 2>&1 || { grep -E "error" "$name.try.build.log" | head -n 5; echo "the examples of $name do not build"; exit 1; }
   python3 try_fn.py hasher.ode "$name" "Lifted_$name.lean.rows" || { echo "the compiler's proof of $name: NOT checked (the examples above)"; exit 1; }
 fi
+# every contract comes with a theorem that it can be used (Usable.lean): a contract that asks the impossible is met by any code
+ns=$(echo "$contract" | sed 's/\..*//')
+grep -q "^theorem $ns.usable : ($contract " Usable.lean || { echo "$contract has no theorem that it can be used ($ns.usable in Usable.lean)"; echo "the compiler's proof of $name: NOT checked"; exit 1; }
+targets="$targets Usable"
 python3 prove_fn.py hasher.ode "$name" "Lifted_$name.lean.rows" "$name.layout" "Proof_$name.lean"
 if lake build $targets > "$name.build.log" 2>&1 && ! grep -q -E "error|sorry" "$name.build.log"; then
   grep -E "Build completed" "$name.build.log"

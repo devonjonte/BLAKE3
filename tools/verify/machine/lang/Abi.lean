@@ -111,6 +111,14 @@ def MeetsQuietly {G : Type} (prog : Nat → Option (Instr × Nat)) (entry : Nat)
       (c g).ensures S.core.rax S.core.mem ∧
       ∀ x : BitVec 64, (c g).stack + 8#64 ≤ x - (s.rsp - (c g).stack) → (∀ r ∈ (c g).modifies, r.2 ≤ x - r.1) → S.core.mem x = s.mem x
 
+/-- **The contract can be used:** there is a stack and a memory that give it all it asks (the stack free
+below the pointer, the pieces apart, what it accepts, every piece holding what it says). A contract that
+asks the impossible is met by any code; each contract here comes with a theorem that it is not one
+(`Usable.lean`). -/
+def Contract.Usable (c : Contract) : Prop :=
+  ∃ (rsp : BitVec 64) (m : Mem), Cells.Region m (rsp - c.stack) c.stack ∧
+    AllApart ((rsp - c.stack, c.stack + 8#64) :: c.regions) ∧ c.accepts ∧ c.requires m
+
 /-- **The contract of a function's checked entry.** Any arguments are accepted. Where the function's own
 contract `c` accepts them, the checked entry does as `c` says; where it does not, the checked entry returns
 `refused`, and every piece of memory holds what it held at the call. -/

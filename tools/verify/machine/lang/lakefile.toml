@@ -93,3 +93,5 @@ name = "Proof_merge_sse"
 name = "Checked_merge_sse"
 [[lean_lib]]
 name = "Example_add"
+[[lean_lib]]
+name = "Usable"
