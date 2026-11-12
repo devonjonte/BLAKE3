@@ -40,7 +40,7 @@ def Post (c : Contract) (fb ra : BitVec 64) (sv : Saved) (m0 : Mem) (s : State) 
 theorem apart_shrink {a S F : BitVec 64} (hF : F ≤ S) (hS : S ≤ 0x100000#64) {q : BitVec 64 × BitVec 64}
     (h : Apart a (S + 8#64) q.1 q.2) : Apart (a + (S - F)) (F + 8#64) q.1 q.2 := by
   obtain ⟨h1, h2⟩ := h
-  constructor <;> bv_decide
+  constructor <;> bv_omega
 
 /-- A function proved with a frame of `F` bytes meets its contract when `F` is within the contract's budget. -/
 theorem meets_of_triple {prog : Nat → Option (Instr × Nat)} {entry : Nat} {c : Contract} (F : BitVec 64)
@@ -49,11 +49,11 @@ theorem meets_of_triple {prog : Nat → Option (Instr × Nat)} {entry : Nat} {c 
     Meets prog entry c := by
   intro s ra hpc hargs hra hstack hap hreq
   have e : s.rsp - F + F = s.rsp := BitVec.sub_add_cancel ..
-  have ea : s.rsp - F = s.rsp - c.stack + (c.stack - F) := by bv_decide
+  have ea : s.rsp - F = s.rsp - c.stack + (c.stack - F) := by bv_omega
   have hstack' : Cells.Region s.mem (s.rsp - F) F := by
     intro d hd
-    have := hstack (c.stack - F + d) (by bv_decide)
-    rw [show s.rsp - F + d = s.rsp - c.stack + (c.stack - F + d) by bv_decide]; exact this
+    have := hstack (c.stack - F + d) (by bv_omega)
+    rw [show s.rsp - F + d = s.rsp - c.stack + (c.stack - F + d) by bv_omega]; exact this
   have hap' : AllApart ((s.rsp - F, F + 8#64) :: c.regions) := by
     obtain ⟨h1, h2⟩ := hap
     exact ⟨fun q hq => by rw [ea]; exact apart_shrink hF hS (h1 q hq), h2⟩
@@ -63,6 +63,6 @@ theorem meets_of_triple {prog : Nat → Option (Instr × Nat)} {entry : Nat} {c 
   refine ⟨k, s', hrun, hpc', ?_, hbx, hbp, h12, h13, h14, h15, hens, ?_⟩
   · rw [hsp']; show s.rsp - F + F + 8#64 = s.rsp + 8#64; rw [e]
   · intro x hx hmod
-    exact hout x (by show F + 8#64 ≤ x - (s.rsp - F); bv_decide) hmod
+    exact hout x (by show F + 8#64 ≤ x - (s.rsp - F); bv_omega) hmod
 
 end Abi

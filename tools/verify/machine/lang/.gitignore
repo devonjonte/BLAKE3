@@ -2,10 +2,12 @@ HasherOde.lean
 hex.S
 hex.o
 hex.listing
+hex.build.log
 Lifted_hex.lean.rows
 merge.S
 merge.o
 merge.listing
 merge.layout
+merge.build.log
 Lifted_merge.lean
 Lifted_merge.lean.rows

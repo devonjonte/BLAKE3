@@ -22,5 +22,10 @@ python3 ../one/lift_one.py "$name.listing" "b3l_$name" "$base" "Lifted_$name.lea
   --call blake3_servil_compress_in_place_avx512=0x30000 --call blake3_servil_compress_in_place_sse41=0x20000
 python3 gen_code.py "$name" "Lifted_$name.lean.rows" "Code_$name.lean"
 python3 prove_fn.py hasher.ode "$name" "Lifted_$name.lean.rows" "$name.layout" "Proof_$name.lean"
-lake build "Proof_$name" 2>&1 | grep -E "error|sorry|Build completed" || true
-echo "the compiler's proof of $name: checked"
+if lake build "Proof_$name" > "$name.build.log" 2>&1 && ! grep -q -E "error|sorry" "$name.build.log"; then
+  grep -E "Build completed" "$name.build.log"
+  echo "the compiler's proof of $name: checked"
+else
+  grep -E "error|sorry" "$name.build.log" | head -n 5
+  echo "the compiler's proof of $name: NOT checked"; exit 1
+fi

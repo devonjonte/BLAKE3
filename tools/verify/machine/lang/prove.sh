@@ -17,6 +17,11 @@ if cc -target x86_64-unknown-linux-gnu -c -o "$name.o" "$name.S" 2>/dev/null; th
 "$OBJDUMP" -d -r --x86-asm-syntax=intel "$name.o" | awk "/<_?b3l_$name>:/,/ret/" > "$name.listing"
 python3 ../one/lift_one.py "$name.listing" "$(head -n 1 "$name.listing" | sed 's/.*<\(.*\)>:/\1/')" $base "Lifted_$name.lean" "Lifted_$name" --object "$name.o"
 python3 prove.py hasher.ode "$name" "Lifted_$name.lean.rows" $base .
-lake build "Proof_$name" 2>&1 | grep -E "depends on axioms|error|sorry|Build completed" || true
+if lake build "Proof_$name" > "$name.build.log" 2>&1 && ! grep -q -E "error|sorry" "$name.build.log"; then
+  grep -E "Build completed" "$name.build.log"
+else
+  grep -E "error|sorry" "$name.build.log" | head -n 5
+  echo "the compiler's proof of $name: NOT checked"; exit 1
+fi
 [ "${MUTANTS:-1}" = 0 ] || python3 "mutants_$name.py"
 echo "the compiler's proof of $name: checked"
