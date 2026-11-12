@@ -160,8 +160,10 @@ one kernel, their repository unchanged; `../arm/`.) What we learned by doing it:
 - **Their proof library does the stepping** (`wp_init`, `wp_steps`: 32 NEON instructions in seconds) and
   leaves us the arithmetic: eight equalities of 64-bit values, which `bv_decide` closes. Their
   `wp_done` does not hand back what it cannot close; `SepWP.of_eq` (three lines, ours) replaces the
-  spatial context by the specification's and leaves the value goals. A generator for Arm writes that
-  step and the tactic for the goals; the rest is theirs.
+  spatial context by the specification's and leaves the value goals. The compiler's Arm generator
+  (`../arm/gen_arm.py`) writes that step and the tactic for the goals; the rest is theirs.
+- **One source file, two architectures**: `kernel NAME on aarch64` beside `kernel NAME` in `hasher.ode`;
+  `../arm/prove_arm.sh` is to Arm what `prove.sh` is to x86-64.
 - **They have no observer** (side channels are outside their scope). Ours is small: what an instruction
   shows is its fetch, the addresses it reads and writes, and where it sends control; it is defined for
   the kinds of instruction our kernels use and says "no account" for the rest. The theorem is the

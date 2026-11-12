@@ -28,6 +28,7 @@ The machine level, for kernels: the programmer chooses every instruction and reg
 
     data NAME = WORD, WORD, ...              32-bit words, 64-byte aligned; `#NAME` names them in an instruction
     kernel NAME replaces "symbol" {          a function whose body is instructions, one a line
+    kernel NAME on aarch64 {                 the same for AArch64: `odec.py SOURCE aarch64 NAME` prints it
       def NAME(a, b) {                       instructions, substituted where used; `$a` is the argument
         vpaddd xmm0, xmm0, $a
       }
@@ -336,23 +337,28 @@ class Lower:
 
 
 contracts = []
+other = {}      # kernels for other architectures than x86-64: {arch: [(name, lines)]}
 
 
 def kernels(text):
     """Take the `data` and `kernel` declarations out of the source: (the rest, data, kernels)."""
     data, kerns, rest, lines, i = [], [], [], text.split("\n"), 0
-    contracts.clear()
+    contracts.clear(); other.clear()
     while i < len(lines):
         line = lines[i]
         m = re.match(r"^data\s+(\w+)\s*=\s*(.*)$", line)
         if m:
             data.append((m.group(1), [int(w.strip().replace("_", ""), 0) for w in m.group(2).split("//")[0].split(",")])); i += 1; continue
-        m = re.match(r'^kernel\s+(\w+)(?:\s+replaces\s+"([^"]+)")?\s*\{\s*$', line)
+        m = re.match(r'^kernel\s+(\w+)(?:\s+on\s+(\w+))?(?:\s+replaces\s+"([^"]+)")?\s*\{\s*$', line)
         if m:
             j = i + 1
             while lines[j] != "}":
                 j += 1
-            kerns.append((m.group(1), m.group(2), lines[i + 1:j])); i = j + 1; continue
+            if m.group(2) in (None, "x86_64"):
+                kerns.append((m.group(1), m.group(3), lines[i + 1:j]))
+            else:
+                other.setdefault(m.group(2), []).append((m.group(1), lines[i + 1:j]))
+            i = j + 1; continue
         m = re.match(r"^contract\s+(\w+)\s*\{\s*$", line)
         if m:
             j = i + 1
@@ -400,12 +406,30 @@ def expand(name, lines, defs, env):
             assert len(args) == len(params), f"{m.group(1)}: {len(params)} arguments"
             out += expand(name, body, defs, dict(zip(params, args))); continue
         s = re.sub(r"@(\w+)", lambda g: f".Lode_{name}_{g.group(1)}", s)
-        s = re.sub(r"#(\w+)", lambda g: f".Lode_data_{g.group(1)}", s)
+        s = re.sub(r"#([A-Za-z_]\w*)", lambda g: f".Lode_data_{g.group(1)}", s)     # `#name` is data; `#4` is a number
         out.append(re.sub(r"\s+", " ", s))
     return out
 
 
+def kernel_aarch64(src, name):
+    """The assembly of a kernel written `kernel NAME on aarch64`: its lines, defs and fors expanded, under
+    its symbol. No instruction is added or changed."""
+    kernels(contracts_of(open(src).read())[2])
+    found = [lines for n, lines in other.get("aarch64", []) if n == name]
+    if len(found) != 1:
+        sys.exit(f"{src}: no `kernel {name} on aarch64`")
+    ins = expand(name, found[0], {}, {})
+    return ("// Printed by odec.py from " + src.split("/")[-1] + ". Not written or edited by hand.\n"
+            "#if defined(__ELF__) && defined(__linux__)\n.section .note.GNU-stack,\"\",%progbits\n#endif\n"
+            "        .text\n        .balign 4\n"
+            f"#ifdef __APPLE__\n        .globl  _b3l_{name}\n_b3l_{name}:\n#else\n        .globl  b3l_{name}\n"
+            f"        .type   b3l_{name}, %function\nb3l_{name}:\n#endif\n"
+            + "".join(("" if x.endswith(":") else "        ") + x + "\n" for x in ins))
+
+
 def main():
+    if len(sys.argv) == 4 and sys.argv[2] == "aarch64":
+        sys.stdout.write(kernel_aarch64(sys.argv[1], sys.argv[3])); return
     src, out = sys.argv[1], sys.argv[2]
     source, data, kerns = kernels(contracts_of(open(src).read())[2])
     p = Parser(tokens(source)); p.top()

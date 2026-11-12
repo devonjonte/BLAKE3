@@ -1,5 +1,5 @@
 name = "arm"
-defaultTargets = ["HexNeonQuiet", "HexNeonRun", "HexNeonProof", "HexNeonBytes"]
+defaultTargets = ["Quiet_hex_neon", "HexNeonRun", "Proof_hex_neon", "HexNeonBytes"]
 
 # Google DeepMind's AArch64 model and proof library (Apache-2.0), unchanged, at a named commit.
 [[require]]
@@ -13,13 +13,25 @@ name = "spec"
 path = "../spec"
 
 [[lean_lib]]
+name = "KernelAttr"
+
+[[lean_lib]]
+name = "Observer"
+
+[[lean_lib]]
+name = "WpKernel"
+
+[[lean_lib]]
+name = "HexVec"
+
+[[lean_lib]]
+name = "Quiet_hex_neon"
+
+[[lean_lib]]
+name = "Proof_hex_neon"
+
+[[lean_lib]]
 name = "HexNeonRun"
 
 [[lean_lib]]
-name = "HexNeonProof"
-
-[[lean_lib]]
 name = "HexNeonBytes"
-
-[[lean_lib]]
-name = "HexNeonQuiet"

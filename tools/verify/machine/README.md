@@ -396,34 +396,37 @@ of memory; then a control whose 32-bit writes keep the upper half. Needs AVX-512
 
 Sam's decision: for Arm we use the AArch64 model of `google-deepmind/code-verification` (`arm64-semantics`,
 Apache-2.0; the model of "AlphaProof Code: Verifying Signal's Security at the Machine-Code Level") rather
-than write one. First trial, their repository unchanged at b0f729ac: the constant-time `hex` kernel for
-NEON (`hex_neon.S`, 32 instructions, no table, no branch).
+than write one. Done for one kernel, their repository unchanged at b0f729ac: the constant-time `hex` for
+NEON, **written in our language** (`kernel hex_neon on aarch64` in `lang/hasher.ode`: 32 instructions, no
+table, no branch) **with its proofs written by the compiler**.
 
-- `HexNeonRun.lean`: the 32 words, decoded and run by their trusted definitions alone (`decode`,
-  `execInst`) on 320 hashes: every one gives the hexadecimal.
-- `HexNeonProof.lean`: **`hex_neon_ok`**: in any program holding these words at the symbol,
-  `subroutineOk` of their logic: a call returns to its caller with the stack pointer and callee-saved
-  registers as they were, the hash unchanged and the 64 bytes its hexadecimal, the rest of memory as it
-  was. Their tactics run the 32 instructions (`wp_init`, `wp_steps`, `wp_done`); eight equalities of
-  64-bit values are left and `bv_decide` closes them. Axioms: Lean's three and eight of `bv_decide`.
-- `./check.sh`: assembles the kernel, compares the object's words with the theorem's, builds their
-  model and library (about six minutes on 64 threads) and checks both files.
+**`./prove_arm.sh`: from the source to checked theorems.** `odec.py` prints the kernel's assembly
+(`hex_neon.S` here must be that); the assembler makes an ELF object; `gen_arm.py` asks their decoder
+what each of the object's words is and writes two files from the words and the source's contract
+clauses (the files here must be those); Lean builds their model and library (about six minutes on 64
+threads) and checks everything; then the audit runs.
 
-- `HexNeonBytes.lean`: **`hex_neon_bytes_ok`**: the same code meets the statement in bytes, in the words
-  used on x86-64: with 32 bytes `hash` at X1 and 64 bytes at X0, the 64 become `Hex.text hash` and the
-  hash is unchanged. From `hex_neon_ok` by their rule `subroutine_ok_refine`. Axioms: Lean's three and
-  72 of `bv_decide` (64 of them one a character, in the lemma from vectors to text).
-
-- `HexNeonQuiet.lean` (written by `gen_quiet.py`; needs their trusted definitions only): their model has
-  no observer of time or cache, so the file defines one (`Obs`, `obsInstr`, `runObs`: fetches, the
-  addresses read and written, where control goes) and proves **`hex_neon_quiet`**: two machines that
-  agree on the general registers, the stack pointer, the program counter and on which memory is mapped
-  with which permissions, and differ in any way in what memory holds and in the vector registers, show
-  the same while the 32 instructions run; and **`hex_neon_observed`**: every one of the 32 is an
-  instruction the observer has an account of. Lean's three axioms only; checked in a second.
-  `python3 mutants_quiet.py`: the control accepted; three changes of code that show the hash (a move to
+- `Quiet_hex_neon.lean` (generated; needs their trusted definitions only): **`hex_neon_quiet`**: two
+  machines that agree on the general registers, the stack pointer, the program counter and on which
+  memory is mapped with which permissions, and differ in any way in what memory holds and in the vector
+  registers, show the same while the 32 instructions run; **`hex_neon_observed`**: every one of the 32
+  is an instruction the observer has an account of. Lean's three axioms; one second. The observer is
+  ours (`Observer.lean`, 60 lines to read: fetches, the addresses read and written, where control
+  goes), since their model has none.
+- `Proof_hex_neon.lean` (generated): **`hex_neon_ok`**: the kernel's own contract, in 16-byte vectors
+  (`HexVec.lean`), as `subroutineOk` of their logic: a call returns to its caller with the stack
+  pointer and callee-saved registers as they were, memory as the contract says and otherwise as it was.
+  Their tactics run the 32 instructions; eight equalities of 64-bit values are left, which `bv_decide`
+  closes.
+- `HexNeonBytes.lean` (by hand, as `lang/Meets_hex.lean` is on x86-64): **`hex_neon_bytes_ok`**: the
+  reader's contract, in the words used on x86-64: with 32 bytes `hash` at X1 and 64 bytes at X0, the 64
+  become `Hex.text hash` and the hash is unchanged. From `hex_neon_ok` by their `subroutine_ok_refine`.
+- `HexNeonRun.lean`: the words run by their trusted definitions alone on 320 hashes; all give the
+  hexadecimal, and the observer sees 36 things, the same on two hashes.
+- `python3 mutants_quiet.py`: the control accepted; three changes of code that show the hash (a move to
   a general register, a branch, an indexed load), three weaker statements and one blind observer: 7 of
   7 refused.
+- `Observer.lean`, `WpKernel.lean`, `KernelAttr.lean`: written once for all kernels.
 
 `spec/HexText.lean` (16 lines, Lean's core library only) is the hexadecimal itself, `Hex.char` and
 `Hex.text`: the one specification both architectures' contracts name.
@@ -431,6 +434,7 @@ NEON (`hex_neon.S`, 32 instructions, no table, no branch).
 | | x86-64 (`lang/`, our model) | AArch64 (`arm/`, Google's model) |
 |---|---|---|
 | the contract | `Hex.contract`: 64 bytes at `out` become `Hex.text` of the 32 at `hash` | `hexBytesSpec`: the same words |
+| the source | `kernel hex` in `lang/hasher.ode` | `kernel hex_neon on aarch64`, the same file |
 | the theorem | `hex_meets` (`Abi.MeetsQuietly`) | `hex_neon_bytes_ok` (`subroutineOk`) |
 | what an observer sees | in the same theorem: one list for every hash | `hex_neon_quiet`, a second theorem, about the 32 words run in order |
 | axioms | 3 + 5 of `bv_decide` | 3 + 72 of `bv_decide`; the observer's theorems 3 |
@@ -438,5 +442,5 @@ NEON (`hex_neon.S`, 32 instructions, no table, no branch).
 
 Not yet: the observer's theorem joined to their `Step` (it runs the words in order; that the model
 fetches exactly these from memory is `hex_neon_ok`'s part); an instruction's own time (Arm's DIT; no
-model has it); the kernel written in our language with these files generated; SME2 (their model has no
-SVE or SME).
+model has it); the layer from the kernel's vectors to the contract's bytes written by the compiler
+(by hand on both architectures today); SME2 (their model has no SVE or SME).

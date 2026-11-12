@@ -1,4 +1,7 @@
 .lake/
 lake-manifest.json
 *.o
+*.words
+build.log
+again/
 t

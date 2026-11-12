@@ -1,6 +1,6 @@
 import Arm64
 import HexText
-import HexNeonQuiet
+import Quiet_hex_neon
 open Arm64
 
 /-! The NEON `hex` kernel's 32 instruction words (from the ELF object), run on Google's AArch64 model
@@ -18,7 +18,7 @@ def start (hash : List (BitVec 8)) : State :=
   ((({ mem := mem, pc := 0x10000#64 } : State).writeReg64 (.gpr 0#5) outAt).writeReg64 (.gpr 1#5) inAt).writeReg64 (.gpr 30#5) 0x424242#64
 
 def run (hash : List (BitVec 8)) : State :=
-  hexWords.foldl (fun s w => match decode w with | some i => execInst i s | none => { s with status := .Halted }) (start hash)
+  hex_neon_words.foldl (fun s w => match decode w with | some i => execInst i s | none => { s with status := .Halted }) (start hash)
 
 def ok (hash : List (BitVec 8)) : Bool :=
   let s := run hash
@@ -31,8 +31,8 @@ def hashes : List (List (BitVec 8)) :=
 #eval (hashes.length, (hashes.filter ok).length)
 #eval let s := run ((List.range 32).map fun i => BitVec.ofNat 8 (i * 17 + 3)); (s.pc, s.status == .Running, String.ofList ((s.mem.readBytes outAt 64).map fun b => Char.ofNat b.toNat))
 
-/-- What the observer of `HexNeonQuiet.lean` sees on two different hashes: 36 things each (32 fetches, a
+/-- What the observer of `Observer.lean` sees on two different hashes: 36 things each (32 fetches, a
 read, two writes, the return), and the same. -/
-def seenOn (v : Nat) : Option (List Obs) := runObs hexWords (start (List.replicate 32 (BitVec.ofNat 8 v)))
+def seenOn (v : Nat) : Option (List Obs) := runObs hex_neon_words (start (List.replicate 32 (BitVec.ofNat 8 v)))
 
 #eval ((seenOn 0x00).map (·.length), decide (seenOn 0x00 = seenOn 0xff))

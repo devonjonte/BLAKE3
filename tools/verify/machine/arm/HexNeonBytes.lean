@@ -1,11 +1,11 @@
 import Arm64
 import ProofLib
-import HexNeonProof
+import Proof_hex_neon
 open Arm64 ProofLib
 
 /-! # The NEON `hex` kernel: the contract in bytes
 
-`HexNeonProof.lean` proves the kernel against a statement in 16-byte vectors. Here the same code meets the
+`Proof_hex_neon.lean` (written by the compiler) proves the kernel against its own contract, in 16-byte vectors. Here the same code meets the
 statement a reader wants, in the words used on x86-64 (`Hex.text`, `../spec/HexText.lean`): the 64 bytes at `out` become `Hex.text` of the 32
 bytes at `inp`. From `hex_neon_ok` by their rule `subroutine_ok_refine`; the rest is bytes to vectors and
 back. -/
@@ -110,7 +110,7 @@ abbrev hexBytesSpec : Spec HexBytesArgs where
     (x.inp ↦ₛ x.hash) ∗ (x.out ↦ₛ x.old)
   post := fun x _ _ => (x.inp ↦ₛ x.hash) ∗ (x.out ↦ₛ Hex.text x.hash)
 
-theorem hex_neon_bytes_ok (prog : Program) (h_code : hexCode.holds prog) :
+theorem hex_neon_bytes_ok (prog : Program) (h_code : hex_neon_code.holds prog) :
     prog.subroutineOk "b3l_hex_neon" hexBytesSpec := by
   refine subroutine_ok_refine (hex_neon_ok prog h_code) ?_
   intro y R s0 hp

@@ -362,3 +362,61 @@ kernel hex {
   half(xmm1, 32)
   ret
 }
+
+// The same on AArch64 (NEON): the 32 bytes at X1, their 64 hexadecimal characters at X0. No table, no
+// branch, no constant from memory. V0-V7 and V16-V19 only (all caller-saved); no stack.
+contract hex_neon {
+  spec   HexVec
+  reads  x1: h0, h1
+  writes x0: Hex.hex16 h0 0, Hex.hex16 h0 8, Hex.hex16 h1 0, Hex.hex16 h1 8
+}
+kernel hex_neon on aarch64 {
+  // The sixteen bytes in $x, each split in its high and low four bits: the high in $hi, the low in $x.
+  def split(x, hi) {
+    ushr    $hi.16b, $x.16b, #4
+    and     $x.16b, $x.16b, v4.16b
+  }
+  // The numbers in $x become their characters: '0' more, and 39 more where above 9. $t is scratch.
+  def above(x, t) {
+    cmhi    $t.16b, $x.16b, v5.16b
+  }
+  def letters(t) {
+    and     $t.16b, $t.16b, v6.16b
+  }
+  def digits(x) {
+    add     $x.16b, $x.16b, v7.16b
+  }
+  def chars(x, t) {
+    add     $x.16b, $x.16b, $t.16b
+  }
+  ldp     q0, q1, [x1]
+  movi    v4.16b, #0x0f
+  movi    v5.16b, #9
+  movi    v6.16b, #39
+  movi    v7.16b, #0x30
+  split(v0, v2)
+  split(v1, v3)
+  zip1    v16.16b, v2.16b, v0.16b
+  zip2    v17.16b, v2.16b, v0.16b
+  zip1    v18.16b, v3.16b, v1.16b
+  zip2    v19.16b, v3.16b, v1.16b
+  above(v16, v0)
+  above(v17, v1)
+  above(v18, v2)
+  above(v19, v3)
+  letters(v0)
+  letters(v1)
+  letters(v2)
+  letters(v3)
+  digits(v16)
+  digits(v17)
+  digits(v18)
+  digits(v19)
+  chars(v16, v0)
+  chars(v17, v1)
+  chars(v18, v2)
+  chars(v19, v3)
+  stp     q16, q17, [x0]
+  stp     q18, q19, [x0, #32]
+  ret
+}
