@@ -12,20 +12,49 @@ lists what changed, each item with where it is described.
 - **`blake3-servil`** is that crate, whole, with a pool of threads and a
   multithreaded form of each call: `hash_multithreaded`,
   `hash_many_multithreaded`, `hash_each_multithreaded`,
-  `update_multithreaded`, `update_each_multithreaded`. A program that
-  depends on `blake3-servil` 0.8 keeps the crate's name.
+  `update_multithreaded`, `update_each_multithreaded`.
 - **0.9 has no streaming API.** 0.8's stream (`performance::stream`) is
   gone, and one streaming API, the Pipeline, is being built to replace it
-  (#356). A program that feeds 0.8's stream waits for the Pipeline's
-  release and stays on 0.8 until then, knowing the stream's two faults
-  there (below, "Safer"). 0.9's calls take whole messages and batches;
-  used in a stream's place they are slower ("Slower", below).
+  after 0.9 (#356). A program that feeds 0.8's stream waits for the
+  Pipeline's release and stays on 0.8 until then, knowing the stream's
+  two faults there (below, "Safer"). Where a program can do without a
+  stream, 0.9's calls take whole inputs: `hash_multithreaded` (one
+  message), `hash_many_multithreaded` (a batch), `hash_each_multithreaded`
+  (messages of different lengths), `update_multithreaded` (one message
+  fed in pieces). Used in a stream's place they are slower ("Slower",
+  below).
+
+## What a program on 0.8 changes
+
+- **`performance` is `throughput`**: the module's name; its calls keep
+  theirs.
+- **The `Hasher` is `convenience::Hasher`** (it was `performance::Hasher`):
+  - `Hasher::new(mode)` is `Hasher::new(mode, length_hint)`, the hint an
+    `Option<u64>`; `None` is always right;
+  - `finalize` and `finalize_xof` take the hasher (`self`, where they
+    took `&self`);
+  - `count` and `reset` are gone;
+  - the method `hasher.update_multithreaded(input)` is the call
+    `throughput::update_multithreaded(&mut hasher, input)`.
+- **`finalize_each` takes `&mut [Hasher]`** (it took `&[Hasher]`): each
+  hasher it finishes starts again.
+- **The stream is gone**: `performance::stream`, `Stream` and its seven
+  methods.
+
+Unchanged for a caller, though the signature reads differently:
+`hash_many` and `hash_many_multithreaded` take any `Prepared` input, and
+`&Batch` is one. New: `Packed<16>` and `Packed<32>` (the other `Prepared`
+input) and the constant `BUILD_VERSION`. `Hash`, `Mode`, `Block`,
+`OutputReader`, the three `convenience` calls, `context_key` and the
+other `throughput` calls read the same in both. A program that depends
+on `blake3-servil` keeps the crate's name: it re-exports everything the
+core documents and adds the multithreaded calls and
+`initialize_multithreaded`.
 
 ## The API: one call family for a hash now and then, one for call after call
 
 - **`convenience`** is for a hash amid other work: `hash`, `hash_with`,
-  `hash_xof`, and now the incremental `Hasher` (`convenience::Hasher::new(mode,
-  length_hint)`; `finalize` takes the hasher). Its paths are tuned for
+  `hash_xof`, and now the incremental `Hasher`. Its paths are tuned for
   code that has left the caches (on AArch64, its kernels' code is
   prefetched). The length hint is a scheduling hint and never part of the
   hash.
