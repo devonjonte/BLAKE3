@@ -219,6 +219,26 @@ one kernel, their repository unchanged; `../arm/`.) What we learned by doing it:
   the facts about it hold by `rfl`. A candidate to offer them.
 - **One specification for both architectures**: `../spec/HexText.lean`, no machine in it.
 
+## Next for two architectures: contracts that name no machine
+
+Today a contract that speaks of bytes as a list is shared by both architectures (`Hex.text`: one file,
+no machine in it). A contract that speaks of a data structure in memory is not: `Stack.At` is a
+predicate over the x86-64 model's memory, and on Google's model the same stack would be a separation
+logic assertion of theirs. To write `push`, `merge` and `add` once for both:
+
+- **A layout says what the bytes of a thing are, relative to its address, and names no memory**: a size
+  and a relation between a window of bytes (offset to byte) and the value. `Stack.layout`, `Cv.layout`
+  and `Bytes.layout` become such definitions, in the folder `spec/` with `Hex.text`.
+- **Each machine says once how a window of its memory is read** (ours: `fun i => m (a + i)`; theirs:
+  their `read8` under a permission, or a `SepProp` built from the window), and what `keeps`, `turns` and
+  `fills` mean there. `Abi.Contract` itself needs only the pieces, so it can live in `spec/` too, with
+  `Abi.Meets` given per machine: ours as it is, theirs by `subroutine_ok`.
+- The compiler then has two printers for word-level code (x86-64 exists; AArch64 is to write) and two
+  proof generators (ours over `Cells.lean`; theirs over their `wp_*` tactics, which today's kernel proof
+  shows step our code without change), and one source.
+
+Not started. The kernel `hex_neon` did not need it because its contract's data is a list of bytes.
+
 ## No code the proof shows is never reached
 
 (Sam, November 12.) A check that the proof shows can never fail is dead code: it costs instructions, it is
