@@ -86,6 +86,9 @@ Known limits, stated so nobody takes these for more than they are:
   detection that are not CPUID, XGETBV, a jump, a call or a stack move); `loop/`'s and `call/`'s copies,
   `wide/`'s and `a64/`'s are not; no model is checked against Sail, as `cross_check_x86.py` does for the Python models.
 
+**One command:** `./prove_all.sh` goes from the source to checked theorems for everything the language's
+compiler proves, on both architectures, one line a function (`AUDIT=1` adds the audits).
+
 ## `lang/`: an implementation language of our own, whose compiler proves its assembly
 
 What the language and its prover are for, and what a failed check must say (the code, the contract, the
