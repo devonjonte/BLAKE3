@@ -1137,7 +1137,7 @@ pub mod hazmat {
         pub use crate::tree::left_len;
     }
     pub mod incremental {
-        pub use crate::incremental::{HasherCore, Pool, STAGE_LEN};
+        pub use crate::incremental::Pool;
     }
     pub mod each {
         pub use crate::each::{Item, MEMBERS, hash_each_on, prepare_thread, update_turn};

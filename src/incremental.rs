@@ -66,12 +66,12 @@ impl Clone for Hasher {
 
 /// The bytes a Hasher gathers before they hash side by side: 16 chunks,
 /// the widest kernels' lanes.
-pub const STAGE_LEN: usize = 16 * CHUNK_LEN;
+pub(crate) const STAGE_LEN: usize = 16 * CHUNK_LEN;
 
 /// The tree's state behind a [`Hasher`]: its chunk, and the chaining values
 /// of its finished subtrees.
 #[derive(Clone)]
-pub struct HasherCore {
+pub(crate) struct HasherCore {
     pub(crate) key: CVWords,
     pub(crate) chunk_state: ChunkState,
     pub(crate) initial_chunk_counter: u64,
