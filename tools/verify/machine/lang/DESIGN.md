@@ -9,6 +9,29 @@ Very fast code, a specification a person can read in one sitting, and a machine-
 bytes that run meet it: the right result, only valid memory accesses, no branch or address that depends
 on a secret. For every instruction that can execute, checkable by a skeptical stranger.
 
+## Who checks: Alice finds bugs, Bob should be able to verify (Sam, November 12)
+
+The language is called **Ode** from here on (Sam, November 12; the files are `.ode` already).
+
+A deployment to expect, learned from our own practice: **Alice**, who provides the code, runs the prover to
+*find* bugs, fixes them or reports them; **Bob**, who uses the code, verifies nothing and relies on Alice.
+That is where blake3-servil-core stands today: its maintainer checks none of these proofs and has had one
+finding from them (`Hash::to_hex` was not constant-time; fixed for 0.9). That use is real and worth having.
+It is not the goal. The goal is that Bob can verify **for himself**, as cheaply as possible:
+
+a. **What Bob must read is minimal** (or what the friend, colleague or agent he trusts must read): the
+   contract, the specification, what meeting a contract means, the machine, and Lean itself as far as his
+   statement reaches and no further. `LAYERS.md` counts it, Lean included.
+b. **Checking the proof is fast.**
+c. **Checking is automatic, the default in normal conditions:** if Bob builds from source, the proof is
+   checked in that build, and the build fails if it does not check.
+
+What (c) asks of the system, none of it done: a checker that a build can run without Bob installing Lean (an
+independent checker reading exported proofs is the candidate: nanoda is a Rust library); proofs with no axiom
+beyond Lean's three (an independent checker refuses `bv_decide`'s; only `push_arm_meets` qualifies today);
+statements about the bytes the build links, not about a table made from a listing (true on AArch64, not yet
+on x86-64); and a check time a build can bear.
+
 ## There is one way to do it
 
 - One implementation language, made for this job, for word-level code and for kernels alike. No

@@ -1,7 +1,7 @@
 # What two auditors must each read, and what they share (November 12, 2026)
 
 Lines of Lean that a statement depends on, through every definition those use (`#reading_defs`, experiment
-branch at e9574d86; Lean's own library left out). These are the lines a reader must read and judge to know
+branch at e9574d86). Lean itself is counted too, in its own row and in section 4. These are the lines a reader must read and judge to know
 what a theorem *says*; no proof, lemma, tactic or generator is among them. `layers.py` here made the tables
 from Lean's output (`rd-*.txt`).
 
@@ -16,6 +16,9 @@ from Lean's output (`rd-*.txt`).
 | the function's contract | 13 | 8 | 14 | 15 | 13 | 8 |
 | the function's instructions | 48 | 31 | 277 | 341 | 3 | 3 |
 | **total** | **543** | **508** | **866** | **931** | **6,180** | **6,193** |
+| Lean's library: the definitions the statement reaches (`#reading_core`) | 2,237 | 2,330 | 3,434 | 3,434 | 3,961 | 3,990 |
+| **total with Lean's library** | 2,780 | 2,838 | 4,300 | 4,365 | 10,141 | 10,183 |
+| axioms beyond Lean's three: where they are not 0, Lean's kernel is not enough (section 4) | 5 | 90 | 555 | 718 | 72 | 0 |
 
 - Layer 1 is the machine. On AArch64 it is Google DeepMind's model: the 6,113 lines our statements reach are
   all in their `Arm64/Trusted/` (16,767 lines in all), which an auditor of their libsignal theorem reads too.
@@ -58,3 +61,37 @@ auditor reads anyway.
 - The largest avoidable part is layer 5 on x86-64 (31 to 341 lines of instruction tables). Lean reading the
   object's bytes itself (a decoder, as Google's model has) would take it to a few lines, at the price of a
   decoder in layer 1.
+
+## 4. Lean itself
+
+"Lean is doing what it is alleged to do" has three parts for an auditor of one theorem, and only the first is
+reading that the theorem decides.
+
+**a. The words the statement is written in.** A statement uses Lean's own definitions (`BitVec`, `Nat`, `List`,
+`And`, equality, ...). `#reading_core T` (`lang/ReadingCore.lean`) walks from the statement as `#reading_list`
+does and counts the ones in Lean's library: 241 definitions, 2,237 lines for `hex` on x86-64, up to 417
+definitions, 3,990 lines for `push` on AArch64 (the row above). Two thirds are in one file, `Init/Prelude.lean`,
+and the count takes each definition with its documentation comment, so it is an upper figure. Every Lean
+theorem in the world shares most of it: this is the layer most shared of all.
+
+**b. The checker.** No statement decides this; it is the same for every theorem. Three choices, in lines:
+
+| checker | lines | notes |
+|---|---|---|
+| Lean's own kernel (`src/kernel`, C++, v4.34.1) | 8,071 in 36 files | on Lean's runtime (17,559 lines) and GMP for large numbers |
+| nanoda (an independent checker, Rust) | 10,258 in 22 files | reads Lean's exported proofs; takes a list of permitted axioms |
+| lean4lean's checker (the kernel written in Lean) | 3,901 in 18 files | partly proved correct in Lean; itself compiled by Lean |
+
+Running a second, independent checker over the same proof is the usual answer to "is the kernel right": then
+neither has to be read whole.
+
+**c. What the kernel is not enough for, today.**
+- **`bv_decide`'s axioms.** Each one says: a checker compiled by Lean's compiler accepted a solver's
+  certificate. A theorem with any of them rests on Lean's compiler, its code generator and the C compiler that
+  built it, not on the kernel alone, and an independent checker refuses it. Today only `push_arm_meets` has
+  none (row above). So removing them is not polish: it is what makes part b true.
+- **From text to term.** A reader reads source text; the kernel checks the term Lean's elaborator made of it
+  (the elaborator is 75,021 lines of Lean, `Lean/Elab`, within the 271,566 of `Lean/`; nobody reads it). Notation can be redefined. The
+  guard is to have Lean print the statement back in full, and to keep statements free of local notation.
+- **From the object to the statement.** On x86-64 the instructions in the statement are a table a script made
+  from the object's listing (layer 5); on AArch64 Lean decodes the words itself.
