@@ -3,31 +3,62 @@
 The figures for this release come from its release runs; this section
 lists what changed, each item with where it is described.
 
+## Two crates, and no streaming API in this release
+
+- **`blake3-servil-core`** is BLAKE3-Servil on one thread: every call
+  hashes on the thread that makes it, and the crate starts no thread. Its
+  assembly kernels are each proved against the BLAKE3 specification.
+  Without its `std` feature it needs no allocator.
+- **`blake3-servil`** is that crate, whole, with a pool of threads and a
+  multithreaded form of each call: `hash_multithreaded`,
+  `hash_many_multithreaded`, `hash_each_multithreaded`,
+  `update_multithreaded`, `update_each_multithreaded`. A program that
+  depends on `blake3-servil` 0.8 keeps the crate's name.
+- **0.9 has no streaming API.** 0.8's stream (`performance::stream`) is
+  gone. It had two faults (below, "Safer"). One streaming API, the
+  Pipeline, is being built to replace it (#356). Until that is released,
+  a program that fed a stream calls `hash_multithreaded` or
+  `hash_many_multithreaded` for each message or batch it has whole, which
+  is slower where the stream hashed while the program read on ("Slower",
+  below).
+
 ## The API: one call family for a hash now and then, one for call after call
 
 - **`convenience`** is for a hash amid other work: `hash`, `hash_with`,
   `hash_xof`, and now the incremental `Hasher` (`convenience::Hasher::new(mode,
-  length_hint)`). Its paths are tuned for code that has left the caches
-  (on AArch64, its kernels' code is prefetched). The length hint is a
-  scheduling hint and never part of the hash.
+  length_hint)`; `finalize` takes the hasher). Its paths are tuned for
+  code that has left the caches (on AArch64, its kernels' code is
+  prefetched). The length hint is a scheduling hint and never part of the
+  hash.
 - **`throughput`** (the `performance` module of 0.8, renamed) is for call
-  after call: `hash`, `hash_many`, `hash_each` and their multithreaded forms
-  over prepared inputs (`Block`, `Batch`), the stream, grouped incremental
-  updates (`update_each`, `finalize_each`), and `update_multithreaded`, a
-  Hasher's parallel update. A program chooses the pattern by the call it
-  makes; no clock guesses it.
-- **`throughput::pipeline`**: one message or many, received in pieces,
-  hashed on the worker pool while the program reads the next piece, the
-  program's buffers bounded by reserved admission.
+  after call: `hash`, `hash_many`, `hash_each` and their multithreaded
+  forms over prepared inputs (`Block`, `Batch`, `Packed`), and grouped
+  incremental updates (`update_each`, `finalize_each`). A program chooses
+  the pattern by the call it makes; no clock guesses it.
 - **The C API is the convenience API**: `b3_hash`, `b3_hasher_*` (with
   the length hint) and the modes.
 - **A build names its code** (#328): `BUILD_VERSION`, `b3_version()` and
   `b3sum --version`. A release reads its version; the code after one reads
   `X.Y.Z+dev` with its commit, and a dirty tree adds its Git tree id.
 
-## Slower, on purpose: a `throughput` call made now and then, on AArch64
+## Slower
 
-0.8 guessed with a clock whether a call came after a pause, and prefetched
+**Without a stream: messages hashed one after another on many threads.**
+0.8's stream hashed on the workers while the program read the next
+message, gathered short messages into lanes and spread them over the
+cores. A call a message does none of that. On a Ryzen 9700X (16 threads)
+a program that hashes messages one after another through
+`hash_multithreaded` takes, against 0.8's stream: 2.7 to 3 times the time
+for messages of 16 KiB to 64 MiB, and 3.6 to 24 times for messages of
+64 B to 4 KiB, the most at 512 B and 1 KiB. Gathering short messages into
+batches for `hash_many_multithreaded` recovers most of it: batches one
+after another take 1.2 to 2.9 times the stream's time. The
+single-threaded calls are unaffected. (A check of the two-crate tree
+against 0.8, four pairs a cell; the release runs give the release's
+figures.)
+
+**On purpose, on AArch64: a `throughput` call made now and then.** 0.8
+guessed with a clock whether a call came after a pause, and prefetched
 its kernels' code when it did. 0.9 has no such clock (#253): the call
 decides. So on AArch64 a `throughput` call made amid other work, where
 0.8's clock would have prefetched, is slower than 0.8:
@@ -41,37 +72,19 @@ small batch amid other work has no such call yet. Call after call, both
 are as fast as before or faster. The release runs give the figures; an
 Apple M6's are in #364.
 
-## Reads slower than 0.8, cause not yet known
+**Cause not yet known: single-threaded `hash_many` over a batch of 2 or 4
+messages, after a brief pause (20 μs).** 4.4% and 3.2% more time on two
+EPYC 7443; level on an i7-12700K. The two sides were measured under two
+versions of the benchmark, so the library's part in it is not yet
+separated (#369).
 
-- **Single-threaded `hash_many` over a batch of 2 or 4 messages, after a
-  brief pause (20 μs):** 4.4% and 3.2% more time on two EPYC 7443; level
-  on an i7-12700K. The two sides were measured under two versions of the
-  benchmark, so the library's part in it is not yet separated (#369).
-
-## Faster, already on `next`
-
-- **A Hasher's in-place checkpoint copies only the bytes it has staged**
-  (`clone_from`), not its whole 16 KiB stage (#283).
-- **`Packed<16>` and `Packed<32>`**: a batch of 16- or 32-byte messages
-  (Merkle leaves, digests) hashed without the program writing each into a
-  block of its own first (#289).
-- **`finalize_each` finishes sixteen hashers at once on AVX-512**, each
-  with its own chaining value and flags, on a proved kernel; its indices
-  are distinct, a contract a debug build checks (#295).
+## Faster
 
 - **On x86-64, whole chunks and parents round up to the lanes** (#248,
   #345): 3 inputs run on 4 lanes, 5 to 7 on 8, 9 to 15 on 16 and 17 to 31
   on 32 where those kernels run, each in one pass where the kernels took
-  two or three; the spare lanes hash a copy whose result is dropped.
-- **On AArch64, many short messages fed in small pieces finish side by
-  side** (#298): 1,024 open messages of 1 KiB arriving in 256-byte pieces
-  take 68 to 71% less time a cycle on an M4 Max. Plain messages alone: a
-  keyed hasher's key is secret, so it finishes by itself as before.
-- **A stream moves a task's header and the members it holds**, where up
-  to three places each moved all 1,640 bytes of every task (#314): the
-  multithreaded stream of 4 KiB messages takes 8% less time and of 16 KiB
-  13% less on an i7-12700K.
-
+  two or three; the spare lanes hash a copy whose result is dropped. One
+  message of 3 KiB to 7935 B takes 24 to 45% less time on a Ryzen 9700X.
 - **On x86-64, packed leaves and a batch's messages of 1 to 63 bytes
   run eight at a time on AVX2 and sixteen on AVX-512** (#297), on the
   kernels `finalize_each` uses: a single-threaded Merkle tree over 16- or
@@ -79,6 +92,18 @@ Apple M6's are in #364.
   9275F (sixteen lanes), and 45 to 57% less on two EPYC 7443 (eight). One
   cell pays, on that last machine alone: its multithreaded tree of
   1,048,576 leaves of 32 B, on 96 threads, takes 6% more (#372).
+- **`Packed<16>` and `Packed<32>`**: a batch of 16- or 32-byte messages
+  (Merkle leaves, digests) hashed without the program writing each into a
+  block of its own first (#289).
+- **`finalize_each` finishes sixteen hashers at once on AVX-512**, each
+  with its own chaining value and flags, on a proved kernel; its indices
+  are distinct, a contract a debug build checks (#295).
+- **On AArch64, many short messages fed in small pieces finish side by
+  side** (#298): 1,024 open messages of 1 KiB arriving in 256-byte pieces
+  take 68 to 71% less time a cycle on an M4 Max. Plain messages alone: a
+  keyed hasher's key is secret, so it finishes by itself as before.
+- **A Hasher's in-place checkpoint copies only the bytes it has staged**
+  (`clone_from`), not its whole 16 KiB stage (#283).
 
 ## Steadier
 
@@ -88,11 +113,6 @@ Apple M6's are in #364.
   thread and the workers, the first cycle included.
   `initialize_multithreaded` prepares the calling thread's scratch (48 KiB,
   for inputs to 64 MiB).
-- **The pipeline's batch and message cycles allocate nothing after the
-  first** (#329): the batch's job waits in its message slot, and the
-  completions stay in fixed entries.
-- **A stream with no worker stops at once** where it would wait forever
-  (#276).
 - **A repeated collection allocates nothing** (#325): `hash_each` keeps
   its messages' places and chunk values on the calling thread between
   calls, where each call took them and freed them.
@@ -102,28 +122,19 @@ Apple M6's are in #364.
 Where an entry says 0.8 has the fault, the remedy for a program on 0.8 is
 this release: no 0.8.x follows.
 
-- **`throughput::Stream::open` is private** (#308). In 0.8 it is public,
-  safe and hidden from the docs, and a safe program could open a stream,
-  hand it borrowed input, forget it (`mem::forget`) and free the input
-  while the workers still read it. `throughput::stream`, which keeps the
-  stream inside its scope, is the way in.
-- **The pipeline owns a submitted batch and its places** (#309, #317).
-  `submit_batch` takes the batch and a `Box` of places and hands both back
-  with the batch's event. Before, it borrowed them, and a safe program
-  that forgot the pipeline (`mem::forget`) could free them while workers
-  still wrote. A program that passed borrowed places now moves a box in
-  and takes it back.
+- **0.8's stream has two faults, and 0.9 has no stream.** In 0.8 a worker
+  claimed a task in the stream's ring and then copied it, and a worker
+  delayed between the two could copy a later task written into the same
+  slot (#302). And `performance::Stream::open` is public, safe and hidden
+  from the docs: a safe program could open a stream, hand it borrowed
+  input, forget it (`mem::forget`) and free the input while the workers
+  still read it (#308). A program on 0.8's stream moves to the one-shot
+  multithreaded calls of this release.
 - **The C header says what a finished hasher takes** (#311): after
   `b3_hasher_finalize`, only `b3_hasher_new`. A finished hasher is not
   reset, and an update on it silently continued the old message. Official
   BLAKE3's hasher may be finalized again and updated further; code ported
   from it calls `b3_hasher_new` between messages.
-- **A claimed task is never written over before its copy** (#302, #331).
-  A worker claimed a task in a stream's ring and then copied it, and a
-  worker delayed between the two could copy a later task written into the
-  same slot. 0.8's stream has this race. Now a stream's slot comes round
-  only after its task was copied, and the pipeline's worker reads its
-  task's three words before its claim, which leaves nothing to copy.
 - **`Batch::new` stops on a count whose blocks overflow** (#320). In 0.8,
   in a release build, a count of 128-byte messages past half of
   `usize::MAX` wrapped to zero blocks and returned an empty batch.
@@ -142,10 +153,10 @@ this release: no 0.8.x follows.
 
 ## To fill at the release
 
-- The Faster table from each machine's release run (bench-hashes 0.21).
+- The Faster table from each machine's release run.
+- `Hash`'s hex in constant time (#370), when it lands.
 - The x86-64 kernels that land before the release, each with its measured
-  gain and its proof (the grouped AVX2 and AVX-512 finishing kernels,
-  Zen 5's integer-register chunk root), and lane rounding's gain.
+  gain and its proof (Zen 5's integer-register chunk root).
 
 # blake3-servil 0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861, against official BLAKE3 1.8.7
 
