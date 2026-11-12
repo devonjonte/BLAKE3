@@ -18,15 +18,21 @@ reader needs:
       ...
       while CONDITION
         ghost name: Type, ...                what the invariant speaks of besides the variables
-        invariant CLAUSE [by LEMMA]          holds each time the loop's head is reached; LEMMA carries it
-                                             across a turn (without one: it is read off, or kept by `P.frame`)
+        invariant CLAUSE [by LEMMA] [from LEMMA]
+                                             holds each time the loop's head is reached; `by` carries it across a
+                                             turn (without one: it is read off, or kept by `P.frame`), `by A | B`
+                                             by the first of the lemmas that applies on a path; `from` shows it
+                                             of the state the loop is entered in (without one: read off, or kept)
         decreases VARIABLE
-        [open LEMMA as names]                takes an invariant's fact apart before a turn's instructions
+        [open LEMMA as names [when CONDITION]]   takes an invariant's fact apart before a turn's instructions;
+                                             with `when`, on the ways through the turn where that condition of
+                                             the body holds (a fact only one branch has)
         [assert CLAUSE]                      arithmetic the run needs said
       { ... }
 
 A clause is a comparison of the language's expressions (variables, numbers, `+ - | & << >>`, `low8(e)`,
-`low32(e)`, `Name(args)` for a Lean definition), or `Name(args)` alone, which says `Name` of memory.
+`low32(e)`, `Name(args)` for a Lean definition), or `Name(args)` alone, which says `Name` of memory. A
+buffer's name in a clause is its address.
 Whatever the contract requires of the arguments alone is known at every turn without being repeated.
 By convention a lemma's memory is `m`, and for a predicate `P` over memory `P.cells` (if there is one)
 gives what its holder may read at once and `P.frame` says it depends on its own bytes only.
@@ -214,8 +220,12 @@ class Clause:
 
 
 def split_by(s):
-    m = re.match(r"^(.*?)\s+by\s+([\w.]+)$", s)
-    return (m.group(1), m.group(2)) if m else (s, None)
+    """A clause, the lemmas that carry it across a turn (`by A | B`), the lemma that shows it at entry (`from L`)."""
+    frm = None
+    m = re.match(r"^(.*?)\s+from\s+([\w.]+)$", s)
+    if m: s, frm = m.group(1), m.group(2)
+    m = re.match(r"^(.*?)\s+by\s+([\w.]+(?:\s*\|\s*[\w.]+)*)$", s)
+    return (m.group(1), [x.strip() for x in m.group(2).split("|")], frm) if m else (s, [], frm)
 
 
 # ---------------------------------------------------------------- what the source gives the prover
@@ -245,7 +255,9 @@ leave_opens = [re.match(r"^open\s+([\w.]+)\s+as\s+(.*)$", rest).groups() for w, 
 loop_ghosts = [b for w, rest in loop if w == "ghost" for b in binders(rest)]
 invariants = [split_by(rest) for w, rest in loop if w == "invariant"]
 decreases = None if STRAIGHT else one(loop, "decreases", "the loop must say what gets smaller: decreases VARIABLE")
-opens = [re.match(r"^([\w.]+)\s+as\s+(.*)$", rest).groups() for w, rest in loop if w == "open"]
+opens_all = [re.match(r"^([\w.]+)\s+as\s+(.*?)(?:\s+when\s+(.*))?$", rest).groups() for w, rest in loop if w == "open"]
+opens = [(l, n) for l, n, c in opens_all if c is None]
+when_opens = [(l, n, c) for l, n, c in opens_all if c is not None]      # on the ways through a turn where c holds
 asserts = [rest for w, rest in loop if w == "assert"]
 
 # where the loop is in the function
@@ -291,12 +303,13 @@ for x in live: assert slot_of(x) is None, f"{x} changes in the loop and lives in
 frozen = {}
 base_env = {p: p for p in params}
 base_env.update({g: g for g, _ in fn_ghosts})
-for cl, _ in invariants:
+base_env.update({b: at(C0 + off) for b, off in bufat.items()})          # a buffer's name is its address in the frame
+for cl, *_ in invariants:
     m = re.match(r"^(\w+)\s*==\s*(.*)$", cl)
     if m and m.group(1) in fn["locals"] and m.group(1) not in changed:
         frozen[m.group(1)] = Clause(m.group(2)).expr(base_env, "?")
 for x in ([] if STRAIGHT else sets(before)): assert x in frozen or x in changed, f"the invariant must say what {x} is (invariant {x} == ...)"
-inv_user = [(cl, by) for cl, by in invariants if not (re.match(r"^(\w+)\s*==", cl) and re.match(r"^(\w+)", cl).group(1) in frozen)]
+inv_user = [(cl, by, frm) for cl, by, frm in invariants if not (re.match(r"^(\w+)\s*==", cl) and re.match(r"^(\w+)", cl).group(1) in frozen)]
 
 
 def env_at(reg):
@@ -333,7 +346,7 @@ inv_mem = [(f"Region s.mem fb {F}#64", "mem_region", "hF"), (f"Quad s.mem (fb + 
 inv_frozen = [(f"s.{home[x]} = {e}" if slot_of(x) is None else f"Quad s.mem {at(slot_of(x))} {e}", slot_of(x) is None) for x, e in frozen.items()]
 env_s = env_at(lambda x: f"s.{home[x]}")
 inv_clauses, inv_pred = [], []
-for cl, _ in inv_user:
+for cl, *_ in inv_user:
     c = Clause(cl); inv_clauses.append(c.clause(env_s, "s.mem")); inv_pred.append(c.pred)
 preds = [p for i, p in enumerate(inv_pred) if p and p not in inv_pred[:i]]
 ex = "".join(f"({g} : {t}) " for g, t in loop_ghosts)
@@ -364,7 +377,7 @@ def cond_fact(c, value, env):
 
 def cond_prop(c, env):
     kind, a, b = c[0], lean_low(c[1], env), lean_low(c[2], env)
-    return f"{a} < {b}" if kind == "ltu" else f"{a} = {b}"
+    return f"{a} < {b}" if kind == "ltu" else f"{a} ≠ {b}" if kind == "ne" else f"{a} = {b}"
 
 
 def paths(ss, env):
@@ -494,8 +507,10 @@ def prove_inv(ind, old_outside, turn):
     t += [f"{ind}· " + "; ".join(["apply Exists.intro"] * n_ex) if n_ex else f"{ind}· skip",
           f"{ind}  refine ⟨" + ", ".join(["?_"] * (len(inv_frozen) + len(inv_clauses))) + "⟩"]
     for c, in_reg in inv_frozen: t.append(f"{ind}  · {'rfl' if in_reg else 'mem_fact'}")
-    for (cl, by), pred in zip(inv_user, inv_pred):
-        if turn and by: t.append(f"{ind}  · apply {by} <;> mem_auto")
+    for (cl, by, frm), pred in zip(inv_user, inv_pred):
+        if turn and len(by) == 1: t.append(f"{ind}  · apply {by[0]} <;> mem_auto")
+        elif turn and by: t.append(f"{ind}  · first | " + " | ".join(f"(apply {b} <;> mem_auto)" for b in by))
+        elif not turn and frm: t.append(f"{ind}  · apply {frm} <;> mem_auto")
         elif pred: t.append(f"{ind}  · first | mem_auto | (apply {pred}.frame <;> mem_auto)")
         else: t.append(f"{ind}  · first | rfl | mem_auto")
     if turn: t.append(f"{ind}· exact BitVec.lt_def.mp (by bv_decide)")
@@ -613,10 +628,23 @@ for i, (lemma, names) in enumerate(opens): turn_open += open_with(lemma, names, 
 for i, a in enumerate(asserts):
     turn_open.append(f"  have as{i} : {Clause(a).clause(env_h, '?')} := by bv_decide")
 tp = [([("cond", wcond, True, False, wc_env)] + ev, e) for ev, e in paths(wbody, wc_env)]
+
+
+def turn_leaf(ev, ind):
+    """One way through a turn: the facts only this way has, the run, the invariant again."""
+    pre = []
+    for j, (lemma, names, cond) in enumerate(when_opens):
+        want = Clause(cond).clause(env_h, "?")
+        if any(e[0] == "cond" and e[2] and cond_prop(e[1], e[4]) == want for e in ev):
+            pre += open_with(lemma, names, "mem", len(opens) + j, ind)
+    lines, ind2 = run_piece(ev, HEAD, "head", [f"as{i}" for i in range(len(asserts))], ind)
+    return pre + lines + prove_inv(ind2, True, True)
+
+
 L += [f"theorem turn {ARGDECL}",
       f"    (s : State) (hI : Inv {ARGUSE} s) (hc : {cond_prop(wcond, env_s)}) :",
       f"    ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ (Inv {ARGUSE} s' ∧ s'.{measure_reg}.toNat < s.{measure_reg}.toNat) := by"] + open_head + turn_open + \
-     tree(tp, set(), lambda ev, ind: (lambda r: r[0] + prove_inv(r[1], True, True))(run_piece(ev, HEAD, "head", [f"as{i}" for i in range(len(asserts))], ind)), "  ") + [""]
+     tree(tp, set(), turn_leaf, "  ") + [""]
 
 # ---------------------------------------------------------------- leave
 lp = [([("cond", wcond, False, False, wc_env)] + ev, e) for ev, e in paths(after, wc_env)]

@@ -3,7 +3,7 @@
 #
 #   x86-64 (our machine model, lang/):  hex, merge (and its checked entry), push, merge_sse, add (by its
 #       callees' contracts; then with merge_sse swapped in behind merge's contract), merge_steps
-#       and ladd (the tree's levels, another design than the stack: levels/levels.ode; its model first)
+#       and ladd and lroot (the tree's levels, another design than the stack: levels/levels.ode; its model first)
 #   AArch64 (Google DeepMind's model, arm/; fetched at the commit arm/lakefile.toml names):
 #       hex_neon (the kernel), push (the same source function, printed for AArch64)
 #   "direct": the compiler's proofs of push and merge again, about the contracts in bytes themselves, with
@@ -37,6 +37,7 @@ run add-and-swap lang ./swap.sh
 run merge_steps  lang ./prove_fn.sh merge_steps 0xA0000
 run levels-model levels python3 model.py 3000
 run ladd         lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh ladd 0xB0000
+run lroot        lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh lroot 0xC0000
 run any-machine  lang sh -c 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes UsableBytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ] && grep -q "usable_bytes. depends on axioms" any.log'
 run direct       lang sh -c 'python3 direct_fn.py push Push.contract Push.byteContract 64 StackAsBytes Cv.opens Stack.opens && python3 direct_fn.py merge Merge.contract Merge.byteContract 256 MergeAsBytes Cv.opens Stack.opens Merge.merged_eq && lake build Direct_push Direct_merge > direct.log 2>&1 && ! grep -q -E "error|sorry" direct.log && grep -q "Direct_push.push_meets. depends on axioms" direct.log && grep -q "Direct_merge.merge_meets. depends on axioms" direct.log'
 run hash-tried   lang sh -c 'lake build TrySem HasherOde HashContract > /dev/null 2>&1; lake env lean HashTry.lean > hashtry.log 2>&1 && grep -q "104 examples meet it, 0 do not" hashtry.log && grep -q "holds on 104" hashtry.log'
@@ -48,6 +49,7 @@ if [ "${AUDIT:-0}" = 1 ]; then
   run audit-add    lang python3 mutants_code.py add "${JOBS:-6}"
   run audit-steps  lang python3 mutants_code.py merge_steps "${JOBS:-6}"
   run audit-ladd   lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py ladd "${JOBS:-6}"
+  run audit-lroot  lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py lroot "${JOBS:-6}"
   run audit-spec   lang python3 mutants_spec.py "${JOBS:-6}"
   run audit-hash   lang python3 mutants_hash.py
 fi

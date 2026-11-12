@@ -32,7 +32,7 @@ params, pieces, accepts, returns = [], [], None, None
 for line in out.splitlines():
     if line.startswith("param "): n, ty = line[6:].split(" : ", 1); params.append((n, ty))
     elif line.startswith("accepts "): accepts = line[8:]
-    elif line.startswith(("read |", "update |")): pieces.append([x.strip() for x in line.split("|")])
+    elif line.startswith(("read |", "update |", "fill |")): pieces.append([x.strip() for x in line.split("|")])
     elif line.startswith("returns "): returns = [x.strip() for x in line[8:].split("|", 1)]
 if returns and not re.fullmatch(r"[A-Za-z_]\w*", returns[0]): returns[0] = "result_"     # `fun _ => ...`: a name Lean made up
 assert params and accepts is not None and returns, f"could not read {CNAME}:\n{out}"
@@ -42,12 +42,14 @@ q = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')
 names = ", ".join(n for n, _ in params)
 types = " × ".join(t for _, t in params)
 pre = [f'("it accepts the arguments: {q(accepts)}", decide ({accepts}))', '("the stack and its pieces of memory are apart", Try.apart c)'] + \
-      [f'("at the call {q(l)} at {q(a)} holds {q(v)}", {sample(l)}.check s0.mem ({a}) ({v}))' for _, l, a, v, _ in pieces]
+      [f'("at the call {q(l)} at {q(a)} holds {q(v)}", {sample(l)}.check s0.mem ({a}) ({v}))' for kind, l, a, v, _ in pieces if kind != "fill"]
 def post_of(mem):
     return [f'("it returns what the contract says: {q(returns[1])}", decide ({returns[1]}))'] + \
-       [f'("at the return {q(l)} at {q(a)} holds {q(w)}", {sample(l)}.check {mem} ({a}) ({w}))' for kind, l, a, _, w in pieces if kind == "update"]
+       [f'("at the return {q(l)} at {q(a)} holds {q(w)}", {sample(l)}.check {mem} ({a}) ({w}))' for kind, l, a, _, w in pieces if kind in ("update", "fill")]
 post = post_of("s'.mem")
-puts = "".join(f"    let m0 := {sample(l)}.put m0 ({a}) ({v})\n" for _, l, a, v, _ in pieces)
+# a piece the function fills is, at the call, bytes the program owns (zeroes here)
+puts = "".join(f"    let m0 := Try.fill m0 ({a}) (Array.replicate ({l}).size.toNat 0#8)\n" if kind == "fill" else
+               f"    let m0 := {sample(l)}.put m0 ({a}) ({v})\n" for kind, l, a, v, _ in pieces)
 L = f"""import Try
 import TrySem
 import {os.environ.get('ODEMOD', 'HasherOde')}

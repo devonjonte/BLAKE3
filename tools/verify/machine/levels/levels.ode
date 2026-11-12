@@ -120,16 +120,46 @@ fn ladd(lv, key, flags, plat, cv)
   return ln + 1
 }
 
+// The root. What lroot is claimed to do is Lroot.contract (../lang/Spec_lroot.lean); the lemmas named are in
+// ../lang/Lemmas_lroot.lean. `Levels.Fold` says what holds at the loop's head: the levels from `base` up are
+// still to be folded, and `acc` holds the subtree over all the chunks they do not cover.
 fn lroot(out, lv, key, flags, plat)
+  reg e, base, f, lv, key, plat
+  meets Lroot.contract(k: Blake3.CV, chunks: Array Blake3.Node)
+  uses Lemmas_lroot
+  enter know Levels.At.cell
+  enter open Levels.At.newest as n0, n1
+  leave open Levels.Fold.done as r0, r1
+  leave by Lroot.exit
 {
   buf blk[64]
   buf acc[32]
   var pf = flags | PARENT
-  var ln = 0
-  var e = 0
-  var base = 0
-  var f = 0
-  levels_root()
+  var e = u64[lv] - 1                     // the levels have received all the chunks but the newest
+  var base = lv + 64
+  copy 32 acc <- base + ((e & 1) << 5)    // the newest chunk's value: in the bottom's next place
+  while e > 0
+    invariant Levels.Fold(lv, k, flags, chunks, base, e, acc)   by Levels.Fold.root | Levels.Fold.parent | Levels.Fold.skip   from Levels.Fold.start
+    invariant Cv.At(key, k)
+    invariant Region(out, 32)             // the bytes the root goes to are the program's, through the loop
+    invariant pf == flags | PARENT
+    decreases e
+    open Cv.At.vectors as k0, k1
+    open Levels.Fold.acc as a0, a1
+    open Levels.Fold.level as l0, l1 when e & 1 == 1
+  {
+    if e & 1 == 1 {
+      var f = pf
+      if e == 1 { f = pf | ROOT }         // the highest level that holds a value: this parent is the root
+      copy 32 blk <- base
+      copy 32 blk + 32 <- acc
+      copy 32 acc <- key
+      compress(acc, blk, 64, 0, f)
+    }
+    e = e >> 1
+    base = base + 64
+  }
+  copy 32 out <- acc
 }
 
 def fill_ptrs(base, shift, count) {

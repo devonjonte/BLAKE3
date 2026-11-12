@@ -359,8 +359,8 @@ The statement a user wants is about the function they call. It is written (`spec
 specification's `IV` at `key`, the 32 bytes at `out` become `Blake3.hashBytes` of the message (C2SP's
 `Blake3.hash`), and the message and the key are unchanged.
 
-**It is not proved.** `hash` in `hasher.ode` is the whole one-shot hash (815 of the 1,258 x86-64
-instructions the language's code compiles to; the functions proved above are 306). What exists is the
+**It is not proved.** `hash` in `hasher.ode` is the whole one-shot hash (810 instructions; the functions of
+`hasher.ode` proved above are 306, and on the levels `ladd` and `lroot` are 202 more). What exists is the
 first of the blame verdicts, one level up from the machine: `HashTry.lean` runs the *source* by the
 language's meaning (`Sem.lean`), each kernel being what its contract says (one block, or many inputs of
 many blocks), on the 35 lengths of the BLAKE3 test vectors and three platforms: 104 examples meet the
@@ -396,8 +396,10 @@ nothing for it.**
 reaches the tree, in under an hour with the generator as it was. And the proof changed the code: its view
 of the levels as a binary counter, with the newest chunk waiting, made `ladd`'s loop and `lroot` simpler.
 **A second rule from it: when the proof's words for a data structure are simpler than the code's, rewrite
-the code in the proof's words.** Next: `lroot`'s theorem (the generator needs a call before a loop, or the
-code a shape without one: it has that shape now), then the contracts in bytes.
+the code in the proof's words.** `lroot` is proved too (`Proof_lroot.lroot_meets`: the root's output as the
+specification has it; twenty minutes, with four more forms in the generator: a frame's buffer in an
+invariant, a lemma a path, an invariant made at entry, a fact one branch has). Next: the contracts in
+bytes; `hash2` by its callees' contracts.
 
 ## The coder decides, and can predict (Sam, November 12)
 

@@ -20,8 +20,8 @@ went, as the pair's parent, to the level above. The newest chunk of all waits in
 `ladd` settles the value that waited (while a level is full, its pair goes up) and puts the new chunk in
 its place; `lroot` folds each level that holds a value onto the one that waits.
 
-**`ladd` is proved** (x86-64, as assembled, for all arguments): `Proof_ladd.ladd_meets`, below.
-`lroot` is not yet.
+**Both are proved** (x86-64, as assembled, for all arguments): `Proof_ladd.ladd_meets` and
+`Proof_lroot.lroot_meets`, below.
 
 **Memory** (Sam, November 12: its cost is in lines and pages touched, not in bytes). The levels are 3520
 bytes and the stack 1792. Counted from the layouts, not measured, for 64-byte lines (x86-64): a level is
@@ -50,11 +50,11 @@ cold tail last) would undo that; not done, and no warm timing shows it.
 | a value added, and the root at the end (1024 values) | 43.5 ns a value | 41.0 ns (-5.8%) |
 | the hash of 2 KiB, 4 KiB, 16 KiB, 32 KiB | 746, 1,007, 2,276, 4,611 ns | 753, 1,009, 2,232, 4,520 ns (+0.9% to -2.0%) |
 | copies of 32 bytes a parent | 4, and two scratch buffers | 1 (the key), no scratch |
-| instructions | `push` 27, `merge` 89; the root's fold is inside `hash` | `ladd` 96, `lroot` 121 |
+| instructions | `push` 27, `merge` 89; the root's fold is inside `hash` | `ladd` 96, `lroot` 108 |
 | the caller | holds back the last chunk; computes `target` | adds every value; asks for the root |
 
-(`hash2` is 569 instructions against `hash`'s 815, but it has no 32-chunk path: not a comparison. The
-times are of the code as the proof left it (`ladd` was 121 instructions and `lroot` 157 before), on a
+(`hash2` is 560 instructions against `hash`'s 810, but it has no 32-chunk path: not a comparison. The
+times are of the code as `ladd`'s proof left it (`ladd` was 121 instructions and `lroot` 157 before), on a
 machine not quite idle: every column, the crate's too, is about 2% above the run before the change, and the
 levels stand to the stack as they did.)
 
@@ -105,9 +105,54 @@ became 95), and `lroot` lost its special case for the bottom pair (157 became 12
 value is taken first, and every level that holds a value, the bottom included, is folded onto it the
 same way.
 
-**Not done:** `lroot`'s theorem; the contracts in bytes (`../spec/LevelsContract.lean`, in the same words)
-joined to these; `ladd` on AArch64; `hash2` calling `ladd` and `lroot` by their contracts (it has their
-text a second time, as a macro).
+## The proof of `lroot` (November 12)
+
+    lroot_meets : ∀ out lv key flags plat k chunks,
+      Abi.Meets Code_lroot.prog 0xC0000 (Lroot.contract out lv key flags plat k chunks)
+
+For levels over two chunks or more, the 32 bytes at `out` become the first eight words of the
+specification's output for the tree over them (`Levels.rootCv`: the root node's compression with the `ROOT`
+flag), and the levels and the key are as they were. The stack has no counterpart under a theorem: its
+root is folded inside `hash`.
+
+| | `lroot` |
+|---|---|
+| instructions under the theorem | 107 |
+| the statement, by hand | 26 lines (`Spec_lroot.lean`), on `Spec_levels.lean`'s 43 |
+| lemmas, by hand | 271 lines (`Lemmas_lroot.lean`), the tree's fold included (the specification's own split, `go_split`) |
+| the proof the compiler writes | 390 lines; five ways through a turn (the root's parent or another, each by either kernel; a level that holds nothing) |
+| Lean's check of it | about three minutes (181 s and 209 s, the machine busy both times) |
+| a reader of the theorem reads | 888 lines |
+| axioms beyond Lean's three (`bv_decide`) | 783 |
+| examples run in the machine model before the proof | 8 (7 meet the contract: two to eight chunks, both kernels; 1 is refused as not an example) |
+| each instruction made a no-op in turn | see below: the audit changed the code, and the count for the code as it is comes with `../prove_all.sh`'s `audit-lroot` |
+
+Twenty minutes from the contract's first line to the checked theorem, four additions to the proof
+generator included: a buffer of the frame named in an invariant (`acc` holds the fold across turns); a
+lemma a way through the turn (`by A | B | C`: the first that applies); an invariant that is made, not
+kept, at entry (`from`); a fact only one branch has (`open ... when`). The proofs of `merge`, `push`,
+`merge_steps` and `ladd` are written the same to the letter by the changed generator.
+
+One thing the first run found: the function fills `out` at the end, so the invariant must say the bytes
+at `out` are the program's through the loop (`invariant Region(out, 32)`); the contract says it at the
+call only.
+
+**What the audit found, and what was removed for it.** The first proved `lroot` was 111 instructions. Made
+no-ops one at a time, the proof still checked without these (of the first 82 tried):
+- two that set a variable to zero before the loop (`var f = 0`, mine, to declare it): dead; the variable is
+  now declared where it is first set. (And `odec.py` now refuses an assignment to a variable never declared:
+  it had taken one silently.)
+- a jump over an empty `else`: the compiler (`Lang.lean`) no longer emits one. In `hasher.ode` that changes
+  `hash` alone (nine instructions fewer), and both designs still agree with the crate on 8,154 inputs.
+- two loads of a value the register still holds (the constant 1 after the comparison before; a buffer's
+  address after the copy before): the compiler does not know what a register holds, as with `add`'s two
+  and `ladd`'s one. Left.
+So 111 became 107.
+
+**Not done:** the contracts in bytes (`../spec/LevelsContract.lean`, in the same words) joined to these;
+both functions on AArch64; `hash2` calling `ladd` and `lroot` by their contracts (it has their text a
+second time, as a macro), and with that the proof of the whole hash on the levels, which then needs the
+chunks' values under a contract too.
 
 ## The contracts in bytes (`../spec/LevelsContract.lean`; no theorem about these yet)
 

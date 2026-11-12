@@ -284,7 +284,8 @@ mutual
       let lelse := s!".L{fn}_{n}"; let lend := s!".L{fn}_{n + 1}"
       let (tc, n1) := Stmts.asm L fn (n + 2) t
       let (ec, n2) := Stmts.asm L fn n1 e
-      (c.asmUnless L lelse ++ tc ++ [s!"jmp {lend}", lelse ++ ":"] ++ ec ++ [lend ++ ":"], n2)
+      -- with nothing to do otherwise, the end of the branch is where the condition jumps to: no jump over nothing
+      (c.asmUnless L lelse ++ tc ++ (if e.isEmpty then [lelse ++ ":"] else [s!"jmp {lend}", lelse ++ ":"] ++ ec ++ [lend ++ ":"]), n2)
     | .while c b =>
       let lhead := s!".L{fn}_{n}"; let lexit := s!".L{fn}_{n + 1}"
       let (bc, n1) := Stmts.asm L fn (n + 2) b

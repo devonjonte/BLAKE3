@@ -145,3 +145,13 @@ name = "Proof_ladd"
 name = "Sample_levels"
 [[lean_lib]]
 name = "Example_ladd"
+[[lean_lib]]
+name = "Spec_lroot"
+[[lean_lib]]
+name = "Lemmas_lroot"
+[[lean_lib]]
+name = "Code_lroot"
+[[lean_lib]]
+name = "Proof_lroot"
+[[lean_lib]]
+name = "Example_lroot"

@@ -5,7 +5,8 @@ import Spec_push
 import Spec_add
 import Spec_hex
 import Spec_ladd
-import Lemmas_merge
+import Spec_lroot
+import Lemmas_ladd
 open X86
 
 /-! # Each contract can be used
@@ -94,7 +95,38 @@ theorem Ladd.usable : (Ladd.contract 0x100000#64 0x200000#64 0#64 5#64 0x300000#
     · exact Cells.vec_put128_far _ _ _ _ _ (by decide) (vec_put128 _ _ _)
     · exact vec_put128 _ _ _
 
+/-- Two chunks (two nodes of zeroes') in the bottom level's two places, the count 2, a key of zeroes. -/
+theorem Lroot.usable : (Lroot.contract 0x300000#64 0x100000#64 0x200000#64 0#64 5#64 zeroCv #[default, default]).Usable := by
+  obtain ⟨v0, v1, hv⟩ := cv_vectors (default : Blake3.Node).cv
+  obtain ⟨k0, k1, hk0, hk1, hk⟩ := zeroMem_cv 0x200000#64
+  have reg : ∀ b n : BitVec 64, Cells.Region
+      (((((zeroMem.put64 0x100000#64 2#64).put128 0x100040#64 v0).put128 0x100050#64 v1).put128 0x100060#64 v0).put128 0x100070#64 v1) b n :=
+    fun b n => Cells.region_put128 _ _ (Cells.region_put128 _ _ (Cells.region_put128 _ _ (Cells.region_put128 _ _ (Cells.region_put64 _ _ (zeroMem_region b n)))))
+  refine ⟨0x7ff00000#64, ((((zeroMem.put64 0x100000#64 2#64).put128 0x100040#64 v0).put128 0x100050#64 v1).put128 0x100060#64 v0).put128 0x100070#64 v1,
+    reg _ _, ?_, ?_, ?_⟩
+  · simp only [Lroot.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, Abi.AllApart, Abi.Apart]; decide
+  · simp only [Lroot.contract]; decide
+  · simp only [Lroot.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
+    have sub0 : Blake3.sub zeroCv ⟨BitVec.setWidth 32 0#64⟩ #[default, default] 0 1 = (default : Blake3.Node).cv := by
+      simp only [Blake3.sub, Blake3.go_one]; rfl
+    have sub1 : Blake3.sub zeroCv ⟨BitVec.setWidth 32 0#64⟩ #[default, default] 1 1 = (default : Blake3.Node).cv := by
+      simp only [Blake3.sub, Blake3.go_one]; rfl
+    refine ⟨reg _ _, ⟨k0, k1, ?_, ?_, hk⟩, by decide, reg _ _, ?_, fun _ => ⟨?_, ⟨v0, v1, ?_, ?_, ?_⟩⟩⟩
+    · exact Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put64_far _ _ _ _ _ (by decide) hk0))))
+    · exact Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put64_far _ _ _ _ _ (by decide) hk1))))
+    · show Quad _ _ 2#64
+      exact Cells.quad_put128_far _ _ _ _ _ (by decide) (Cells.quad_put128_far _ _ _ _ _ (by decide) (Cells.quad_put128_far _ _ _ _ _ (by decide) (Cells.quad_put128_far _ _ _ _ _ (by decide) (quad_put64 _ _ _))))
+    · show Levels.Lev _ _ _ _ (53 + 1) _ 1 1
+      rw [Levels.Lev_succ]
+      refine ⟨fun _ => ⟨v0, v1, ?_, ?_, by rw [hv]; exact sub0.symm⟩, Levels.Lev_none _ _ _ _⟩
+      · exact Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put128_far _ _ _ _ _ (by decide) (vec_put128 _ _ _)))
+      · exact Cells.vec_put128_far _ _ _ _ _ (by decide) (Cells.vec_put128_far _ _ _ _ _ (by decide) (vec_put128 _ _ _))
+    · exact Cells.vec_put128_far _ _ _ _ _ (by decide) (vec_put128 _ _ _)
+    · exact vec_put128 _ _ _
+    · rw [hv]; exact sub1.symm
+
 #print axioms Merge.usable
+#print axioms Lroot.usable
 #print axioms Ladd.usable
 #print axioms Push.usable
 #print axioms Add.usable

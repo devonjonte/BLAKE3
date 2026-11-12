@@ -79,7 +79,8 @@ elab "#pieces " id:ident : command => do
         match piece.getAppFnArgs with
         | (``Abi.Layout.keeps, #[_, l, a, v]) => out := out.push s!"{kind} | {← show_ l} | {← show_ a} | {← show_ v} | {← show_ v}"
         | (``Abi.Layout.turns, #[_, l, a, v, w]) => out := out.push s!"{kind} | {← show_ l} | {← show_ a} | {← show_ v} | {← show_ w}"
-        | _ => throwError "a piece is neither `keeps` nor `turns`: {piece}"
+        | (``Abi.Layout.fills, #[_, l, a, w]) => out := out.push s!"fill | {← show_ l} | {← show_ a} | - | {← show_ w}"
+        | _ => throwError "a piece is neither `keeps`, `turns` nor `fills`: {piece}"
     let ret ← lambdaTelescope (← field `returns) fun rs b => do
       return s!"returns {← rs[0]!.fvarId!.getUserName} | {← show_ b}"
     return out.push ret

@@ -299,6 +299,8 @@ class Lower:
                 if not self.result_call(s[1], s[2], env, fn, out):
                     out.append(("set", s[1], self.expr(s[2], env)))
             elif k == "set":
+                # a statement `def` assigns its user's variables: those are checked where it is used
+                assert s[1] in fn["locals"] or s[1] in fn["params"] or s[1] in env, f"{s[1]} is assigned and was never declared (var {s[1]} = ...)"
                 if not self.result_call(s[1], s[2], env, fn, out):
                     out.append(("set", s[1], self.expr(s[2], env)))
             elif k == "buf":
