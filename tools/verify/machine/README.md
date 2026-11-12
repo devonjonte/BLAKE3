@@ -90,6 +90,9 @@ Known limits, stated so nobody takes these for more than they are:
 
 **One command:** `./prove_all.sh` goes from the source to checked theorems for everything the language's
 compiler proves, on both architectures, one line a function (`AUDIT=1` adds the audits).
+**What two auditors share:** `LAYERS.md` puts what a reader must read in layers (the machine; what a contract is;
+BLAKE3 and its data; the function's contract; its instructions) and counts what pairs of auditors read in common.
+
 **One page:** `INDEX.md` lists what the language's part proves: each theorem, what it says, its contract,
 how many lines a reader must read to know what it says, and its axioms (`index.py` asks Lean for the numbers).
 
