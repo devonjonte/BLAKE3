@@ -290,9 +290,14 @@ What it took, and what it shows:
   Lean checks. They should go: the source names the contract in bytes and the stack budget
   (`meets Push.byteContract(...) stack 64`), the generated theorem is about `Abi.ofBytes` of it, and where
   the generated proof unfolds the contract it adds `Abi.ofBytes`, `List.map` and the `Opens` facts, after
-  which the pieces are the model's and the proof goes on as today. The audits that change
-  `Spec_merge.lean` move to `mutants_spec.py`'s way (a copy of `spec/`). Not done on November 12 for want
-  of an hour to re-check every script from nothing afterwards.
+  which the pieces are the model's and the proof goes on as today. **Tried, and it works:**
+  `direct_fn.py` makes exactly that substitution in the generated proofs of `push` and of `merge` (its
+  loop and its kernel calls included), and Lean accepts both (`Direct_push.push_meets`,
+  `Direct_merge.merge_meets : Abi.Meets … (Abi.ofBytes (Merge.byteContract …) 256)`), with no proof text
+  written. What is left before the model's own contracts can be deleted: callers (a callee's contract is
+  named in the caller's proof), the examples and the checked entry (`#checks`, `#pieces` read the model's
+  contract), and the audits that change `Spec_merge.lean`, which move to `mutants_spec.py`'s way (a copy
+  of `spec/`).
 - On AArch64 the compiler's proof is against cells (their tactics alone, nothing written), and a file
   by hand (`PushBytes.lean`, 144 lines) goes from the bytes to the cells and back (their rule
   `subroutine_ok_refine_frame`). The lemmas

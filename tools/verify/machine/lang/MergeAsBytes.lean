@@ -8,6 +8,9 @@ open X86
 
 By the two lemmas of `StackAsBytes.lean` about the stack and a chaining value as pieces. -/
 
+/-- `Merge.merged` (../spec) is `Merge.result` (`Spec_merge.lean`), word for word. -/
+theorem Merge.merged_eq : Merge.merged = Merge.result := rfl
+
 /-- **`Merge.contract` is `Merge.byteContract` read for this machine**, with 256 bytes of stack. -/
 theorem Merge.contract_eq (st key flags plat target : BitVec 64) (k : Blake3.CV) (cvs : List Blake3.CV) :
     Abi.ofBytes (Merge.byteContract st key flags plat target k cvs) 256#64 = Merge.contract st key flags plat target k cvs := by

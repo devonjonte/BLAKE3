@@ -125,3 +125,7 @@ name = "MergeAsBytes"
 name = "Meets_merge_bytes"
 [[lean_lib]]
 name = "UsableBytes"
+[[lean_lib]]
+name = "Direct_push"
+[[lean_lib]]
+name = "Direct_merge"

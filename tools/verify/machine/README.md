@@ -493,6 +493,9 @@ threads) and checks everything; then the audit runs.
   and five false statements: all 23 refused.
 - **`merge` and `add`** have such contracts too (`spec/MergeContract.lean`), met on x86-64
   (`lang/Meets_merge_bytes.lean`); their AArch64 code is not written.
+- **The generated proofs do not need the model's own contracts** (`lang/direct_fn.py`): with the contract
+  in bytes put in their statements and the layouts' opening facts added where they unfold the contract,
+  the proofs of `push` and `merge` check as they are (`Direct_push.lean`, `Direct_merge.lean`, generated).
 - **The shared contracts are audited** (`lang/mutants_spec.py`): in a copy of `spec/`, 15 false statements
   (of the stack's bytes, of `push`, `merge` and `add`, of what keeping a piece means) each make Lean refuse
   the x86-64 theorems; the unchanged copy is accepted. Twelve are refused where the model's own statement

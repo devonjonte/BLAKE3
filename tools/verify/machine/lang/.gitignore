@@ -32,3 +32,4 @@ swap.log
 build.log
 rl.lean
 any.log
+Direct_*.lean

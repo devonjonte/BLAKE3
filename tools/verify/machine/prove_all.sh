@@ -5,6 +5,8 @@
 #       callees' contracts; then with merge_sse swapped in behind merge's contract), merge_steps
 #   AArch64 (Google DeepMind's model, arm/; fetched at the commit arm/lakefile.toml names):
 #       hex_neon (the kernel), push (the same source function, printed for AArch64)
+#   "direct": the compiler's proofs of push and merge again, about the contracts in bytes themselves, with
+#       the model's own contracts out of the way (direct_fn.py).
 #   Contracts that name no machine (spec/HexContract.lean, PushContract.lean, MergeContract.lean): "any-machine"
 #       is the four x86-64 theorems (hex, push, merge, add); "hex_neon" and "push-aarch64" end with the two
 #       AArch64 ones (hex, push).
@@ -30,6 +32,7 @@ run merge_sse    lang ./prove_fn.sh merge_sse 0x90000
 run add-and-swap lang ./swap.sh
 run merge_steps  lang ./prove_fn.sh merge_steps 0xA0000
 run any-machine  lang sh -c 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes UsableBytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ] && grep -q "usable_bytes. depends on axioms" any.log'
+run direct       lang sh -c 'python3 direct_fn.py push Push.contract Push.byteContract 64 StackAsBytes Cv.opens Stack.opens && python3 direct_fn.py merge Merge.contract Merge.byteContract 256 MergeAsBytes Cv.opens Stack.opens Merge.merged_eq && lake build Direct_push Direct_merge > direct.log 2>&1 && ! grep -q -E "error|sorry" direct.log && grep -q "Direct_push.push_meets. depends on axioms" direct.log && grep -q "Direct_merge.merge_meets. depends on axioms" direct.log'
 run hex_neon     arm  env MUTANTS=$hexaudit ./prove_arm.sh
 run push-aarch64 arm  env MUTANTS=$hexaudit ./prove_arm_fn.sh
 if [ "${AUDIT:-0}" = 1 ]; then
