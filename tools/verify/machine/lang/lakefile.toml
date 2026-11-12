@@ -45,3 +45,15 @@ name = "Lemmas_merge"
 name = "Checks"
 [[lean_lib]]
 name = "Checked_merge"
+[[lean_lib]]
+name = "Try"
+[[lean_lib]]
+name = "Sample_stack"
+[[lean_lib]]
+name = "Example_merge"
+[[lean_lib]]
+name = "TrySem"
+[[lean_lib]]
+name = "Spec_bytes"
+[[lean_lib]]
+name = "Spec_hex"

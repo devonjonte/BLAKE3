@@ -1,5 +1,6 @@
 import Machine
 import MemLemmas
+import Observer
 import Cells
 open X86
 
@@ -40,6 +41,10 @@ structure Piece where
 /-- The thing at `a` holds `v` at the call and `w` at the return. -/
 @[abi] def Layout.turns {α : Type} (l : Layout α) (a : BitVec 64) (v w : α) : Piece :=
   ⟨a, l.size, fun m => l.holds m a v, fun m => l.holds m a w⟩
+
+/-- The thing at `a` holds `w` at the return; at the call the bytes there are the program's and may hold anything. -/
+@[abi] def Layout.fills {α : Type} (l : Layout α) (a : BitVec 64) (w : α) : Piece :=
+  ⟨a, l.size, fun m => Cells.Region m a l.size, fun m => l.holds m a w⟩
 
 /-- What a caller owes a function and what it gets. -/
 structure Contract where
@@ -86,6 +91,25 @@ def Meets (prog : Nat → Option (Instr × Nat)) (entry : Nat) (c : Contract) : 
       s'.rbx = s.rbx ∧ s'.rbp = s.rbp ∧ s'.r12 = s.r12 ∧ s'.r13 = s.r13 ∧ s'.r14 = s.r14 ∧ s'.r15 = s.r15 ∧
       c.ensures s'.rax s'.mem ∧
       ∀ x : BitVec 64, c.stack + 8#64 ≤ x - (s.rsp - c.stack) → (∀ r ∈ c.modifies, r.2 ≤ x - r.1) → s'.mem x = s.mem x
+
+/-- **The function at `entry` of `prog` meets the contract `c g` for every `g`, and shows an observer the
+same whatever `g` is.** `g` is what the caller wants kept from an observer of time and of the cache (a
+hash, a key, a message). All that `Meets` says holds for each `g`; and what such an observer sees of the
+run (every address read or written and where every jump goes: `Observer.lean`) is one list `seen`, fixed
+by the stack pointer and the return address: not by `g`, and not by anything else in the machine. -/
+def MeetsQuietly {G : Type} (prog : Nat → Option (Instr × Nat)) (entry : Nat) (c : G → Contract) : Prop :=
+  ∀ (rsp ra : BitVec 64), ∃ seen : List Obs, ∀ (g : G) (s : State),
+    s.pc = entry → s.rsp = rsp →
+    (c g).args = [s.rdi, s.rsi, s.rdx, s.rcx, s.r8, s.r9].take (c g).args.length →
+    Quad s.mem s.rsp ra →
+    Cells.Region s.mem (s.rsp - (c g).stack) (c g).stack →
+    AllApart ((s.rsp - (c g).stack, (c g).stack + 8#64) :: (c g).regions) →
+    (c g).accepts → (c g).requires s.mem →
+    ∃ k S, stepsL prog k ⟨s, []⟩ = some S ∧ S.leak = seen ∧
+      S.core.pc = ra.toNat ∧ S.core.rsp = s.rsp + 8#64 ∧
+      S.core.rbx = s.rbx ∧ S.core.rbp = s.rbp ∧ S.core.r12 = s.r12 ∧ S.core.r13 = s.r13 ∧ S.core.r14 = s.r14 ∧ S.core.r15 = s.r15 ∧
+      (c g).ensures S.core.rax S.core.mem ∧
+      ∀ x : BitVec 64, (c g).stack + 8#64 ≤ x - (s.rsp - (c g).stack) → (∀ r ∈ (c g).modifies, r.2 ≤ x - r.1) → S.core.mem x = s.mem x
 
 /-- **The contract of a function's checked entry.** Any arguments are accepted. Where the function's own
 contract `c` accepts them, the checked entry does as `c` says; where it does not, the checked entry returns

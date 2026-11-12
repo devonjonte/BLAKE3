@@ -102,16 +102,25 @@ def run(kind, what, old, new, n=1):
             g = subprocess.run([sys.executable, "prove_fn.py", SRC, "merge", ROWS, "merge.layout", "Proof_merge.lean"], cwd=w, capture_output=True, text=True)
             if g.returncode != 0:
                 return kind, what, "REJECTED by the generator", time.time() - start, (g.stderr.strip().splitlines() or [""])[-1][:110]
+        # first the quick answer: run the function on its examples and compare with the contract
+        tried = "the examples were not run"
+        b = subprocess.run(["lake", "build", "Code_merge", "Example_merge", "Checks", "TrySem", "HasherOde"], cwd=w, capture_output=True, text=True)
+        if b.returncode == 0:
+            tr = subprocess.run([sys.executable, "try_fn.py", SRC, "merge", ROWS], cwd=w, capture_output=True, text=True)
+            bad = [l for l in tr.stdout.splitlines() if "REFUTED" in l or "NOT AN EXAMPLE" in l]
+            tried = bad[0] if bad else (tr.stdout.strip().splitlines() or ["?"])[-1]
+        else:
+            tried = "the statement no longer fits the examples or the lemmas (it does not build)"
+        tried_secs = time.time() - start
         # its own process group, so a check that runs out of time is stopped with its children (lake's lean)
         pr = subprocess.Popen(["lake", "build", "Proof_merge", "Checked_merge"], cwd=w, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
         try:
             out, _ = pr.communicate(timeout=LIMIT)
         except subprocess.TimeoutExpired:
             os.killpg(pr.pid, signal.SIGKILL); pr.communicate()
-            return kind, what, f"NO VERDICT in {LIMIT} s", time.time() - start, ""
+            return kind, what, f"NO VERDICT in {LIMIT} s", time.time() - start, f"tried in {tried_secs:.0f} s: {tried}"
         ok = pr.returncode == 0 and "sorry" not in out
-        first = next((l for l in out.splitlines() if "error" in l), "")[:110]
-        return kind, what, "ACCEPTED" if ok else "REJECTED", time.time() - start, first
+        return kind, what, "ACCEPTED" if ok else "REJECTED", time.time() - start, f"tried in {tried_secs:.0f} s: {tried}"
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -122,14 +131,19 @@ snapshot = os.path.join(snap_dir, "w")
 shutil.copytree(here, snapshot, symlinks=True, ignore=shutil.ignore_patterns("mut-*", "*.o"))
 import atexit; atexit.register(lambda: shutil.rmtree(snap_dir, ignore_errors=True))
 k, w, verdict, secs, _ = run("control", "the unchanged copy", "", "")
-print(f"control: {verdict} in {secs:.0f} s", flush=True)
+print(f"control: {verdict} in {secs:.0f} s ({_})", flush=True)
 if verdict != "ACCEPTED" or secs < 20:
     raise SystemExit("the control failed (or answered without checking): the audit proves nothing")
 todo = [("code", *m) for m in code] + [("entry", *m, 1) for m in entry] + [("statement", what, (fname, old), new, 1) for what, fname, old, new in statement] + [("clause", *m, 1) for m in clause]
-tally = {}
+tally, blame = {}, {}
 with ThreadPoolExecutor(jobs) as pool:
     for kind, what, verdict, secs, first in pool.map(lambda m: run(*m), todo):
-        print(f"{verdict:<26} {secs:5.0f} s  {kind}: {what}" + (f"   [{first}]" if first else ""), flush=True)
+        print(f"{verdict:<10} {secs:4.0f} s  {kind}: {what}\n{'':17}{first}", flush=True)
         key = "accepted" if verdict == "ACCEPTED" else "no verdict" if verdict.startswith("NO") else "rejected"
         tally[key] = tally.get(key, 0) + 1
+        blame[kind] = blame.get(kind, []) + ["compiler" if "the code the compiler made is wrong" in first else "source or contract" if "the source or the contract is wrong" in first
+                                              else "not an example" if "NOT AN EXAMPLE" in first else "does not build" if "does not build" in first else "not refuted"]
 print(f"{len(code)} changed instructions, {len(entry)} changed instructions of the checked entry, {len(statement)} false statements and {len(clause)} changed clauses: " + ", ".join(f"{n} {k}" for k, n in sorted(tally.items())))
+print("what trying the examples said of each kind (before any proof was checked):")
+for kind, vs in blame.items():
+    print(f"  {kind}: " + ", ".join(f"{vs.count(v)} {v}" for v in sorted(set(vs))))

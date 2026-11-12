@@ -160,13 +160,23 @@ the machine model, and a generator that knows which clause every line of proof c
 4. **Out of time.** Every check has a limit. No answer is an answer of its own kind, never a pass and
    never a refutation.
 
-Not built yet (November 11): verdicts 2 and 3. Today the audit says "rejected" with a Lean line number.
+Built (November 12): verdict 2, as a test by running. `try_fn.py` runs the assembled function in the
+machine model on the examples of `Example_NAME.lean` and compares the result with the contract (the tests
+are made from the contract itself, read by `#pieces`); on a failure it runs the same example through
+the source's meaning and says which is at fault. For `merge`: eight examples in 7 s, before the 90 s
+proof. In the audit, 13 of 14 changed instructions were pinned on the compiler's code within 17 s each
+(the fourteenth showed a gap in the examples, since filled), and 5 of 12 false statements on "the source
+or the contract". `have_by` names the hypothesis of a lemma that could not be shown (a first piece of
+verdict 3). Not built: verdict 3 in the source's terms; a refutation as a theorem Lean checks (today it
+is a run anyone can repeat); the checked entry tried on examples; the examples' checkers
+(`Sample_*.lean`) proved against the layouts, so that a false layout is refuted too (it is not, today).
 
 ## A contract must be able to hold
 
 A theorem "from every state where the `requires` clauses hold ..." is true of any code if no such state
-exists. (Shown: `requires target >= 1` and `requires target < 1` together are accepted today.) So every
-contract comes with a proved witness: a state in which its `requires` clauses hold, and that state run
+exists. (Shown: `requires target >= 1` and `requires target < 1` together were accepted by Lean.) Since
+November 12 `prove_fn.sh` refuses a contract none of whose examples meets what it requires (6 s). That is
+a test; the aim stays a proved witness: a state in which its `requires` clauses hold, and that state run
 through the code with the `ensures` clauses checked on the result. The invariant needs none of its own:
 `enter` proves it is reached.
 

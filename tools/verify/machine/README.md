@@ -140,6 +140,16 @@ them, returns 2^64 − 1 if one fails, and otherwise jumps to `merge`) and the p
 Nobody wrote the tests or that proof. `reading_layers.py` compares what two theorems' statements depend on
 (`#reading_defs`).
 
+**Trying a function on examples** (`try_fn.py`, `Try.lean`, `TrySem.lean`; run by `prove_fn.sh` before the
+proof). The machine model runs, and so does the specification: the assembled `merge` is run on the examples
+of `Example_merge.lean` (a memory is built from the contract's pieces by `Sample_stack.lean`) and the
+result compared with the contract, read in parts by `#pieces`: eight examples in 7 s, among them a full
+stack of 55 values (28,381 instructions). An example that breaks the contract is run through the source's
+meaning (`Sem.lean`) as well, which says whether the source and contract or the compiler's code is at
+fault. A contract none of whose examples meets it is refused. A test by running, not a proof.
+`Spec_hex.lean`, `Spec_bytes.lean` and `Abi.MeetsQuietly` are the statement `hex` is to be proved against
+next (its present proof, `Proof_hex.lean`, is still of the older shape).
+
 Limits: one loop, not nested; a loop-carried variable lives in a register; no call or condition outside
 the loop; the trace is not in this theorem; `push` and the hash itself carry no contract yet. For `hex`: the recipe covers kernels that load, compute and store with no loop; x86-64 only; the object proved is assembled on a Mac for x86-64 (the instructions' bytes
 are the ELF object's; the relocations differ); the constants' alignment is the assembler's.
