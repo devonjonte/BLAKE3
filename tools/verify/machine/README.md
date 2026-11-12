@@ -161,7 +161,8 @@ unchanged copy, checked again. Its first run accepted three: `mov rax, 0` at the
 `add` (the source returns nothing, the contracts promise nothing of the result), and in `add` a
 `mov rdi, rbx` when RDI still holds that value: instructions no contract needs. The compiler no longer
 sets a result the source does not return. Now `push`: 26 of 26 refused (each seen by an example too);
-`add`: 29 of 30 (the move is still emitted). Three of `add`'s that the proof refuses the examples do
+`add` (which since returns `merge`'s count): 30 of 32, the two accepted both moves of a value already in
+place (RDI again; the result read back from the slot it was just put in). Three of `add`'s that the proof refuses the examples do
 not see, and each is the point of a contract: without the reload of RDI after `push` returns, `add`
 still works with this `push`, which happens to leave RDI alone; its contract does not promise that, so
 the proof does not accept it.
