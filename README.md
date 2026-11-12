@@ -53,12 +53,7 @@ blake3_servil::initialize(); // once, before any other call
 let hash = blake3_servil::convenience::hash(b"foobarbaz");
 ```
 
-**Two crates.** `blake3-servil` is the one most programs want: every
-call, and a pool of threads for the calls that hash on every core.
-`blake3-servil-core` is the same library on one thread: the same
-kernels and the same calls but the multithreaded ones, and it starts no
-thread. `blake3-servil` contains it whole, so a program depends on one
-of the two.
+`blake3-servil-core` provides everything except multithreading, running on the calling thread with zero background threads. `blake3-servil` re-exports `blake3-servil-core` and adds multithreading.
 
 The [crate documentation](https://servil-software-factory.github.io/BLAKE3/blake3_servil/) covers the
 calls for programs that hash a lot, and the C library in [`capi/`](capi/).

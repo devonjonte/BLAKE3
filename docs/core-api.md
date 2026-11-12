@@ -1,48 +1,21 @@
-# blake3-servil-core 0.9: its API
+# `blake3-servil-core` 0.9 (API Preview)
 
-**Coming soon, not yet released.** `blake3-servil-core` is BLAKE3-Servil on
-one thread: a fast BLAKE3 for 64-bit Arm (Linux, macOS) and x86-64 (Linux)
-that produces the same digests as official BLAKE3. Every call hashes on
-the thread that makes it; the crate starts no thread. Its assembly
-kernels are each proved against the BLAKE3 specification.
+*0.9 is unreleased ([release plan](https://github.com/servil-software-factory/BLAKE3/issues/357)). Signatures below reflect current code and may change before release, when full rustdoc will publish at <https://servil-software-factory.github.io/BLAKE3/>.*
 
-This page lists everything a program can name in the crate, as it stands
-on [`next`](https://github.com/servil-software-factory/BLAKE3/tree/next),
-the branch that becomes 0.9; a check holds the list to the code. It
-changes with the code until the release; from the release on, the same
-list with every call's full documentation is at
-<https://servil-software-factory.github.io/BLAKE3/>. Progress toward the
-release: [BLAKE3 #357](https://github.com/servil-software-factory/BLAKE3/issues/357).
+`blake3-servil-core` is a fast, single-threaded BLAKE3 library for 64-bit Arm (Linux, macOS) and x86-64 (Linux). Every call runs on the calling thread, spawns zero background threads, and produces the same digests as official BLAKE3. Every assembly kernel is formally proved against the BLAKE3 specification; the surrounding Rust is tested.
 
-**Two kinds of call.** `convenience` takes any slice and returns the
-result: one call a hash, tuned for a hash now and then. `throughput` is
-for call after call: inputs come as `Block`s (64 bytes on a 64-byte
-boundary), many messages hash side by side in one call, and digests go
-where the program says. Every program calls `initialize()` once first: it
-runs each kernel built for the machine against fixed values.
+## Using the API
 
-**On several cores.** The crate `blake3-servil` is this crate, whole,
-with a pool of threads and a multithreaded form of each call
-(`hash_multithreaded`, `hash_many_multithreaded`,
-`hash_each_multithreaded`, `update_multithreaded`,
-`update_each_multithreaded`). It is released with this one.
+Call `initialize()` once at startup before hashing. Hashing functions live in two modules:
 
-**From C.** `b3.h` (in `capi/`) is the convenience API for C: `b3_hash`,
-`b3_hasher_new`, `b3_hasher_update`, `b3_hasher_finalize`,
-`b3_hasher_finalize_xof`, the three `b3_mode_*` constructors and
-`b3_version`.
+- `convenience` takes ordinary `&[u8]` slices and is tuned for occasional calls amid other work.
+- `throughput` takes 64-byte-aligned `Block`s and batches, writes into caller-supplied buffers, and is tuned for sustained back-to-back calls.
 
-**Cargo features.** `std` (on by default: the `Read`, `Write` and `Seek`
-implementations, `Packed`, a `Batch` that owns its storage, and the calls
-over many messages of different lengths or many hashers: `hash_each`,
-`update_each`, `finalize_each`); `serde` and `zeroize` (off by default).
-Without `std` the crate needs no allocator.
+Disable default features (`default-features = false`) for an allocator-free `no_std` build. Optional `serde` and `zeroize` features add trait support.
 
-The list below is generated from the compiler's own record of the crate
-(`python3 tools/api.py`), a signature and the first sentence of each
-item's documentation.
+`blake3-servil` re-exports this crate and adds multithreading via a shared thread pool. [`capi/b3.h`](../capi/b3.h) provides the convenience API for C and C++.
 
-## The crate's root
+## Crate root
 
 ```rust
 const BUILD_VERSION  (from `blake3_servil_version`)

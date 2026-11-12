@@ -6,8 +6,8 @@ list (its JSON output), so the page names exactly what the crate offers.
     python3 tools/api.py DOC.json                 # the list
     python3 tools/api.py DOC.json --check PAGE    # PAGE's list is this one
 
-A page is its own opening, then the list from the line "## The crate's
-root" to its end; `--check` compares that part and prints what differs
+A page is its own opening, then the list from the line "## Crate root"
+to its end; `--check` compares that part and prints what differs
 (tools/check-builds.sh runs it on docs/core-api.md).
 
 DOC.json: `RUSTC_BOOTSTRAP=1 cargo rustdoc --lib --features serde,zeroize --
@@ -216,8 +216,8 @@ if sys.argv[2:3] == ["--check"]:
     import difflib
 
     page = open(sys.argv[3]).read()
-    start = "## The crate's root\n\n"
-    assert start in page, f"{sys.argv[3]}: no line \"## The crate's root\" to start its list"
+    start = "## Crate root\n\n"
+    assert start in page, f'{sys.argv[3]}: no line "## Crate root" to start its list'
     shown = page[page.index(start) + len(start):]
     if shown != listed:
         sys.stdout.writelines(difflib.unified_diff(shown.splitlines(True), listed.splitlines(True), sys.argv[3], "the crate"))
