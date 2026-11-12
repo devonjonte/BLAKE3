@@ -131,3 +131,17 @@ name = "UsableBytes"
 name = "Direct_push"
 [[lean_lib]]
 name = "Direct_merge"
+[[lean_lib]]
+name = "Spec_levels"
+[[lean_lib]]
+name = "Spec_ladd"
+[[lean_lib]]
+name = "Lemmas_ladd"
+[[lean_lib]]
+name = "Code_ladd"
+[[lean_lib]]
+name = "Proof_ladd"
+[[lean_lib]]
+name = "Sample_levels"
+[[lean_lib]]
+name = "Example_ladd"

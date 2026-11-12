@@ -14,6 +14,15 @@ was; values are merged as they arrive, so the caller holds back whatever may be 
    third arrives; above the bottom a pair becomes its parent at once, for by then a later value exists.
    So every chunk's value is added, the last too, and `lroot` makes the root by one fold.
 
+**In the proof's words** (and now the code's): the levels are a counter in binary. A level that has
+received an odd number of values holds the newest of them in its first place; each pair it received
+went, as the pair's parent, to the level above. The newest chunk of all waits in the bottom's free place.
+`ladd` settles the value that waited (while a level is full, its pair goes up) and puts the new chunk in
+its place; `lroot` folds each level that holds a value onto the one that waits.
+
+**`ladd` is proved** (x86-64, as assembled, for all arguments): `Proof_ladd.ladd_meets`, below.
+`lroot` is not yet.
+
 **Memory** (Sam, November 12: its cost is in lines and pages touched, not in bytes). The levels are 3520
 bytes and the stack 1792. Counted from the layouts, not measured, for 64-byte lines (x86-64): a level is
 one cache line, so a parent reads one line and writes half of another; the stack's values are 32 bytes
@@ -38,15 +47,69 @@ cold tail last) would undo that; not done, and no warm timing shows it.
 
 | | the stack | the levels |
 |---|---|---|
-| a value added, and the root at the end (1024 values) | 42.6 ns a value | 40.3 ns (-5.5%) |
-| the hash of 2 KiB, 4 KiB, 16 KiB, 32 KiB | 732, 992, 2,227, 4,515 ns | 736, 988, 2,170, 4,413 ns (+0.5% to -2.6%) |
+| a value added, and the root at the end (1024 values) | 43.5 ns a value | 41.0 ns (-5.8%) |
+| the hash of 2 KiB, 4 KiB, 16 KiB, 32 KiB | 746, 1,007, 2,276, 4,611 ns | 753, 1,009, 2,232, 4,520 ns (+0.9% to -2.0%) |
 | copies of 32 bytes a parent | 4, and two scratch buffers | 1 (the key), no scratch |
-| instructions | `push` 27, `merge` 89; the root's fold is inside `hash` | `ladd` 121, `lroot` 157 |
+| instructions | `push` 27, `merge` 89; the root's fold is inside `hash` | `ladd` 96, `lroot` 121 |
 | the caller | holds back the last chunk; computes `target` | adds every value; asks for the root |
 
-(`hash2` is 630 instructions against `hash`'s 815, but it has no 32-chunk path: not a comparison.)
+(`hash2` is 569 instructions against `hash`'s 815, but it has no 32-chunk path: not a comparison. The
+times are of the code as the proof left it (`ladd` was 121 instructions and `lroot` 157 before), on a
+machine not quite idle: every column, the crate's too, is about 2% above the run before the change, and the
+levels stand to the stack as they did.)
 
-## The contracts (`../spec/LevelsContract.lean`; no theorem yet)
+## The proof of `ladd`, beside the stack's (November 12)
+
+    ladd_meets : ∀ lv key flags plat cv k chunks new,
+      Abi.Meets Code_ladd.prog 0xB0000 (Ladd.contract lv key flags plat cv k chunks new)
+
+(`../lang/Spec_levels.lean`, `Spec_ladd.lean` the statement; `Lemmas_ladd.lean` by hand; `Proof_ladd.lean`
+written by the compiler; `./prove_fn.sh` with `SOURCE=../levels/levels.ode ODEMOD=LevelsOde`, as
+`../prove_all.sh` runs it.) `ladd` does what `add` does on the stack (`push`, then `merge`), and its
+contract says more: the levels hold the specification's subtrees, where the stack's contracts say `mergeTo`
+and leave the tree to `alg/Stack.lean`. So the fair comparison is with `push`, `merge`, `add` and the
+stack's part of the tree's proof together:
+
+| | the stack (`push` + `merge` + `add`) | the levels (`ladd`) |
+|---|---|---|
+| instructions under the theorem | 26 + 88 + 32 | 95 |
+| the statement, by hand (contract and layout) | 91 lines (4 files) | 63 lines (2 files) |
+| lemmas, by hand | 226 lines for the code, and about 220 of `alg/Stack.lean` and `AddTree.lean` for the tree | 376 lines, the tree included |
+| the proof the compiler writes | 67 + 245 + 147 lines | 262 lines |
+| Lean's check of it (Threadripper 7975WX) | 24 s, 143 s, and `add`'s within 99 s | 167 s |
+| a reader of the theorem reads | 935 lines (`add_meets_bytes`; the tree not reached) | 854 lines (the tree reached) |
+| axioms beyond Lean's three (`bv_decide`) | 718 | 377 |
+| examples run in the machine model before the proof | 4 + 8 + 5 | 9 (8 meet the contract, 1 is refused as not an example) |
+| each instruction made a no-op in turn | `push` 26 of 26 refused; `add` 30 of 32 (two redundant moves) | 94 of 95 refused (one redundant move: a value loaded again that the register still holds); 88 already refuted by an example |
+
+From the first line of the contract to the checked theorem took under an hour, with the compiler's proof
+generator as it was for `merge` and four additions to it (below); `merge`'s own took an evening, generator
+included. The lemmas checked on their first compilation but one (a search that did not end).
+
+**What the system lacked, and now has:**
+- the machine model had no shift right: `shr64` (one line of meaning in `../one/Machine.lean`; its two forms
+  here are in the processor cross-check, 10,080 vectors over 252 forms, none differs; a model that shifts
+  by one bit less is found). Every x86-64 theorem's reading list grew by four lines;
+- the proof generator: facts at hand from the first instruction in a function with a loop (`enter know`),
+  an invariant's fact taken apart after the loop (`leave open`), and a variable read from memory before
+  the loop used in what follows (its value is what the invariant says it is);
+- `prove_fn.sh`, the examples and the audit took a source file other than `hasher.ode`; a layout with
+  parameters (`Levels.layout k mode`) has its sample.
+
+**What the code's shape owes to the prover** (a cost, said): the generator takes one loop, at the top of
+the function, with no branch before it. So "nothing added yet" is not a branch around the loop but a value
+(`x = ln | ((ln - 1) >> 63)`: the count, or 1 for none), and the loop asks only whether `x` is even.
+
+**What the proof gave the code:** the counter. With it `ladd`'s loop needs one variable (121 instructions
+became 95), and `lroot` lost its special case for the bottom pair (157 became 121): the newest chunk's
+value is taken first, and every level that holds a value, the bottom included, is folded onto it the
+same way.
+
+**Not done:** `lroot`'s theorem; the contracts in bytes (`../spec/LevelsContract.lean`, in the same words)
+joined to these; `ladd` on AArch64; `hash2` calling `ladd` and `lroot` by their contracts (it has their
+text a second time, as a macro).
+
+## The contracts in bytes (`../spec/LevelsContract.lean`; no theorem about these yet)
 
     ladd:  the levels over `chunks` become the levels over `chunks` and the new chunk
     lroot: the 32 bytes at `out` become the specification's output for the tree over `chunks`
@@ -56,10 +119,10 @@ What a reader of each design's contracts reads (`reading.py` on Lean's lists, `.
 | | lines |
 |---|---|
 | the stack's three contracts (`push`, `merge`, `add`) | 186 |
-| the levels' two (`ladd`, `lroot`) | 228 |
+| the levels' two (`ladd`, `lroot`) | 227 |
 | read for both (the specification's compression, what a contract is, a value's bytes) | 137 |
 | only the stack's (the three contracts 27, `mergeTo` and `Merge.merged` 13, the stack's layout 9) | 49 |
-| only the levels' (the two contracts 19, the levels' layout and counts 23, two words of `Contract` 4, **the specification's tree and output 45**) | 91 |
+| only the levels' (the two contracts 19, the levels' layout 22, two words of `Contract` 4, **the specification's tree and output 45**) | 90 |
 
 The 45 lines are the point: the levels' contracts say "the specification's tree"; the stack's say
 "`mergeTo`". So the 186 and the 228 are not like for like. A reader who wants to know that the stack
@@ -68,7 +131,7 @@ makes BLAKE3's tree must also read the statement that says so (`Blake3.stack_is_
 | to know "this makes the specification's tree" | lines |
 |---|---|
 | the stack's three contracts and `stack_is_the_tree` | 225 |
-| the levels' two contracts | 228, of which 14 go further than the stack's (the root's output bytes) |
+| the levels' two contracts | 227, of which 14 go further than the stack's (the root's output bytes) |
 
 And on the stack's side two things are then still in no statement: that the caller passes the count's
 one bits as `target` and holds back the last chunk, and the fold that makes the root (code inside
@@ -84,8 +147,8 @@ auditor of the part reads.
 - **Not shared:** the data structure's layout (`Stack.Holds`, `Levels.Holds`), the contracts of the
   functions on it, and (not written for the levels) the algorithm's proof: `../alg/Stack.lean`'s 293
   lines are about the stack.
-- **Not known yet:** what the proofs cost. `ladd` has a loop that calls a kernel, as `merge` has; whether
-  disjoint writes make its proof shorter is the next thing to measure.
+- **The proofs:** the table above. Writes that never land on what is still to be read did help: `ladd`'s
+  lemma for a turn (`Levels.Mid.carry`) needs "every byte but the 32 written is as it was" and no more.
 
 ## A first form, and what it taught
 

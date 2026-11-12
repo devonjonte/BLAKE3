@@ -12,6 +12,8 @@ reader needs:
       uses FILE, ...                         Lean files of lemmas for the prover
       leave by LEMMA                         gives the contract's `ensures` from the invariant when the loop ends
       [enter open LEMMA as names]            takes a `requires` fact apart before the first instruction
+      [enter know LEMMA]                     facts a `requires` fact gives, to have at hand from the first instruction
+      [leave open LEMMA as names]            takes an invariant's fact apart before the instructions after the loop
     {
       ...
       while CONDITION
@@ -236,9 +238,10 @@ mm = re.match(r"^([\w.]+)\((.*)\)$", one(head, "meets", "the function must name 
 CNAME, fn_ghosts = mm.group(1), binders(mm.group(2))
 uses = [u.strip() for w, rest in head if w == "uses" for u in rest.split(",")]
 LEAVE = None if (STRAIGHT and not any(w == "leave" for w, _ in head)) else \
-    re.match(r"^by\s+([\w.]+)$", one(head, "leave", "the function must name the lemma that gives its ensures when the loop ends: leave by LEMMA")).group(1)
+    re.match(r"^by\s+([\w.]+)$", one([(w, r) for w, r in head if not (w == "leave" and r.startswith("open"))], "leave", "the function must name the lemma that gives its ensures when the loop ends: leave by LEMMA")).group(1)
 enter_opens = [re.match(r"^open\s+([\w.]+)\s+as\s+(.*)$", rest).groups() for w, rest in head if w == "enter" and rest.startswith("open")]
 enter_knows = [re.match(r"^know\s+([\w.]+)$", rest).group(1) for w, rest in head if w == "enter" and rest.startswith("know")]
+leave_opens = [re.match(r"^open\s+([\w.]+)\s+as\s+(.*)$", rest).groups() for w, rest in head if w == "leave" and rest.startswith("open")]
 loop_ghosts = [b for w, rest in loop if w == "ghost" for b in binders(rest)]
 invariants = [split_by(rest) for w, rest in loop if w == "invariant"]
 decreases = None if STRAIGHT else one(loop, "decreases", "the loop must say what gets smaller: decreases VARIABLE")
@@ -372,7 +375,8 @@ def paths(ss, env):
         for ev, e in res:
             k = s[0]
             if k == "set":
-                e2 = dict(e); e2[s[1]] = lean_low(s[2], e); new.append((ev, e2))
+                # a value read from memory is what the invariant says the variable is, if it says (`invariant x == E`)
+                e2 = dict(e); v = lean_low(s[2], e); e2[s[1]] = v if v is not None else frozen.get(s[1]); new.append((ev, e2))
             elif k == "call": new.append((ev + [("call", s[1], [lean_low(a, e) for a in s[2]] if s[1] in OWN else None)], e))
             elif k == "callr":
                 # the result is the callee's RAX at its return: the state there is named by the call's number
@@ -585,6 +589,7 @@ L += [f"theorem enter {ARGDECL}",
       "  simp only [List.length_cons, List.length_nil, List.take, List.cons.injEq, and_true] at hargs",
       f"  obtain ⟨{', '.join(f'ha{i}' for i in range(len(params)))}⟩ := hargs",
       f"  subst pc rsp {' '.join(ABI[:len(params)])} {' '.join(CALLEE_SAVED)} mem"] + known("  ", "m0", False)
+for i, lemma in enumerate(enter_knows): L += know_with(lemma, "m0", i, "  ")
 for i, (lemma, names) in enumerate(enter_opens): L += open_with(lemma, names, "m0", i, "  ")
 L += run_piece(ep[0][0], ENTRY, "head", [], "  ")[0] + prove_inv("  ", False, False) + [""]
 
@@ -619,6 +624,7 @@ assert len(lp) == 1 and not any(e[0] == "call" for e in lp[0][0]), "a condition 
 L += [f"theorem leave {ARGDECL}",
       f"    (s : State) (hI : Inv {ARGUSE} s) (hc : ¬ {cond_prop(wcond, env_s)}) :",
       f"    ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ {POST} s' := by"] + open_head + \
+     [x for i, (lemma, names) in enumerate(leave_opens) for x in open_with(lemma, names, "mem", i, "  ")] + \
      run_piece(lp[0][0], HEAD, "ret", [], "  ")[0] + \
      [f"  refine runs_done ⟨rfl, by simp only [{CNAME}, Abi.Contract.framed]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩", "  all_goals try dsimp only"] + \
      outside_goal("  ", True) + [f"  · simp only [{OPEN_C}]", f"    apply {LEAVE} <;> mem_auto", ""]

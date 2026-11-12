@@ -124,6 +124,7 @@ for at, size, op, args, reloc, raw in insns:
     elif op == "movzx":
         r, w = REG[a[0]]; s, ws = opnd(a[1]); assert w == 32 and ws == 8, args; ins = f".movzx8 .{r} {s}"
     elif op == "shl": r, w = REG[a[0]]; assert w == 64; ins = f".shl64 .{r} {int(a[1], 16)}"
+    elif op == "shr": r, w = REG[a[0]]; assert w == 64; ins = f".shr64 .{r} {int(a[1], 16) if len(a) > 1 else 1}"   # `shr r` alone is by one
     elif op == "dec":
         r, w = REG[a[0]]; assert w in (8, 64); ins = f".decb .{r}" if w == 8 else f".dec64 .{r}"
     elif op == "lea":

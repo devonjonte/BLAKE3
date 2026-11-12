@@ -27,6 +27,8 @@ const AVX2        = 4
 
 extern compress_avx512/5  = "blake3_servil_compress_in_place_avx512"
 extern compress_sse41/5   = "blake3_servil_compress_in_place_sse41"
+callee compress_avx512 meets Kernels.call_avx_runs (8)
+callee compress_sse41 meets Kernels.call_sse_runs (10)
 extern hash_many_avx512/10 = "blake3_servil_hash_many_avx512"
 extern hash_many_avx2/10   = "blake3_servil_hash_many_avx2"
 extern hash_many_sse41/10  = "blake3_servil_hash_many_sse41"
@@ -38,69 +40,83 @@ def compress(cv, block, block_len, counter, flags) {
 
 def level_at(L) = lv + 64 + (L << 6)
 
-// The value at t is added. If the bottom level holds two, they give their parent to the level above
-// first; a level that thereby holds two gives theirs to the next, and so on. Every parent is written
-// where nothing needed lies: the first place of an empty level, or the second of a level holding one.
+// The value at t is added. While a level holds two values (x, the count of values that reached it, is
+// even), they give their parent to the level above: to its first place, or to its second if it holds one
+// already (then the next turn finds that level full). Every parent is written where nothing needed
+// lies. Then the new value takes the bottom's next place. (This is `ladd`'s body: `ladd` below has it
+// written out with what the prover needs; `hash2` uses it from here.)
 def levels_add() {
   ln = u64[lv]
-  j = ln & 1
-  if ln != 0 {
-    if j == 0 {
-      e = (ln - 1) >> 1
-      src = lv + 64
-      go = 1
-      while go == 1 {
-        dst = src + 64 + ((e & 1) << 5)
-        copy 32 dst <- key
-        compress(dst, src, 64, 0, pf)
-        go = e & 1
-        e = e >> 1
-        src = src + 64
-      }
-    }
+  x = ln | ((ln - 1) >> 63)          // the count; or 1 where nothing was added yet (no pair to give)
+  src = lv + 64
+  while x & 1 == 0 {
+    x = x >> 1
+    dst = src + 64 + (((x + 1) & 1) << 5)
+    copy 32 dst <- key
+    compress(dst, src, 64, 0, pf)
+    src = src + 64
   }
-  copy 32 lv + 64 + (j << 5) <- t
+  copy 32 lv + 64 + ((ln & 1) << 5) <- t
   u64[lv] = ln + 1
 }
 
 // The root of the values added (two or more), written at out; the levels are left as they are.
-// The bottom level's pair becomes its parent, or its one value is taken; then each level above that
-// holds a value is folded in, the lowest first. The last parent made is the root.
+// The newest chunk's value waits at the bottom; each level that holds a value (a bit of the count less
+// one) is folded onto it, the lowest first. The last parent made is the root.
 def levels_root() {
   ln = u64[lv]
-  e = (ln - 1) >> 1
+  e = ln - 1                              // the levels have received all the chunks but the newest
   base = lv + 64
-  if ln & 1 == 0 {
-    f = pf
-    if e == 0 { f = pf | ROOT }            // two values in all: they are the root's children
-    copy 32 acc <- key
-    compress(acc, base, 64, 0, f)
-  } else { copy 32 acc <- base }
-  while e != 0 {
-    base = base + 64
+  copy 32 acc <- base + ((e & 1) << 5)    // the newest chunk's value: in the bottom's next place
+  while e > 0 {
     if e & 1 == 1 {
       f = pf
-      if e == 1 { f = pf | ROOT }          // the highest level: this parent is the root
+      if e == 1 { f = pf | ROOT }         // the highest level that holds a value: this parent is the root
       copy 32 blk <- base
       copy 32 blk + 32 <- acc
       copy 32 acc <- key
       compress(acc, blk, 64, 0, f)
     }
     e = e >> 1
+    base = base + 64
   }
   copy 32 out <- acc
 }
 
-fn ladd(lv, key, flags, plat, t)
+// A chunk's value arrives. What ladd is claimed to do is its contract, written in Lean for a reader:
+// Ladd.contract (../lang/Spec_ladd.lean). Here is the code, and for its loop what the prover needs and no
+// reader does. The lemmas named are in ../lang/Lemmas_ladd.lean.
+fn ladd(lv, key, flags, plat, cv)
+  reg x, src, lv, key, plat, dst
+  meets Ladd.contract(k: Blake3.CV, chunks: Array Blake3.Node, new: Blake3.Node)
+  uses Lemmas_ladd
+  enter know Levels.At.start
+  enter know Ladd.New.intro
+  leave open Ladd.New.vectors as t0, t1
+  leave by Ladd.exit
 {
   var pf = flags | PARENT
-  var ln = 0
-  var j = 0
-  var e = 0
-  var src = 0
-  var dst = 0
-  var go = 0
-  levels_add()
+  var ln = u64[lv]
+  var x = ln | ((ln - 1) >> 63)
+  var src = lv + 64
+  while x & 1 == 0
+    invariant Levels.Mid(lv, k, flags, chunks, src, x)      by Levels.Mid.carry
+    invariant Cv.At(key, k)
+    invariant Ladd.New(cv, new)
+    invariant pf == flags | PARENT
+    invariant ln == Levels.count(chunks)
+    decreases x
+    open Levels.Mid.full as l0, l1, r0, r1
+    open Cv.At.vectors as k0, k1
+  {
+    x = x >> 1
+    var dst = src + 64 + (((x + 1) & 1) << 5)
+    copy 32 dst <- key
+    compress(dst, src, 64, 0, pf)
+    src = src + 64
+  }
+  copy 32 lv + 64 + ((ln & 1) << 5) <- cv
+  u64[lv] = ln + 1
   return ln + 1
 }
 
@@ -145,11 +161,10 @@ fn hash2(out, input, len, key, flags, plat)
   var t = 0
   var f = 0
   var ln = 0
-  var j = 0
+  var x = 0
   var e = 0
   var src = 0
   var dst = 0
-  var go = 0
   var base = 0
   u64[lv] = 0
 

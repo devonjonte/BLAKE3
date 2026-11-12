@@ -291,5 +291,7 @@ def crossTable : List (Instr × String) := [
   (.punpcklbw 3 (.x 1), "660f60d9"),
   (.punpckhbw 2 (.x 1), "660f68d1"),
   (.storev false .rdi 0x20 3, "f30f7f5f20"),
-  (.storev false .rdi 0x30 2, "f30f7f5730")
+  (.storev false .rdi 0x30 2, "f30f7f5730"),
+  (.shr64 .rcx 63, "48c1e93f"),
+  (.shr64 .rax 1, "48d1e8")
 ]

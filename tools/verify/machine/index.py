@@ -26,6 +26,8 @@ X86 = [  # (module, theorem, contract and where, what it says)
      "a second `merge`, on the SSE4.1 kernel alone, meets the same contract"),
     ("Proof_merge_steps", "Proof_merge_steps.merge_steps_meets", "`MergeSteps.contract` (lang/Spec_mergesteps.lean)",
      "a loop that calls `merge` by its contract, one value a turn, does what `merge` does"),
+    ("Proof_ladd", "Proof_ladd.ladd_meets", "`Ladd.contract` (lang/Spec_ladd.lean)",
+     "`ladd` (the tree's levels, another design than the stack: levels/), as assembled, turns the levels of the tree over some chunks into the levels over those and one more"),
     ("AddTree", "Add.keeps_the_tree", "no code: `Add.contract`'s result and the specification's tree (alg/Stack.lean)",
      "on the tree's stack for `m` chunks, what `add` leaves is the tree's stack for `m + 1`"),
 ]

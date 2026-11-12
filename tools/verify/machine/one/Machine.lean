@@ -275,6 +275,8 @@ inductive Instr
   | punpcklbw (dst : Nat) (src : Src)
   | punpckhbw (dst : Nat) (src : Src)
   | psrlw (dst : Nat) (n : Nat)
+  /-- SHR r64, imm8: a logical shift right. The processor takes the count's low six bits. -/
+  | shr64 (r : Reg) (n : Nat)
 
 def read (s : State) (w : Nat) : Opnd → Option (BitVec 64)
   | .reg r => some (trunc w (s.get r))
@@ -375,6 +377,8 @@ def step (i : Instr) (next : Nat) (s : State) : Option State :=
   | .punpcklbw d x => do some (s.setx d (punpcklbw (s.xmm d) (← src s true x)))
   | .punpckhbw d x => do some (s.setx d (punpckhbw (s.xmm d) (← src s true x)))
   | .psrlw d n => if n < 16 then some (s.setx d (psrlw (s.xmm d) n)) else none
+  -- A shift's flags depend on its count (none change when it is zero): left unmodelled, so nothing may branch on them.
+  | .shr64 r n => some ({ s with zf := none, cf := none }.set r (s.get r >>> (BitVec.ofNat 6 n).toNat))
 
 /-- Exactly `k` instructions. -/
 def steps (prog : Nat → Option (Instr × Nat)) : Nat → State → Option State

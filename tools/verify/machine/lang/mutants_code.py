@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Does a function's generated proof notice a missing instruction? For any function proved by prove_fn.sh.
 
-    mutants_code.py NAME [JOBS]
+    [SOURCE=FILE.ode ODEMOD=Module] mutants_code.py NAME [JOBS]      (as prove_fn.sh: hasher.ode and HasherOde unless said)
 
 One instruction at a time is replaced by a no-op in the lifter's rows (Lifted_NAME.lean.rows), the
 program is written again from the rows (as prove_fn.sh wrote it) and `lake build Proof_NAME` must fail;
@@ -17,10 +17,11 @@ import odec
 here = os.path.dirname(os.path.abspath(__file__))
 name = sys.argv[1]
 jobs = int(sys.argv[2]) if len(sys.argv) > 2 else 6
-SRC, ROWS = "hasher.ode", f"Lifted_{name}.lean.rows"
+SRC, ROWS = os.path.abspath(os.path.join(here, os.environ.get("SOURCE", "hasher.ode"))), f"Lifted_{name}.lean.rows"
+ODEMOD = os.environ.get("ODEMOD", "HasherOde")
 LIMIT = 900
 rows = [l.rstrip("\n").split("\t") for l in open(os.path.join(here, ROWS))]
-clauses = odec.contracts_of(open(os.path.join(here, SRC)).read())[0][name]
+clauses = odec.contracts_of(open(SRC).read())[0][name]
 CNAME = re.match(r"[\w.]+", next(r for w, r in clauses["head"] if w == "meets")).group(0)
 EX = "Example_" + CNAME.split(".")[0].lower()
 # the options prove_fn.sh gave gen_code.py: the checked entry's rows, the callees' code
@@ -57,7 +58,7 @@ def run(k):
             assert g.returncode == 0, g.stderr
         tried = "no examples"
         if os.path.exists(os.path.join(w, EX + ".lean")):
-            b = subprocess.run(["lake", "build", f"Code_{name}", EX, "Checks", "TrySem", "HasherOde"], cwd=w, capture_output=True, text=True)
+            b = subprocess.run(["lake", "build", f"Code_{name}", EX, "Checks", "TrySem", ODEMOD], cwd=w, capture_output=True, text=True)
             if b.returncode == 0:
                 tr = subprocess.run([sys.executable, "try_fn.py", SRC, name, ROWS], cwd=w, capture_output=True, text=True)
                 bad = [l for l in tr.stdout.splitlines() if "REFUTED" in l or "NO VERDICT" in l]

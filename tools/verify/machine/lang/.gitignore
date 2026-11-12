@@ -35,3 +35,6 @@ any.log
 Direct_*.lean
 index_tmp.lean
 hashtry.log
+LevelsOde.lean
+ladd.*
+lroot.*

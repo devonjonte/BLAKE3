@@ -3,37 +3,40 @@ import StackBytes
 /-! # The tree's levels (`ladd`, `lroot`): what is claimed, of the code for any machine
 
 The tree of chaining values another way than the stack (`../levels/levels.ode`): a parent has memory of
-its own, and the two newest values wait at the bottom level until a third arrives, so every chunk's value
+its own, and the newest chunk's value waits at the bottom until the next arrives, so every chunk's value
 is added, the last too, and the root is made at the end.
 
-Definitions only. **No theorem yet.** The code is tried against BLAKE3 (`../levels/run_levels.sh`) and
-the whole hash on it against `Hash.byteContract`, the contract of the hash on the stack, unchanged
-(`../levels/try_hash2.sh`). These contracts are here to be compared with the stack's
-(`PushContract.lean`, `MergeContract.lean`): they speak of the chunks added and of the specification's
-tree over them, and of nothing a caller must compute. -/
+Each level has two places, 32 bytes each, side by side; level 0 is the chunks' own. The levels are a
+counter in binary: a level that has received an odd number of values holds the newest of them, in its
+first place; each pair it received went, as the pair's parent, to the level above. And the newest chunk of
+all waits in the bottom level's free place: its turn to count comes when the next chunk arrives (until
+then it may be the root's child).
+
+Definitions only, of bytes. **The theorem so far is about the same words said of the x86-64 model's
+memory** (`../lang/Spec_levels.lean`, `Spec_ladd.lean`: `ladd_meets`, `../lang/Proof_ladd.lean`); that these
+bytes say the same is not proved yet, and `lroot` has no theorem yet. The whole hash on the levels is tried
+against `Hash.byteContract`, the contract of the hash on the stack, unchanged (`../levels/try_hash2.sh`). -/
 
 namespace Levels
 
-/-- How many values the bottom level holds once `n` were added: the newest one if `n` is odd, the newest
-two if it is even. (Two stay until a third arrives: until then they may be the root's children.) -/
-def bottom (n : Nat) : Nat := if n = 0 then 0 else if n % 2 = 1 then 1 else 2
-
-/-- How many pairs the bottom level has given upward once `n` values were added. -/
-def given (n : Nat) : Nat := (n - 1) / 2
+/-- **The levels from byte `o` of `b` upward, `f` of them, have received `r` values of `size` chunks each**
+(whole subtrees of the specification's tree, in order from chunk 0): if `r` is odd this level holds the
+newest of them in its first place, and the level above has received `r / 2` values of twice the size. -/
+def Received (key : Blake3.CV) (mode : Blake3.Word) (chunks : Array Blake3.Node) (b : List (BitVec 8)) : Nat → Nat → Nat → Nat → Prop
+  | 0, _, _, r => r = 0
+  | f + 1, o, size, r =>
+    (r % 2 = 1 → (b.drop o).take 32 = Cv.bytes (Blake3.sub key mode chunks ((r - 1) * size) size)) ∧
+    Received key mode chunks b f (o + 64) (2 * size) (r / 2)
 
 /-- **The bytes `b` hold the levels of the tree over `chunks`**, under a key and a mode: 3520 bytes; the
-count of chunks in the first eight; level `L`'s two places from byte `64 + 64 L`, 32 bytes each. The
-bottom level holds the newest chunks' chaining values, the older first. A level `L` above it holds a
-value, in its first place, if bit `L - 1` of the count of pairs given upward is set: the chaining value of
-the specification's subtree over the newest `2 ^ L` chunks that are whole such a subtree. Fewer than
-`2 ^ 54` chunks. -/
+count of chunks in the first eight; the levels from byte 64, 64 bytes each, 54 of them; fewer than `2 ^ 54`
+chunks. With a chunk or more: the levels have received all the chunks but the newest, and the newest
+chunk's value is in the bottom level's next place (its second, if the first is in use). -/
 def Holds (key : Blake3.CV) (mode : Blake3.Word) (b : List (BitVec 8)) (chunks : Array Blake3.Node) : Prop :=
   b.length = 3520 ∧ chunks.size < 2 ^ 54 ∧ b.take 8 = Bytes.le64 chunks.size ∧
-  (∀ j : Nat, j < bottom chunks.size →
-    (b.drop (64 + 32 * j)).take 32 = Cv.bytes (Blake3.sub key mode chunks (chunks.size - bottom chunks.size + j) 1)) ∧
-  ∀ L : Nat, 1 ≤ L → L < 54 → given chunks.size / 2 ^ (L - 1) % 2 = 1 →
-    (b.drop (64 + 64 * L)).take 32 =
-      Cv.bytes (Blake3.sub key mode chunks (given chunks.size / 2 ^ L * 2 ^ (L + 1)) (2 ^ L))
+  (0 < chunks.size →
+    Received key mode chunks b 54 64 1 (chunks.size - 1) ∧
+    (b.drop (64 + 32 * ((chunks.size - 1) % 2))).take 32 = Cv.bytes (Blake3.sub key mode chunks (chunks.size - 1) 1))
 
 /-- The levels in memory: 3520 bytes. -/
 def byteLayout (key : Blake3.CV) (mode : Blake3.Word) : Bytes.Layout (Array Blake3.Node) := ⟨3520, Holds key mode⟩

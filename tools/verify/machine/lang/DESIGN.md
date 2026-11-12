@@ -389,8 +389,15 @@ of about 200 lines of contract reading are shared; the layout and the functions'
 levels' contracts speak of the specification's tree itself, where the stack's speak of `mergeTo` and
 leave the tree to other theorems and the caller. **Rule taken from it: prefer the contract that states
 the specification's own object** (the tree over the chunks), **and a design whose caller computes
-nothing for it.** Next: the levels' theorems (`ladd_meets`, `lroot_meets`, and the algorithm's), to
-compare the proofs.
+nothing for it.**
+
+`ladd` is proved (`Proof_ladd.ladd_meets`; `../levels/README.md` has the comparison with `push`, `merge` and
+`add`): fewer instructions, a shorter generated proof, about half the `bv_decide` axioms, a statement that
+reaches the tree, in under an hour with the generator as it was. And the proof changed the code: its view
+of the levels as a binary counter, with the newest chunk waiting, made `ladd`'s loop and `lroot` simpler.
+**A second rule from it: when the proof's words for a data structure are simpler than the code's, rewrite
+the code in the proof's words.** Next: `lroot`'s theorem (the generator needs a call before a loop, or the
+code a shape without one: it has that shape now), then the contracts in bytes.
 
 ## The coder decides, and can predict (Sam, November 12)
 

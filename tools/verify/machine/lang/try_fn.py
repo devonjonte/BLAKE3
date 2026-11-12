@@ -17,7 +17,7 @@ One line an example:
     example I: NO VERDICT: ...
 and a last line: `tried: A meet, B refuted, C not examples`. Exit status 0 only if at least one example
 meets the contract's requirements and none is refuted. This is a test by running, not a proof."""
-import re, subprocess, sys
+import os, re, subprocess, sys
 import odec
 
 src, name, rows_path = sys.argv[1:4]
@@ -36,7 +36,8 @@ for line in out.splitlines():
     elif line.startswith("returns "): returns = [x.strip() for x in line[8:].split("|", 1)]
 if returns and not re.fullmatch(r"[A-Za-z_]\w*", returns[0]): returns[0] = "result_"     # `fun _ => ...`: a name Lean made up
 assert params and accepts is not None and returns, f"could not read {CNAME}:\n{out}"
-sample = lambda layout: re.sub(r"\.layout$", ".sample", layout)
+# a layout `X.layout`, or one with parameters `X.layout a b`, is tried by `X.sample`, with the same parameters
+sample = lambda layout: "(" + re.sub(r"\.layout\b", ".sample", layout, count=1) + ")"
 q = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')
 names = ", ".join(n for n, _ in params)
 types = " × ".join(t for _, t in params)
@@ -49,7 +50,7 @@ post = post_of("s'.mem")
 puts = "".join(f"    let m0 := {sample(l)}.put m0 ({a}) ({v})\n" for _, l, a, v, _ in pieces)
 L = f"""import Try
 import TrySem
-import HasherOde
+import {os.environ.get('ODEMOD', 'HasherOde')}
 import Code_{name}
 import Example_{CNAME.split('.')[0].lower()}
 open X86
