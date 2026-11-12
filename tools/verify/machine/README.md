@@ -90,6 +90,10 @@ Known limits, stated so nobody takes these for more than they are:
 
 **One command:** `./prove_all.sh` goes from the source to checked theorems for everything the language's
 compiler proves, on both architectures, one line a function (`AUDIT=1` adds the audits).
+**Two designs side by side:** `levels/` is the tree of chaining values another way than the stack (a parent in
+memory of its own; no pair hashed while it may be the root's), in Ode, tried against BLAKE3 and against the stack
+hash's contract unchanged; no theorem yet. Its README compares the two.
+
 **A build that checks its proof:** `build-check/` (a trial: a Rust crate's build has an independent checker,
 nanoda, check the theorem about the code it then links; its README has the times and controls).
 

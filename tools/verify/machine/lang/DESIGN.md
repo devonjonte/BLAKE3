@@ -379,6 +379,19 @@ from memory to memory (`Try.compress`) was computed again at every byte read, si
 definition that returns a function as one of more arguments; sixteen compressions took minutes. Computed
 once when the kernel is called (`compressNow`), the 104 examples take two and a half minutes.
 
+## Two designs of one thing, side by side: the stack and the levels (Sam, November 12)
+
+`../levels/` holds the tree of chaining values in a second design (Sam's, from earlier work on BLAKE3):
+a parent written to memory of its own, and no pair hashed while it may be the root's. It is there to
+learn what two designs of one thing share in this system, and it may one day be the better `merge`.
+Found so far (its README has the numbers): the user-facing contract and its trial are shared whole; 137
+of about 200 lines of contract reading are shared; the layout and the functions' contracts are not; the
+levels' contracts speak of the specification's tree itself, where the stack's speak of `mergeTo` and
+leave the tree to other theorems and the caller. **Rule taken from it: prefer the contract that states
+the specification's own object** (the tree over the chunks), **and a design whose caller computes
+nothing for it.** Next: the levels' theorems (`ladd_meets`, `lroot_meets`, and the algorithm's), to
+compare the proofs.
+
 ## No code the proof shows is never reached
 
 (Sam, November 12.) A check that the proof shows can never fail is dead code: it costs instructions, it is

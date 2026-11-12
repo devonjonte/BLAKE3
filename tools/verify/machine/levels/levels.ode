@@ -5,13 +5,18 @@
 // Here:
 //   - a parent is written into memory of its own, never over its children: each level of the tree
 //     has room for two values side by side, which are a parent's 64-byte block as they lie;
-//   - a pair becomes its parent only when a third value arrives at its level: until then it may be
-//     the root, which is hashed differently. So every chunk's value is added, the last one too, and
-//     `lroot` makes the root.
+//   - the two newest values wait at the bottom level until a third arrives: only then is it known that
+//     they are not the root's children (the root is hashed differently). Above the bottom a pair
+//     becomes its parent as soon as it is complete, for by then a later value exists. So every chunk's
+//     value is added, the last one too, and `lroot` makes the root, by one fold.
 //
 // The levels: the count of values added (a word) at offset 0; level L's two places at offset
-// 64 + 64 L, 32 bytes each; 54 levels; 3520 bytes. What each level holds follows from the count n:
-// with q = (n + 1) >> L, nothing if q <= 1, one value if q is even, two if q is odd.
+// 64 + 64 L, 32 bytes each; 54 levels; 3520 bytes. What is held follows from the count n: the bottom
+// level holds the newest value if n is odd and the newest two if it is even; with e = (n - 1) / 2
+// pairs given upward, level L >= 1 holds one value, in its first place, if bit L - 1 of e is set.
+//
+// (A first form waited at every level, not only the bottom: as fast, but its root took three cases a
+// level, 272 instructions; it is in this folder's history, and README.md has its numbers.)
 
 const CHUNK_START = 1
 const CHUNK_END   = 2
@@ -33,91 +38,55 @@ def compress(cv, block, block_len, counter, flags) {
 
 def level_at(L) = lv + 64 + (L << 6)
 
-// The value at t is added. The full levels from the bottom (k of them) each give their pair's parent to
-// the level above, the highest first, so every parent is written where nothing needed lies; then t takes
-// the bottom level's first place, or its second if one value was there.
+// The value at t is added. If the bottom level holds two, they give their parent to the level above
+// first; a level that thereby holds two gives theirs to the next, and so on. Every parent is written
+// where nothing needed lies: the first place of an empty level, or the second of a level holding one.
 def levels_add() {
   ln = u64[lv]
-  q = ln + 1
-  k = 0
-  while q & 1 == 1 {
-    if q == 1 { q = 0 }
-    else {
-      k = k + 1
-      q = q >> 1
+  j = ln & 1
+  if ln != 0 {
+    if j == 0 {
+      e = (ln - 1) >> 1
+      src = lv + 64
+      go = 1
+      while go == 1 {
+        dst = src + 64 + ((e & 1) << 5)
+        copy 32 dst <- key
+        compress(dst, src, 64, 0, pf)
+        go = e & 1
+        e = e >> 1
+        src = src + 64
+      }
     }
   }
-  j = 0
-  if q != 0 { j = 1 }
-  while k > 0 {
-    dst = level_at(k) + (j << 5)
-    src = level_at(k - 1)
-    copy 32 dst <- key
-    compress(dst, src, 64, 0, pf)
-    j = 0
-    k = k - 1
-  }
-  copy 32 level_at(0) + (j << 5) <- t
+  copy 32 lv + 64 + (j << 5) <- t
   u64[lv] = ln + 1
 }
 
 // The root of the values added (two or more), written at out; the levels are left as they are.
-// From the bottom level up: a pair becomes its parent, which joins the level above as its last value (pr);
-// a value left alone joins what is right of it (acc). The last parent made is the root.
+// The bottom level's pair becomes its parent, or its one value is taken; then each level above that
+// holds a value is folded in, the lowest first. The last parent made is the root.
 def levels_root() {
   ln = u64[lv]
-  m = ln
-  q = ln + 1
-  pw = 2
+  e = (ln - 1) >> 1
   base = lv + 64
-  have_p = 0
-  have_c = 0
-  while m != 0 {
-    h = 0
-    if q > 1 { h = 1 + (q & 1) }
-    single = 0
+  if ln & 1 == 0 {
     f = pf
-    if ln == pw { f = pf | ROOT }          // this level's pair is the whole tree
-    if h == 2 {
-      if have_p == 1 {
-        copy 32 old <- pr
-        single = old
-      }
-      copy 32 pr <- key
-      compress(pr, base, 64, 0, f)
-      have_p = 1
-    } else {
-      if h == 1 {
-        if have_p == 1 {
-          copy 32 blk <- base
-          copy 32 blk + 32 <- pr
-          copy 32 pr <- key
-          compress(pr, blk, 64, 0, f)
-        } else { single = base }
-      } else {
-        if have_p == 1 {
-          single = pr
-          have_p = 0
-        }
-      }
-    }
-    if single != 0 {
-      if have_c == 1 {
-        f = pf
-        if m == 1 { f = pf | ROOT }        // the highest level: this parent is the root
-        copy 32 blk <- single
-        copy 32 blk + 32 <- acc
-        copy 32 acc <- key
-        compress(acc, blk, 64, 0, f)
-      } else {
-        copy 32 acc <- single
-        have_c = 1
-      }
-    }
-    m = m >> 1
-    q = q >> 1
-    pw = pw + pw
+    if e == 0 { f = pf | ROOT }            // two values in all: they are the root's children
+    copy 32 acc <- key
+    compress(acc, base, 64, 0, f)
+  } else { copy 32 acc <- base }
+  while e != 0 {
     base = base + 64
+    if e & 1 == 1 {
+      f = pf
+      if e == 1 { f = pf | ROOT }          // the highest level: this parent is the root
+      copy 32 blk <- base
+      copy 32 blk + 32 <- acc
+      copy 32 acc <- key
+      compress(acc, blk, 64, 0, f)
+    }
+    e = e >> 1
   }
   copy 32 out <- acc
 }
@@ -126,11 +95,11 @@ fn ladd(lv, key, flags, plat, t)
 {
   var pf = flags | PARENT
   var ln = 0
-  var q = 0
-  var k = 0
   var j = 0
-  var dst = 0
+  var e = 0
   var src = 0
+  var dst = 0
+  var go = 0
   levels_add()
   return ln + 1
 }
@@ -138,19 +107,11 @@ fn ladd(lv, key, flags, plat, t)
 fn lroot(out, lv, key, flags, plat)
 {
   buf blk[64]
-  buf pr[32]
-  buf old[32]
   buf acc[32]
   var pf = flags | PARENT
   var ln = 0
-  var m = 0
-  var q = 0
-  var pw = 0
+  var e = 0
   var base = 0
-  var have_p = 0
-  var have_c = 0
-  var h = 0
-  var single = 0
   var f = 0
   levels_root()
 }
@@ -174,8 +135,6 @@ fn hash2(out, input, len, key, flags, plat)
   buf block[64]
   buf cv[32]
   buf blk[64]
-  buf pr[32]
-  buf old[32]
   buf acc[32]
   var p = input
   var rem = len
@@ -186,18 +145,12 @@ fn hash2(out, input, len, key, flags, plat)
   var t = 0
   var f = 0
   var ln = 0
-  var q = 0
-  var k = 0
   var j = 0
-  var dst = 0
+  var e = 0
   var src = 0
-  var m = 0
-  var pw = 0
+  var dst = 0
+  var go = 0
   var base = 0
-  var have_p = 0
-  var have_c = 0
-  var h = 0
-  var single = 0
   u64[lv] = 0
 
   // Whole chunks, up to sixteen at a time, while more than one chunk's bytes are left.

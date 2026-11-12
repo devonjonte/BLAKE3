@@ -14,40 +14,33 @@ def spec(cvs, root=True):
 class Levels:
     def __init__(self): self.n = 0; self.slot = {}; self.parents = 0
     def add(self, cv):
-        q, k = self.n + 1, 0
-        while q & 1 == 1:
-            if q == 1: q = 0
-            else: k += 1; q >>= 1
-        j = 1 if q != 0 else 0
-        L = k
-        while L > 0:
-            assert L < k or self.held(L) == j        # the place is free: nothing is written over a value still needed
-            self.slot[(L, j)] = (self.slot[(L - 1, 0)], self.slot[(L - 1, 1)], False); self.parents += 1
-            j = 0; L -= 1
+        n = self.n; j = n & 1
+        if n != 0 and j == 0:
+            e, L = (n - 1) >> 1, 0
+            while True:
+                b = e & 1
+                assert self.above(L + 1) == b            # the place is free: nothing needed is written over
+                self.slot[(L + 1, b)] = (self.slot[(L, 0)], self.slot[(L, 1)], False); self.parents += 1
+                if b == 0: break
+                e >>= 1; L += 1
         self.slot[(0, j)] = cv
         self.n += 1
+    def above(self, L):
+        """How many values level L >= 1 holds at rest."""
+        return ((self.n - 1) >> 1 >> (L - 1)) & 1 if self.n else 0
     def held(self, L):
-        q = (self.n + 1) >> L
-        return 0 if q <= 1 else (2 if q & 1 else 1)
+        if L == 0: return 0 if self.n == 0 else (1 if self.n & 1 else 2)
+        return self.above(L)
     def root(self):
         n = self.n; assert n >= 2
-        pr = acc = None; L = 0; parents = 0
-        while n >> L != 0:
-            h = self.held(L); single = None
-            root_here = n == 1 << (L + 1)
-            if h == 2:
-                if pr is not None: single = pr
-                pr = (self.slot[(L, 0)], self.slot[(L, 1)], root_here); parents += 1
-            elif h == 1:
-                if pr is not None: pr = (self.slot[(L, 0)], pr, root_here); parents += 1
-                else: single = self.slot[(L, 0)]
-            else:
-                if pr is not None: single, pr = pr, None
-            if single is not None:
-                if acc is not None: acc = (single, acc, n >> (L + 1) == 0); parents += 1
-                else: acc = single
+        e, parents = (n - 1) >> 1, 0
+        if n & 1 == 0: acc = (self.slot[(0, 0)], self.slot[(0, 1)], e == 0); parents += 1
+        else: acc = self.slot[(0, 0)]
+        L = 0
+        while e != 0:
             L += 1
-        assert pr is None
+            if e & 1: acc = (self.slot[(L, 0)], acc, e == 1); parents += 1
+            e >>= 1
         return acc, parents
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000

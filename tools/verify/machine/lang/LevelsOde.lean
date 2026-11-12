@@ -8,114 +8,76 @@ namespace Ode
 def ladd : Fn where
   name := "b3l_ladd"
   params := ["lv", "key", "flags", "plat", "t"]
-  locals := ["pf", "ln", "q", "k", "j", "dst", "src"]
+  locals := ["pf", "ln", "j", "e", "src", "dst", "go"]
   regs := []
   bufs := []
   externs := ["blake3_servil_compress_in_place_avx512", "blake3_servil_compress_in_place_sse41"]
   body := [
     .set "pf" (.or (.var "flags") (.const 4)),
     .set "ln" (.const 0),
-    .set "q" (.const 0),
-    .set "k" (.const 0),
     .set "j" (.const 0),
-    .set "dst" (.const 0),
+    .set "e" (.const 0),
     .set "src" (.const 0),
+    .set "dst" (.const 0),
+    .set "go" (.const 0),
     .set "ln" (.load 64 (.var "lv")),
-    .set "q" (.add (.var "ln") (.const 1)),
-    .set "k" (.const 0),
-    .while (.eq (.and (.var "q") (.const 1)) (.const 1)) [
-      .ite (.eq (.var "q") (.const 1)) [
-        .set "q" (.const 0)] [
-        .set "k" (.add (.var "k") (.const 1)),
-        .set "q" (.shr (.var "q") 1)]],
-    .set "j" (.const 0),
-    .ite (.ne (.var "q") (.const 0)) [
-      .set "j" (.const 1)] [],
-    .while (.ltu (.const 0) (.var "k")) [
-      .set "dst" (.add (.add (.add (.var "lv") (.const 64)) (.shl (.var "k") 6)) (.shl (.var "j") 5)),
-      .set "src" (.add (.add (.var "lv") (.const 64)) (.shl (.sub (.var "k") (.const 1)) 6)),
-      .copy 32 (.var "dst") (.var "key"),
-      .ite (.eq (.var "plat") (.const 5)) [
-        .call "blake3_servil_compress_in_place_avx512" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]] [
-        .call "blake3_servil_compress_in_place_sse41" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]],
-      .set "j" (.const 0),
-      .set "k" (.sub (.var "k") (.const 1))],
-    .copy 32 (.add (.add (.add (.var "lv") (.const 64)) (.const 0)) (.shl (.var "j") 5)) (.var "t"),
+    .set "j" (.and (.var "ln") (.const 1)),
+    .ite (.ne (.var "ln") (.const 0)) [
+      .ite (.eq (.var "j") (.const 0)) [
+        .set "e" (.shr (.sub (.var "ln") (.const 1)) 1),
+        .set "src" (.add (.var "lv") (.const 64)),
+        .set "go" (.const 1),
+        .while (.eq (.var "go") (.const 1)) [
+          .set "dst" (.add (.add (.var "src") (.const 64)) (.shl (.and (.var "e") (.const 1)) 5)),
+          .copy 32 (.var "dst") (.var "key"),
+          .ite (.eq (.var "plat") (.const 5)) [
+            .call "blake3_servil_compress_in_place_avx512" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]] [
+            .call "blake3_servil_compress_in_place_sse41" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]],
+          .set "go" (.and (.var "e") (.const 1)),
+          .set "e" (.shr (.var "e") 1),
+          .set "src" (.add (.var "src") (.const 64))]] []] [],
+    .copy 32 (.add (.add (.var "lv") (.const 64)) (.shl (.var "j") 5)) (.var "t"),
     .store 64 (.var "lv") (.add (.var "ln") (.const 1))]
   ret := (.add (.var "ln") (.const 1))
 
 def lroot : Fn where
   name := "b3l_lroot"
   params := ["out", "lv", "key", "flags", "plat"]
-  locals := ["pf", "ln", "m", "q", "pw", "base", "have_p", "have_c", "h", "single", "f"]
+  locals := ["pf", "ln", "e", "base", "f"]
   regs := []
-  bufs := [("blk", 64), ("pr", 32), ("old", 32), ("acc", 32)]
+  bufs := [("blk", 64), ("acc", 32)]
   externs := ["blake3_servil_compress_in_place_avx512", "blake3_servil_compress_in_place_sse41"]
   body := [
     .set "pf" (.or (.var "flags") (.const 4)),
     .set "ln" (.const 0),
-    .set "m" (.const 0),
-    .set "q" (.const 0),
-    .set "pw" (.const 0),
+    .set "e" (.const 0),
     .set "base" (.const 0),
-    .set "have_p" (.const 0),
-    .set "have_c" (.const 0),
-    .set "h" (.const 0),
-    .set "single" (.const 0),
     .set "f" (.const 0),
     .set "ln" (.load 64 (.var "lv")),
-    .set "m" (.var "ln"),
-    .set "q" (.add (.var "ln") (.const 1)),
-    .set "pw" (.const 2),
+    .set "e" (.shr (.sub (.var "ln") (.const 1)) 1),
     .set "base" (.add (.var "lv") (.const 64)),
-    .set "have_p" (.const 0),
-    .set "have_c" (.const 0),
-    .while (.ne (.var "m") (.const 0)) [
-      .set "h" (.const 0),
-      .ite (.ltu (.const 1) (.var "q")) [
-        .set "h" (.add (.const 1) (.and (.var "q") (.const 1)))] [],
-      .set "single" (.const 0),
+    .ite (.eq (.and (.var "ln") (.const 1)) (.const 0)) [
       .set "f" (.var "pf"),
-      .ite (.eq (.var "ln") (.var "pw")) [
+      .ite (.eq (.var "e") (.const 0)) [
         .set "f" (.or (.var "pf") (.const 8))] [],
-      .ite (.eq (.var "h") (.const 2)) [
-        .ite (.eq (.var "have_p") (.const 1)) [
-          .copy 32 (.buf "old") (.buf "pr"),
-          .set "single" (.buf "old")] [],
-        .copy 32 (.buf "pr") (.var "key"),
+      .copy 32 (.buf "acc") (.var "key"),
+      .ite (.eq (.var "plat") (.const 5)) [
+        .call "blake3_servil_compress_in_place_avx512" [(.buf "acc"), (.var "base"), (.const 64), (.const 0), (.var "f")]] [
+        .call "blake3_servil_compress_in_place_sse41" [(.buf "acc"), (.var "base"), (.const 64), (.const 0), (.var "f")]]] [
+      .copy 32 (.buf "acc") (.var "base")],
+    .while (.ne (.var "e") (.const 0)) [
+      .set "base" (.add (.var "base") (.const 64)),
+      .ite (.eq (.and (.var "e") (.const 1)) (.const 1)) [
+        .set "f" (.var "pf"),
+        .ite (.eq (.var "e") (.const 1)) [
+          .set "f" (.or (.var "pf") (.const 8))] [],
+        .copy 32 (.buf "blk") (.var "base"),
+        .copy 32 (.add (.buf "blk") (.const 32)) (.buf "acc"),
+        .copy 32 (.buf "acc") (.var "key"),
         .ite (.eq (.var "plat") (.const 5)) [
-          .call "blake3_servil_compress_in_place_avx512" [(.buf "pr"), (.var "base"), (.const 64), (.const 0), (.var "f")]] [
-          .call "blake3_servil_compress_in_place_sse41" [(.buf "pr"), (.var "base"), (.const 64), (.const 0), (.var "f")]],
-        .set "have_p" (.const 1)] [
-        .ite (.eq (.var "h") (.const 1)) [
-          .ite (.eq (.var "have_p") (.const 1)) [
-            .copy 32 (.buf "blk") (.var "base"),
-            .copy 32 (.add (.buf "blk") (.const 32)) (.buf "pr"),
-            .copy 32 (.buf "pr") (.var "key"),
-            .ite (.eq (.var "plat") (.const 5)) [
-              .call "blake3_servil_compress_in_place_avx512" [(.buf "pr"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]] [
-              .call "blake3_servil_compress_in_place_sse41" [(.buf "pr"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]]] [
-            .set "single" (.var "base")]] [
-          .ite (.eq (.var "have_p") (.const 1)) [
-            .set "single" (.buf "pr"),
-            .set "have_p" (.const 0)] []]],
-      .ite (.ne (.var "single") (.const 0)) [
-        .ite (.eq (.var "have_c") (.const 1)) [
-          .set "f" (.var "pf"),
-          .ite (.eq (.var "m") (.const 1)) [
-            .set "f" (.or (.var "pf") (.const 8))] [],
-          .copy 32 (.buf "blk") (.var "single"),
-          .copy 32 (.add (.buf "blk") (.const 32)) (.buf "acc"),
-          .copy 32 (.buf "acc") (.var "key"),
-          .ite (.eq (.var "plat") (.const 5)) [
-            .call "blake3_servil_compress_in_place_avx512" [(.buf "acc"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]] [
-            .call "blake3_servil_compress_in_place_sse41" [(.buf "acc"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]]] [
-          .copy 32 (.buf "acc") (.var "single"),
-          .set "have_c" (.const 1)]] [],
-      .set "m" (.shr (.var "m") 1),
-      .set "q" (.shr (.var "q") 1),
-      .set "pw" (.add (.var "pw") (.var "pw")),
-      .set "base" (.add (.var "base") (.const 64))],
+          .call "blake3_servil_compress_in_place_avx512" [(.buf "acc"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]] [
+          .call "blake3_servil_compress_in_place_sse41" [(.buf "acc"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]]] [],
+      .set "e" (.shr (.var "e") 1)],
     .copy 32 (.var "out") (.buf "acc")]
   ret := (.const 0)
   noResult := true
@@ -123,9 +85,9 @@ def lroot : Fn where
 def hash2 : Fn where
   name := "b3l_hash2"
   params := ["out", "input", "len", "key", "flags", "plat"]
-  locals := ["p", "rem", "counter", "pf", "i", "n", "t", "f", "ln", "q", "k", "j", "dst", "src", "m", "pw", "base", "have_p", "have_c", "h", "single", "one", "tail", "first", "lastp", "jj"]
+  locals := ["p", "rem", "counter", "pf", "i", "n", "t", "f", "ln", "j", "e", "src", "dst", "go", "base", "one", "tail", "first", "lastp", "jj"]
   regs := ["p", "rem", "counter", "i", "n", "key"]
-  bufs := [("lv", 3520), ("cvs", 1024), ("ptrs", 256), ("block", 64), ("cv", 32), ("blk", 64), ("pr", 32), ("old", 32), ("acc", 32)]
+  bufs := [("lv", 3520), ("cvs", 1024), ("ptrs", 256), ("block", 64), ("cv", 32), ("blk", 64), ("acc", 32)]
   externs := ["blake3_servil_hash_many_avx512", "blake3_servil_hash_many_avx2", "blake3_servil_hash_many_sse41", "blake3_servil_compress_in_place_avx512", "blake3_servil_compress_in_place_sse41"]
   body := [
     .set "p" (.var "input"),
@@ -137,18 +99,12 @@ def hash2 : Fn where
     .set "t" (.const 0),
     .set "f" (.const 0),
     .set "ln" (.const 0),
-    .set "q" (.const 0),
-    .set "k" (.const 0),
     .set "j" (.const 0),
-    .set "dst" (.const 0),
+    .set "e" (.const 0),
     .set "src" (.const 0),
-    .set "m" (.const 0),
-    .set "pw" (.const 0),
+    .set "dst" (.const 0),
+    .set "go" (.const 0),
     .set "base" (.const 0),
-    .set "have_p" (.const 0),
-    .set "have_c" (.const 0),
-    .set "h" (.const 0),
-    .set "single" (.const 0),
     .store 64 (.buf "lv") (.const 0),
     .while (.ltu (.const 1024) (.var "rem")) [
       .set "n" (.shr (.var "rem") 10),
@@ -169,26 +125,22 @@ def hash2 : Fn where
       .while (.ltu (.var "i") (.var "n")) [
         .set "t" (.add (.buf "cvs") (.shl (.var "i") 5)),
         .set "ln" (.load 64 (.buf "lv")),
-        .set "q" (.add (.var "ln") (.const 1)),
-        .set "k" (.const 0),
-        .while (.eq (.and (.var "q") (.const 1)) (.const 1)) [
-          .ite (.eq (.var "q") (.const 1)) [
-            .set "q" (.const 0)] [
-            .set "k" (.add (.var "k") (.const 1)),
-            .set "q" (.shr (.var "q") 1)]],
-        .set "j" (.const 0),
-        .ite (.ne (.var "q") (.const 0)) [
-          .set "j" (.const 1)] [],
-        .while (.ltu (.const 0) (.var "k")) [
-          .set "dst" (.add (.add (.add (.buf "lv") (.const 64)) (.shl (.var "k") 6)) (.shl (.var "j") 5)),
-          .set "src" (.add (.add (.buf "lv") (.const 64)) (.shl (.sub (.var "k") (.const 1)) 6)),
-          .copy 32 (.var "dst") (.var "key"),
-          .ite (.eq (.var "plat") (.const 5)) [
-            .call "blake3_servil_compress_in_place_avx512" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]] [
-            .call "blake3_servil_compress_in_place_sse41" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]],
-          .set "j" (.const 0),
-          .set "k" (.sub (.var "k") (.const 1))],
-        .copy 32 (.add (.add (.add (.buf "lv") (.const 64)) (.const 0)) (.shl (.var "j") 5)) (.var "t"),
+        .set "j" (.and (.var "ln") (.const 1)),
+        .ite (.ne (.var "ln") (.const 0)) [
+          .ite (.eq (.var "j") (.const 0)) [
+            .set "e" (.shr (.sub (.var "ln") (.const 1)) 1),
+            .set "src" (.add (.buf "lv") (.const 64)),
+            .set "go" (.const 1),
+            .while (.eq (.var "go") (.const 1)) [
+              .set "dst" (.add (.add (.var "src") (.const 64)) (.shl (.and (.var "e") (.const 1)) 5)),
+              .copy 32 (.var "dst") (.var "key"),
+              .ite (.eq (.var "plat") (.const 5)) [
+                .call "blake3_servil_compress_in_place_avx512" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]] [
+                .call "blake3_servil_compress_in_place_sse41" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]],
+              .set "go" (.and (.var "e") (.const 1)),
+              .set "e" (.shr (.var "e") 1),
+              .set "src" (.add (.var "src") (.const 64))]] []] [],
+        .copy 32 (.add (.add (.buf "lv") (.const 64)) (.shl (.var "j") 5)) (.var "t"),
         .store 64 (.buf "lv") (.add (.var "ln") (.const 1)),
         .set "i" (.add (.var "i") (.const 1))],
       .set "counter" (.add (.var "counter") (.var "n"))],
@@ -235,80 +187,48 @@ def hash2 : Fn where
       .ite (.eq (.var "tail") (.const 1)) [
         .set "t" (.buf "cv"),
         .set "ln" (.load 64 (.buf "lv")),
-        .set "q" (.add (.var "ln") (.const 1)),
-        .set "k" (.const 0),
-        .while (.eq (.and (.var "q") (.const 1)) (.const 1)) [
-          .ite (.eq (.var "q") (.const 1)) [
-            .set "q" (.const 0)] [
-            .set "k" (.add (.var "k") (.const 1)),
-            .set "q" (.shr (.var "q") 1)]],
-        .set "j" (.const 0),
-        .ite (.ne (.var "q") (.const 0)) [
-          .set "j" (.const 1)] [],
-        .while (.ltu (.const 0) (.var "k")) [
-          .set "dst" (.add (.add (.add (.buf "lv") (.const 64)) (.shl (.var "k") 6)) (.shl (.var "j") 5)),
-          .set "src" (.add (.add (.buf "lv") (.const 64)) (.shl (.sub (.var "k") (.const 1)) 6)),
-          .copy 32 (.var "dst") (.var "key"),
-          .ite (.eq (.var "plat") (.const 5)) [
-            .call "blake3_servil_compress_in_place_avx512" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]] [
-            .call "blake3_servil_compress_in_place_sse41" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]],
-          .set "j" (.const 0),
-          .set "k" (.sub (.var "k") (.const 1))],
-        .copy 32 (.add (.add (.add (.buf "lv") (.const 64)) (.const 0)) (.shl (.var "j") 5)) (.var "t"),
+        .set "j" (.and (.var "ln") (.const 1)),
+        .ite (.ne (.var "ln") (.const 0)) [
+          .ite (.eq (.var "j") (.const 0)) [
+            .set "e" (.shr (.sub (.var "ln") (.const 1)) 1),
+            .set "src" (.add (.buf "lv") (.const 64)),
+            .set "go" (.const 1),
+            .while (.eq (.var "go") (.const 1)) [
+              .set "dst" (.add (.add (.var "src") (.const 64)) (.shl (.and (.var "e") (.const 1)) 5)),
+              .copy 32 (.var "dst") (.var "key"),
+              .ite (.eq (.var "plat") (.const 5)) [
+                .call "blake3_servil_compress_in_place_avx512" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]] [
+                .call "blake3_servil_compress_in_place_sse41" [(.var "dst"), (.var "src"), (.const 64), (.const 0), (.var "pf")]],
+              .set "go" (.and (.var "e") (.const 1)),
+              .set "e" (.shr (.var "e") 1),
+              .set "src" (.add (.var "src") (.const 64))]] []] [],
+        .copy 32 (.add (.add (.buf "lv") (.const 64)) (.shl (.var "j") 5)) (.var "t"),
         .store 64 (.buf "lv") (.add (.var "ln") (.const 1))] [],
       .set "ln" (.load 64 (.buf "lv")),
-      .set "m" (.var "ln"),
-      .set "q" (.add (.var "ln") (.const 1)),
-      .set "pw" (.const 2),
+      .set "e" (.shr (.sub (.var "ln") (.const 1)) 1),
       .set "base" (.add (.buf "lv") (.const 64)),
-      .set "have_p" (.const 0),
-      .set "have_c" (.const 0),
-      .while (.ne (.var "m") (.const 0)) [
-        .set "h" (.const 0),
-        .ite (.ltu (.const 1) (.var "q")) [
-          .set "h" (.add (.const 1) (.and (.var "q") (.const 1)))] [],
-        .set "single" (.const 0),
+      .ite (.eq (.and (.var "ln") (.const 1)) (.const 0)) [
         .set "f" (.var "pf"),
-        .ite (.eq (.var "ln") (.var "pw")) [
+        .ite (.eq (.var "e") (.const 0)) [
           .set "f" (.or (.var "pf") (.const 8))] [],
-        .ite (.eq (.var "h") (.const 2)) [
-          .ite (.eq (.var "have_p") (.const 1)) [
-            .copy 32 (.buf "old") (.buf "pr"),
-            .set "single" (.buf "old")] [],
-          .copy 32 (.buf "pr") (.var "key"),
+        .copy 32 (.buf "acc") (.var "key"),
+        .ite (.eq (.var "plat") (.const 5)) [
+          .call "blake3_servil_compress_in_place_avx512" [(.buf "acc"), (.var "base"), (.const 64), (.const 0), (.var "f")]] [
+          .call "blake3_servil_compress_in_place_sse41" [(.buf "acc"), (.var "base"), (.const 64), (.const 0), (.var "f")]]] [
+        .copy 32 (.buf "acc") (.var "base")],
+      .while (.ne (.var "e") (.const 0)) [
+        .set "base" (.add (.var "base") (.const 64)),
+        .ite (.eq (.and (.var "e") (.const 1)) (.const 1)) [
+          .set "f" (.var "pf"),
+          .ite (.eq (.var "e") (.const 1)) [
+            .set "f" (.or (.var "pf") (.const 8))] [],
+          .copy 32 (.buf "blk") (.var "base"),
+          .copy 32 (.add (.buf "blk") (.const 32)) (.buf "acc"),
+          .copy 32 (.buf "acc") (.var "key"),
           .ite (.eq (.var "plat") (.const 5)) [
-            .call "blake3_servil_compress_in_place_avx512" [(.buf "pr"), (.var "base"), (.const 64), (.const 0), (.var "f")]] [
-            .call "blake3_servil_compress_in_place_sse41" [(.buf "pr"), (.var "base"), (.const 64), (.const 0), (.var "f")]],
-          .set "have_p" (.const 1)] [
-          .ite (.eq (.var "h") (.const 1)) [
-            .ite (.eq (.var "have_p") (.const 1)) [
-              .copy 32 (.buf "blk") (.var "base"),
-              .copy 32 (.add (.buf "blk") (.const 32)) (.buf "pr"),
-              .copy 32 (.buf "pr") (.var "key"),
-              .ite (.eq (.var "plat") (.const 5)) [
-                .call "blake3_servil_compress_in_place_avx512" [(.buf "pr"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]] [
-                .call "blake3_servil_compress_in_place_sse41" [(.buf "pr"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]]] [
-              .set "single" (.var "base")]] [
-            .ite (.eq (.var "have_p") (.const 1)) [
-              .set "single" (.buf "pr"),
-              .set "have_p" (.const 0)] []]],
-        .ite (.ne (.var "single") (.const 0)) [
-          .ite (.eq (.var "have_c") (.const 1)) [
-            .set "f" (.var "pf"),
-            .ite (.eq (.var "m") (.const 1)) [
-              .set "f" (.or (.var "pf") (.const 8))] [],
-            .copy 32 (.buf "blk") (.var "single"),
-            .copy 32 (.add (.buf "blk") (.const 32)) (.buf "acc"),
-            .copy 32 (.buf "acc") (.var "key"),
-            .ite (.eq (.var "plat") (.const 5)) [
-              .call "blake3_servil_compress_in_place_avx512" [(.buf "acc"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]] [
-              .call "blake3_servil_compress_in_place_sse41" [(.buf "acc"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]]] [
-            .copy 32 (.buf "acc") (.var "single"),
-            .set "have_c" (.const 1)]] [],
-        .set "m" (.shr (.var "m") 1),
-        .set "q" (.shr (.var "q") 1),
-        .set "pw" (.add (.var "pw") (.var "pw")),
-        .set "base" (.add (.var "base") (.const 64))],
+            .call "blake3_servil_compress_in_place_avx512" [(.buf "acc"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]] [
+            .call "blake3_servil_compress_in_place_sse41" [(.buf "acc"), (.buf "blk"), (.const 64), (.const 0), (.var "f")]]] [],
+        .set "e" (.shr (.var "e") 1)],
       .copy 32 (.var "out") (.buf "acc")]]
   ret := (.const 0)
   noResult := true
