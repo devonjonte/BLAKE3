@@ -1383,6 +1383,7 @@ pub(crate) mod sources {
         }
 
         /// A stream's next task, if any (this source is a stream's).
+        #[inline(never)]
         pub(crate) fn take_task(&self) -> Option<Task> {
             self.take_task_claimed(|| {})
         }
@@ -2115,6 +2116,7 @@ pub(crate) fn worker_count() -> usize {
     pool().workers()
 }
 
+#[inline(never)]
 pub(crate) fn run_task(task: &Task) {
     task.run(pool_platform());
 }
