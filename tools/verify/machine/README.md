@@ -1,10 +1,12 @@
 # Experiments: compiled code proved in Lean (#361)
 
-Fourteen folders, each a Lean project of its own (`lake build` in its folder). None is a gate.
+Sixteen folders, each a Lean project of its own (`lake build` in its folder). None is a gate.
 Each theorem is about machine code as llvm-objdump lists it, run on a small model of x86-64 (one
-of AArch64) written here, against a function written in Lean. The table has the first seven; the
-sections after it have `lang/`, `equihash/`, `a64/`, `gen/`, `hex/`, `alg/`, `eq/`, `CvStack::merge` and the kernels'
-traces (both in `one/`).
+of AArch64) written here, against a function written in Lean; in `arm/` the model is Google
+DeepMind's and Lean decodes the instruction words itself. The table has the first seven; the
+sections after it have `lang/` (with `spec/` and `arm/`), `equihash/`, `a64/`, `gen/`, `hex/`, `alg/`, `eq/`,
+`CvStack::merge` and the kernels' traces (both in `one/`). `hexbench/` is a small Rust program that times
+the hex kernels.
 
 **What each theorem is about: one build's bytes.** The listings are rustc 1.99.1's plain release
 build for x86-64 Linux (the test subjects of `loop/`, `call/`, `gen/` and the kernels' objects were
