@@ -125,7 +125,7 @@ root is folded inside `hash`.
 | a reader of the theorem reads | 888 lines |
 | axioms beyond Lean's three (`bv_decide`) | 783 |
 | examples run in the machine model before the proof | 8 (7 meet the contract: two to eight chunks, both kernels; 1 is refused as not an example) |
-| each instruction made a no-op in turn | see below: the audit changed the code, and the count for the code as it is comes with `../prove_all.sh`'s `audit-lroot` |
+| each instruction made a no-op in turn | of 107: 103 refused, 3 accepted, 1 without a verdict (below); 98 refuted by an example |
 
 Twenty minutes from the contract's first line to the checked theorem, four additions to the proof
 generator included: a buffer of the frame named in an invariant (`acc` holds the fold across turns); a
@@ -148,6 +148,12 @@ no-ops one at a time, the proof still checked without these (of the first 82 tri
   address after the copy before): the compiler does not know what a register holds, as with `add`'s two
   and `ladd`'s one. Left.
 So 111 became 107.
+
+The audit of the 107 (from nothing, `../prove_all.sh` with `AUDIT=1`): 103 refused. Accepted: three moves of
+a value the register still holds (the two above, and `mov rax, rbp` straight after `mov rbp, rax`). No
+verdict in fifteen minutes for one: the jump after the AVX-512 kernel's call made a no-op, so that the
+SSE4.1 kernel is called as well; an example refutes it (the root is wrong), the proof attempt did not end.
+A changed program that the examples refute and Lean does not refuse within its time is counted as neither.
 
 **Not done:** the contracts in bytes (`../spec/LevelsContract.lean`, in the same words) joined to these;
 both functions on AArch64; `hash2` calling `ladd` and `lroot` by their contracts (it has their text a
