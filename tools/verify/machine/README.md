@@ -493,6 +493,11 @@ threads) and checks everything; then the audit runs.
   and five false statements: all 23 refused.
 - **`merge` and `add`** have such contracts too (`spec/MergeContract.lean`), met on x86-64
   (`lang/Meets_merge_bytes.lean`); their AArch64 code is not written.
+- **The shared contracts are audited** (`lang/mutants_spec.py`): in a copy of `spec/`, 15 false statements
+  (of the stack's bytes, of `push`, `merge` and `add`, of what keeping a piece means) each make Lean refuse
+  the x86-64 theorems; the unchanged copy is accepted. Twelve are refused where the model's own statement
+  is tied to the bytes (`StackAsBytes.lean`, `MergeAsBytes.lean`, `BytesAt.lean`), three already by the
+  shared lemmas about lists.
 - **`hex` the same way:** `Hex.byteContract` (`spec/HexContract.lean`) is met by the x86-64 kernel on our
   model (`hex_meets_bytes`, `lang/Meets_hex_bytes.lean`, with what an observer sees) and by the AArch64
   kernel on Google's (`hex_neon_meets`, `HexNeonBytes.lean`).

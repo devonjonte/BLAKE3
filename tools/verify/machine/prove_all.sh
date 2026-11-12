@@ -37,5 +37,6 @@ if [ "${AUDIT:-0}" = 1 ]; then
   run audit-push   lang python3 mutants_code.py push "${JOBS:-6}"
   run audit-add    lang python3 mutants_code.py add "${JOBS:-6}"
   run audit-steps  lang python3 mutants_code.py merge_steps "${JOBS:-6}"
+  run audit-spec   lang python3 mutants_spec.py "${JOBS:-6}"
 fi
 [ "$fails" = 0 ] && echo "all checked" || { echo "$fails NOT checked"; exit 1; }
