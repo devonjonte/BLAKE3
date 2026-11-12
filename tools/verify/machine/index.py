@@ -47,6 +47,9 @@ def rows(table, machine):
     src = "import ReadingList\n" + "".join(f"import {m}\n" for m in mods) + "".join(f"#reading_list {t}\n#print axioms {t}\n" for _, t, *_ in table)
     with open("index_tmp.lean", "w") as f:
         f.write(src)
+    b = subprocess.run(["lake", "build", "ReadingList"] + mods, capture_output=True, text=True, timeout=3600)
+    if b.returncode != 0:
+        sys.exit("the theorems' modules do not build:\n" + (b.stdout + b.stderr)[-2000:])
     r = subprocess.run(["lake", "env", "lean", "index_tmp.lean"], capture_output=True, text=True, timeout=1200)
     out = r.stdout + r.stderr
     if r.returncode != 0:

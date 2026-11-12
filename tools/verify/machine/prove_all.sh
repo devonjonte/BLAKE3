@@ -7,6 +7,9 @@
 #       hex_neon (the kernel), push (the same source function, printed for AArch64)
 #   "direct": the compiler's proofs of push and merge again, about the contracts in bytes themselves, with
 #       the model's own contracts out of the way (direct_fn.py).
+#   "hash-tried": not a proof. The source function `hash` (the whole one-shot hash), run by the language's
+#       meaning with each kernel as its contract, against Hash.byteContract (spec/HashContract.lean: "the 32
+#       bytes at out become the specification's BLAKE3 of the message") on the test vectors' 35 lengths.
 #   Contracts that name no machine (spec/HexContract.lean, PushContract.lean, MergeContract.lean): "any-machine"
 #       is the four x86-64 theorems (hex, push, merge, add); "hex_neon" and "push-aarch64" end with the two
 #       AArch64 ones (hex, push).
@@ -22,7 +25,7 @@ run() {  # run LABEL DIR COMMAND...
   start=$(date +%s)
   if (cd "$here/$dir" && "$@") > "$here/prove_all.$label.log" 2>&1; then verdict=checked; else verdict="NOT checked (prove_all.$label.log)"; fails=$((fails + 1)); fi
   printf '%-28s %-12s %4s s   %s\n' "$label" "$dir/" "$(( $(date +%s) - start ))" "$verdict"
-  case "$label" in audit-*) echo "    $(grep -E "rejected" "$here/prove_all.$label.log" | tail -n 1)";; esac
+  case "$label" in audit-*) echo "    $(grep -E "rejected|refuted by an example" "$here/prove_all.$label.log" | tail -n 1)";; esac
 }
 if [ "${AUDIT:-0}" = 1 ]; then hexaudit=1; else hexaudit=0; fi
 run hex          lang env MUTANTS=$hexaudit ./prove.sh
@@ -33,6 +36,7 @@ run add-and-swap lang ./swap.sh
 run merge_steps  lang ./prove_fn.sh merge_steps 0xA0000
 run any-machine  lang sh -c 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes UsableBytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ] && grep -q "usable_bytes. depends on axioms" any.log'
 run direct       lang sh -c 'python3 direct_fn.py push Push.contract Push.byteContract 64 StackAsBytes Cv.opens Stack.opens && python3 direct_fn.py merge Merge.contract Merge.byteContract 256 MergeAsBytes Cv.opens Stack.opens Merge.merged_eq && lake build Direct_push Direct_merge > direct.log 2>&1 && ! grep -q -E "error|sorry" direct.log && grep -q "Direct_push.push_meets. depends on axioms" direct.log && grep -q "Direct_merge.merge_meets. depends on axioms" direct.log'
+run hash-tried   lang sh -c 'lake build TrySem HasherOde HashContract > /dev/null 2>&1; lake env lean HashTry.lean > hashtry.log 2>&1 && grep -q "104 examples meet it, 0 do not" hashtry.log && grep -q "holds on 104" hashtry.log'
 run hex_neon     arm  env MUTANTS=$hexaudit ./prove_arm.sh
 run push-aarch64 arm  env MUTANTS=$hexaudit ./prove_arm_fn.sh
 if [ "${AUDIT:-0}" = 1 ]; then
@@ -41,5 +45,6 @@ if [ "${AUDIT:-0}" = 1 ]; then
   run audit-add    lang python3 mutants_code.py add "${JOBS:-6}"
   run audit-steps  lang python3 mutants_code.py merge_steps "${JOBS:-6}"
   run audit-spec   lang python3 mutants_spec.py "${JOBS:-6}"
+  run audit-hash   lang python3 mutants_hash.py
 fi
 [ "$fails" = 0 ] && echo "all checked" || { echo "$fails NOT checked"; exit 1; }

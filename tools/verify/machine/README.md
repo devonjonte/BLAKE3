@@ -495,6 +495,11 @@ threads) and checks everything; then the audit runs.
   and five false statements: all 23 refused.
 - **`merge` and `add`** have such contracts too (`spec/MergeContract.lean`), met on x86-64
   (`lang/Meets_merge_bytes.lean`); their AArch64 code is not written.
+- **`hash`, the function a user calls, has its contract and no theorem yet** (`spec/HashContract.lean`:
+  the 32 bytes at `out` become the specification's BLAKE3 of the message). `lang/HashTry.lean` runs the
+  source by the language's meaning, kernels as their contracts, on the test vectors' 35 lengths and three
+  platforms: 104 examples meet it. `lang/mutants_hash.py`: four wrong sources are each refuted by examples.
+  A test, said as a test.
 - **The generated proofs do not need the model's own contracts** (`lang/direct_fn.py`): with the contract
   in bytes put in their statements and the layouts' opening facts added where they unfold the contract,
   the proofs of `push` and `merge` check as they are (`Direct_push.lean`, `Direct_merge.lean`, generated).

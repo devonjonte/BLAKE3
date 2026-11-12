@@ -323,6 +323,33 @@ What it took, and what it shows:
   contract holds for any encoding of a chaining value. Only a function that computes with the value pins
   the encoding; a contract's data can be as abstract as the code allows.
 
+## The function a user calls: `hash`, its contract, and a trial short of proof
+
+The statement a user wants is about the function they call. It is written (`spec/HashContract.lean`,
+`Hash.byteContract`, naming no machine): with the `len` bytes of a message at `input` and the
+specification's `IV` at `key`, the 32 bytes at `out` become `Blake3.hashBytes` of the message (C2SP's
+`Blake3.hash`), and the message and the key are unchanged.
+
+**It is not proved.** `hash` in `hasher.ode` is the whole one-shot hash (815 of the 1,258 x86-64
+instructions the language's code compiles to; the functions proved above are 306). What exists is the
+first of the blame verdicts, one level up from the machine: `HashTry.lean` runs the *source* by the
+language's meaning (`Sem.lean`), each kernel being what its contract says (one block, or many inputs of
+many blocks), on the 35 lengths of the BLAKE3 test vectors and three platforms: 104 examples meet the
+contract, none fails. `mutants_hash.py` audits that test: four wrong sources (a chunk's end not marked;
+the root not marked; a parent merged at the wrong count; the counter not advanced) are each refuted by 9
+to 27 of 27 examples, and the unchanged source meets all.
+
+What that is worth: a wrong source or a wrong contract for `hash` is likely to be seen in seconds, before
+any proof is tried, and the contract a reader would read exists to be argued with. What it is not: a
+statement about every message, or about the assembled code, or about the kernels' own code (the two
+one-block kernels are proved elsewhere here; the many-input kernels' contracts are assumed by this test,
+and above 32 KiB on AVX-512 the source calls kernels whose contracts are not written).
+
+A fault found on the way, for whoever runs sources as tests: a kernel's contract given as a function
+from memory to memory (`Try.compress`) was computed again at every byte read, since Lean compiles a
+definition that returns a function as one of more arguments; sixteen compressions took minutes. Computed
+once when the kernel is called (`compressNow`), the 104 examples take two and a half minutes.
+
 ## No code the proof shows is never reached
 
 (Sam, November 12.) A check that the proof shows can never fail is dead code: it costs instructions, it is
