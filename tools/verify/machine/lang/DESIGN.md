@@ -392,6 +392,48 @@ the specification's own object** (the tree over the chunks), **and a design whos
 nothing for it.** Next: the levels' theorems (`ladd_meets`, `lroot_meets`, and the algorithm's), to
 compare the proofs.
 
+## The coder decides, and can predict (Sam, November 12)
+
+Sam's rule, from the trouble she and Devon have with Rust's layout, inlining and whole-program optimization
+making benchmarks unpredictable. At the fork between "the compiler makes this better for the coder, if it
+can" and "the compiler makes *whether* this is better predictable and controllable by the coder", **Ode
+takes the second.** More to think about for the coder is accepted; the work may be reduced only where the
+result stays predictable and controllable.
+
+Already so: nothing is optimised (what is written is what is emitted); `def` is the coder's inlining and
+`reg` the coder's choice of registers; a change to one function changes no other function's code (checked
+when `hash`'s stack went onto a boundary: the other eight functions' text was the same to the letter).
+
+To keep, as tests: the same source and target give the same bytes; a function's bytes depend on that
+function's source alone.
+
+## Calls between Ode functions need not be C's (Sam, November 12)
+
+Sam's direction: as the proofs remove run-time checks and dynamic allocation, let them remove the calling
+convention between Ode functions too, down to a `jmp`; the C convention stays where C or Rust calls in.
+
+What the convention costs in the code as compiled today (`push` 9 of 26 instructions, `merge` 32 of 88,
+`merge_steps` 26 of 38, `add` 30 of 32: saving and restoring six registers, moving parameters to homes and
+arguments to the convention's registers, `call`, `ret`; part of that is this compiler giving every variable
+a home in a saved register, not the convention itself).
+
+What can replace it, each piece stated in the callee's contract and proved, none assumed:
+- **Where the arguments are** and **what the callee may change**: per function, chosen by the coder, in
+  place of one rule for all. The theorems already say what is changed; they would say it of registers too.
+- **No frame of its own**: with no recursion (needed anyway for an exact memory bound) the calls form a
+  tree, and every function's buffers can be places in one block the coder lays out. Then the stack pointer
+  never moves, the whole tree's memory is one piece of the entry's contract, and "exactly the memory this
+  call needs" and "where every buffer lies, by line and page" are the same statement.
+- **The way back**: a function with one caller is entered and left by direct jumps; a tail call is a jump
+  already; a function with several callers needs a return address, which can be in a register.
+
+To weigh before building (not measured): processors predict `ret` from `call` by a stack of their own, and
+a return by an indirect jump gives that up where a function has several callers; Intel's shadow stack and
+Arm's pointer authentication assume the pairing; profilers and debuggers find callers by the frame's
+conventions (unwinding tables can say it without code). The System V entry stays, as a wrapper, for every
+function C or Rust calls. In the proofs a callee is already used as "from its entry, for any return address,
+the continuation runs from a state the contract describes": that form fits a jump as it fits a call.
+
 ## Memory: boundaries, lines and pages; nothing allocated (Sam, November 12)
 
 Sam's direction. The cost of memory is in how it is touched (cache lines, pages, what is shared), never in a
@@ -414,11 +456,23 @@ function without one is assembled exactly as before (checked: the same text for 
    kernel may rely on it and "this piece is N whole lines" can be said.
 2. The stack budget derived from the code, for the whole tree of calls, and shown reached by an example:
    then "exactly the memory this call needs" is a number in the theorem, not an upper bound written by hand.
-3. A memory map for each function and target, written by the compiler: which lines and pages its hot data
-   can lie on. Line and page are the target's (64 and 4096 bytes on our x86-64 machines; 128 and 16384 on
-   Apple's), so contracts stay in bytes and boundaries, which name no machine, and the map is per target.
-4. Hot data together, cold tails last, in a frame (found with `hash2`: its 3520 bytes of levels, mostly
-   never touched, lie between the buffers every call touches, and the frame is 5232 bytes).
+3. **The coder lays memory out; the compiler does what is written or refuses** (Sam, November 12: not "the
+   compiler arranges it and reports"). Proposed, for Sam to decide:
+   - `line` and `page` are names the source may use in sizes and boundaries. A target says what they are
+     (64 and 4096 bytes on our x86-64 machines; 128 and 16384 on Apple's; on other AArch64 systems the
+     page is the operating system's choice, 4, 16 or 64 KiB, so there the build must be told). A contract
+     that says "on a line" is one text for every machine, with the target's number.
+   - Buffers lie in the order written, each on the boundary written. Nothing is reordered or padded
+     unasked.
+   - The coder states what the layout is for, and the compiler checks it and stops if it is false:
+     `same line: a, b`; `apart lines: x, y`; `within pages 1: st, block, cv`. Different targets may need
+     different layouts: then they are written per target, not derived.
+   - The compiler prints the map (every buffer's offset, line and page, per target) as a record of what
+     was written, to read and to compare between versions.
+   Found with `hash2`, to be fixed by the coder's ordering under this rule: its 3520 bytes of levels,
+   mostly never touched, lie between the buffers every call touches, and the frame is 5232 bytes.
+4. Where code lies is layout too: a function's own boundary and the order of functions in the object, by
+   the coder (today every function is on 16 bytes, in source order).
 5. Where a function needs more than fits a frame well: a workspace the caller passes, a piece on a page
    boundary.
 

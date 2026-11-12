@@ -48,7 +48,8 @@ refuses a literal it has twice): `controls.py` now picks a number the export doe
 
 ## What this does not yet show
 
-- **One function, one architecture**: the only theorem whose proof has no axiom beyond Lean's three.
+- **One function in the build, one architecture.** Two more theorems pass the same checker outside the
+  build (below): the three whose proofs have no axiom beyond Lean's three.
 - **The text compared is the checker's printing, not Lean's source.** `push_arm_meets.checked.txt` is 26,067
   lines (1,087 definitions, 143 inductive types with their constructors and recursors, 70 theorems'
   statements, 3 axioms), every argument written out: Lean's library and Google's model as far as the
@@ -59,12 +60,31 @@ refuses a literal it has twice): `controls.py` now picks a number the export doe
 - **The control for a changed definition changes the text read, not the export**: an export with one
   definition changed and every proof still checking is not something I could make by editing a number
   (the proofs stop checking first, as the other controls show). The comparison is the same either way.
-- **5 MB of proof for eighteen instructions.** Nearly all of it is Lean's library and Google's model,
-  which every theorem of a crate would share; what a second theorem adds is not measured.
+- **5 MB of proof for eighteen instructions, and more theorems do not come cheap** (measured, below): I
+  had guessed that nearly all of it was Lean's library and Google's model, shared by every theorem. It is
+  not: most of an export is the proofs themselves.
 - **The checker is a build dependency**: 31 crates in the lock file with it. And Cargo builds build
   scripts unoptimized unless the top crate of the build says otherwise (the 11.8 s above).
 - **One checker in the build.** Lean's own kernel accepted the same proof where it was made; a second
   independent checker in the build is not tried.
+
+## A second and a third theorem (November 12)
+
+`hex_neon_quiet` and `hex_neon_observed` (the NEON `hex` kernel shows an observer of time and cache the
+same whatever the hash's bytes are; `../arm/Quiet_hex_neon.lean`) have no axiom beyond Lean's three either,
+and nanoda accepts them: 5,900 and 5,851 declarations, 0.4 s each on sixteen threads.
+
+| export | bytes (packed) | declarations | nanoda, sixteen threads |
+|---|---|---|---|
+| `push_arm_meets` | 33.0 MB (5.1 MB) | 5,061 | 2.9 s |
+| `hex_neon_quiet` | 26.8 MB (4.1 MB) | 5,900 | 0.4 s |
+| the two and `hex_neon_observed` in one | 47.5 MB (7.3 MB) | 7,427 | 3.2 s |
+
+So the second and third theorems add 14.5 MB (2.2 MB packed) and 0.3 s to the first; of the 26.8 MB the
+second needs alone, about 12 MB was already there. At this rate a crate of some hundreds of proved functions
+would carry hundreds of megabytes of proof. Checking time is not the problem; the size of the proofs as
+exported is, and making them smaller (proofs by the kernel's own computation in place of long chains of
+rewriting steps) is the same work as removing `bv_decide`'s axioms.
 
 ## Again
 
