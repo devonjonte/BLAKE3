@@ -16,6 +16,8 @@ name = "Sem"
 [[lean_lib]]
 name = "HasherOde"
 [[lean_lib]]
+name = "LevelsOde"
+[[lean_lib]]
 name = "HexSpec"
 [[lean_lib]]
 name = "Attr_hex"

@@ -1,0 +1,13 @@
+[package]
+name = "levelsbench"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+blake3-servil-core = { path = "../crate" }
+
+[build-dependencies]
+cc = "1.1.12"
+
+[profile.release]
+debug = false
