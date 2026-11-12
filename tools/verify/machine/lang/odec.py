@@ -458,7 +458,7 @@ def expand(name, lines, defs, env):
     return out
 
 
-def kernel_aarch64(src, name):
+def kernel_aarch64(src, name, prefix="b3l_"):
     """The assembly of a kernel written `kernel NAME on aarch64`: its lines, defs and fors expanded, under
     its symbol. No instruction is added or changed."""
     kernels(contracts_of(open(src).read())[2])
@@ -469,9 +469,29 @@ def kernel_aarch64(src, name):
     return ("// Printed by odec.py from " + src.split("/")[-1] + ". Not written or edited by hand.\n"
             "#if defined(__ELF__) && defined(__linux__)\n.section .note.GNU-stack,\"\",%progbits\n#endif\n"
             "        .text\n        .balign 4\n"
-            f"#ifdef __APPLE__\n        .globl  _b3l_{name}\n_b3l_{name}:\n#else\n        .globl  b3l_{name}\n"
-            f"        .type   b3l_{name}, %function\nb3l_{name}:\n#endif\n"
+            f"#ifdef __APPLE__\n        .globl  _{prefix}{name}\n_{prefix}{name}:\n#else\n        .globl  {prefix}{name}\n"
+            f"        .type   {prefix}{name}, %function\n{prefix}{name}:\n#endif\n"
             + "".join(("" if x.endswith(":") else "        ") + x + "\n" for x in ins))
+
+
+def kernel_x86(src, name, prefix="b3l_"):
+    """The assembly of an x86-64 kernel of the source, with the data it names: its lines, defs and fors
+    expanded, under its symbol. No instruction is added or changed. After its first line, the same text
+    Lean prints for it (`asm PREFIX only NAME`): prove.sh compares the two."""
+    _, data, kerns = kernels(contracts_of(open(src).read())[2])
+    found = [lines for n, _, lines in kerns if n == name]
+    if len(found) != 1:
+        sys.exit(f"{src}: no x86-64 `kernel {name}`")
+    ins = expand(name, found[0], {}, {})
+    used = [(n, ws) for n, ws in data if any(f".Lode_data_{n}]" in x or f".Lode_data_{n} " in x for x in ins)]
+    text = ("// Printed by odec.py from " + src.split("/")[-1] + ". Not written or edited by hand.\n"
+            "#if defined(__ELF__) && defined(__linux__)\n.section .note.GNU-stack,\"\",%progbits\n#endif\n"
+            "#ifdef __APPLE__\n#define CALL(f) _##f\n#else\n#define CALL(f) f@PLT\n#endif\n"
+            ".intel_syntax noprefix\n#ifdef __APPLE__\n.static_data\n#else\n.section .rodata\n#endif\n")
+    for n, ws in used:
+        text += f".p2align 6\n.Lode_data_{n}:\n" + "".join(f"    .long {w}\n" for w in ws)
+    text += f".text\n.text\n.global {prefix}{name}\n.global _{prefix}{name}\n.p2align 4\n{prefix}{name}:\n_{prefix}{name}:\n"
+    return text + "".join((x + "\n") if x.endswith(":") else ("    " + x + "\n") for x in ins)
 
 
 def fn_aarch64(src, name):
@@ -526,10 +546,12 @@ def fn_aarch64(src, name):
 
 
 def main():
-    if len(sys.argv) == 4 and sys.argv[2] == "aarch64":
-        sys.stdout.write(kernel_aarch64(sys.argv[1], sys.argv[3])); return
+    if len(sys.argv) in (4, 5) and sys.argv[2] == "aarch64":
+        sys.stdout.write(kernel_aarch64(sys.argv[1], sys.argv[3], *(sys.argv[4:5]))); return
     if len(sys.argv) == 4 and sys.argv[2] == "aarch64-fn":
         sys.stdout.write(fn_aarch64(sys.argv[1], sys.argv[3])); return
+    if len(sys.argv) in (4, 5) and sys.argv[2] == "x86_64":
+        sys.stdout.write(kernel_x86(sys.argv[1], sys.argv[3], *(sys.argv[4:5]))); return
     src, out = sys.argv[1], sys.argv[2]
     source, data, kerns = kernels(contracts_of(open(src).read())[2])
     p = Parser(tokens(source)); p.top()

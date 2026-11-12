@@ -14,6 +14,10 @@ name=${1:-hex}; base=0x50000
 python3 odec.py hasher.ode HasherOde.lean
 lake build Lang HasherOde > /dev/null
 lake env lean --run HasherOde.lean asm b3l_ only "$name" > "$name.S"
+# The same kernel printed without Lean (what a check of the shipped file runs): the same text after the first line.
+python3 odec.py hasher.ode x86_64 "$name" | tail -n +2 > "$name.py.S"
+tail -n +2 "$name.S" | cmp -s - "$name.py.S" || { echo "odec.py and Lean print $name differently"; echo "the compiler's proof of $name: NOT checked"; exit 1; }
+rm -f "$name.py.S"
 if cc -target x86_64-unknown-linux-gnu -c -o "$name.o" "$name.S" 2>/dev/null; then :; else cc -c -o "$name.o" "$name.S"; fi
 "$OBJDUMP" -d -r --x86-asm-syntax=intel "$name.o" | awk "/<_?b3l_$name>:/,/ret/" > "$name.listing"
 python3 ../one/lift_one.py "$name.listing" "$(head -n 1 "$name.listing" | sed 's/.*<\(.*\)>:/\1/')" $base "Lifted_$name.lean" "Lifted_$name" --object "$name.o"
