@@ -409,6 +409,11 @@ NEON (`hex_neon.S`, 32 instructions, no table, no branch).
 - `./check.sh`: assembles the kernel, compares the object's words with the theorem's, builds their
   model and library (about six minutes on 64 threads) and checks both files.
 
-Not yet: the statement in bytes with `Hex.text` (the same words as on x86-64); anything about what an
-observer sees (their model has no observer); the kernel written in our language with the proof
-generated; SME2 (their model has no SVE or SME).
+- `HexNeonBytes.lean`: **`hex_neon_bytes_ok`**: the same code meets the statement in bytes, in the words
+  used on x86-64: with 32 bytes `hash` at X1 and 64 bytes at X0, the 64 become `Hex.text hash` and the
+  hash is unchanged. From `hex_neon_ok` by their rule `subroutine_ok_refine`. Axioms: Lean's three and
+  72 of `bv_decide` (64 of them one a character, in the lemma from vectors to text).
+
+Not yet: one file of specification shared by both architectures (`Hex.char` and `Hex.text` are written
+out again here); anything about what an observer sees (their model has no observer); the kernel written
+in our language with the proof generated; SME2 (their model has no SVE or SME).

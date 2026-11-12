@@ -12,9 +12,9 @@ symbol, a call with the hash at X1 and 64 writable bytes at X0 returns to the ca
 the callee-saved registers as they were, the hash unchanged, and the 64 bytes the hexadecimal; whatever
 else is in memory is as it was (the frame `R` of `subroutine_ok`).
 
-The values are stated in 16-byte vectors (`↦₁₂₈`); the byte-list form (`Hex.text`, as on x86-64) is next.
-Their model has no observer of time or cache, so nothing is said here of what the hash's value shows.
-Axioms: Lean's three and eight of `bv_decide`. -/
+The values are stated here in 16-byte vectors (`↦₁₂₈`); `HexNeonBytes.lean` gives the statement in bytes
+(`Hex.text`, the words used on x86-64). Their model has no observer of time or cache, so nothing is said
+here of what the hash's value shows. Axioms: Lean's three and eight of `bv_decide`. -/
 
 set_option maxRecDepth 200000
 
