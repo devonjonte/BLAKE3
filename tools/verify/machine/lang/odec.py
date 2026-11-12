@@ -15,7 +15,9 @@ what the assembly is printed from, so this compiler is not trusted for either.
     def NAME(a, b) { STATEMENTS }            statements, substituted where they are used
     fn NAME(p, q, ...) [reg a, b, ...] [requires TEXT]* { STATEMENTS  return EXPR }
 
-    var x = EXPR          x = EXPR          buf name[BYTES]
+    var x = EXPR          x = EXPR          buf name[BYTES] [align BOUNDARY]
+                                            (a buffer starts on a 16-byte boundary, or on the one named:
+                                             64 a cache line, 4096 a page; a power of two)
     u8[ADDR] = EXPR       u32[ADDR] = EXPR  u64[ADDR] = EXPR
     copy BYTES DST <- SRC
     NAME(ARGS)            a kernel (extern) or a statement `def`
@@ -181,7 +183,10 @@ class Parser:
         if tok == "var":
             x = self.take(); self.take("="); return ("var", x, self.expr())
         if tok == "buf":
-            b = self.take(); self.take("["); n = self.expr(); self.take("]"); return ("buf", b, n)
+            b = self.take(); self.take("["); n = self.expr(); self.take("]")
+            if self.peek() == "align":
+                self.take(); return ("buf", b, n, self.expr())
+            return ("buf", b, n)
         if tok in ("u8", "u32", "u64"):
             self.take("["); a = self.expr(); self.take("]"); self.take("="); return ("store", int(tok[1:]), a, self.expr())
         if tok == "copy":
@@ -298,6 +303,10 @@ class Lower:
                     out.append(("set", s[1], self.expr(s[2], env)))
             elif k == "buf":
                 fn["bufs"].append((s[1], self.value(s[2], env)))
+                if len(s) == 4:
+                    a = self.value(s[3], env)
+                    assert a >= 32 and a & (a - 1) == 0, f"buf {s[1]}: a boundary is a power of two above 16"
+                    fn.setdefault("aligns", []).append((s[1], a))
             elif k == "store":
                 out.append(("store", s[1], self.expr(s[2], env), self.expr(s[3], env)))
             elif k == "copy":
@@ -379,7 +388,7 @@ class Lower:
         return (f"/-- `{name}`, from the source.\n{doc}-/\n" if doc else "") + \
             f"def {name} : Fn where\n  name := \"b3l_{name}\"\n  params := {q(params)}\n  locals := {q(fn['locals'])}\n" \
             f"  regs := {q(regs)}\n  bufs := [{', '.join(f'(\"{b}\", {n})' for b, n in fn['bufs'])}]\n  externs := {q(fn['externs'])}\n" \
-            f"  body := [" + ",".join("\n    " + self.lean_s(s, bufs, "    ") for s in low) + f"]\n  ret := {self.lean_e(fn['ret'], bufs)}\n" + ("" if fn.get("returns") else "  noResult := true\n")
+            f"  body := [" + ",".join("\n    " + self.lean_s(s, bufs, "    ") for s in low) + f"]\n  ret := {self.lean_e(fn['ret'], bufs)}\n" + ("" if not fn.get("aligns") else "  aligns := [" + ", ".join(f'("{b}", {a})' for b, a in fn["aligns"]) + "]\n") + ("" if fn.get("returns") else "  noResult := true\n")
 
 
 contracts = []

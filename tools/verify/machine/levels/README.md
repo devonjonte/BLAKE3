@@ -15,12 +15,17 @@ was; values are merged as they arrive, so the caller holds back whatever may be 
    So every chunk's value is added, the last too, and `lroot` makes the root by one fold.
 
 **Memory** (Sam, November 12: its cost is in lines and pages touched, not in bytes). The levels are 3520
-bytes and the stack 1792: either is within one page if it starts on one. Counted from the layouts, not
-measured: a level is one cache line when the levels start on a 64-byte boundary, so a parent reads one
-line and writes half of another; the stack's values are 32 bytes from byte 32, so every second pair lies
-across two lines. Over 1024 values the levels touch 11 lines (the count's and ten levels), the stack 6
-and its two scratch buffers. All of it stays in the first-level cache in both. Not yet arranged: Ode
-aligns a buffer in a frame to 16 bytes, so `hash2`'s levels are not promised a 64-byte boundary.
+bytes and the stack 1792. Counted from the layouts, not measured, for 64-byte lines (x86-64): a level is
+one cache line, so a parent reads one line and writes half of another; the stack's values are 32 bytes
+from byte 32, so every second pair lies across two lines. Over 1024 values the levels touch 11 lines (the
+count's and ten levels), the stack 6 and its two scratch buffers; the levels above are never touched. On
+Apple's processors a line is 128 bytes and a page 16 KiB: two levels a line, and everything here in one
+page. Both structures are on a 64-byte boundary in what is timed below: in the standalone trial by the
+harness, and inside `hash` and `hash2` by `buf ... align 64` (the compiler has it since this experiment;
+putting them on the boundary moved no time by more than run-to-run differences).
+What the bytes do cost: `hash2`'s frame is 5232 bytes against `hash`'s 3920, so on 4 KiB pages its hot
+buffers lie on two pages, because the levels' untouched tail lies between them. Ordering the frame (the
+cold tail last) would undo that; not done, and no warm timing shows it.
 
 ## Tried (Threadripper 7975WX; single runs: inventory, no speed verdict)
 
@@ -33,8 +38,8 @@ aligns a buffer in a frame to 16 bytes, so `hash2`'s levels are not promised a 6
 
 | | the stack | the levels |
 |---|---|---|
-| a value added, and the root at the end (1024 values) | 42.5 ns a value | 40.1 ns (-5.6%) |
-| the hash of 2 KiB, 4 KiB, 16 KiB, 32 KiB | 728, 982, 2,210, 4,483 ns | 726, 976, 2,163, 4,406 ns (-0.3% to -2.2%) |
+| a value added, and the root at the end (1024 values) | 42.6 ns a value | 40.3 ns (-5.5%) |
+| the hash of 2 KiB, 4 KiB, 16 KiB, 32 KiB | 732, 992, 2,227, 4,515 ns | 736, 988, 2,170, 4,413 ns (+0.5% to -2.6%) |
 | copies of 32 bytes a parent | 4, and two scratch buffers | 1 (the key), no scratch |
 | instructions | `push` 27, `merge` 89; the root's fold is inside `hash` | `ladd` 121, `lroot` 157 |
 | the caller | holds back the last chunk; computes `target` | adds every value; asks for the root |

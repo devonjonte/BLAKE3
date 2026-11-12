@@ -129,7 +129,7 @@ def fill_ptrs(base, shift, count) {
 fn hash2(out, input, len, key, flags, plat)
   reg p, rem, counter, i, n, key
 {
-  buf lv[3520]
+  buf lv[3520] align 64
   buf cvs[1024]
   buf ptrs[256]
   buf block[64]

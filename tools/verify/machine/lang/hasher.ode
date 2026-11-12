@@ -215,7 +215,7 @@ def push_merging() {
 fn hash(out, input, len, key, flags, plat)
   reg p, rem, counter, i, n, key
 {
-  buf st[1792]
+  buf st[1792] align 64
   buf cvs[1024]
   buf par[512]
   buf ptrs[256]

@@ -231,6 +231,7 @@ def hash2 : Fn where
         .set "e" (.shr (.var "e") 1)],
       .copy 32 (.var "out") (.buf "acc")]]
   ret := (.const 0)
+  aligns := [("lv", 64)]
   noResult := true
 
 def all : List Fn := [ladd, lroot, hash2]

@@ -392,6 +392,36 @@ the specification's own object** (the tree over the chunks), **and a design whos
 nothing for it.** Next: the levels' theorems (`ladd_meets`, `lroot_meets`, and the algorithm's), to
 compare the proofs.
 
+## Memory: boundaries, lines and pages; nothing allocated (Sam, November 12)
+
+Sam's direction. The cost of memory is in how it is touched (cache lines, pages, what is shared), never in a
+count of bytes. `alloc`/`free` were fixed before virtual memory existed; Ode targets 64-bit machines with
+virtual memory and should say memory in those terms: a boundary with every use, lines and pages where the
+programmer wants them. And no dynamic allocation: the memory a call needs is set aside beforehand, exactly,
+and that is proved.
+
+**Where Ode stands.** It has no allocator and gets none. A function's memory is its frame's buffers (fixed
+sizes) and the pieces its contract names, which are the caller's. What a call may touch is already a
+theorem's content: the contract's pieces and a stack budget (`Abi.ofBytes c stack`), nothing else.
+
+**Done (November 12):** `buf NAME[BYTES] align BOUNDARY` (a power of two: 64, 4096, ...). A function with
+such a buffer sets its frame on the largest boundary and keeps the caller's stack pointer in the frame; a
+function without one is assembled exactly as before (checked: the same text for all nine functions of
+`hasher.ode` before `hash`'s stack was put on a 64-byte boundary).
+
+**To do, in this order:**
+1. A boundary in a contract's pieces (`Bytes.Layout` gains one; a caller shows an address is on it), so a
+   kernel may rely on it and "this piece is N whole lines" can be said.
+2. The stack budget derived from the code, for the whole tree of calls, and shown reached by an example:
+   then "exactly the memory this call needs" is a number in the theorem, not an upper bound written by hand.
+3. A memory map for each function and target, written by the compiler: which lines and pages its hot data
+   can lie on. Line and page are the target's (64 and 4096 bytes on our x86-64 machines; 128 and 16384 on
+   Apple's), so contracts stay in bytes and boundaries, which name no machine, and the map is per target.
+4. Hot data together, cold tails last, in a frame (found with `hash2`: its 3520 bytes of levels, mostly
+   never touched, lie between the buffers every call touches, and the frame is 5232 bytes).
+5. Where a function needs more than fits a frame well: a workspace the caller passes, a piece on a page
+   boundary.
+
 ## No code the proof shows is never reached
 
 (Sam, November 12.) A check that the proof shows can never fail is dead code: it costs instructions, it is

@@ -73,6 +73,10 @@ structure Fn where
   naked : Bool := false
   /-- The source returns nothing: no instruction sets a result. -/
   noResult : Bool := false
+  /-- Buffers that must start on a larger boundary than 16 bytes: a name and the boundary (a power of two:
+      64 for a cache line, 4096 for a page). A function with one of these sets its own frame on the
+      largest such boundary; one without is laid out, and assembled, exactly as before. -/
+  aligns : List (String × Nat) := []
   deriving Repr, Inhabited
 
 /-! ## To Rust -/
@@ -125,7 +129,10 @@ def Fn.rust (f : Fn) : String :=
   let params := ", ".intercalate (f.params.map fun p => s!"mut {p}: u64")
   let locals := String.join (f.locals.map fun x => s!"    let mut {x}: u64 = 0;\n")
   let bufs := String.join (f.bufs.map fun (b, n) =>
-    s!"    let mut {b}_store = core::mem::MaybeUninit::<Aligned<{n}>>::uninit();\n    let {b}: u64 = {b}_store.as_mut_ptr() as u64;\n")
+    let ty := match f.aligns.find? (·.1 == b) with
+      | some (_, a) => s!"Aligned{a}"
+      | none => "Aligned"
+    s!"    let mut {b}_store = core::mem::MaybeUninit::<{ty}<{n}>>::uninit();\n    let {b}: u64 = {b}_store.as_mut_ptr() as u64;\n")
   s!"#[no_mangle]\n#[allow(unused_mut, unused_assignments, unused_parens, unused_variables)]\npub unsafe extern \"C\" fn {f.name}({params}) -> u64 \{\n{locals}{bufs}{Stmts.rust "    " f.body}    {f.ret.rust}\n}\n"
 
 /-- A file of functions: no standard library, no panic machinery, nothing but the functions and the
@@ -135,6 +142,8 @@ def rustFile (fs : List Fn) : String :=
   let decl := exts.map fun (g, n) => s!"    fn {g}({", ".intercalate ((List.range n).map fun i => s!"a{i}: u64")});\n"
   "// Printed from Lean (Lang.lean). Not written or edited by hand.\n#![no_std]\n#![allow(unused_parens)]\n" ++
   "#[repr(C, align(16))]\npub struct Aligned<const N: usize>([u8; N]);\n" ++
+  String.join (((fs.flatMap fun f => f.aligns.map (·.2)).eraseDups).map fun a =>
+    s!"#[repr(C, align({a}))]\npub struct Aligned{a}<const N: usize>([u8; N]);\n") ++
   (if decl.isEmpty then "" else "extern \"C\" {\n" ++ String.join decl ++ "}\n") ++
   String.join ((fs.filter (!·.naked)).map Fn.rust)
 
@@ -163,6 +172,10 @@ structure Layout where
   bufAt : String → Nat
   frame : Nat
   saved : List String
+  /-- The boundary the frame is set on: 16 unless a buffer asks for more. -/
+  align : Nat := 16
+  /-- Where the caller's RSP is kept when the frame is set on a larger boundary: `[rsp + keep]`. -/
+  keep : Nat := 0
 
 def idxOf (xs : List String) (x : String) : Nat := (xs.findIdx? (· == x)).getD 0
 
@@ -183,16 +196,25 @@ def Fn.layout (f : Fn) : Layout :=
   -- the frame, from RSP up: arguments a call passes on the stack (the seventh on), the buffers, the slots
   let outArgs := 8 * (maxArgs f.body - 6)
   let outArgs := if outArgs % 16 == 0 then outArgs else outArgs + 8
-  let bufOff := f.bufs.foldl (fun (acc : List (String × Nat) × Nat) (b, n) => (acc.1 ++ [(b, acc.2)], acc.2 + n)) ([], outArgs)
+  -- a buffer starts on its boundary (16 unless `aligns` says more): offsets from an RSP on the largest one
+  let alignOf := fun (b : String) => ((f.aligns.find? (·.1 == b)).map (·.2)).getD 16
+  let align := f.aligns.foldl (fun a x => max a x.2) 16
+  let bufOff := f.bufs.foldl (fun (acc : List (String × Nat) × Nat) (b, n) =>
+    let at_ := (acc.2 + alignOf b - 1) / alignOf b * alignOf b
+    (acc.1 ++ [(b, at_)], at_ + n)) ([], outArgs)
   let slots := bufOff.2
   let raw := slots + 8 * nslot
-  -- at a call RSP must be a multiple of 16: the return address and the pushes are 8 * (1 + nreg) bytes
-  let frame := if (raw + 8 * (1 + nreg)) % 16 == 0 then raw else raw + 8
+  -- at a call RSP must be a multiple of 16: the return address and the pushes are 8 * (1 + nreg) bytes.
+  -- A frame set on a larger boundary is a multiple of 16 itself, with eight bytes for the caller's RSP.
+  let frame := if align > 16 then (raw + 8 + 15) / 16 * 16
+    else if (raw + 8 * (1 + nreg)) % 16 == 0 then raw else raw + 8
   { home := fun x => let i := idxOf vars x; if i < nreg then homes.getD i "" else s!"qword ptr [rsp + {slots + 8 * (i - nreg)}]"
     inReg := fun x => idxOf vars x < nreg
     bufAt := fun b => ((bufOff.1.find? (·.1 == b)).map (·.2)).getD 0
     frame := frame
-    saved := homes.take nreg }
+    saved := homes.take nreg
+    align := align
+    keep := raw }
 
 /-- A constant, a variable or a buffer's address: what an argument of a call may be. -/
 def Exp.atom : Exp → Bool
@@ -279,10 +301,16 @@ end
 
 def Fn.asm (f : Fn) : String :=
   let L := f.layout
-  let prologue := L.saved.map (fun r => s!"push {r}") ++ (if L.frame == 0 then [] else [s!"sub rsp, {L.frame}"]) ++
+  -- A frame on a larger boundary: RSP goes down by the frame and then to the boundary below; the caller's
+  -- RSP is kept in the frame and put back at the end. Otherwise as before.
+  let down := if L.align > 16 then ["mov rax, rsp", s!"sub rsp, {L.frame}", s!"and rsp, -{L.align}", s!"mov qword ptr [rsp + {L.keep}], rax"]
+    else if L.frame == 0 then [] else [s!"sub rsp, {L.frame}"]
+  let up := if L.align > 16 then [s!"mov rsp, qword ptr [rsp + {L.keep}]"]
+    else if L.frame == 0 then [] else [s!"add rsp, {L.frame}"]
+  let prologue := L.saved.map (fun r => s!"push {r}") ++ down ++
     (f.params.zip abiArgs).map (fun (p, r) => s!"mov {L.home p}, {r}")
   let (body, _) := Stmts.asm L f.name 0 f.body
-  let epilogue := (if f.noResult then [] else Exp.asm L 0 f.ret) ++ (if L.frame == 0 then [] else [s!"add rsp, {L.frame}"]) ++
+  let epilogue := (if f.noResult then [] else Exp.asm L 0 f.ret) ++ up ++
     L.saved.reverse.map (fun r => s!"pop {r}") ++ ["ret"]
   let line (s : String) := if s.endsWith ":" then s ++ "\n" else "    " ++ s ++ "\n"
   s!".global {f.name}\n.global _{f.name}\n.p2align 4\n{f.name}:\n_{f.name}:\n" ++
