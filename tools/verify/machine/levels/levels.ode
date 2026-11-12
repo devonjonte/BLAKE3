@@ -162,6 +162,24 @@ fn lroot(out, lv, key, flags, plat)
   copy 32 out <- acc
 }
 
+// A node's compression: its chaining value, or with root = ROOT the first 32 bytes of its output. What
+// node_out is claimed to do is NodeOut.contract (../lang/Spec_nodeout.lean): the node in memory is the
+// specification's own (h, the block m, the counter, the block length, the flags), 120 bytes.
+fn node_out(out, nd, root, plat)
+  meets NodeOut.contract(node: Blake3.Node)
+  uses Lemmas_node
+  enter know Node.At.cells
+  enter open Node.At.vectors as h0, h1, b0, b1, b2, b3
+  leave by NodeOut.exit
+{
+  var blk = nd + 32
+  var len = u64[nd + 104]
+  var t = u64[nd + 96]
+  var f = u64[nd + 112] | root
+  copy 32 out <- nd
+  compress(out, blk, len, t, f)
+}
+
 def fill_ptrs(base, shift, count) {
   i = 0
   while i < count {

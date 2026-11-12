@@ -7,6 +7,7 @@ import Spec_hex
 import Spec_ladd
 import Spec_lroot
 import Lemmas_ladd
+import Spec_nodeout
 open X86
 
 /-! # Each contract can be used
@@ -131,3 +132,17 @@ theorem Lroot.usable : (Lroot.contract 0x300000#64 0x100000#64 0x200000#64 0#64 
 #print axioms Push.usable
 #print axioms Add.usable
 #print axioms Hex.usable
+
+/-- A node of zeroes. -/
+def zeroNode : Blake3.Node := ⟨zeroCv, words8 0#128 0#128 ++ words8 0#128 0#128, 0, 0, 0⟩
+
+theorem zeroMem_node (a : BitVec 64) : Node.At zeroMem a zeroNode :=
+  ⟨zeroMem_cv a, ⟨0#128, 0#128, 0#128, 0#128, zeroMem_vec _, zeroMem_vec _, zeroMem_vec _, zeroMem_vec _, rfl⟩,
+    zeroMem_quad _, zeroMem_quad _, zeroMem_quad _, by decide, by decide⟩
+
+theorem NodeOut.usable : (NodeOut.contract 0x300000#64 0x100000#64 0#64 5#64 zeroNode).Usable := by
+  refine ⟨0x7ff00000#64, zeroMem, zeroMem_region _ _, ?_, ?_, ?_⟩
+  · simp only [NodeOut.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, Abi.AllApart, Abi.Apart]; decide
+  · simp only [NodeOut.contract]; decide
+  · simp only [NodeOut.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
+    exact ⟨zeroMem_region _ _, zeroMem_node _⟩

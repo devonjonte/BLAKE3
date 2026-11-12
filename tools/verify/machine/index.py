@@ -30,6 +30,8 @@ X86 = [  # (module, theorem, contract and where, what it says)
      "`ladd` (the tree's levels, another design than the stack: levels/), as assembled, turns the levels of the tree over some chunks into the levels over those and one more"),
     ("Proof_lroot", "Proof_lroot.lroot_meets", "`Lroot.contract` (lang/Spec_lroot.lean)",
      "`lroot`, as assembled, writes the first eight words of the specification's output for the tree over the levels' chunks, and leaves the levels as they are"),
+    ("Proof_node_out", "Proof_node_out.node_out_meets", "`NodeOut.contract` (lang/Spec_nodeout.lean)",
+     "`node_out`, as assembled, writes a node's compression for the node in memory (the specification's own: h, block, counter, length, flags): its chaining value, or with the root flag the first 32 bytes of its output"),
     ("AddTree", "Add.keeps_the_tree", "no code: `Add.contract`'s result and the specification's tree (alg/Stack.lean)",
      "on the tree's stack for `m` chunks, what `add` leaves is the tree's stack for `m + 1`"),
 ]

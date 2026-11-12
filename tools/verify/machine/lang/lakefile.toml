@@ -155,3 +155,17 @@ name = "Code_lroot"
 name = "Proof_lroot"
 [[lean_lib]]
 name = "Example_lroot"
+[[lean_lib]]
+name = "Spec_node"
+[[lean_lib]]
+name = "Spec_nodeout"
+[[lean_lib]]
+name = "Lemmas_node"
+[[lean_lib]]
+name = "Sample_node"
+[[lean_lib]]
+name = "Example_nodeout"
+[[lean_lib]]
+name = "Code_node_out"
+[[lean_lib]]
+name = "Proof_node_out"
