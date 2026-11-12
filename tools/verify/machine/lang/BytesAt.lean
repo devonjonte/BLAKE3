@@ -57,31 +57,51 @@ theorem Bytes.of_region {m : Mem} {a : BitVec 64} (n : Nat) (hn : n < 2 ^ 64) (h
   | none => rw [hm] at hs; cases hs
   | some x => rfl
 
+/-- **A layout in bytes opens as a layout of this model**: the same size, and memory holds a value in the
+model's layout exactly when the bytes at the address are bytes that hold it. One such fact a data structure
+is all the pieces of a contract need (`keeps`, `turns`, `fills` below). -/
+structure Abi.Layout.Opens {α : Type} (L : Bytes.Layout α) (N : Abi.Layout α) : Prop where
+  size : N.size = BitVec.ofNat 64 L.size
+  small : L.size < 2 ^ 64
+  holds : ∀ (m : Mem) (a : BitVec 64) (v : α), (∃ b : List (BitVec 8), b.length = L.size ∧ Bytes.At m a b ∧ L.holds b v) = N.holds m a v
+
+theorem Abi.Layout.Opens.keeps {α : Type} {L : Bytes.Layout α} {N : Abi.Layout α} (h : Abi.Layout.Opens L N) (a : BitVec 64) (v : α) :
+    Abi.Piece.ofBytes (L.keeps a v) = N.keeps a v := by
+  simp only [Abi.Piece.ofBytes, Bytes.Layout.keeps, Abi.Layout.keeps, h.holds, h.size]
+
+theorem Abi.Layout.Opens.turns {α : Type} {L : Bytes.Layout α} {N : Abi.Layout α} (h : Abi.Layout.Opens L N) (a : BitVec 64) (v w : α) :
+    Abi.Piece.ofBytes (L.turns a v w) = N.turns a v w := by
+  simp only [Abi.Piece.ofBytes, Bytes.Layout.turns, Abi.Layout.turns, h.holds, h.size]
+
+/-- Owned bytes are some bytes in memory. -/
+theorem Bytes.region_iff (n : Nat) (hn : n < 2 ^ 64) (m : Mem) (a : BitVec 64) :
+    (∃ b : List (BitVec 8), b.length = n ∧ Bytes.At m a b ∧ True) = Region m a (BitVec.ofNat 64 n) := by
+  apply propext
+  constructor
+  · rintro ⟨b, hl, hb, -⟩ d hd
+    have hd' : d.toNat < b.length := by
+      rw [hl]; rw [BitVec.lt_def, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hn] at hd; exact hd
+    have := hb d.toNat hd'
+    rw [BitVec.ofNat_toNat, BitVec.setWidth_eq] at this
+    rw [this]; rfl
+  · intro h
+    obtain ⟨b, hl, hb⟩ := Bytes.of_region n hn h
+    exact ⟨b, hl, hb, trivial⟩
+
+theorem Abi.Layout.Opens.fills {α : Type} {L : Bytes.Layout α} {N : Abi.Layout α} (h : Abi.Layout.Opens L N) (a : BitVec 64) (w : α) :
+    Abi.Piece.ofBytes (L.fills a w) = N.fills a w := by
+  simp only [Abi.Piece.ofBytes, Bytes.Layout.fills, Abi.Layout.fills, h.holds, h.size, Bytes.region_iff _ h.small]
+
+/-- Plain bytes open as the model's plain bytes. -/
+theorem Bytes.opens (n : Nat) (hn : n < 2 ^ 64) : Abi.Layout.Opens (Bytes.plain n) (Bytes.layout n) where
+  size := rfl
+  small := hn
+  holds := fun _ _ v => propext ⟨fun ⟨_, hl, hb, e⟩ => e ▸ ⟨hl, hb⟩, fun ⟨hl, hb⟩ => ⟨v, hl, hb, rfl⟩⟩
+
 /-- Plain bytes the function does not change: the piece read for this machine is the model's own. -/
-theorem Bytes.piece_keeps (n : Nat) (a : BitVec 64) (v : List (BitVec 8)) :
-    Abi.Piece.ofBytes ((Bytes.plain n).keeps a v) = (Bytes.layout n).keeps a v := by
-  have e : ∀ m : Mem, (∃ b : List (BitVec 8), b.length = n ∧ Bytes.At m a b ∧ b = v) = (v.length = n ∧ Bytes.At m a v) := by
-    intro m
-    exact propext ⟨fun ⟨b, hl, hb, e⟩ => e ▸ ⟨hl, hb⟩, fun ⟨hl, hb⟩ => ⟨v, hl, hb, rfl⟩⟩
-  simp only [Abi.Piece.ofBytes, Bytes.Layout.keeps, Bytes.plain, Abi.Layout.keeps, Bytes.layout, e]
+theorem Bytes.piece_keeps (n : Nat) (hn : n < 2 ^ 64) (a : BitVec 64) (v : List (BitVec 8)) :
+    Abi.Piece.ofBytes ((Bytes.plain n).keeps a v) = (Bytes.layout n).keeps a v := (Bytes.opens n hn).keeps a v
 
 /-- Plain bytes the function fills: the same. -/
 theorem Bytes.piece_fills (n : Nat) (hn : n < 2 ^ 64) (a : BitVec 64) (w : List (BitVec 8)) :
-    Abi.Piece.ofBytes ((Bytes.plain n).fills a w) = (Bytes.layout n).fills a w := by
-  have e : ∀ m : Mem, (∃ b : List (BitVec 8), b.length = n ∧ Bytes.At m a b ∧ b = w) = (w.length = n ∧ Bytes.At m a w) := by
-    intro m
-    exact propext ⟨fun ⟨b, hl, hb, e⟩ => e ▸ ⟨hl, hb⟩, fun ⟨hl, hb⟩ => ⟨w, hl, hb, rfl⟩⟩
-  have r : ∀ m : Mem, (∃ b : List (BitVec 8), b.length = n ∧ Bytes.At m a b ∧ True) = Region m a (BitVec.ofNat 64 n) := by
-    intro m
-    apply propext
-    constructor
-    · rintro ⟨b, hl, hb, -⟩ d hd
-      have hd' : d.toNat < b.length := by
-        rw [hl]; rw [BitVec.lt_def, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hn] at hd; exact hd
-      have := hb d.toNat hd'
-      rw [BitVec.ofNat_toNat, BitVec.setWidth_eq] at this
-      rw [this]; rfl
-    · intro h
-      obtain ⟨b, hl, hb⟩ := Bytes.of_region n hn h
-      exact ⟨b, hl, hb, trivial⟩
-  simp only [Abi.Piece.ofBytes, Bytes.Layout.fills, Bytes.plain, Abi.Layout.fills, Bytes.layout, e, r]
+    Abi.Piece.ofBytes ((Bytes.plain n).fills a w) = (Bytes.layout n).fills a w := (Bytes.opens n hn).fills a w

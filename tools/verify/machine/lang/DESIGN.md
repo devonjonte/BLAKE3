@@ -280,11 +280,19 @@ machine: `Abi.MeetsQuietly` here, `hex_neon_quiet` there.)
 
 What it took, and what it shows:
 
-- On x86-64 the existing proof was kept: `Stack.At_iff_bytes` (`StackAsBytes.lean`, by hand, 227 lines
-  with its lemmas) shows the model's own predicate is the statement in bytes, so
-  `Abi.ofBytes (Push.byteContract …) 64 = Push.contract …` and the theorem carries over. The honest end
-  is for `Spec_stack.lean` to go: the compiler's proofs would open a layout in bytes into the cells code
-  touches, by lemmas like these, written once a data structure.
+- On x86-64 the existing proof was kept: `Stack.At_iff_bytes` (`StackAsBytes.lean`, by hand) shows the
+  model's own predicate is the statement in bytes, so `Abi.ofBytes (Push.byteContract …) 64 =
+  Push.contract …` and the theorem carries over. What a data structure owes is one fact,
+  `Abi.Layout.Opens L N` (`BytesAt.lean`: the layout in bytes `L` opens as the model's layout `N`; proved
+  for plain bytes, a chaining value and the stack); `keeps`, `turns` and `fills` follow.
+- **The next step, exactly:** the model's own contracts (`Spec_push.lean`, `Spec_merge.lean`,
+  `Spec_add.lean`, `Spec_hex.lean`) are now a second text of what `spec/` says, tied to it by an equation
+  Lean checks. They should go: the source names the contract in bytes and the stack budget
+  (`meets Push.byteContract(...) stack 64`), the generated theorem is about `Abi.ofBytes` of it, and where
+  the generated proof unfolds the contract it adds `Abi.ofBytes`, `List.map` and the `Opens` facts, after
+  which the pieces are the model's and the proof goes on as today. The audits that change
+  `Spec_merge.lean` move to `mutants_spec.py`'s way (a copy of `spec/`). Not done on November 12 for want
+  of an hour to re-check every script from nothing afterwards.
 - On AArch64 the compiler's proof is against cells (their tactics alone, nothing written), and a file
   by hand (`PushBytes.lean`, 144 lines) goes from the bytes to the cells and back (their rule
   `subroutine_ok_refine_frame`). The lemmas

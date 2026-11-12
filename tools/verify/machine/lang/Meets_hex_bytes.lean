@@ -11,7 +11,7 @@ AArch64 kernel against the same statement, on Google DeepMind's model. -/
 /-- **`Hex.contract` is `Hex.byteContract` read for this machine**, with no stack. -/
 theorem Hex.contract_eq (out inp : BitVec 64) (hash : List (BitVec 8)) :
     Abi.ofBytes (Hex.byteContract out inp hash) 0#64 = Hex.contract out inp hash := by
-  simp only [Abi.ofBytes, Hex.byteContract, Hex.contract, List.map, Bytes.piece_keeps, Bytes.piece_fills 64 (by decide)]
+  simp only [Abi.ofBytes, Hex.byteContract, Hex.contract, List.map, Bytes.piece_keeps 32 (by decide), Bytes.piece_fills 64 (by decide)]
 
 /-- **The x86-64 kernel `hex` meets `Hex.byteContract` whatever the hash is, and what an observer of
 time and of the cache sees does not depend on the hash.** -/

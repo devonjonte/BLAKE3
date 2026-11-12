@@ -153,23 +153,31 @@ theorem Stack.At_iff_bytes (m : Mem) (st : BitVec 64) (cvs : List Blake3.CV) :
 `Push.contract` (`Spec_push.lean`, in this model's vectors and cells) is `Push.byteContract`
 (`../spec/PushContract.lean`, which names no machine) read for this machine. -/
 
-theorem Cv.piece_keeps (a : BitVec 64) (v : Blake3.CV) : Abi.Piece.ofBytes (Cv.byteLayout.keeps a v) = Cv.layout.keeps a v := by
-  have e : ∀ m : Mem, (∃ b : List (BitVec 8), b.length = 32 ∧ Bytes.At m a b ∧ b = Cv.bytes v) = Cv.At m a v := by
-    intro m
+/-- A chaining value's bytes open as the model's chaining value in memory. -/
+theorem Cv.opens : Abi.Layout.Opens Cv.byteLayout Cv.layout where
+  size := rfl
+  small := by decide
+  holds := fun m a v => by
     apply propext
+    show (∃ b : List (BitVec 8), b.length = 32 ∧ Bytes.At m a b ∧ b = Cv.bytes v) ↔ Cv.At m a v
     rw [Cv.At_iff_bytes]
     exact ⟨fun ⟨b, _, hb, e⟩ => e ▸ hb, fun h => ⟨_, Cv.bytes_length v, h, rfl⟩⟩
-  simp only [Abi.Piece.ofBytes, Bytes.Layout.keeps, Cv.byteLayout, Abi.Layout.keeps, Cv.layout, e]
 
-theorem Stack.piece_turns (a : BitVec 64) (v w : List Blake3.CV) :
-    Abi.Piece.ofBytes (Stack.byteLayout.turns a v w) = Stack.layout.turns a v w := by
-  have e : ∀ (m : Mem) (x : List Blake3.CV),
-      (∃ b : List (BitVec 8), b.length = 1792 ∧ Bytes.At m a b ∧ Stack.Holds b x) = Stack.At m a x := by
-    intro m x
+/-- The stack's bytes open as the model's stack in memory. -/
+theorem Stack.opens : Abi.Layout.Opens Stack.byteLayout Stack.layout where
+  size := rfl
+  small := by decide
+  holds := fun m a x => by
     apply propext
+    show (∃ b : List (BitVec 8), b.length = 1792 ∧ Bytes.At m a b ∧ Stack.Holds b x) ↔ Stack.At m a x
     rw [Stack.At_iff_bytes]
     exact ⟨fun ⟨b, _, hb, h⟩ => ⟨b, hb, h⟩, fun ⟨b, hb, h⟩ => ⟨b, h.2.1, hb, h⟩⟩
-  simp only [Abi.Piece.ofBytes, Bytes.Layout.turns, Stack.byteLayout, Abi.Layout.turns, Stack.layout, e]
+
+theorem Cv.piece_keeps (a : BitVec 64) (v : Blake3.CV) : Abi.Piece.ofBytes (Cv.byteLayout.keeps a v) = Cv.layout.keeps a v :=
+  Cv.opens.keeps a v
+
+theorem Stack.piece_turns (a : BitVec 64) (v w : List Blake3.CV) :
+    Abi.Piece.ofBytes (Stack.byteLayout.turns a v w) = Stack.layout.turns a v w := Stack.opens.turns a v w
 
 /-- **`Push.contract` is `Push.byteContract` read for this machine**, with 64 bytes of stack. -/
 theorem Push.contract_eq (st cv : BitVec 64) (new : Blake3.CV) (cvs : List Blake3.CV) :
