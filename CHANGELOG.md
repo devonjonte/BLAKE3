@@ -1,7 +1,8 @@
-# Unreleased: changes since 0.8 (a draft for 0.9)
+# blake3-servil 0.9.0+dev, against blake3-servil 0.8.0
 
-The figures for this release come from its release runs; this section
-lists what changed, each item with where it is described.
+What changed since 0.8.0, each item with where it is described. The
+figures come from checks of this code against 0.8.0, on the machines
+each names.
 
 ## Two crates, and no streaming API in this release
 
@@ -85,9 +86,7 @@ there. Gathering short messages into batches for
 `hash_many_multithreaded` recovers most of it: batches one after another
 take 1.2 to 2.9 times the stream's time. No other call is slower on
 those machines: none of the single-threaded calls, none of the
-multithreaded calls made for whole inputs. (Checks of `next` c10d6804
-against 0.8, four pairs a cell; the release runs give the release's
-figures.)
+multithreaded calls made for whole inputs. (Four pairs of runs a cell.)
 
 **On purpose, on AArch64: a `throughput` call made now and then.** 0.8
 guessed with a clock whether a call came after a pause, and prefetched
@@ -101,8 +100,9 @@ decides. So on AArch64 a `throughput` call made amid other work, where
 The remedy for one message is the call made for that pattern,
 `convenience::hash`, which prefetches on every call of 1 to 64 KiB. A
 small batch amid other work has no such call yet. Call after call, both
-are as fast as before or faster. The release runs give the figures; an
-Apple M6's are in #364.
+are as fast as before or faster. On an Apple M6, made amid other work,
+the batch takes 37 to 180% more time than 0.8's and the message 28 to
+115% more (#364).
 
 **Cause not yet known, on AMD Zen 5: `convenience::hash` of 4 KiB made
 after other work** takes 5 to 6% more time than 0.8 on a Ryzen 9700X, an
@@ -191,12 +191,6 @@ this release: no 0.8.x follows.
 - **The tests split in two**: the code's, on fixed inputs and the test
   clock, under two seconds; the machine's (clocks, counters, sleeps) by
   their own profile.
-
-## To fill at the release
-
-- The Faster table from each machine's release run.
-- The x86-64 kernels that land before the release, each with its measured
-  gain and its proof (Zen 5's integer-register chunk root).
 
 # blake3-servil 0.8.0+b3c5efc7c975d903762dea809066f7c0a0603861, against official BLAKE3 1.8.7
 
