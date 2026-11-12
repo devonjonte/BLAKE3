@@ -144,7 +144,7 @@ it. `add`'s whole source is ten lines.
 
 **Swapping an implementation** (`./swap.sh`): `merge_sse` is another `merge` (always the SSE4.1 kernel;
 77 instructions) proved to meet the same `Merge.contract`. With that one `callee` line changed, `add`
-is proved again from its source: 4 of the generated proof's 143 lines differ (two names, twice). This
+is proved again from its source: 4 of the generated proof's 147 lines differ (two names, twice). This
 is what a maintainer gets: change the code behind a contract, prove the new code against the contract,
 and every caller's proof stands as generated.
 
@@ -165,8 +165,11 @@ function that calls `merge` needs `merge`'s 256, a return address and its own fr
 belongs in the contract; but it is the one line of a contract that depends on how the function is
 built. To think about: a budget stated as "what the code needs", derived, with the contract naming it.
 
-Not yet: a call's result used by the caller; calls under conditions; the budget read from the callee's
-contract instead of written beside it; the callee line generated from what was built.
+**A call's result** (`return merge(…)`, `x = f(…)`): to the caller it is a value of which the callee's
+contract says what it says (`returns`). `add` returns `merge`'s count, and `Add.contract` says so.
+
+Not yet: calls under conditions; the budget read from the callee's contract instead of written beside
+it; the callee line generated from what was built.
 
 ## A requirement is stated once; proved where it can be, tested where it cannot
 

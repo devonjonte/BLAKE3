@@ -139,7 +139,7 @@ fn add(st, key, flags, plat, cv, target)
   push(st, cv)
     with new; cvs
     keep Cv.At(key, k)
-  merge(st, key, flags, plat, target)
+  return merge(st, key, flags, plat, target)
     with k; (new :: cvs)
 }
 

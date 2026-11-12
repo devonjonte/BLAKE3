@@ -44,6 +44,8 @@ structure Env where
   /-- A kernel's contract: what a call with these arguments does to memory (`none`: its
       precondition does not hold). -/
   ext : String → List Word → Mem → Option Mem
+  /-- A function called for its result: the result and the memory after. -/
+  extr : String → List Word → Mem → Option (Word × Mem) := fun _ _ _ => none
 
 def Exp.eval (E : Env) (s : St) : Exp → Word
   | .const v => BitVec.ofNat 64 v
@@ -93,6 +95,10 @@ def exec (E : Env) : Nat → List Stmt → St → Option St
       match E.ext f (args.map (·.eval E s)) s.mem with
       | none => none
       | some m => exec E fuel rest { s with mem := m }
+    | .callr x f args =>
+      match E.extr f (args.map (·.eval E s)) s.mem with
+      | none => none
+      | some (r, m) => exec E fuel rest { s with mem := m, vars := fun y => if y == x then r else s.vars y }
     | .ite c t e =>
       let b := c.eval E s
       (exec E fuel (if b then t else e) (s.see (c.loads E s ++ [.branch b]))).bind (exec E fuel rest)

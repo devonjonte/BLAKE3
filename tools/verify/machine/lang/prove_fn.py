@@ -74,7 +74,7 @@ for line in open(layout_path):
 
 
 def has_call(ss):
-    return any(s[0] == "call" or (s[0] == "ite" and (has_call(s[2]) or has_call(s[3]))) or (s[0] == "while" and has_call(s[2])) for s in ss)
+    return any(s[0] in ("call", "callr") or (s[0] == "ite" and (has_call(s[2]) or has_call(s[3]))) or (s[0] == "while" and has_call(s[2])) for s in ss)
 
 
 own_calls = clauses[name].get("calls", [])            # calls of this file's functions, by their contracts
@@ -253,7 +253,7 @@ before, wcond, wbody, after = body[:wi], (body[wi][1] if wi < len(body) else Non
 def sets(ss):
     out = set()
     for s in ss:
-        if s[0] == "set": out.add(s[1])
+        if s[0] in ("set", "callr"): out.add(s[1])
         elif s[0] == "ite": out |= sets(s[2]) | sets(s[3])
         elif s[0] == "while": out |= sets(s[2])
     return out
@@ -270,6 +270,7 @@ def mentions(s, x):
     if k == "ite": return x in reads(s[1][1]) | reads(s[1][2]) or any(mentions(y, x) for y in s[2] + s[3])
     if k == "while": return x in reads(s[1][1]) | reads(s[1][2]) or any(mentions(y, x) for y in s[2])
     if k == "call": return any(x in reads(a) for a in s[2])
+    if k == "callr": return s[1] == x or any(x in reads(a) for a in s[3])
     if k == "set": return s[1] == x or x in reads(s[2])
     return any(x in reads(e) for e in s[1:] if isinstance(e, tuple))
 
@@ -372,7 +373,13 @@ def paths(ss, env):
             k = s[0]
             if k == "set":
                 e2 = dict(e); e2[s[1]] = lean_low(s[2], e); new.append((ev, e2))
-            elif k == "call": new.append((ev + [("call", s[1], [lean_low(a, e) for a in s[2]])], e))
+            elif k == "call": new.append((ev + [("call", s[1], [lean_low(a, e) for a in s[2]] if s[1] in OWN else None)], e))
+            elif k == "callr":
+                # the result is the callee's RAX at its return: the state there is named by the call's number
+                assert s[2] in OWN, "a kernel's result: not yet"
+                n = 1 + sum(1 for x in ev if x[0] == "call" and x[1] in OWN)
+                e2 = dict(e); e2[s[1]] = f"rax_{n}"
+                new.append((ev + [("call", s[2], [lean_low(a, e) for a in s[3]])], e2))
             elif k == "trap": pass
             elif k == "ite":
                 tp, ep = paths(s[2], e), paths(s[3], e); split = bool(tp) and bool(ep)
@@ -542,7 +549,7 @@ if STRAIGHT:
              f"{ind}all_goals try dsimp only"]
         t += outside_goal(ind, has_out)
         t += [f"{ind}· simp only [{OPEN_C}]"]
-        t += [f"{ind}  apply {LEAVE} <;> mem_auto"] if LEAVE else [f"{ind}  repeat' (with_reducible apply And.intro)", f"{ind}  all_goals (first | trivial | assumption)"]
+        t += [f"{ind}  apply {LEAVE} <;> mem_auto"] if LEAVE else [f"{ind}  repeat' (with_reducible apply And.intro)", f"{ind}  all_goals (first | trivial | assumption | (apply_frame <;> mem_auto))"]
         return t
 
     def leaf(ev, ind):

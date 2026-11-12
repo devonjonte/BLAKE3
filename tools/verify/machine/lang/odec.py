@@ -75,7 +75,7 @@ def contracts_of(text):
         # in a function's body: a call of such a function, then what the prover needs at it, one a line:
         # `with TERM; TERM` (what its contract is stated for besides the arguments) and `keep CLAUSE` (what
         # still holds after it, besides what its contract promises)
-        m = re.match(r"^(\w+)\(.*\)$", s)
+        m = re.match(r"^(?:return\s+|(?:var\s+)?\w+\s*=\s*)?(\w+)\(.*\)$", s)
         if fn and where is None and m and m.group(1) in own:
             out[fn]["calls"].append({"callee": m.group(1), "with": [], "keep": []}); kept.append(line); continue
         word0 = s.split(None, 1)[0] if s else ""
@@ -268,6 +268,22 @@ class Lower:
             return ("const", f(a[1], b[1]))
         return (k, a, b)
 
+    def result_call(self, x, e, env, fn, out):
+        """`x = f(args)` for a function called by its symbol (an extern, or a function of this file): the
+        call, its result kept in x. False if `e` is no such call."""
+        own = {f[0]: len(f[1]) for f in self.p.fns}
+        if e[0] != "call" or e[1] in self.p.edefs or not (e[1] in own or e[1] in self.p.externs):
+            return False
+        sym, n = (f"b3l_{e[1]}", own[e[1]]) if e[1] in own and e[1] not in self.p.externs else self.p.externs[e[1]]
+        args = [self.expr(a, env) for a in e[2]]
+        assert len(args) == n, f"{e[1]} takes {n} arguments"
+        for a in args:
+            assert a[0] in ("const", "var"), f"{e[1]}: an argument is a number, a variable or a buffer"
+        if sym not in fn["externs"]:
+            fn["externs"].append(sym)
+        out.append(("callr", x, sym, args))
+        return True
+
     def stmts(self, body, env, fn):
         out = []
         for s in body:
@@ -275,9 +291,11 @@ class Lower:
             if k == "var":
                 if s[1] not in fn["locals"] and s[1] not in fn["params"]:
                     fn["locals"].append(s[1])
-                out.append(("set", s[1], self.expr(s[2], env)))
+                if not self.result_call(s[1], s[2], env, fn, out):
+                    out.append(("set", s[1], self.expr(s[2], env)))
             elif k == "set":
-                out.append(("set", s[1], self.expr(s[2], env)))
+                if not self.result_call(s[1], s[2], env, fn, out):
+                    out.append(("set", s[1], self.expr(s[2], env)))
             elif k == "buf":
                 fn["bufs"].append((s[1], self.value(s[2], env)))
             elif k == "store":
@@ -305,7 +323,13 @@ class Lower:
             elif k == "trap":
                 out.append(("trap",))
             elif k == "return":
-                fn["ret"] = self.expr(s[1], env); fn["returns"] = True
+                fn["returns"] = True
+                if s[1][0] == "call" and s[1][1] not in self.p.edefs:      # `return f(args)`: the callee's result, through a variable
+                    if "result_" not in fn["locals"]: fn["locals"].append("result_")
+                    assert self.result_call("result_", s[1], env, fn, out), s[1]
+                    fn["ret"] = ("var", "result_")
+                else:
+                    fn["ret"] = self.expr(s[1], env)
             elif k == "call":
                 if s[1] in self.p.sdefs:
                     params, body = self.p.sdefs[s[1]]
@@ -340,6 +364,7 @@ class Lower:
         if k == "store": return f".store {s[1]} {E(s[2])} {E(s[3])}"
         if k == "copy": return f".copy {s[1]} {E(s[2])} {E(s[3])}"
         if k == "call": return f'.call "{s[1]}" [{", ".join(E(a) for a in s[2])}]'
+        if k == "callr": return f'.callr "{s[1]}" "{s[2]}" [{", ".join(E(a) for a in s[3])}]'
         if k == "ite": return f".ite (.{s[1][0]} {E(s[1][1])} {E(s[1][2])}) {B(s[2])} {B(s[3])}"
         if k == "while": return f".while (.{s[1][0]} {E(s[1][1])} {E(s[1][2])}) {B(s[2])}"
         return ".trap"

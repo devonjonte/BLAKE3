@@ -44,6 +44,8 @@ inductive Stmt
   /-- A call of a C-ABI function of the library (a kernel), with up to six arguments, each a
       constant, a variable or a buffer's address. No result. -/
   | call (f : String) (args : List Exp)
+  /-- The same call, its result kept in a variable. -/
+  | callr (x : Var) (f : String) (args : List Exp)
   | ite (c : Cond) (t e : List Stmt)
   | while (c : Cond) (body : List Stmt)
   /-- The contract is broken: stop the program. -/
@@ -100,6 +102,7 @@ mutual
     | .store w a e => s!"{ind}core::ptr::write_unaligned(({a.rust}) as *mut u{w}, ({e.rust}) as u{w});\n"
     | .copy n d s => s!"{ind}core::ptr::copy_nonoverlapping(({s.rust}) as *const u8, ({d.rust}) as *mut u8, {n});\n"
     | .call f args => s!"{ind}{f}({", ".intercalate (args.map Exp.rust)});\n"
+    | .callr x f args => s!"{ind}{x} = {f}({", ".intercalate (args.map Exp.rust)});\n"
     | .ite c t e => s!"{ind}if {c.rust} \{\n{Stmts.rust (ind ++ "    ") t}{ind}} else \{\n{Stmts.rust (ind ++ "    ") e}{ind}}\n"
     | .while c b => s!"{ind}while {c.rust} \{\n{Stmts.rust (ind ++ "    ") b}{ind}}\n"
     | .trap => s!"{ind}core::arch::asm!(\"ud2\", options(noreturn));\n"
@@ -113,6 +116,7 @@ end
 partial def arity (f : String) : List Stmt → Option Nat
   | [] => none
   | .call g args :: rest => if g == f then some args.length else arity f rest
+  | .callr _ g args :: rest => if g == f then some args.length else arity f rest
   | .ite _ t e :: rest => (arity f t).orElse fun _ => (arity f e).orElse fun _ => arity f rest
   | .while _ b :: rest => (arity f b).orElse fun _ => arity f rest
   | _ :: rest => arity f rest
@@ -166,6 +170,7 @@ def idxOf (xs : List String) (x : String) : Nat := (xs.findIdx? (· == x)).getD 
 partial def maxArgs : List Stmt → Nat
   | [] => 0
   | .call _ args :: rest => max args.length (maxArgs rest)
+  | .callr _ _ args :: rest => max args.length (maxArgs rest)
   | .ite _ t e :: rest => max (max (maxArgs t) (maxArgs e)) (maxArgs rest)
   | .while _ b :: rest => max (maxArgs b) (maxArgs rest)
   | _ :: rest => maxArgs rest
@@ -250,6 +255,9 @@ mutual
       -- the seventh argument on goes to the bottom of the frame (through RAX), then the six registers
       let onStack := ((args.drop 6).zipIdx).flatMap fun (a, i) => [argAsm L "rax" a, s!"mov qword ptr [rsp + {8 * i}], rax"]
       (onStack ++ (args.zip abiArgs).map (fun (a, r) => argAsm L r a) ++ [s!"call CALL({f})"], n)
+    | .callr x f args =>
+      let onStack := ((args.drop 6).zipIdx).flatMap fun (a, i) => [argAsm L "rax" a, s!"mov qword ptr [rsp + {8 * i}], rax"]
+      (onStack ++ (args.zip abiArgs).map (fun (a, r) => argAsm L r a) ++ [s!"call CALL({f})", s!"mov {L.home x}, rax"], n)
     | .ite c t e =>
       let lelse := s!".L{fn}_{n}"; let lend := s!".L{fn}_{n + 1}"
       let (tc, n1) := Stmts.asm L fn (n + 2) t
@@ -284,6 +292,7 @@ def Fn.asm (f : Fn) : String :=
 partial def retarget (old new : String) : List Stmt → List Stmt
   | [] => []
   | .call g args :: rest => .call (if g == old then new else g) args :: retarget old new rest
+  | .callr x g args :: rest => .callr x (if g == old then new else g) args :: retarget old new rest
   | .ite c t e :: rest => .ite c (retarget old new t) (retarget old new e) :: retarget old new rest
   | .while c b :: rest => .while c (retarget old new b) :: retarget old new rest
   | s :: rest => s :: retarget old new rest

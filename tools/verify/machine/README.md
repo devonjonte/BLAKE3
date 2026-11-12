@@ -153,7 +153,7 @@ level at a time, each turn a call of `merge` with a target one less than the cou
 instructions); `merge_steps_meets : ∀ …, Abi.Meets Code_merge_steps.prog 0xA0000 (MergeSteps.contract …)`,
 generated, checked on the generator's first run. `MergeSteps.contract` is `Merge.contract`'s text with 512
 bytes of stack in place of 256: a function that calls `merge` cannot fit in `merge`'s own budget.
-Lemmas by hand: `Lemmas_merge_steps.lean` (80 lines: merging in steps is merging).
+Lemmas by hand: `Lemmas_merge_steps.lean` (80 lines: merging in steps is merging). Audit: 38 of 38 no-ops refused.
 
 **An audit for any function (`python3 mutants_code.py NAME`, November 12):** each instruction in turn is
 made a no-op; the proof must refuse, and the examples say first whether they see it. The control is an
@@ -172,10 +172,10 @@ proved on an empty stack and zeroes. `prove_fn.sh` refuses a function whose cont
 
 **`add` (November 12): a function that calls two others by their contracts.** `Spec_add.lean`:
 `Add.contract` (a chunk's value arrives: the stack turns into `Merge.result` of the stack with the value on
-it). `./prove_fn.sh add 0x80000`: `add_meets : ∀ …, Abi.Meets Code_add.prog 0x80000 (Add.contract …)`,
+it, and the result is its count: `merge`'s result, returned). `./prove_fn.sh add 0x80000`: `add_meets : ∀ …, Abi.Meets Code_add.prog 0x80000 (Add.contract …)`,
 generated, checked in about 30 s: at each call `Abi.call_meets` with the callee's theorem (`push_meets`,
 `merge_meets`) and nothing of its code. `./swap.sh`: with `merge_sse` (another implementation, proved to
-meet `Merge.contract`) named in the one `callee` line, `add` is proved again; 4 of 143 generated lines
+meet `Merge.contract`) named in the one `callee` line, `add` is proved again; 4 of 147 generated lines
 differ. Once, for all functions: `one/Dom.lean` (`steps_dom`: no run changes which addresses are the
 program's), `AbiCall.lean` (`Abi.Meets.mono`, `Abi.call_meets`).
 

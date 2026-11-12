@@ -50,7 +50,7 @@ theorem whole (fb st key flags plat cv target ra : BitVec 64) (sv : Abi.Saved) (
     all_goals bv_decide
   · simp only [Push.contract]
     repeat' (with_reducible apply And.intro)
-    all_goals assumption
+    all_goals (first | assumption | bv_decide)
   · dsimp only
     simp only [Push.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
     repeat' (with_reducible apply And.intro)
@@ -71,7 +71,7 @@ theorem whole (fb st key flags plat cv target ra : BitVec 64) (sv : Abi.Saved) (
     have hS1_5 : Quad mem1 (fb + 280#64) sv.r14 := X86.Quad.frame (by mem_fact) (fun x hx => hout1 x (by bv_decide) (by bv_decide))
     have hS1_6 : Quad mem1 (fb + 272#64) sv.r15 := X86.Quad.frame (by mem_fact) (fun x hx => hout1 x (by bv_decide) (by bv_decide))
     have hK1_0 : Cv.At mem1 key k := Cv.At.frame (m := m0) (by assumption) (fun x hx => by rw [hout1 x (by bv_decide) (by bv_decide)]; first | rfl | mem_away)
-    have hOut1 : (∀ x : BitVec 64, (Abi.Contract.framed (Add.contract st key flags plat cv target k new cvs) 320#64).stack + 8#64 ≤ x - fb → (∀ r ∈ (Abi.Contract.framed (Add.contract st key flags plat cv target k new cvs) 320#64).modifies, r.2 ≤ x - r.1) → mem1 x = m0 x) := by
+    have hOut : (∀ x : BitVec 64, (Abi.Contract.framed (Add.contract st key flags plat cv target k new cvs) 320#64).stack + 8#64 ≤ x - fb → (∀ r ∈ (Abi.Contract.framed (Add.contract st key flags plat cv target k new cvs) 320#64).modifies, r.2 ≤ x - r.1) → mem1 x = m0 x) := by
       intro x hx hmod
       have hx' := hx
       have hmod' := hmod
@@ -92,7 +92,7 @@ theorem whole (fb st key flags plat cv target ra : BitVec 64) (sv : Abi.Saved) (
       all_goals bv_decide
     · simp only [Merge.contract]
       repeat' (with_reducible apply And.intro)
-      all_goals assumption
+      all_goals (first | assumption | bv_decide)
     · dsimp only
       simp only [Merge.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
       repeat' (with_reducible apply And.intro)
@@ -112,23 +112,27 @@ theorem whole (fb st key flags plat cv target ra : BitVec 64) (sv : Abi.Saved) (
       have hS2_4 : Quad mem2 (fb + 288#64) sv.r13 := X86.Quad.frame (by mem_fact) (fun x hx => hout2 x (by bv_decide) (by bv_decide))
       have hS2_5 : Quad mem2 (fb + 280#64) sv.r14 := X86.Quad.frame (by mem_fact) (fun x hx => hout2 x (by bv_decide) (by bv_decide))
       have hS2_6 : Quad mem2 (fb + 272#64) sv.r15 := X86.Quad.frame (by mem_fact) (fun x hx => hout2 x (by bv_decide) (by bv_decide))
-      have hOut2 : (∀ x : BitVec 64, (Abi.Contract.framed (Add.contract st key flags plat cv target k new cvs) 320#64).stack + 8#64 ≤ x - fb → (∀ r ∈ (Abi.Contract.framed (Add.contract st key flags plat cv target k new cvs) 320#64).modifies, r.2 ≤ x - r.1) → mem2 x = m0 x) := by
+      have hOut : (∀ x : BitVec 64, (Abi.Contract.framed (Add.contract st key flags plat cv target k new cvs) 320#64).stack + 8#64 ≤ x - fb → (∀ r ∈ (Abi.Contract.framed (Add.contract st key flags plat cv target k new cvs) 320#64).modifies, r.2 ≤ x - r.1) → mem2 x = m0 x) := by
         intro x hx hmod
         have hx' := hx
         have hmod' := hmod
         simp only [Add.contract, Abi.Contract.framed, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, BitVec.reduceAdd] at hx' hmod'
         rw [hout2 x (by bv_decide) (by bv_decide)]
-        refine Eq.trans ?_ (hOut1 x hx hmod); first | rfl | mem_away
+        refine Eq.trans ?_ (hOut x hx hmod); first | rfl | mem_away
       clear hout2 hown2
-      refine runs_then (a := 8) (s1 := ?_) ?_ ?_
+      refine runs_then (a := 10) (s1 := ?_) ?_ ?_
       case refine_2 => run_fn []; rfl
       refine runs_done ⟨rfl, by simp only [Add.contract, Abi.Contract.framed]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩
       all_goals try dsimp only
       · intro x hx hmod
-        exact hOut2 x hx hmod
+        refine Eq.trans ?_ (hOut x hx hmod)
+        have hx' := hx
+        have hmod' := hmod
+        simp only [Add.contract, Abi.Contract.framed, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, BitVec.reduceAdd] at hx' hmod'
+        first | rfl | mem_away
       · simp only [Add.contract, Abi.Contract.framed, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
         repeat' (with_reducible apply And.intro)
-        all_goals (first | trivial | assumption)
+        all_goals (first | trivial | assumption | (apply_frame <;> mem_auto))
 
 /-- **`add`, as assembled, meets its contract, whatever its arguments.** -/
 theorem add_meets : ∀ (st key flags plat cv target : BitVec 64) (k : Blake3.CV) (new : Blake3.CV) (cvs : List Blake3.CV),
