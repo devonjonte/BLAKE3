@@ -3,3 +3,6 @@
 # nextest's clock stops one (tools/mutants/check.py, TIMEOUTS). Their own
 # outcome: neither caught nor survived.
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
+src/ffi_neon_hybrid.rs	replace += with *= in xof_many	1	as on aarch64: times out (timeouts-aarch64.txt): a loop variant broken: `done` stays 0 (0 *= n), so the extended-output loop never advances; the clock stops the XOF tests
+src/hasher.rs	replace << with >> in subtree_len	1	as on aarch64: times out (timeouts-aarch64.txt): a loop variant broken: a subtree of 0 bytes consumes nothing, so the Hasher's staging loop never advances; the clock stops the first test that hashes past a chunk
+src/hasher.rs	replace subtree_len -> usize with 0	1	as on aarch64: times out (timeouts-aarch64.txt): a loop variant broken: a subtree of 0 bytes consumes nothing, so the Hasher's staging loop never advances; the clock stops the first test that hashes past a chunk
