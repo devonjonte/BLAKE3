@@ -41,6 +41,13 @@ small batch amid other work has no such call yet. Call after call, both
 are as fast as before or faster. The release runs give the figures; an
 Apple M6's are in #364.
 
+## Reads slower than 0.8, cause not yet known
+
+- **Single-threaded `hash_many` over a batch of 2 or 4 messages, after a
+  brief pause (20 μs):** 4.4% and 3.2% more time on two EPYC 7443; level
+  on an i7-12700K. The two sides were measured under two versions of the
+  benchmark, so the library's part in it is not yet separated (#369).
+
 ## Faster, already on `next`
 
 - **A Hasher's in-place checkpoint copies only the bytes it has staged**
