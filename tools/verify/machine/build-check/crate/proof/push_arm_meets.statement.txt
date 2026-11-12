@@ -1,0 +1,4 @@
+theorem push_arm_meets (prog : Arm64.Program) (h_code : Arm64.FnCode.holds push_arm_code prog)
+  (st cv : BitVec (OfNat.ofNat 64)) (new : Blake3.CV) (cvs : List Blake3.CV) :
+  Arm64.Program.subroutineOk prog "b3l_push" (ArmAbi.spec (Push.byteContract st cv new cvs)) :=
+  _

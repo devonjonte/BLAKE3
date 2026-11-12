@@ -26,7 +26,13 @@ b. **Checking the proof is fast.**
 c. **Checking is automatic, the default in normal conditions:** if Bob builds from source, the proof is
    checked in that build, and the build fails if it does not check.
 
-What (c) asks of the system, none of it done: a checker that a build can run without Bob installing Lean (an
+**Tried (November 12, `build-check/`):** a Rust crate whose build script has nanoda check Lean's export of
+`push_arm_meets` (5,061 declarations; 1.4 s on an Apple M6 with the checker optimized, 11.8 s as Cargo builds
+build scripts by default), compares the checked statement with the text read, and assembles the instruction
+words *from the checked theorem*: the linked bytes have no other source. Changed words, sizes and statements
+fail the build. Its README lists what that does not yet show.
+
+What (c) asks of the system, beyond that trial: a checker that a build can run without Bob installing Lean (an
 independent checker reading exported proofs is the candidate: nanoda is a Rust library); proofs with no axiom
 beyond Lean's three (an independent checker refuses `bv_decide`'s; only `push_arm_meets` qualifies today);
 statements about the bytes the build links, not about a table made from a listing (true on AArch64, not yet

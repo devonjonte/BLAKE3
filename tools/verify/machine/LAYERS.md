@@ -79,7 +79,7 @@ theorem in the world shares most of it: this is the layer most shared of all.
 | checker | lines | notes |
 |---|---|---|
 | Lean's own kernel (`src/kernel`, C++, v4.34.1) | 8,071 in 36 files | on Lean's runtime (17,559 lines) and GMP for large numbers |
-| nanoda (an independent checker, Rust) | 10,258 in 22 files | reads Lean's exported proofs; takes a list of permitted axioms |
+| nanoda (an independent checker, Rust) | 8,760 in 16 files without its tests; the checking itself 5,320 | reads Lean's exported proofs; takes a list of permitted axioms; tried in `build-check/` |
 | lean4lean's checker (the kernel written in Lean) | 3,901 in 18 files | partly proved correct in Lean; itself compiled by Lean |
 
 Running a second, independent checker over the same proof is the usual answer to "is the kernel right": then

@@ -1,0 +1,20 @@
+[package]
+name = "checked-push"
+version = "0.0.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+description = "Trial: a build that checks the proof of the code it links, with an independent checker of Lean proofs."
+
+[build-dependencies]
+nanoda_lib = { git = "https://github.com/ammkrn/nanoda_lib", rev = "0da9f98feadd3a0a2ef4b3dbcf52a298a6fef929" }
+flate2 = "1"
+cc = "1"
+
+# The checker runs in the build script. Cargo builds build scripts unoptimized unless told otherwise, and
+# only the top crate of a build can tell it: a user of a library with such a build script gets the slow
+# checker (measured: 11.8 s against 1.4 s on an Apple M6) unless their own Cargo.toml has these lines too.
+[profile.release.build-override]
+opt-level = 3
+[profile.dev.build-override]
+opt-level = 3

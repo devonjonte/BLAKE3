@@ -1,0 +1,35 @@
+theorem push_arm_meets (prog : Arm64.Program) (h_code : Arm64.FnCode.holds push_arm_code prog)
+  (st cv : BitVec (OfNat.ofNat 64)) (new : Blake3.CV) (cvs : List Blake3.CV) :
+  Arm64.Program.subroutineOk prog "b3l_push" (ArmAbi.spec (Push.byteContract st cv new cvs)) :=
+  _
+
+def push_arm_code :
+  Arm64.FnCode :=
+  Arm64.FnCode.ofFn "b3l_push"
+    (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2852127728))
+      (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 4181721616))
+        (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2853176297))
+          (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2852193264))
+            (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2852127729))
+              (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 3531605000))
+                (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2332557873))
+                  (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2852717544))
+                    (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 3548113160))
+                      (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2332557873))
+                        (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2906654208))
+                          (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2902459936))
+                            (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2852717552))
+                              (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 3531604017))
+                                (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2333147664))
+                                  (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 2852127729))
+                                    (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 4177527344))
+                                      (List.cons (BitVec.ofNat (OfNat.ofNat 32) (OfNat.ofNat 3596551104))
+                                        List.nil))))))))))))))))))
+
+axiom propext {a b : Sort 0} : Iff a b → Eq a b
+
+axiom Quot.sound.{u} {α : Sort u} {r : α → α → Sort 0} {a b : α} :
+  r a b → Eq (Quot.mk r a) (Quot.mk r b)
+
+axiom Classical.choice.{u} {α : Sort u} : Nonempty α → α
+

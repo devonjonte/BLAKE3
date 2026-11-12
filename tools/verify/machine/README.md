@@ -90,6 +90,9 @@ Known limits, stated so nobody takes these for more than they are:
 
 **One command:** `./prove_all.sh` goes from the source to checked theorems for everything the language's
 compiler proves, on both architectures, one line a function (`AUDIT=1` adds the audits).
+**A build that checks its proof:** `build-check/` (a trial: a Rust crate's build has an independent checker,
+nanoda, check the theorem about the code it then links; its README has the times and controls).
+
 **What two auditors share:** `LAYERS.md` puts what a reader must read in layers (the machine; what a contract is;
 BLAKE3 and its data; the function's contract; its instructions) and counts what pairs of auditors read in common.
 
