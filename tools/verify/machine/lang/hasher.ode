@@ -50,30 +50,31 @@ fn push(st, cv)
 }
 
 // While the stack holds more than target values, its top two become their parent.
-// The contract: what a caller owes (requires) and gets (ensures), and what holds each time the loop's
-// head is reached (invariant). The compiler writes the theorem these make and its proof; Lean checks it.
-// Stack.holds, Stack.merged and the lemmas named are in StackSpec.lean.
+// What merge is claimed to do is its statement, in Lean, for a reader: Merge.statement (Spec_merge.lean).
+// Here is only what the prover needs and no reader does: what holds each time the loop's head is reached,
+// what gets smaller, and the lemmas (StackSpec.lean, StackBridge.lean) that open the statement's view of
+// memory at entry, carry a clause across a turn, and close it when the loop ends.
 fn merge(st, key, flags, plat, target)
-  spec StackSpec
-  ghost es0: Stack.Cvs, k0: vec, k1: vec, len0: word
+  spec Spec_merge
+  spec StackBridge
+  meets Merge.contract(k: Blake3.CV, cvs: List Blake3.CV) as Merge.statement
   predicate Stack.holds cells Stack.cells frame Stack.frame
-  region st[1792], key[32]
-  requires target >= 1
-  requires flags < 256
-  requires Stack.holds(st, len0, es0)
-  requires vec[key] == k0
-  requires vec[key + 16] == k1
-  ensures  Stack.holds(st, result, Stack.merged(k0, k1, low8(flags | PARENT), target, es0)) by Stack.merged_exit
-  modifies st
+  enter open Stack.holds_of_at as len0, es0
+  enter open Cv.vectors as k0, k1
+  leave by Merge.exit
 {
   buf block[64]
   buf pcv[32]
   var len = u64[st]
   var pf = flags | PARENT
   while target < len
-    ghost es: Stack.Cvs
+    ghost es: Stack.Cvs, es0: Stack.Cvs, k0: vec, k1: vec
+    invariant target >= 1
+    invariant flags < 256
     invariant Stack.holds(st, len, es) by Stack.close_merge
     invariant Stack.merged(k0, k1, low8(pf), target, es) == Stack.merged(k0, k1, low8(pf), target, es0) by Stack.merged_turn
+    invariant Stack.Views(es0, cvs)
+    invariant Cv.Is(k0, k1, k)
     invariant pf == flags | PARENT
     invariant vec[key] == k0
     invariant vec[key + 16] == k1

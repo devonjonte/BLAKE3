@@ -39,10 +39,14 @@ statement would be such a thing: trusted, or one more text to read.
   the prover's hints are internal: Lean checks that they give the statement.
 - A function no user calls needs no reader at all: its statement is an interface between two proofs.
 
-State on November 11: `merge_meets : Merge.statement` is proved (`Meets_merge.lean`), from the compiler's
-theorem; that last step (70 lines) is still written by hand and is the generator's to write. The clauses
-`requires` and `ensures` in `hasher.ode` now say the same thing twice and are to go; `invariant`,
-`decreases` and the hints stay in the source.
+State on November 12: the compiler writes all of it. The source says `meets Merge.contract(...) as
+Merge.statement` and gives only what the prover needs (the loop's `invariant` clauses, `decreases`, and
+the names of the lemmas that open the statement's view of memory at entry, carry a clause across a
+turn, and close it when the loop ends); `prove_fn.py` writes `Proof_merge.lean`, whose last theorem is
+`merge_meets : Merge.statement`. The source no longer has `requires` or `ensures`: there is one
+statement, and it is in Lean. Written by hand: the statement (`Spec_merge.lean`, `Spec_stack.lean`: 31
+lines of definitions), and, once for the data structure, its lemmas (`StackSpec.lean`,
+`StackBridge.lean`, `MergeTree.lean`).
 
 ## Pinning the blame
 

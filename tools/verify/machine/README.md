@@ -108,24 +108,23 @@ rejected. On the EPYC 9255 host it takes 1.9 ns a call where the crate's `to_hex
 12.8; a million random hashes agree. A candidate for the crate that uses it: branch
 `candidate/sam-hex-constant-time`.
 
-**`./prove_fn.sh`: a function with a contract, from source to a checked theorem.** `merge` (the tree
-hashing's loop: while the stack holds more than `target` values, the top two become their parent) carries
-its contract in the source: `requires` (the stack held at `st`, the key, `target >= 1`, `flags < 256`),
-on its loop `invariant` (the stack held; what is left to merge gives the whole result) and `decreases`,
-and `ensures` (the stack merged to `target`). Clauses are the language's own expressions or name
-definitions of `StackSpec.lean`. `prove_fn.py` writes `Proof_merge.lean` from the clauses and the
-layout the compiler prints: `Pre`, `Inv` and `Post` over the machine's state (each variable where the
-compiler put it, the frame as the compiler keeps it), the three straight-line pieces (`enter`, `turn`,
-`leave`) by a symbolic run on memory in cells (`Cells.lean`) with the kernels' contracts at the calls
-(`Kernels.lean`) and a split where the invariant does not settle a condition, and
-**`merge_meets_its_contract`** by `Hoare.seq` and `Hoare.loop` (`one/Hoare.lean`): from any state where
-the `requires` clauses hold, the 93 instructions run without a fault, through however many turns, to
-the caller's return address, where the `ensures` clauses hold, its registers are back and no byte
-outside the frame and the stack's region has changed. About 100 s. `MergeTree.lean`: the stack the
-contract promises is the specification's `Blake3.mergeTo`, the function `alg/`'s `stack_is_the_tree`
-is about. Written by hand, once: `Cells.lean` (generic), `Kernels.lean`, `StackSpec.lean` (the data
-structure and its open and close lemmas), `MergeTree.lean`; nothing for the function itself.
-`python3 mutants_fn.py`: changed instructions and changed clauses, after a control.
+**`./prove_fn.sh`: a function and its statement, from source to a checked theorem.** `merge` (the tree
+hashing's loop: while the stack holds more than `target` values, the two newest become their parent) has
+its statement in Lean, written by hand for a reader: `Merge.statement` (`Spec_merge.lean`), a contract in
+the one vocabulary of `Abi.lean` (arguments, stack, regions, `requires`, `ensures`, `modifies`; `Abi.Meets`
+says what meeting it means under the calling convention), in the specification's terms: on return the
+stack is `Blake3.mergeTo` of the stack at the call. The source (`hasher.ode`) names the statement and
+gives the prover what no reader needs: the loop's `invariant` clauses, `decreases`, and the lemmas that
+open and close the statement's view of memory. `prove_fn.py` writes `Proof_merge.lean` from that and the
+layout the compiler prints: `Inv` over the machine's state, the three straight-line pieces (`enter`,
+`turn`, `leave`) by a symbolic run on memory in cells (`Cells.lean`) with the kernels' contracts at the
+calls (`Kernels.lean`), and **`merge_meets : Merge.statement`** by `Abi.meets_of_triple`, `Hoare.seq` and
+`Hoare.loop`. About 100 s from the source. `#reading_list Proof_merge.merge_meets` (`ReadingList.lean`)
+asks Lean what the statement depends on: 31 lines for `merge` and the stack's layout, 47 of `Abi.lean`,
+the specification, the machine model, the instructions. Written by hand, once: `Cells.lean`, `Abi.lean`,
+`AbiProof.lean` (generic), `Kernels.lean`, and for the stack `StackSpec.lean`, `StackBridge.lean`,
+`MergeTree.lean`; nothing for the function but its statement and its invariant.
+`python3 mutants_fn.py`: changed instructions, false statements and changed clauses, after a control.
 
 Limits: one loop, not nested; a loop-carried variable lives in a register; no call or condition outside
 the loop; the trace is not in this theorem; `push` and the hash itself carry no contract yet

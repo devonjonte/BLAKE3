@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Audit of the compiler's proof of `merge`: does a wrong program, or a wrong contract, fail?
+"""Audit of the compiler's proof of `merge`: does a wrong program, a wrong statement, or a missing invariant fail?
 
-First a control: an unchanged copy must be ACCEPTED (a copy that cannot build proves nothing).
-Then, each in its own copy of this folder:
-  - instructions changed one at a time in the lifter's rows, the proof text left as generated for
-    the right code: Lean must reject it;
-  - clauses of the source changed one at a time, the proof generated again from the changed source
-    (the assembly is the same): the generator or Lean must reject it.
+First a control: an unchanged copy, made to check the proof again, must be ACCEPTED (a copy that cannot
+build proves nothing). Then, each in its own copy of this folder:
+  - code: instructions changed one at a time in the lifter's rows, the proof text left as generated
+    for the right code;
+  - statement: the Lean statement a reader reads (Spec_merge.lean, Spec_stack.lean) changed to claim
+    something false, the proof text left as it is;
+  - clause: what the source gives the prover changed, and the proof generated again.
+Each must be rejected, by Lean or by the generator, within the time limit.
 usage: mutants_fn.py [JOBS]   (after ./prove_fn.sh; run from this folder)"""
 import os, shutil, signal, subprocess, sys, tempfile, time
 from concurrent.futures import ThreadPoolExecutor
@@ -31,14 +33,24 @@ code = [
     ("the second kernel call's flags come from another slot", ".mov 64 (.reg .r8) (.mem .rsp 0x60)", ".mov 64 (.reg .r8) (.mem .rsp 0x68)", 2),
     ("the result is not the length", ".mov 64 (.reg .rax) (.reg .r15)", ".mov 64 (.reg .rax) (.reg .r14)", 3),
 ]
+statement = [
+    ("the result claimed is merged to target + 1", "Spec_merge.lean", "target.toNat cvs) ∧", "(target.toNat + 1) cvs) ∧"),
+    ("nothing is said to be modified", "Spec_merge.lean", "modifies := [(st, 1792#64)]", "modifies := []"),
+    ("168 bytes of stack are said to be enough", "Spec_merge.lean", "stack := 176#64", "stack := 168#64"),
+    ("no `1 ≤ target` is required (then the trap can be reached)", "Spec_merge.lean", "1#64 ≤ target ∧ ", ""),
+    ("no `flags < 256` is required (then the two kernels read different flags)", "Spec_merge.lean", "flags < 256#64 ∧ ", ""),
+    ("the key is not said to be apart from the stack", "Spec_merge.lean", "regions := [(st, 1792#64), (key, 32#64)]", "regions := [(st, 1792#64)]"),
+    ("the arguments are in another order", "Spec_merge.lean", "args := [st, key, flags, plat, target]", "args := [key, st, flags, plat, target]"),
+    ("the key is not required to be at `key`", "Spec_merge.lean", " ∧ Cv.At m key k", ""),
+    ("the stack's values are said to be 16 bytes apart", "Spec_stack.lean", "st + 32#64 * BitVec.ofNat 64 cvs.length", "st + 16#64 * BitVec.ofNat 64 cvs.length"),
+    ("a chaining value's second half is said to be at byte 8", "Spec_stack.lean", "Vec m (a + 16#64) v1", "Vec m (a + 8#64) v1"),
+]
 clause = [
-    ("no `requires target >= 1` (then the trap can be reached)", "  requires target >= 1\n", ""),
-    ("no `requires flags < 256` (then the two kernels read different flags)", "  requires flags < 256\n", ""),
-    ("the result claimed is merged without the PARENT flag", "Stack.merged(k0, k1, low8(flags | PARENT), target, es0)) by Stack.merged_exit", "Stack.merged(k0, k1, low8(flags), target, es0)) by Stack.merged_exit"),
-    ("the stack's region is said to be 1000 bytes", "region st[1792], key[32]", "region st[1000], key[32]"),
+    ("the invariant forgets that target is at least 1", "    invariant target >= 1\n", ""),
+    ("the invariant forgets that the flags are below 256", "    invariant flags < 256\n", ""),
     ("the invariant forgets the key's second half", "    invariant vec[key + 16] == k1\n", ""),
     ("the invariant says pf is the flags alone", "    invariant pf == flags | PARENT\n", "    invariant pf == flags\n"),
-    ("the loop is said to end with the stack as it began", "ensures  Stack.holds(st, result, Stack.merged(k0, k1, low8(flags | PARENT), target, es0)) by Stack.merged_exit", "ensures  Stack.holds(st, result, es0)"),
+    ("the invariant forgets which key the vectors are", "    invariant Cv.Is(k0, k1, k)\n", ""),
 ]
 
 
@@ -60,6 +72,10 @@ def run(kind, what, old, new, n=1):
         if kind == "control":
             # a line added to the proof's file, so the copy checks the proof again and does not answer from what was built
             with open(os.path.join(w, "Proof_merge.lean"), "a") as f: f.write("\n-- the control's copy\n")
+        if kind == "statement":
+            fname, old = old
+            s = open(os.path.join(w, fname)).read(); assert s.count(old) >= 1, old
+            with open(os.path.join(w, fname), "w") as f: f.write(s.replace(old, new, 1))
         if kind == "code":
             t = open(os.path.join(w, ROWS)).read(); assert old in t, old
             with open(os.path.join(w, ROWS), "w") as f: f.write(nth_replace(t, old, new, n))
@@ -88,11 +104,11 @@ k, w, verdict, secs, _ = run("control", "the unchanged copy", "", "")
 print(f"control: {verdict} in {secs:.0f} s", flush=True)
 if verdict != "ACCEPTED" or secs < 20:
     raise SystemExit("the control failed (or answered without checking): the audit proves nothing")
-todo = [("code", *m) for m in code] + [("clause", *m, 1) for m in clause]
+todo = [("code", *m) for m in code] + [("statement", what, (fname, old), new, 1) for what, fname, old, new in statement] + [("clause", *m, 1) for m in clause]
 tally = {}
 with ThreadPoolExecutor(jobs) as pool:
     for kind, what, verdict, secs, first in pool.map(lambda m: run(*m), todo):
         print(f"{verdict:<26} {secs:5.0f} s  {kind}: {what}" + (f"   [{first}]" if first else ""), flush=True)
         key = "accepted" if verdict == "ACCEPTED" else "no verdict" if verdict.startswith("NO") else "rejected"
         tally[key] = tally.get(key, 0) + 1
-print(f"{len(code)} changed instructions and {len(clause)} changed clauses: " + ", ".join(f"{n} {k}" for k, n in sorted(tally.items())))
+print(f"{len(code)} changed instructions, {len(statement)} false statements and {len(clause)} changed clauses: " + ", ".join(f"{n} {k}" for k, n in sorted(tally.items())))

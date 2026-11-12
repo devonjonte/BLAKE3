@@ -41,3 +41,9 @@ name = "Abi"
 name = "Spec_merge"
 [[lean_lib]]
 name = "Meets_merge"
+[[lean_lib]]
+name = "AbiProof"
+[[lean_lib]]
+name = "Spec_stack"
+[[lean_lib]]
+name = "StackBridge"

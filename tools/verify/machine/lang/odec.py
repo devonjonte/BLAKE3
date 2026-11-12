@@ -43,7 +43,7 @@ import json, re, sys
 TOKEN = re.compile(r"\s*(?:(//[^\n]*)|(0x[0-9a-fA-F_]+|\d[\d_]*)|([A-Za-z_][A-Za-z_0-9]*)|(\"[^\"]*\")|(<<|>>|<=|>=|==|!=|<-|\.\.|[-+&|()\[\]{}<>=,/]))")
 
 
-CLAUSES = ("spec", "ghost", "predicate", "region", "requires", "ensures", "modifies", "invariant", "decreases", "open", "assert")
+CLAUSES = ("spec", "meets", "enter", "leave", "ghost", "predicate", "invariant", "decreases", "open", "assert")
 
 
 def contracts_of(text):
