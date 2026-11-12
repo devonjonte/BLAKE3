@@ -4,6 +4,7 @@
 # A line: file <TAB> mutant (function and change) <TAB> places <TAB> reason.
 files: src/finish.rs src/lanes.rs src/park.rs src/stream.rs src/lib.rs
 model files: src/finish.rs src/park.rs
+src/finish.rs	delete ! in Finish::wait	1	OPEN: the pool's scheduling: `if poll()` leaves the polls for the park as soon as a poll did work; whether a test then hangs depends on the machine: it survives on five x86-64 machines of 16 to 112 threads (whole runs at 5c0247cd, November 12), and times out on aarch64 (timeouts-aarch64.txt)
 src/lanes.rs	delete ! in initialize	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	delete ! in sources::take_stream_task	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lanes.rs	replace && with || in initialize	2	compiled out on x86: the SME2 thread (cfg!(blake3_sme2) is false, so the expression is false whatever the comparison)
@@ -26,4 +27,5 @@ src/lanes.rs	replace prefix_for -> usize with 1	1	speed: how the work is cut amo
 src/lanes.rs	replace sme2_main with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/lanes.rs	replace sources::take_stream_task -> Option<Task> with None	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/lanes.rs	replace | with ^ in Task::run_equal_members	4	equivalent: | and ^ agree on flag bits that never overlap
+src/lib.rs	replace __all_workers_parked -> bool with true	1	as on aarch64: survives (known-aarch64.txt): a test-only hook (__all_workers_parked, the stream tests' wait for every worker parked): a yes too soon only shortens their wait, and they check what they checked before
 src/park.rs	replace > with >= in Park::wake_for	1	equivalent: `later >= 0` adds `later` to the owed when it is 0, which is adding nothing; the `if` keeps an atomic add off the path of a job that owes none
