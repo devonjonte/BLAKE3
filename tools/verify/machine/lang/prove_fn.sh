@@ -46,8 +46,9 @@ fi
 # first the quick answer: the function run on its examples (Example_NAME.lean) and compared with the contract.
 # At least one example must meet what the contract requires (a contract nothing can meet proves nothing),
 # and none may be refuted; a refutation says whether the source or the compiler's code is at fault.
-if [ -f "Example_$name.lean" ]; then
-  lake build "Code_$name" "Example_$name" Checks TrySem HasherOde > "$name.try.build.log" 2>&1 || { grep -E "error" "$name.try.build.log" | head -n 5; echo "the examples of $name do not build"; exit 1; }
+examples=$(echo "$spec" | sed 's/^Spec_/Example_/')       # the contract's examples: every function that meets it is tried on them
+if [ -f "$examples.lean" ]; then
+  lake build "Code_$name" "$examples" Checks TrySem HasherOde > "$name.try.build.log" 2>&1 || { grep -E "error" "$name.try.build.log" | head -n 5; echo "the examples of $name do not build"; exit 1; }
   python3 try_fn.py hasher.ode "$name" "Lifted_$name.lean.rows" || { echo "the compiler's proof of $name: NOT checked (the examples above)"; exit 1; }
 fi
 python3 prove_fn.py hasher.ode "$name" "Lifted_$name.lean.rows" "$name.layout" "Proof_$name.lean"

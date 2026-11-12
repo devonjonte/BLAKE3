@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Try a function on its examples: run the machine model on each and compare with the contract.
 
-usage: try_fn.py SOURCE.ode NAME ROWS      (after `lake build Code_NAME Example_NAME Checks`)
+usage: try_fn.py SOURCE.ode NAME ROWS      (after `lake build Code_NAME Example_CONTRACT Checks`)
 
 The function's contract (Lean, `Spec_NAME.lean`) is read in parts by `#pieces` (Checks.lean); its examples
-are `NAMESPACE.examples` in `Example_NAME.lean`, tuples of the contract's parameters. For each example
+are `Xyz.examples` in `Example_xyz.lean` for the contract `Xyz.contract` (every function that meets the
+contract is tried on them), tuples of the contract's parameters. For each example
 this builds a memory holding what the contract's pieces say, checks that the example meets what the
 contract requires, runs the assembled function in the machine model, and checks what the contract
 ensures. A layout `X.layout` is put into memory and tested by `X.sample` (`Sample_*.lean`).
@@ -50,7 +51,7 @@ L = f"""import Try
 import TrySem
 import HasherOde
 import Code_{name}
-import Example_{name}
+import Example_{CNAME.split('.')[0].lower()}
 open X86
 
 /-! Written by try_fn.py from what `#pieces {CNAME}` read in the contract. A test by running, not a proof. -/
@@ -61,7 +62,7 @@ namespace Try_{name}
 def blame : {types} → Mem → String
   | ({names}), m0 =>
     let c := {CNAME} {' '.join(n for n, _ in params)}
-    match Try.source Ode.{name} c.args m0 with
+    match Try.sourceIn Ode.all Ode.{name} c.args m0 with
     | none => "The source traps on it too (or does not end): the source or the contract is wrong."
     | some ({returns[0]}, m') =>
       let m0' : Mem := fun x => some ((m0 x).getD 0)

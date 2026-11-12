@@ -38,9 +38,27 @@ def semEnv (f : L.Fn) : L.Env where
       | _ => none
     else none
 
+instance : Inhabited L.Env := ⟨⟨fun _ => 0, fun _ _ _ => none⟩⟩
+
+/-- The same, where the source calls other functions of the file (`fs`): to the source such a call is the
+callee's own source, run. -/
+partial def semEnvIn (fs : List L.Fn) (f : L.Fn) : L.Env :=
+  { semEnv f with
+    ext := fun g args m =>
+      match (semEnv f).ext g args m with
+      | some m' => some m'
+      | none =>
+        match fs.find? (·.name == g) with
+        | some h => (L.Fn.run (semEnvIn fs h) 20000 h args m).map fun (_, st) => st.mem
+        | none => none }
+
 /-- Run the source on a machine memory (bytes the program does not own read as zero), for at most 20000
 statements deep. -/
 def source (f : L.Fn) (args : List (BitVec 64)) (m : Mem) : Option (BitVec 64 × Mem) :=
   (L.Fn.run (semEnv f) 20000 f args (fun x => (m x).getD 0)).map fun (r, st) => (r, fun x => some (st.mem x))
+
+/-- The same for a source that calls other functions of the file. -/
+def sourceIn (fs : List L.Fn) (f : L.Fn) (args : List (BitVec 64)) (m : Mem) : Option (BitVec 64 × Mem) :=
+  (L.Fn.run (semEnvIn fs f) 20000 f args (fun x => (m x).getD 0)).map fun (r, st) => (r, fun x => some (st.mem x))
 
 end Try

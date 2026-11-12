@@ -148,9 +148,12 @@ is proved again from its source: 4 of the generated proof's 143 lines differ (tw
 is what a maintainer gets: change the code behind a contract, prove the new code against the contract,
 and every caller's proof stands as generated.
 
+Examples belong to a contract (`Example_merge.lean` for `Merge.contract`): every function that meets it
+is tried on them, `merge_sse` as `merge`. `add`'s examples run through its calls (a few hundred to a
+thousand instructions); to the source's meaning, when blame is asked, a call is the callee's own source.
+
 Not yet: a call's result used by the caller; calls inside loops or under conditions; the budget read
-from the callee's contract instead of written beside it; examples run through a caller (`try_fn.py`
-knows no calls); the callee line generated from what was built.
+from the callee's contract instead of written beside it; the callee line generated from what was built.
 
 ## A requirement is stated once; proved where it can be, tested where it cannot
 
