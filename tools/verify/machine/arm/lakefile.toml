@@ -1,0 +1,15 @@
+name = "arm"
+defaultTargets = ["HexNeonRun", "HexNeonProof"]
+
+# Google DeepMind's AArch64 model and proof library (Apache-2.0), unchanged, at a named commit.
+[[require]]
+name = "prooflib"
+git = "https://github.com/google-deepmind/code-verification"
+rev = "b0f729accbc21a0413e7ca4e1da43fa45b5f2e1b"
+subDir = "arm64-semantics/ProofLib"
+
+[[lean_lib]]
+name = "HexNeonRun"
+
+[[lean_lib]]
+name = "HexNeonProof"

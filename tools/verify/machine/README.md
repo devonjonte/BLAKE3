@@ -391,3 +391,24 @@ processor: every instruction of the five programs (258 distinct; 225 once jumps,
 moves and the constants the linker places are left to the proofs), forty random states each, comparing
 fourteen registers, sixteen vector registers, ZF and CF where the model defines them, and 1024 bytes
 of memory; then a control whose 32-bit writes keep the upper half. Needs AVX-512 F and VL.
+
+## `arm/`: AArch64, on Google DeepMind's model (November 12)
+
+Sam's decision: for Arm we use the AArch64 model of `google-deepmind/code-verification` (`arm64-semantics`,
+Apache-2.0; the model of "AlphaProof Code: Verifying Signal's Security at the Machine-Code Level") rather
+than write one. First trial, their repository unchanged at b0f729ac: the constant-time `hex` kernel for
+NEON (`hex_neon.S`, 32 instructions, no table, no branch).
+
+- `HexNeonRun.lean`: the 32 words, decoded and run by their trusted definitions alone (`decode`,
+  `execInst`) on 320 hashes: every one gives the hexadecimal.
+- `HexNeonProof.lean`: **`hex_neon_ok`**: in any program holding these words at the symbol,
+  `subroutineOk` of their logic: a call returns to its caller with the stack pointer and callee-saved
+  registers as they were, the hash unchanged and the 64 bytes its hexadecimal, the rest of memory as it
+  was. Their tactics run the 32 instructions (`wp_init`, `wp_steps`, `wp_done`); eight equalities of
+  64-bit values are left and `bv_decide` closes them. Axioms: Lean's three and eight of `bv_decide`.
+- `./check.sh`: assembles the kernel, compares the object's words with the theorem's, builds their
+  model and library (about six minutes on 64 threads) and checks both files.
+
+Not yet: the statement in bytes with `Hex.text` (the same words as on x86-64); anything about what an
+observer sees (their model has no observer); the kernel written in our language with the proof
+generated; SME2 (their model has no SVE or SME).
