@@ -140,6 +140,13 @@ longer give one of those and forget another (the mistake "the key is not said to
 stack" cannot be written). `Merge.contract` is six lines: `args`, `stack`, `accepts`, `reads`,
 `updates`, `returns`.
 
+## No code the proof shows is never reached
+
+(Sam, November 12.) A check that the proof shows can never fail is dead code: it costs instructions, it is
+one more thing to read, and keeping it would say we do not believe the proof. `merge` had a trap for a
+stack of fewer than two values; its contract and invariant exclude that, so the trap is gone (93
+instructions became 88). Where a check is wanted because a caller is not proved, it is the checked entry's.
+
 ## Pinning the blame
 
 **A failed check must say what is at fault: the code, the contract, the compiler, or the proof. Reliably

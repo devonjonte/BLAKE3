@@ -16,7 +16,7 @@ set_option maxHeartbeats 0
 /-- **The checked entry of `merge`, as assembled, meets the contract's checked form, whatever its arguments:**
 it does as `Merge.contract` says where that accepts them, and returns 18446744073709551615 having changed nothing where it does not. -/
 theorem merge_checked_meets : ∀ (st key flags plat target : BitVec 64) (k : Blake3.CV) (cvs : List Blake3.CV),
-    Abi.Meets Code_merge.prog 0x60150 ((Merge.contract st key flags plat target k cvs).checked 18446744073709551615#64) := by
+    Abi.Meets Code_merge.prog 0x60140 ((Merge.contract st key flags plat target k cvs).checked 18446744073709551615#64) := by
   intro st key flags plat target k cvs s ra hpc hargs hra hstack hap _ hreq
   obtain ⟨rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8, r9, r12, r13, r14, r15, zf, cf, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, mem, pc⟩ := s
   have hargs0 := hargs

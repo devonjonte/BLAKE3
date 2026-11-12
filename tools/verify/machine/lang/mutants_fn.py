@@ -45,7 +45,7 @@ statement = [
     ("the result is said to be one more than the count", "Spec_merge.lean", "result.toNat = (Merge.result k flags target cvs).length", "result.toNat = (Merge.result k flags target cvs).length + 1"),
     ("the stack is said to be left as it is", "Spec_merge.lean", "Stack.layout.turns st cvs (Merge.result k flags target cvs)", "Stack.layout.keeps st cvs"),
     ("168 bytes of stack are said to be enough", "Spec_merge.lean", "stack := 256#64", "stack := 168#64"),
-    ("no `1 ≤ target` is asked (then the trap can be reached)", "Spec_merge.lean", "1#64 ≤ target ∧ flags < 256#64", "flags < 256#64"),
+    ("no `1 ≤ target` is asked (then a turn would read below the stack's first value)", "Spec_merge.lean", "1#64 ≤ target ∧ flags < 256#64", "flags < 256#64"),
     ("no `flags < 256` is asked (then the two kernels read different flags)", "Spec_merge.lean", "1#64 ≤ target ∧ flags < 256#64", "1#64 ≤ target"),
     ("the key is not mentioned", "Spec_merge.lean", "reads := [Cv.layout.keeps key k]", "reads := []"),
     ("the arguments are in another order", "Spec_merge.lean", "args := [st, key, flags, plat, target]", "args := [key, st, flags, plat, target]"),

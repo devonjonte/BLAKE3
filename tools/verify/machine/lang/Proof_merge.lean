@@ -121,16 +121,15 @@ theorem turn (fb st key flags plat target ra : BitVec 64) (sv : Abi.Saved) (k : 
   try norm_addr at hO1
   split_ands hO1
   try subst now
-  by_cases hs2 : plat = 5#64
+  by_cases hs1 : plat = 5#64
   · have c0 : (target).ult (len) = true := by bv_decide
-    have c1 : (len).ult (2#64) = false := by bv_decide
-    have c2 : (plat - 5#64 == 0#64) = true := by bv_decide
-    refine runs_then (a := 45) (s1 := ?_) ?_ ?_
-    case refine_2 => run_fn [c0, c1, c2]; rfl
+    have c1 : (plat - 5#64 == 0#64) = true := by bv_decide
+    refine runs_then (a := 41) (s1 := ?_) ?_ ?_
+    case refine_2 => run_fn [c0, c1]; rfl
     refine Kernels.call_avx_runs Code_merge.has_kernels (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) ?_
     intro rax' rcx' rdx' rsi' rdi' r8' r9' zf' cf' y0 y1 y2 y3 y4 y5 y6 y7 y8 y9 y10 y11 y12 y13 y14 y15
     refine runs_then (a := 14) (s1 := ?_) ?_ ?_
-    case refine_2 => run_fn [c0, c1, c2]; rfl
+    case refine_2 => run_fn [c0, c1]; rfl
     refine runs_done ⟨⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩
     all_goals try dsimp only
     · mem_region
@@ -159,14 +158,13 @@ theorem turn (fb st key flags plat target ra : BitVec 64) (sv : Abi.Saved) (k : 
       · first | mem_auto | (apply Cv.At.frame <;> mem_auto)
     · exact BitVec.lt_def.mp (by bv_decide)
   · have c0 : (target).ult (len) = true := by bv_decide
-    have c1 : (len).ult (2#64) = false := by bv_decide
-    have c2 : (plat - 5#64 == 0#64) = false := by bv_decide
-    refine runs_then (a := 45) (s1 := ?_) ?_ ?_
-    case refine_2 => run_fn [c0, c1, c2]; rfl
+    have c1 : (plat - 5#64 == 0#64) = false := by bv_decide
+    refine runs_then (a := 41) (s1 := ?_) ?_ ?_
+    case refine_2 => run_fn [c0, c1]; rfl
     refine Kernels.call_sse_runs Code_merge.has_kernels (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) (by mem_auto) ?_
     intro rax' rcx' rdx' rsi' rdi' r8' r9' zf' cf' y0 y1 y2 y3 y4 y5 y6 y7 y8 y9 y10 y11 y12 y13 y14 y15
     refine runs_then (a := 13) (s1 := ?_) ?_ ?_
-    case refine_2 => run_fn [c0, c1, c2]; rfl
+    case refine_2 => run_fn [c0, c1]; rfl
     refine runs_done ⟨⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩
     all_goals try dsimp only
     · mem_region

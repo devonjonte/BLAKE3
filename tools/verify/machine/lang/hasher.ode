@@ -73,7 +73,6 @@ fn merge(st, key, flags, plat, target)
     open Stack.At.top2 as r, l, rest, r0, r1, l0, l1
     open Cv.At.vectors as k0, k1
   {
-    if len < 2 { trap }
     var at = cv_at(st, len - 2)
     parent_to(at, at, at + 32, pf)
     len = len - 1

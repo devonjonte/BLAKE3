@@ -3,7 +3,7 @@ import KCode
 import Cells
 open X86
 
-/-! `merge` as assembled: 101 instructions. Written from the lifter's rows. -/
+/-! `merge` as assembled: 96 instructions. Written from the lifter's rows. -/
 
 set_option maxRecDepth 100000
 namespace Code_merge
@@ -30,86 +30,81 @@ def table : List (Nat × Instr × Nat) := [
   (0x60032, .mov 64 (.reg .rax) (.reg .r14), 0x60035),
   (0x60035, .mov 64 (.reg .rcx) (.reg .r15), 0x60038),
   (0x60038, .cmp 64 (.reg .rax) (.reg .rcx), 0x6003B),
-  (0x6003B, .jae 0x6013D, 0x60041),
-  (0x60041, .mov 64 (.reg .rax) (.reg .r15), 0x60044),
-  (0x60044, .mov 64 (.reg .rcx) (.imm 0x2), 0x6004B),
-  (0x6004B, .cmp 64 (.reg .rax) (.reg .rcx), 0x6004E),
-  (0x6004E, .jae 0x60054, 0x60050),
-  (0x60052, .jmp 0x60054, 0x60054),
-  (0x60054, .mov 64 (.reg .rax) (.reg .rbx), 0x60057),
-  (0x60057, .add 64 (.reg .rax) (.imm 0x20), 0x6005B),
-  (0x6005B, .mov 64 (.reg .rcx) (.reg .r15), 0x6005E),
-  (0x6005E, .sub 64 (.reg .rcx) (.imm 0x2), 0x60062),
-  (0x60062, .shl64 .rcx 5, 0x60066),
-  (0x60066, .add 64 (.reg .rax) (.reg .rcx), 0x60069),
-  (0x60069, .mov 64 (.mem .rsp 0x68) (.reg .rax), 0x6006E),
-  (0x6006E, .mov 64 (.reg .rax) (.mem .rsp 0x68), 0x60073),
-  (0x60073, .lea .rcx .rsp 0x0, 0x60077),
-  (0x60077, .movv false 0 (.m .rax 0x0), 0x6007A),
-  (0x6007A, .storev false .rcx 0x0 0, 0x6007D),
-  (0x6007D, .movv false 0 (.m .rax 0x10), 0x60081),
-  (0x60081, .storev false .rcx 0x10 0, 0x60085),
-  (0x60085, .mov 64 (.reg .rax) (.mem .rsp 0x68), 0x6008A),
-  (0x6008A, .add 64 (.reg .rax) (.imm 0x20), 0x6008E),
-  (0x6008E, .lea .rcx .rsp 0x0, 0x60092),
-  (0x60092, .add 64 (.reg .rcx) (.imm 0x20), 0x60096),
-  (0x60096, .movv false 0 (.m .rax 0x0), 0x60099),
-  (0x60099, .storev false .rcx 0x0 0, 0x6009C),
-  (0x6009C, .movv false 0 (.m .rax 0x10), 0x600A0),
-  (0x600A0, .storev false .rcx 0x10 0, 0x600A4),
-  (0x600A4, .mov 64 (.reg .rax) (.reg .rbp), 0x600A7),
-  (0x600A7, .lea .rcx .rsp 0x40, 0x600AC),
-  (0x600AC, .movv false 0 (.m .rax 0x0), 0x600AF),
-  (0x600AF, .storev false .rcx 0x0 0, 0x600B2),
-  (0x600B2, .movv false 0 (.m .rax 0x10), 0x600B6),
-  (0x600B6, .storev false .rcx 0x10 0, 0x600BA),
-  (0x600BA, .mov 64 (.reg .rax) (.reg .r13), 0x600BD),
-  (0x600BD, .mov 64 (.reg .rcx) (.imm 0x5), 0x600C4),
-  (0x600C4, .cmp 64 (.reg .rax) (.reg .rcx), 0x600C7),
-  (0x600C7, .jne 0x600EC, 0x600C9),
-  (0x600C9, .lea .rdi .rsp 0x40, 0x600CE),
-  (0x600CE, .lea .rsi .rsp 0x0, 0x600D2),
-  (0x600D2, .mov 64 (.reg .rdx) (.imm 0x40), 0x600D9),
-  (0x600D9, .mov 64 (.reg .rcx) (.imm 0x0), 0x600E0),
-  (0x600E0, .mov 64 (.reg .r8) (.mem .rsp 0x60), 0x600E5),
-  (0x600E5, .call 0x30000, 0x600EA),
-  (0x600EA, .jmp 0x6010D, 0x600EC),
-  (0x600EC, .lea .rdi .rsp 0x40, 0x600F1),
-  (0x600F1, .lea .rsi .rsp 0x0, 0x600F5),
-  (0x600F5, .mov 64 (.reg .rdx) (.imm 0x40), 0x600FC),
-  (0x600FC, .mov 64 (.reg .rcx) (.imm 0x0), 0x60103),
-  (0x60103, .mov 64 (.reg .r8) (.mem .rsp 0x60), 0x60108),
-  (0x60108, .call 0x20000, 0x6010D),
-  (0x6010D, .lea .rax .rsp 0x40, 0x60112),
-  (0x60112, .mov 64 (.reg .rcx) (.mem .rsp 0x68), 0x60117),
-  (0x60117, .movv false 0 (.m .rax 0x0), 0x6011A),
-  (0x6011A, .storev false .rcx 0x0 0, 0x6011D),
-  (0x6011D, .movv false 0 (.m .rax 0x10), 0x60121),
-  (0x60121, .storev false .rcx 0x10 0, 0x60125),
-  (0x60125, .mov 64 (.reg .rax) (.reg .r15), 0x60128),
-  (0x60128, .sub 64 (.reg .rax) (.imm 0x1), 0x6012C),
-  (0x6012C, .mov 64 (.reg .r15) (.reg .rax), 0x6012F),
-  (0x6012F, .mov 64 (.reg .rax) (.reg .r15), 0x60132),
-  (0x60132, .mov 64 (.reg .rcx) (.reg .rbx), 0x60135),
-  (0x60135, .mov 64 (.mem .rcx 0x0) (.reg .rax), 0x60138),
-  (0x60138, .jmp 0x60032, 0x6013D),
-  (0x6013D, .mov 64 (.reg .rax) (.reg .r15), 0x60140),
-  (0x60140, .add 64 (.reg .rsp) (.imm 0x78), 0x60144),
-  (0x60144, .pop .r15, 0x60146),
-  (0x60146, .pop .r14, 0x60148),
-  (0x60148, .pop .r13, 0x6014A),
-  (0x6014A, .pop .r12, 0x6014C),
-  (0x6014C, .pop .rbp, 0x6014D),
-  (0x6014D, .pop .rbx, 0x6014E),
-  (0x6014E, .ret, 0x6014F),
-  (0x60150, .cmp 64 (.reg .r8) (.imm 0x1), 0x60154),
-  (0x60154, .jae 0x60158, 0x60156),
-  (0x60156, .jmp 0x60166, 0x60158),
-  (0x60158, .cmp 64 (.reg .rdx) (.imm 0x100), 0x6015F),
-  (0x6015F, .jae 0x60166, 0x60161),
-  (0x60161, .jmp 0x60000, 0x60166),
-  (0x60166, .mov 64 (.reg .rax) (.imm 0xFFFFFFFFFFFFFFFF), 0x6016D),
-  (0x6016D, .ret, 0x6016E)
+  (0x6003B, .jae 0x6012A, 0x60041),
+  (0x60041, .mov 64 (.reg .rax) (.reg .rbx), 0x60044),
+  (0x60044, .add 64 (.reg .rax) (.imm 0x20), 0x60048),
+  (0x60048, .mov 64 (.reg .rcx) (.reg .r15), 0x6004B),
+  (0x6004B, .sub 64 (.reg .rcx) (.imm 0x2), 0x6004F),
+  (0x6004F, .shl64 .rcx 5, 0x60053),
+  (0x60053, .add 64 (.reg .rax) (.reg .rcx), 0x60056),
+  (0x60056, .mov 64 (.mem .rsp 0x68) (.reg .rax), 0x6005B),
+  (0x6005B, .mov 64 (.reg .rax) (.mem .rsp 0x68), 0x60060),
+  (0x60060, .lea .rcx .rsp 0x0, 0x60064),
+  (0x60064, .movv false 0 (.m .rax 0x0), 0x60067),
+  (0x60067, .storev false .rcx 0x0 0, 0x6006A),
+  (0x6006A, .movv false 0 (.m .rax 0x10), 0x6006E),
+  (0x6006E, .storev false .rcx 0x10 0, 0x60072),
+  (0x60072, .mov 64 (.reg .rax) (.mem .rsp 0x68), 0x60077),
+  (0x60077, .add 64 (.reg .rax) (.imm 0x20), 0x6007B),
+  (0x6007B, .lea .rcx .rsp 0x0, 0x6007F),
+  (0x6007F, .add 64 (.reg .rcx) (.imm 0x20), 0x60083),
+  (0x60083, .movv false 0 (.m .rax 0x0), 0x60086),
+  (0x60086, .storev false .rcx 0x0 0, 0x60089),
+  (0x60089, .movv false 0 (.m .rax 0x10), 0x6008D),
+  (0x6008D, .storev false .rcx 0x10 0, 0x60091),
+  (0x60091, .mov 64 (.reg .rax) (.reg .rbp), 0x60094),
+  (0x60094, .lea .rcx .rsp 0x40, 0x60099),
+  (0x60099, .movv false 0 (.m .rax 0x0), 0x6009C),
+  (0x6009C, .storev false .rcx 0x0 0, 0x6009F),
+  (0x6009F, .movv false 0 (.m .rax 0x10), 0x600A3),
+  (0x600A3, .storev false .rcx 0x10 0, 0x600A7),
+  (0x600A7, .mov 64 (.reg .rax) (.reg .r13), 0x600AA),
+  (0x600AA, .mov 64 (.reg .rcx) (.imm 0x5), 0x600B1),
+  (0x600B1, .cmp 64 (.reg .rax) (.reg .rcx), 0x600B4),
+  (0x600B4, .jne 0x600D9, 0x600B6),
+  (0x600B6, .lea .rdi .rsp 0x40, 0x600BB),
+  (0x600BB, .lea .rsi .rsp 0x0, 0x600BF),
+  (0x600BF, .mov 64 (.reg .rdx) (.imm 0x40), 0x600C6),
+  (0x600C6, .mov 64 (.reg .rcx) (.imm 0x0), 0x600CD),
+  (0x600CD, .mov 64 (.reg .r8) (.mem .rsp 0x60), 0x600D2),
+  (0x600D2, .call 0x30000, 0x600D7),
+  (0x600D7, .jmp 0x600FA, 0x600D9),
+  (0x600D9, .lea .rdi .rsp 0x40, 0x600DE),
+  (0x600DE, .lea .rsi .rsp 0x0, 0x600E2),
+  (0x600E2, .mov 64 (.reg .rdx) (.imm 0x40), 0x600E9),
+  (0x600E9, .mov 64 (.reg .rcx) (.imm 0x0), 0x600F0),
+  (0x600F0, .mov 64 (.reg .r8) (.mem .rsp 0x60), 0x600F5),
+  (0x600F5, .call 0x20000, 0x600FA),
+  (0x600FA, .lea .rax .rsp 0x40, 0x600FF),
+  (0x600FF, .mov 64 (.reg .rcx) (.mem .rsp 0x68), 0x60104),
+  (0x60104, .movv false 0 (.m .rax 0x0), 0x60107),
+  (0x60107, .storev false .rcx 0x0 0, 0x6010A),
+  (0x6010A, .movv false 0 (.m .rax 0x10), 0x6010E),
+  (0x6010E, .storev false .rcx 0x10 0, 0x60112),
+  (0x60112, .mov 64 (.reg .rax) (.reg .r15), 0x60115),
+  (0x60115, .sub 64 (.reg .rax) (.imm 0x1), 0x60119),
+  (0x60119, .mov 64 (.reg .r15) (.reg .rax), 0x6011C),
+  (0x6011C, .mov 64 (.reg .rax) (.reg .r15), 0x6011F),
+  (0x6011F, .mov 64 (.reg .rcx) (.reg .rbx), 0x60122),
+  (0x60122, .mov 64 (.mem .rcx 0x0) (.reg .rax), 0x60125),
+  (0x60125, .jmp 0x60032, 0x6012A),
+  (0x6012A, .mov 64 (.reg .rax) (.reg .r15), 0x6012D),
+  (0x6012D, .add 64 (.reg .rsp) (.imm 0x78), 0x60131),
+  (0x60131, .pop .r15, 0x60133),
+  (0x60133, .pop .r14, 0x60135),
+  (0x60135, .pop .r13, 0x60137),
+  (0x60137, .pop .r12, 0x60139),
+  (0x60139, .pop .rbp, 0x6013A),
+  (0x6013A, .pop .rbx, 0x6013B),
+  (0x6013B, .ret, 0x6013C),
+  (0x60140, .cmp 64 (.reg .r8) (.imm 0x1), 0x60144),
+  (0x60144, .jae 0x60148, 0x60146),
+  (0x60146, .jmp 0x60156, 0x60148),
+  (0x60148, .cmp 64 (.reg .rdx) (.imm 0x100), 0x6014F),
+  (0x6014F, .jae 0x60156, 0x60151),
+  (0x60151, .jmp 0x60000, 0x60156),
+  (0x60156, .mov 64 (.reg .rax) (.imm 0xFFFFFFFFFFFFFFFF), 0x6015D),
+  (0x6015D, .ret, 0x6015E)
 ]
 
 /-- This function's instructions and the two kernels' (one/KCode.lean) as one program. -/
@@ -139,85 +134,80 @@ theorem has_kernels : ∀ pc x, KCode.prog pc = some x → prog pc = some x := b
 @[ode_at] theorem at_60032 : prog 0x60032 = some (.mov 64 (.reg .rax) (.reg .r14), 0x60035) := rfl
 @[ode_at] theorem at_60035 : prog 0x60035 = some (.mov 64 (.reg .rcx) (.reg .r15), 0x60038) := rfl
 @[ode_at] theorem at_60038 : prog 0x60038 = some (.cmp 64 (.reg .rax) (.reg .rcx), 0x6003B) := rfl
-@[ode_at] theorem at_6003B : prog 0x6003B = some (.jae 0x6013D, 0x60041) := rfl
-@[ode_at] theorem at_60041 : prog 0x60041 = some (.mov 64 (.reg .rax) (.reg .r15), 0x60044) := rfl
-@[ode_at] theorem at_60044 : prog 0x60044 = some (.mov 64 (.reg .rcx) (.imm 0x2), 0x6004B) := rfl
-@[ode_at] theorem at_6004B : prog 0x6004B = some (.cmp 64 (.reg .rax) (.reg .rcx), 0x6004E) := rfl
-@[ode_at] theorem at_6004E : prog 0x6004E = some (.jae 0x60054, 0x60050) := rfl
-@[ode_at] theorem at_60052 : prog 0x60052 = some (.jmp 0x60054, 0x60054) := rfl
-@[ode_at] theorem at_60054 : prog 0x60054 = some (.mov 64 (.reg .rax) (.reg .rbx), 0x60057) := rfl
-@[ode_at] theorem at_60057 : prog 0x60057 = some (.add 64 (.reg .rax) (.imm 0x20), 0x6005B) := rfl
-@[ode_at] theorem at_6005B : prog 0x6005B = some (.mov 64 (.reg .rcx) (.reg .r15), 0x6005E) := rfl
-@[ode_at] theorem at_6005E : prog 0x6005E = some (.sub 64 (.reg .rcx) (.imm 0x2), 0x60062) := rfl
-@[ode_at] theorem at_60062 : prog 0x60062 = some (.shl64 .rcx 5, 0x60066) := rfl
-@[ode_at] theorem at_60066 : prog 0x60066 = some (.add 64 (.reg .rax) (.reg .rcx), 0x60069) := rfl
-@[ode_at] theorem at_60069 : prog 0x60069 = some (.mov 64 (.mem .rsp 0x68) (.reg .rax), 0x6006E) := rfl
-@[ode_at] theorem at_6006E : prog 0x6006E = some (.mov 64 (.reg .rax) (.mem .rsp 0x68), 0x60073) := rfl
-@[ode_at] theorem at_60073 : prog 0x60073 = some (.lea .rcx .rsp 0x0, 0x60077) := rfl
-@[ode_at] theorem at_60077 : prog 0x60077 = some (.movv false 0 (.m .rax 0x0), 0x6007A) := rfl
-@[ode_at] theorem at_6007A : prog 0x6007A = some (.storev false .rcx 0x0 0, 0x6007D) := rfl
-@[ode_at] theorem at_6007D : prog 0x6007D = some (.movv false 0 (.m .rax 0x10), 0x60081) := rfl
-@[ode_at] theorem at_60081 : prog 0x60081 = some (.storev false .rcx 0x10 0, 0x60085) := rfl
-@[ode_at] theorem at_60085 : prog 0x60085 = some (.mov 64 (.reg .rax) (.mem .rsp 0x68), 0x6008A) := rfl
-@[ode_at] theorem at_6008A : prog 0x6008A = some (.add 64 (.reg .rax) (.imm 0x20), 0x6008E) := rfl
-@[ode_at] theorem at_6008E : prog 0x6008E = some (.lea .rcx .rsp 0x0, 0x60092) := rfl
-@[ode_at] theorem at_60092 : prog 0x60092 = some (.add 64 (.reg .rcx) (.imm 0x20), 0x60096) := rfl
-@[ode_at] theorem at_60096 : prog 0x60096 = some (.movv false 0 (.m .rax 0x0), 0x60099) := rfl
-@[ode_at] theorem at_60099 : prog 0x60099 = some (.storev false .rcx 0x0 0, 0x6009C) := rfl
-@[ode_at] theorem at_6009C : prog 0x6009C = some (.movv false 0 (.m .rax 0x10), 0x600A0) := rfl
-@[ode_at] theorem at_600A0 : prog 0x600A0 = some (.storev false .rcx 0x10 0, 0x600A4) := rfl
-@[ode_at] theorem at_600A4 : prog 0x600A4 = some (.mov 64 (.reg .rax) (.reg .rbp), 0x600A7) := rfl
-@[ode_at] theorem at_600A7 : prog 0x600A7 = some (.lea .rcx .rsp 0x40, 0x600AC) := rfl
-@[ode_at] theorem at_600AC : prog 0x600AC = some (.movv false 0 (.m .rax 0x0), 0x600AF) := rfl
-@[ode_at] theorem at_600AF : prog 0x600AF = some (.storev false .rcx 0x0 0, 0x600B2) := rfl
-@[ode_at] theorem at_600B2 : prog 0x600B2 = some (.movv false 0 (.m .rax 0x10), 0x600B6) := rfl
-@[ode_at] theorem at_600B6 : prog 0x600B6 = some (.storev false .rcx 0x10 0, 0x600BA) := rfl
-@[ode_at] theorem at_600BA : prog 0x600BA = some (.mov 64 (.reg .rax) (.reg .r13), 0x600BD) := rfl
-@[ode_at] theorem at_600BD : prog 0x600BD = some (.mov 64 (.reg .rcx) (.imm 0x5), 0x600C4) := rfl
-@[ode_at] theorem at_600C4 : prog 0x600C4 = some (.cmp 64 (.reg .rax) (.reg .rcx), 0x600C7) := rfl
-@[ode_at] theorem at_600C7 : prog 0x600C7 = some (.jne 0x600EC, 0x600C9) := rfl
-@[ode_at] theorem at_600C9 : prog 0x600C9 = some (.lea .rdi .rsp 0x40, 0x600CE) := rfl
-@[ode_at] theorem at_600CE : prog 0x600CE = some (.lea .rsi .rsp 0x0, 0x600D2) := rfl
-@[ode_at] theorem at_600D2 : prog 0x600D2 = some (.mov 64 (.reg .rdx) (.imm 0x40), 0x600D9) := rfl
-@[ode_at] theorem at_600D9 : prog 0x600D9 = some (.mov 64 (.reg .rcx) (.imm 0x0), 0x600E0) := rfl
-@[ode_at] theorem at_600E0 : prog 0x600E0 = some (.mov 64 (.reg .r8) (.mem .rsp 0x60), 0x600E5) := rfl
-@[ode_at] theorem at_600E5 : prog 0x600E5 = some (.call 0x30000, 0x600EA) := rfl
-@[ode_at] theorem at_600EA : prog 0x600EA = some (.jmp 0x6010D, 0x600EC) := rfl
-@[ode_at] theorem at_600EC : prog 0x600EC = some (.lea .rdi .rsp 0x40, 0x600F1) := rfl
-@[ode_at] theorem at_600F1 : prog 0x600F1 = some (.lea .rsi .rsp 0x0, 0x600F5) := rfl
-@[ode_at] theorem at_600F5 : prog 0x600F5 = some (.mov 64 (.reg .rdx) (.imm 0x40), 0x600FC) := rfl
-@[ode_at] theorem at_600FC : prog 0x600FC = some (.mov 64 (.reg .rcx) (.imm 0x0), 0x60103) := rfl
-@[ode_at] theorem at_60103 : prog 0x60103 = some (.mov 64 (.reg .r8) (.mem .rsp 0x60), 0x60108) := rfl
-@[ode_at] theorem at_60108 : prog 0x60108 = some (.call 0x20000, 0x6010D) := rfl
-@[ode_at] theorem at_6010D : prog 0x6010D = some (.lea .rax .rsp 0x40, 0x60112) := rfl
-@[ode_at] theorem at_60112 : prog 0x60112 = some (.mov 64 (.reg .rcx) (.mem .rsp 0x68), 0x60117) := rfl
-@[ode_at] theorem at_60117 : prog 0x60117 = some (.movv false 0 (.m .rax 0x0), 0x6011A) := rfl
-@[ode_at] theorem at_6011A : prog 0x6011A = some (.storev false .rcx 0x0 0, 0x6011D) := rfl
-@[ode_at] theorem at_6011D : prog 0x6011D = some (.movv false 0 (.m .rax 0x10), 0x60121) := rfl
-@[ode_at] theorem at_60121 : prog 0x60121 = some (.storev false .rcx 0x10 0, 0x60125) := rfl
-@[ode_at] theorem at_60125 : prog 0x60125 = some (.mov 64 (.reg .rax) (.reg .r15), 0x60128) := rfl
-@[ode_at] theorem at_60128 : prog 0x60128 = some (.sub 64 (.reg .rax) (.imm 0x1), 0x6012C) := rfl
-@[ode_at] theorem at_6012C : prog 0x6012C = some (.mov 64 (.reg .r15) (.reg .rax), 0x6012F) := rfl
-@[ode_at] theorem at_6012F : prog 0x6012F = some (.mov 64 (.reg .rax) (.reg .r15), 0x60132) := rfl
-@[ode_at] theorem at_60132 : prog 0x60132 = some (.mov 64 (.reg .rcx) (.reg .rbx), 0x60135) := rfl
-@[ode_at] theorem at_60135 : prog 0x60135 = some (.mov 64 (.mem .rcx 0x0) (.reg .rax), 0x60138) := rfl
-@[ode_at] theorem at_60138 : prog 0x60138 = some (.jmp 0x60032, 0x6013D) := rfl
-@[ode_at] theorem at_6013D : prog 0x6013D = some (.mov 64 (.reg .rax) (.reg .r15), 0x60140) := rfl
-@[ode_at] theorem at_60140 : prog 0x60140 = some (.add 64 (.reg .rsp) (.imm 0x78), 0x60144) := rfl
-@[ode_at] theorem at_60144 : prog 0x60144 = some (.pop .r15, 0x60146) := rfl
-@[ode_at] theorem at_60146 : prog 0x60146 = some (.pop .r14, 0x60148) := rfl
-@[ode_at] theorem at_60148 : prog 0x60148 = some (.pop .r13, 0x6014A) := rfl
-@[ode_at] theorem at_6014A : prog 0x6014A = some (.pop .r12, 0x6014C) := rfl
-@[ode_at] theorem at_6014C : prog 0x6014C = some (.pop .rbp, 0x6014D) := rfl
-@[ode_at] theorem at_6014D : prog 0x6014D = some (.pop .rbx, 0x6014E) := rfl
-@[ode_at] theorem at_6014E : prog 0x6014E = some (.ret, 0x6014F) := rfl
-@[ode_at] theorem at_60150 : prog 0x60150 = some (.cmp 64 (.reg .r8) (.imm 0x1), 0x60154) := rfl
-@[ode_at] theorem at_60154 : prog 0x60154 = some (.jae 0x60158, 0x60156) := rfl
-@[ode_at] theorem at_60156 : prog 0x60156 = some (.jmp 0x60166, 0x60158) := rfl
-@[ode_at] theorem at_60158 : prog 0x60158 = some (.cmp 64 (.reg .rdx) (.imm 0x100), 0x6015F) := rfl
-@[ode_at] theorem at_6015F : prog 0x6015F = some (.jae 0x60166, 0x60161) := rfl
-@[ode_at] theorem at_60161 : prog 0x60161 = some (.jmp 0x60000, 0x60166) := rfl
-@[ode_at] theorem at_60166 : prog 0x60166 = some (.mov 64 (.reg .rax) (.imm 0xFFFFFFFFFFFFFFFF), 0x6016D) := rfl
-@[ode_at] theorem at_6016D : prog 0x6016D = some (.ret, 0x6016E) := rfl
+@[ode_at] theorem at_6003B : prog 0x6003B = some (.jae 0x6012A, 0x60041) := rfl
+@[ode_at] theorem at_60041 : prog 0x60041 = some (.mov 64 (.reg .rax) (.reg .rbx), 0x60044) := rfl
+@[ode_at] theorem at_60044 : prog 0x60044 = some (.add 64 (.reg .rax) (.imm 0x20), 0x60048) := rfl
+@[ode_at] theorem at_60048 : prog 0x60048 = some (.mov 64 (.reg .rcx) (.reg .r15), 0x6004B) := rfl
+@[ode_at] theorem at_6004B : prog 0x6004B = some (.sub 64 (.reg .rcx) (.imm 0x2), 0x6004F) := rfl
+@[ode_at] theorem at_6004F : prog 0x6004F = some (.shl64 .rcx 5, 0x60053) := rfl
+@[ode_at] theorem at_60053 : prog 0x60053 = some (.add 64 (.reg .rax) (.reg .rcx), 0x60056) := rfl
+@[ode_at] theorem at_60056 : prog 0x60056 = some (.mov 64 (.mem .rsp 0x68) (.reg .rax), 0x6005B) := rfl
+@[ode_at] theorem at_6005B : prog 0x6005B = some (.mov 64 (.reg .rax) (.mem .rsp 0x68), 0x60060) := rfl
+@[ode_at] theorem at_60060 : prog 0x60060 = some (.lea .rcx .rsp 0x0, 0x60064) := rfl
+@[ode_at] theorem at_60064 : prog 0x60064 = some (.movv false 0 (.m .rax 0x0), 0x60067) := rfl
+@[ode_at] theorem at_60067 : prog 0x60067 = some (.storev false .rcx 0x0 0, 0x6006A) := rfl
+@[ode_at] theorem at_6006A : prog 0x6006A = some (.movv false 0 (.m .rax 0x10), 0x6006E) := rfl
+@[ode_at] theorem at_6006E : prog 0x6006E = some (.storev false .rcx 0x10 0, 0x60072) := rfl
+@[ode_at] theorem at_60072 : prog 0x60072 = some (.mov 64 (.reg .rax) (.mem .rsp 0x68), 0x60077) := rfl
+@[ode_at] theorem at_60077 : prog 0x60077 = some (.add 64 (.reg .rax) (.imm 0x20), 0x6007B) := rfl
+@[ode_at] theorem at_6007B : prog 0x6007B = some (.lea .rcx .rsp 0x0, 0x6007F) := rfl
+@[ode_at] theorem at_6007F : prog 0x6007F = some (.add 64 (.reg .rcx) (.imm 0x20), 0x60083) := rfl
+@[ode_at] theorem at_60083 : prog 0x60083 = some (.movv false 0 (.m .rax 0x0), 0x60086) := rfl
+@[ode_at] theorem at_60086 : prog 0x60086 = some (.storev false .rcx 0x0 0, 0x60089) := rfl
+@[ode_at] theorem at_60089 : prog 0x60089 = some (.movv false 0 (.m .rax 0x10), 0x6008D) := rfl
+@[ode_at] theorem at_6008D : prog 0x6008D = some (.storev false .rcx 0x10 0, 0x60091) := rfl
+@[ode_at] theorem at_60091 : prog 0x60091 = some (.mov 64 (.reg .rax) (.reg .rbp), 0x60094) := rfl
+@[ode_at] theorem at_60094 : prog 0x60094 = some (.lea .rcx .rsp 0x40, 0x60099) := rfl
+@[ode_at] theorem at_60099 : prog 0x60099 = some (.movv false 0 (.m .rax 0x0), 0x6009C) := rfl
+@[ode_at] theorem at_6009C : prog 0x6009C = some (.storev false .rcx 0x0 0, 0x6009F) := rfl
+@[ode_at] theorem at_6009F : prog 0x6009F = some (.movv false 0 (.m .rax 0x10), 0x600A3) := rfl
+@[ode_at] theorem at_600A3 : prog 0x600A3 = some (.storev false .rcx 0x10 0, 0x600A7) := rfl
+@[ode_at] theorem at_600A7 : prog 0x600A7 = some (.mov 64 (.reg .rax) (.reg .r13), 0x600AA) := rfl
+@[ode_at] theorem at_600AA : prog 0x600AA = some (.mov 64 (.reg .rcx) (.imm 0x5), 0x600B1) := rfl
+@[ode_at] theorem at_600B1 : prog 0x600B1 = some (.cmp 64 (.reg .rax) (.reg .rcx), 0x600B4) := rfl
+@[ode_at] theorem at_600B4 : prog 0x600B4 = some (.jne 0x600D9, 0x600B6) := rfl
+@[ode_at] theorem at_600B6 : prog 0x600B6 = some (.lea .rdi .rsp 0x40, 0x600BB) := rfl
+@[ode_at] theorem at_600BB : prog 0x600BB = some (.lea .rsi .rsp 0x0, 0x600BF) := rfl
+@[ode_at] theorem at_600BF : prog 0x600BF = some (.mov 64 (.reg .rdx) (.imm 0x40), 0x600C6) := rfl
+@[ode_at] theorem at_600C6 : prog 0x600C6 = some (.mov 64 (.reg .rcx) (.imm 0x0), 0x600CD) := rfl
+@[ode_at] theorem at_600CD : prog 0x600CD = some (.mov 64 (.reg .r8) (.mem .rsp 0x60), 0x600D2) := rfl
+@[ode_at] theorem at_600D2 : prog 0x600D2 = some (.call 0x30000, 0x600D7) := rfl
+@[ode_at] theorem at_600D7 : prog 0x600D7 = some (.jmp 0x600FA, 0x600D9) := rfl
+@[ode_at] theorem at_600D9 : prog 0x600D9 = some (.lea .rdi .rsp 0x40, 0x600DE) := rfl
+@[ode_at] theorem at_600DE : prog 0x600DE = some (.lea .rsi .rsp 0x0, 0x600E2) := rfl
+@[ode_at] theorem at_600E2 : prog 0x600E2 = some (.mov 64 (.reg .rdx) (.imm 0x40), 0x600E9) := rfl
+@[ode_at] theorem at_600E9 : prog 0x600E9 = some (.mov 64 (.reg .rcx) (.imm 0x0), 0x600F0) := rfl
+@[ode_at] theorem at_600F0 : prog 0x600F0 = some (.mov 64 (.reg .r8) (.mem .rsp 0x60), 0x600F5) := rfl
+@[ode_at] theorem at_600F5 : prog 0x600F5 = some (.call 0x20000, 0x600FA) := rfl
+@[ode_at] theorem at_600FA : prog 0x600FA = some (.lea .rax .rsp 0x40, 0x600FF) := rfl
+@[ode_at] theorem at_600FF : prog 0x600FF = some (.mov 64 (.reg .rcx) (.mem .rsp 0x68), 0x60104) := rfl
+@[ode_at] theorem at_60104 : prog 0x60104 = some (.movv false 0 (.m .rax 0x0), 0x60107) := rfl
+@[ode_at] theorem at_60107 : prog 0x60107 = some (.storev false .rcx 0x0 0, 0x6010A) := rfl
+@[ode_at] theorem at_6010A : prog 0x6010A = some (.movv false 0 (.m .rax 0x10), 0x6010E) := rfl
+@[ode_at] theorem at_6010E : prog 0x6010E = some (.storev false .rcx 0x10 0, 0x60112) := rfl
+@[ode_at] theorem at_60112 : prog 0x60112 = some (.mov 64 (.reg .rax) (.reg .r15), 0x60115) := rfl
+@[ode_at] theorem at_60115 : prog 0x60115 = some (.sub 64 (.reg .rax) (.imm 0x1), 0x60119) := rfl
+@[ode_at] theorem at_60119 : prog 0x60119 = some (.mov 64 (.reg .r15) (.reg .rax), 0x6011C) := rfl
+@[ode_at] theorem at_6011C : prog 0x6011C = some (.mov 64 (.reg .rax) (.reg .r15), 0x6011F) := rfl
+@[ode_at] theorem at_6011F : prog 0x6011F = some (.mov 64 (.reg .rcx) (.reg .rbx), 0x60122) := rfl
+@[ode_at] theorem at_60122 : prog 0x60122 = some (.mov 64 (.mem .rcx 0x0) (.reg .rax), 0x60125) := rfl
+@[ode_at] theorem at_60125 : prog 0x60125 = some (.jmp 0x60032, 0x6012A) := rfl
+@[ode_at] theorem at_6012A : prog 0x6012A = some (.mov 64 (.reg .rax) (.reg .r15), 0x6012D) := rfl
+@[ode_at] theorem at_6012D : prog 0x6012D = some (.add 64 (.reg .rsp) (.imm 0x78), 0x60131) := rfl
+@[ode_at] theorem at_60131 : prog 0x60131 = some (.pop .r15, 0x60133) := rfl
+@[ode_at] theorem at_60133 : prog 0x60133 = some (.pop .r14, 0x60135) := rfl
+@[ode_at] theorem at_60135 : prog 0x60135 = some (.pop .r13, 0x60137) := rfl
+@[ode_at] theorem at_60137 : prog 0x60137 = some (.pop .r12, 0x60139) := rfl
+@[ode_at] theorem at_60139 : prog 0x60139 = some (.pop .rbp, 0x6013A) := rfl
+@[ode_at] theorem at_6013A : prog 0x6013A = some (.pop .rbx, 0x6013B) := rfl
+@[ode_at] theorem at_6013B : prog 0x6013B = some (.ret, 0x6013C) := rfl
+@[ode_at] theorem at_60140 : prog 0x60140 = some (.cmp 64 (.reg .r8) (.imm 0x1), 0x60144) := rfl
+@[ode_at] theorem at_60144 : prog 0x60144 = some (.jae 0x60148, 0x60146) := rfl
+@[ode_at] theorem at_60146 : prog 0x60146 = some (.jmp 0x60156, 0x60148) := rfl
+@[ode_at] theorem at_60148 : prog 0x60148 = some (.cmp 64 (.reg .rdx) (.imm 0x100), 0x6014F) := rfl
+@[ode_at] theorem at_6014F : prog 0x6014F = some (.jae 0x60156, 0x60151) := rfl
+@[ode_at] theorem at_60151 : prog 0x60151 = some (.jmp 0x60000, 0x60156) := rfl
+@[ode_at] theorem at_60156 : prog 0x60156 = some (.mov 64 (.reg .rax) (.imm 0xFFFFFFFFFFFFFFFF), 0x6015D) := rfl
+@[ode_at] theorem at_6015D : prog 0x6015D = some (.ret, 0x6015E) := rfl
 
 end Code_merge
