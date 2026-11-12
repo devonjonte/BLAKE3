@@ -9,6 +9,7 @@ description = "Trial: a build that checks the proof of the code it links, with a
 [build-dependencies]
 nanoda_lib = { git = "https://github.com/ammkrn/nanoda_lib", rev = "0da9f98feadd3a0a2ef4b3dbcf52a298a6fef929" }
 flate2 = "1"
+serde_json = "1"
 cc = "1"
 
 # The checker runs in the build script. Cargo builds build scripts unoptimized unless told otherwise, and

@@ -1,5 +1,5 @@
 #!/bin/bash
-# The build that checks its proof, tried: the crate as it is (tests must pass), then two changed copies
+# The build that checks its proof, tried: the crate as it is (tests must pass), then three changed copies
 # (the build must fail). Usage: build-trial.sh CRATE OUT
 export PATH="/opt/homebrew/opt/python@3.14/libexec/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH"
 C=$1; O=$2; mkdir -p "$O"; : > "$O/result.txt"
@@ -31,4 +31,16 @@ p.write_text(t.replace("Push.byteContract st cv new cvs", "Push.byteContract cv 
 PY
 cargo build --release > "$O/stmt.log" 2>&1; echo "the statement file changed: cargo build rc=$?" >> "$O/result.txt"
 grep -h "is not the statement" "$O/stmt.log" | head -n 1 | cut -c1-200 >> "$O/result.txt"
+# control 3: a definition the statement rests on is another in the text a reader read
+cp -R "$C" "$S/defn"; cd "$S/defn" || exit 1
+python3 - <<'PY'
+from pathlib import Path
+p = Path("proof/push_arm_meets.checked.txt"); t = p.read_text()
+at = t.index("def Stack.Holds ")
+old = "(OfNat.ofNat 1792)"
+assert t.count(old, at, at + 300) == 1
+p.write_text(t[:at] + t[at:at + 300].replace(old, "(OfNat.ofNat 1794)") + t[at + 300:])
+PY
+cargo build --release > "$O/defn.log" 2>&1; echo "a definition changed in the text read (the stack's size in Stack.Holds): cargo build rc=$?" >> "$O/result.txt"
+grep -h -A2 "is not what is in" "$O/defn.log" | head -n 3 | cut -c1-200 >> "$O/result.txt"
 rm -rf "$S"; echo done >> "$O/result.txt"
