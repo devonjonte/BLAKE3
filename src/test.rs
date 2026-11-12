@@ -240,6 +240,15 @@ fn test_counts_past_the_widest_kernel_split_into_groups_and_a_rounded_rest() {
         assert_eq!(crate::ROUNDED_WIDTH.with(|w| w.get()), widths, "{count} parents on AVX2: the widths rounded to");
         assert_eq!(crate::RAN.with(|r| r.get()) & Ran::RoundedUp as u32 != 0, widths != 0);
     }
+    // One or two inputs and a count that is a width go straight to their
+    // kernel; every other count takes the path that splits and rounds
+    // (BLAKE3 #376: that path's code stays out of the exact counts' way).
+    for (count, between) in [(1, false), (2, false), (4, false), (8, false), (3, true), (5, true), (9, true), (16, true)] {
+        crate::RAN.with(|r| r.set(0));
+        let mut out = std::vec![0u8; count * OUT_LEN];
+        crate::hash_many_rounded(avx2, &blocks[..count], IV, 0, IncrementCounter::No, PARENT, 0, 0, &mut out);
+        assert_eq!(crate::RAN.with(|r| r.get()) & Ran::BetweenWidths as u32 != 0, between, "{count} inputs on AVX2");
+    }
     // Chunks at counters counting up split the same way, the rest's
     // counter after the groups': 11 chunks as 8 then 3 on 4.
     let input = std::vec![0x5au8; 11 * CHUNK_LEN];

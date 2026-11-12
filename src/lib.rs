@@ -278,6 +278,10 @@ pub(crate) enum Ran {
     /// Whole chunks or parents were hashed on a wider kernel than their
     /// count, the spare lanes a copy of the last (rounded_lanes).
     RoundedUp = 256,
+    /// A count between the kernels' widths, or past the widest, took the
+    /// path that splits and rounds (hash_many_between_widths); one or two
+    /// inputs and a count that is a width go straight to their kernel.
+    BetweenWidths = 512,
 }
 
 #[cfg(all(test, feature = "std"))]
@@ -853,6 +857,15 @@ fn rounded_lanes(platform: Platform, count: usize) -> Option<usize> {
 /// kernel takes the count in one pass: the spare lanes hash a copy of the
 /// last input, into scratch. Past the widest kernel, the whole groups of
 /// its width first, then the rest rounded.
+///
+/// One or two inputs, and a count that is a kernel's width, go straight to
+/// their kernel: the call most messages make, and the one whose code a
+/// call after other work has to fetch. Splitting and rounding are a
+/// function of their own, out of that path. With them inlined here a
+/// 4 KiB message, which rounds nothing, ran 17% more lines of code a call
+/// than in 0.8 and read 5 to 6% slower after other work on three Zen 5
+/// machines (BLAKE3 #376).
+#[inline]
 fn hash_many_rounded<const N: usize>(
     platform: Platform,
     inputs: &[&[u8; N]],
@@ -864,6 +877,28 @@ fn hash_many_rounded<const N: usize>(
     flags_end: u8,
     out: &mut [u8],
 ) {
+    if inputs.len() <= 2 || lane_widths(platform).contains(&inputs.len()) {
+        return platform.hash_many(inputs, key, counter, increment_counter, flags, flags_start, flags_end, out);
+    }
+    hash_many_between_widths(platform, inputs, key, counter, increment_counter, flags, flags_start, flags_end, out)
+}
+
+/// hash_many_rounded for a count between the kernels' widths, or past the
+/// widest: the whole groups of the widest first, then the rest on
+/// `rounded_lanes` where a wider kernel takes it in one pass.
+#[inline(never)]
+fn hash_many_between_widths<const N: usize>(
+    platform: Platform,
+    inputs: &[&[u8; N]],
+    key: &CVWords,
+    counter: u64,
+    increment_counter: IncrementCounter,
+    flags: u8,
+    flags_start: u8,
+    flags_end: u8,
+    out: &mut [u8],
+) {
+    ran(Ran::BetweenWidths);
     // Past the widest kernel, where the rest would round: its whole groups
     // first, one call each, then the rest below (a loop, each turn a whole
     // group fewer).
