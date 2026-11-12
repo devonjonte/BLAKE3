@@ -30,7 +30,7 @@ run merge_sse    lang ./prove_fn.sh merge_sse 0x90000
 run add-and-swap lang ./swap.sh
 run merge_steps  lang ./prove_fn.sh merge_steps 0xA0000
 run hex_neon     arm  env MUTANTS=$hexaudit ./prove_arm.sh
-run push-aarch64 arm  ./prove_arm_fn.sh
+run push-aarch64 arm  env MUTANTS=$hexaudit ./prove_arm_fn.sh
 if [ "${AUDIT:-0}" = 1 ]; then
   run audit-merge  lang python3 mutants_fn.py "${JOBS:-6}"
   run audit-push   lang python3 mutants_code.py push "${JOBS:-6}"

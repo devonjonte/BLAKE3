@@ -295,8 +295,10 @@ What it took, and what it shows:
   `Stack.piece_turns` give it at once; `Merge.result` must move to `spec/` first, and an audit names it
   where it is) and on AArch64 (loops and calls in the second printer and its proof generator, and a
   compression kernel with a contract there); the compression kernels' contracts in this form; the
-  bytes-to-cells step generated; "quietly" stated once for both machines; an audit of the AArch64 `push`
-  (the kernel `hex_neon` has one).
+  bytes-to-cells step generated; "quietly" stated once for both machines.
+- An observation from the AArch64 proof: `push` never looks inside `Cv.bytes` (it copies 32 bytes), so its
+  contract holds for any encoding of a chaining value. Only a function that computes with the value pins
+  the encoding; a contract's data can be as abstract as the code allows.
 
 ## No code the proof shows is never reached
 

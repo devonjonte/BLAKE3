@@ -6,3 +6,4 @@ build.log
 again/
 t
 build-*.log
+audit-*.log

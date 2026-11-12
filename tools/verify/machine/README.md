@@ -489,7 +489,8 @@ threads) and checks everything; then the audit runs.
   (`lang/Meets_push_bytes.lean`, from `push_meets` by `lang/StackAsBytes.lean`: the model's own `Stack.At`
   is the statement in bytes). `spec/` holds what names no machine: `Contract.lean`, `StackBytes.lean`
   (`Stack.Holds`), `PushContract.lean`, `HexText.lean`, and the algorithm's `Stack` (the file of `alg/`).
-  Not audited yet on the AArch64 side.
+  Audit (`mutants_push.py`): the unchanged files accepted; each of the 18 instructions made to do nothing,
+  and five false statements: all 23 refused.
 - **`hex` the same way:** `Hex.byteContract` (`spec/HexContract.lean`) is met by the x86-64 kernel on our
   model (`hex_meets_bytes`, `lang/Meets_hex_bytes.lean`, with what an observer sees) and by the AArch64
   kernel on Google's (`hex_neon_meets`, `HexNeonBytes.lean`).

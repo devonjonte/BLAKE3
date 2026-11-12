@@ -42,3 +42,8 @@ if [ "$name" = push ]; then
     echo "push (AArch64) meets Push.byteContract: NOT checked"; exit 1
   fi
 fi
+# The audit: each instruction made to do nothing, and false statements, must be refused (control first).
+if [ "$name" = push ] && [ "${MUTANTS:-1}" != 0 ]; then
+  python3 mutants_push.py | tee "audit-$name.log" | grep -E "control|ACCEPTED|MALFORMED|instructions:|false statements:"
+  grep -q "false statements: 5 rejected$" "audit-$name.log" && grep -q "18 instructions: 18 rejected$" "audit-$name.log" || { echo "the audit of push (AArch64): NOT as expected"; exit 1; }
+fi
