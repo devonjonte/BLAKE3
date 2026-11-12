@@ -1,6 +1,8 @@
 """What is mine to move: the open issues and pull requests assigned to
 you in both repositories, newest update first, each with who spoke last
-and when (AGENTS.md, "One assignee makes the next move").
+and when (AGENTS.md, "One assignee makes the next move"). The team's
+private notes (servil-software-factory/ops) are read too, for whoever
+has access to them: a note written there for you shows here.
 
     python3 tools/my_moves.py [LOGIN]
 
@@ -13,9 +15,12 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 REPOS = ["servil-software-factory/BLAKE3", "servil-software-factory/bench-hashes"]
+# The team's alone: GitHub answers 404 to an account without access.
+PRIVATE = ["servil-software-factory/ops"]
 
 
 def token():
@@ -35,10 +40,15 @@ def main():
     tok = token()
     login = sys.argv[1] if len(sys.argv) > 1 else get(tok, "https://api.github.com/user")["login"]
     rows = []
-    for repo in REPOS:
+    for repo in REPOS + PRIVATE:
         page = 1
         while True:
-            items = get(tok, f"https://api.github.com/repos/{repo}/issues?state=open&assignee={login}&per_page=100&page={page}")
+            try:
+                items = get(tok, f"https://api.github.com/repos/{repo}/issues?state=open&assignee={login}&per_page=100&page={page}")
+            except urllib.error.HTTPError as e:
+                if repo in PRIVATE and e.code == 404:
+                    break
+                raise
             if not items:
                 break
             rows += [(i, repo) for i in items]
