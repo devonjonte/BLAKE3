@@ -15,12 +15,11 @@ lists what changed, each item with where it is described.
   `update_multithreaded`, `update_each_multithreaded`. A program that
   depends on `blake3-servil` 0.8 keeps the crate's name.
 - **0.9 has no streaming API.** 0.8's stream (`performance::stream`) is
-  gone. It had two faults (below, "Safer"). One streaming API, the
-  Pipeline, is being built to replace it (#356). Until that is released,
-  a program that fed a stream calls `hash_multithreaded` or
-  `hash_many_multithreaded` for each message or batch it has whole, which
-  is slower where the stream hashed while the program read on ("Slower",
-  below).
+  gone, and one streaming API, the Pipeline, is being built to replace it
+  (#356). A program that feeds 0.8's stream waits for the Pipeline's
+  release and stays on 0.8 until then, knowing the stream's two faults
+  there (below, "Safer"). 0.9's calls take whole messages and batches;
+  used in a stream's place they are slower ("Slower", below).
 
 ## The API: one call family for a hash now and then, one for call after call
 
@@ -44,6 +43,8 @@ lists what changed, each item with where it is described.
 ## Slower
 
 **Without a stream: messages hashed one after another on many threads.**
+This is what a program would see if it used 0.9's calls where it used
+0.8's stream; a program that needs a stream waits for the Pipeline.
 0.8's stream hashed on the workers while the program read the next
 message, gathered short messages into lanes and spread them over the
 cores. A call a message does none of that. On a Ryzen 9700X (16 threads)
@@ -128,8 +129,9 @@ this release: no 0.8.x follows.
   slot (#302). And `performance::Stream::open` is public, safe and hidden
   from the docs: a safe program could open a stream, hand it borrowed
   input, forget it (`mem::forget`) and free the input while the workers
-  still read it (#308). A program on 0.8's stream moves to the one-shot
-  multithreaded calls of this release.
+  still read it (#308). The remedy for a program on 0.8's stream is the
+  Pipeline's release, which follows this one; 0.9's one-shot calls are a
+  remedy today only where the program can do without a stream.
 - **The C header says what a finished hasher takes** (#311): after
   `b3_hasher_finalize`, only `b3_hasher_new`. A finished hasher is not
   reset, and an update on it silently continued the old message. Official
