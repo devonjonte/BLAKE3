@@ -39,14 +39,65 @@ statement would be such a thing: trusted, or one more text to read.
   the prover's hints are internal: Lean checks that they give the statement.
 - A function no user calls needs no reader at all: its statement is an interface between two proofs.
 
-State on November 12: the compiler writes all of it. The source says `meets Merge.contract(...) as
-Merge.statement` and gives only what the prover needs (the loop's `invariant` clauses, `decreases`, and
-the names of the lemmas that open the statement's view of memory at entry, carry a clause across a
-turn, and close it when the loop ends); `prove_fn.py` writes `Proof_merge.lean`, whose last theorem is
-`merge_meets : Merge.statement`. The source no longer has `requires` or `ensures`: there is one
-statement, and it is in Lean. Written by hand: the statement (`Spec_merge.lean`, `Spec_stack.lean`: 31
-lines of definitions), and, once for the data structure, its lemmas (`StackSpec.lean`,
-`StackBridge.lean`, `MergeTree.lean`).
+State on November 12: done for `merge`. Its contract is `Merge.contract` (`Spec_merge.lean`); the compiler
+writes `Proof_merge.lean`, whose last theorem `merge_meets` says: for all arguments,
+`Abi.Meets Code_merge.prog 0x60000 (Merge.contract ...)`. Nothing is translated.
+
+### Words
+
+- A **contract** (`Abi.Contract`) is what a caller owes a function and what it gets.
+- A **statement** is a proposition: something that may be true or false, such as "the function at this
+  address of this program meets this contract, whatever its arguments". A reader reads statements.
+- A **theorem** is a statement with a proof Lean has checked. Nobody reads proofs.
+- A **lemma** is a theorem made to be used in other proofs. Nobody need read those either.
+
+### What a reader reads, and where it is
+
+| File | What | Read |
+|---|---|---|
+| `Abi.lean` | what it means to meet a contract | once |
+| `Spec_THING.lean` | a data structure's layout in memory, or a function's contract | per thing |
+| the specification (`c2sp/BLAKE3`) | BLAKE3 | once |
+| `one/Machine.lean` | the machine | once |
+| the last line of `Proof_FN.lean` | which program and entry the theorem is about | per function |
+
+A `Spec_` file holds definitions only: no theorem, no tactic, nothing made for a proof's convenience. It
+imports `Abi`, the specification and other `Spec_` files, never code or proofs, so it can be written and
+read before the code exists. `#reading_list FN_meets` is the check that this table is the whole of it.
+
+### What a developer writes
+
+1. The contract, in `Spec_FN.lean`. Its stack is a round budget, not the frame's size: the compiler's
+   frame may change without the contract changing.
+2. The code, in the source, with `meets CONTRACT(...)`, `uses FILES`, `leave by LEMMA`, and for a loop
+   the `invariant` clauses and `decreases` (`prove_fn.py`'s first lines give the whole syntax).
+3. Lemmas, in Lean: for a data structure, once (`StackLemmas.lean`: what its holder may read at once,
+   that it depends on its own bytes only, how it is taken apart into the cells code reads and put together
+   again); for the function (`Lemmas_merge.lean`: what carries the invariant across a turn, and what
+   gives `ensures` when the loop ends).
+4. `./prove_fn.sh FN`, then `python3 mutants_fn.py`.
+
+Rules that kept it simple:
+
+- **One view of the data.** The invariant speaks in the contract's own terms (`Stack.At`, `Merge.result`).
+  A second representation for the proof's convenience doubled the lemmas and needed a bridge; it is gone.
+- **The invariant says "what is left to do gives the whole result"**, so one lemma carries it across a turn
+  and one closes it at the end.
+- **What the contract requires of the arguments alone is known at every turn**; the source does not
+  repeat it. What it requires of memory at entry is forgotten once the loop is entered: only the
+  invariant speaks of memory now.
+- **Conventions in place of declarations.** A clause `Name(args)` alone says `Name` of memory; its lemmas
+  are `Name.cells` and `Name.frame`; a lemma's memory is `m`.
+- **Every hypothesis of a lemma the source names is of a kind one tactic settles** (`mem_auto`): a fact at
+  hand, a cell of the memory after some writes, a region still owned, bytes no write touched, arithmetic.
+  Values a lemma speaks of are found by unification, never guessed.
+- **A callee's oddities stay in its contract.** (The SSE4.1 kernel reads its flags from a wider register
+  than the AVX-512 one; the lemma for its call asks the caller to show they are small, and then states
+  its result as the other's. The source needs no hint.)
+- **An audit begins with a control**: an unchanged copy, forced to check again, must be accepted.
+
+Not yet in this shape: the kernel `hex` (its contract is still clauses in the source, turned into a
+statement by `prove.py`, and its theorem has the trace, which `Abi.Meets` does not); `push` and the hash.
 
 ## Pinning the blame
 

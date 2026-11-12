@@ -1,5 +1,5 @@
 import Machine
-import Code
+import KCode
 import Cells
 open X86
 
@@ -104,10 +104,10 @@ def table : List (Nat × Instr × Nat) := [
   (0x6014E, .ret, 0x6014F)
 ]
 
-/-- This function's instructions and the kernels' (one/Code.lean) as one program. -/
-def prog (pc : Nat) : Option (Instr × Nat) := (Code.prog pc).or (table.lookup pc)
+/-- This function's instructions and the two kernels' (one/KCode.lean) as one program. -/
+def prog (pc : Nat) : Option (Instr × Nat) := (KCode.prog pc).or (table.lookup pc)
 
-theorem has_kernels : ∀ pc x, Code.prog pc = some x → prog pc = some x := by
+theorem has_kernels : ∀ pc x, KCode.prog pc = some x → prog pc = some x := by
   intro pc x h; simp only [prog, h, Option.some_or]
 
 @[ode_at] theorem at_60000 : prog 0x60000 = some (.push .rbx, 0x60001) := rfl

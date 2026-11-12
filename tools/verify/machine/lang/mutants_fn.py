@@ -34,9 +34,11 @@ code = [
     ("the result is not the length", ".mov 64 (.reg .rax) (.reg .r15)", ".mov 64 (.reg .rax) (.reg .r14)", 3),
 ]
 statement = [
-    ("the result claimed is merged to target + 1", "Spec_merge.lean", "target.toNat cvs) ∧", "(target.toNat + 1) cvs) ∧"),
+    ("the stack claimed is merged to target + 1", "Spec_merge.lean", "Stack.At m st (Merge.result k flags target cvs)", "Stack.At m st (Merge.result k flags (target + 1#64) cvs)"),
+    ("`Merge.result` is the specification's merge to one value more", "Spec_merge.lean", "⟨flags.setWidth 32⟩ target.toNat cvs", "⟨flags.setWidth 32⟩ (target.toNat + 1) cvs"),
+    ("the result is said to be one more than the count", "Spec_merge.lean", "result.toNat = (Merge.result k flags target cvs).length", "result.toNat = (Merge.result k flags target cvs).length + 1"),
     ("nothing is said to be modified", "Spec_merge.lean", "modifies := [(st, 1792#64)]", "modifies := []"),
-    ("168 bytes of stack are said to be enough", "Spec_merge.lean", "stack := 176#64", "stack := 168#64"),
+    ("168 bytes of stack are said to be enough", "Spec_merge.lean", "stack := 256#64", "stack := 168#64"),
     ("no `1 ≤ target` is required (then the trap can be reached)", "Spec_merge.lean", "1#64 ≤ target ∧ ", ""),
     ("no `flags < 256` is required (then the two kernels read different flags)", "Spec_merge.lean", "flags < 256#64 ∧ ", ""),
     ("the key is not said to be apart from the stack", "Spec_merge.lean", "regions := [(st, 1792#64), (key, 32#64)]", "regions := [(st, 1792#64)]"),
@@ -45,12 +47,13 @@ statement = [
     ("the stack's values are said to be 16 bytes apart", "Spec_stack.lean", "st + 32#64 * BitVec.ofNat 64 cvs.length", "st + 16#64 * BitVec.ofNat 64 cvs.length"),
     ("a chaining value's second half is said to be at byte 8", "Spec_stack.lean", "Vec m (a + 16#64) v1", "Vec m (a + 8#64) v1"),
 ]
+# what the source gives the prover: the line holding the first text is dropped (None) or the text replaced
 clause = [
-    ("the invariant forgets that target is at least 1", "    invariant target >= 1\n", ""),
-    ("the invariant forgets that the flags are below 256", "    invariant flags < 256\n", ""),
-    ("the invariant forgets the key's second half", "    invariant vec[key + 16] == k1\n", ""),
-    ("the invariant says pf is the flags alone", "    invariant pf == flags | PARENT\n", "    invariant pf == flags\n"),
-    ("the invariant forgets which key the vectors are", "    invariant Cv.Is(k0, k1, k)\n", ""),
+    ("the invariant forgets the count", "invariant len == Stack.count(now)", None),
+    ("the invariant forgets what is left to merge", "invariant Merge.result(k, flags, target, now)", None),
+    ("the invariant forgets the key", "invariant Cv.At(key, k)", None),
+    ("the invariant says pf is the flags alone", "invariant pf == flags | PARENT", "invariant pf == flags"),
+    ("the loop is said to end with another lemma's conclusion", "leave by Merge.exit", "leave by Stack.At.cells"),
 ]
 
 
@@ -67,7 +70,7 @@ def run(kind, what, old, new, n=1):
     start = time.time()
     try:
         w = os.path.join(d, "w")
-        shutil.copytree(here, w, symlinks=True, ignore=shutil.ignore_patterns("mut-*", "*.o"))
+        shutil.copytree(snapshot, w, symlinks=True)
         os.symlink(os.path.join("..", "one"), os.path.join(d, "one"))     # the copy is one level deeper: its ../one is this
         if kind == "control":
             # a line added to the proof's file, so the copy checks the proof again and does not answer from what was built
@@ -81,8 +84,11 @@ def run(kind, what, old, new, n=1):
             with open(os.path.join(w, ROWS), "w") as f: f.write(nth_replace(t, old, new, n))
             g = subprocess.run([sys.executable, "gen_code.py", "merge", ROWS, "Code_merge.lean"], cwd=w, capture_output=True, text=True)
         elif kind == "clause":
-            t = open(os.path.join(w, SRC)).read(); assert t.count(old) == 1, old
-            with open(os.path.join(w, SRC), "w") as f: f.write(t.replace(old, new))
+            lines = open(os.path.join(w, SRC)).read().split("\n")
+            at = [i for i, l in enumerate(lines) if old in l]; assert len(at) == 1, old
+            if new is None: del lines[at[0]]
+            else: lines[at[0]] = lines[at[0]].replace(old, new)
+            with open(os.path.join(w, SRC), "w") as f: f.write("\n".join(lines))
             g = subprocess.run([sys.executable, "prove_fn.py", SRC, "merge", ROWS, "merge.layout", "Proof_merge.lean"], cwd=w, capture_output=True, text=True)
             if g.returncode != 0:
                 return kind, what, "REJECTED by the generator", time.time() - start, (g.stderr.strip().splitlines() or [""])[-1][:110]
@@ -100,6 +106,11 @@ def run(kind, what, old, new, n=1):
         shutil.rmtree(d, ignore_errors=True)
 
 
+# one copy of this folder as it is now: every check starts from it, whatever is edited here meanwhile
+snap_dir = tempfile.mkdtemp(prefix="mut-merge-snap-", dir=os.path.dirname(here))
+snapshot = os.path.join(snap_dir, "w")
+shutil.copytree(here, snapshot, symlinks=True, ignore=shutil.ignore_patterns("mut-*", "*.o"))
+import atexit; atexit.register(lambda: shutil.rmtree(snap_dir, ignore_errors=True))
 k, w, verdict, secs, _ = run("control", "the unchanged copy", "", "")
 print(f"control: {verdict} in {secs:.0f} s", flush=True)
 if verdict != "ACCEPTED" or secs < 20:

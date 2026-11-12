@@ -64,6 +64,10 @@ EPYC 9255 host.
 Known limits, stated so nobody takes these for more than they are:
 
 - `one/` is the first with one model for kernels and compiled Rust; the others still have their own copies;
+- in `one/` the two kernels are a program of their own (`KCode.lean`, by `mk_kcode.py`) and their contracts are proved
+  for it (`Sse.kcontract`, `Avx.kcontract`; `gen_kernel.py` writes both proofs); `Code.prog` has them (`has_kernels`), so
+  the same contracts hold there (`contract`), and a function written in `lang/` is proved in a program of its own
+  instructions and the kernels' only;
 - `one/`'s Rust functions come from the two-crate trial (784fb406) built by rustc 1.99.1 for x86-64 Linux; their
   listing is `one/rust-functions.s`; a call through the GOT is taken to reach the kernel its relocation names;
 - `one/ParentOutputProof.lean` and `one/ChainingValueProof*.lean` were written by scripts not kept here (the list
@@ -108,27 +112,28 @@ rejected. On the EPYC 9255 host it takes 1.9 ns a call where the crate's `to_hex
 12.8; a million random hashes agree. A candidate for the crate that uses it: branch
 `candidate/sam-hex-constant-time`.
 
-**`./prove_fn.sh`: a function and its statement, from source to a checked theorem.** `merge` (the tree
+**`./prove_fn.sh`: a function and its contract, from source to a checked theorem.** `merge` (the tree
 hashing's loop: while the stack holds more than `target` values, the two newest become their parent) has
-its statement in Lean, written by hand for a reader: `Merge.statement` (`Spec_merge.lean`), a contract in
-the one vocabulary of `Abi.lean` (arguments, stack, regions, `requires`, `ensures`, `modifies`; `Abi.Meets`
-says what meeting it means under the calling convention), in the specification's terms: on return the
-stack is `Blake3.mergeTo` of the stack at the call. The source (`hasher.ode`) names the statement and
-gives the prover what no reader needs: the loop's `invariant` clauses, `decreases`, and the lemmas that
-open and close the statement's view of memory. `prove_fn.py` writes `Proof_merge.lean` from that and the
-layout the compiler prints: `Inv` over the machine's state, the three straight-line pieces (`enter`,
-`turn`, `leave`) by a symbolic run on memory in cells (`Cells.lean`) with the kernels' contracts at the
-calls (`Kernels.lean`), and **`merge_meets : Merge.statement`** by `Abi.meets_of_triple`, `Hoare.seq` and
-`Hoare.loop`. About 100 s from the source. `#reading_list Proof_merge.merge_meets` (`ReadingList.lean`)
-asks Lean what the statement depends on: 31 lines for `merge` and the stack's layout, 47 of `Abi.lean`,
-the specification, the machine model, the instructions. Written by hand, once: `Cells.lean`, `Abi.lean`,
-`AbiProof.lean` (generic), `Kernels.lean`, and for the stack `StackSpec.lean`, `StackBridge.lean`,
-`MergeTree.lean`; nothing for the function but its statement and its invariant.
-`python3 mutants_fn.py`: changed instructions, false statements and changed clauses, after a control.
+its contract in Lean, written by hand for a reader: `Merge.contract` (`Spec_merge.lean`), in the one
+vocabulary of `Abi.lean` (arguments, a budget of stack, regions, `requires`, `ensures`, `modifies`;
+`Abi.Meets` says what meeting it means under the calling convention) and in the specification's terms:
+on return the stack is `Blake3.mergeTo` of the stack at the call. `Spec_stack.lean` says how a stack
+lies in memory. The source (`hasher.ode`) names the contract and gives the prover what no reader needs:
+the loop's `invariant` clauses, in the contract's own terms, and what `decreases`. `prove_fn.py` writes
+`Proof_merge.lean` from that and the layout the compiler prints: `Inv` over the machine's state, the
+three straight-line pieces (`enter`, `turn`, `leave`) by a symbolic run on memory in cells (`Cells.lean`)
+with the kernels' contracts at the calls (`Kernels.lean`), and **`merge_meets`**: for all arguments,
+`Abi.Meets Code_merge.prog 0x60000 (Merge.contract ...)`, by `Abi.meets_of_triple` (`AbiProof.lean`),
+`Hoare.seq` and `Hoare.loop`. About 90 s from the source. `#reading_list Proof_merge.merge_meets`
+(`ReadingList.lean`) asks Lean what that statement depends on: 929 lines, of which 30 are `merge`'s and
+the stack's, 47 `Abi.lean`, 118 the specification, 461 the machine, 273 the instructions of `merge` and
+the two kernels it calls (`one/KCode.lean`). Lemmas written by hand: `StackLemmas.lean` (the data
+structure, once) and `Lemmas_merge.lean` (the function: 71 lines). `python3 mutants_fn.py`: 14 changed
+instructions, 12 false statements and 5 changed clauses, after a control: 31 rejected.
+`lang/DESIGN.md` has the conventions.
 
 Limits: one loop, not nested; a loop-carried variable lives in a register; no call or condition outside
-the loop; the trace is not in this theorem; `push` and the hash itself carry no contract yet
-(`LabPush.lean` is only `push`'s run). For `hex`: the recipe covers kernels that load, compute and store with no loop; x86-64 only; the object proved is assembled on a Mac for x86-64 (the instructions' bytes
+the loop; the trace is not in this theorem; `push` and the hash itself carry no contract yet. For `hex`: the recipe covers kernels that load, compute and store with no loop; x86-64 only; the object proved is assembled on a Mac for x86-64 (the instructions' bytes
 are the ELF object's; the relocations differ); the constants' alignment is the assembler's.
 
 ## `equihash/`: another project's Lean function, tied to the bytes its Rust compiles to

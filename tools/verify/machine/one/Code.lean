@@ -4,6 +4,7 @@ import Sse
 import Avx
 import Merge
 import Attr
+import KCode
 
 /-! The four functions as one program, and one lemma an instruction. Written from lift_one.py's tables. -/
 
@@ -13,7 +14,12 @@ open X86
 
 def table : List (Nat × Instr × Nat) := ParentOutput.table ++ ChainingValue.table ++ Sse.table ++ Avx.table ++ Merge.table
 
-def prog (pc : Nat) : Option (Instr × Nat) := table.lookup pc
+/-- The kernels' program (`KCode.prog`) first, then the rest: the same instructions as `table`, and
+what is proved of the kernels alone holds here (`has_kernels`). -/
+def prog (pc : Nat) : Option (Instr × Nat) := (KCode.prog pc).or (table.lookup pc)
+
+theorem has_kernels : ∀ pc x, KCode.prog pc = some x → prog pc = some x := by
+  intro pc x h; simp only [prog, h, Option.some_or]
 
 theorem at_10000 : prog 0x10000 = some (.mov 64 (.reg .rax) (.reg .rdi), 0x10003) := rfl
 theorem at_10003 : prog 0x10003 = some (.movv false 0 (.m .rsi 0x0), 0x10006) := rfl

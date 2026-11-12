@@ -409,4 +409,23 @@ theorem steps_add (prog : Nat → Option (Instr × Nat)) (a b : Nat) (s : State)
       | none => rfl
       | some s1 => simp only [Option.bind_some, ih]
 
+/-- A program that has all the instructions of another runs as the other does. -/
+theorem steps_mono {p q : Nat → Option (Instr × Nat)} (h : ∀ pc x, p pc = some x → q pc = some x) :
+    ∀ (k : Nat) (s s' : State), steps p k s = some s' → steps q k s = some s' := by
+  intro k
+  induction k with
+  | zero => intro s s' e; exact e
+  | succ k ih =>
+    intro s s' e
+    simp only [steps] at e ⊢
+    cases hp : p s.pc with
+    | none => rw [hp] at e; cases e
+    | some x =>
+      rw [hp] at e; rw [h _ _ hp]
+      obtain ⟨i, next⟩ := x
+      simp only at e ⊢
+      cases hs : step i next s with
+      | none => rw [hs] at e; cases e
+      | some s1 => rw [hs, Option.bind_some] at e; rw [Option.bind_some]; exact ih s1 s' e
+
 end X86

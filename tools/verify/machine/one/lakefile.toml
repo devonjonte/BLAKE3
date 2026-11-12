@@ -74,3 +74,5 @@ name = "CrossOneTable"
 name = "Observer"
 [[lean_lib]]
 name = "Hoare"
+[[lean_lib]]
+name = "KCode"

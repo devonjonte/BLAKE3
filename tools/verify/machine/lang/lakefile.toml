@@ -22,17 +22,11 @@ name = "Proof_hex"
 [[lean_lib]]
 name = "Cells"
 [[lean_lib]]
-name = "Code_push"
-[[lean_lib]]
 name = "Code_merge"
-[[lean_lib]]
-name = "StackSpec"
 [[lean_lib]]
 name = "Kernels"
 [[lean_lib]]
 name = "Proof_merge"
-[[lean_lib]]
-name = "MergeTree"
 [[lean_lib]]
 name = "ReadingList"
 [[lean_lib]]
@@ -40,10 +34,10 @@ name = "Abi"
 [[lean_lib]]
 name = "Spec_merge"
 [[lean_lib]]
-name = "Meets_merge"
-[[lean_lib]]
 name = "AbiProof"
 [[lean_lib]]
 name = "Spec_stack"
 [[lean_lib]]
-name = "StackBridge"
+name = "StackLemmas"
+[[lean_lib]]
+name = "Lemmas_merge"

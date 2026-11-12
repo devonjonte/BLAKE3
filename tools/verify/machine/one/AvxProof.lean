@@ -22,14 +22,14 @@ set_option maxHeartbeats 0 in
 /-- **A round.** The 34 instructions from the loop's head are the specification's round on the rows. -/
 theorem body (v0 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15 m0 m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15 : BitVec 32) (s : State) (hpc : s.pc = 0x30064)
     (hv : Rows s #v[v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15]) (hm : Msgs s #v[m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]) :
-    ∃ s', steps Code.prog 34 s = some s' ∧ s'.pc = 0x3011A ∧ Rows s' (rnd #v[v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15] #v[m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]) ∧
+    ∃ s', steps KCode.prog 34 s = some s' ∧ s'.pc = 0x3011A ∧ Rows s' (rnd #v[v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15] #v[m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]) ∧
       Msgs s' #v[m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15] ∧ Same s s' ∧ s'.x14 = s.x14 ∧ s'.x15 = s.x15 ∧ s'.rax = s.rax := by
   obtain ⟨rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8, r9, r12, r13, r14, r15, zf, cf, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, mem, pc⟩ := s
   obtain ⟨hv0, hv1, hv2, hv3⟩ := hv
   obtain ⟨hm0, hm1, hm2, hm3⟩ := hm
   simp only at hpc hv0 hv1 hv2 hv3 hm0 hm1 hm2 hm3
   subst hpc hv0 hv1 hv2 hv3 hm0 hm1 hm2 hm3
-  run_code []
+  run_kcode []
   refine ⟨_, rfl, rfl, ⟨?_, ?_, ?_, ?_⟩, ⟨rfl, rfl, rfl, rfl⟩, ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩, rfl, rfl, rfl⟩
   all_goals (eval_spec; open_ops; bv_decide (config := { timeout := 900 }))
 
@@ -39,14 +39,14 @@ set_option maxHeartbeats 0 in
 permute the message words as the specification does. -/
 theorem perm (m0 m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15 : BitVec 32) (s : State) (hpc : s.pc = 0x3011A)
     (hm : Msgs s #v[m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]) (hal : (s.rax.setWidth 8 - 1 == 0) = false) :
-    ∃ s', steps Code.prog 16 s = some s' ∧ s'.pc = 0x30064 ∧ Msgs s' (PERMUTE #v[m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]) ∧
+    ∃ s', steps KCode.prog 16 s = some s' ∧ s'.pc = 0x30064 ∧ Msgs s' (PERMUTE #v[m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]) ∧
       (s'.x0 = s.x0 ∧ s'.x1 = s.x1 ∧ s'.x2 = s.x2 ∧ s'.x3 = s.x3) ∧ Same s s' ∧ s'.x14 = s.x14 ∧ s'.x15 = s.x15 ∧
       s'.rax.setWidth 8 = s.rax.setWidth 8 - 1 := by
   obtain ⟨rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8, r9, r12, r13, r14, r15, zf, cf, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, mem, pc⟩ := s
   obtain ⟨hm0, hm1, hm2, hm3⟩ := hm
   simp only at hpc hm0 hm1 hm2 hm3 hal
   subst hpc hm0 hm1 hm2 hm3
-  run_code [hal]
+  run_kcode [hal]
   refine ⟨_, rfl, rfl, ⟨?_, ?_, ?_, ?_⟩, ⟨rfl, rfl, rfl, rfl⟩, ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩, rfl, rfl, ?_⟩
   · eval_spec; open_ops; bv_decide (config := { timeout := 900 })
   · eval_spec; open_ops; bv_decide (config := { timeout := 900 })
@@ -62,7 +62,7 @@ theorem finish (v0 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15 : BitVec 3
     (hv : Rows s #v[v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15]) (hal : (s.rax.setWidth 8 - 1 == 0) = true)
     (o0 : Owned16 s.mem (s.rdi + 0)) (o1 : Owned16 s.mem (s.rdi + 16))
     (hret : s.mem.read s.rsp 64 = some ra) (hapart : ∀ x, (x - s.rsp).toNat < 8 → 32 ≤ (x - s.rdi).toNat) :
-    ∃ s', steps Code.prog 7 s = some s' ∧ s'.pc = ra.toNat ∧ s'.rsp = s.rsp + 8 ∧
+    ∃ s', steps KCode.prog 7 s = some s' ∧ s'.pc = ra.toNat ∧ s'.rsp = s.rsp + 8 ∧
       s'.mem = (s.mem.put128 (s.rdi + 0) (mk4 (v0 ^^^ v8) (v1 ^^^ v9) (v2 ^^^ v10) (v3 ^^^ v11))).put128 (s.rdi + 16)
         (mk4 (v4 ^^^ v12) (v5 ^^^ v13) (v6 ^^^ v14) (v7 ^^^ v15)) ∧
       s'.rbx = s.rbx ∧ s'.rbp = s.rbp ∧ s'.r12 = s.r12 ∧ s'.r13 = s.r13 ∧ s'.r14 = s.r14 ∧ s'.r15 = s.r15 := by
@@ -81,7 +81,7 @@ theorem finish (v0 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15 : BitVec 3
     open_ops; bv_decide (config := { timeout := 900 })
   have e1 : mk4 v4 v5 v6 v7 ^^^ mk4 v12 v13 v14 v15 = mk4 (v4 ^^^ v12) (v5 ^^^ v13) (v6 ^^^ v14) (v7 ^^^ v15) := by
     open_ops; bv_decide (config := { timeout := 900 })
-  run_code [hal, write_vec o0, w1, r1, e0, e1]
+  run_kcode [hal, write_vec o0, w1, r1, e0, e1]
   exact ⟨_, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 set_option maxRecDepth 1000000 in
@@ -92,7 +92,7 @@ theorem start (cv0 cv1 b0 b1 b2 b3 : V) (s : State) (hpc : s.pc = 0x30000)
     (hc0 : Vec s.mem (s.rdi + 0) cv0) (hc1 : Vec s.mem (s.rdi + 16) cv1)
     (hb0 : Vec s.mem (s.rsi + 0) b0) (hb1 : Vec s.mem (s.rsi + 16) b1)
     (hb2 : Vec s.mem (s.rsi + 32) b2) (hb3 : Vec s.mem (s.rsi + 48) b3)  :
-    ∃ s', steps Code.prog 21 s = some s' ∧ s'.pc = 0x30064 ∧
+    ∃ s', steps KCode.prog 21 s = some s' ∧ s'.pc = 0x30064 ∧
       Rows s' #v[dw cv0 0, dw cv0 1, dw cv0 2, dw cv0 3, dw cv1 0, dw cv1 1, dw cv1 2, dw cv1 3,
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, s.rcx.setWidth 32, (s.rcx >>> 32).setWidth 32, (s.rdx.setWidth 8).setWidth 32, (s.r8.setWidth 8).setWidth 32] ∧
       Msgs s' #v[dw b0 0, dw b0 1, dw b0 2, dw b0 3, dw b1 0, dw b1 1, dw b1 2, dw b1 3,
@@ -101,7 +101,7 @@ theorem start (cv0 cv1 b0 b1 b2 b3 : V) (s : State) (hpc : s.pc = 0x30000)
   obtain ⟨rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8, r9, r12, r13, r14, r15, zf, cf, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, mem, pc⟩ := s
   simp only at hpc hc0 hc1 hb0 hb1 hb2 hb3
   subst hpc
-  run_code [read_vec hc0, read_vec hc1, read_vec hb0, read_vec hb1, read_vec hb2, read_vec hb3]
+  run_kcode [read_vec hc0, read_vec hc1, read_vec hb0, read_vec hb1, read_vec hb2, read_vec hb3]
   refine ⟨_, rfl, rfl, ⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_⟩, ?_, ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩⟩
   all_goals (try eval_spec)
   all_goals (try open_ops)
@@ -109,14 +109,14 @@ theorem start (cv0 cv1 b0 b1 b2 b3 : V) (s : State) (hpc : s.pc = 0x30000)
 
 theorem body' (v m : Vector (BitVec 32) 16) (s : State) (hpc : s.pc = 0x30064)
     (hv : Rows s v) (hm : Msgs s m) :
-    ∃ s', steps Code.prog 34 s = some s' ∧ s'.pc = 0x3011A ∧ Rows s' (rnd v m) ∧ Msgs s' m ∧ Same s s' ∧
+    ∃ s', steps KCode.prog 34 s = some s' ∧ s'.pc = 0x3011A ∧ Rows s' (rnd v m) ∧ Msgs s' m ∧ Same s s' ∧
       s'.x14 = s.x14 ∧ s'.x15 = s.x15 ∧ s'.rax = s.rax := by
   have h := body v[0] v[1] v[2] v[3] v[4] v[5] v[6] v[7] v[8] v[9] v[10] v[11] v[12] v[13] v[14] v[15] m[0] m[1] m[2] m[3] m[4] m[5] m[6] m[7] m[8] m[9] m[10] m[11] m[12] m[13] m[14] m[15] s hpc (by rw [eta16]; exact hv) (by rw [eta16]; exact hm)
   rwa [eta16 v, eta16 m] at h
 
 theorem perm' (m : Vector (BitVec 32) 16) (s : State) (hpc : s.pc = 0x3011A)
     (hm : Msgs s m) (hal : (s.rax.setWidth 8 - 1 == 0) = false) :
-    ∃ s', steps Code.prog 16 s = some s' ∧ s'.pc = 0x30064 ∧ Msgs s' (PERMUTE m) ∧
+    ∃ s', steps KCode.prog 16 s = some s' ∧ s'.pc = 0x30064 ∧ Msgs s' (PERMUTE m) ∧
       (s'.x0 = s.x0 ∧ s'.x1 = s.x1 ∧ s'.x2 = s.x2 ∧ s'.x3 = s.x3) ∧ Same s s' ∧ s'.x14 = s.x14 ∧ s'.x15 = s.x15 ∧
       s'.rax.setWidth 8 = s.rax.setWidth 8 - 1 := by
   have h := perm m[0] m[1] m[2] m[3] m[4] m[5] m[6] m[7] m[8] m[9] m[10] m[11] m[12] m[13] m[14] m[15] s hpc (by rw [eta16]; exact hm) hal
@@ -126,7 +126,7 @@ theorem finish' (w : Vector (BitVec 32) 16) (ra : BitVec 64) (s : State) (hpc : 
     (hv : Rows s w) (hal : (s.rax.setWidth 8 - 1 == 0) = true)
     (o0 : Owned16 s.mem (s.rdi + 0)) (o1 : Owned16 s.mem (s.rdi + 16))
     (hret : s.mem.read s.rsp 64 = some ra) (hapart : ∀ x, (x - s.rsp).toNat < 8 → 32 ≤ (x - s.rdi).toNat) :
-    ∃ s', steps Code.prog 7 s = some s' ∧ s'.pc = ra.toNat ∧ s'.rsp = s.rsp + 8 ∧
+    ∃ s', steps KCode.prog 7 s = some s' ∧ s'.pc = ra.toNat ∧ s'.rsp = s.rsp + 8 ∧
       s'.mem = (s.mem.put128 (s.rdi + 0) (mk4 (w[0] ^^^ w[8]) (w[1] ^^^ w[9]) (w[2] ^^^ w[10]) (w[3] ^^^ w[11]))).put128
         (s.rdi + 16) (mk4 (w[4] ^^^ w[12]) (w[5] ^^^ w[13]) (w[6] ^^^ w[14]) (w[7] ^^^ w[15])) ∧
       s'.rbx = s.rbx ∧ s'.rbp = s.rbp ∧ s'.r12 = s.r12 ∧ s'.r13 = s.r13 ∧ s'.r14 = s.r14 ∧ s'.r15 = s.r15 :=
@@ -141,7 +141,7 @@ structure Head (s : State) (v m : Vector (BitVec 32) 16) (k : BitVec 8) : Prop w
 
 /-- A round that is not the last, and the permutation after it: 50 instructions. -/
 theorem iter (v m : Vector (BitVec 32) 16) (k : BitVec 8) (s : State) (h : Head s v m k) (hk : (k - 1 == 0) = false) :
-    ∃ s', steps Code.prog 50 s = some s' ∧ Head s' (rnd v m) (PERMUTE m) (k - 1) ∧ Same s s' := by
+    ∃ s', steps KCode.prog 50 s = some s' ∧ Head s' (rnd v m) (PERMUTE m) (k - 1) ∧ Same s s' := by
   obtain ⟨s1, e1, pc1, r1, m1, S1, a14, a15, ax1⟩ := body' v m s h.pc h.rows h.msgs
   obtain ⟨s2, e2, pc2, m2, ⟨q0, q1, q2, q3⟩, S2, b14, b15, ax2⟩ := perm' m s1 pc1 m1 (by rw [ax1, h.al]; exact hk)
   obtain ⟨c0, c1, c2, c3⟩ := r1
@@ -152,7 +152,7 @@ theorem iter (v m : Vector (BitVec 32) 16) (k : BitVec 8) (s : State) (h : Head 
 theorem last (v m : Vector (BitVec 32) 16) (ra : BitVec 64) (s : State) (h : Head s v m 1)
     (o0 : Owned16 s.mem (s.rdi + 0)) (o1 : Owned16 s.mem (s.rdi + 16))
     (hret : s.mem.read s.rsp 64 = some ra) (hapart : ∀ x, (x - s.rsp).toNat < 8 → 32 ≤ (x - s.rdi).toNat) :
-    ∃ s', steps Code.prog 41 s = some s' ∧ s'.pc = ra.toNat ∧ s'.rsp = s.rsp + 8 ∧
+    ∃ s', steps KCode.prog 41 s = some s' ∧ s'.pc = ra.toNat ∧ s'.rsp = s.rsp + 8 ∧
       s'.mem = (s.mem.put128 (s.rdi + 0) (mk4 ((rnd v m)[0] ^^^ (rnd v m)[8]) ((rnd v m)[1] ^^^ (rnd v m)[9])
         ((rnd v m)[2] ^^^ (rnd v m)[10]) ((rnd v m)[3] ^^^ (rnd v m)[11]))).put128 (s.rdi + 16)
         (mk4 ((rnd v m)[4] ^^^ (rnd v m)[12]) ((rnd v m)[5] ^^^ (rnd v m)[13]) ((rnd v m)[6] ^^^ (rnd v m)[14])
@@ -173,12 +173,12 @@ chaining value's 32 bytes: its 362 instructions run to that address with the sta
 popped, and memory is what it was but for the 32 bytes at RDI, which hold the first eight words
 of the specification's `BLAKE3_COMPRESS` (sections 2.2 to 3.3 of C2SP's BLAKE3, `Generic.lean`,
 at 32-bit words). RBX, RBP and R12 to R15 are as they were. -/
-theorem contract (cv0 cv1 b0 b1 b2 b3 : V) (ra : BitVec 64) (s : State) (hpc : s.pc = 0x30000)
+theorem kcontract (cv0 cv1 b0 b1 b2 b3 : V) (ra : BitVec 64) (s : State) (hpc : s.pc = 0x30000)
     (hc0 : Vec s.mem (s.rdi + 0) cv0) (hc1 : Vec s.mem (s.rdi + 16) cv1)
     (hb0 : Vec s.mem (s.rsi + 0) b0) (hb1 : Vec s.mem (s.rsi + 16) b1)
     (hb2 : Vec s.mem (s.rsi + 32) b2) (hb3 : Vec s.mem (s.rsi + 48) b3) 
     (hret : s.mem.read s.rsp 64 = some ra) (hapart : ∀ x, (x - s.rsp).toNat < 8 → 32 ≤ (x - s.rdi).toNat) :
-    ∃ s', steps Code.prog 362 s = some s' ∧ s'.pc = ra.toNat ∧ s'.rsp = s.rsp + 8 ∧
+    ∃ s', steps KCode.prog 362 s = some s' ∧ s'.pc = ra.toNat ∧ s'.rsp = s.rsp + 8 ∧
       s'.mem = (s.mem.put128 (s.rdi + 0) (mk4 (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[0] (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[1]
           (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[2] (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[3])).put128 (s.rdi + 16)
         (mk4 (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[4] (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[5]
@@ -213,5 +213,20 @@ theorem contract (cv0 cv1 b0 b1 b2 b3 : V) (ra : BitVec 64) (s : State) (hpc : s
   · rw [show 362 = 21 + (50 + (50 + (50 + (50 + (50 + (50 + 41)))))) from rfl, steps_add, e1, Option.bind_some, steps_add, e2, Option.bind_some, steps_add, e3, Option.bind_some, steps_add, e4, Option.bind_some, steps_add, e5, Option.bind_some, steps_add, e6, Option.bind_some, steps_add, e7, Option.bind_some, e8]
   · rw [mem8, kmem, kdi, spec_eq, low8_0, low8_1, low8_2, low8_3, low8_4, low8_5, low8_6, low8_7]
     rfl
+
+/-- The same contract in the program that holds all five functions (`Code.prog`). -/
+theorem contract (cv0 cv1 b0 b1 b2 b3 : V) (ra : BitVec 64) (s : State) (hpc : s.pc = 0x30000)
+    (hc0 : Vec s.mem (s.rdi + 0) cv0) (hc1 : Vec s.mem (s.rdi + 16) cv1)
+    (hb0 : Vec s.mem (s.rsi + 0) b0) (hb1 : Vec s.mem (s.rsi + 16) b1)
+    (hb2 : Vec s.mem (s.rsi + 32) b2) (hb3 : Vec s.mem (s.rsi + 48) b3) 
+    (hret : s.mem.read s.rsp 64 = some ra) (hapart : ∀ x, (x - s.rsp).toNat < 8 → 32 ≤ (x - s.rdi).toNat) :
+    ∃ s', steps Code.prog 362 s = some s' ∧ s'.pc = ra.toNat ∧ s'.rsp = s.rsp + 8 ∧
+      s'.mem = (s.mem.put128 (s.rdi + 0) (mk4 (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[0] (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[1]
+          (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[2] (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[3])).put128 (s.rdi + 16)
+        (mk4 (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[4] (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[5]
+          (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[6] (specCv (cvWords cv0 cv1) (blockWords b0 b1 b2 b3) s.rcx ((s.rdx.setWidth 8).setWidth 32) ((s.r8.setWidth 8).setWidth 32))[7]) ∧
+      s'.rbx = s.rbx ∧ s'.rbp = s.rbp ∧ s'.r12 = s.r12 ∧ s'.r13 = s.r13 ∧ s'.r14 = s.r14 ∧ s'.r15 = s.r15 := by
+  obtain ⟨s', h, rest⟩ := kcontract cv0 cv1 b0 b1 b2 b3 ra s hpc hc0 hc1 hb0 hb1 hb2 hb3 hret hapart
+  exact ⟨s', steps_mono Code.has_kernels _ _ _ h, rest⟩
 
 end Avx

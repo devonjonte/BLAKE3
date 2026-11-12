@@ -23,6 +23,16 @@ macro "run_code" "[" hs:Lean.Parser.Tactic.simpLemma,* "]" : tactic => `(tactic|
     BitVec.reduceAnd, BitVec.reduceSetWidth, Bool.false_eq_true, Bool.true_eq_false, Bool.false_and, Bool.true_and,
     Bool.not_true, Bool.not_false, $hs,*])
 
+set_option maxRecDepth 100000 in
+/-- The same for the kernels' own program (`KCode.prog`). -/
+macro "run_kcode" "[" hs:Lean.Parser.Tactic.simpLemma,* "]" : tactic => `(tactic|
+  simp (config := {maxSteps := 100000000, implicitDefEqProofs := false}) only [steps_mk, steps_zero, step, src, X86.read, write,
+    State.get, State.set, State.xmm, State.setx, trunc, al_of, kcode_at,
+    Option.bind_eq_bind, Option.bind_some, Option.pure_def, Option.map_some, bind_pure_comp, Option.isSome_some,
+    Nat.reduceEqDiff, ↓reduceIte, reduceCtorEq, BitVec.reduceAdd, BitVec.reduceSub, BitVec.reduceEq, BitVec.reduceBEq,
+    BitVec.reduceAnd, BitVec.reduceSetWidth, Bool.false_eq_true, Bool.true_eq_false, Bool.false_and, Bool.true_and,
+    Bool.not_true, Bool.not_false, $hs,*])
+
 /-- What the kernels leave alone from one part to the next. -/
 def Same (s s' : State) : Prop :=
   s'.rbx = s.rbx ∧ s'.rsp = s.rsp ∧ s'.rbp = s.rbp ∧ s'.rdi = s.rdi ∧ s'.r12 = s.r12 ∧ s'.r13 = s.r13 ∧ s'.r14 = s.r14 ∧

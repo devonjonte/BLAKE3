@@ -5,8 +5,7 @@
 #   3. prove.py writes the theorem from the source's contract and its proof by recipe;
 #   4. Lean checks that those bytes meet the contract.
 # Then the audit: instructions changed one at a time must each fail the proof.
-# Needs python3, cc (assembling for x86-64), llvm-objdump (OBJDUMP), lake. The object is made for
-# macOS's format where cc is Apple's (-arch x86_64), for ELF elsewhere; the instructions' bytes are the same.
+# Needs python3, cc (clang, or gcc on x86-64 Linux), llvm-objdump (OBJDUMP), lake. The object is ELF.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd); cd "$here"
 OBJDUMP=${OBJDUMP:-llvm-objdump}; export OBJDUMP
@@ -14,7 +13,7 @@ name=${1:-hex}; base=0x50000
 python3 odec.py hasher.ode HasherOde.lean
 lake build Lang HasherOde > /dev/null
 lake env lean --run HasherOde.lean asm b3l_ only "$name" > "$name.S"
-if cc -arch x86_64 -c -o "$name.o" "$name.S" 2>/dev/null; then :; else cc -c -o "$name.o" "$name.S"; fi
+if cc -target x86_64-unknown-linux-gnu -c -o "$name.o" "$name.S" 2>/dev/null; then :; else cc -c -o "$name.o" "$name.S"; fi
 "$OBJDUMP" -d -r --x86-asm-syntax=intel "$name.o" | awk "/<_?b3l_$name>:/,/ret/" > "$name.listing"
 python3 ../one/lift_one.py "$name.listing" "$(head -n 1 "$name.listing" | sed 's/.*<\(.*\)>:/\1/')" $base "Lifted_$name.lean" "Lifted_$name" --object "$name.o"
 python3 prove.py hasher.ode "$name" "Lifted_$name.lean.rows" $base .

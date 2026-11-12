@@ -1,25 +1,46 @@
 #!/usr/bin/env python3
-"""The compiler's other output for a word-level function: the proof that it meets its statement.
+"""The compiler's other output for a word-level function: the proof that it meets its contract.
 
 usage: prove_fn.py SOURCE.ode NAME ROWS LAYOUT OUT.lean
 
-A function's statement is written in Lean, by hand, for a reader (`Spec_NAME.lean`: a contract in the
-vocabulary of `Abi.lean`). The source names it (`meets CONTRACT(ghosts) as STATEMENT`) and gives the
-prover what no reader needs: for its loop the `invariant` clauses and what `decreases`, and the names
-of lemmas that open the statement's view of memory at entry, close it at the end, and carry a clause
-across a turn. ROWS is the lifter's reading of the assembled object; LAYOUT is what the compiler printed
-about where it put things.
+What a function is claimed to do is a contract written in Lean, by hand, for a reader
+(`Spec_NAME.lean`, in the vocabulary of `Abi.lean`). The source names it and gives the prover what no
+reader needs:
 
-This writes, with nothing left for a person to fill in:
+    fn NAME(params)
+      meets CONTRACT(ghost: Type, ...)       the contract, and what it is stated for besides the arguments
+      uses FILE, ...                         Lean files of lemmas for the prover
+      leave by LEMMA                         gives the contract's `ensures` from the invariant when the loop ends
+      [enter open LEMMA as names]            takes a `requires` fact apart before the first instruction
+    {
+      ...
+      while CONDITION
+        ghost name: Type, ...                what the invariant speaks of besides the variables
+        invariant CLAUSE [by LEMMA]          holds each time the loop's head is reached; LEMMA carries it
+                                             across a turn (without one: it is read off, or kept by `P.frame`)
+        decreases VARIABLE
+        [open LEMMA as names]                takes an invariant's fact apart before a turn's instructions
+        [assert CLAUSE]                      arithmetic the run needs said
+      { ... }
 
-  Inv              what holds at the loop's head, on the machine's state: the invariant with every
-                   variable replaced by the register or frame slot the compiler gave it, and around it
-                   what the compiler itself keeps (the frame owned, the caller's registers and return
-                   address saved in it, every byte outside the frame and what may be modified as it was);
+A clause is a comparison of the language's expressions (variables, numbers, `+ - | & << >>`, `low8(e)`,
+`low32(e)`, `Name(args)` for a Lean definition), or `Name(args)` alone, which says `Name` of memory.
+Whatever the contract requires of the arguments alone is known at every turn without being repeated.
+By convention a lemma's memory is `m`, and for a predicate `P` over memory `P.cells` (if there is one)
+gives what its holder may read at once and `P.frame` says it depends on its own bytes only.
+
+ROWS is the lifter's reading of the assembled object; LAYOUT is what the compiler printed about where
+it put things. This writes, with nothing left for a person to fill in:
+
+  Inv              the invariant on the machine's state: each variable where the compiler keeps it, and
+                   around the clauses what the compiler itself keeps (the frame owned, the caller's
+                   registers and return address saved in it, every byte outside the frame and what may be
+                   modified as it was at entry);
   enter, turn, leave   the three straight-line pieces of a function with one loop, each proved by
-                   running its instructions on symbolic memory (Cells.lean's run_fn), with an external
-                   function's contract at each call, split on the conditions the invariant does not settle;
-  NAME_meets : STATEMENT   by Abi.meets_of_triple, Hoare.seq and Hoare.loop.
+                   running its instructions on symbolic memory (Cells.lean), with an external function's
+                   contract at each call, split on the conditions the invariant does not settle;
+  NAME_meets       for all arguments, Abi.Meets PROGRAM ENTRY (CONTRACT ...): by Abi.meets_of_triple,
+                   Hoare.seq and Hoare.loop.
 
 Lean checks all of it; nothing here is trusted. One loop, not nested, for now."""
 import re, sys
@@ -138,15 +159,18 @@ class Clause:
     def take(self, want=None):
         t = self.toks[self.i]; assert want is None or t == want, (t, want); self.i += 1; return t
 
-    def clause(self, env, mem, preds):
-        if self.peek() in preds:                       # a predicate over memory
-            p = self.take(); return f"{p} {mem} " + " ".join(self.args(env, mem))
+    def clause(self, env, mem):
+        """The clause as a Lean proposition. Sets self.pred when it is `Name(args)` alone: `Name` of memory."""
+        self.pred = None
         if self.peek() in ("vec", "u64"):
             kind = self.take(); self.take("["); a = self.expr(env, mem); self.take("]"); self.take("=="); v = self.expr(env, mem)
             return f"{'Vec' if kind == 'vec' else 'Quad'} {mem} {a} {v}"
-        a = self.expr(env, mem)
-        if self.peek() is None: return a[1:-1] if a.startswith("(") else a      # a predicate that is not about memory
-        op = self.take(); b = self.expr(env, mem)
+        if re.fullmatch(r"[A-Z][\w.]*", self.peek() or "") and self.i + 1 < len(self.toks) and self.toks[self.i + 1] == "(":
+            start = self.i; name = self.take(); xs = self.args(env, mem)
+            if self.peek() is None:
+                self.pred = name; return f"{name} {mem} " + " ".join(xs)
+            self.i = start
+        a = self.expr(env, mem); op = self.take(); b = self.expr(env, mem)
         return {"==": f"{a} = {b}", "!=": f"{a} ≠ {b}", "<": f"{a} < {b}", "<=": f"{a} ≤ {b}", ">": f"{b} < {a}", ">=": f"{b} ≤ {a}"}[op]
 
     def args(self, env, mem):
@@ -188,37 +212,32 @@ def split_by(s):
     return (m.group(1), m.group(2)) if m else (s, None)
 
 
-# ---------------------------------------------------------------- the contract's parts
+# ---------------------------------------------------------------- what the source gives the prover
 TYPES = {"vec": "V", "word": "BitVec 64"}
-def ghosts(items):
+def binders(text):
     out = []
-    for word, rest in items:
-        if word == "ghost":
-            for g in rest.split(","):
-                n, t = [x.strip() for x in g.split(":")]; out.append((n, TYPES.get(t, t)))
+    for g in text.split(","):
+        if g.strip():
+            n, ty = [x.strip() for x in g.split(":", 1)]; out.append((n, TYPES.get(ty, ty)))
     return out
 
 
-specs = [rest for word, rest in head if word == "spec"]
-fn_ghosts, loop_ghosts = ghosts(head), ghosts(loop)
-preds, pred_cells, pred_frame = [], {}, {}
-for word, rest in head:
-    if word == "predicate":
-        f = rest.split(); preds.append(f[0])
-        for k, v in zip(f[1::2], f[2::2]):
-            (pred_cells if k == "cells" else pred_frame)[f[0]] = v
-meets = [rest for word, rest in head if word == "meets"]
-assert len(meets) == 1, "the function must name its statement: meets CONTRACT(ghost: Type, ...) as STATEMENT"
-mm = re.match(r"^([\w.]+)\((.*)\)\s+as\s+([\w.]+)$", meets[0]); assert mm, meets[0]
-CNAME, STATEMENT = mm.group(1), mm.group(3)
-fn_ghosts = [(g.split(":")[0].strip(), TYPES.get(g.split(":")[1].strip(), g.split(":")[1].strip())) for g in mm.group(2).split(",") if g.strip()]
-enter_opens = [re.match(r"^open\s+([\w.]+)\s+as\s+(.*)$", rest).groups() for word, rest in head if word == "enter"]
-leave_by = [re.match(r"^by\s+([\w.]+)$", rest).group(1) for word, rest in head if word == "leave"]
-assert len(leave_by) == 1, "the function must name the lemma that gives its ensures when the loop ends: leave by LEMMA"
-invariants = [split_by(rest) for word, rest in loop if word == "invariant"]
-decreases = [rest for word, rest in loop if word == "decreases"][0]
-opens = [rest for word, rest in loop if word == "open"]
-asserts = [rest for word, rest in loop if word == "assert"]
+def one(items, word, what):
+    xs = [rest for w, rest in items if w == word]
+    assert len(xs) == 1, f"{name}: {what}"
+    return xs[0]
+
+
+mm = re.match(r"^([\w.]+)\((.*)\)$", one(head, "meets", "the function must name its contract: meets CONTRACT(ghost: Type, ...)"))
+CNAME, fn_ghosts = mm.group(1), binders(mm.group(2))
+uses = [u.strip() for w, rest in head if w == "uses" for u in rest.split(",")]
+LEAVE = re.match(r"^by\s+([\w.]+)$", one(head, "leave", "the function must name the lemma that gives its ensures when the loop ends: leave by LEMMA")).group(1)
+enter_opens = [re.match(r"^open\s+([\w.]+)\s+as\s+(.*)$", rest).groups() for w, rest in head if w == "enter"]
+loop_ghosts = [b for w, rest in loop if w == "ghost" for b in binders(rest)]
+invariants = [split_by(rest) for w, rest in loop if w == "invariant"]
+decreases = one(loop, "decreases", "the loop must say what gets smaller: decreases VARIABLE")
+opens = [re.match(r"^([\w.]+)\s+as\s+(.*)$", rest).groups() for w, rest in loop if w == "open"]
+asserts = [rest for w, rest in loop if w == "assert"]
 
 # where the loop is in the function
 wi = next(i for i, s in enumerate(body) if s[0] == "while")
@@ -239,8 +258,6 @@ def reads(e):
     return set().union(*[reads(x) for x in e[1:] if isinstance(x, tuple)]) if len(e) > 1 else set()
 
 
-assert not (sets(body) & set(params)), "a parameter is assigned: not yet"
-changed = sets(wbody)                                   # variables the loop assigns
 def mentions(s, x):
     """Does this statement read or set x anywhere?"""
     k = s[0]
@@ -251,6 +268,8 @@ def mentions(s, x):
     return any(x in reads(e) for e in s[1:] if isinstance(e, tuple))
 
 
+assert not (sets(body) & set(params)), "a parameter is assigned: not yet"
+changed = sets(wbody)                                   # variables the loop assigns
 first_use = {}                                          # is a changed variable read before the body sets it?
 for s_ in wbody:
     for x in changed:
@@ -278,10 +297,12 @@ def env_at(reg):
     return env
 
 
-# ---------------------------------------------------------------- the three predicates
-C = f"({CNAME} {' '.join(params + [g for g, _ in fn_ghosts])})"        # the contract, as the statement applies it
-UNFOLD = f"{CNAME}, Abi.AllApart, Abi.Apart, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, BitVec.reduceAdd"
-UNFOLD_X = f"{CNAME}, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, BitVec.reduceAdd"
+# ---------------------------------------------------------------- the invariant on the machine's state
+CARGS = " ".join(params + [g for g, _ in fn_ghosts])
+C = f"(Abi.Contract.framed ({CNAME} {CARGS}) {F}#64)"                  # the contract, with the frame the compiler made
+OPEN_C = f"{CNAME}, Abi.Contract.framed"
+UNFOLD = f"{OPEN_C}, Abi.AllApart, Abi.Apart, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, BitVec.reduceAdd"
+UNFOLD_X = f"{OPEN_C}, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, BitVec.reduceAdd"
 CALLEE_SAVED = ["rbx", "rbp", "r12", "r13", "r14", "r15"]
 ARGDECL = f"(fb {' '.join(params)} ra : BitVec 64) (sv : Abi.Saved) " + " ".join(f"({g} : {t})" for g, t in fn_ghosts) + " (m0 : Mem)"
 ARGUSE = " ".join(["fb"] + params + ["ra", "sv"] + [g for g, _ in fn_ghosts] + ["m0"])
@@ -292,23 +313,27 @@ param_reg = [(p, home[p]) for p in params if slot_of(p) is None]
 param_slot = [(p, slot_of(p)) for p in params if slot_of(p) is not None]
 unpushed = [r for r in CALLEE_SAVED if r not in saved]
 
-# the invariant on the machine's state: (text, how it is proved of a state that was run to, its name when taken apart)
+# (text, how it is proved of a state that was run to, its name when the invariant is taken apart)
 inv_fixed = [f"s.pc = 0x{HEAD:X}", f"s.rsp = {at(C0)}"] + [f"s.{r} = {p}" for p, r in param_reg] + [f"s.{r} = sv.{r}" for r in unpushed]
 inv_mem = [(f"Region s.mem fb {F}#64", "mem_region", "hF"), (f"Quad s.mem (fb + {F}#64) ra", "mem_fact", "hRa")] + \
     [(f"Quad s.mem (fb + {F - 8 * (i + 1)}#64) sv.{r}", "mem_fact", f"hS{i}") for i, r in enumerate(saved)] + \
     [(f"Quad s.mem {at(o)} {p}", "mem_fact", f"hPs{i}") for i, (p, o) in enumerate(param_slot)] + \
-    [(f"Abi.AllApart ((fb, {C}.stack + 8#64) :: {C}.regions)", "exact hAp0", "hAp"), (outside, None, "hOut")]
+    [(f"Abi.AllApart ((fb, {C}.stack + 8#64) :: {C}.regions)", "exact hAp0", "hAp"), (outside, None, "hOut"),
+     (f"{C}.requires m0", "exact hReq0", "hReq")]
 inv_frozen = [(f"s.{home[x]} = {e}" if slot_of(x) is None else f"Quad s.mem {at(slot_of(x))} {e}", slot_of(x) is None) for x, e in frozen.items()]
 env_s = env_at(lambda x: f"s.{home[x]}")
-inv_clauses = [Clause(cl).clause(env_s, "s.mem", preds) for cl, _ in inv_user]
+inv_clauses, inv_pred = [], []
+for cl, _ in inv_user:
+    c = Clause(cl); inv_clauses.append(c.clause(env_s, "s.mem")); inv_pred.append(c.pred)
+preds = [p for i, p in enumerate(inv_pred) if p and p not in inv_pred[:i]]
 ex = "".join(f"({g} : {t}) " for g, t in loop_ghosts)
 inv_inner = " ∧\n    ".join([c for c, _ in inv_frozen] + inv_clauses)
 
-L = ["import Cells", "import Kernels", "import AbiProof"] + [f"import {s}" for s in specs] + [f"import Code_{name}", "open X86 Cells", "",
-     f"/-! # `{name}`, as assembled, meets its statement `{STATEMENT}`", "",
-     f"Written by prove_fn.py from {src.split('/')[-1]} and the compiler's layout; not edited by hand, and not to be read:",
-     f"Lean checks that it proves the statement. The frame: {F} bytes below the stack pointer at entry (`fb` is its",
-     f"lowest address), the caller's {', '.join(saved)} at its top.", "-/", "",
+L = ["import Cells", "import Kernels", "import AbiProof", f"import Spec_{name}"] + [f"import {u}" for u in uses] + [f"import Code_{name}", "open X86 Cells", "",
+     f"/-! # `{name}`, as assembled, meets `{CNAME}`", "",
+     f"Written by prove_fn.py from {src.split('/')[-1]} and the compiler's layout; not edited by hand, and not to be read",
+     f"but for its last theorem's statement: Lean checks the rest. The frame: {F} bytes below the stack pointer at entry",
+     f"(`fb` is its lowest address), the caller's {', '.join(saved)} at its top.", "-/", "",
      f"namespace Proof_{name}", "", "set_option maxRecDepth 1000000", "set_option maxHeartbeats 0", "set_option linter.unusedVariables false", "",
      f"/-- What holds each time the loop's head is reached: the source's `invariant` clauses, each variable where the",
      f"compiler keeps it, and the frame as the compiler keeps it. -/",
@@ -316,7 +341,6 @@ L = ["import Cells", "import Kernels", "import AbiProof"] + [f"import {s}" for s
 
 STATE = lambda names: "⟨" + ", ".join(names) + f", zf, cf, {', '.join(XS.split())}, mem, pc⟩"
 INTROS = "intro rax' rcx' rdx' rsi' rdi' r8' r9' zf' cf' y0 y1 y2 y3 y4 y5 y6 y7 y8 y9 y10 y11 y12 y13 y14 y15"
-DEFAULT = "first | rfl | mem_auto" + "".join(f" | (apply {f} <;> mem_auto)" for f in pred_frame.values())
 
 
 def cond_fact(c, value, env):
@@ -384,8 +408,10 @@ def prove_inv(ind, old_outside, turn):
     t += [f"{ind}· " + "; ".join(["apply Exists.intro"] * n_ex) if n_ex else f"{ind}· skip",
           f"{ind}  refine ⟨" + ", ".join(["?_"] * (len(inv_frozen) + len(inv_clauses))) + "⟩"]
     for c, in_reg in inv_frozen: t.append(f"{ind}  · {'rfl' if in_reg else 'mem_fact'}")
-    for cl, by in inv_user:
-        t.append(f"{ind}  · apply {by} <;> mem_auto" if (turn and by) else f"{ind}  · {DEFAULT}")
+    for (cl, by), pred in zip(inv_user, inv_pred):
+        if turn and by: t.append(f"{ind}  · apply {by} <;> mem_auto")
+        elif pred: t.append(f"{ind}  · first | mem_auto | (apply {pred}.frame <;> mem_auto)")
+        else: t.append(f"{ind}  · first | rfl | mem_auto")
     if turn: t.append(f"{ind}· exact BitVec.lt_def.mp (by bv_decide)")
     return t
 
@@ -401,30 +427,36 @@ def tree(ps, done, leaf, ind):
     return [f"{ind}by_cases hs{idx} : {cond_prop(e[1], e[4])}", f"{ind}·" + ty[0][len(ind) + 1:]] + ty[1:] + [f"{ind}·" + tn[0][len(ind) + 1:]] + tn[1:]
 
 
-def known(ind):
-    """What is at hand before a piece is run: the regions apart, and what the holder of each memory predicate knows."""
-    t = [f"{ind}have hAp0 := hAp", f"{ind}simp only [{UNFOLD}] at hAp", f"{ind}split_ands hAp"]
-    for i, lemma in enumerate(pred_cells.values()):
-        t += [f"{ind}have hK{i} := {lemma} (by assumption)", f"{ind}split_ands hK{i}"]
+def known(ind, mem, at_head):
+    """What is at hand before a piece is run: the regions apart, what the contract requires (of the
+    arguments alone, once the loop is entered), and what the holder of each memory predicate may read."""
+    t = [f"{ind}have hAp0 := hAp", f"{ind}simp only [{UNFOLD}] at hAp", f"{ind}split_ands hAp",
+         f"{ind}have hReq0 := hReq", f"{ind}simp only [{OPEN_C}] at hReq", f"{ind}split_ands hReq"]
+    if at_head: t.append(f"{ind}forget_about m0 except hOut hReq0")
+    for i, p in enumerate(preds):
+        t.append(f"{ind}try (have hK{i} := {p}.cells (m := {mem}) (by assumption); split_ands hK{i})")
     return t
+
+
+def open_with(lemma, names, mem, i, ind):
+    """A lemma that takes a fact apart: its hypotheses found, its conclusion's parts named."""
+    return [f"{ind}have_by hO{i} := {lemma} (m := {mem})", f"{ind}obtain ⟨{names}, hO{i}⟩ := hO{i}", f"{ind}try norm_addr at hO{i}", f"{ind}split_ands hO{i}"] + \
+        [f"{ind}try subst {g}" for g, _ in loop_ghosts]
 
 
 # ---------------------------------------------------------------- enter
 ep = paths(before, dict(base_env))
 assert len(ep) == 1 and not any(e[0] == "call" for e in ep[0][0]), "a condition or a call before the loop: not yet"
-arg_names = [f"ha{i}" for i in range(len(params))]
 L += [f"theorem enter {ARGDECL}",
       f"    (s : State) (hP : {PRE} s) : ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ Inv {ARGUSE} s' := by",
       f"  obtain {STATE(REGS)} := s",
       "  obtain ⟨hpc, hsp, hargs, hbx, hbp, h12, h13, h14, h15, hmem, hF, hRa, hAp, hReq⟩ := hP",
-      f"  simp only [{CNAME}] at hpc hsp hargs hbx hbp h12 h13 h14 h15 hmem hF hRa hReq",
+      f"  simp only [{OPEN_C}] at hpc hsp hargs hbx hbp h12 h13 h14 h15 hmem hF hRa",
       "  simp only [List.length_cons, List.length_nil, List.take, List.cons.injEq, and_true] at hargs",
-      f"  obtain ⟨{', '.join(arg_names)}⟩ := hargs",
-      f"  subst pc rsp {' '.join(ABI[:len(params)])} {' '.join(CALLEE_SAVED)} mem",
-      "  split_ands hReq"]
-for i, (lemma, names) in enumerate(enter_opens):
-    L += [f"  obtain ⟨{names}, hE{i}⟩ := {lemma} (by assumption)", f"  split_ands hE{i}"]
-L += known("  ") + run_piece(ep[0][0], ENTRY, "head", [], "  ") + prove_inv("  ", False, False) + [""]
+      f"  obtain ⟨{', '.join(f'ha{i}' for i in range(len(params)))}⟩ := hargs",
+      f"  subst pc rsp {' '.join(ABI[:len(params)])} {' '.join(CALLEE_SAVED)} mem"] + known("  ", "m0", False)
+for i, (lemma, names) in enumerate(enter_opens): L += open_with(lemma, names, "m0", i, "  ")
+L += run_piece(ep[0][0], ENTRY, "head", [], "  ") + prove_inv("  ", False, False) + [""]
 
 # ---------------------------------------------------------------- what the loop's head gives
 head_names = [next((x for x in live if home[x] == r), r) for r in REGS]
@@ -436,17 +468,15 @@ env_h = env_at(lambda x: x)
 frozen_reg = [home[x] for x in frozen if slot_of(x) is None]
 open_head = [f"  obtain {STATE(head_names)} := s", f"  obtain ⟨{', '.join(inv_names)}⟩ := hI",
              f"  simp only at {' '.join(on_state)} hc",
-             f"  subst pc rsp {' '.join([r for _, r in param_reg] + unpushed + frozen_reg)}".rstrip()] + known("  ")
+             f"  subst pc rsp {' '.join([r for _, r in param_reg] + unpushed + frozen_reg)}".rstrip()] + known("  ", "mem", True)
 wc_env = dict(env_h)
 measure_reg = home[decreases]; assert slot_of(decreases) is None
 
 # ---------------------------------------------------------------- turn
 turn_open = []
-for o in opens:
-    m = re.match(r"^([\w.]+)\((.*)\)\s+as\s+(.*)$", o); lemma, conds, names = m.group(1), [c for c in m.group(2).split(",") if c.strip()], [n.strip() for n in m.group(3).split(",")]
-    turn_open += [f"  obtain ⟨{', '.join(names)}, hEq, hO⟩ := {lemma} (by assumption) {' '.join(['(by bv_decide)'] * len(conds))}", "  subst hEq", "  norm_addr at hO", "  split_ands hO"]
+for i, (lemma, names) in enumerate(opens): turn_open += open_with(lemma, names, "mem", i, "  ")
 for i, a in enumerate(asserts):
-    turn_open.append(f"  have as{i} : {Clause(a).clause(env_h, '?', preds)} := by bv_decide")
+    turn_open.append(f"  have as{i} : {Clause(a).clause(env_h, '?')} := by bv_decide")
 tp = [([("cond", wcond, True, False, wc_env)] + ev, e) for ev, e in paths(wbody, wc_env)]
 L += [f"theorem turn {ARGDECL}",
       f"    (s : State) (hI : Inv {ARGUSE} s) (hc : {cond_prop(wcond, env_s)}) :",
@@ -460,14 +490,16 @@ L += [f"theorem leave {ARGDECL}",
       f"    (s : State) (hI : Inv {ARGUSE} s) (hc : ¬ {cond_prop(wcond, env_s)}) :",
       f"    ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ {POST} s' := by"] + open_head + \
      run_piece(lp[0][0], HEAD, "ret", [], "  ") + \
-     [f"  refine runs_done ⟨rfl, by dsimp only [{CNAME}]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩", "  all_goals try dsimp only"] + \
-     outside_goal("  ", True) + [f"  · dsimp only [{CNAME}]", f"    apply {leave_by[0]} <;> mem_auto", ""]
+     [f"  refine runs_done ⟨rfl, by dsimp only [{OPEN_C}]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩", "  all_goals try dsimp only"] + \
+     outside_goal("  ", True) + [f"  · dsimp only [{OPEN_C}]", f"    apply {LEAVE} <;> mem_auto", ""]
 
 # ---------------------------------------------------------------- the theorem
-L += [f"/-- **`{name}`, as assembled, meets its statement.** -/",
-      f"theorem {name}_meets : {STATEMENT} := by",
-      f"  intro {' '.join(params + [g for g, _ in fn_ghosts])}",
-      "  refine Abi.meets_of_triple (fun fb ra sv m0 => ?_)",
+ALL = f"({' '.join(params)} : BitVec 64) " + " ".join(f"({g} : {t})" for g, t in fn_ghosts)
+L += [f"/-- **`{name}`, as assembled, meets its contract, whatever its arguments.** -/",
+      f"theorem {name}_meets : ∀ {ALL},",
+      f"    Abi.Meets Code_{name}.prog 0x{ENTRY:X} ({CNAME} {CARGS}) := by",
+      f"  intro {CARGS}",
+      f"  refine Abi.meets_of_triple {F}#64 (by dsimp only [{CNAME}]; decide) (by dsimp only [{CNAME}]; decide) (fun fb ra sv m0 => ?_)",
       f"  refine Hoare.seq (Q := Inv {ARGUSE}) ?_ ?_",
       f"  · intro s hP", f"    exact enter {ARGUSE} s hP",
       f"  · refine Hoare.loop (fun s => s.{measure_reg}.toNat) (fun s hI => ?_)",

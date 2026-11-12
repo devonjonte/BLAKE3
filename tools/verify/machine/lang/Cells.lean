@@ -1,6 +1,5 @@
 import Machine
 import MemLemmas
-import Code
 import Hoare
 import Lean
 open X86
@@ -17,32 +16,6 @@ of the bases. These lemmas are written once; the compiler's proofs use them by n
 register_simp_attr ode_at
 
 namespace Cells
-
-/-- A program that has all the instructions of another runs as the other does. -/
-theorem steps_mono {p q : Nat → Option (Instr × Nat)} (h : ∀ pc x, p pc = some x → q pc = some x) :
-    ∀ (k : Nat) (s s' : State), steps p k s = some s' → steps q k s = some s' := by
-  intro k
-  induction k with
-  | zero => intro s s' e; exact e
-  | succ k ih =>
-    intro s s' e
-    simp only [steps] at e ⊢
-    cases hp : p s.pc with
-    | none => rw [hp] at e; cases e
-    | some x =>
-      rw [hp] at e; rw [h _ _ hp]
-      obtain ⟨i, next⟩ := x
-      simp only at e ⊢
-      cases hs : step i next s with
-      | none => rw [hs] at e; cases e
-      | some s1 => rw [hs, Option.bind_some] at e; rw [Option.bind_some]; exact ih s1 s' e
-
-/-- Run a piece, then the rest. -/
-theorem run_then {prog : Nat → Option (Instr × Nat)} {a b : Nat} {s s1 : State} {Q : State → Prop}
-    (h : steps prog a s = some s1) (next : ∃ s', steps prog b s1 = some s' ∧ Q s') :
-    ∃ s', steps prog (a + b) s = some s' ∧ Q s' := by
-  obtain ⟨s', h2, q⟩ := next
-  exact ⟨s', by rw [steps_add, h, Option.bind_some, h2], q⟩
 
 /-- From this state the program runs, without a fault, to a state where `Q` holds. -/
 def Runs (prog : Nat → Option (Instr × Nat)) (s : State) (Q : State → Prop) : Prop := ∃ k s', steps prog k s = some s' ∧ Q s'
@@ -197,5 +170,44 @@ macro "mem_auto" : tactic => `(tactic| skip_unless_prop (first
   | mem_region
   | (intros; mem_away; done)
   | bv_decide))
+
+open Lean Elab Tactic Meta in
+/-- `have_by h := LEMMA`: the lemma's conclusion as the new fact `h`, each of its hypotheses settled in
+order by `mem_auto` (a fact at hand, a cell of memory, arithmetic). Says which hypothesis it could not
+show. -/
+elab "have_by " h:ident " := " t:term : tactic => withMainContext do
+  let e ← Tactic.elabTerm t none (mayPostpone := true)
+  let ty ← instantiateMVars (← inferType e)
+  let (args, bis, body) ← forallMetaTelescopeReducing ty
+  let mut n : Nat := 0
+  for (a, bi) in args.zip bis do
+    let aty ← instantiateMVars (← inferType a)
+    if bi.isExplicit && (← isProp aty) then
+      n := n + 1
+      let g := a.mvarId!
+      unless (← g.isAssigned) do
+        let rest ← try Tactic.run g (do evalTactic (← `(tactic| mem_auto))) catch _ => pure [g]
+        unless rest.isEmpty do
+          throwError "hypothesis {n} of {t} could not be shown:\n{← instantiateMVars aty}"
+  let pf ← instantiateMVars (mkAppN e args)
+  if pf.hasExprMVar then throwError "{t}: something it speaks of was not found"
+  let g ← (← getMainGoal).assert h.getId (← instantiateMVars body) pf
+  let (_, g) ← g.intro1P
+  replaceMainGoal [g]
+
+open Lean Elab Tactic Meta in
+/-- Forget every fact that mentions `x`, but those named: what was known of the memory at entry is not
+known of the memory now. -/
+elab "forget_about " x:ident " except" keep:(ppSpace colGt ident)* : tactic => withMainContext do
+  let fx ← getFVarId x
+  let keepIds ← keep.mapM getFVarId
+  let mut g ← getMainGoal
+  let mut decls : Array LocalDecl := #[]
+  for d in (← getLCtx) do decls := decls.push d
+  for d in decls.reverse do
+    if d.fvarId != fx && !keepIds.contains d.fvarId && !d.isImplementationDetail then
+      if (← instantiateMVars d.type).containsFVar fx then
+        g ← g.tryClear d.fvarId
+  replaceMainGoal [g]
 
 end Cells

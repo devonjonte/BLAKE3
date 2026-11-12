@@ -13,7 +13,7 @@ const AVX2        = 4
 extern compress_avx512/5  = "blake3_servil_compress_in_place_avx512"
 extern compress_sse41/5   = "blake3_servil_compress_in_place_sse41"
 callee compress_avx512 meets Kernels.call_avx_runs (8)
-callee compress_sse41 meets Kernels.call_sse_runs (9)
+callee compress_sse41 meets Kernels.call_sse_runs (10)
 extern hash_many_avx512/10 = "blake3_servil_hash_many_avx512"
 extern hash_many_avx2/10   = "blake3_servil_hash_many_avx2"
 extern hash_many_sse41/10  = "blake3_servil_hash_many_sse41"
@@ -50,17 +50,12 @@ fn push(st, cv)
 }
 
 // While the stack holds more than target values, its top two become their parent.
-// What merge is claimed to do is its statement, in Lean, for a reader: Merge.statement (Spec_merge.lean).
-// Here is only what the prover needs and no reader does: what holds each time the loop's head is reached,
-// what gets smaller, and the lemmas (StackSpec.lean, StackBridge.lean) that open the statement's view of
-// memory at entry, carry a clause across a turn, and close it when the loop ends.
+// What merge is claimed to do is its contract, written in Lean for a reader: Merge.contract (Spec_merge.lean).
+// Here is the code, and for its loop what the prover needs and no reader does: what holds each time the
+// loop's head is reached, and what gets smaller. The lemmas named are in StackLemmas.lean and Lemmas_merge.lean.
 fn merge(st, key, flags, plat, target)
-  spec Spec_merge
-  spec StackBridge
-  meets Merge.contract(k: Blake3.CV, cvs: List Blake3.CV) as Merge.statement
-  predicate Stack.holds cells Stack.cells frame Stack.frame
-  enter open Stack.holds_of_at as len0, es0
-  enter open Cv.vectors as k0, k1
+  meets Merge.contract(k: Blake3.CV, cvs: List Blake3.CV)
+  uses Lemmas_merge
   leave by Merge.exit
 {
   buf block[64]
@@ -68,19 +63,15 @@ fn merge(st, key, flags, plat, target)
   var len = u64[st]
   var pf = flags | PARENT
   while target < len
-    ghost es: Stack.Cvs, es0: Stack.Cvs, k0: vec, k1: vec
-    invariant target >= 1
-    invariant flags < 256
-    invariant Stack.holds(st, len, es) by Stack.close_merge
-    invariant Stack.merged(k0, k1, low8(pf), target, es) == Stack.merged(k0, k1, low8(pf), target, es0) by Stack.merged_turn
-    invariant Stack.Views(es0, cvs)
-    invariant Cv.Is(k0, k1, k)
+    ghost now: List Blake3.CV
+    invariant Stack.At(st, now)                                                           by Stack.At.merge_top
+    invariant len == Stack.count(now)                                                     by Stack.count_merge_top
+    invariant Merge.result(k, flags, target, now) == Merge.result(k, flags, target, cvs)  by Merge.turn
+    invariant Cv.At(key, k)
     invariant pf == flags | PARENT
-    invariant vec[key] == k0
-    invariant vec[key + 16] == k1
     decreases len
-    open Stack.open2(len >= 2) as r0, r1, l0, l1, rest
-    assert low32(pf) == low32(low8(pf))
+    open Stack.At.top2 as r, l, rest, r0, r1, l0, l1
+    open Cv.At.vectors as k0, k1
   {
     if len < 2 { trap }
     var at = cv_at(st, len - 2)

@@ -19,16 +19,23 @@ while rest:
     elif rest[0] == "--panics-from": panics_from = int(rest[1], 16); rest = rest[2:]
     else: raise SystemExit(f"unknown argument {rest[0]}")
 OD = os.environ.get("OBJDUMP", "llvm-objdump")
-symbols, data = {}, {}
+symbols, symsec, data, sections = {}, {}, {}, {}     # data: by address (Mach-O); sections: by name, then offset (ELF)
 if obj:
     for line in subprocess.run([OD, "-t", obj], capture_output=True, text=True, check=True).stdout.splitlines():
         f = line.split()
-        if len(f) >= 5 and re.fullmatch(r"[0-9a-f]{16}", f[0]): symbols[f[-1]] = int(f[0], 16)
+        if len(f) >= 5 and re.fullmatch(r"[0-9a-f]{16}", f[0]):
+            symbols[f[-1]] = int(f[0], 16)
+            if re.fullmatch(r"[0-9a-f]{16}", f[-2]): symsec[f[-1]] = f[-3]      # ELF: value flags section size name
+    sec = None
     for line in subprocess.run([OD, "-s", obj], capture_output=True, text=True, check=True).stdout.splitlines():
+        m = re.match(r"^Contents of section (.+):$", line)
+        if m: sec = m.group(1); sections[sec] = {}; continue
         m = re.match(r"^\s*([0-9a-f]+) ((?:[0-9a-f]+ )+)", line)
         if m:
             at = int(m.group(1), 16)
-            for i, b in enumerate(bytes.fromhex(m.group(2).replace(" ", ""))): data[at + i] = b
+            for i, b in enumerate(bytes.fromhex(m.group(2).replace(" ", ""))):
+                data[at + i] = b
+                if sec is not None: sections[sec][at + i] = b
 
 G64 = "rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r12 r13 r14 r15".split()
 REG = {r: (r, 64) for r in G64}
@@ -48,6 +55,12 @@ def memref(t):
     d = int(m.group(3), 16) if m.group(3) else 0
     return r, (-d if m.group(2) == "-" else d)
 def const(sym):
+    if sym.startswith("elf:"):
+        # ELF: `SECTION+ADDEND` or `SYMBOL+ADDEND`, relative to the end of the instruction's last four bytes
+        m = re.fullmatch(r"(.+?)([+-]0x[0-9a-f]+)?", sym[4:]); name = m.group(1); add = int(m.group(2), 16) if m.group(2) else 0
+        sec, start = (name, 0) if name in sections else (symsec[name], symbols[name])
+        at = start + add + 4
+        return "0x" + "".join(f"{sections[sec][at + i]:02X}" for i in reversed(range(16)))
     at = symbols[sym]; return "0x" + "".join(f"{data[at + i]:02X}" for i in reversed(range(16)))
 def vsrc(t, reloc):
     t = t.strip()
@@ -73,8 +86,8 @@ for line in open(listing):
     if not inside: continue
     m = re.match(r"^\s+([0-9a-f]+):((?: [0-9a-f]{2})+)\s+(\S+)\s*([^#]*)", line)
     if m: insns.append([int(m.group(1), 16), len(m.group(2).split()), m.group(3), m.group(4).strip(), None, m.group(2).strip()]); continue
-    m = re.match(r"^\s+[0-9a-f]+:\s+(?:X86_64_RELOC_SIGNED\s+(\S+)|R_X86_64_(?:GOTPCREL|PLT32)\s+(.+)-0x4)$", line.rstrip())
-    if m and insns: insns[-1][4] = m.group(1) or m.group(2)
+    m = re.match(r"^\s+[0-9a-f]+:\s+(?:X86_64_RELOC_SIGNED\s+(\S+)|R_X86_64_(?:GOTPCREL|PLT32)\s+(.+)-0x4|R_X86_64_PC32\s+(\S+))$", line.rstrip())
+    if m and insns: insns[-1][4] = m.group(1) or m.group(2) or "elf:" + m.group(3)
 assert insns, f"{func} is not in {listing}"
 start = insns[0][0]
 ALIGNED = ("movaps", "movdqa", "vmovaps", "vmovdqa")
