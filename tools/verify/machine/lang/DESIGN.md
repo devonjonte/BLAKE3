@@ -266,7 +266,11 @@ What a reader reads (`#reading_list`, lines):
 | the code | 31 | 3 (the words; Lean decodes them) |
 | total | 508 (`push_meets`, in the model's own cells: 480) | 6,193 |
 
-Of what is written for `push` itself a reader reads eight lines, once, for both architectures.
+Of what is written for `push` itself a reader reads eight lines, once, for both architectures. The
+other statements in this form: `hex_meets_bytes` 543 lines and `hex_neon_meets` 6,180 (43 shared);
+`merge_meets_bytes` 866; `add_meets_bytes` 931. Each x86-64 list is 28 to 30 lines longer than with the
+model's own contract (`Contract` and `AbiBytes` beside `Abi`): the price of the shared half until
+`Abi.Contract` itself gives way.
 
 For `hex` the same: `spec/HexContract.lean` (`Hex.byteContract`: the 64 bytes at `out` become `Hex.text`
 of the 32 at `hash`), `hex_meets_bytes` on x86-64 (`Meets_hex_bytes.lean`; with what an observer sees, as
@@ -291,10 +295,12 @@ What it took, and what it shows:
   implement a contract" (above) becomes a property of a machine's reading, not of the contract.
 - A piece the function does not change: on our model the frame clause says so; in their logic the
   specification names the piece's bytes and gives the same bytes back.
-- Not done: `merge` and `add` in this form (on x86-64 the two lemmas `Cv.piece_keeps` and
-  `Stack.piece_turns` give it at once; `Merge.result` must move to `spec/` first, and an audit names it
-  where it is) and on AArch64 (loops and calls in the second printer and its proof generator, and a
-  compression kernel with a contract there); the compression kernels' contracts in this form; the
+- `merge` and `add` have their contracts in this form too (`spec/MergeContract.lean`), met on x86-64
+  (`merge_meets_bytes`, `add_meets_bytes`, `Meets_merge_bytes.lean`: by the same two lemmas about the
+  stack and a chaining value as pieces, a few lines each). `Merge.merged` there is `Merge.result` here,
+  word for word, until the audit that names `Spec_merge.lean` is moved.
+- Not done: `merge` and `add` on AArch64 (loops and calls in the second printer and its proof generator,
+  and a compression kernel with a contract there); the compression kernels' contracts in this form; the
   bytes-to-cells step generated; "quietly" stated once for both machines.
 - An observation from the AArch64 proof: `push` never looks inside `Cv.bytes` (it copies 32 bytes), so its
   contract holds for any encoding of a chaining value. Only a function that computes with the value pins

@@ -491,6 +491,8 @@ threads) and checks everything; then the audit runs.
   (`Stack.Holds`), `PushContract.lean`, `HexText.lean`, and the algorithm's `Stack` (the file of `alg/`).
   Audit (`mutants_push.py`): the unchanged files accepted; each of the 18 instructions made to do nothing,
   and five false statements: all 23 refused.
+- **`merge` and `add`** have such contracts too (`spec/MergeContract.lean`), met on x86-64
+  (`lang/Meets_merge_bytes.lean`); their AArch64 code is not written.
 - **`hex` the same way:** `Hex.byteContract` (`spec/HexContract.lean`) is met by the x86-64 kernel on our
   model (`hex_meets_bytes`, `lang/Meets_hex_bytes.lean`, with what an observer sees) and by the AArch64
   kernel on Google's (`hex_neon_meets`, `HexNeonBytes.lean`).

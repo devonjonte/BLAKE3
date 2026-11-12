@@ -1,5 +1,5 @@
 name = "spec"
-defaultTargets = ["HexText", "HexContract", "StackBytesLemmas", "PushContract"]
+defaultTargets = ["HexText", "HexContract", "StackBytesLemmas", "PushContract", "MergeContract"]
 
 # The specification (C2SP's BLAKE3 in Lean).
 [[require]]
@@ -25,6 +25,9 @@ name = "PushContract"
 
 [[lean_lib]]
 name = "HexContract"
+
+[[lean_lib]]
+name = "MergeContract"
 
 [[lean_lib]]
 name = "StackBytesLemmas"

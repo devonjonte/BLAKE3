@@ -5,8 +5,9 @@
 #       callees' contracts; then with merge_sse swapped in behind merge's contract), merge_steps
 #   AArch64 (Google DeepMind's model, arm/; fetched at the commit arm/lakefile.toml names):
 #       hex_neon (the kernel), push (the same source function, printed for AArch64)
-#   hex and push, on both, meet contracts that name no machine (spec/HexContract.lean, spec/PushContract.lean):
-#       "any-machine" is the two x86-64 theorems; "hex_neon" and "push-aarch64" end with the AArch64 ones.
+#   Contracts that name no machine (spec/HexContract.lean, PushContract.lean, MergeContract.lean): "any-machine"
+#       is the four x86-64 theorems (hex, push, merge, add); "hex_neon" and "push-aarch64" end with the two
+#       AArch64 ones (hex, push).
 #
 # Each line of the result is one function: what Lean checked, and how long it took here.
 # Needs python3, cc or clang, llvm-objdump (OBJDUMP), lake (elan). AUDIT=1 also runs the audits (minutes more).
@@ -25,10 +26,10 @@ if [ "${AUDIT:-0}" = 1 ]; then hexaudit=1; else hexaudit=0; fi
 run hex          lang env MUTANTS=$hexaudit ./prove.sh
 run merge        lang ./prove_fn.sh merge 0x60000
 run push         lang ./prove_fn.sh push 0x70000
-run any-machine  lang sh -c 'lake build Meets_push_bytes Meets_hex_bytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && grep -q "push_meets_bytes. depends on axioms" any.log && grep -q "hex_meets_bytes. depends on axioms" any.log'
 run merge_sse    lang ./prove_fn.sh merge_sse 0x90000
 run add-and-swap lang ./swap.sh
 run merge_steps  lang ./prove_fn.sh merge_steps 0xA0000
+run any-machine  lang sh -c 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ]'
 run hex_neon     arm  env MUTANTS=$hexaudit ./prove_arm.sh
 run push-aarch64 arm  env MUTANTS=$hexaudit ./prove_arm_fn.sh
 if [ "${AUDIT:-0}" = 1 ]; then

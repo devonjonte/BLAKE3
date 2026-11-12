@@ -119,3 +119,7 @@ name = "Meets_push_bytes"
 name = "BytesAt"
 [[lean_lib]]
 name = "Meets_hex_bytes"
+[[lean_lib]]
+name = "MergeAsBytes"
+[[lean_lib]]
+name = "Meets_merge_bytes"
