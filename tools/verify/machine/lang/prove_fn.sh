@@ -15,14 +15,29 @@ python3 odec.py hasher.ode HasherOde.lean
 lake build Lang HasherOde > /dev/null
 lake env lean --run HasherOde.lean asm b3l_ only "$name" > "$name.S"
 lake env lean --run HasherOde.lean layout "$name" > "$name.layout"
+# what the contract accepts of its arguments, read from the contract; the checked entry's code is made from it
+contract=$(python3 -c "import odec,re,sys; c=odec.contracts_of(open('hasher.ode').read())[0][sys.argv[1]]['head']; print(re.match(r'[\w.]+', next(r for w,r in c if w=='meets')).group(0))" "$name")
+lake build Checks "Spec_$name" > /dev/null
+printf 'import Checks\nimport Spec_%s\n#checks %s\n' "$name" "$contract" > "$name.checks.lean"
+lake env lean "$name.checks.lean" > "$name.checks"
+checked=0; if grep -q "check " "$name.checks"; then checked=1; python3 check_fn.py asm hasher.ode "$name" "$name.checks" >> "$name.S"; fi
 if cc -target x86_64-unknown-linux-gnu -c -o "$name.o" "$name.S" 2>/dev/null; then :; else cc -c -o "$name.o" "$name.S"; fi
 "$OBJDUMP" -d -r --x86-asm-syntax=intel "$name.o" > "$name.listing"
 # the kernels are where one/KCode.lean has them
 python3 ../one/lift_one.py "$name.listing" "b3l_$name" "$base" "Lifted_$name.lean" "Lifted_$name" \
   --call blake3_servil_compress_in_place_avx512=0x30000 --call blake3_servil_compress_in_place_sse41=0x20000
-python3 gen_code.py "$name" "Lifted_$name.lean.rows" "Code_$name.lean"
+targets="Proof_$name"
+if [ "$checked" = 1 ]; then
+  at=$(python3 -c "import re,sys; print(hex(int(sys.argv[2],0)+int(next(re.match(r'^([0-9a-f]+) <'+sys.argv[3]+'>:',l).group(1) for l in open(sys.argv[1]) if re.match(r'^[0-9a-f]+ <'+sys.argv[3]+'>:',l)),16)))" "$name.listing" "$base" "b3l_${name}_checked")
+  python3 ../one/lift_one.py "$name.listing" "b3l_${name}_checked" "$at" "Lifted_${name}_checked.lean" "Lifted_${name}_checked" --call "b3l_$name=$base"
+  python3 gen_code.py "$name" "Lifted_$name.lean.rows" "Code_$name.lean" "Lifted_${name}_checked.lean.rows"
+  python3 check_fn.py proof hasher.ode "$name" "$name.checks" "Lifted_${name}_checked.lean.rows" "$base" "Checked_$name.lean"
+  targets="Proof_$name Checked_$name"
+else
+  python3 gen_code.py "$name" "Lifted_$name.lean.rows" "Code_$name.lean"
+fi
 python3 prove_fn.py hasher.ode "$name" "Lifted_$name.lean.rows" "$name.layout" "Proof_$name.lean"
-if lake build "Proof_$name" > "$name.build.log" 2>&1 && ! grep -q -E "error|sorry" "$name.build.log"; then
+if lake build $targets > "$name.build.log" 2>&1 && ! grep -q -E "error|sorry" "$name.build.log"; then
   grep -E "Build completed" "$name.build.log"
   echo "the compiler's proof of $name: checked"
 else

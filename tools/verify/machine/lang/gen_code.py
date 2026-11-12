@@ -1,9 +1,9 @@
 """The lifter's rows of a word-level function -> Code_NAME.lean: its table, the program that is this
 function with the two kernels (one/KCode.lean), and one lemma an address (attribute ode_at).
-usage: gen_code.py NAME ROWS OUT.lean"""
+usage: gen_code.py NAME ROWS OUT.lean [MORE_ROWS ...]   (more rows: the function's checked entry)"""
 import sys
 name, rows_path, out = sys.argv[1:4]
-rows = [l.rstrip("\n").split("\t") for l in open(rows_path)]
+rows = [l.rstrip("\n").split("\t") for path in [rows_path] + sys.argv[4:] for l in open(path)]
 t = ["import Machine", "import KCode", "import Cells", "open X86", "",
      f"/-! `{name}` as assembled: {len(rows)} instructions. Written from the lifter's rows. -/", "",
      "set_option maxRecDepth 100000", f"namespace Code_{name}", "", "def table : List (Nat × Instr × Nat) := ["]

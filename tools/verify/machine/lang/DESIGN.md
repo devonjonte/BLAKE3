@@ -99,6 +99,47 @@ Rules that kept it simple:
 Not yet in this shape: the kernel `hex` (its contract is still clauses in the source, turned into a
 statement by `prove.py`, and its theorem has the trace, which `Abi.Meets` does not); `push` and the hash.
 
+## A requirement is stated once; proved where it can be, tested where it cannot
+
+(Sam, November 12, after E's guards and auditors and Goose's index types and `checkfree`.) A type is a
+predicate. Proving it of a value and testing it of a value are two ways to enforce one statement, and the
+programmer should write that statement once.
+
+- What a function requires of its **arguments themselves** is the contract's `accepts`. What it requires
+  of **memory** is in its pieces (below): no code can test that a pointer leads to bytes the program owns.
+- At a call, `accepts` is **proved** by the caller's own proof (then no code is spent on it), or
+  **tested**: the function's *checked entry* tests it, refuses loudly if it fails, and otherwise goes on
+  to the function. Never assumed.
+- Nobody writes the test or its proof. `#checks CONTRACT` (`Checks.lean`) reads the comparisons out of
+  the contract's `accepts`; `check_fn.py` makes the checked entry's instructions from them and the proof
+  that the entry meets `CONTRACT.checked refused` (`Abi.lean`: where the contract accepts the arguments
+  the entry does as the contract says; where not, it returns `refused` and every piece of memory holds
+  what it held). Done for `merge`: `Checked_merge.merge_checked_meets`.
+- A public function is a checked entry: its callers are not proved. What then remains assumed at the
+  boundary is only what no code can test (the calling convention, the pieces of memory), stated in
+  `Abi.Meets`.
+- Still to build: a proved caller that calls the unchecked entry; a predicate with a decider a programmer
+  wrote (today: comparisons of arguments and numbers); the report of every call that fell back to
+  testing, and a mark that forbids it inside the library.
+
+### Secrets (a proposal, not yet a decision)
+
+Sam: an attacker may want any value, so there is no class of "secret values"; all values are secret. Then
+no branch and no address may depend on any value, except where the contract says so: the principled
+conversion of a secret into something an observer may learn is a line of the contract ("what an observer
+sees depends only on: the addresses; the input's length; whether the arguments were accepted"), which is
+on the reader's list. That is the shape the kernels' trace theorems already have. A test in a checked
+entry is a branch, so `accepted or refused` is one such line. `Abi.Meets` has no trace yet.
+
+## A contract speaks of memory in pieces
+
+A contract names each piece of memory once: where it is, and what it holds (`Abi.Piece`, made from a
+data structure's `Abi.Layout` by `keeps` or `turns`). From the pieces follow the regions that must be
+apart, what must hold at the call, what holds at the return, and what may change; a contract can no
+longer give one of those and forget another (the mistake "the key is not said to be apart from the
+stack" cannot be written). `Merge.contract` is six lines: `args`, `stack`, `accepts`, `reads`,
+`updates`, `returns`.
+
 ## Pinning the blame
 
 **A failed check must say what is at fault: the code, the contract, the compiler, or the proof. Reliably

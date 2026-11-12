@@ -15,6 +15,9 @@ of the bases. These lemmas are written once; the compiler's proofs use them by n
 /-- The lemmas that say which instruction of a function written in the language is at which address. -/
 register_simp_attr ode_at
 
+/-- Definitions a contract is written with, which a proof opens to see what the contract says of memory. -/
+register_simp_attr abi
+
 namespace Cells
 
 /-- From this state the program runs, without a fault, to a state where `Q` holds. -/

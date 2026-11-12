@@ -4,7 +4,7 @@
 First a control: an unchanged copy, made to check the proof again, must be ACCEPTED (a copy that cannot
 build proves nothing). Then, each in its own copy of this folder:
   - code: instructions changed one at a time in the lifter's rows, the proof text left as generated
-    for the right code;
+    for the right code (`entry`: the same for the checked entry's instructions);
   - statement: the Lean statement a reader reads (Spec_merge.lean, Spec_stack.lean) changed to claim
     something false, the proof text left as it is;
   - clause: what the source gives the prover changed, and the proof generated again.
@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 here = os.path.dirname(os.path.abspath(__file__))
 jobs = int(sys.argv[1]) if len(sys.argv) > 1 else 4
-ROWS, SRC = "Lifted_merge.lean.rows", "hasher.ode"
+ROWS, ROWS2, SRC = "Lifted_merge.lean.rows", "Lifted_merge_checked.lean.rows", "hasher.ode"
 LIMIT = 600     # seconds a check may take; the right proof takes about 100
 code = [
     ("the PARENT flag is another bit", ".or 64 (.reg .rax) (.imm 0x4)", ".or 64 (.reg .rax) (.imm 0x8)", 1),
@@ -33,17 +33,23 @@ code = [
     ("the second kernel call's flags come from another slot", ".mov 64 (.reg .r8) (.mem .rsp 0x60)", ".mov 64 (.reg .r8) (.mem .rsp 0x68)", 2),
     ("the result is not the length", ".mov 64 (.reg .rax) (.reg .r15)", ".mov 64 (.reg .rax) (.reg .r14)", 3),
 ]
+entry = [
+    ("the checked entry lets flags of 256 through", ".cmp 64 (.reg .rdx) (.imm 0x100)", ".cmp 64 (.reg .rdx) (.imm 0x101)"),
+    ("the checked entry tests another argument", ".cmp 64 (.reg .r8) (.imm 0x1)", ".cmp 64 (.reg .rcx) (.imm 0x1)"),
+    ("the checked entry refuses with 0", ".mov 64 (.reg .rax) (.imm 0xFFFFFFFFFFFFFFFF)", ".mov 64 (.reg .rax) (.imm 0x0)"),
+    ("the checked entry jumps past the function's first instruction", ".jmp 0x60000", ".jmp 0x60001"),
+]
 statement = [
-    ("the stack claimed is merged to target + 1", "Spec_merge.lean", "Stack.At m st (Merge.result k flags target cvs)", "Stack.At m st (Merge.result k flags (target + 1#64) cvs)"),
+    ("the stack claimed is merged to target + 1", "Spec_merge.lean", "Stack.layout.turns st cvs (Merge.result k flags target cvs)", "Stack.layout.turns st cvs (Merge.result k flags (target + 1#64) cvs)"),
     ("`Merge.result` is the specification's merge to one value more", "Spec_merge.lean", "⟨flags.setWidth 32⟩ target.toNat cvs", "⟨flags.setWidth 32⟩ (target.toNat + 1) cvs"),
     ("the result is said to be one more than the count", "Spec_merge.lean", "result.toNat = (Merge.result k flags target cvs).length", "result.toNat = (Merge.result k flags target cvs).length + 1"),
-    ("nothing is said to be modified", "Spec_merge.lean", "modifies := [(st, 1792#64)]", "modifies := []"),
+    ("the stack is said to be left as it is", "Spec_merge.lean", "Stack.layout.turns st cvs (Merge.result k flags target cvs)", "Stack.layout.keeps st cvs"),
     ("168 bytes of stack are said to be enough", "Spec_merge.lean", "stack := 256#64", "stack := 168#64"),
-    ("no `1 ≤ target` is required (then the trap can be reached)", "Spec_merge.lean", "1#64 ≤ target ∧ ", ""),
-    ("no `flags < 256` is required (then the two kernels read different flags)", "Spec_merge.lean", "flags < 256#64 ∧ ", ""),
-    ("the key is not said to be apart from the stack", "Spec_merge.lean", "regions := [(st, 1792#64), (key, 32#64)]", "regions := [(st, 1792#64)]"),
+    ("no `1 ≤ target` is asked (then the trap can be reached)", "Spec_merge.lean", "1#64 ≤ target ∧ flags < 256#64", "flags < 256#64"),
+    ("no `flags < 256` is asked (then the two kernels read different flags)", "Spec_merge.lean", "1#64 ≤ target ∧ flags < 256#64", "1#64 ≤ target"),
+    ("the key is not mentioned", "Spec_merge.lean", "reads := [Cv.layout.keeps key k]", "reads := []"),
     ("the arguments are in another order", "Spec_merge.lean", "args := [st, key, flags, plat, target]", "args := [key, st, flags, plat, target]"),
-    ("the key is not required to be at `key`", "Spec_merge.lean", " ∧ Cv.At m key k", ""),
+    ("the stack is said to take 1000 bytes", "Spec_stack.lean", "⟨1792#64, Stack.At⟩", "⟨1000#64, Stack.At⟩"),
     ("the stack's values are said to be 16 bytes apart", "Spec_stack.lean", "st + 32#64 * BitVec.ofNat 64 cvs.length", "st + 16#64 * BitVec.ofNat 64 cvs.length"),
     ("a chaining value's second half is said to be at byte 8", "Spec_stack.lean", "Vec m (a + 16#64) v1", "Vec m (a + 8#64) v1"),
 ]
@@ -82,7 +88,11 @@ def run(kind, what, old, new, n=1):
         if kind == "code":
             t = open(os.path.join(w, ROWS)).read(); assert old in t, old
             with open(os.path.join(w, ROWS), "w") as f: f.write(nth_replace(t, old, new, n))
-            g = subprocess.run([sys.executable, "gen_code.py", "merge", ROWS, "Code_merge.lean"], cwd=w, capture_output=True, text=True)
+            g = subprocess.run([sys.executable, "gen_code.py", "merge", ROWS, "Code_merge.lean", ROWS2], cwd=w, capture_output=True, text=True)
+        elif kind == "entry":
+            t = open(os.path.join(w, ROWS2)).read(); assert old in t, old
+            with open(os.path.join(w, ROWS2), "w") as f: f.write(t.replace(old, new, 1))
+            g = subprocess.run([sys.executable, "gen_code.py", "merge", ROWS, "Code_merge.lean", ROWS2], cwd=w, capture_output=True, text=True)
         elif kind == "clause":
             lines = open(os.path.join(w, SRC)).read().split("\n")
             at = [i for i, l in enumerate(lines) if old in l]; assert len(at) == 1, old
@@ -93,7 +103,7 @@ def run(kind, what, old, new, n=1):
             if g.returncode != 0:
                 return kind, what, "REJECTED by the generator", time.time() - start, (g.stderr.strip().splitlines() or [""])[-1][:110]
         # its own process group, so a check that runs out of time is stopped with its children (lake's lean)
-        pr = subprocess.Popen(["lake", "build", "Proof_merge"], cwd=w, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+        pr = subprocess.Popen(["lake", "build", "Proof_merge", "Checked_merge"], cwd=w, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
         try:
             out, _ = pr.communicate(timeout=LIMIT)
         except subprocess.TimeoutExpired:
@@ -115,11 +125,11 @@ k, w, verdict, secs, _ = run("control", "the unchanged copy", "", "")
 print(f"control: {verdict} in {secs:.0f} s", flush=True)
 if verdict != "ACCEPTED" or secs < 20:
     raise SystemExit("the control failed (or answered without checking): the audit proves nothing")
-todo = [("code", *m) for m in code] + [("statement", what, (fname, old), new, 1) for what, fname, old, new in statement] + [("clause", *m, 1) for m in clause]
+todo = [("code", *m) for m in code] + [("entry", *m, 1) for m in entry] + [("statement", what, (fname, old), new, 1) for what, fname, old, new in statement] + [("clause", *m, 1) for m in clause]
 tally = {}
 with ThreadPoolExecutor(jobs) as pool:
     for kind, what, verdict, secs, first in pool.map(lambda m: run(*m), todo):
         print(f"{verdict:<26} {secs:5.0f} s  {kind}: {what}" + (f"   [{first}]" if first else ""), flush=True)
         key = "accepted" if verdict == "ACCEPTED" else "no verdict" if verdict.startswith("NO") else "rejected"
         tally[key] = tally.get(key, 0) + 1
-print(f"{len(code)} changed instructions, {len(statement)} false statements and {len(clause)} changed clauses: " + ", ".join(f"{n} {k}" for k, n in sorted(tally.items())))
+print(f"{len(code)} changed instructions, {len(entry)} changed instructions of the checked entry, {len(statement)} false statements and {len(clause)} changed clauses: " + ", ".join(f"{n} {k}" for k, n in sorted(tally.items())))

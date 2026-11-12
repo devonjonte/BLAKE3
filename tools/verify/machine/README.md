@@ -132,6 +132,14 @@ structure, once) and `Lemmas_merge.lean` (the function: 71 lines). `python3 muta
 instructions, 12 false statements and 5 changed clauses, after a control: 31 rejected.
 `lang/DESIGN.md` has the conventions.
 
+**The checked entry.** What `merge` requires of its arguments is the contract's `accepts`
+(`1 ≤ target ∧ flags < 256`), stated once. `#checks Merge.contract` (`Checks.lean`) reads the comparisons
+out of the contract; `check_fn.py` makes from them the entry `merge_checked` (8 instructions: it tests
+them, returns 2^64 − 1 if one fails, and otherwise jumps to `merge`) and the proof of
+**`merge_checked_meets`**: for all arguments, `Abi.Meets Code_merge.prog 0x60150 ((Merge.contract …).checked …)`.
+Nobody wrote the tests or that proof. `reading_layers.py` compares what two theorems' statements depend on
+(`#reading_defs`).
+
 Limits: one loop, not nested; a loop-carried variable lives in a register; no call or condition outside
 the loop; the trace is not in this theorem; `push` and the hash itself carry no contract yet. For `hex`: the recipe covers kernels that load, compute and store with no loop; x86-64 only; the object proved is assembled on a Mac for x86-64 (the instructions' bytes
 are the ELF object's; the relocations differ); the constants' alignment is the assembler's.

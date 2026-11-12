@@ -3,7 +3,7 @@ import KCode
 import Cells
 open X86
 
-/-! `merge` as assembled: 93 instructions. Written from the lifter's rows. -/
+/-! `merge` as assembled: 101 instructions. Written from the lifter's rows. -/
 
 set_option maxRecDepth 100000
 namespace Code_merge
@@ -101,7 +101,15 @@ def table : List (Nat × Instr × Nat) := [
   (0x6014A, .pop .r12, 0x6014C),
   (0x6014C, .pop .rbp, 0x6014D),
   (0x6014D, .pop .rbx, 0x6014E),
-  (0x6014E, .ret, 0x6014F)
+  (0x6014E, .ret, 0x6014F),
+  (0x60150, .cmp 64 (.reg .r8) (.imm 0x1), 0x60154),
+  (0x60154, .jae 0x60158, 0x60156),
+  (0x60156, .jmp 0x60166, 0x60158),
+  (0x60158, .cmp 64 (.reg .rdx) (.imm 0x100), 0x6015F),
+  (0x6015F, .jae 0x60166, 0x60161),
+  (0x60161, .jmp 0x60000, 0x60166),
+  (0x60166, .mov 64 (.reg .rax) (.imm 0xFFFFFFFFFFFFFFFF), 0x6016D),
+  (0x6016D, .ret, 0x6016E)
 ]
 
 /-- This function's instructions and the two kernels' (one/KCode.lean) as one program. -/
@@ -203,5 +211,13 @@ theorem has_kernels : ∀ pc x, KCode.prog pc = some x → prog pc = some x := b
 @[ode_at] theorem at_6014C : prog 0x6014C = some (.pop .rbp, 0x6014D) := rfl
 @[ode_at] theorem at_6014D : prog 0x6014D = some (.pop .rbx, 0x6014E) := rfl
 @[ode_at] theorem at_6014E : prog 0x6014E = some (.ret, 0x6014F) := rfl
+@[ode_at] theorem at_60150 : prog 0x60150 = some (.cmp 64 (.reg .r8) (.imm 0x1), 0x60154) := rfl
+@[ode_at] theorem at_60154 : prog 0x60154 = some (.jae 0x60158, 0x60156) := rfl
+@[ode_at] theorem at_60156 : prog 0x60156 = some (.jmp 0x60166, 0x60158) := rfl
+@[ode_at] theorem at_60158 : prog 0x60158 = some (.cmp 64 (.reg .rdx) (.imm 0x100), 0x6015F) := rfl
+@[ode_at] theorem at_6015F : prog 0x6015F = some (.jae 0x60166, 0x60161) := rfl
+@[ode_at] theorem at_60161 : prog 0x60161 = some (.jmp 0x60000, 0x60166) := rfl
+@[ode_at] theorem at_60166 : prog 0x60166 = some (.mov 64 (.reg .rax) (.imm 0xFFFFFFFFFFFFFFFF), 0x6016D) := rfl
+@[ode_at] theorem at_6016D : prog 0x6016D = some (.ret, 0x6016E) := rfl
 
 end Code_merge

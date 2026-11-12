@@ -9,5 +9,9 @@ merge.o
 merge.listing
 merge.layout
 merge.build.log
+merge.checks
+merge.checks.lean
 Lifted_merge.lean
 Lifted_merge.lean.rows
+Lifted_merge_checked.lean
+Lifted_merge_checked.lean.rows

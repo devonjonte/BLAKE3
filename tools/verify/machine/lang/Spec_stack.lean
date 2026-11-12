@@ -1,6 +1,4 @@
-import Machine
-import MemLemmas
-import Cells
+import Abi
 import ParentSpec
 import Stack
 open X86
@@ -24,3 +22,9 @@ newest highest; at most 55 of them. -/
 def Stack.At (m : Mem) (st : BitVec 64) (cvs : List Blake3.CV) : Prop :=
   cvs.length ≤ 55 ∧ Cells.Region m st 1792#64 ∧ Quad m st (BitVec.ofNat 64 cvs.length) ∧
   Cvs.At m (st + 32#64 * BitVec.ofNat 64 cvs.length) cvs
+
+/-- A chaining value in memory: 32 bytes. -/
+@[abi] def Cv.layout : Abi.Layout Blake3.CV := ⟨32#64, Cv.At⟩
+
+/-- The hasher's stack in memory: 1792 bytes. -/
+@[abi] def Stack.layout : Abi.Layout (List Blake3.CV) := ⟨1792#64, Stack.At⟩

@@ -64,8 +64,8 @@ theorem Merge.result_done (k : Blake3.CV) (flags target : BitVec 64) (cvs : List
 theorem Merge.exit {m : Mem} {st len target flags : BitVec 64} {k : Blake3.CV} {now cvs : List Blake3.CV}
     (h : Stack.At m st now) (hl : len = Stack.count now)
     (he : Merge.result k flags target now = Merge.result k flags target cvs) (ht : ¬ target < len) :
-    Stack.At m st (Merge.result k flags target cvs) ∧ len.toNat = (Merge.result k flags target cvs).length := by
+    len.toNat = (Merge.result k flags target cvs).length ∧ Stack.At m st (Merge.result k flags target cvs) := by
   have hc := Stack.count_toNat h.1
   have hd : ¬ target.toNat < now.length := by rw [← hc, ← hl]; exact fun x => ht (BitVec.lt_def.mpr x)
   rw [← he, Merge.result_done k flags target now hd]
-  exact ⟨h, by rw [hl, hc]⟩
+  exact ⟨by rw [hl, hc], h⟩

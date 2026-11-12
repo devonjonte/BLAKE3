@@ -41,3 +41,7 @@ name = "Spec_stack"
 name = "StackLemmas"
 [[lean_lib]]
 name = "Lemmas_merge"
+[[lean_lib]]
+name = "Checks"
+[[lean_lib]]
+name = "Checked_merge"

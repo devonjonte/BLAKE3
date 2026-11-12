@@ -48,6 +48,8 @@ elab "#reading_list " id:ident : command => do
     if isCore m then core := core + 1 else
       -- generated helpers (matchers, recursors, equation lemmas) are counted with what they belong to
       if c.isInternalDetail || (c matches .str _ "rec") || (c matches .str _ "casesOn") || (c matches .str _ "recOn") then continue
+      -- a structure's fields and constructor are lines of the structure itself
+      if env.isProjectionFn c || (env.find? c matches some (.ctorInfo _)) then continue
       let lines ← liftCoreM do
         match ← findDeclarationRanges? c with
         | some r => pure (r.range.endPos.line - r.range.pos.line + 1)
@@ -68,5 +70,28 @@ elab "#reading_list " id:ident : command => do
   msg := msg ++ m!"  {std.size} standard ({", ".intercalate (std.toList.map toString)}); {other.size} others" ++
     (if other.isEmpty then m!"" else m!" (each says: a compiled checker accepted a solver's certificate), e.g. {other[0]!}")
   logInfo msg
+
+/-- The same, as data: one line a definition (`def MODULE NAME LINES`) and one an axiom, for tools that
+compare what two theorems' statements depend on. -/
+elab "#reading_defs " id:ident : command => do
+  let env ← getEnv
+  let name ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo id
+  let some info := env.find? name | throwError "unknown"
+  let all := walk env (constsOf info.type).toList {}
+  let mut out : Array String := #[]
+  for c in all.toList do
+    let m := match env.getModuleIdxFor? c with
+      | some i => env.header.moduleNames[i.toNat]!
+      | none => env.mainModule
+    if isCore m then continue
+    if c.isInternalDetail || (c matches .str _ "rec") || (c matches .str _ "casesOn") || (c matches .str _ "recOn") then continue
+    if env.isProjectionFn c || (env.find? c matches some (.ctorInfo _)) then continue
+    let lines ← liftCoreM do
+      match ← findDeclarationRanges? c with
+      | some r => pure (r.range.endPos.line - r.range.pos.line + 1)
+      | none => pure 0
+    out := out.push s!"def {m} {c} {lines}"
+  for a in ← liftCoreM <| collectAxioms name do out := out.push s!"axiom {a}"
+  logInfo ("\n".intercalate out.toList)
 
 end ReadingList

@@ -300,7 +300,7 @@ def env_at(reg):
 # ---------------------------------------------------------------- the invariant on the machine's state
 CARGS = " ".join(params + [g for g, _ in fn_ghosts])
 C = f"(Abi.Contract.framed ({CNAME} {CARGS}) {F}#64)"                  # the contract, with the frame the compiler made
-OPEN_C = f"{CNAME}, Abi.Contract.framed"
+OPEN_C = f"{CNAME}, Abi.Contract.framed, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true"
 UNFOLD = f"{OPEN_C}, Abi.AllApart, Abi.Apart, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, BitVec.reduceAdd"
 UNFOLD_X = f"{OPEN_C}, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, BitVec.reduceAdd"
 CALLEE_SAVED = ["rbx", "rbp", "r12", "r13", "r14", "r15"]
@@ -319,7 +319,7 @@ inv_mem = [(f"Region s.mem fb {F}#64", "mem_region", "hF"), (f"Quad s.mem (fb + 
     [(f"Quad s.mem (fb + {F - 8 * (i + 1)}#64) sv.{r}", "mem_fact", f"hS{i}") for i, r in enumerate(saved)] + \
     [(f"Quad s.mem {at(o)} {p}", "mem_fact", f"hPs{i}") for i, (p, o) in enumerate(param_slot)] + \
     [(f"Abi.AllApart ((fb, {C}.stack + 8#64) :: {C}.regions)", "exact hAp0", "hAp"), (outside, None, "hOut"),
-     (f"{C}.requires m0", "exact hReq0", "hReq")]
+     (f"{C}.accepts", "exact hAcc0", "hAcc"), (f"{C}.requires m0", "exact hReq0", "hReq")]
 inv_frozen = [(f"s.{home[x]} = {e}" if slot_of(x) is None else f"Quad s.mem {at(slot_of(x))} {e}", slot_of(x) is None) for x, e in frozen.items()]
 env_s = env_at(lambda x: f"s.{home[x]}")
 inv_clauses, inv_pred = [], []
@@ -431,6 +431,7 @@ def known(ind, mem, at_head):
     """What is at hand before a piece is run: the regions apart, what the contract requires (of the
     arguments alone, once the loop is entered), and what the holder of each memory predicate may read."""
     t = [f"{ind}have hAp0 := hAp", f"{ind}simp only [{UNFOLD}] at hAp", f"{ind}split_ands hAp",
+         f"{ind}have hAcc0 := hAcc", f"{ind}try (simp only [{OPEN_C}] at hAcc; split_ands hAcc)",
          f"{ind}have hReq0 := hReq", f"{ind}simp only [{OPEN_C}] at hReq", f"{ind}split_ands hReq"]
     if at_head: t.append(f"{ind}forget_about m0 except hOut hReq0")
     for i, p in enumerate(preds):
@@ -450,7 +451,7 @@ assert len(ep) == 1 and not any(e[0] == "call" for e in ep[0][0]), "a condition 
 L += [f"theorem enter {ARGDECL}",
       f"    (s : State) (hP : {PRE} s) : ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ Inv {ARGUSE} s' := by",
       f"  obtain {STATE(REGS)} := s",
-      "  obtain ⟨hpc, hsp, hargs, hbx, hbp, h12, h13, h14, h15, hmem, hF, hRa, hAp, hReq⟩ := hP",
+      "  obtain ⟨hpc, hsp, hargs, hbx, hbp, h12, h13, h14, h15, hmem, hF, hRa, hAp, hAcc, hReq⟩ := hP",
       f"  simp only [{OPEN_C}] at hpc hsp hargs hbx hbp h12 h13 h14 h15 hmem hF hRa",
       "  simp only [List.length_cons, List.length_nil, List.take, List.cons.injEq, and_true] at hargs",
       f"  obtain ⟨{', '.join(f'ha{i}' for i in range(len(params)))}⟩ := hargs",
@@ -490,8 +491,8 @@ L += [f"theorem leave {ARGDECL}",
       f"    (s : State) (hI : Inv {ARGUSE} s) (hc : ¬ {cond_prop(wcond, env_s)}) :",
       f"    ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ {POST} s' := by"] + open_head + \
      run_piece(lp[0][0], HEAD, "ret", [], "  ") + \
-     [f"  refine runs_done ⟨rfl, by dsimp only [{OPEN_C}]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩", "  all_goals try dsimp only"] + \
-     outside_goal("  ", True) + [f"  · dsimp only [{OPEN_C}]", f"    apply {LEAVE} <;> mem_auto", ""]
+     [f"  refine runs_done ⟨rfl, by simp only [{CNAME}, Abi.Contract.framed]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩", "  all_goals try dsimp only"] + \
+     outside_goal("  ", True) + [f"  · simp only [{OPEN_C}]", f"    apply {LEAVE} <;> mem_auto", ""]
 
 # ---------------------------------------------------------------- the theorem
 ALL = f"({' '.join(params)} : BitVec 64) " + " ".join(f"({g} : {t})" for g, t in fn_ghosts)

@@ -130,7 +130,9 @@ for at, size, op, args, reloc, raw in insns:
         r, w = REG[a[0]]; assert w == 64; b, d = memref(a[1]); ins = f".lea .{r} .{b} {bv(d)}"
     elif op.startswith("nop"): ins = ".nop"
     elif op in ("push", "pop"): r, w = REG[a[0]]; assert w == 64; ins = f".{op} .{r}"
-    elif op in ("je", "jne", "jmp", "jbe", "jae"): ins = f".{op} 0x{base + int(a[0].split()[0], 16) - start:X}"
+    elif op in ("je", "jne", "jmp", "jbe", "jae"):
+        # a jump to another function of the object goes to the address given for its symbol
+        ins = f".{op} 0x{calls[reloc]:X}" if reloc in calls else f".{op} 0x{base + int(a[0].split()[0], 16) - start:X}"
     elif op == "call":
         assert reloc in calls, f"call to a function with no address given: {reloc}"; ins = f".call 0x{calls[reloc]:X}"
     elif op == "ud2": continue   # a trap: no instruction is there, so reaching it is a fault
