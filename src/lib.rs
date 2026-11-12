@@ -158,9 +158,10 @@
 //! check costs nothing: it is part of the platform load every call makes.
 //!
 //! `initialize` checks the build and the CPU before the process first
-//! hashes, in well under a millisecond. It runs every assembly kernel built
+//! hashes, in well under a millisecond. It runs the assembly kernels built
 //! for this machine on fixed inputs and compares the outputs with fixed
-//! values official BLAKE3 generated. A mismatch stops the process, which no
+//! values official BLAKE3 generated (on ARM64, all but the kernels for
+//! batches of short messages of unequal lengths). A mismatch stops the process, which no
 //! caller can catch: with `std` it names the code path on stderr and
 //! aborts; without it, the CPU's trap instruction stops it. Other threads
 //! that call `initialize` meanwhile wait for it.

@@ -343,21 +343,16 @@ src/platform.rs	replace | with ^ in Platform::compress_blocks	1	same code: every
 src/platform.rs	replace | with ^ in features_of	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/platform.rs	replace | with ^ in os_saves_avx	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/platform.rs	replace |= with &= in features_of	4	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/self_test.rs	delete ! in last_lanes	1	[cpu has sha3] speed: also computes scalar answers before the last-lane kernels overwrite them; on a CPU without SHA-3 it omits the answers and the startup tests fail
 src/self_test.rs	replace & with ^ in compiled_features_present	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace & with | in compiled_features_present	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace && with || in compiled_features_present	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace * with +	5	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace * with + in chain	1	equivalent: the case has one message, so its length scales only message 0's offset, 0
-src/self_test.rs	replace * with + in last_lanes	2	[cpu has sha3] equivalent here: changes only the scalar startup path that this CPU leaves uncalled; the SHA-3-free startup tests check those answers
 src/self_test.rs	replace * with + in test::wide_reference	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace * with /	5	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/self_test.rs	replace * with / in last_lanes	2	[cpu has sha3] equivalent here: changes only the scalar startup path that this CPU leaves uncalled; the SHA-3-free startup tests check those answers
 src/self_test.rs	replace * with / in test::wide_reference	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace + with *	7	x86 only: compiled out on AArch64 (CI's x86 tests reach it) (the x86 cases' lengths)
-src/self_test.rs	replace + with * in last_lanes	1	[cpu has sha3] equivalent here: changes only the scalar startup path that this CPU leaves uncalled; the SHA-3-free startup tests check those answers
 src/self_test.rs	replace + with -	6	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/self_test.rs	replace + with - in last_lanes	1	[cpu has sha3] equivalent here: changes only the scalar startup path that this CPU leaves uncalled; the SHA-3-free startup tests check those answers
 src/self_test.rs	replace += with *= in run	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace += with -= in run	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace << with >> in compiled_features_present	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -368,7 +363,6 @@ src/self_test.rs	replace test::ours -> usize with 0	1	same code: every test bina
 src/self_test.rs	replace test::ours -> usize with 1	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/self_test.rs	replace test::wide_reference with ()	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/self_test.rs	replace | with ^ in chunk_values	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/self_test.rs	replace | with ^ in last_lanes	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/tree.rs	replace + with * in wide	1	speed: how far past its input a subtree prefetches (a prefetch never faults)
 src/tree.rs	replace + with - in wide	1	speed: how far past its input a subtree prefetches (a prefetch never faults)
 src/tree.rs	replace <impl Kernels for PlatformKernels<'_>>::subtree -> Option<usize> with None	1	speed: subtrees then hash on the walk's one-chunk path, the same digests

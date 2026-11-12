@@ -598,9 +598,10 @@ pub unsafe fn hash_chunk(
 /// [`Kernel`] and the partial chunk's `blocks | last_len << 8`.
 type PartialKernel = unsafe extern "C" fn(*const *const u8, u64, *const u32, u64, u64, *mut u8, u64);
 
-/// Every assembly entry point of the hybrids, named: from the kernel
-/// tables, the q kernels, and the integer kernel (for the self-test's
-/// test).
+/// The hybrids' assembly entry points the startup self-test runs, named:
+/// from the kernel tables, the q kernels, and the integer kernel (for the
+/// self-test's test). The l kernels are left to
+/// test_hash_last_lanes_against_hash (self_test.rs has why).
 #[cfg(all(test, feature = "std"))]
 pub(crate) fn entries() -> std::vec::Vec<(std::string::String, *const ())> {
     let mut out = std::vec::Vec::new();
@@ -618,11 +619,6 @@ pub(crate) fn entries() -> std::vec::Vec<(std::string::String, *const ())> {
     if sha3_detected() {
         for n in 1..=9 {
             out.push((std::format!("q{n}"), partial_kernel(n) as *const ()));
-        }
-        for (n, kernel) in LAST_KERNELS.iter().enumerate() {
-            if let Some(kernel) = kernel {
-                out.push((std::format!("l{n}"), *kernel as *const ()));
-            }
         }
     }
     out.push(("c1".into(), asm::blake3_servil_hybrid_c1 as *const ()));
