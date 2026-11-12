@@ -76,14 +76,16 @@ This is what a program would see if it used 0.9's calls where it used
 0.8's stream; a program that needs a stream waits for the Pipeline.
 0.8's stream hashed on the workers while the program read the next
 message, gathered short messages into lanes and spread them over the
-cores. A call a message does none of that. On a Ryzen 9700X (16 threads)
-a program that hashes messages one after another through
-`hash_multithreaded` takes, against 0.8's stream: 2.7 to 3 times the time
-for messages of 16 KiB to 64 MiB, and 3.6 to 24 times for messages of
-64 B to 4 KiB, the most at 512 B and 1 KiB. Gathering short messages into
-batches for `hash_many_multithreaded` recovers most of it: batches one
-after another take 1.2 to 2.9 times the stream's time. The
-single-threaded calls are unaffected. (A check of the two-crate tree
+cores. A call a message does none of that. Against 0.8's stream, on four
+x86-64 machines (a Ryzen 9700X, an EPYC 9275F, an EPYC 9255, two Xeon
+Gold 6330), messages one after another through `hash_multithreaded` take
+from 1.2 to 25 times the time: the most for messages of 512 B and 1 KiB
+on the 16-thread Ryzen, 2 to 3 times for messages of 16 KiB and more
+there. Gathering short messages into batches for
+`hash_many_multithreaded` recovers most of it: batches one after another
+take 1.2 to 2.9 times the stream's time. No other call is slower on
+those machines: none of the single-threaded calls, none of the
+multithreaded calls made for whole inputs. (Checks of `next` c10d6804
 against 0.8, four pairs a cell; the release runs give the release's
 figures.)
 
