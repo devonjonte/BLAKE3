@@ -166,6 +166,15 @@ this release: no 0.8.x follows.
   reset, and an update on it silently continued the old message. Official
   BLAKE3's hasher may be finalized again and updated further; code ported
   from it calls `b3_hasher_new` between messages.
+- **`Hash`'s hex is computed, with the same time and memory accesses
+  for every hash** (#370). A hash can be a secret (a keyed hash's tag, a
+  derived key). 0.8's `to_hex` looked each character up in a table
+  indexed by the hash, and its `from_hex` stopped at the first bad
+  character. Both now work by arithmetic over all 64 characters. Checked
+  on the compiled code: `to_hex` has one path and no leak on x86-64 and
+  AArch64; `from_hex`'s accepted path is clean after its first branch on
+  AArch64, and on x86-64 the tool's exploration is incomplete, so that
+  half rests on a reading of the compiled code.
 - **`Batch::new` stops on a count whose blocks overflow** (#320). In 0.8,
   in a release build, a count of 128-byte messages past half of
   `usize::MAX` wrapped to zero blocks and returned an empty batch.
@@ -185,7 +194,6 @@ this release: no 0.8.x follows.
 ## To fill at the release
 
 - The Faster table from each machine's release run.
-- `Hash`'s hex in constant time (#370), when it lands.
 - The x86-64 kernels that land before the release, each with its measured
   gain and its proof (Zen 5's integer-register chunk root).
 
