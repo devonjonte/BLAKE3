@@ -10,7 +10,7 @@ build proves nothing). Then, each in its own copy of this folder:
   - clause: what the source gives the prover changed, and the proof generated again.
 Each must be rejected, by Lean or by the generator, within the time limit.
 usage: mutants_fn.py [JOBS]   (after ./prove_fn.sh; run from this folder)"""
-import os, shutil, signal, subprocess, sys, tempfile, time
+import os, re, shutil, signal, subprocess, sys, tempfile, time
 from concurrent.futures import ThreadPoolExecutor
 
 here = os.path.dirname(os.path.abspath(__file__))
@@ -107,8 +107,12 @@ def run(kind, what, old, new, n=1):
         b = subprocess.run(["lake", "build", "Code_merge", "Example_merge", "Checks", "TrySem", "HasherOde"], cwd=w, capture_output=True, text=True)
         if b.returncode == 0:
             tr = subprocess.run([sys.executable, "try_fn.py", SRC, "merge", ROWS], cwd=w, capture_output=True, text=True)
-            bad = [l for l in tr.stdout.splitlines() if "REFUTED" in l or "NOT AN EXAMPLE" in l]
-            tried = bad[0] if bad else (tr.stdout.strip().splitlines() or ["?"])[-1]
+            # what differs from the unchanged version's answers, example by example (BASE is the control's)
+            now = classes(tr.stdout)
+            if kind == "control":
+                BASE.update(now)
+            diff = [line for i, (c, line) in sorted(now.items()) if BASE.get(i, (c,))[0] != c] + [f"example {i}: no longer answered" for i in sorted(BASE) if i not in now]
+            tried = diff[0] if diff else "every example answers as for the unchanged version"
         else:
             tried = "the statement no longer fits the examples or the lemmas (it does not build)"
         tried_secs = time.time() - start
@@ -123,6 +127,18 @@ def run(kind, what, old, new, n=1):
         return kind, what, "ACCEPTED" if ok else "REJECTED", time.time() - start, f"tried in {tried_secs:.0f} s: {tried}"
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+BASE = {}
+def classes(out):
+    """example number -> (meets | refuted | not an example | no verdict, its line)"""
+    r = {}
+    for l in out.splitlines():
+        m = re.match(r"example (\d+): (.*)", l)
+        if m:
+            c = "meets" if m.group(2).startswith("meets") else "refuted" if "REFUTED" in l else "not an example" if "NOT AN EXAMPLE" in l else "no verdict"
+            r[int(m.group(1))] = (c, l)
+    return r
 
 
 # one copy of this folder as it is now: every check starts from it, whatever is edited here meanwhile
@@ -142,7 +158,7 @@ with ThreadPoolExecutor(jobs) as pool:
         key = "accepted" if verdict == "ACCEPTED" else "no verdict" if verdict.startswith("NO") else "rejected"
         tally[key] = tally.get(key, 0) + 1
         blame[kind] = blame.get(kind, []) + ["compiler" if "the code the compiler made is wrong" in first else "source or contract" if "the source or the contract is wrong" in first
-                                              else "not an example" if "NOT AN EXAMPLE" in first else "does not build" if "does not build" in first else "not refuted"]
+                                              else "no longer an example" if "NOT AN EXAMPLE" in first else "does not build" if "does not build" in first else "not refuted"]
 print(f"{len(code)} changed instructions, {len(entry)} changed instructions of the checked entry, {len(statement)} false statements and {len(clause)} changed clauses: " + ", ".join(f"{n} {k}" for k, n in sorted(tally.items())))
 print("what trying the examples said of each kind (before any proof was checked):")
 for kind, vs in blame.items():
