@@ -253,6 +253,9 @@ srcDir = "../experiments/adler32"
 name = "Block_adler32"
 srcDir = "../experiments/adler32"
 [[lean_lib]]
+name = "WordReduce_adler32"
+srcDir = "../experiments/adler32"
+[[lean_lib]]
 name = "AdlerOde"
 [[lean_lib]]
 name = "Code_adler32"
