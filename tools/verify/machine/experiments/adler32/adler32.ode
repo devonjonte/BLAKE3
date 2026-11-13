@@ -1,14 +1,21 @@
 // Adler-32, RFC 1950 section 8. An integrity checksum, not a cryptographic hash.
 // Caller supplies n readable bytes at input; neither input nor n is secret.
-// This first experiment has executable tests, not a machine-code correctness theorem.
+// Contract and proof hints leave the assembled function's bytes unchanged.
 const MOD = 65521
 
 fn adler32(input, n)
+  meets Adler32.contract(bytes: List (BitVec 8))
+  uses Lemmas_adler32
+  leave by Adler32.exit
 {
   var a = 1
   var b = 0
   var i = 0
-  while i < n {
+  while i < n
+    invariant Adler32.Mid(input, n, bytes, i, a, b) by Adler32.Mid.small_small | Adler32.Mid.small_large | Adler32.Mid.large_small | Adler32.Mid.large_large from Adler32.Mid.start
+    decreases n - i
+    open Adler32.Mid.next as v
+  {
     a = a + u8[input + i]
     if a >= MOD { a = a - MOD }
     b = b + a

@@ -10,6 +10,7 @@ import Lemmas_ladd
 import Spec_nodeout
 import Spec_pad
 import Spec_chunknode
+import Spec_adler32
 open X86
 
 /-! # Each contract can be used
@@ -127,6 +128,16 @@ theorem Lroot.usable : (Lroot.contract 0x300000#64 0x100000#64 0x200000#64 0#64 
     · exact Cells.vec_put128_far _ _ _ _ _ (by decide) (vec_put128 _ _ _)
     · exact vec_put128 _ _ _
     · rw [hv]; exact sub1.symm
+
+theorem Adler32.usable : (Adler32.contract 0x100000#64 1#64 [0#8]).Usable := by
+  refine ⟨0x7ff00000#64, zeroMem, zeroMem_region _ _, ?_, rfl, ?_⟩
+  · simp only [Adler32.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append,
+      List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, Abi.AllApart, Abi.Apart]; decide
+  · simp only [Adler32.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append,
+      List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
+    refine ⟨trivial, fun i h => ?_⟩
+    have hi : i = 0 := by simp at h; omega
+    subst i; rfl
 
 #print axioms Merge.usable
 #print axioms Lroot.usable

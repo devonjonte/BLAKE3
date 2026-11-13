@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable correctness and structural controls. These are tests, not proofs.
+"""Executable tests, structural controls, and proof-by-default build controls.
 
     python3 test_adler32.py --out NEW_DIRECTORY
 
@@ -123,6 +123,28 @@ assert c.munmap(base, 3*p) == 0
 
     def test_06_disassembly_reader(self):
         self.assertEqual(observe.instructions("0000 <name>:\n  0: push rbx\n  1: ret\n"), ["push rbx", "ret"])
+
+    def test_07_proof_is_the_default_build(self):
+        def build(name, *flags):
+            return observe.run(["sh", HERE / "build.sh", OUT / name, *flags])
+        build("checked-build")
+        r = json.loads((OUT / "checked-build/report.json").read_text())
+        self.assertIn("Lean checked Proof_adler32.adler32_meets", r["proof"])
+        self.assertEqual(r["text"], self.base[0]["text"])
+        build("explicit-skip", "--skip-proof")
+        r = json.loads((OUT / "explicit-skip/report.json").read_text())
+        self.assertEqual(r["proof"], "not checked by this tool")
+        self.assertFalse((OUT / "explicit-skip/Proof_adler32.lean").exists())
+        path = HERE / "adler32.ode"
+        good = path.read_text()
+        try:
+            path.write_text(good.replace("var a = 1", "var a = 2"))
+            with self.assertRaises(subprocess.CalledProcessError):
+                build("failed-build")
+            self.assertFalse((OUT / "failed-build").exists(), "proof failure stops artifact publication")
+        finally:
+            path.write_text(good)
+            build("restored-build")
 
 
 if __name__ == "__main__":

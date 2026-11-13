@@ -2,15 +2,16 @@ import Abi
 import Spec_bytes
 open X86
 
-/-! The intended contract of the experiment. No theorem yet ties its machine code to this contract.
-The arithmetic is RFC 1950 section 8; the checksum is not a cryptographic authentication code. -/
+/-! Adler-32's contract, in the arithmetic of RFC 1950 section 8.
+The checksum is not a cryptographic authentication code. -/
 
 namespace Adler32
 
-def sums (bytes : List (BitVec 8)) : Nat × Nat :=
-  bytes.foldl (fun (a, b) byte =>
-    let a' := (a + byte.toNat) % 65521
-    (a', (b + a') % 65521)) (1, 0)
+def step (s : Nat × Nat) (byte : BitVec 8) : Nat × Nat :=
+  let a := (s.1 + byte.toNat) % 65521
+  (a, (s.2 + a) % 65521)
+
+def sums (bytes : List (BitVec 8)) : Nat × Nat := bytes.foldl step (1, 0)
 
 def checksum (bytes : List (BitVec 8)) : BitVec 64 :=
   BitVec.ofNat 64 ((sums bytes).2 * 65536 + (sums bytes).1)

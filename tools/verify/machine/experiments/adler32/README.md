@@ -13,8 +13,9 @@ The questions:
 
 ## What works
 
-`adler32.ode` implements the checksum in one byte loop. No change to Ode's compiler
-or language was needed. `adler32_compact.ode` computes the same checksum with the
+`adler32.ode` implements the checksum in one byte loop, using Sam's original
+parser and assembly printer. Proof-generator extensions are described below.
+`adler32_compact.ode` computes the same checksum with the
 two reductions spelled `a > MOD - 1` rather than `a >= MOD`.
 
 `../../observe.py` uses Ode's own compiler and assembly/layout printers. It records
@@ -72,10 +73,51 @@ The samples, logs and commands are in
   before it calls the function. Its tests check samples reading and abstention on
   busy load; unchanged synthetic pairs read level and planted +20% pairs read slower.
 
-**Proof status:** `Spec_adler32.lean` states the intended contract and checks two
-specification examples. No theorem yet connects the assembled checksum to that
-contract. The tests above are executable evidence, not a correctness, memory-safety,
-termination, constant-time or resource-bound proof. Input and length are public.
+## Checked machine-code theorem
+
+**The original `adler32.ode` is now proved.** Its 171-byte assembled object is
+byte-for-byte identical to the one tested and benchmarked above. The proof
+annotations change no instructions. The compact variant remains tested only.
+
+The generated theorem (`../../lang/Proof_adler32.lean`) is:
+
+```lean
+Proof_adler32.adler32_meets : ∀ (input n : BitVec 64) (bytes : List (BitVec 8)),
+  Abi.Meets Code_adler32.prog 0x100000 (Adler32.contract input n bytes)
+```
+
+For every message and permitted entry state, the lifted instructions terminate
+without a modeled fault, return the Adler-32 defined by the contract, preserve the
+calling convention, and leave every byte outside the permitted stack area
+unchanged. The contract grants 64 bytes of stack; the generated proof uses 40.
+A usability theorem supplies a concrete nonempty input meeting the preconditions.
+Input and length are public. There is no constant-time or exact execution-cost claim.
+
+The compiler wrote the 272-line machine proof from the source and its annotations.
+`Lemmas_adler32.lean` holds 133 lines of hand-written supporting lemmas: bounded
+conditional subtraction equals reduction modulo 65521, one loop step preserves the
+remaining-fold invariant, and the final words pack the specification's checksum.
+The contract remains the same modular arithmetic as the initial experiment.
+
+Three small proof-generator extensions were needed: a variant expression (`n - i`),
+byte-load values in a read-only loop body, and normalization of a saved register
+at stack offset zero. The assembly printer is unchanged. Existing `push`, `pad`
+and `merge` proofs regenerate and check with these changes.
+
+**Trust boundary:** this is a theorem on Ode's x86-64 model. The object-to-model
+link still trusts LLVM objdump and the existing lifter. The theorem depends on
+Lean's three standard axioms and 32 native `bv_decide` axioms, as printed in
+`proof.log`. It therefore does not yet meet the independent-checker-only goal in
+Sam's design. It makes no claim about every behavior of real processors beyond
+the model's assumptions.
+
+An audit regenerates the unchanged proof and rechecks it directly with Lean,
+bypassing the target cache. Wrong seed, overread and wrong result-contract variants
+are refused by the machine-code proof; an impossible contract is refused by the
+usability theorem. Wrong-reduction and wrong-packing variants time out at 30 seconds
+and receive **no verdict**. The first wrong-reduction attempt also timed out at
+120 seconds. The original proof is restored and checked again. These timeouts
+remain a diagnostic limitation; they are not reported as caught mutants.
 
 ## Run the exercise
 
@@ -87,14 +129,24 @@ objdump executable. `CC` and `OBJCOPY` name executables too.
 From `tools/verify/machine/` (output directories must be new):
 
 ```sh
-python3 observe.py experiments/adler32/adler32.ode adler32 /absolute/path/observation
+# Normal project build: compile, generate the machine proof, check it, then observe.
+sh experiments/adler32/build.sh /absolute/path/checked-build
+# Explicit development opt-out: the report remains marked unverified.
+sh experiments/adler32/build.sh /absolute/path/unverified-build --skip-proof
 python3 experiments/adler32/test_adler32.py --out /absolute/path/tests
-(cd lang && lake build Abi Spec_bytes && lake env lean ../experiments/adler32/Spec_adler32.lean)
 ```
 
-The tests read no clock. The observer builds the language printer without building the
-BLAKE3 proofs. Each external command has a timeout. Use a process-group supervisor
-for a hard bound over the complete job.
+The normal build stops on a failed proof before publishing its output directory.
+It compares the observed object with the object lifted for the theorem before
+marking the report checked. Build controls exercise success, explicit opt-out, and
+a wrong seed that must fail the default build. The tests read no clock.
+
+The low-level `observe.py SOURCE FUNCTION NEW_OUTPUT` command observes code
+structure only and says so in its report. Each external command has a timeout.
+Use a process-group supervisor for a hard bound over the complete job. After a
+successful build, `python3 experiments/adler32/audit_proof.py NEW_OUTPUT` runs the
+negative proof controls. Exit 2 means at least one timed out; the original source
+and checked generated proof are restored last.
 
 ## Measure on a dedicated machine
 
@@ -155,7 +207,8 @@ code/data cache misses and hardware latency models remain outside this exercise.
    a structural control and measured costs each establish something different. The
    report states its proof status explicitly so a user can see what remains open.
 
-The next useful step is a machine-code theorem for this checksum, while recording
-what its author has to supply. That will exercise the proof interface independently
-of BLAKE3. Improving the branch printer is a separate candidate, weighed against the
-existing functions' proofs and code before changing the shared compiler.
+The next proof-tool improvement is a faster, source-level diagnosis of the two
+wrong variants whose proofs timed out. Proving the compact variant is separate:
+it cannot inherit the original's theorem. Improving the branch printer is also
+a separate candidate, weighed against existing functions' proofs and code before
+changing the shared compiler.
