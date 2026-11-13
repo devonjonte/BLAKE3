@@ -69,9 +69,10 @@ variable {m m' : Mem} {nd input len counter flags p rem first : BitVec 64} {k : 
 proof of apartness speaks: the chunk's piece is `BitVec.ofNat 64 bytes.length` bytes from `input`). -/
 theorem cells (h : Mid m nd input len counter flags k bytes p rem first) :
     Region m nd 120#64 ∧ first ≤ 1#64 ∧ rem ≤ 1024#64 ∧ flags < 256#64 ∧
-    len = BitVec.ofNat 64 bytes.length ∧ p = input + (len - rem) ∧ rem ≤ len ∧ len ≤ 1024#64 := by
-  obtain ⟨hn, hl, hf, hr, _, _, hp, hfirst, _, _, hR⟩ := h
-  refine ⟨hR, ?_, by bv_omega, hf, ?_, hp, by bv_omega, by bv_omega⟩
+    len = BitVec.ofNat 64 bytes.length ∧ p = input + (len - rem) ∧ rem ≤ len ∧ len ≤ 1024#64 ∧
+    (rem = len ∨ 0#64 < rem) := by
+  obtain ⟨hn, hl, hf, hr, _, hor, hp, hfirst, _, _, hR⟩ := h
+  refine ⟨hR, ?_, by bv_omega, hf, ?_, hp, by bv_omega, by bv_omega, hor⟩
   · rw [hfirst]; split <;> decide
   · apply BitVec.eq_of_toNat_eq; rw [hn, BitVec.toNat_ofNat]; omega
 

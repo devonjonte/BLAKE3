@@ -34,6 +34,8 @@ X86 = [  # (module, theorem, contract and where, what it says)
      "`node_out`, as assembled, writes a node's compression for the node in memory (the specification's own: h, block, counter, length, flags): its chaining value, or with the root flag the first 32 bytes of its output"),
     ("Proof_pad", "Proof_pad.pad_meets", "`Pad.contract` (lang/Spec_pad.lean)",
      "`pad`, as assembled, writes a chunk's last block as a compression reads it: the bytes given (at most 64), then zeros to 64"),
+    ("Proof_chunk_node", "Proof_chunk_node.chunk_node_meets", "`ChunkNode.contract` (lang/Spec_chunknode.lean)",
+     "`chunk_node`, as assembled, fills the specification's node of a chunk (`Blake3.chunkNode`) from the chunk's bytes: every block but the last through a one-block kernel, the last by `pad`'s contract"),
     ("AddTree", "Add.keeps_the_tree", "no code: `Add.contract`'s result and the specification's tree (alg/Stack.lean)",
      "on the tree's stack for `m` chunks, what `add` leaves is the tree's stack for `m + 1`"),
 ]
