@@ -1,0 +1,19 @@
+// Adler-32, RFC 1950 section 8. An integrity checksum, not a cryptographic hash.
+// Caller supplies n readable bytes at input; neither input nor n is secret.
+// This first experiment has executable tests, not a machine-code correctness theorem.
+const MOD = 65521
+
+fn adler32(input, n)
+{
+  var a = 1
+  var b = 0
+  var i = 0
+  while i < n {
+    a = a + u8[input + i]
+    if a >= MOD { a = a - MOD }
+    b = b + a
+    if b >= MOD { b = b - MOD }
+    i = i + 1
+  }
+  return (b << 16) | a
+}
