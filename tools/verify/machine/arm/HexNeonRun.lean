@@ -3,7 +3,7 @@ import HexText
 import Quiet_hex_neon
 open Arm64
 
-/-! The NEON `hex` kernel's 32 instruction words (from the ELF object), run on Google's AArch64 model
+/-! The NEON `hex` kernel's instruction words (from the ELF object), run on Google's AArch64 model
 (`Arm64.Trusted`: its decoder and `execInst`), on concrete hashes, against the hexadecimal. -/
 
 def outAt : BitVec 64 := 0x7000#64
@@ -31,8 +31,8 @@ def hashes : List (List (BitVec 8)) :=
 #eval (hashes.length, (hashes.filter ok).length)
 #eval let s := run ((List.range 32).map fun i => BitVec.ofNat 8 (i * 17 + 3)); (s.pc, s.status == .Running, String.ofList ((s.mem.readBytes outAt 64).map fun b => Char.ofNat b.toNat))
 
-/-- What the observer of `Observer.lean` sees on two different hashes: 36 things each (32 fetches, a
-read, two writes, the return), and the same. -/
+/-- What the observer of `Observer.lean` sees on two different hashes: as many things each (every
+instruction's fetch, a read, two writes, the return), and the same. -/
 def seenOn (v : Nat) : Option (List Obs) := runObs hex_neon_words (start (List.replicate 32 (BitVec.ofNat 8 v)))
 
 #eval ((seenOn 0x00).map (·.length), decide (seenOn 0x00 = seenOn 0xff))

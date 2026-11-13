@@ -164,27 +164,28 @@ variable {m m' : Mem} {lv input len p rem counter flags : BitVec 64} {k : Blake3
 theorem nodes_size (k : Blake3.CV) (flags : BitVec 64) (bytes : List (BitVec 8)) (c : BitVec 64) : (nodes k flags bytes c).size = c.toNat := by
   simp [nodes]
 
-theorem counter_small (hin : In m input len bytes p rem counter) (hpos : 0 < rem.toNat) (hmax : bytes.length < 2 ^ 64 - 1024) :
-    counter.toNat + 1 < 2 ^ 54 := by
+theorem counter_small (hin : In m input len bytes p rem counter) (hpos : 0 < rem.toNat) :
+    counter.toNat < 2 ^ 54 := by
   obtain ⟨hn, _, hr, _, _⟩ := hin
+  have := len.isLt
   omega
 
 /-- **In a turn:** what the three calls are given. -/
 theorem turn (hin : In m input len bytes p rem counter) (hlv : Lv m lv k flags (nodes k flags bytes counter))
-    (hc : 1024#64 < rem) (hmax : bytes.length < 2 ^ 64 - 1024) :
+    (hc : 1024#64 < rem) :
     ∃ _u : Unit, Bytes.At m p (chunk bytes counter) ∧ (chunk bytes counter).length < 2 ^ 64 ∧
       1024 = (chunk bytes counter).length ∧ (1024#64).toNat = (chunk bytes counter).length ∧
-      (chunk bytes counter).length ≤ 1024 ∧ (nodes k flags bytes counter).size + 1 < 2 ^ 54 ∧
+      (chunk bytes counter).length ≤ 1024 ∧ (nodes k flags bytes counter).size < 2 ^ 54 ∧
       BitVec.ofNat 64 (chunk bytes counter).length = 1024#64 := by
   have hrem : 1024 < rem.toNat := hc
   obtain ⟨hb, hlt, hlen⟩ := In.here hin
   have e : (chunk bytes counter).length = 1024 := by rw [hlen]; omega
   refine ⟨(), hb, hlt, e.symm, by rw [e]; rfl, by omega, ?_, by rw [e]⟩
-  rw [nodes_size]; exact counter_small hin (by omega) hmax
+  rw [nodes_size]; exact counter_small hin (by omega)
 
 /-- **After the loop:** the last chunk, and what the calls are given. -/
 theorem last (hin : In m input len bytes p rem counter) (hlv : Lv m lv k flags (nodes k flags bytes counter))
-    (hc : ¬ 1024#64 < rem) (hmax : bytes.length < 2 ^ 64 - 1024) :
+    (hc : ¬ 1024#64 < rem) :
     ∃ _u : Unit, Bytes.At m p (chunk bytes counter) ∧ (chunk bytes counter).length < 2 ^ 64 ∧
       rem.toNat = (chunk bytes counter).length ∧ (chunk bytes counter).length ≤ 1024 ∧
       BitVec.ofNat 64 (chunk bytes counter).length = rem := by
@@ -195,15 +196,15 @@ theorem last (hin : In m input len bytes p rem counter) (hlv : Lv m lv k flags (
 
 /-- After the loop, with a chunk done before the last: the levels have room for the last. -/
 theorem room (hin : In m input len bytes p rem counter) (hlv : Lv m lv k flags (nodes k flags bytes counter))
-    (hne : counter ≠ 0#64) (hmax : bytes.length < 2 ^ 64 - 1024) :
-    (nodes k flags bytes counter).size + 1 < 2 ^ 54 := by
+    (hne : counter ≠ 0#64) :
+    (nodes k flags bytes counter).size < 2 ^ 54 := by
   rw [nodes_size]
   have hor := hin.2.2.2.2
   have hpos : 0 < rem.toNat := by
     rcases hor with h | h
     · exact absurd h hne
     · exact h
-  exact counter_small hin hpos hmax
+  exact counter_small hin hpos
 
 /-- **Across a turn:** the levels over one chunk more. -/
 theorem Lv.step

@@ -88,7 +88,34 @@ def has_call(ss):
 
 
 own_calls = clauses[name].get("calls", [])            # calls of this file's functions, by their contracts
-OWN = {f"b3l_{n}": (n, info) for n, info in odec.own.items()}
+OWN = {(P.externs[n][0] if n in P.externs else f"b3l_{n}"): (n, info) for n, info in odec.own.items()}
+# External functions called by a contract that is assumed (a wide kernel this model does not hold): the theorem
+# is then about this function's instructions over any program (`ext`) in which those addresses meet the contracts.
+ASSUMED = odec.assumed_of(clauses, name)
+EXT = bool(ASSUMED)
+PROG = f"(Code_{name}.prog ext)" if EXT else f"Code_{name}.prog"
+E_ = " ext" if EXT else ""
+
+
+def assumption(c, prog):
+    info = odec.own[c]; xs = " ".join(f"x{i}" for i in range(info["arity"]))
+    return f"∀ {xs}, Abi.Meets {prog} 0x{info['at']:X} ({info['contract']} {xs})"
+
+
+XDECL = ("(ext : Nat → Option (Instr × Nat)) " + " ".join(f"(hA_{c} : {assumption(c, PROG)})" for c in ASSUMED) + " ") if EXT else ""
+XUSE = ("ext " + " ".join(f"hA_{c}" for c in ASSUMED) + " ") if EXT else ""
+
+
+def callee_meets(info, callee, a):
+    """The term that says a callee meets its contract in this function's program."""
+    if info["theorem"] is None:                              # assumed: this theorem's own hypothesis
+        return f"(hA_{callee} {a})"
+    theirs = odec.assumed_of(clauses, callee)
+    if theirs:                                               # proved over any program: over this one
+        hyps = " ".join(f"(fun {' '.join(f'x{i}' for i in range(odec.own[c]['arity']))} => Abi.Meets.mono (Code_{name}.over_{info['code']} ext) "
+                        f"(hA_{c} {' '.join(f'x{i}' for i in range(odec.own[c]['arity']))}))" for c in theirs)
+        return f"(Abi.Meets.mono (Code_{name}.has_{info['code']} ext) ({info['theorem']} {PROG} {hyps} {a}))"
+    return f"(Abi.Meets.mono (Code_{name}.has_{info['code']}{E_}) ({info['theorem']} {a}))"
 # below the frame: where a callee's return address goes, and under it the most stack a callee's contract may use
 C0 = (8 + max([odec.own[c["callee"]]["budget"] for c in own_calls] or [0])) if has_call(body) else 0
 F = C0 + frame + 8 * len(saved)          # bytes the function owns below the stack pointer it is entered with
@@ -369,7 +396,7 @@ ex = "".join(f"({g} : {t}) " for g, t in loop_ghosts)
 inv_inner = " ∧\n    ".join([c for c, _ in inv_frozen] + inv_clauses)
 
 L = ["import Cells", "import Kernels", "import AbiProof"] + (["import AbiCall"] if own_calls else []) + [f"import Spec_{CNAME.split('.')[0].lower()}"] + [f"import {u}" for u in uses] + \
-    [f"import {odec.own[c]['theorem'].rsplit('.', 1)[0]}" for c in dict.fromkeys(x["callee"] for x in own_calls)] + [f"import Code_{name}", "open X86 Cells", "",
+    [f"import {odec.own[c]['theorem'].rsplit('.', 1)[0]}" for c in dict.fromkeys(x["callee"] for x in own_calls) if odec.own[c]["theorem"]] + [f"import Code_{name}", "open X86 Cells", "",
      f"/-! # `{name}`, as assembled, meets `{CNAME}`", "",
      f"Written by prove_fn.py from {src.split('/')[-1]} and the compiler's layout; not edited by hand, and not to be read",
      f"but for its last theorem's statement: Lean checks the rest. The frame: {F} bytes below the stack pointer at entry",
@@ -448,7 +475,8 @@ def own_call(i, sym, target, args, ra, oc, ind, prev, has_out, env):
     tactics and the indentation the run goes on at."""
     callee, info = OWN[sym]
     assert callee == oc["callee"] and target == info["at"], (callee, oc, hex(target))
-    a = " ".join(args + oc["with"])
+    # what the contract is stated for besides the arguments: Lean terms; a buffer's name alone is its address
+    a = " ".join(args + [env[w] if w in bufat and w in env else w for w in oc["with"]])
     CK, OPENK = f"{info['contract']} {a}", f"{info['contract']}, {LISTS}"
     st = "⟨" + ", ".join(f"{r}_{i}" for r in REGS) + f", zf_{i}, cf_{i}, " + ", ".join(f"y{i}_{j}" for j in range(16)) + f", mem{i}, pc_{i}⟩"
     hs = f"hpc{i} hsp{i} hbx{i} hbp{i} h12_{i} h13_{i} h14_{i} h15_{i} hens{i} hout{i} hown{i}"
@@ -459,7 +487,7 @@ def own_call(i, sym, target, args, ra, oc, ind, prev, has_out, env):
         # facts the call needs, from a lemma named at it: its hypotheses found, its conclusion's parts at hand
         t += [f"{ind}have_by hN{i}_{j} := {lemma} (m := {prev})", f"{ind}try norm_addr at hN{i}_{j}", f"{ind}split_ands hN{i}_{j}"]
     t += [f"{ind}refine Abi.call_meets (c := {CK}) (ra := {ra}#64)",
-         f"{ind}  (Abi.Meets.mono Code_{name}.has_{info['code']} ({info['theorem']} {a})) rfl rfl ?_ ?_ ?_ ?_ ?_ ?_",
+         f"{ind}  {callee_meets(info, callee, a)} rfl rfl ?_ ?_ ?_ ?_ ?_ ?_",
          f"{ind}· dsimp only; mem_fact",
          f"{ind}· dsimp only [{info['contract']}]; mem_subregion",
          f"{ind}· dsimp only",
@@ -525,7 +553,7 @@ def run_piece(events, start, stop, extra, ind, prev="mem", has_out=True, own_at=
             else:
                 callee = sym_extern[sym]; assert callee in callees, f"no contract for {callee} (callee ... meets ...)"
                 lemma, nh = callees[callee]
-                t += [f"{ind}refine {lemma} Code_{name}.has_kernels {' '.join(['(by mem_auto)'] * nh)} ?_", f"{ind}{INTROS}"]
+                t += [f"{ind}refine {lemma} {'(' if EXT else ''}Code_{name}.has_kernels{E_}{')' if EXT else ''} {' '.join(['(by mem_auto)'] * nh)} ?_", f"{ind}{INTROS}"]
     return t, ind
 
 
@@ -616,16 +644,16 @@ if STRAIGHT:
         return lines + finish(ind2, any(e[0] == "call" and e[1] in OWN for e in ev))
 
     ALL = f"({' '.join(params)} : BitVec 64) " + " ".join(f"({g} : {t})" for g, t in fn_ghosts)
-    L += [f"theorem whole {ARGDECL}",
-          f"    (s : State) (hP : {PRE} s) : ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ {POST} s' := by"] + ENTER + \
+    L += [f"theorem whole {XDECL}{ARGDECL}",
+          f"    (s : State) (hP : {PRE} s) : ∃ n_ s', steps {PROG} n_ s = some s' ∧ {POST} s' := by"] + ENTER + \
          tree(wp, set(), leaf, "  ") + ["",
           f"/-- **`{name}`, as assembled, meets its contract, whatever its arguments.** -/",
-          f"theorem {name}_meets : ∀ {ALL},",
-          f"    Abi.Meets Code_{name}.prog 0x{ENTRY:X} ({CNAME} {CARGS}) := by",
+          f"theorem {name}_meets {XDECL}: ∀ {ALL},",
+          f"    Abi.Meets {PROG} 0x{ENTRY:X} ({CNAME} {CARGS}) := by",
           f"  intro {CARGS}",
           f"  refine Abi.meets_of_triple {F}#64 (by dsimp only [{CNAME}]; decide) (by dsimp only [{CNAME}]; decide) (fun fb ra sv m0 => ?_)",
           "  intro s hP",
-          f"  exact whole {ARGUSE} s hP", "",
+          f"  exact whole {XUSE}{ARGUSE} s hP", "",
           f"#print axioms {name}_meets", "", f"end Proof_{name}", ""]
     with open(out_path, "w") as f:
         f.write("\n".join(L))
@@ -636,8 +664,8 @@ if STRAIGHT:
 # ---------------------------------------------------------------- enter
 ep = paths(before, dict(base_env))
 assert len(ep) == 1 and not any(e[0] == "call" for e in ep[0][0]), "a condition or a call before the loop: not yet"
-L += [f"theorem enter {ARGDECL}",
-      f"    (s : State) (hP : {PRE} s) : ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ Inv {ARGUSE} s' := by",
+L += [f"theorem enter {XDECL}{ARGDECL}",
+      f"    (s : State) (hP : {PRE} s) : ∃ n_ s', steps {PROG} n_ s = some s' ∧ Inv {ARGUSE} s' := by",
       f"  obtain {STATE(REGS)} := s",
       "  obtain ⟨hpc, hsp, hargs, hbx, hbp, h12, h13, h14, h15, hmem, hF, hRa, hAp, hAcc, hReq⟩ := hP",
       f"  simp only [{OPEN_C}] at hpc hsp hargs hbx hbp h12 h13 h14 h15 hmem hF hRa",
@@ -685,9 +713,9 @@ def turn_leaf(ev, ind):
     return pre + lines + prove_inv(ind2, True, True)
 
 
-L += [f"theorem turn {ARGDECL}",
+L += [f"theorem turn {XDECL}{ARGDECL}",
       f"    (s : State) (hI : Inv {ARGUSE} s) (hc : {cond_prop(wcond, env_s)}) :",
-      f"    ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ (Inv {ARGUSE} s' ∧ {measure_next} < {measure_s}) := by"] + open_head + turn_open + \
+      f"    ∃ n_ s', steps {PROG} n_ s = some s' ∧ (Inv {ARGUSE} s' ∧ {measure_next} < {measure_s}) := by"] + open_head + turn_open + \
      tree(tp, set(), turn_leaf, "  ") + [""]
 
 # ---------------------------------------------------------------- leave
@@ -699,9 +727,9 @@ def leave_leaf(ev, ind):
                     f"{ind2}all_goals try dsimp only"] + outside_goal(ind2, True) + [f"{ind2}· simp only [{OPEN_C}]", f"{ind2}  apply {LEAVE} <;> mem_auto"]
 
 
-L += [f"theorem leave {ARGDECL}",
+L += [f"theorem leave {XDECL}{ARGDECL}",
       f"    (s : State) (hI : Inv {ARGUSE} s) (hc : ¬ {cond_prop(wcond, env_s)}) :",
-      f"    ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ {POST} s' := by"] + open_head + \
+      f"    ∃ n_ s', steps {PROG} n_ s = some s' ∧ {POST} s' := by"] + open_head + \
      [x for i, (lemma, names) in enumerate(leave_opens) for x in open_with(lemma, names, "mem", i, "  ")]
 if len(lp) == 1 and not any(e[0] == "call" for e in lp[0][0]):
     L += leave_leaf(lp[0][0], "  ") + [""]
@@ -712,16 +740,16 @@ else:
 # ---------------------------------------------------------------- the theorem
 ALL = f"({' '.join(params)} : BitVec 64) " + " ".join(f"({g} : {t})" for g, t in fn_ghosts)
 L += [f"/-- **`{name}`, as assembled, meets its contract, whatever its arguments.** -/",
-      f"theorem {name}_meets : ∀ {ALL},",
-      f"    Abi.Meets Code_{name}.prog 0x{ENTRY:X} ({CNAME} {CARGS}) := by",
+      f"theorem {name}_meets {XDECL}: ∀ {ALL},",
+      f"    Abi.Meets {PROG} 0x{ENTRY:X} ({CNAME} {CARGS}) := by",
       f"  intro {CARGS}",
       f"  refine Abi.meets_of_triple {F}#64 (by dsimp only [{CNAME}]; decide) (by dsimp only [{CNAME}]; decide) (fun fb ra sv m0 => ?_)",
       f"  refine Hoare.seq (Q := Inv {ARGUSE}) ?_ ?_",
-      f"  · intro s hP", f"    exact enter {ARGUSE} s hP",
+      f"  · intro s hP", f"    exact enter {XUSE}{ARGUSE} s hP",
       f"  · refine Hoare.loop (fun s => {measure_s}) (fun s hI => ?_)",
       f"    by_cases hc : {cond_prop(wcond, env_s)}",
-      f"    · obtain ⟨n_, s', h, hi, hm⟩ := turn {ARGUSE} s hI hc", "      exact ⟨n_, s', h, Or.inl ⟨hi, hm⟩⟩",
-      f"    · obtain ⟨n_, s', h, hq⟩ := leave {ARGUSE} s hI hc", "      exact ⟨n_, s', h, Or.inr hq⟩", "",
+      f"    · obtain ⟨n_, s', h, hi, hm⟩ := turn {XUSE}{ARGUSE} s hI hc", "      exact ⟨n_, s', h, Or.inl ⟨hi, hm⟩⟩",
+      f"    · obtain ⟨n_, s', h, hq⟩ := leave {XUSE}{ARGUSE} s hI hc", "      exact ⟨n_, s', h, Or.inr hq⟩", "",
       f"#print axioms {name}_meets", "", f"end Proof_{name}", ""]
 with open(out_path, "w") as f:
     f.write("\n".join(L))

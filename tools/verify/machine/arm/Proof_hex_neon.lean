@@ -6,7 +6,7 @@ open Arm64 ProofLib
 
 /-! # `hex_neon` meets its contract, on Google DeepMind's AArch64 model
 
-Written by `gen_arm.py` from the source's contract clauses and the assembled kernel's 32 words. To be
+Written by `gen_arm.py` from the source's contract clauses and the assembled kernel's 27 words. To be
 read: `hex_neon_spec` and the theorem's statement. `hex_neon_ok`: in any program holding these words at the
 symbol, their `subroutineOk`: a call returns to its caller, the stack pointer and callee-saved registers
 as they were, memory as the contract says and otherwise as it was. Their tactics run the instructions;
@@ -44,9 +44,9 @@ abbrev hex_neon_spec : Spec hex_neon_args where
 
 def hex_neon_code : FnCode :=
   .ofFn "b3l_hex_neon"
-    "ad400420 4f00e5e4 4f00e525 4f01e4e6 4f01e607 6f0c0402 4e241c00 6f0c0423 4e241c21 4e003850 4e007851 4e013872 4e017873 6e253600 6e253621 6e253642 6e253663 4e261c00 4e261c21 4e261c42 4e261c63 4e278610 4e278631 4e278652 4e278673 4e208610 4e218631 4e228652 4e238673 ad004410 ad014c12 d65f03c0"
+    "ad400420 d2862609 f2a66649 f2c6a689 f2e6e6c9 d287270a f2ac4c2a f2cc8c6a f2ecccaa 4e081d25 4e181d45 4f00e5e4 6f0c0402 4e241c00 6f0c0423 4e241c21 4e003850 4e007851 4e013872 4e017873 4e1000b0 4e1100b1 4e1200b2 4e1300b3 ad004410 ad014c12 d65f03c0"
 
-set_option maxHeartbeats 4000000 in
+set_option maxHeartbeats 40000000 in
 theorem hex_neon_ok (prog : Program) (h_code : hex_neon_code.holds prog) :
     prog.subroutineOk "b3l_hex_neon" hex_neon_spec := by
   wp_init x s0
@@ -62,9 +62,10 @@ theorem hex_neon_ok (prog : Program) (h_code : hex_neon_code.holds prog) :
   case values =>
     repeat' (first | with_reducible rfl | apply sepConj_congr | apply pointsTo64_congr_val)
     all_goals (
-      simp only [forIn_range8_yield, bind_pure, Id.run_pure, Nat.reduceMul, Nat.reduceAdd, kernel_spec]
       generalize x.h0 = h0
       generalize x.h1 = h1
+      simp only [forIn_range8_yield, forIn_range16_yield, bind_pure, Id.run_pure, Nat.reduceMul, Nat.reduceAdd,
+        tbl_lt, tbl_reg, tbl_shift, kernel_spec]
       bv_decide)
   case rest =>
     wp_done

@@ -249,7 +249,7 @@ one kernel, their repository unchanged; `../arm/`.) What we learned by doing it:
 - **Their trusted part is enough to state our contracts**: a decoder from the 32-bit words, `execInst`,
   `Step`, and `subroutine_ok` (total correctness with a frame; the stack pointer and callee-saved
   registers kept). Our contract in bytes (`Hex.text`) is a `Spec` of theirs, 6 lines.
-- **Their proof library does the stepping** (`wp_init`, `wp_steps`: 32 NEON instructions in seconds) and
+- **Their proof library does the stepping** (`wp_init`, `wp_steps`: the kernel's NEON instructions in seconds) and
   leaves us the arithmetic: eight equalities of 64-bit values, which `bv_decide` closes. Their
   `wp_done` does not hand back what it cannot close; `SepWP.of_eq` (three lines, ours) replaces the
   spatial context by the specification's and leaves the value goals. The compiler's Arm generator
@@ -360,7 +360,7 @@ specification's `IV` at `key`, the 32 bytes at `out` become `Blake3.hashBytes` o
 `Blake3.hash`), and the message and the key are unchanged.
 
 **Since November 13 a hash is proved against it: `hashl`** (`../levels/levels.ode`; the section after this
-one). `hashl_meets_bytes` (`Meets_hashl_bytes.lean`): for any message shorter than 2^64 - 1024 bytes the
+one). `hashl_meets_bytes` (`Meets_hashl_bytes.lean`): for any message the
 assembled code meets `Hash.byteContract`. It is the slow hash, one block at a time; what follows is about
 `hash`, the fast one, which calls the many-input kernels.
 
@@ -418,7 +418,9 @@ Warts met on the way, each to remove:
 - The generator does not follow a frame set on a boundary (`align`): `hashl`'s levels are not aligned.
 - Every call lists by hand what still holds after it (`keep`), four lines a call in `hashl`: what the
   callee's contract does not let it touch should be kept without being said.
-- The levels hold fewer than 2^54 chunks, so the theorem stops 1024 bytes short of 2^64.
+- (Settled November 13: the theorem stopped 1024 bytes short of BLAKE3's 2^64 - 1, because the levels'
+  predicate said "fewer than 2^54 chunks". The 54 levels hold 2^54: they receive every chunk but the newest.
+  The predicate now says "at most"; the code and its generated proofs did not change by a character.)
 - A side condition's solver had ten seconds, and a proof accepted alone was refused in a run of everything
   at once: the memory tactics now give it 120 (`bv_side`). A proof that passes or fails with the machine's
   load is a fault of the proof system, and this is a patch, not its removal.
@@ -436,6 +438,43 @@ expression, a byte load's value in a read-only loop, a saved register at offset 
 `a >= MOD` costs a jump that `a > MOD - 1` does not (the compiler's lowering of `>=`: to fix, the coder
 should not have to know); wrong versions that only time out get no verdict (examples would refute them in
 seconds: the audits ask them first now).
+
+## The fast path: wide kernels behind contracts (begun November 13)
+
+`hashl` is proved and slow: one block at a time. The library is fast because its wide kernels hash 32
+chunks, or 16 parents, in one call. Those kernels use registers and instructions this machine model does not
+have, and the library proves them with another system (Z3). The way to a fast hash that is still under a
+Lean theorem, in steps:
+
+- **A kernel the model does not hold is called by a contract its caller assumes**
+  (`callee NAME at ADDRESS assumes CONTRACT (N) budget BYTES` in the source). The contract is written in
+  Lean like any other (`Spec_p16.lean`), for the kernel as our callers use it. The theorem of a function
+  that calls it is then about that function's instructions **over any program** in which the address meets
+  the contract: `NAME_meets (ext) (hA : ∀ ..., Abi.Meets (Code_NAME.prog ext) ADDRESS (CONTRACT ...)) : ...`.
+  The assumption is a hypothesis of the theorem, in the reader's sight, and not a line of the model. A
+  function that calls such a function carries the hypothesis on.
+- **An assumed contract must be shown able to be met, and is tried:** a function of ours stands in for the
+  kernel when examples run (`standin NAME`: the same contract, slowly, through the one-block kernel; `p16s`).
+  It is tried on the contract's examples today; proved, it is the witness that the contract can be met and
+  gives the callers' theorems for a program wholly inside the model.
+- **What joins the kernel's own proof to the contract is not yet a Lean theorem.** Z3's statement about
+  the kernel and `P16.contract` are two texts. To close: the kernels proved in a Lean model with their
+  registers (the 512-bit state `wide/` has for three instructions), then one model.
+- **The tree's part is proved apart from any machine** (`../alg/Groups.lean`): with the chunks in groups of
+  `2^b`, the last of 1 to `2^b`, the specification's tree over the chunks is its tree over the groups' own
+  trees (`tree_groups`). So 32 chunks' value can be made first and added to levels of such values with the
+  functions already proved (`ladd`, `lroot`), and a second set of levels holds the last, short group.
+
+Measured before proving (unproved Ode, single runs, GB/s at 1 MiB and 16 MiB; `../levels/README.md`): 32
+chunks by the 32-lane kernel and their values added one at a time is slow (EPYC 9255: 7.6 where the library's
+own hash does 14); the 32 values made one by five calls of the 16-lane parent kernel, 12.1 (the library 13.8
+to 14.2; Ryzen 9700X 15.1 for 17.1). Below 64 KiB the library is ahead by a quarter to a third: it has
+kernels for short inputs that this path does not call yet.
+
+Proved so far: `fillp` (the table of addresses a wide kernel is given) and `tree32` (32 values to one, over
+any program where the parent kernel meets `P16.contract`). To come: the 32-lane chunk kernel's contract, the
+hash's wide loop on two sets of levels, `lroot` with the root flag as a parameter (the last group's value is
+not a root), the witnesses.
 
 ## Two designs of one thing, side by side: the stack and the levels (Sam, November 12)
 
@@ -635,7 +674,7 @@ What the table says:
   `Merge.contract` itself, which `add`'s reader never reads (only `Merge.result`, which `Add.contract`
   names). `Push.contract` is not on the list at all. An internal contract is read by maintainers.
 - **Instructions are most of what is specific to a function**, and they are the lifter's reading of the
-  object, not checked by Lean on x86-64. On AArch64 they are 32 words in one line: Google's decoder is
+  object, not checked by Lean on x86-64. On AArch64 they are 27 words in one line: Google's decoder is
   in the model. That is the case for a decoder of our own, or for their kind of model, on x86-64.
 - **Google's model is twelve times ours to read, and it is not ours alone**: the same 6,106 lines stand
   under their Signal verification. Ours (417 lines) stands under nothing but this library. A reader who

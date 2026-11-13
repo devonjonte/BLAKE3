@@ -449,8 +449,12 @@ kernel hex {
   ret
 }
 
-// The same on AArch64 (NEON): the 32 bytes at X1, their 64 hexadecimal characters at X0. No table, no
-// branch, no constant from memory. V0-V7 and V16-V19 only (all caller-saved); no stack.
+// The same on AArch64 (NEON): the 32 bytes at X1, their 64 hexadecimal characters at X0. Each byte is split
+// in its two halves and each half's character is looked up (`tbl`) in a register that holds the sixteen
+// characters. That register is made from immediates through X9 and X10: there is no table in memory, no
+// constant loaded, no branch. V0-V5 and V16-V19, X9 and X10 only (all caller-saved); no stack.
+// (Before November 13 the characters were made by arithmetic, 32 instructions: a call took 9.8 ns on a
+// Neoverse where this takes 7.9; on an Apple M6 the two are within 0.1 ns.)
 contract hex_neon {
   spec   HexVec
   reads  x1: h0, h1
@@ -462,46 +466,33 @@ kernel hex_neon on aarch64 {
     ushr    $hi.16b, $x.16b, #4
     and     $x.16b, $x.16b, v4.16b
   }
-  // The numbers in $x become their characters: '0' more, and 39 more where above 9. $t is scratch.
-  def above(x, t) {
-    cmhi    $t.16b, $x.16b, v5.16b
-  }
-  def letters(t) {
-    and     $t.16b, $t.16b, v6.16b
-  }
-  def digits(x) {
-    add     $x.16b, $x.16b, v7.16b
-  }
-  def chars(x, t) {
-    add     $x.16b, $x.16b, $t.16b
+  // The numbers in $x (0 to 15) become their characters.
+  def chars(x) {
+    tbl     $x.16b, {v5.16b}, $x.16b
   }
   ldp     q0, q1, [x1]
+  // "01234567" and "89abcdef", the first character lowest
+  movz    x9, #0x3130
+  movk    x9, #0x3332, lsl #16
+  movk    x9, #0x3534, lsl #32
+  movk    x9, #0x3736, lsl #48
+  movz    x10, #0x3938
+  movk    x10, #0x6261, lsl #16
+  movk    x10, #0x6463, lsl #32
+  movk    x10, #0x6665, lsl #48
+  mov     v5.d[0], x9
+  mov     v5.d[1], x10
   movi    v4.16b, #0x0f
-  movi    v5.16b, #9
-  movi    v6.16b, #39
-  movi    v7.16b, #0x30
   split(v0, v2)
   split(v1, v3)
   zip1    v16.16b, v2.16b, v0.16b
   zip2    v17.16b, v2.16b, v0.16b
   zip1    v18.16b, v3.16b, v1.16b
   zip2    v19.16b, v3.16b, v1.16b
-  above(v16, v0)
-  above(v17, v1)
-  above(v18, v2)
-  above(v19, v3)
-  letters(v0)
-  letters(v1)
-  letters(v2)
-  letters(v3)
-  digits(v16)
-  digits(v17)
-  digits(v18)
-  digits(v19)
-  chars(v16, v0)
-  chars(v17, v1)
-  chars(v18, v2)
-  chars(v19, v3)
+  chars(v16)
+  chars(v17)
+  chars(v18)
+  chars(v19)
   stp     q16, q17, [x0]
   stp     q18, q19, [x0, #32]
   ret

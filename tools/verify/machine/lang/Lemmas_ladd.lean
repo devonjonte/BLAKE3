@@ -195,10 +195,11 @@ theorem Mid.frame {m m' : Mem} {lv src x flags : BitVec 64} {chunks : Array Blak
   · subst hsrc; rcases hpl with h | h <;> (rw [h] at hy; bv_omega)
 
 /-- **At entry:** the levels at rest are the loop's head at the bottom level. -/
-theorem At.start {m : Mem} {lv flags : BitVec 64} {chunks : Array Blake3.Node} (h : At k ⟨flags.setWidth 32⟩ m lv chunks) :
+theorem At.start {m : Mem} {lv flags : BitVec 64} {chunks : Array Blake3.Node} (h : At k ⟨flags.setWidth 32⟩ m lv chunks)
+    (hn : chunks.size < 2 ^ 54) :
     Mid m lv k flags chunks (lv + 64#64) (count chunks ||| (count chunks - 1#64) >>> 63) ∧
       Quad m lv (count chunks) ∧ Region m lv 3520#64 := by
-  obtain ⟨hn, hR, hq, hrest⟩ := h
+  obtain ⟨_, hR, hq, hrest⟩ := h
   refine ⟨⟨hn, hR, hq, 0, chunks.size - 1, by omega, by simp, ?_, ?_, fun h0 => ⟨rfl, by omega⟩, fun hp => ?_⟩, hq, hR⟩
   · -- the count, or 1 where there is none
     by_cases h0 : chunks.size = 0
@@ -323,7 +324,7 @@ open Levels in
 /-- **When the loop ends:** the level the loop stopped at keeps its value, the new chunk's value goes to the
 bottom's next place and the count is one more: the levels over the chunks and the new one. -/
 theorem Ladd.exit {m m' : Mem} {lv src x flags : BitVec 64} {k : Blake3.CV} {chunks : Array Blake3.Node} {new : Blake3.Node} {t0 t1 : V}
-    (h : Levels.Mid m lv k flags chunks src x) (hc : ¬ x &&& 1#64 = 0#64) (hn : chunks.size + 1 < 2 ^ 54)
+    (h : Levels.Mid m lv k flags chunks src x) (hc : ¬ x &&& 1#64 = 0#64) (hn : chunks.size < 2 ^ 54)
     (hw : words8 t0 t1 = new.cv)
     (hp0 : Vec m' (lv + 64#64 + (Levels.count chunks &&& 1#64) <<< 5) t0)
     (hp1 : Vec m' (lv + 64#64 + (Levels.count chunks &&& 1#64) <<< 5 + 16#64) t1)
@@ -341,7 +342,7 @@ theorem Ladd.exit {m m' : Mem} {lv src x flags : BitVec 64} {k : Blake3.CV} {chu
     rcases Nat.mod_two_eq_zero_or_one chunks.size with h | h
     · exact Or.inl (place_even h)
     · exact Or.inr (place_odd h)
-  refine ⟨by rw [hcount, BitVec.toNat_ofNat]; omega, by rw [Array.size_push]; exact hn, hR, by rw [Array.size_push, ← hcount]; exact hq, fun _ => ?_⟩
+  refine ⟨by rw [hcount, BitVec.toNat_ofNat]; omega, by rw [Array.size_push]; omega, hR, by rw [Array.size_push, ← hcount]; exact hq, fun _ => ?_⟩
   rw [Array.size_push, Nat.add_sub_cancel]
   refine ⟨?_, ⟨t0, t1, hp0, hp1, by rw [hw, sub_new]⟩⟩
   rcases Nat.eq_zero_or_pos chunks.size with hz | hp

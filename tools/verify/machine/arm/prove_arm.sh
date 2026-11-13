@@ -35,7 +35,10 @@ else
   fail "Lean does not accept the proofs"
 fi
 grep -q "(320, 320)" build.log || fail "the 320 hashes did not all give the hexadecimal"
-grep -q "(some 36, true)" build.log || fail "the observer did not see 36 things, the same on two hashes"
+# what the observer sees: every instruction's address, and of this kernel one read (ldp), two writes (stp) and
+# where ret goes
+seen=$(( $(wc -w < "$name.words") + 4 ))
+grep -q "(some $seen, true)" build.log || fail "the observer did not see $seen things, the same on two hashes"
 grep -q "'hex_neon_meets' depends on axioms" build.log || fail "hex_neon_meets (the contract that names no machine) was not checked"
 [ "${MUTANTS:-1}" = 0 ] || python3 mutants_quiet.py "$name" || fail "the audit accepted a change"
 echo "the compiler's proof of $name on Google's AArch64 model: checked"

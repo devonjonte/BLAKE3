@@ -14,7 +14,7 @@ kernel and changes nothing else. -/
 def Ladd.contract (lv key flags plat cv : BitVec 64) (k : Blake3.CV) (chunks : Array Blake3.Node) (new : Blake3.Node) : Abi.Contract where
   args := [lv, key, flags, plat, cv]
   stack := 256#64
-  accepts := chunks.size + 1 < 2 ^ 54 ∧ flags < 256#64
+  accepts := chunks.size < 2 ^ 54 ∧ flags < 256#64
   reads := [Cv.layout.keeps key k, Cv.layout.keeps cv new.cv]
   updates := [(Levels.layout k ⟨flags.setWidth 32⟩).turns lv chunks (chunks.push new)]
   returns := fun result => result.toNat = chunks.size + 1

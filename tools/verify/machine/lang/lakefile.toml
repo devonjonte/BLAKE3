@@ -206,6 +206,44 @@ name = "Proof_hashl"
 [[lean_lib]]
 name = "Meets_hashl_bytes"
 [[lean_lib]]
+name = "Spec_ptrs"
+[[lean_lib]]
+name = "Spec_fillp"
+[[lean_lib]]
+name = "Lemmas_fillp"
+[[lean_lib]]
+name = "Sample_ptrs"
+[[lean_lib]]
+name = "Example_fillp"
+[[lean_lib]]
+name = "Code_fillp"
+[[lean_lib]]
+name = "Proof_fillp"
+[[lean_lib]]
+name = "Spec_cvl"
+[[lean_lib]]
+name = "Lemmas_cvl"
+[[lean_lib]]
+name = "Spec_p16"
+[[lean_lib]]
+name = "Spec_tree32"
+[[lean_lib]]
+name = "Lemmas_tree32"
+[[lean_lib]]
+name = "Sample_cvl"
+[[lean_lib]]
+name = "Example_p16"
+[[lean_lib]]
+name = "Code_p16s"
+[[lean_lib]]
+name = "Example_tree32"
+[[lean_lib]]
+name = "Code_tree32"
+[[lean_lib]]
+name = "Proof_tree32"
+[[lean_lib]]
+name = "Checked_tree32"
+[[lean_lib]]
 name = "Spec_adler32"
 srcDir = "../experiments/adler32"
 [[lean_lib]]

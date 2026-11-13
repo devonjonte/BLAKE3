@@ -31,7 +31,7 @@ def Levels.sample (k : Blake3.CV) (mode : Blake3.Word) : Try.Sample (Array Blake
     (Levels.held chunks.size).foldl (fun m (level, place, start, size) =>
       Try.fill m (Levels.slot lv level place) (Cv.bytes (Blake3.sub k mode chunks start size)).toArray) m
   check := fun m lv chunks =>
-    decide (chunks.size < 2 ^ 54) && (Try.bytes? m lv 3520).isSome &&
+    decide (chunks.size ≤ 2 ^ 54) && (Try.bytes? m lv 3520).isSome &&
     Try.bytes? m lv 8 == some (Try.le64 (BitVec.ofNat 64 chunks.size)) &&
     (Levels.held chunks.size).all fun (level, place, start, size) =>
       Try.bytes? m (Levels.slot lv level place) 32 == some (Cv.bytes (Blake3.sub k mode chunks start size))

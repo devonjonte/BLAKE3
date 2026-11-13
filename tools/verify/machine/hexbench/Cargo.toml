@@ -7,7 +7,8 @@ publish = false
 # The library at the commit to compare with, checked out beside this repository as `crate`
 # (a pinned-run job does that; see hex-speed.sh in the study).
 [dependencies]
-blake3 = { package = "blake3-servil", path = "../../../../../crate" }
+# (the core crate, at the repository's root since 0.9)
+blake3 = { package = "blake3-servil-core", path = "../../../../../crate" }
 
 [build-dependencies]
 cc = "1"

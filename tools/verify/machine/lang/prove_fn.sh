@@ -31,8 +31,8 @@ elif grep -q "error" "$name.checks"; then echo "$name: what its contract accepts
 if cc -target x86_64-unknown-linux-gnu -c -o "$name.o" "$name.S" 2>/dev/null; then :; else cc -c -o "$name.o" "$name.S"; fi
 "$OBJDUMP" -d -r --x86-asm-syntax=intel "$name.o" > "$name.listing"
 # the kernels are where one/KCode.lean has them; a function of this file that is called is where its `callee` line says
-owncalls=$(python3 -c "import odec,sys; c=odec.contracts_of(open(sys.argv[-1]).read())[0][sys.argv[1]].get('calls',[]); print(' '.join('--call b3l_%s=%s' % (n, hex(odec.own[n]['at'])) for n in dict.fromkeys(x['callee'] for x in c)))" "$name" "$source")
-withs=$(python3 -c "import odec,sys,os; c=odec.contracts_of(open(sys.argv[-1]).read())[0][sys.argv[1]].get('calls',[]); ns=list(dict.fromkeys(odec.own[x['callee']]['code'] for x in c)); ns.sort(key=lambda n: 'import KCode' not in open('Code_%s.lean' % n).read()); print(' '.join('--with %s%s' % (n, '+k' if 'import KCode' in open('Code_%s.lean' % n).read() else '') for n in ns))" "$name" "$source")
+owncalls=$(python3 fn_args.py lift "$source" "$name")
+withs=$(python3 fn_args.py code "$source" "$name")
 python3 ../one/lift_one.py "$name.listing" "b3l_$name" "$base" "Lifted_$name.lean" "Lifted_$name" \
   --call blake3_servil_compress_in_place_avx512=0x30000 --call blake3_servil_compress_in_place_sse41=0x20000 $owncalls
 targets="Proof_$name"
@@ -50,9 +50,12 @@ fi
 # and none may be refuted; a refutation says whether the source or the compiler's code is at fault.
 examples=$(echo "$spec" | sed 's/^Spec_/Example_/')       # the contract's examples: every function that meets it is tried on them
 if [ -f "$examples.lean" ]; then
-  lake build "Code_$name" "$examples" Checks TrySem "$odemod" > "$name.try.build.log" 2>&1 || { grep -E "error" "$name.try.build.log" | head -n 5; echo "the examples of $name do not build"; exit 1; }
+  lake build "Code_$name" $(python3 fn_args.py standins "$source" "$name") "$examples" Checks TrySem "$odemod" > "$name.try.build.log" 2>&1 || { grep -E "error" "$name.try.build.log" | head -n 5; echo "the examples of $name do not build"; exit 1; }
   python3 try_fn.py "$source" "$name" "Lifted_$name.lean.rows" || { echo "the compiler's proof of $name: NOT checked (the examples above)"; exit 1; }
 fi
+# PROVE=0: a function that is tried on its contract's examples and not proved (one that stands in, when
+# examples run, for a kernel this model does not hold)
+if [ "${PROVE:-1}" = 0 ]; then echo "$name: tried on the examples of $contract; not proved"; exit 0; fi
 # every contract comes with a theorem that it can be used (Usable.lean): a contract that asks the impossible is met by any code
 ns=$(echo "$contract" | sed 's/\..*//')
 grep -q "^theorem $ns.usable : ($contract " Usable.lean || { echo "$contract has no theorem that it can be used ($ns.usable in Usable.lean)"; echo "the compiler's proof of $name: NOT checked"; exit 1; }

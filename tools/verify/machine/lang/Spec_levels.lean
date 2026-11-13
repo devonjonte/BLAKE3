@@ -29,10 +29,10 @@ def place (r : Nat) : BitVec 64 := if r % 2 = 1 then 32#64 else 0#64
 
 /-- **Memory holds, at `lv`, the levels of the tree over `chunks`** (under a key and a mode): 3520 bytes
 the program may use; the count of chunks in the first eight; the levels from byte 64, 64 bytes each, 54
-of them; fewer than 2^54 chunks. With a chunk or more: the levels have received all the chunks but the
+of them; at most 2^54 chunks (what a message of 2^64 - 1 bytes has). With a chunk or more: the levels have received all the chunks but the
 newest, and the newest chunk's value is in the bottom level's next place. -/
 def At (k : Blake3.CV) (mode : Blake3.Word) (m : Mem) (lv : BitVec 64) (chunks : Array Blake3.Node) : Prop :=
-  chunks.size < 2 ^ 54 ∧ Cells.Region m lv 3520#64 ∧ Quad m lv (BitVec.ofNat 64 chunks.size) ∧
+  chunks.size ≤ 2 ^ 54 ∧ Cells.Region m lv 3520#64 ∧ Quad m lv (BitVec.ofNat 64 chunks.size) ∧
   (0 < chunks.size →
     Lev k mode chunks m 54 (lv + 64#64) 1 (chunks.size - 1) ∧
     Cv.At m (lv + 64#64 + place (chunks.size - 1)) (Blake3.sub k mode chunks (chunks.size - 1) 1))
