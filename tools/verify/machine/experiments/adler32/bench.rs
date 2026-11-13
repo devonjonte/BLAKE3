@@ -35,6 +35,9 @@ mod probes {
         fn probe256(p: *const u8, n: usize) -> u32;
         fn probe256_one(p: *const u8, n: usize) -> u32;
         fn probe512_r32(p: *const u8, n: usize) -> u32;
+        fn probe512_align(p: *const u8, n: usize) -> u32;
+        fn probe4096(p: *const u8, n: usize) -> u32;
+        pub fn b3l_raw4096(p: *const u8) -> u64;
         fn adler32_x86_avx512_vl512_vnni(seed: u32, p: *const u8, n: usize) -> u32;
         static adler32_impl: unsafe extern "C" fn(u32, *const u8, usize) -> u32;
     }
@@ -49,6 +52,14 @@ mod probes {
     #[inline(never)]
     pub unsafe fn wide512_r32(p: *const u8, n: usize) -> u32 {
         probe512_r32(p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn aligned512(p: *const u8, n: usize) -> u32 {
+        probe512_align(p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn fixed4096(p: *const u8, n: usize) -> u32 {
+        probe4096(p, n)
     }
     #[inline(never)]
     pub unsafe fn isal(p: *const u8, n: usize) -> u32 {
@@ -80,6 +91,10 @@ const ENGINES: &[(&str, Engine)] = &[
     ("libdeflate512", probes::libdeflate512),
     #[cfg(feature = "probe")]
     ("probe512-r32", probes::wide512_r32),
+    #[cfg(feature = "probe")]
+    ("probe512-align", probes::aligned512),
+    #[cfg(feature = "probe")]
+    ("probe4096", probes::fixed4096),
     #[cfg(feature = "probe")]
     ("isa-l", probes::isal),
     #[cfg(feature = "probe")]
@@ -122,13 +137,15 @@ fn validate() {
     );
     let actual = unsafe { std::slice::from_raw_parts(b3l_adler32 as *const u8, EXPECTED_TEXT.len()) };
     assert_eq!(actual, EXPECTED_TEXT, "linked Ode function differs from the proved observed bytes");
+    #[cfg(feature = "probe")]
+    validate_blocks();
     for &(name, f) in ENGINES {
         for (input, want) in [(b"".as_slice(), 1), (b"a".as_slice(), 0x00620062), (b"Wikipedia".as_slice(), 0x11e60398), (b"123456789".as_slice(), 0x091e01de)]
         {
             assert_eq!(checksum(f, input), want, "{name}");
         }
         for n in [
-            0, 1, 2, 16, 31, 32, 63, 64, 127, 128, 255, 256, 257, 1024, 4096, 5551, 5552, 5553, 16383, 16384, 16385, 32768, 65520, 65521, 65522, 65536, 1048576,
+            0, 1, 2, 16, 31, 32, 63, 64, 127, 128, 255, 256, 257, 1024, 4095, 4096, 4097, 5551, 5552, 5553, 8191, 8192, 8193, 16383, 16384, 16385, 32768, 65520, 65521, 65522, 65535, 65536, 65537, 65600, 1048576,
         ] {
             for pattern in 0..4 {
                 for offset in [0, 1] {
@@ -158,6 +175,55 @@ fn validate() {
     guard_pages(ENGINES);
 }
 
+#[cfg(feature = "probe")]
+fn validate_blocks() {
+    // Independently fixed raw sums: all-zero, all-one, all-255, byte ramp.
+    // Ramp: sum=16*32640; weighted=34816*32640 - 16*5559680.
+    for (mut bytes, a, b) in [
+        (vec![0; 4096], 0u64, 0u64),
+        (vec![1; 4096], 4096, 8390656),
+        (vec![255; 4096], 1044480, 2139617280),
+        ((0..4096).map(|i| i as u8).collect::<Vec<_>>(), 522240, 1047439360),
+    ] {
+        let saved = bytes.clone();
+        assert_eq!(unsafe { probes::b3l_raw4096(bytes.as_mut_ptr()) }, (b << 32) | a, "raw fixed anchor");
+        assert_eq!(bytes, saved, "raw kernel preserves input");
+    }
+    for pattern in [1, 3] {
+        for n in [4095, 4096, 4097, 8191, 8192, 8193, 65535, 65536, 65537, 65600] {
+            let (bytes, start) = input(pattern, n, 0);
+            let bytes = &bytes[start..start + n];
+            let want = reference(bytes);
+            for offset in 0..64 {
+                let mut storage = vec![0; n + 127];
+                let start = (64 - storage.as_ptr() as usize % 64) % 64 + offset;
+                storage[start..start + n].copy_from_slice(bytes);
+                for name in ["probe512-align", "probe4096"] {
+                    assert_eq!(checksum(engine(name), &storage[start..start + n]), want, "{name}, block boundary {n}, alignment {offset}, pattern {pattern}");
+                }
+                if n == 4096 {
+                    // Direct weighted definition, independent of the striped prefix algorithm.
+                    let a: u64 = bytes.iter().map(|&v| u64::from(v)).sum();
+                    let b: u64 = bytes.iter().enumerate().map(|(i, &v)| (4096 - i) as u64 * u64::from(v)).sum();
+                    assert_eq!(unsafe { probes::b3l_raw4096(storage.as_ptr().add(start)) }, (b << 32) | a, "raw alignment {offset}, pattern {pattern}");
+                }
+            }
+        }
+    }
+    // Force canonical A=0 at the block boundary, then a seed-one tail with A=0.
+    // This exercises the modulo subtraction in the caller's append formula.
+    let mut bytes = vec![0; 4096 + 257];
+    bytes[..256].fill(255);
+    bytes[256] = 240;
+    bytes[4096..4096 + 256].fill(255);
+    bytes[4096 + 256] = 240;
+    for n in [4096, 4097, bytes.len()] {
+        for name in ["probe512-align", "probe4096"] {
+            assert_eq!(checksum(engine(name), &bytes[..n]), reference(&bytes[..n]), "{name}, zero-A boundary {n}");
+        }
+    }
+}
+
 fn guard_pages(engines: &[(&str, Engine)]) {
     unsafe extern "C" {
         fn mmap(p: *mut u8, n: usize, prot: i32, flags: i32, fd: i32, off: i64) -> *mut u8;
@@ -170,7 +236,7 @@ fn guard_pages(engines: &[(&str, Engine)]) {
     unsafe {
         let page = sysconf(30) as usize;
         assert!(page.is_power_of_two());
-        for n in (0..=257).chain([4095, 4096, 4097, 5551, 5552, 5553, 16383, 16384, 16385]) {
+        for n in (0..=257).chain([4095, 4096, 4097, 5551, 5552, 5553, 8191, 8192, 8193, 16383, 16384, 16385, 65535, 65536, 65537, 65600]) {
             let span = (n / page + 1) * page;
             let total = span + 2 * page;
             let map = mmap(std::ptr::null_mut(), total, 0, 0x22, -1, 0);
@@ -241,7 +307,7 @@ fn collect(name: &str, probe: bool) -> i32 {
     clocks::load::quiet_for(3).expect("collect needs a quiet measurement machine");
     println!("{FORMAT}\n# engine: {name}\n# workload: {}", if probe { "probe" } else { "full" });
     if name.starts_with("probe") {
-        println!("# engine proof: UNVERIFIED native C algorithm probe, not an Ode implementation");
+        println!("# engine proof: UNVERIFIED experimental implementation; no optimized machine theorem");
     }
     println!("# scope: warmed seed-one native calls; indirect adapter boundary; includes result consumption; buffers 64-byte aligned or offset by 1");
     #[cfg(feature = "probe")]

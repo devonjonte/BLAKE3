@@ -212,11 +212,13 @@ code/data cache misses and hardware latency models remain outside this exercise.
 
 ## Faster implementation experiment
 
-[The active plan](FAST.md) probes larger reduction intervals and fewer vector
-prefix accumulators, and adds ISA-L to the contender search. These native C
-probes require explicit `prepare_bench.py ... --skip-proof` and are marked
-UNVERIFIED. They select a design before extending Ode's wide-vector model.
-The original checksum's proof remains the project's verified result.
+[The active plan](FAST.md) probes reduction intervals, vector width, alignment
+and a fixed 4 KiB raw-sums kernel written in Ode. Native C probes and that
+source kernel with its C caller require explicit `prepare_bench.py ... --skip-proof`
+and remain UNVERIFIED. They select a design before extending the wide-vector
+model. Preparation checks generated kernel assembly; execution tests and checked
+block algebra each supply their own evidence. The original scalar checksum's
+machine theorem remains the project's verified whole-checksum result.
 
 ## Reuse in a larger codebase
 

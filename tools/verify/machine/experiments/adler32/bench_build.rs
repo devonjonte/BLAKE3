@@ -24,7 +24,7 @@ fn main() {
         // Experimental symbols bind to this executable's copied archive.
         println!("cargo:rustc-link-arg=-Wl,--exclude-libs,libdeflate-wide.a");
         let mut objects = Vec::new();
-        for (width, prefix, reduce32, name) in [(64, 0, 0, "probe512"), (64, 1, 0, "probe512_one"), (32, 0, 0, "probe256"), (32, 1, 0, "probe256_one"), (64, 0, 1, "probe512_r32")] {
+        for (width, prefix, reduce32, align, name) in [(64, 0, 0, 0, "probe512"), (64, 1, 0, 0, "probe512_one"), (32, 0, 0, 0, "probe256"), (32, 1, 0, 0, "probe256_one"), (64, 0, 1, 0, "probe512_r32"), (64, 0, 1, 1, "probe512_align")] {
             let object = out.join(format!("{name}.o"));
             assert!(Command::new(&cc)
                 .args(["-c", "-O3", "-DNDEBUG", "-fno-lto", "-mavx512bw", "-mavx512vl", "-mavx512vnni", "-mavx512dq"])
@@ -32,6 +32,7 @@ fn main() {
                     format!("-DVL={width}"),
                     format!("-DONEPREFIX={prefix}"),
                     format!("-DREDUCE32={reduce32}"),
+                    format!("-DALIGN_HEAD={align}"),
                     format!("-DPROBE_NAME={name}"),
                     "-DCHUNK=16384".into(),
                     format!("-mprefer-vector-width={}", width * 8)
@@ -44,11 +45,20 @@ fn main() {
                 .success());
             objects.push(object);
         }
+        for source in ["probe4096.c", "raw4096.S"] {
+            let object = out.join(format!("{source}.o"));
+            assert!(Command::new(&cc).args(["-c", "-O3", "-DNDEBUG", "-fno-lto"])
+                .arg(source).arg("-o").arg(&object).status().unwrap().success());
+            objects.push(object);
+            println!("cargo:rerun-if-changed={source}");
+        }
         assert!(Command::new("ar").arg("crs").arg(out.join("libprobe.a")).args(objects).status().unwrap().success());
+        println!("cargo:rustc-link-arg=-Wl,--exclude-libs,libprobe.a");
         println!("cargo:rustc-link-lib=static=probe");
         println!("cargo:rustc-link-search=native={}", root.join("native/isa-l").display());
         println!("cargo:rustc-link-lib=static=isal");
         println!("cargo:rerun-if-changed=probe.c");
+        println!("cargo:rerun-if-changed=align.h");
     }
     println!("cargo:rerun-if-changed=function.S");
     println!("cargo:rerun-if-changed=text.bin");

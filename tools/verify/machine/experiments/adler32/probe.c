@@ -24,6 +24,9 @@
 #include <immintrin.h>
 #include <stddef.h>
 #include <stdint.h>
+#if ALIGN_HEAD
+#include "align.h"
+#endif
 
 _Static_assert(CHUNK <= 16384 && CHUNK % (4*VL) == 0, "bounded vector counters");
 #if VL == 64
@@ -91,6 +94,10 @@ uint32_t PROBE_NAME(const uint8_t *p, size_t len) {
     if (len == 0) return 1;
     if (len == 1) { uint32_t a=1+*p; return (a<<16)|a; }
     uint64_t a=1,b=0;
+#if ALIGN_HEAD
+    uint32_t prefix=adler_align_input(&p,&len);
+    a=prefix&65535; b=prefix>>16;
+#endif
     const Vec ones=ONES(1), w=LOAD(weights);
     while (len) {
         size_t n=len < CHUNK ? len : CHUNK;

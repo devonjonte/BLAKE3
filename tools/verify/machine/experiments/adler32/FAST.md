@@ -6,7 +6,8 @@ Tracker: https://github.com/servil-software-factory/BLAKE3/issues/377
 
 The original 171-byte Ode implementation remains proved. **The optimized whole
 checksum and its machine theorem remain open.** `raw4096.ode` is an assembled,
-UNVERIFIED block-kernel hypothesis, pending executable tests and timing.
+UNVERIFIED block-kernel hypothesis; executable validation and timing are recorded
+with each candidate source pin.
 `probe.c` is explicitly unverified native C, adapted
 from the MIT-licensed libdeflate striped-VNNI algorithm to decide which design
 would earn the work needed in Ode and its machine model.
@@ -54,7 +55,10 @@ Promote a design only after inspecting its regressions and the native leaders.
 An Ode implementation then needs its generated machine proof and the full paired
 comparison, plus real libdeflate integration measurements. Instruction semantics
 and proof assumptions remain explicit. The current x86 model's vector state is
-128 bits; wide-vector/VNNI/mask support needs coordinated work with Sam.
+128 bits; wide-vector/VNNI/mask support needs coordinated work with Sam. Her
+current recommendation grows `wide/Wide.lean` for kernels, then unifies it with
+the word-level model. Conditional caller proofs can already expose the kernel
+contract as a visible theorem hypothesis.
 
 ## Targeted follow-up, declared November 13 before collection
 
@@ -93,5 +97,51 @@ stay explicit; a native result supplies candidate evidence, separate from a
 machine theorem. A fixed 4 KiB straight-line block kernel may simplify the proof
 boundary. `raw4096.ode` now assembles through the existing source-kernel machinery;
 its two printers agree. Mathematical raw/update bounds check in `Block_adler32`.
-Executable validation, measurement, linked constant-image binding and the optimized
-machine theorem remain open. See `WIDE-FORMS.md` for its exact assembled forms.
+See `WIDE-FORMS.md` for exact assembled forms and open proof/image obligations.
+
+## Alignment and raw-block probe, declared November 13 before collection
+
+Two new UNVERIFIED implementations, sharing one alignment policy (`align.h`):
+
+- `probe512-align` retains `probe512-r32`'s algorithm and reductions, adding a
+  scalar byte peel to 64-byte alignment only when the original length exceeds
+  65536. The peel starts at seed one and reads at most 63 bytes.
+- `probe4096` calls the straight-line Ode `raw4096` kernel for complete 4096-byte
+  blocks. Its C caller uses u32 modular reductions and the checked block law;
+  remaining bytes use the existing `probe512-r32`, composed with the seed-one
+  append formula. Small inputs tail-call that existing implementation. This
+  combines unrolling, a kernel call and more frequent reductions; their complete
+  caller cost is the question. The shared alignment peel applies above 65536.
+
+Preparation verifies the generated assembly against Ode's existing printer.
+It admits both new implementations only with explicit `--skip-proof`. Reports
+pin the source, generated assembly, printer, C glue and actual build flags.
+Native C probes remain -O3; libdeflate retains release defaults (-O2).
+
+Before timing: existing fixed/reference/all-small/all-alignment/guard cases,
+raw zero/one/255/ramp anchors, direct random weighted sums at every alignment,
+4095/4096/4097 and 8191/8192/8193 boundaries, alignment threshold
+65535/65536/65537/65600 at all 64 alignments, and canonical A=0 across a block
+and a seed-one tail. Guard input stays read-only. A planted raw weighted-shift
+fault must fail a fixed anchor; a one-byte overread must fault. Earlier five
+native probe objects must retain their section bytes, headers and relocations.
+
+Both declared CPUs, four paired layouts (0/256/1024/2048), 16-cell random probe,
+20 ms requested batches; alternating pair order, rotating questions. Questions
+(old → new):
+
+1. `probe512-r32` → `probe512-align` (alignment policy, matched algorithm/flags).
+2. `libdeflate512` → `probe512-align` (matched-width implementation).
+3. `libdeflate` → `probe512-align` (public dispatcher).
+4. `probe512-align` → `probe4096` (fixed-block kernel/caller design).
+5. `libdeflate512` → `probe4096` (matched-width implementation).
+6. `libdeflate` → `probe4096` (public dispatcher).
+7. `libdeflate512` → `libdeflate512` (same-code control).
+8. `probe512-align` → `probe512-align` (new same-code control).
+
+Judge all 16 cells per question with the unchanged shared rule. Preserve all
+attempts, including busy/unobserved abstentions; permit at most two whole-pair
+retries. Inspect every small/unaligned cost. Neither a native pass nor the
+checked natural-number bounds establish the optimized machine theorem. Full
+80-cell, real integration and adverse/cold/after-work measurements remain later
+gates for a promising, proved design.

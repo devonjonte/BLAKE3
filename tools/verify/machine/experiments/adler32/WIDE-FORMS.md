@@ -72,7 +72,11 @@ wide weighted reduction or scalar modular division. It still needs tests of
 unaligned loads and a competitive measurement, and its caller still needs
 competitive small/tail handling. Both existing Ode printers agree exactly on
 the source's assembly: 309 instructions, 1901 text bytes and 128 constant bytes.
-Executable validation, timing and the machine theorem remain open.
+The 13-engine validation passes under SDE, including raw fixed anchors,
+all-alignment boundaries, canonical-zero sums and read-only guards. A wrong
+weighted shift fails a fixed anchor; deliberate overread faults. Physical
+validation and timing follow at the declared candidate source. The machine
+theorem remains open.
 
 The assembled source uses these exact vector forms (Intel destination first):
 
@@ -92,19 +96,29 @@ u32 update bounds for canonical entry sums. These mathematical theorems use only
 `propext` and `Quot.sound`; vector arithmetic and the assembled bytes remain
 separate proof obligations.
 
-## Existing machinery and image binding to settle with Sam
+## Agreed boundary and open machine/image work
 
-`lang/prove.py` already generates straight-line kernel proofs. Today its
-contract has 128-bit `reads` / `writes` lists and its recipe contains hex-specific
-simplifications. A scalar packed return needs an extension of this mechanism;
-reuse it rather than build another compiler or proof generator.
+[Sam's response](https://github.com/servil-software-factory/BLAKE3/issues/361#issuecomment-6848814467)
+chooses the kernel-by-contract boundary. At `de232955` her caller generator can
+already expose an assumed kernel contract as a visible theorem hypothesis,
+with a scalar stand-in for executable examples. That permits an honest
+conditional word-caller theorem before the vector kernel theorem exists.
 
-`one/lift_one.py` already resolves a RIP-relative vector load's relocation
-against `--object`, reads its 16 data bytes, and emits a constant vector operand
-(`.c`). That places object-data interpretation in the existing lifter trust
-boundary. A 64-byte extension must also bind the final linked read-only image,
-including relocation resolution, to the constants used by the theorem. Checking
-only function text bytes would leave this part of the artifact unchecked.
+Sam recommends growing the existing `wide/Wide.lean` model for kernels first,
+with memory, coherent XMM/YMM views, VEX/EVEX upper zeroing and the retained
+instruction forms. This avoids regenerating every existing proof immediately.
+When the models unify, the kernel's `Abi.Meets` discharges the caller hypothesis.
+She owns a `returns rax: EXPR` extension of `prove.py`; the packed return belongs
+there. The model and every form's hardware cross-check remain the larger work.
+
+`one/lift_one.py` resolves 16-byte RIP-relative object loads to `.c` constants,
+placing object-data interpretation in the lifter's trust. Sam recommends treating
+new tables as memory the kernel reads: `(Bytes.layout 64).keeps ADDRESS bytes`.
+The theorem names the instructions and those bytes at their fixed image address.
+One artifact check binds final linked text AND read-only data, including resolved
+relocations, to the theorem's image. Constants constructed by instructions are an
+alternative to measure if that simplifies the binding. The current source still
+uses its two 64-byte tables; that image-binding obligation remains open.
 
 Recommended division: Devon owns the raw-sums candidate, algebra, caller and
 artifact checks. Sam chooses the shared vector-state/cell/proof-generator design

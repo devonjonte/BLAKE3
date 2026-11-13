@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 HERE = Path(__file__).resolve().parent
 CLOCKS_REV = "5f99f456951ab36f7201decd8aa5e0249ec67bd1"
@@ -55,7 +56,7 @@ def main():
     ap.add_argument("observation", type=Path)
     ap.add_argument("deps", type=Path)
     ap.add_argument("out", type=Path)
-    ap.add_argument("--skip-proof", action="store_true", help="include explicitly UNVERIFIED native algorithm probes (AVX-512 VNNI required)")
+    ap.add_argument("--skip-proof", action="store_true", help="include UNVERIFIED native probes and Ode raw-block kernel (AVX-512 VNNI required)")
     a = ap.parse_args()
     clocks, obs, deps, out = a.clocks.resolve(), a.observation.resolve(), a.deps.resolve(), a.out.resolve()
     # These are contracts for this deliberately small first workload adapter.
@@ -69,6 +70,10 @@ def main():
     actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=clocks, text=True).strip()
     assert actual == CLOCKS_REV, f"clocks checkout at {CLOCKS_REV}, got {actual}"
     subprocess.run(["git", "diff", "--exit-code", "HEAD", "--", "clocks"], cwd=clocks, check=True, capture_output=True)
+    if a.skip_proof:
+        raw_asm = subprocess.check_output([sys.executable, str(HERE.parents[1] / "lang/odec.py"),
+            str(HERE / "raw4096.ode"), "x86_64", "raw4096"], text=True)
+        assert raw_asm == (HERE / "raw4096.S").read_text(), "regenerate raw4096.S from its Ode source"
     out.mkdir(parents=True, exist_ok=False)
     for name in ["function.S", "text.bin"]:
         shutil.copyfile(obs / name, out / name)
@@ -93,15 +98,20 @@ def main():
         with (out / "isa-l-build.log").open("w") as log:
             subprocess.run(["timeout", "-k", "5", "240", "make", "-f", "Makefile.unx", "-j4", "bin/isa-l.a"], cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=250)
         shutil.copyfile(build / "bin/isa-l.a", build / "libisal.a")
-        shutil.copyfile(HERE / "probe.c", out / "probe.c")
+        for name in ["probe.c", "align.h", "probe4096.c", "raw4096.ode", "raw4096.S"]:
+            shutil.copyfile(HERE / name, out / name)
         r["libdeflate_width_control"] = expose_libdeflate(out / "native/libdeflate/libdeflate.a", out, observer)
-        r["experimental_probes"] = {"proof": "UNVERIFIED native C algorithm probes, not Ode implementations", "isa_l": ISAL_REV,
-            "chunk": 16384, "widths": [32,64], "prefix_accumulators": [1,4],
+        r["experimental_probes"] = {"proof": "UNVERIFIED experimental implementations; no optimized machine theorem", "isa_l": ISAL_REV,
+            "native_probe_chunk": 16384, "widths": [32,64], "prefix_accumulators": [1,4],
             "reduce32": "additional 512/four-prefix variant: u32 A; u32 B at blocks <=5552, otherwise u64",
+            "alignment": "probe512-align and probe4096: shared seed-one scalar peel to 64 B, only at lengths >65536",
+            "raw4096": "Ode source kernel, 4096 B packed raw sums; UNVERIFIED C caller, u32 reductions, existing probe512-r32 tails",
+            "raw4096_flags": "C caller -O3 -DNDEBUG -fno-lto; raw assembly unchanged from source printer",
+            "source_kernel_printer": observer.digest(HERE.parents[1] / "lang/odec.py"),
             "flags": "-O3 -DNDEBUG -fno-lto -mavx512bw -mavx512vl -mavx512vnni -mavx512dq; prefer vector width matching probe"}
     r["comparison"] = {"seed": 1, "sources": {name: rev for name, (rev, _) in DEPS.items()},
                        "build": "CMake Release, each project's default optimization flags, runtime dispatch enabled, static linking, no LTO"}
-    r["benchmark_files"] = {name: observer.digest(HERE / name) for name in ["bench.rs", "bench_build.rs", "prepare_bench.py"] + (["probe.c"] if a.skip_proof else [])}
+    r["benchmark_files"] = {name: observer.digest(HERE / name) for name in ["bench.rs", "bench_build.rs", "prepare_bench.py"] + (["probe.c", "align.h", "probe4096.c", "raw4096.ode", "raw4096.S"] if a.skip_proof else [])}
     (out / "report.json").write_text(json.dumps(r, indent=2) + "\n")
     for src, dst in [("bench.rs", "main.rs"), ("bench_build.rs", "build.rs")]:
         shutil.copyfile(HERE / src, out / dst)
