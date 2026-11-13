@@ -77,6 +77,19 @@ theorem output_32 (root : Node) :
     simp only [Vector.toList_mk]
     rfl
 
+/-- A message's bytes as the specification takes them. -/
+def ofBytes (bs : List (BitVec 8)) : ByteArray := ⟨(bs.map fun b => (⟨b⟩ : UInt8)).toArray⟩
+
+theorem ofBytes_size (bs : List (BitVec 8)) : (ofBytes bs).size = bs.length := by
+  simp [ofBytes, ByteArray.size]
+
+/-- A byte of the message, zero past its end: as the specification's `get!` reads it. -/
+theorem ofBytes_get (bs : List (BitVec 8)) (n : Nat) : (ofBytes bs).get! n = ⟨bs.getD n 0#8⟩ := by
+  simp only [ofBytes, ByteArray.get!]
+  by_cases h : n < bs.length
+  · simp [List.getD, h]
+  · simp [List.getD, h]; rfl
+
 /-- **The 32 bytes of BLAKE3 are the bytes of the first eight output words of the tree over the input's
 chunks.** -/
 theorem blake3_32 (key : Vector Word 8) (mode : Word) (input : ByteArray) :

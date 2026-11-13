@@ -182,6 +182,45 @@ fn pad(block, src, n)
   }
 }
 
+callee pad at 0xE0000 meets Pad.contract by Proof_pad.pad_meets budget 64
+
+// A chunk's node, as the specification has it (Blake3.chunkNode): h, the chaining value after every block
+// but the last; the last block, padded; the chunk's number; the last block's length; its flags. What
+// chunk_node is claimed to do is ChunkNode.contract (../lang/Spec_chunknode.lean). The key is in the node's h
+// at the call, where the specification starts it. The lemmas named are in ../lang/Lemmas_chunk.lean:
+// `Chunk.Mid` says what holds at the loop's head (h is the value after the blocks hashed so far, and rem
+// bytes are left from p).
+fn chunk_node(nd, input, len, counter, flags, plat)
+  reg p, rem, first, nd, counter, plat
+  meets ChunkNode.contract(k: Blake3.CV, bytes: List (BitVec 8))
+  uses Lemmas_chunk
+  leave open Chunk.Mid.last as _u
+  leave by ChunkNode.exit
+{
+  var first = CHUNK_START
+  var p = input
+  var rem = len
+  while rem > 64
+    invariant Chunk.Mid(nd, input, len, counter, flags, k, bytes, p, rem, first)   by Chunk.Mid.step   from Chunk.Mid.start
+    decreases rem
+    open Chunk.Mid.block as h0, h1, b0, b1, b2, b3
+  {
+    var f = flags | first
+    compress(nd, p, 64, counter, f)
+    first = 0
+    p = p + 64
+    rem = rem - 64
+  }
+  var blk = nd + 32
+  pad(blk, p, rem)
+    with (Chunk.rest bytes)
+    keep Cv.At(nd, Chunk.h(k, flags, counter, bytes))
+    keep Region(nd, 120)
+  u64[nd + 96] = counter
+  u64[nd + 104] = rem
+  u64[nd + 112] = flags | first | CHUNK_END
+}
+
 // A node's compression: its chaining value, or with root = ROOT the first 32 bytes of its output. What
 // node_out is claimed to do is NodeOut.contract (../lang/Spec_nodeout.lean): the node in memory is the
 // specification's own (h, the block m, the counter, the block length, the flags), 120 bytes.

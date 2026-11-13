@@ -181,3 +181,15 @@ name = "Example_pad"
 name = "Code_pad"
 [[lean_lib]]
 name = "Proof_pad"
+[[lean_lib]]
+name = "Lemmas_block"
+[[lean_lib]]
+name = "Spec_chunknode"
+[[lean_lib]]
+name = "Lemmas_chunk"
+[[lean_lib]]
+name = "Example_chunknode"
+[[lean_lib]]
+name = "Code_chunk_node"
+[[lean_lib]]
+name = "Proof_chunk_node"

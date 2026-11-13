@@ -27,19 +27,27 @@ theorem Block.At.frame {m m' : Mem} {a : BitVec 64} {b : Vector Blake3.Word 16} 
   exact ⟨v0, v1, v2, v3, vec_congr (fun x hx => same x (by bv_omega)) h0, vec_congr (fun x hx => same x (by bv_omega)) h1,
     vec_congr (fun x hx => same x (by bv_omega)) h2, vec_congr (fun x hx => same x (by bv_omega)) h3, hw⟩
 
+/-- A node's tail is in its own 88 bytes. -/
+theorem Node.Tail.frame {m m' : Mem} {a : BitVec 64} {n : Blake3.Node} (h : Node.Tail m a n)
+    (same : ∀ x : BitVec 64, x - a < 88#64 → m' x = m x) : Node.Tail m' a n := by
+  obtain ⟨hm, ht, hl, hf, bl, bf⟩ := h
+  exact ⟨Block.At.frame hm (fun x hx => same x (by bv_omega)), quad_congr (fun x hx => same x (by bv_omega)) ht,
+    quad_congr (fun x hx => same x (by bv_omega)) hl, quad_congr (fun x hx => same x (by bv_omega)) hf, bl, bf⟩
+
 /-- The node is in its own 120 bytes: a memory that agrees on them holds it too. -/
 theorem Node.At.frame {m m' : Mem} {a : BitVec 64} {n : Blake3.Node} (h : Node.At m a n)
-    (same : ∀ x : BitVec 64, x - a < 120#64 → m' x = m x) : Node.At m' a n := by
-  obtain ⟨hh, hm, ht, hl, hf, bl, bf⟩ := h
-  exact ⟨Cv.At.frame hh (fun x hx => same x (by bv_omega)), Block.At.frame hm (fun x hx => same x (by bv_omega)),
-    quad_congr (fun x hx => same x (by bv_omega)) ht, quad_congr (fun x hx => same x (by bv_omega)) hl,
-    quad_congr (fun x hx => same x (by bv_omega)) hf, bl, bf⟩
+    (same : ∀ x : BitVec 64, x - a < 120#64 → m' x = m x) : Node.At m' a n :=
+  ⟨Cv.At.frame h.1 (fun x hx => same x (by bv_omega)), Node.Tail.frame h.2 (fun x hx => same x (by bv_omega))⟩
 
 /-- What a holder of a node may read at once: its three words, and their bounds. -/
 theorem Node.At.cells {m : Mem} {a : BitVec 64} {n : Blake3.Node} (h : Node.At m a n) :
     Quad m (a + 96#64) n.t.toBitVec ∧ Quad m (a + 104#64) (n.len.toBitVec.setWidth 64) ∧
-    Quad m (a + 112#64) (n.flags.toBitVec.setWidth 64) ∧ n.len.toBitVec ≤ 64#32 ∧ n.flags.toBitVec < 256#32 :=
-  ⟨h.2.2.1, h.2.2.2.1, h.2.2.2.2.1, h.2.2.2.2.2.1, h.2.2.2.2.2.2⟩
+    Quad m (a + 112#64) (n.flags.toBitVec.setWidth 64) ∧ n.len.toBitVec ≤ 64#32 ∧ n.flags.toBitVec < 256#32 := by
+  obtain ⟨_, _, ht, hl, hf, bl, bf⟩ := h
+  refine ⟨?_, ?_, ?_, bl, bf⟩
+  · rw [show a + 96#64 = a + 32#64 + 64#64 by bv_decide]; exact ht
+  · rw [show a + 104#64 = a + 32#64 + 72#64 by bv_decide]; exact hl
+  · rw [show a + 112#64 = a + 32#64 + 80#64 by bv_decide]; exact hf
 
 /-- A node's `h` and block, as the six vectors a kernel reads. -/
 theorem Node.At.vectors {m : Mem} {a : BitVec 64} {n : Blake3.Node} (h : Node.At m a n) :

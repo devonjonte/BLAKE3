@@ -50,7 +50,7 @@ it put things. This writes, with nothing left for a person to fill in:
   NAME_meets       for all arguments, Abi.Meets PROGRAM ENTRY (CONTRACT ...): by Abi.meets_of_triple,
                    Hoare.seq and Hoare.loop.
 
-Lean checks all of it; nothing here is trusted. One loop, not nested, for now."""
+Lean checks all of it; nothing here is trusted. One loop, not nested, for now; calls and conditions may come after it."""
 import re, sys
 import odec
 
@@ -455,6 +455,9 @@ def own_call(i, sym, target, args, ra, oc, ind, prev, has_out):
     for j, cl in enumerate(oc["keep"]):
         c = Clause(cl); prop = c.clause(base_env, f"mem{i}")
         assert c.pred, f"keep {cl}: a predicate of memory, Name(args)"
+        if c.pred == "Region":
+            # bytes the program owns stay its own across any call, whatever the callee writes there
+            t.append(f"{ind}have hK{i}_{j} : {prop} := hown{i} _ _ (by assumption)"); continue
         t.append(f"{ind}have hK{i}_{j} : {prop} := {c.pred}.frame (m := {prev}) (by assumption) (fun x hx => by rw [hout{i} x (by bv_decide) (by bv_decide)]; first | rfl | mem_away)")
     t += [f"{ind}have hOut : {outside.replace('s.mem x', f'mem{i} x')} := by",
           f"{ind}  intro x hx hmod", f"{ind}  have hx' := hx", f"{ind}  have hmod' := hmod",
@@ -650,14 +653,22 @@ L += [f"theorem turn {ARGDECL}",
 
 # ---------------------------------------------------------------- leave
 lp = [([("cond", wcond, False, False, wc_env)] + ev, e) for ev, e in paths(after, wc_env)]
-assert len(lp) == 1 and not any(e[0] == "call" for e in lp[0][0]), "a condition or a call after the loop: not yet"
+def leave_leaf(ev, ind):
+    """One way from the loop's end to the return: the run (each call by its contract), then the contract's Post."""
+    lines, ind2 = run_piece(ev, HEAD, "ret", [], ind)
+    return lines + [f"{ind2}refine runs_done ⟨rfl, by simp only [{CNAME}, Abi.Contract.framed]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩",
+                    f"{ind2}all_goals try dsimp only"] + outside_goal(ind2, True) + [f"{ind2}· simp only [{OPEN_C}]", f"{ind2}  apply {LEAVE} <;> mem_auto"]
+
+
 L += [f"theorem leave {ARGDECL}",
       f"    (s : State) (hI : Inv {ARGUSE} s) (hc : ¬ {cond_prop(wcond, env_s)}) :",
       f"    ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ {POST} s' := by"] + open_head + \
-     [x for i, (lemma, names) in enumerate(leave_opens) for x in open_with(lemma, names, "mem", i, "  ")] + \
-     run_piece(lp[0][0], HEAD, "ret", [], "  ")[0] + \
-     [f"  refine runs_done ⟨rfl, by simp only [{CNAME}, Abi.Contract.framed]; bv_decide, rfl, rfl, rfl, rfl, rfl, rfl, ?_, ?_⟩", "  all_goals try dsimp only"] + \
-     outside_goal("  ", True) + [f"  · simp only [{OPEN_C}]", f"    apply {LEAVE} <;> mem_auto", ""]
+     [x for i, (lemma, names) in enumerate(leave_opens) for x in open_with(lemma, names, "mem", i, "  ")]
+if len(lp) == 1 and not any(e[0] == "call" for e in lp[0][0]):
+    L += leave_leaf(lp[0][0], "  ") + [""]
+else:
+    # conditions and calls after the loop: every way to the return, as in a turn
+    L += tree(lp, set(), leave_leaf, "  ") + [""]
 
 # ---------------------------------------------------------------- the theorem
 ALL = f"({' '.join(params)} : BitVec 64) " + " ".join(f"({g} : {t})" for g, t in fn_ghosts)

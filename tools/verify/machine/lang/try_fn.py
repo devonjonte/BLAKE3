@@ -71,7 +71,7 @@ def blame : {types} → Mem → String
       let m0' : Mem := fun x => some ((m0 x).getD 0)
       let post : List (String × Bool) := [{', '.join(post_of("m'"))}] ++
         [("memory the function only reads is unchanged", c.reads.all fun p => Try.sameBytes m0' m' p.addr p.size.toNat),
-         ("the bytes beside its pieces are unchanged", c.regions.all fun r => Try.sameBytes m0' m' (r.1 - 64#64) 64 && Try.sameBytes m0' m' (r.1 + r.2) 64)]
+         ("the bytes beside its pieces are unchanged", Try.besideSame c m0' m')]
       match Try.firstFailure post with
       | some f => s!"The source breaks the contract on it too (not so: {{f}}): the source or the contract is wrong."
       | none => "The source keeps the contract on it: the code the compiler made is wrong."

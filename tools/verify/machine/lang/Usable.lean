@@ -9,6 +9,7 @@ import Spec_lroot
 import Lemmas_ladd
 import Spec_nodeout
 import Spec_pad
+import Spec_chunknode
 open X86
 
 /-! # Each contract can be used
@@ -154,3 +155,10 @@ theorem Pad.usable : (Pad.contract 0x100000#64 0x200000#64 0#64 []).Usable := by
   · simp only [Pad.contract]; decide
   · simp only [Pad.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
     exact ⟨zeroMem_region _ _, trivial, fun i h => absurd h (by simp)⟩
+
+theorem ChunkNode.usable : (ChunkNode.contract 0x100000#64 0x200000#64 0#64 0#64 0#64 5#64 zeroCv []).Usable := by
+  refine ⟨0x7ff00000#64, zeroMem, zeroMem_region _ _, ?_, ?_, ?_⟩
+  · simp only [ChunkNode.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, Abi.AllApart, Abi.Apart]; decide
+  · simp only [ChunkNode.contract]; decide
+  · simp only [ChunkNode.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
+    exact ⟨zeroMem_cv _, zeroMem_region _ _, trivial, fun i h => absurd h (by simp)⟩

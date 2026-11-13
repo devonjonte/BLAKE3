@@ -85,14 +85,20 @@ def apart (c : Abi.Contract) : Bool := allApartB ((stackTop - c.stack, c.stack +
 def sameBytes (m m' : Mem) (a : BitVec 64) (n : Nat) : Bool :=
   (List.range n).all fun i => m (a + BitVec.ofNat 64 i) == m' (a + BitVec.ofNat 64 i)
 
+/-- The 64 bytes before and after each piece of memory a contract speaks of are as they were, but for bytes
+that are in a piece the function may change (two such pieces may lie side by side). -/
+def besideSame (c : Abi.Contract) (m m' : Mem) : Bool :=
+  let changes (x : BitVec 64) : Bool := c.modifies.any fun r => decide (x - r.1 < r.2)
+  let same (a : BitVec 64) : Bool := (List.range 64).all fun i => changes (a + BitVec.ofNat 64 i) || m (a + BitVec.ofNat 64 i) == m' (a + BitVec.ofNat 64 i)
+  c.regions.all fun r => same (r.1 - 64#64) && same (r.1 + r.2)
+
 /-- What every contract asks of the state a function returns in. -/
 def returnChecks (c : Abi.Contract) (s0 s' : State) : List (String × Bool) :=
   [("the stack pointer is popped", s'.rsp == s0.rsp + 8#64),
    ("the caller's registers are kept", s'.rbx == s0.rbx && s'.rbp == s0.rbp && s'.r12 == s0.r12 && s'.r13 == s0.r13 && s'.r14 == s0.r14 && s'.r15 == s0.r15),
    ("memory the function only reads is unchanged", c.reads.all fun p => sameBytes s0.mem s'.mem p.addr p.size.toNat),
    ("the bytes beside its pieces and above its stack are unchanged",
-      c.regions.all (fun r => sameBytes s0.mem s'.mem (r.1 - 64#64) 64 && sameBytes s0.mem s'.mem (r.1 + r.2) 64) &&
-      sameBytes s0.mem s'.mem stackTop 72)]
+      besideSame c s0.mem s'.mem && sameBytes s0.mem s'.mem stackTop 72)]
 
 /-- Why a run stopped at `pc`. -/
 def why (prog : Nat → Option (Instr × Nat)) (pc : Nat) : String :=
