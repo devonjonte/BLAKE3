@@ -7,6 +7,7 @@ unsafe extern "C" {
 }
 
 const FORMAT: &str = "# ode-adler-samples-v1";
+const LENGTHS: [usize; 8] = [0, 1, 16, 64, 256, 1024, 4096, 65536];
 const EXPECTED_TEXT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/text.bin"));
 
 fn checksum(bytes: &[u8]) -> u64 {
@@ -64,7 +65,7 @@ fn collect() -> i32 {
     println!("pattern\tbytes\tsample\tcalls\twall_ns\tcpu_ns\tp_cycles\tp_instructions\tp_time_ns\te_cycles\te_instructions\te_time_ns\tstarted_ns");
     let mut all = vec![];
     for pattern in 0..3 {
-        for len in [0, 1, 16, 64, 256, 1024, 4096, 65536] {
+        for len in LENGTHS {
             let input = input(pattern, len);
             let samples = clocks::measure(12, 5_000_000, || {
                 black_box(checksum(black_box(&input)));
@@ -106,6 +107,10 @@ fn collect() -> i32 {
 type Cell = (u8, usize);
 fn read(path: &str) -> BTreeMap<Cell, u128> {
     let text = std::fs::read_to_string(path).expect("samples exist");
+    read_text(&text)
+}
+
+fn read_text(text: &str) -> BTreeMap<Cell, u128> {
     assert_eq!(text.lines().next(), Some(FORMAT), "samples format");
     assert!(text.lines().any(|l| l == "# accepted: quiet"), "comparison abstains on busy or unobserved load");
     let mut cells: BTreeMap<Cell, Vec<(u64, u64)>> = BTreeMap::new();
@@ -118,7 +123,8 @@ fn read(path: &str) -> BTreeMap<Cell, u128> {
         assert_eq!(sample, v.len(), "samples appear once in order");
         v.push((p[4].parse().unwrap(), p[3].parse().unwrap()));
     }
-    assert_eq!(cells.len(), 24, "all declared workload cells");
+    let expected: Vec<_> = (0..3).flat_map(|pattern| LENGTHS.map(|len| (pattern, len))).collect();
+    assert!(cells.keys().copied().eq(expected), "exactly the declared workload cells");
     cells
         .into_iter()
         .map(|(k, v)| {
@@ -167,5 +173,47 @@ mod tests {
     #[test]
     fn linked_bytes_and_examples() {
         super::validate();
+    }
+
+    fn fixture(ns: u64) -> String {
+        let mut s = format!("{}\n", super::FORMAT);
+        for p in 0..3 {
+            for n in super::LENGTHS {
+                for i in 0..12 {
+                    s.push_str(&format!("{p}\t{n}\t{i}\t1\t{ns}\t-\t-\t-\t-\t-\t-\t-\t0\n"));
+                }
+            }
+        }
+        s + "# accepted: quiet\n"
+    }
+
+    #[test]
+    fn raw_reader_and_shared_judge_controls() {
+        use clocks::summary::{discoveries, Verdict};
+        let old = super::read_text(&fixture(100));
+        assert!(old.values().all(|&m| m == 100u128 << 64));
+        let new = super::read_text(&fixture(120));
+        let same: Vec<_> = old.values().map(|&v| vec![(v, v); 4]).collect();
+        assert!(discoveries(&same, 50, 30).iter().all(|j| j.verdict == Verdict::Level));
+        let slower: Vec<_> = old.iter().map(|(k, &v)| vec![(v, new[k]); 4]).collect();
+        assert!(discoveries(&slower, 50, 30).iter().all(|j| j.verdict == Verdict::Slower && j.ratio_permille == 1200));
+    }
+
+    #[test]
+    #[should_panic(expected = "comparison abstains")]
+    fn busy_samples_require_abstention() {
+        super::read_text(&fixture(100).replace("accepted: quiet", "accepted: busy-or-unobserved"));
+    }
+
+    #[test]
+    #[should_panic(expected = "samples appear once")]
+    fn duplicate_samples_are_refused() {
+        super::read_text(&fixture(100).replace("0\t0\t1\t1\t", "0\t0\t0\t1\t"));
+    }
+
+    #[test]
+    #[should_panic(expected = "samples format")]
+    fn another_format_is_refused() {
+        super::read_text(&fixture(100).replace(super::FORMAT, "# another-version"));
     }
 }

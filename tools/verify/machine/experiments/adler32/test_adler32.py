@@ -68,7 +68,8 @@ class AdlerTests(unittest.TestCase):
         # Run separately: a planted out-of-bounds access should fail this test,
         # rather than end the rest of the test driver's controls.
         child = r'''
-import ctypes, os, sys, zlib
+import ctypes, os, resource, sys, zlib
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 lib = ctypes.CDLL(sys.argv[1]); fn = lib.b3l_adler32
 fn.argtypes = [ctypes.c_void_p, ctypes.c_uint64]; fn.restype = ctypes.c_uint64
 c = ctypes.CDLL(None, use_errno=True)
@@ -79,7 +80,7 @@ c.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
 p = os.sysconf('SC_PAGE_SIZE'); base = c.mmap(None, 3*p, 0, 0x22, -1, 0)
 assert base != ctypes.c_void_p(-1).value
 for n in [0, 1, 2, 15, 16, 63, 64, 255, p-1, p]:
-    for at in [base+p, base+2*p-n]:
+    for at in [base+2*p-n, base+p]:
         assert c.mprotect(base+p, p, 3) == 0
         data = bytes((i*17+23)%256 for i in range(n))
         ctypes.memmove(at, data, n)
@@ -87,7 +88,14 @@ for n in [0, 1, 2, 15, 16, 63, 64, 255, p-1, p]:
         assert fn(at, n) == zlib.adler32(data)
 assert c.munmap(base, 3*p) == 0
 '''
-        observe.run(["python3", "-c", child, OUT / "baseline" / "function.so"])
+        for variant in ["baseline", "compact"]:
+            observe.run(["python3", "-c", child, OUT / variant / "function.so"])
+        # Positive control for the guard: make a read one byte too far. The
+        # first nonempty suffix ends at the inaccessible page and must fault.
+        self.build("overread", self.source.replace("u8[input + i]", "u8[input + i + 1]"))
+        with self.assertRaises(subprocess.CalledProcessError) as failure:
+            observe.run(["python3", "-c", child, OUT / "overread" / "function.so"])
+        self.assertIn(failure.exception.returncode, [-11, -7], "guard catches an actual memory fault")
 
     def test_03_unrelated_source_leaves_exact_function_bytes(self):
         noise = "\nfn unrelated(x)\n{\n  return x + 123\n}\n"
