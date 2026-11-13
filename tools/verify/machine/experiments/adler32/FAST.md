@@ -196,3 +196,44 @@ small/unaligned cells stay visible. Separate candidate effects before combining
 them. Neither these execution tests nor the natural-number bounds establish an
 optimized machine theorem. Static-image and wide-model work still follow the
 choice of a promising implementation.
+
+## Cleanup placement and shared bulk, declared before collection
+
+The caller/small experiment at4d519c5d leaves every batch-four versus old-raw
+cell Level on both CPUs. Small specialization helps Xeon16/64 B, while EPYC's
+16 B remains slightly slower than LF512 and offset-one4KiB becomes slower.
+Two diagnostic changes follow those concrete findings:
+
+- `probe4096-cleanup` moves `vzeroupper` from every raw block's return to the
+  whole checksum's exit. The private word-only caller uses a derived Ode kernel
+  with that instruction alone omitted (308 instructions/1898 B). Same per4096
+  reductions, tails and peel. Preparation compares the two generated assemblies;
+  inspection must find word-only code between calls and one final cleanup.
+- `probe512-dispatch` keeps the seed-one small path and tail-calls the original,
+  unchanged `probe512-align` body above64 B. This isolates the compiler's changed
+  bulk body from the small source specialization; extra dispatch cost stays visible.
+
+Both remain UNVERIFIED. The original kernel's emitted bytes and every earlier
+native object must remain identical. Validate both raw packed returns directly,
+all18 checksum engines, all small/critical alignments and read-only guards. A
+wrong dispatched length must fail; restore and validate again. Record both linked
+kernel bodies/tables and actual generated source/assembly. Cleanup placement's
+performance belongs to this experiment; functional examples establish their own scope.
+
+Both CPUs, four layouts, same16-cell v3 probe/20 ms requested batches and shared
+judgment; alternating sides and rotating questions. Old → new:
+
+1. `probe4096` → `probe4096-cleanup`.
+2. `probe512-small` → `probe512-dispatch`.
+3. `libdeflate512` → `probe4096-cleanup`.
+4. `libdeflate512` → `probe512-dispatch`.
+5. `libdeflate` → `probe4096-cleanup`.
+6. `libdeflate` → `probe512-dispatch`.
+7. `libdeflate512` → `libdeflate512` (same-code control).
+8. `probe4096` → `probe4096` (same-code control).
+
+Retain all cells and failed attempts, at most two whole-pair retries for load.
+A winner still needs a checked optimized machine theorem, full matrix and real
+caller/adverse/cold evidence. The arithmetic reduction for a later Ode caller is
+checked separately in `WordReduce_adler32`: two16-bit folds and one conditional
+subtraction reduce every value below2^36, with Lean's three standard axioms only.

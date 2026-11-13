@@ -24,11 +24,11 @@ fn main() {
         // Experimental symbols bind to this executable's copied archive.
         println!("cargo:rustc-link-arg=-Wl,--exclude-libs,libdeflate-wide.a");
         let mut objects = Vec::new();
-        for (width, prefix, reduce32, align, small, name) in [
-            (64, 0, 0, 0, 0, "probe512"), (64, 1, 0, 0, 0, "probe512_one"),
-            (32, 0, 0, 0, 0, "probe256"), (32, 1, 0, 0, 0, "probe256_one"),
-            (64, 0, 1, 0, 0, "probe512_r32"), (64, 0, 1, 1, 0, "probe512_align"),
-            (64, 0, 1, 1, 1, "probe512_small"),
+        for (width, prefix, reduce32, align, small, shared, name) in [
+            (64, 0, 0, 0, 0, 0, "probe512"), (64, 1, 0, 0, 0, 0, "probe512_one"),
+            (32, 0, 0, 0, 0, 0, "probe256"), (32, 1, 0, 0, 0, 0, "probe256_one"),
+            (64, 0, 1, 0, 0, 0, "probe512_r32"), (64, 0, 1, 1, 0, 0, "probe512_align"),
+            (64, 0, 1, 1, 1, 0, "probe512_small"), (64, 0, 1, 1, 1, 1, "probe512_dispatch"),
         ] {
             let object = out.join(format!("{name}.o"));
             assert!(Command::new(&cc)
@@ -39,6 +39,7 @@ fn main() {
                     format!("-DREDUCE32={reduce32}"),
                     format!("-DALIGN_HEAD={align}"),
                     format!("-DSMALL_SEED={small}"),
+                    format!("-DSHARED_BULK={shared}"),
                     format!("-DPROBE_NAME={name}"),
                     "-DCHUNK=16384".into(),
                     format!("-mprefer-vector-width={}", width * 8)
@@ -51,19 +52,22 @@ fn main() {
                 .success());
             objects.push(object);
         }
-        for (batch, split, name) in [(0, 0, "probe4096"), (1, 0, "probe4096_batch"), (0, 1, "probe4096_entry")] {
+        for (batch, split, cleanup, name) in [(0, 0, 0, "probe4096"), (1, 0, 0, "probe4096_batch"), (0, 1, 0, "probe4096_entry"), (0, 0, 1, "probe4096_cleanup")] {
             let object = out.join(format!("{name}.c.o"));
             assert!(Command::new(&cc).args(["-c", "-O3", "-DNDEBUG", "-fno-lto"])
-                .args([format!("-DBATCH4={batch}"), format!("-DENTRY_SPLIT={split}"), format!("-DPROBE_NAME={name}")])
+                .args([format!("-DBATCH4={batch}"), format!("-DENTRY_SPLIT={split}"), format!("-DPROBE_NAME={name}"),
+                    format!("-DCLEAN_AT_END={cleanup}"), format!("-DRAW_KERNEL={}", if cleanup == 1 { "b3ldirty_raw4096" } else { "b3l_raw4096" })])
                 .arg("probe4096.c").arg("-o").arg(&object).status().unwrap().success());
             objects.push(object);
         }
-        let object = out.join("raw4096.S.o");
-        assert!(Command::new(&cc).args(["-c", "-O3", "-DNDEBUG", "-fno-lto"])
-            .arg("raw4096.S").arg("-o").arg(&object).status().unwrap().success());
-        objects.push(object);
+        for source in ["raw4096.S", "raw4096-dirty.S"] {
+            let object = out.join(format!("{source}.o"));
+            assert!(Command::new(&cc).args(["-c", "-O3", "-DNDEBUG", "-fno-lto"])
+                .arg(source).arg("-o").arg(&object).status().unwrap().success());
+            objects.push(object);
+            println!("cargo:rerun-if-changed={source}");
+        }
         println!("cargo:rerun-if-changed=probe4096.c");
-        println!("cargo:rerun-if-changed=raw4096.S");
         assert!(Command::new("ar").arg("crs").arg(out.join("libprobe.a")).args(objects).status().unwrap().success());
         println!("cargo:rustc-link-arg=-Wl,--exclude-libs,libprobe.a");
         println!("cargo:rustc-link-lib=static=probe");

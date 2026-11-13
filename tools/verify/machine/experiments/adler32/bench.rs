@@ -40,9 +40,20 @@ mod probes {
         fn probe4096_batch(p: *const u8, n: usize) -> u32;
         fn probe4096_entry(p: *const u8, n: usize) -> u32;
         fn probe512_small(p: *const u8, n: usize) -> u32;
+        fn probe512_dispatch(p: *const u8, n: usize) -> u32;
+        fn probe4096_cleanup(p: *const u8, n: usize) -> u32;
+        fn b3ldirty_raw4096(p: *const u8) -> u64;
         pub fn b3l_raw4096(p: *const u8) -> u64;
         fn adler32_x86_avx512_vl512_vnni(seed: u32, p: *const u8, n: usize) -> u32;
         static adler32_impl: unsafe extern "C" fn(u32, *const u8, usize) -> u32;
+    }
+    #[inline(never)]
+    pub unsafe fn raw_pair(p: *const u8) -> (u64, u64) {
+        let clean = b3l_raw4096(p);
+        let dirty = b3ldirty_raw4096(p);
+        // Clockless validation returns to ordinary Rust with upper state clean.
+        std::arch::asm!("vzeroupper", options(nostack, nomem, preserves_flags));
+        (clean, dirty)
     }
     pub unsafe fn dispatch_record() {
         println!("# libdeflate selected pointer: {:p}; existing 512-bit kernel: {:p}",
@@ -75,6 +86,14 @@ mod probes {
     #[inline(never)]
     pub unsafe fn small512(p: *const u8, n: usize) -> u32 {
         probe512_small(p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn dispatch512(p: *const u8, n: usize) -> u32 {
+        probe512_dispatch(p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn fixed4096_cleanup(p: *const u8, n: usize) -> u32 {
+        probe4096_cleanup(p, n)
     }
     #[inline(never)]
     pub unsafe fn isal(p: *const u8, n: usize) -> u32 {
@@ -117,6 +136,10 @@ const ENGINES: &[(&str, Engine)] = &[
     #[cfg(feature = "probe")]
     ("probe512-small", probes::small512),
     #[cfg(feature = "probe")]
+    ("probe512-dispatch", probes::dispatch512),
+    #[cfg(feature = "probe")]
+    ("probe4096-cleanup", probes::fixed4096_cleanup),
+    #[cfg(feature = "probe")]
     ("isa-l", probes::isal),
     #[cfg(feature = "probe")]
     ("probe512", probes::wide512),
@@ -128,7 +151,7 @@ const ENGINES: &[(&str, Engine)] = &[
     ("probe256-one", probes::wide256_one),
 ];
 #[cfg(feature = "probe")]
-const BLOCK_ENGINES: &[&str] = &["probe512-align", "probe4096", "probe4096-batch", "probe4096-entry", "probe512-small"];
+const BLOCK_ENGINES: &[&str] = &["probe512-align", "probe4096", "probe4096-batch", "probe4096-entry", "probe512-small", "probe512-dispatch", "probe4096-cleanup"];
 const FORMAT: &str = "# ode-adler-samples-v3";
 const LENGTHS: [usize; 10] = [0, 1, 16, 64, 256, 1024, 4096, 5552, 65536, 1048576];
 const EXPECTED_TEXT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/text.bin"));
@@ -215,7 +238,8 @@ fn validate_blocks() {
         ((0..4096).map(|i| i as u8).collect::<Vec<_>>(), 522240, 1047439360),
     ] {
         let saved = bytes.clone();
-        assert_eq!(unsafe { probes::b3l_raw4096(bytes.as_mut_ptr()) }, (b << 32) | a, "raw fixed anchor");
+        let want = (b << 32) | a;
+        assert_eq!(unsafe { probes::raw_pair(bytes.as_mut_ptr()) }, (want, want), "raw fixed anchor");
         assert_eq!(bytes, saved, "raw kernel preserves input");
     }
     for pattern in [1, 3] {
@@ -234,7 +258,8 @@ fn validate_blocks() {
                     // Direct weighted definition, independent of the striped prefix algorithm.
                     let a: u64 = bytes.iter().map(|&v| u64::from(v)).sum();
                     let b: u64 = bytes.iter().enumerate().map(|(i, &v)| (4096 - i) as u64 * u64::from(v)).sum();
-                    assert_eq!(unsafe { probes::b3l_raw4096(storage.as_ptr().add(start)) }, (b << 32) | a, "raw alignment {offset}, pattern {pattern}");
+                    let raw = (b << 32) | a;
+                    assert_eq!(unsafe { probes::raw_pair(storage.as_ptr().add(start)) }, (raw, raw), "raw alignment {offset}, pattern {pattern}");
                 }
             }
         }

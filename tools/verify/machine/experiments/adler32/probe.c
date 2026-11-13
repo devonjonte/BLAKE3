@@ -27,6 +27,10 @@
 #if ALIGN_HEAD
 #include "align.h"
 #endif
+#if SHARED_BULK
+_Static_assert(SMALL_SEED && ALIGN_HEAD && VL == 64, "dispatch probe reuses the aligned bulk implementation");
+extern uint32_t probe512_align(const uint8_t *, size_t);
+#endif
 
 _Static_assert(CHUNK <= 16384 && CHUNK % (4*VL) == 0, "bounded vector counters");
 #if VL == 64
@@ -105,6 +109,9 @@ uint32_t PROBE_NAME(const uint8_t *p, size_t len) {
         if (len > 22) b%=65521;
         return (b<<16)|a;
     }
+#endif
+#if SHARED_BULK
+    return probe512_align(p,len);
 #endif
     uint64_t a=1,b=0;
 #if ALIGN_HEAD

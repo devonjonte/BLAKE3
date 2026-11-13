@@ -75,6 +75,16 @@ def main():
             str(HERE / "raw4096.ode"), "x86_64", "raw4096"], text=True)
         assert raw_asm == (HERE / "raw4096.S").read_text(), "regenerate raw4096.S from its Ode source"
     out.mkdir(parents=True, exist_ok=False)
+    if a.skip_proof:
+        source = (HERE / "raw4096.ode").read_text()
+        marker = "for cleanup in 0..1"
+        assert source.count(marker) == 1
+        (out / "raw4096-dirty.ode").write_text(source.replace(marker, "for cleanup in 0..0"))
+        dirty = subprocess.check_output([sys.executable, str(HERE.parents[1] / "lang/odec.py"),
+            str(out / "raw4096-dirty.ode"), "x86_64", "raw4096", "b3ldirty_"], text=True)
+        expected = raw_asm.replace("from raw4096.ode", "from raw4096-dirty.ode").replace("b3l_", "b3ldirty_")
+        assert dirty == expected.replace("    vzeroupper\n", ""), "cleanup variant changes more than its return cleanup"
+        (out / "raw4096-dirty.S").write_text(dirty)
     for name in ["function.S", "text.bin"]:
         shutil.copyfile(obs / name, out / name)
     for name, (rev, options) in DEPS.items():
@@ -110,6 +120,10 @@ def main():
             "batch4": "probe4096-batch: four raw calls before reduction; u32 A and u64 B; per4096 remainder unchanged",
             "entry_split": "probe4096-entry: noinline large body with the same per4096 reductions; tiny entry tail-calls r32",
             "small_seed": "probe512-small: aligned probe plus direct masked vector at <=64 B; A needs no reduction, B only above22 B",
+            "shared_bulk": "probe512-dispatch: same small path, tail-calling the unchanged probe512-align for inputs >64 B",
+            "cleanup": "probe4096-cleanup: original per4096 reductions; no per-block vzeroupper, one at whole-call exit",
+            "raw_dirty_source": observer.digest(out / "raw4096-dirty.ode"),
+            "raw_dirty_assembly": observer.digest(out / "raw4096-dirty.S"),
             "source_kernel_printer": observer.digest(HERE.parents[1] / "lang/odec.py"),
             "flags": "-O3 -DNDEBUG -fno-lto -mavx512bw -mavx512vl -mavx512vnni -mavx512dq; prefer vector width matching probe"}
     r["comparison"] = {"seed": 1, "sources": {name: rev for name, (rev, _) in DEPS.items()},

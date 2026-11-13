@@ -59,6 +59,8 @@ kernel raw4096 {
   reduce(4, ecx)
   shl rcx, 32
   or rax, rcx
-  vzeroupper
+  for cleanup in 0..1 {
+    vzeroupper
+  }
   ret
 }
