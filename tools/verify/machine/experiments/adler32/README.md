@@ -150,6 +150,14 @@ and checked generated proof are restored last.
 
 ## Measure on a dedicated machine
 
+[The native comparison results](https://github.com/devonjonte/bench-hashes/tree/data/2026-11-13/ode-adler32-comparison)
+cover an EPYC 9275F and Xeon Gold 6330. Zlib, zlib-ng and libdeflate beat the
+original scalar Ode loop at every tested length from 16 bytes upward, across all
+patterns and alignments. All 64 runs were quiet; all same-code control cells
+judged level. Thread counters were unavailable. These are warmed, repeated-buffer
+measurements. The result compares implemented algorithms; a like-for-like scalar
+control would help separate algorithm choice from compiler effects.
+
 `bench.rs` is the first workload adapter, using bench-hashes' existing **clocks**
 crate for timing, load, summaries and paired comparisons. It compares the proved
 Ode baseline with zlib 1.4, zlib-ng 2.3.3 and libdeflate 1.26 through the same native
