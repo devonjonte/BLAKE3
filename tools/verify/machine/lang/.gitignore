@@ -41,5 +41,8 @@ lroot.*
 node_out.*
 pad.*
 chunk_node.*
+hashl.*
+Trace_*.lean
+Trace_*.out
 AdlerOde.lean
 adler32.*

@@ -3,7 +3,8 @@ lemma an address (attribute ode_at). The program is this function's instructions
 (one/KCode.lean) if it calls anything, and after the instructions of each function of ours it calls
 (`--with OTHER`: Code_OTHER.lean; `--with OTHER+k` if OTHER's own program has the kernels). Each of those
 is shown to be in it unchanged (`has_kernels`, `has_OTHER`), so that a theorem about a callee in its own
-program holds in this one.
+program holds in this one. A callee that itself calls functions of ours brings their instructions too
+(read from its Code_OTHER.lean): every table once, and each callee's whole program shown to be in this one.
 usage: gen_code.py NAME ROWS OUT.lean [MORE_ROWS ...] [--with OTHER[+k] ...]   (more rows: the function's checked entry)"""
 import sys
 args = sys.argv[1:]
@@ -18,7 +19,70 @@ t = ["import Machine"] + (["import KCode"] if calls else []) + ["import Cells"] 
      "set_option maxRecDepth 100000", f"namespace Code_{name}", "", "def table : List (Nat × Instr × Nat) := ["]
 t += [f"  (0x{at}, {ins}, 0x{nxt}){',' if i + 1 < len(rows) else ''}" for i, (at, nxt, ins) in enumerate(rows)]
 t += ["]", ""]
-if calls:
+import os, re
+def parts_of(w):
+    """The tables of a callee's own program, in its order: the kernels', each function's it calls, its own."""
+    txt = open(os.path.join(os.path.dirname(os.path.abspath(out)), f"Code_{w}.lean")).read()
+    ps = ["KCode"] if re.search(r"^def pre0 .*:= KCode\.table", txt, re.M) else []
+    return ps + re.findall(r"^def pre\d+ .*:= pre\d+ \+\+ Code_(\w+)\.table", txt, re.M) + [w]
+NESTED = calls and any(len([p for p in parts_of(w) if p != "KCode"]) > 1 for w, _ in mods)
+if NESTED:
+    # A callee that calls functions of ours itself: this program holds every table of every callee's program,
+    # each once. P[0] is the kernels'; pre_i = pre_(i-1) ++ P[i]; whole = pre_n ++ this function's.
+    P = ["KCode"]
+    for w, _ in mods:
+        P += [x for x in parts_of(w) if x not in P]
+    tbl = lambda x: "KCode.table" if x == "KCode" else f"Code_{x}.table"
+    n = len(P) - 1
+    t = [l for l in t if not l.startswith("import Code_")]
+    at = t.index("import Cells") + 1
+    t[at:at] = [f"import Code_{x}" for x in P[1:]]
+    t += ["def pre0 : List (Nat × Instr × Nat) := KCode.table"]
+    t += [f"def pre{i} : List (Nat × Instr × Nat) := pre{i - 1} ++ {tbl(P[i])}" for i in range(1, n + 1)]
+    t += ["", "/-- Every instruction of the program: the two kernels' (one/KCode.lean), " + "".join(f"`{x}`'s, " for x in P[1:]) + "then this function's. -/",
+          f"def whole : List (Nat × Instr × Nat) := pre{n} ++ table", "",
+          "def prog (pc : Nat) : Option (Instr × Nat) := whole.lookup pc", "",
+          "/-- The addresses the program has an instruction at. -/",
+          "def keys : List Nat := whole.map (·.1)", "",
+          "theorem keys_of : ∀ pc x, prog pc = some x → pc ∈ keys := fun pc x h => lookup_mem_keys whole pc x h", ""]
+    def lifted(i, inner):
+        for j in range(i + 1, n + 1):
+            inner = f"lookup_append_left pre{j - 1} {tbl(P[j])} pc x ({inner})"
+        return f"lookup_append_left pre{n} table pc x ({inner})"
+    t += ["theorem has_kernels : ∀ pc x, KCode.prog pc = some x → prog pc = some x := by",
+          "  intro pc x h", f"  exact {lifted(0, 'h')}", ""]
+    for i in range(1, n + 1):
+        t += [f"/-- `{P[i]}`'s own instructions are in this program: no table before them has one at any of their addresses. -/",
+              f"theorem in{i} : ∀ pc x, {tbl(P[i])}.lookup pc = some x → prog pc = some x := by",
+              "  intro pc x h",
+              f"  have apart : ∀ p ∈ {tbl(P[i])}.map (·.1), ((pre{i - 1}.lookup p).isNone) = true := by decide +kernel",
+              "  have none := Option.isNone_iff_eq_none.mp (apart pc (lookup_mem_keys _ pc x h))",
+              f"  have here : pre{i}.lookup pc = some x := by",
+              f"    show (pre{i - 1} ++ {tbl(P[i])}).lookup pc = some x",
+              "    rw [lookup_append_or, none]; exact h",
+              f"  exact {lifted(i, 'here')}", ""]
+    for w, _ in mods:
+        Q = parts_of(w)
+        t += [f"/-- `{w}`'s program (its own instructions and those of what it calls) is part of this one, unchanged. -/",
+              f"theorem has_{w} : ∀ pc x, Code_{w}.prog pc = some x → prog pc = some x := by",
+              "  intro pc x h",
+              f"  have h' : ({' ++ '.join(tbl(q) for q in Q)}).lookup pc = some x := h"] + \
+             (["  simp only [lookup_append_or] at h'"] if len(Q) > 1 else [])
+        ind = "  "
+        for j, q in enumerate(Q):
+            use = "has_kernels" if q == "KCode" else f"in{P.index(q)}"
+            if j + 1 == len(Q):
+                t += [f"{ind}exact {use} pc x h'"]
+            else:
+                t += [f"{ind}cases h{j} : {tbl(q)}.lookup pc with",
+                      f"{ind}| some y =>",
+                      f"{ind}  rw [h{j}] at h'; simp only [Option.some_or, Option.some.injEq] at h'; subst h'",
+                      f"{ind}  exact {use} pc y h{j}",
+                      f"{ind}| none =>",
+                      f"{ind}  rw [h{j}] at h'; simp only [Option.none_or] at h'"]
+                ind += "  "
+        t += [""]
+elif calls:
     # pre0 = the kernels; pre_i = pre_(i-1) ++ the i-th callee's instructions; whole = pre_n ++ this function's
     t += ["def pre0 : List (Nat × Instr × Nat) := KCode.table"]
     for i, (w, _) in enumerate(mods, 1):
@@ -29,11 +93,12 @@ if calls:
 else:
     t += ["/-- Every instruction of the program: this function's (it calls nothing). -/",
           "def whole : List (Nat × Instr × Nat) := table", ""]
-t += ["def prog (pc : Nat) : Option (Instr × Nat) := whole.lookup pc", "",
-      "/-- The addresses the program has an instruction at. -/",
-      "def keys : List Nat := whole.map (·.1)", "",
-      "theorem keys_of : ∀ pc x, prog pc = some x → pc ∈ keys := fun pc x h => lookup_mem_keys whole pc x h", ""]
-if calls:
+if not NESTED:
+    t += ["def prog (pc : Nat) : Option (Instr × Nat) := whole.lookup pc", "",
+          "/-- The addresses the program has an instruction at. -/",
+          "def keys : List Nat := whole.map (·.1)", "",
+          "theorem keys_of : ∀ pc x, prog pc = some x → pc ∈ keys := fun pc x h => lookup_mem_keys whole pc x h", ""]
+if calls and not NESTED:
     def lifted(i, inner):
         """What pre_i holds, the whole program holds: through each later table."""
         for j in range(i + 1, n + 1):

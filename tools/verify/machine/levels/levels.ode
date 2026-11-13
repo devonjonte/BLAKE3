@@ -239,6 +239,96 @@ fn node_out(out, nd, root, plat)
   compress(out, blk, len, t, f)
 }
 
+callee chunk_node at 0xF0000 meets ChunkNode.contract by Proof_chunk_node.chunk_node_meets budget 256
+callee node_out   at 0xD0000 meets NodeOut.contract   by Proof_node_out.node_out_meets     budget 256
+callee ladd       at 0xB0000 meets Ladd.contract      by Proof_ladd.ladd_meets             budget 256
+callee lroot      at 0xC0000 meets Lroot.contract     by Proof_lroot.lroot_meets           budget 256
+
+// The whole hash, by the functions above, each called by its contract: every chunk's node is made
+// (chunk_node), its value added to the levels (node_out, ladd), and the root made (lroot); one chunk alone
+// is the root itself (node_out with ROOT). What hashl is claimed to do is Hashl.contract
+// (../lang/Spec_hashl.lean): the 32 bytes at out become BLAKE3's of the message. One block at a time
+// through the one-block kernels: slow, and every instruction of it under a theorem.
+// `Hash.In` says where the loop is in the message, `Hash.Lv` that the levels are over the chunks done so far
+// (../lang/Lemmas_hashl.lean).
+fn hashl(out, input, len, key, flags, plat)
+  reg p, rem, counter, key, flags, plat
+  meets Hashl.contract(k: Blake3.CV, bytes: List (BitVec 8))
+  uses Lemmas_hashl
+  leave open Hash.last as _u
+  leave open Cv.At.vectors as k0, k1
+  leave by Hashl.exit
+{
+  buf lv[3520]
+  buf nd[120]
+  buf cv[32]
+  u64[lv] = 0
+  var p = input
+  var rem = len
+  var counter = 0
+  while rem > 1024
+    invariant Hash.In(input, len, bytes, p, rem, counter)                  by Hash.In.step   from Hash.In.start
+    invariant Hash.Lv(lv, k, flags, Hash.nodes(k, flags, bytes, counter))   by Hash.Lv.step   from Hash.Lv.start
+    invariant Cv.At(key, k)
+    invariant Region(out, 32)             // the bytes the hash goes to are the program's, through the loop
+    decreases rem
+    open Hash.turn as _u
+    open Cv.At.vectors as k0, k1
+  {
+    copy 32 nd <- key
+    chunk_node(nd, p, 1024, counter, flags, plat)
+      with k; (Hash.chunk bytes counter)
+      keep Hash.In(input, len, bytes, p, rem, counter)
+      keep Hash.Lv(lv, k, flags, Hash.nodes(k, flags, bytes, counter))
+      keep Cv.At(key, k)
+      keep Region(out, 32)
+    node_out(cv, nd, 0, plat)
+      with (Chunk.node k flags counter (Hash.chunk bytes counter))
+      keep Hash.In(input, len, bytes, p, rem, counter)
+      keep Hash.Lv(lv, k, flags, Hash.nodes(k, flags, bytes, counter))
+      keep Cv.At(key, k)
+      keep Region(out, 32)
+    ladd(lv, key, flags, plat, cv)
+      with k; (Hash.nodes k flags bytes counter); (Chunk.node k flags counter (Hash.chunk bytes counter))
+      know Hash.cv_of
+      keep Hash.In(input, len, bytes, p, rem, counter)
+      keep Cv.At(key, k)
+      keep Region(out, 32)
+    p = p + 1024
+    rem = rem - 1024
+    counter = counter + 1
+  }
+  copy 32 nd <- key
+  chunk_node(nd, p, rem, counter, flags, plat)
+    with k; (Hash.chunk bytes counter)
+    keep Hash.In(input, len, bytes, p, rem, counter)
+    keep Hash.Lv(lv, k, flags, Hash.nodes(k, flags, bytes, counter))
+    keep Cv.At(key, k)
+    keep Region(out, 32)
+  if counter == 0 {
+    node_out(out, nd, ROOT, plat)
+      with (Chunk.node k flags counter (Hash.chunk bytes counter))
+      know Hash.one
+  } else {
+    node_out(cv, nd, 0, plat)
+      with (Chunk.node k flags counter (Hash.chunk bytes counter))
+      keep Hash.In(input, len, bytes, p, rem, counter)
+      keep Hash.Lv(lv, k, flags, Hash.nodes(k, flags, bytes, counter))
+      keep Cv.At(key, k)
+      keep Region(out, 32)
+    ladd(lv, key, flags, plat, cv)
+      with k; (Hash.nodes k flags bytes counter); (Chunk.node k flags counter (Hash.chunk bytes counter))
+      know Hash.cv_of
+      know Hash.room
+      keep Hash.In(input, len, bytes, p, rem, counter)
+      keep Cv.At(key, k)
+      keep Region(out, 32)
+    lroot(out, lv, key, flags, plat)
+      with k; ((Hash.nodes k flags bytes counter).push (Chunk.node k flags counter (Hash.chunk bytes counter)))
+      know Hash.many
+  }
+}
+
 def fill_ptrs(base, shift, count) {
   i = 0
   while i < count {

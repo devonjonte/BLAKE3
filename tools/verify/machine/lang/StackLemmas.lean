@@ -17,6 +17,10 @@ def Stack.count (cvs : List Blake3.CV) : BitVec 64 := BitVec.ofNat 64 cvs.length
 theorem Cv.At.vectors {m : Mem} {a : BitVec 64} {cv : Blake3.CV} (h : Cv.At m a cv) :
     ∃ v0 v1 : V, Vec m a v0 ∧ Vec m (a + 16#64) v1 ∧ words8 v0 v1 = cv := h
 
+/-- Two vectors written one after the other are the chaining value of their eight words. -/
+theorem Cv.At.intro {m : Mem} {a : BitVec 64} {cv : Blake3.CV} {v0 v1 : V} (h0 : Vec m a v0) (h1 : Vec m (a + 16#64) v1)
+    (hw : words8 v0 v1 = cv) : Cv.At m a cv := ⟨v0, v1, h0, h1, hw⟩
+
 theorem Cv.At.frame {m m' : Mem} {a : BitVec 64} {cv : Blake3.CV} (h : Cv.At m a cv)
     (same : ∀ x : BitVec 64, x - a < 32#64 → m' x = m x) : Cv.At m' a cv := by
   obtain ⟨v0, v1, h0, h1, hw⟩ := h

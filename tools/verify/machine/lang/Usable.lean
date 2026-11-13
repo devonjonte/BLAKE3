@@ -10,6 +10,7 @@ import Lemmas_ladd
 import Spec_nodeout
 import Spec_pad
 import Spec_chunknode
+import Spec_hashl
 import Spec_adler32
 open X86
 
@@ -173,3 +174,10 @@ theorem ChunkNode.usable : (ChunkNode.contract 0x100000#64 0x200000#64 0#64 0#64
   · simp only [ChunkNode.contract]; decide
   · simp only [ChunkNode.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
     exact ⟨zeroMem_cv _, zeroMem_region _ _, trivial, fun i h => absurd h (by simp)⟩
+
+theorem Hashl.usable : (Hashl.contract 0x300000#64 0x100000#64 0#64 0x200000#64 0#64 5#64 zeroCv []).Usable := by
+  refine ⟨0x7ff00000#64, zeroMem, zeroMem_region _ _, ?_, ?_, ?_⟩
+  · simp only [Hashl.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, Abi.AllApart, Abi.Apart]; decide
+  · simp only [Hashl.contract]; decide
+  · simp only [Hashl.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
+    exact ⟨zeroMem_region _ _, zeroMem_cv _, trivial, fun i h => absurd h (by simp)⟩

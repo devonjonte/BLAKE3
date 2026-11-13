@@ -75,16 +75,17 @@ def contracts_of(text):
                                "code": m.group(6) or m.group(1)}       # whose instructions stand there (Code_X.lean)
             kept.append(""); continue
         # in a function's body: a call of such a function, then what the prover needs at it, one a line:
-        # `with TERM; TERM` (what its contract is stated for besides the arguments) and `keep CLAUSE` (what
-        # still holds after it, besides what its contract promises)
+        # `with TERM; TERM` (what its contract is stated for besides the arguments), `know LEMMA` (facts to
+        # have at hand before it: what its contract asks, said in the contract's words) and `keep CLAUSE`
+        # (what still holds after it, besides what its contract promises)
         m = re.match(r"^(?:return\s+|(?:var\s+)?\w+\s*=\s*)?(\w+)\(.*\)$", s)
         if fn and where is None and m and m.group(1) in own:
-            out[fn]["calls"].append({"callee": m.group(1), "with": [], "keep": []}); kept.append(line); continue
+            out[fn]["calls"].append({"callee": m.group(1), "with": [], "keep": [], "know": []}); kept.append(line); continue
         word0 = s.split(None, 1)[0] if s else ""
-        if fn and where is None and word0 in ("with", "keep") and out[fn]["calls"]:
+        if fn and where is None and word0 in ("with", "keep", "know") and out[fn]["calls"]:
             rest = s[len(word0):].strip()
             if word0 == "with": out[fn]["calls"][-1]["with"] = [x.strip() for x in rest.split(";")]
-            else: out[fn]["calls"][-1]["keep"].append(rest)
+            else: out[fn]["calls"][-1][word0].append(rest)
             kept.append(""); continue
         if fn and re.match(r"^while\b", s) and not s.endswith("{"):
             out[fn]["loops"].append([]); where = out[fn]["loops"][-1]; kept.append(line); continue

@@ -194,6 +194,18 @@ name = "Code_chunk_node"
 [[lean_lib]]
 name = "Proof_chunk_node"
 [[lean_lib]]
+name = "Spec_hashl"
+[[lean_lib]]
+name = "Lemmas_hashl"
+[[lean_lib]]
+name = "Example_hashl"
+[[lean_lib]]
+name = "Code_hashl"
+[[lean_lib]]
+name = "Proof_hashl"
+[[lean_lib]]
+name = "Meets_hashl_bytes"
+[[lean_lib]]
 name = "Spec_adler32"
 srcDir = "../experiments/adler32"
 [[lean_lib]]

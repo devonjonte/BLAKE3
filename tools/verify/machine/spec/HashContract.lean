@@ -27,6 +27,6 @@ AVX-512) chooses the kernels and changes nothing else. -/
 def Hash.byteContract (out inp len key plat : BitVec 64) (msg : List (BitVec 8)) : Bytes.Contract where
   args := [out, inp, len, key, 0#64, plat]
   accepts := len.toNat = msg.length ∧ (plat = 3#64 ∨ plat = 4#64 ∨ plat = 5#64)
-  reads := [(Bytes.plain msg.length).keeps inp msg, (Bytes.plain 32).keeps key Blake3.ivBytes]
+  reads := [(Bytes.plain 32).keeps key Blake3.ivBytes, (Bytes.plain msg.length).keeps inp msg]
   updates := [(Bytes.plain 32).fills out (Blake3.hashBytes msg)]
   returns := fun _ => True

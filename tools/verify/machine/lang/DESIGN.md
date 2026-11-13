@@ -359,7 +359,12 @@ The statement a user wants is about the function they call. It is written (`spec
 specification's `IV` at `key`, the 32 bytes at `out` become `Blake3.hashBytes` of the message (C2SP's
 `Blake3.hash`), and the message and the key are unchanged.
 
-**It is not proved.** `hash` in `hasher.ode` is the whole one-shot hash (810 instructions; the functions of
+**Since November 13 a hash is proved against it: `hashl`** (`../levels/levels.ode`; the section after this
+one). `hashl_meets_bytes` (`Meets_hashl_bytes.lean`): for any message shorter than 2^64 - 1024 bytes the
+assembled code meets `Hash.byteContract`. It is the slow hash, one block at a time; what follows is about
+`hash`, the fast one, which calls the many-input kernels.
+
+**`hash` is not proved.** `hash` in `hasher.ode` is the whole one-shot hash (810 instructions; the functions of
 `hasher.ode` proved above are 306, and on the levels `ladd` and `lroot` are 202 more). What exists is the
 first of the blame verdicts, one level up from the machine: `HashTry.lean` runs the *source* by the
 language's meaning (`Sem.lean`), each kernel being what its contract says (one block, or many inputs of
@@ -403,9 +408,34 @@ wholly proved; the many-input kernels come in behind contracts afterwards.
   puts it (the node's `h` starts as the key). Ode's own convention (below) lifts this; it is not needed
   for a slow proved hash, and it changes no source and no contract when it comes.
 
-Parked on Sam's word (November 12, late): making x86-64 theorems speak of the object's bytes (a decoder
-to read and trust), and removing `bv_decide`'s axioms (a dependency on another project's library, or
-larger proofs). Neither is on the way to the whole hash.
+**Done (November 13):** `hashl_meets` and `hashl_meets_bytes`, with `pad`, `chunk_node` and `node_out`
+proved on the way; `../levels/README.md` has the numbers and what it took. What the theorem is not: about
+the crate's Rust (what users run today); about AArch64; about time or an observer; fast.
+
+Warts met on the way, each to remove:
+- `split_ands` does not take apart a conjunction nested on the left, so a bytes piece (`True ∧ Bytes.At`)
+  is found only where it is the last of `reads`: the contract's order of pieces should not matter.
+- The generator does not follow a frame set on a boundary (`align`): `hashl`'s levels are not aligned.
+- Every call lists by hand what still holds after it (`keep`), four lines a call in `hashl`: what the
+  callee's contract does not let it touch should be kept without being said.
+- The levels hold fewer than 2^54 chunks, so the theorem stops 1024 bytes short of 2^64.
+- A side condition's solver had ten seconds, and a proof accepted alone was refused in a run of everything
+  at once: the memory tactics now give it 120 (`bv_side`). A proof that passes or fails with the machine's
+  load is a fault of the proof system, and this is a patch, not its removal.
+
+**After the whole hash** (Sam, November 13): making x86-64 theorems speak of the object's bytes (a decoder
+in Lean: read by the sceptic in place of trust in a disassembler and a script, and a component other
+projects could share), and removing `bv_decide`'s axioms (later: days of work with an unknown end; the
+gain in checking time is real but not where the loop's time goes). **First, anything that greatly
+accelerates our own development cycle** (done: `../prove_all.py`, the audits by examples first,
+`trace_proof.py`).
+
+**An outside project's first function** (Devon Jonte, with Zooko, November 13): Adler-32
+(`../experiments/adler32/`), proved with the generator plus three additions of his (a variant that is an
+expression, a byte load's value in a read-only loop, a saved register at offset zero). What it showed:
+`a >= MOD` costs a jump that `a > MOD - 1` does not (the compiler's lowering of `>=`: to fix, the coder
+should not have to know); wrong versions that only time out get no verdict (examples would refute them in
+seconds: the audits ask them first now).
 
 ## Two designs of one thing, side by side: the stack and the levels (Sam, November 12)
 

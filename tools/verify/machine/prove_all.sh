@@ -4,6 +4,10 @@
 #   x86-64 (our machine model, lang/):  hex, merge (and its checked entry), push, merge_sse, add (by its
 #       callees' contracts; then with merge_sse swapped in behind merge's contract), merge_steps
 #       and ladd and lroot (the tree's levels, another design than the stack: levels/levels.ode; its model first)
+#       and the whole hash on the levels, by small functions each called by its contract: pad, chunk_node,
+#       node_out, hashl (hashl_meets); "hash-bytes" is hashl against Hash.byteContract, the statement a user
+#       reads (hashl_meets_bytes: the function computes BLAKE3)
+#       and adler32, an outside project's function (experiments/adler32, Devon Jonte's)
 #   AArch64 (Google DeepMind's model, arm/; fetched at the commit arm/lakefile.toml names):
 #       hex_neon (the kernel), push (the same source function, printed for AArch64)
 #   "direct": the compiler's proofs of push and merge again, about the contracts in bytes themselves, with
@@ -17,46 +21,7 @@
 #
 # Each line of the result is one function: what Lean checked, and how long it took here.
 # Needs python3, cc or clang, llvm-objdump (OBJDUMP), lake (elan). AUDIT=1 also runs the audits (minutes more).
-set -u
+# The steps run side by side, each chain in a copy of lang/ of its own (prove_all.py says how, and what
+# "generated" checks); SERIAL=1 runs them in place, one after another.
 here=$(cd "$(dirname "$0")" && pwd)
-OBJDUMP=${OBJDUMP:-llvm-objdump}; export OBJDUMP
-fails=0
-run() {  # run LABEL DIR COMMAND...
-  label=$1; dir=$2; shift 2
-  start=$(date +%s)
-  if (cd "$here/$dir" && "$@") > "$here/prove_all.$label.log" 2>&1; then verdict=checked; else verdict="NOT checked (prove_all.$label.log)"; fails=$((fails + 1)); fi
-  printf '%-28s %-12s %4s s   %s\n' "$label" "$dir/" "$(( $(date +%s) - start ))" "$verdict"
-  case "$label" in audit-*) echo "    $(grep -E "rejected|refuted by an example" "$here/prove_all.$label.log" | tail -n 1)";; esac
-}
-if [ "${AUDIT:-0}" = 1 ]; then hexaudit=1; else hexaudit=0; fi
-run hex          lang env MUTANTS=$hexaudit ./prove.sh
-run merge        lang ./prove_fn.sh merge 0x60000
-run push         lang ./prove_fn.sh push 0x70000
-run merge_sse    lang ./prove_fn.sh merge_sse 0x90000
-run add-and-swap lang ./swap.sh
-run merge_steps  lang ./prove_fn.sh merge_steps 0xA0000
-run levels-model levels python3 model.py 3000
-run ladd         lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh ladd 0xB0000
-run lroot        lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh lroot 0xC0000
-run node_out     lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh node_out 0xD0000
-run pad          lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh pad 0xE0000
-run chunk_node   lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde ./prove_fn.sh chunk_node 0xF0000
-run any-machine  lang sh -c 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes UsableBytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ] && grep -q "usable_bytes. depends on axioms" any.log'
-run direct       lang sh -c 'python3 direct_fn.py push Push.contract Push.byteContract 64 StackAsBytes Cv.opens Stack.opens && python3 direct_fn.py merge Merge.contract Merge.byteContract 256 MergeAsBytes Cv.opens Stack.opens Merge.merged_eq && lake build Direct_push Direct_merge > direct.log 2>&1 && ! grep -q -E "error|sorry" direct.log && grep -q "Direct_push.push_meets. depends on axioms" direct.log && grep -q "Direct_merge.merge_meets. depends on axioms" direct.log'
-run hash-tried   lang sh -c 'lake build TrySem HasherOde HashContract > /dev/null 2>&1; lake env lean HashTry.lean > hashtry.log 2>&1 && grep -q "104 examples meet it, 0 do not" hashtry.log && grep -q "holds on 104" hashtry.log'
-run hex_neon     arm  env MUTANTS=$hexaudit ./prove_arm.sh
-run push-aarch64 arm  env MUTANTS=$hexaudit ./prove_arm_fn.sh
-if [ "${AUDIT:-0}" = 1 ]; then
-  run audit-merge  lang python3 mutants_fn.py "${JOBS:-6}"
-  run audit-push   lang python3 mutants_code.py push "${JOBS:-6}"
-  run audit-add    lang python3 mutants_code.py add "${JOBS:-6}"
-  run audit-steps  lang python3 mutants_code.py merge_steps "${JOBS:-6}"
-  run audit-ladd   lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py ladd "${JOBS:-6}"
-  run audit-lroot  lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py lroot "${JOBS:-6}"
-  run audit-node_out lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py node_out "${JOBS:-6}"
-  run audit-pad    lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py pad "${JOBS:-6}"
-  run audit-chunk_node lang env SOURCE=../levels/levels.ode ODEMOD=LevelsOde python3 mutants_code.py chunk_node "${JOBS:-6}"
-  run audit-spec   lang python3 mutants_spec.py "${JOBS:-6}"
-  run audit-hash   lang python3 mutants_hash.py
-fi
-[ "$fails" = 0 ] && echo "all checked" || { echo "$fails NOT checked"; exit 1; }
+exec python3 "$here/prove_all.py"
