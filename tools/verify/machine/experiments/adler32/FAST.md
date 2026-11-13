@@ -145,3 +145,12 @@ retries. Inspect every small/unaligned cost. Neither a native pass nor the
 checked natural-number bounds establish the optimized machine theorem. Full
 80-cell, real integration and adverse/cold/after-work measurements remain later
 gates for a promising, proved design.
+
+[Delivered result at `dd83b8e4`](https://github.com/devonjonte/bench-hashes/tree/data/2026-11-13/ode-adler32-alignment-raw4096):
+128 quiet runs; both controls level on each CPU. The alignment peel fixes the
+old offset-one Xeon 1 MiB cost. The fixed-block caller is level with LF512 at
+4 KiB and loses several bulk cells; 16-byte costs remain in both designs.
+Next isolate normalization frequency and tiny entry layout before choosing the
+kernel to prove. Sam's explicit assumed-contract caller machinery is merged;
+its use must keep the missing wide-kernel theorem visible. Static-image/read-only
+overlap needs her contract decision (`WIDE-FORMS.md`).

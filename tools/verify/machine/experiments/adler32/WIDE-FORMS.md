@@ -6,8 +6,12 @@ Most of the aligned Xeon gain is already in libdeflate's internal 512-bit
 kernel. The new u32 reductions help 16/64/256-byte probe calls, while 16-byte
 calls and unaligned bulk still lose. EPYC bulk is mostly level.
 
-The next design must earn its proof/model work with stronger measurements.
-This list costs that work; it requests no shared-model change yet.
+The [alignment/raw-block follow-up](https://github.com/devonjonte/bench-hashes/tree/data/2026-11-13/ode-adler32-alignment-raw4096)
+at `dd83b8e4` supplies 128 quiet runs, with both same-code controls level on each
+CPU. Alignment fixes the old offset-one Xeon 1 MiB cost (32.98→15.99 μs), while
+16-byte costs remain. The fixed-block caller is level with LF512 at 4 KiB and
+slower in several bulk cells. Next, isolate its normalization/entry costs before
+requesting wide-model work. No optimized machine theorem exists.
 
 ## Actual forms in the measured `probe512_r32`
 
@@ -72,11 +76,12 @@ wide weighted reduction or scalar modular division. It still needs tests of
 unaligned loads and a competitive measurement, and its caller still needs
 competitive small/tail handling. Both existing Ode printers agree exactly on
 the source's assembly: 309 instructions, 1901 text bytes and 128 constant bytes.
-The 13-engine validation passes under SDE, including raw fixed anchors,
-all-alignment boundaries, canonical-zero sums and read-only guards. A wrong
-weighted shift fails a fixed anchor; deliberate overread faults. Physical
-validation and timing follow at the declared candidate source. The machine
-theorem remains open.
+The 13-engine validation passes under SDE and on both CPUs, including raw fixed
+anchors, the new callers' all-alignment boundaries, canonical-zero sums and
+read-only guards. A wrong weighted shift fails a fixed anchor; deliberate
+overread faults. All four physical layouts validate. The measured whole caller
+is level with LF512 at 4 KiB; EPYC aligned 64 KiB loses (292.07→426.34 ns).
+The kernel and caller remain UNVERIFIED.
 
 The assembled source uses these exact vector forms (Intel destination first):
 
@@ -118,7 +123,14 @@ The theorem names the instructions and those bytes at their fixed image address.
 One artifact check binds final linked text AND read-only data, including resolved
 relocations, to the theorem's image. Constants constructed by instructions are an
 alternative to measure if that simplifies the binding. The current source still
-uses its two 64-byte tables; that image-binding obligation remains open.
+uses its two 64-byte tables. The experimental image observer captures each
+linked body and verifies both tables against source values; a planted table-byte
+fault fails. Binding those bytes to the theorem's own image remains open.
+
+[Read-only overlap question for Sam](https://github.com/servil-software-factory/BLAKE3/issues/361#issuecomment-6850800408):
+`Abi.Meets` currently applies `AllApart` to all read pieces too. Separate pieces
+for input and tables would exclude valid inputs sharing table bytes. The new
+kernel/image contract must preserve the original arbitrary-readable-input scope.
 
 Recommended division: Devon owns the raw-sums candidate, algebra, caller and
 artifact checks. Sam chooses the shared vector-state/cell/proof-generator design
