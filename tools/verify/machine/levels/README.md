@@ -156,9 +156,71 @@ SSE4.1 kernel is called as well; an example refutes it (the root is wrong), the 
 A changed program that the examples refute and Lean does not refuse within its time is counted as neither.
 
 **Not done:** the contracts in bytes (`../spec/LevelsContract.lean`, in the same words) joined to these;
-both functions on AArch64; `hash2` calling `ladd` and `lroot` by their contracts (it has their text a
-second time, as a macro), and with that the proof of the whole hash on the levels, which then needs the
-chunks' values under a contract too.
+both functions on AArch64.
+
+## The whole hash, proved: `hashl` (November 13)
+
+`hash2` above has `ladd`'s and `lroot`'s text a second time, as macros, and calls the many-input kernels.
+`hashl` is the whole hash another way: small functions, each one loop at most, each called by its contract
+and by nothing else, one block at a time through the two one-block kernels (which are proved in `../one/`).
+Slow, and every instruction of it under a theorem.
+
+    hashl(out, input, len, key, flags, plat)        the whole hash
+      chunk_node(nd, input, len, counter, flags, plat)   a chunk's node, as the specification has it
+        pad(block, src, n)                               the last block, zero-padded
+      node_out(out, nd, root, plat)                      a node's compression: its value, or the root's output
+      ladd(lv, key, flags, plat, cv)                     a chunk's value added to the levels
+      lroot(out, lv, key, flags, plat)                   the root of two chunks or more
+
+**The theorem** (`../lang/Proof_hashl.lean`, written by the compiler; the contract is `../lang/Spec_hashl.lean`):
+
+    hashl_meets : ∀ out input len key flags plat k bytes,
+      Abi.Meets Code_hashl.prog 0x40000 (Hashl.contract out input len key flags plat k bytes)
+
+For any message shorter than 2^64 - 1024 bytes, any key and any mode's flags below 256: with the message's
+bytes at `input` and the key at `key`, the 32 bytes at `out` become the first eight words of the output of
+the root of the specification's tree over the message's chunks (`Hash.words`: `Blake3.rootWords
+(Blake3.tree k mode (Blake3.chunksOf k mode message))`); the message and the key are unchanged; nothing
+else is written but the function's own stack, 4608 bytes at most. `Code_hashl.prog` holds every instruction
+that can run: `hashl`'s 108, the five functions' 380 and the two kernels'.
+
+And in the words a user reads (`../lang/Meets_hashl_bytes.lean`; `../spec/HashContract.lean` names no machine):
+
+    hashl_meets_bytes : msg.length < 2 ^ 64 - 1024 →
+      Abi.Meets Code_hashl.prog 0x40000 (Abi.ofBytes (Hash.byteContract out inp len key plat msg) 4608#64)
+
+with the specification's IV at `key` and no flags, the 32 bytes at `out` become `Blake3.hashBytes msg`:
+C2SP's `Blake3.hash` of the message.
+
+| function | instructions | Lean's check | examples that meet its contract | each instruction made a no-op |
+|---|---|---|---|---|
+| `pad` | 39 | 14 to 22 s | 5 (and 2 refused as not examples) | 38 of 39 refused (36 by an example, 2 by the proof); 1 accepted |
+| `node_out` | 58 | 158 to 164 s | 5 (2) | 56 of 58 (51, 5); 2 accepted |
+| `chunk_node` | 81 | 121 to 186 s | 9 (2) | 81 of 81 (74, 7) |
+| `ladd` | 95 | 194 to 233 s | 8 (1) | 94 of 95 (88, 6); 1 accepted |
+| `lroot` | 107 | 269 to 406 s | 7 (1) | 104 of 107 (98, 6); 3 accepted |
+| `hashl` | 108 | 342 s | 7 (1): 0 to 5120 bytes, both kernels, keyed | see `../prove_all.sh`'s `audit-hashl` |
+
+The accepted ones are each a move of a value its register still holds (the compiler does not know what a
+register holds).
+
+What it took beyond `ladd` and `lroot`:
+- **The node in memory is the specification's own** (`Blake3.Node`: `h`, the block, the counter, the block
+  length, the flags; `../lang/Spec_node.lean`). `chunk_node`'s contract is `Blake3.chunkNode` word for word;
+  whether the chunk is the root is decided where it is known, by `hashl`.
+- **Three facts about the specification alone** (`../alg/Chunk.lean`, `../spec/HashBytes.lean`): a chunk's
+  node is a fold over its blocks; BLAKE3's 32 bytes are the bytes of the root's first eight output words;
+  `Blake3.hashBytes` is those bytes.
+- **A message's bytes in memory are the words the specification reads** (`../lang/Lemmas_block.lean`), once,
+  for every function that hashes bytes.
+- **Bytes as a third kind of cell** (`../lang/Cells.lean`), for `pad`.
+- **The generator** learned: calls and conditions after a loop; a callee that calls functions of ours; facts
+  a call needs from a lemma named at it (`know`); a region kept across a call.
+
+What it does not say: nothing about time or what an observer sees (no "quietly" theorem for the hash);
+x86-64 only; one block at a time (the many-input kernels are not behind Lean contracts yet); the frame is
+not on a boundary (the generator does not follow an aligned frame yet); the limits of everything here
+(`bv_decide`'s axioms, the listing read by a disassembler and a script).
 
 ## The contracts in bytes (`../spec/LevelsContract.lean`; no theorem about these yet)
 

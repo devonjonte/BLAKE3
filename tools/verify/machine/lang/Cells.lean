@@ -183,6 +183,12 @@ theorem X86.Quad.frame {m m' : Mem} {a v : BitVec 64} (h : Quad m a v) (same : â
 
 /-! ## The tactics -/
 
+/-- The solver for what a memory lemma asks on the side (two cells apart, an offset inside a region):
+bit-vector arithmetic by `bv_decide`, with time enough on a busy machine. Its own limit is ten seconds; `hashl`'s
+proof, accepted when checked alone, was refused at one such side condition in a run of everything at once
+(twenty chains side by side), which this limit explains. -/
+macro "bv_side" : tactic => `(tactic| bv_decide (config := { timeout := 120 }))
+
 /-- A fact that is several facts joined by "and", taken apart (cells stay whole). -/
 syntax "split_ands " ident : tactic
 macro_rules
@@ -200,16 +206,16 @@ macro "mem_disch" : tactic => `(tactic| first
   | ((repeat (with_reducible (first | apply owned8_put64 | apply owned8_put128 | apply owned16_put64 | apply owned16_put128 | apply owned8_put8 | apply owned16_put8 | apply owned1_put8 | apply owned1_put64 | apply owned1_put128)))
      first
        | with_reducible assumption
-       | ((with_reducible apply owned1_region (by assumption)); bv_decide)
-       | ((with_reducible apply owned1_region0 (by assumption)); bv_decide)
+       | ((with_reducible apply owned1_region (by assumption)); bv_side)
+       | ((with_reducible apply owned1_region0 (by assumption)); bv_side)
        | ((with_reducible apply byte_owned); with_reducible assumption)
-       | ((with_reducible apply owned8_region (by assumption)); bv_decide)
-       | ((with_reducible apply owned16_region (by assumption)); bv_decide)
-       | ((with_reducible apply owned8_region0 (by assumption)); bv_decide)
-       | ((with_reducible apply owned16_region0 (by assumption)); bv_decide)
+       | ((with_reducible apply owned8_region (by assumption)); bv_side)
+       | ((with_reducible apply owned16_region (by assumption)); bv_side)
+       | ((with_reducible apply owned8_region0 (by assumption)); bv_side)
+       | ((with_reducible apply owned16_region0 (by assumption)); bv_side)
        | ((with_reducible apply vec_owned); with_reducible assumption)
        | ((with_reducible apply quad_owned); with_reducible assumption))
-  | bv_decide)
+  | bv_side)
 
 /-- Run a function's instructions on a state that is written out, memory in cells. -/
 macro "run_fn" "[" hs:Lean.Parser.Tactic.simpLemma,* "]" : tactic => `(tactic|
@@ -242,16 +248,16 @@ macro "mem_fact" : tactic => `(tactic| ((try simp only [add_sub_lit, BitVec.add_
   | with_reducible apply byte_put8_far
   | with_reducible apply byte_put64_far
   | with_reducible apply byte_put128_far
-  | bv_decide)))
+  | bv_side)))
 
 /-- A region is still owned under any puts. -/
 macro "mem_region" : tactic => `(tactic| ((repeat (with_reducible (first | apply region_put64 | apply region_put128 | apply region_put8))); with_reducible assumption))
 
 /-- The same for a part of a region at hand (the stack lent to a callee is part of the frame). -/
-macro "mem_subregion" : tactic => `(tactic| ((try simp only [add_sub_lit, BitVec.add_assoc, BitVec.add_zero, BitVec.reduceAdd, BitVec.reduceSub]); (repeat (with_reducible (first | apply region_put64 | apply region_put128 | apply region_put8))); first | with_reducible assumption | ((with_reducible apply region_sub (by assumption)); bv_decide) | ((with_reducible apply region_prefix (by assumption)); bv_decide)))
+macro "mem_subregion" : tactic => `(tactic| ((try simp only [add_sub_lit, BitVec.add_assoc, BitVec.add_zero, BitVec.reduceAdd, BitVec.reduceSub]); (repeat (with_reducible (first | apply region_put64 | apply region_put128 | apply region_put8))); first | with_reducible assumption | ((with_reducible apply region_sub (by assumption)); bv_side) | ((with_reducible apply region_prefix (by assumption)); bv_side)))
 
 /-- A byte away from every put is what it was. -/
-macro "mem_away" : tactic => `(tactic| simp (disch := bv_decide) only [put64_away, put128_away, put8_away])
+macro "mem_away" : tactic => `(tactic| simp (disch := bv_side) only [put64_away, put128_away, put8_away])
 
 open Lean Elab Tactic Meta in
 /-- Run a tactic on a goal that is a proposition; leave any other goal (a value still to be found) alone. -/
@@ -266,7 +272,7 @@ macro "mem_auto" : tactic => `(tactic| skip_unless_prop (first
   | mem_region
   | (mem_subregion; done)
   | (intros; mem_away; done)
-  | bv_decide))
+  | bv_side))
 
 open Lean Elab Tactic Meta in
 /-- `have_by h := LEMMA`: the lemma's conclusion as the new fact `h`, each of its hypotheses settled in

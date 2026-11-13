@@ -58,7 +58,9 @@ CHAINS = [
     [("node_out", "lang", fn("node_out", "0xD0000", True), False), ("audit-node_out", "lang", audit("node_out", True), True)],
     [("pad", "lang", fn("pad", "0xE0000", True), False), ("audit-pad", "lang", audit("pad", True), True)],
     [("chunk_node", "lang", fn("chunk_node", "0xF0000", True), False), ("audit-chunk_node", "lang", audit("chunk_node", True), True)],
-    [("hashl", "lang", fn("hashl", "0x40000", True), False), ("audit-hashl", "lang", audit("hashl", True), True)],
+    [("hashl", "lang", fn("hashl", "0x40000", True), False),
+     ("hash-bytes", "lang", 'lake build Meets_hashl_bytes > hashbytes.log 2>&1 && ! grep -q -E "error|sorry" hashbytes.log && grep -q "hashl_meets_bytes. depends on axioms" hashbytes.log', False),
+     ("audit-hashl", "lang", audit("hashl", True), True)],
     [("any-machine", "lang", 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes UsableBytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ] && grep -q "usable_bytes. depends on axioms" any.log', False)],
     [(None, "lang", fn("push", "0x70000") + " && " + fn("merge", "0x60000"), False),
      ("direct", "lang", 'python3 direct_fn.py push Push.contract Push.byteContract 64 StackAsBytes Cv.opens Stack.opens && python3 direct_fn.py merge Merge.contract Merge.byteContract 256 MergeAsBytes Cv.opens Stack.opens Merge.merged_eq && lake build Direct_push Direct_merge > direct.log 2>&1 && ! grep -q -E "error|sorry" direct.log && grep -q "Direct_push.push_meets. depends on axioms" direct.log && grep -q "Direct_merge.merge_meets. depends on axioms" direct.log', False)],
@@ -68,7 +70,7 @@ CHAINS = [
     [("audit-spec", "lang", f"python3 mutants_spec.py {AJ}", True)],
     [(None, "lang", "python3 odec.py hasher.ode HasherOde.lean", True), ("audit-hash", "lang", "python3 mutants_hash.py", True)],
 ]
-ORDER = ["hex", "merge", "push", "merge_sse", "add-and-swap", "merge_steps", "levels-model", "ladd", "lroot", "node_out", "pad", "chunk_node", "hashl",
+ORDER = ["hex", "merge", "push", "merge_sse", "add-and-swap", "merge_steps", "levels-model", "ladd", "lroot", "node_out", "pad", "chunk_node", "hashl", "hash-bytes",
          "any-machine", "direct", "hash-tried", "hex_neon", "push-aarch64",
          "audit-merge", "audit-push", "audit-add", "audit-steps", "audit-ladd", "audit-lroot", "audit-node_out", "audit-pad", "audit-chunk_node", "audit-hashl",
          "audit-spec", "audit-hash"]
@@ -114,6 +116,11 @@ def run_chain(chain):
             for label, _, command, _ in chain:
                 if alive:
                     ok, secs = run_step(label, cwd, command)
+                    if not ok and copy:
+                        # the copy goes with the chain: what Lean said in it stays, beside the step's own log
+                        for f in sorted(os.listdir(cwd)):
+                            if f.endswith(".build.log"):
+                                shutil.copy(os.path.join(cwd, f), os.path.join(HERE, f"prove_all.{label or 'prepare'}.{f}"))
                 else:
                     ok, secs = False, 0.0
                     with open(os.path.join(HERE, f"prove_all.{label or 'prepare'}.log"), "w") as log:

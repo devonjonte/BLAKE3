@@ -203,3 +203,5 @@ name = "Example_hashl"
 name = "Code_hashl"
 [[lean_lib]]
 name = "Proof_hashl"
+[[lean_lib]]
+name = "Meets_hashl_bytes"

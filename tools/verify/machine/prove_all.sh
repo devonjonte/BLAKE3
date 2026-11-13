@@ -4,6 +4,9 @@
 #   x86-64 (our machine model, lang/):  hex, merge (and its checked entry), push, merge_sse, add (by its
 #       callees' contracts; then with merge_sse swapped in behind merge's contract), merge_steps
 #       and ladd and lroot (the tree's levels, another design than the stack: levels/levels.ode; its model first)
+#       and the whole hash on the levels, by small functions each called by its contract: pad, chunk_node,
+#       node_out, hashl (hashl_meets); "hash-bytes" is hashl against Hash.byteContract, the statement a user
+#       reads (hashl_meets_bytes: the function computes BLAKE3)
 #   AArch64 (Google DeepMind's model, arm/; fetched at the commit arm/lakefile.toml names):
 #       hex_neon (the kernel), push (the same source function, printed for AArch64)
 #   "direct": the compiler's proofs of push and merge again, about the contracts in bytes themselves, with
