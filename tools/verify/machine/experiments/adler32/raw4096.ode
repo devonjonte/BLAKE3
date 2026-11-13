@@ -1,0 +1,64 @@
+// UNVERIFIED source-kernel probe. No optimized machine theorem yet.
+// Input RDI: exactly 4096 readable bytes, any alignment, unchanged.
+// RAX returns (raw weighted byte sum << 32) | raw byte sum.
+// The two raw sums fit u32; the caller owns seed, reductions and tails.
+// All vector registers and RCX are caller-saved; no stack except the return.
+
+data weights4096 = 0x3d3e3f40, 0x393a3b3c, 0x35363738, 0x31323334, 0x2d2e2f30, 0x292a2b2c, 0x25262728, 0x21222324, 0x1d1e1f20, 0x191a1b1c, 0x15161718, 0x11121314, 0x0d0e0f10, 0x090a0b0c, 0x05060708, 0x01020304
+data ones4096 = 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x01010101
+
+kernel raw4096 {
+  def stripe(s, t, h, off) {
+    vpaddd $h, $h, $s
+    vmovdqu64 zmm14, zmmword ptr [rdi + $off]
+    vpdpbusd $t, zmm14, zmm12
+    vpdpbusd $s, zmm14, zmm13
+  }
+  def reduce(k, out) {
+    vextracti64x4 ymm14, zmm$k, 1
+    vpaddd ymm$k, ymm$k, ymm14
+    vextracti128 xmm14, ymm$k, 1
+    vpaddd xmm$k, xmm$k, xmm14
+    vpshufd xmm14, xmm$k, 0x4e
+    vpaddd xmm$k, xmm$k, xmm14
+    vpshufd xmm14, xmm$k, 0xb1
+    vpaddd xmm$k, xmm$k, xmm14
+    vmovd $out, xmm$k
+  }
+  for k in 0..12 {
+    vpxord zmm$k, zmm$k, zmm$k
+  }
+  vmovdqa64 zmm12, zmmword ptr [rip + #weights4096]
+  vmovdqa64 zmm13, zmmword ptr [rip + #ones4096]
+  for k in 0..16 {
+    stripe(zmm0, zmm4, zmm8, $k*256)
+    stripe(zmm1, zmm5, zmm9, $k*256 + 64)
+    stripe(zmm2, zmm6, zmm10, $k*256 + 128)
+    stripe(zmm3, zmm7, zmm11, $k*256 + 192)
+  }
+  // B = sum(t) + 256*sum(h) + 128*(s0+s1) + 64*(s0+s2).
+  vpaddd zmm8, zmm8, zmm9
+  vpaddd zmm10, zmm10, zmm11
+  vpaddd zmm8, zmm8, zmm10
+  vpslld zmm8, zmm8, 8
+  vpaddd zmm4, zmm4, zmm5
+  vpaddd zmm6, zmm6, zmm7
+  vpaddd zmm4, zmm4, zmm6
+  vpaddd zmm4, zmm4, zmm8
+  vpaddd zmm8, zmm0, zmm1
+  vpslld zmm8, zmm8, 7
+  vpaddd zmm4, zmm4, zmm8
+  vpaddd zmm8, zmm0, zmm2
+  vpslld zmm8, zmm8, 6
+  vpaddd zmm4, zmm4, zmm8
+  // A = sum(s).
+  vpaddd zmm0, zmm0, zmm1
+  vpaddd zmm2, zmm2, zmm3
+  vpaddd zmm0, zmm0, zmm2
+  reduce(0, eax)
+  reduce(4, ecx)
+  shl rcx, 32
+  or rax, rcx
+  vzeroupper
+  ret
+}

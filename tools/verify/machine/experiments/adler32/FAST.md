@@ -4,8 +4,10 @@ Goal: beat the strongest known implementations on the declared CPUs/workloads,
 while keeping the seed-one contract and a checked theorem for the exact Ode code.
 Tracker: https://github.com/servil-software-factory/BLAKE3/issues/377
 
-The original 171-byte Ode implementation remains proved. **There is no optimized
-Ode implementation yet.** `probe.c` is explicitly unverified native C, adapted
+The original 171-byte Ode implementation remains proved. **The optimized whole
+checksum and its machine theorem remain open.** `raw4096.ode` is an assembled,
+UNVERIFIED block-kernel hypothesis, pending executable tests and timing.
+`probe.c` is explicitly unverified native C, adapted
 from the MIT-licensed libdeflate striped-VNNI algorithm to decide which design
 would earn the work needed in Ode and its machine model.
 
@@ -88,5 +90,8 @@ Judge each question's 16 cells together using the shared rule. Retain every
 attempt; busy or missing-load pairs abstain, with at most two whole-pair retries.
 Inspect all small-cell costs before choosing an Ode design. Sampling and flags
 stay explicit; a native result supplies candidate evidence, separate from a
-machine theorem. A fixed 4 KiB straight-line block kernel is a later hypothesis
-that may simplify the proof boundary; it has yet to be implemented or measured.
+machine theorem. A fixed 4 KiB straight-line block kernel may simplify the proof
+boundary. `raw4096.ode` now assembles through the existing source-kernel machinery;
+its two printers agree. Mathematical raw/update bounds check in `Block_adler32`.
+Executable validation, measurement, linked constant-image binding and the optimized
+machine theorem remain open. See `WIDE-FORMS.md` for its exact assembled forms.

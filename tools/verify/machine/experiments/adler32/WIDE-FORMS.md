@@ -56,10 +56,10 @@ cross-check row and coherent register-view semantics. Existing legacy SSE
 instructions retain their upper-vector bits; VEX/EVEX writes follow their
 architectural zeroing rules. The mask-zeroing load needs exact readable bounds.
 
-## Proposed fixed 4 KiB raw-sums kernel: hypothesis
+## Fixed 4 KiB raw-sums source kernel: assembled hypothesis
 
-Use the existing source `kernel` machinery with four prefix accumulators and
-unroll its sixteen 256-byte turns. Its single argument addresses exactly 4096
+`raw4096.ode` uses the existing source `kernel` machinery with four prefix
+accumulators and sixteen unrolled 256-byte turns. Its single argument addresses exactly 4096
 read-only bytes, at any alignment. Return one u64:
 
 - low 32 bits: raw byte sum A, at most `255 * 4096 = 1044480`;
@@ -70,13 +70,27 @@ A word-level caller composes blocks using `Block_adler32`'s append law and
 reduces between blocks. The kernel has no tail mask, variable-length branch,
 wide weighted reduction or scalar modular division. It still needs tests of
 unaligned loads and a competitive measurement, and its caller still needs
-competitive small/tail handling. This kernel has yet to be implemented or timed.
+competitive small/tail handling. Both existing Ode printers agree exactly on
+the source's assembly: 309 instructions, 1901 text bytes and 128 constant bytes.
+Executable validation, timing and the machine theorem remain open.
 
-Likely retained forms: full 512-bit input/constant loads, copies, `vpdpbusd`,
-`vpaddd`, immediate `vpslld`, 512→256→128 extracts/folds, `vpshufd`, and `vmovd`.
-The source can load byte-ones as data rather than inherit C's `vpternlogd` /
-`vpabsb` pair. Scalar code packs the two raw u32 values into RAX. Exact forms
-will come from that assembled source before model work begins.
+The assembled source uses these exact vector forms (Intel destination first):
+
+- EVEX.512: `vpxord zmm,zmm,zmm`, `vmovdqa64 zmm,m512` (RIP-relative),
+  `vmovdqu64 zmm,m512`, `vpdpbusd zmm,zmm,zmm`, `vpaddd zmm,zmm,zmm`,
+  `vpslld zmm,zmm,imm8` (6/7/8), `vextracti64x4 ymm,zmm,imm8` (1).
+- VEX.256: `vpaddd ymm,ymm,ymm`, `vextracti128 xmm,ymm,imm8` (1).
+- VEX.128: `vpaddd xmm,xmm,xmm`, `vpshufd xmm,xmm,imm8` (0x4e/0xb1),
+  `vmovd r32,xmm`; plus `vzeroupper`'s implicit effects.
+
+Scalar `shl rcx,32` and `or rax,rcx` pack the return. The kernel uses vector
+registers 0–14. It loads byte-ones as data, avoiding C's `vpternlogd` / `vpabsb`
+pair. Every retained form still needs its hardware cross-check and model support.
+
+`Block_adler32` now checks the raw sum bounds for every 4096-byte list and the
+u32 update bounds for canonical entry sums. These mathematical theorems use only
+`propext` and `Quot.sound`; vector arithmetic and the assembled bytes remain
+separate proof obligations.
 
 ## Existing machinery and image binding to settle with Sam
 

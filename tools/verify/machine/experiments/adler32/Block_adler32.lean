@@ -52,6 +52,44 @@ theorem weighted_append (xs ys : List (BitVec 8)) :
       Nat.mul_add, Nat.add_mul, Nat.one_mul]
     omega
 
+/-- Every byte contributes at most 255 to a raw sum. -/
+theorem total_le (xs : List (BitVec 8)) : total xs ≤ 255 * xs.length := by
+  induction xs with
+  | nil => simp [total]
+  | cons x xs ih =>
+    have hx := x.isLt
+    simp only [total, List.length_cons, Nat.mul_add, Nat.mul_one]
+    omega
+
+/-- Twice the raw weighted sum is bounded without division or rounding. -/
+theorem twice_weighted_le (xs : List (BitVec 8)) :
+    2 * weighted xs ≤ 255 * xs.length * (xs.length + 1) := by
+  induction xs with
+  | nil => simp [weighted]
+  | cons x xs ih =>
+    have hx : x.toNat ≤ 255 := by have := x.isLt; omega
+    have hm := Nat.mul_le_mul_left (2 * (xs.length + 1)) hx
+    simp only [weighted, List.length_cons]
+    simp only [Nat.mul_add, Nat.add_mul, Nat.mul_one, Nat.one_mul, Nat.mul_assoc] at ih hm ⊢
+    omega
+
+/-- A fixed 4 KiB kernel can return its two raw sums in one 64-bit word. -/
+theorem raw4096_bounds (xs : List (BitVec 8)) (h : xs.length = 4096) :
+    total xs ≤ 1044480 ∧ weighted xs ≤ 2139617280 := by
+  have ha := total_le xs
+  have hb := twice_weighted_le xs
+  rw [h] at ha hb
+  constructor <;> omega
+
+/-- Canonical entry sums permit u32 arithmetic around a 4 KiB raw-sums kernel. -/
+theorem update4096_bounds (xs : List (BitVec 8)) (h : xs.length = 4096)
+    (a b : Nat) (ha : a < 65521) (hb : b < 65521) :
+    a + total xs < 2 ^ 32 ∧ b + 4096 * a + weighted xs < 2 ^ 32 := by
+  obtain ⟨hs, hw⟩ := raw4096_bounds xs h
+  constructor <;> omega
+
 #print axioms fold_eq_block
 #print axioms weighted_append
+#print axioms raw4096_bounds
+#print axioms update4096_bounds
 end Adler32
