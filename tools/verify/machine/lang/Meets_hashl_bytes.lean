@@ -33,12 +33,19 @@ theorem Hash.contract_eq (out inp len key plat : BitVec 64) (msg : List (BitVec 
       = { Hashl.contract out inp len key 0#64 plat Blake3.IV msg with accepts := (Hash.byteContract out inp len key plat msg).accepts } := by
   simp only [Abi.ofBytes, Hash.byteContract, Hashl.contract, List.map, Hash.piece_key, Hash.piece_out, Bytes.piece_keeps _ hlen]
 
-/-- **The x86-64 code of `hashl` computes BLAKE3**: for every message shorter than 2^64 - 1024 bytes it meets
-`Hash.byteContract`, with 4608 bytes of stack. -/
-theorem hashl_meets_bytes (out inp len key plat : BitVec 64) (msg : List (BitVec 8)) (hlen : msg.length < 2 ^ 64 - 1024) :
+/-- **The x86-64 code of `hashl` computes BLAKE3**: for every message it meets `Hash.byteContract`, with 4608
+bytes of stack. (Every message whose length the argument `len` can say, which is BLAKE3's own bound: at most
+2^64 - 1 bytes. A longer one has no call.) -/
+theorem hashl_meets_bytes (out inp len key plat : BitVec 64) (msg : List (BitVec 8)) :
     Abi.Meets Code_hashl.prog 0x40000 (Abi.ofBytes (Hash.byteContract out inp len key plat msg) 4608#64) := by
-  rw [Hash.contract_eq out inp len key plat msg (by omega)]
-  exact Abi.Meets.of_accepts _ (Proof_hashl.hashl_meets out inp len key 0#64 plat Blake3.IV msg)
-    (fun h => ⟨h.1, hlen, by decide⟩)
+  by_cases hlen : msg.length < 2 ^ 64
+  · rw [Hash.contract_eq out inp len key plat msg hlen]
+    exact Abi.Meets.of_accepts _ (Proof_hashl.hashl_meets out inp len key 0#64 plat Blake3.IV msg)
+      (fun h => ⟨h.1, by decide⟩)
+  · -- no `len` is the length of such a message: the contract accepts no call
+    intro s ra hpc hargs hq hR hAp ha hreq
+    have h1 : len.toNat = msg.length := ha.1
+    have := len.isLt
+    omega
 
 #print axioms hashl_meets_bytes

@@ -54,7 +54,7 @@ theorem in_levels0 (lv y : BitVec 64) (hy : (y - (lv + 64#64)).toNat < 64 * 54) 
 
 theorem shr_ofNat (r : Nat) (h : r < 2 ^ 54) : BitVec.ofNat 64 r >>> 1 = BitVec.ofNat 64 (r / 2) := by bv_omega
 
-theorem count_pred (h1 : 1 ≤ chunks.size) (hn : chunks.size < 2 ^ 54) :
+theorem count_pred (h1 : 1 ≤ chunks.size) (hn : chunks.size ≤ 2 ^ 54) :
     count chunks - 1#64 = BitVec.ofNat 64 (chunks.size - 1) := by
   simp only [count]; bv_omega
 

@@ -177,7 +177,8 @@ Slow, and every instruction of it under a theorem.
     hashl_meets : ∀ out input len key flags plat k bytes,
       Abi.Meets Code_hashl.prog 0x40000 (Hashl.contract out input len key flags plat k bytes)
 
-For any message shorter than 2^64 - 1024 bytes, any key and any mode's flags below 256: with the message's
+For any message (any length the argument `len` can say: BLAKE3's own bound, 2^64 - 1 bytes), any key and
+any mode's flags below 256: with the message's
 bytes at `input` and the key at `key`, the 32 bytes at `out` become the first eight words of the output of
 the root of the specification's tree over the message's chunks (`Hash.words`: `Blake3.rootWords
 (Blake3.tree k mode (Blake3.chunksOf k mode message))`); the message and the key are unchanged; nothing
@@ -186,7 +187,7 @@ that can run: `hashl`'s 108, the five functions' 380 and the two kernels'.
 
 And in the words a user reads (`../lang/Meets_hashl_bytes.lean`; `../spec/HashContract.lean` names no machine):
 
-    hashl_meets_bytes : msg.length < 2 ^ 64 - 1024 →
+    hashl_meets_bytes : ∀ out inp len key plat msg,
       Abi.Meets Code_hashl.prog 0x40000 (Abi.ofBytes (Hash.byteContract out inp len key plat msg) 4608#64)
 
 with the specification's IV at `key` and no flags, the 32 bytes at `out` become `Blake3.hashBytes msg`:

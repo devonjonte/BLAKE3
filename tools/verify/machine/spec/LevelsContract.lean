@@ -29,11 +29,11 @@ def Received (key : Blake3.CV) (mode : Blake3.Word) (chunks : Array Blake3.Node)
     Received key mode chunks b f (o + 64) (2 * size) (r / 2)
 
 /-- **The bytes `b` hold the levels of the tree over `chunks`**, under a key and a mode: 3520 bytes; the
-count of chunks in the first eight; the levels from byte 64, 64 bytes each, 54 of them; fewer than `2 ^ 54`
+count of chunks in the first eight; the levels from byte 64, 64 bytes each, 54 of them; at most `2 ^ 54`
 chunks. With a chunk or more: the levels have received all the chunks but the newest, and the newest
 chunk's value is in the bottom level's next place (its second, if the first is in use). -/
 def Holds (key : Blake3.CV) (mode : Blake3.Word) (b : List (BitVec 8)) (chunks : Array Blake3.Node) : Prop :=
-  b.length = 3520 ∧ chunks.size < 2 ^ 54 ∧ b.take 8 = Bytes.le64 chunks.size ∧
+  b.length = 3520 ∧ chunks.size ≤ 2 ^ 54 ∧ b.take 8 = Bytes.le64 chunks.size ∧
   (0 < chunks.size →
     Received key mode chunks b 54 64 1 (chunks.size - 1) ∧
     (b.drop (64 + 32 * ((chunks.size - 1) % 2))).take 32 = Cv.bytes (Blake3.sub key mode chunks (chunks.size - 1) 1))
@@ -54,7 +54,7 @@ chooses the kernel and changes nothing else. -/
 def Ladd.byteContract (lv key flags plat cv : BitVec 64) (k : Blake3.CV) (chunks : Array Blake3.Node)
     (new : Blake3.Node) : Bytes.Contract where
   args := [lv, key, flags, plat, cv]
-  accepts := chunks.size + 1 < 2 ^ 54 ∧ flags < 256#64
+  accepts := chunks.size < 2 ^ 54 ∧ flags < 256#64
   reads := [Cv.byteLayout.keeps key k, Cv.byteLayout.keeps cv new.cv]
   updates := [(Levels.byteLayout k ⟨flags.setWidth 32⟩).turns lv chunks (chunks.push new)]
   returns := fun result => result.toNat = chunks.size + 1

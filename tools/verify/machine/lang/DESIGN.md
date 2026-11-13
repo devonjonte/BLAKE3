@@ -360,7 +360,7 @@ specification's `IV` at `key`, the 32 bytes at `out` become `Blake3.hashBytes` o
 `Blake3.hash`), and the message and the key are unchanged.
 
 **Since November 13 a hash is proved against it: `hashl`** (`../levels/levels.ode`; the section after this
-one). `hashl_meets_bytes` (`Meets_hashl_bytes.lean`): for any message shorter than 2^64 - 1024 bytes the
+one). `hashl_meets_bytes` (`Meets_hashl_bytes.lean`): for any message the
 assembled code meets `Hash.byteContract`. It is the slow hash, one block at a time; what follows is about
 `hash`, the fast one, which calls the many-input kernels.
 
@@ -418,7 +418,9 @@ Warts met on the way, each to remove:
 - The generator does not follow a frame set on a boundary (`align`): `hashl`'s levels are not aligned.
 - Every call lists by hand what still holds after it (`keep`), four lines a call in `hashl`: what the
   callee's contract does not let it touch should be kept without being said.
-- The levels hold fewer than 2^54 chunks, so the theorem stops 1024 bytes short of 2^64.
+- (Settled November 13: the theorem stopped 1024 bytes short of BLAKE3's 2^64 - 1, because the levels'
+  predicate said "fewer than 2^54 chunks". The 54 levels hold 2^54: they receive every chunk but the newest.
+  The predicate now says "at most"; the code and its generated proofs did not change by a character.)
 - A side condition's solver had ten seconds, and a proof accepted alone was refused in a run of everything
   at once: the memory tactics now give it 120 (`bv_side`). A proof that passes or fails with the machine's
   load is a fault of the proof system, and this is a patch, not its removal.
