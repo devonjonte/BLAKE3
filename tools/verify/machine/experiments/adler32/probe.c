@@ -93,6 +93,19 @@ static const uint8_t weights[VL] __attribute__((aligned(64))) = {
 uint32_t PROBE_NAME(const uint8_t *p, size_t len) {
     if (len == 0) return 1;
     if (len == 1) { uint32_t a=1+*p; return (a<<16)|a; }
+#if SMALL_SEED
+    _Static_assert(VL == 64, "small seed-one path uses one 64-byte vector");
+    if (len <= 64) {
+        Vec x=MASKLOAD(UINT64_MAX>>(64-len),p);
+        Vec w=ADD8(LOAD(weights),ONES((int)len-64));
+        uint32_t a=1+sum32(DOT(ZERO(),x,ONES(1)));
+        uint32_t b=(uint32_t)len+sum32(DOT(ZERO(),x,w));
+        /* Seed one: A <=16321; B <=64537 at n<=22, the largest
+         * reduction-free length even for all-255 input. */
+        if (len > 22) b%=65521;
+        return (b<<16)|a;
+    }
+#endif
     uint64_t a=1,b=0;
 #if ALIGN_HEAD
     uint32_t prefix=adler_align_input(&p,&len);

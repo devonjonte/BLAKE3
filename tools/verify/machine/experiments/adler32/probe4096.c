@@ -6,10 +6,34 @@
 extern uint64_t b3l_raw4096(const uint8_t *p);
 extern uint32_t probe512_r32(const uint8_t *p, size_t len);
 
-uint32_t probe4096(const uint8_t *p, size_t len) {
+#ifndef PROBE_NAME
+#define PROBE_NAME probe4096
+#endif
+
+#if ENTRY_SPLIT
+static __attribute__((noinline)) uint32_t probe4096_large(const uint8_t *p, size_t len) {
+#else
+uint32_t PROBE_NAME(const uint8_t *p, size_t len) {
+#endif
     if (len < 4096) return probe512_r32(p, len);
     uint32_t prefix = adler_align_input(&p, &len);
     uint32_t a = prefix & 65535, b = prefix >> 16;
+#if BATCH4
+    while (len >= 16384) {
+        uint64_t aa = a, bb = b;
+        #pragma GCC unroll 4
+        for (unsigned i = 0; i < 4; ++i) {
+            uint64_t raw = b3l_raw4096(p);
+            bb += 4096 * aa + (raw >> 32);
+            aa += (uint32_t)raw;
+            p += 4096;
+        }
+        /* Block_adler32.update16384_bounds: aa fits u32, bb is below 2^36. */
+        a = (uint32_t)aa % 65521;
+        b = bb % 65521;
+        len -= 16384;
+    }
+#endif
     while (len >= 4096) {
         uint64_t raw = b3l_raw4096(p);
         /* Block_adler32.update4096_bounds checks these u32 bounds. */
@@ -27,3 +51,10 @@ uint32_t probe4096(const uint8_t *p, size_t len) {
     }
     return (b << 16) | a;
 }
+
+#if ENTRY_SPLIT
+uint32_t PROBE_NAME(const uint8_t *p, size_t len) {
+    if (len < 4096) return probe512_r32(p, len);
+    return probe4096_large(p, len);
+}
+#endif

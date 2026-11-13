@@ -107,6 +107,9 @@ def main():
             "alignment": "probe512-align and probe4096: shared seed-one scalar peel to 64 B, only at lengths >65536",
             "raw4096": "Ode source kernel, 4096 B packed raw sums; UNVERIFIED C caller, u32 reductions, existing probe512-r32 tails",
             "raw4096_flags": "C caller -O3 -DNDEBUG -fno-lto; raw assembly unchanged from source printer",
+            "batch4": "probe4096-batch: four raw calls before reduction; u32 A and u64 B; per4096 remainder unchanged",
+            "entry_split": "probe4096-entry: noinline large body with the same per4096 reductions; tiny entry tail-calls r32",
+            "small_seed": "probe512-small: aligned probe plus direct masked vector at <=64 B; A needs no reduction, B only above22 B",
             "source_kernel_printer": observer.digest(HERE.parents[1] / "lang/odec.py"),
             "flags": "-O3 -DNDEBUG -fno-lto -mavx512bw -mavx512vl -mavx512vnni -mavx512dq; prefer vector width matching probe"}
     r["comparison"] = {"seed": 1, "sources": {name: rev for name, (rev, _) in DEPS.items()},

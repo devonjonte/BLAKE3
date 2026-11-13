@@ -88,6 +88,26 @@ theorem update4096_bounds (xs : List (BitVec 8)) (h : xs.length = 4096)
   obtain ⟨hs, hw⟩ := raw4096_bounds xs h
   constructor <;> omega
 
+/-- Four raw4096 calls can postpone reduction, with u32 A and u64 B. -/
+theorem update16384_bounds (xs : List (BitVec 8)) (h : xs.length = 16384)
+    (a b : Nat) (ha : a < 65521) (hb : b < 65521) :
+    a + total xs < 2 ^ 32 ∧ b + 16384 * a + weighted xs < 2 ^ 36 := by
+  have hs := total_le xs
+  have hw := twice_weighted_le xs
+  rw [h] at hs hw
+  constructor <;> omega
+
+/-- At most 22 bytes from seed one need neither modular reduction. -/
+theorem seed22_bounds (xs : List (BitVec 8)) (h : xs.length ≤ 22) :
+    1 + total xs < 65521 ∧ xs.length + weighted xs < 65521 := by
+  have hs := total_le xs
+  have hw := twice_weighted_le xs
+  have hn : xs.length + 1 ≤ 23 := by omega
+  have hm := Nat.mul_le_mul (Nat.mul_le_mul_left 255 h) hn
+  constructor <;> omega
+
+#print axioms update16384_bounds
+#print axioms seed22_bounds
 #print axioms fold_eq_block
 #print axioms weighted_append
 #print axioms raw4096_bounds

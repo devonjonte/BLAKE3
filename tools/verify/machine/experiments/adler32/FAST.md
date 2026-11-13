@@ -154,3 +154,45 @@ Next isolate normalization frequency and tiny entry layout before choosing the
 kernel to prove. Sam's explicit assumed-contract caller machinery is merged;
 its use must keep the missing wide-kernel theorem visible. Static-image/read-only
 overlap needs her contract decision (`WIDE-FORMS.md`).
+
+## Caller costs and seed-one small calls, declared before collection
+
+Three separate UNVERIFIED candidates keep the same input/seed contract:
+
+- `probe4096-batch` changes the raw C caller's normalization frequency alone.
+  Four raw4096 calls compose one 16 KiB update; A fits u32, B stays below 2^36
+  and uses u64 until reduction. Remaining complete 4 KiB blocks retain the old
+  reductions. The generated raw kernel stays identical.
+- `probe4096-entry` changes entry layout alone: a small outer function tail-calls
+  r32 for inputs below4096; the noinline large body keeps old reductions. This
+  separates the observed six-register tiny prologue from kernel work.
+- `probe512-small` adds a seed-one small path to the aligned probe. At most64 B
+  use one exact masked vector. A needs no reduction; B needs none through22 B,
+  the largest all-255 reduction-free length. Above64 B keep the aligned design.
+
+Validate all16 engines before collection. Extend all-alignment tests through
+16383/16384/16385 and32767/32768/32769; exercise canonical-zero sums after16 KiB,
+read-only guards, and independent fixed all-255 checks at22/23 B. Plant a u32
+truncation of the batched weighted sum and a wrong small-reduction threshold;
+both must fail. Existing objects must retain their sections/headers/relocations.
+Check mathematical update16384/seed22 bounds independently of machine behavior.
+
+Both CPUs, four paired layouts (0/256/1024/2048), alternating sides and rotated
+question order. Same v3 16-cell random probe,20 ms nominal batches, shared clocks
+and judgment. Questions (old → new), all16 cells judged together per question:
+
+1. `probe4096` → `probe4096-batch` (normalization frequency).
+2. `probe4096` → `probe4096-entry` (entry layout).
+3. `probe512-align` → `probe512-small` (seed-one small path).
+4. `libdeflate512` → `probe4096-batch` (matched width).
+5. `libdeflate512` → `probe512-small` (matched width).
+6. `libdeflate` → `probe4096-batch` (public default).
+7. `libdeflate` → `probe512-small` (public default).
+8. `libdeflate512` → `libdeflate512` (same-code control).
+9. `probe4096` → `probe4096` (raw caller same-code control).
+
+Preserve busy/unobserved attempts; permit at most two whole-pair retries. All
+small/unaligned cells stay visible. Separate candidate effects before combining
+them. Neither these execution tests nor the natural-number bounds establish an
+optimized machine theorem. Static-image and wide-model work still follow the
+choice of a promising implementation.

@@ -37,6 +37,9 @@ mod probes {
         fn probe512_r32(p: *const u8, n: usize) -> u32;
         fn probe512_align(p: *const u8, n: usize) -> u32;
         fn probe4096(p: *const u8, n: usize) -> u32;
+        fn probe4096_batch(p: *const u8, n: usize) -> u32;
+        fn probe4096_entry(p: *const u8, n: usize) -> u32;
+        fn probe512_small(p: *const u8, n: usize) -> u32;
         pub fn b3l_raw4096(p: *const u8) -> u64;
         fn adler32_x86_avx512_vl512_vnni(seed: u32, p: *const u8, n: usize) -> u32;
         static adler32_impl: unsafe extern "C" fn(u32, *const u8, usize) -> u32;
@@ -60,6 +63,18 @@ mod probes {
     #[inline(never)]
     pub unsafe fn fixed4096(p: *const u8, n: usize) -> u32 {
         probe4096(p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn fixed4096_batch(p: *const u8, n: usize) -> u32 {
+        probe4096_batch(p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn fixed4096_entry(p: *const u8, n: usize) -> u32 {
+        probe4096_entry(p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn small512(p: *const u8, n: usize) -> u32 {
+        probe512_small(p, n)
     }
     #[inline(never)]
     pub unsafe fn isal(p: *const u8, n: usize) -> u32 {
@@ -96,6 +111,12 @@ const ENGINES: &[(&str, Engine)] = &[
     #[cfg(feature = "probe")]
     ("probe4096", probes::fixed4096),
     #[cfg(feature = "probe")]
+    ("probe4096-batch", probes::fixed4096_batch),
+    #[cfg(feature = "probe")]
+    ("probe4096-entry", probes::fixed4096_entry),
+    #[cfg(feature = "probe")]
+    ("probe512-small", probes::small512),
+    #[cfg(feature = "probe")]
     ("isa-l", probes::isal),
     #[cfg(feature = "probe")]
     ("probe512", probes::wide512),
@@ -106,6 +127,8 @@ const ENGINES: &[(&str, Engine)] = &[
     #[cfg(feature = "probe")]
     ("probe256-one", probes::wide256_one),
 ];
+#[cfg(feature = "probe")]
+const BLOCK_ENGINES: &[&str] = &["probe512-align", "probe4096", "probe4096-batch", "probe4096-entry", "probe512-small"];
 const FORMAT: &str = "# ode-adler-samples-v3";
 const LENGTHS: [usize; 10] = [0, 1, 16, 64, 256, 1024, 4096, 5552, 65536, 1048576];
 const EXPECTED_TEXT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/text.bin"));
@@ -177,6 +200,12 @@ fn validate() {
 
 #[cfg(feature = "probe")]
 fn validate_blocks() {
+    // Seed-one all-255 boundary: formula and independent zlib agree.
+    for (n, want) in [(22, 0xfc1915eb), (23, 0x131216ea)] {
+        for &name in BLOCK_ENGINES {
+            assert_eq!(checksum(engine(name), &vec![255; n]), want, "{name}, small reduction boundary {n}");
+        }
+    }
     // Independently fixed raw sums: all-zero, all-one, all-255, byte ramp.
     // Ramp: sum=16*32640; weighted=34816*32640 - 16*5559680.
     for (mut bytes, a, b) in [
@@ -190,7 +219,7 @@ fn validate_blocks() {
         assert_eq!(bytes, saved, "raw kernel preserves input");
     }
     for pattern in [1, 3] {
-        for n in [4095, 4096, 4097, 8191, 8192, 8193, 65535, 65536, 65537, 65600] {
+        for n in [4095, 4096, 4097, 8191, 8192, 8193, 16383, 16384, 16385, 32767, 32768, 32769, 65535, 65536, 65537, 65600] {
             let (bytes, start) = input(pattern, n, 0);
             let bytes = &bytes[start..start + n];
             let want = reference(bytes);
@@ -198,7 +227,7 @@ fn validate_blocks() {
                 let mut storage = vec![0; n + 127];
                 let start = (64 - storage.as_ptr() as usize % 64) % 64 + offset;
                 storage[start..start + n].copy_from_slice(bytes);
-                for name in ["probe512-align", "probe4096"] {
+                for &name in BLOCK_ENGINES {
                     assert_eq!(checksum(engine(name), &storage[start..start + n]), want, "{name}, block boundary {n}, alignment {offset}, pattern {pattern}");
                 }
                 if n == 4096 {
@@ -212,14 +241,16 @@ fn validate_blocks() {
     }
     // Force canonical A=0 at the block boundary, then a seed-one tail with A=0.
     // This exercises the modulo subtraction in the caller's append formula.
-    let mut bytes = vec![0; 4096 + 257];
-    bytes[..256].fill(255);
-    bytes[256] = 240;
-    bytes[4096..4096 + 256].fill(255);
-    bytes[4096 + 256] = 240;
-    for n in [4096, 4097, bytes.len()] {
-        for name in ["probe512-align", "probe4096"] {
-            assert_eq!(checksum(engine(name), &bytes[..n]), reference(&bytes[..n]), "{name}, zero-A boundary {n}");
+    for block in [4096, 16384] {
+        let mut bytes = vec![0; block + 257];
+        bytes[..256].fill(255);
+        bytes[256] = 240;
+        bytes[block..block + 256].fill(255);
+        bytes[block + 256] = 240;
+        for n in [block, block + 1, bytes.len()] {
+            for &name in BLOCK_ENGINES {
+                assert_eq!(checksum(engine(name), &bytes[..n]), reference(&bytes[..n]), "{name}, zero-A boundary {n}");
+            }
         }
     }
 }
