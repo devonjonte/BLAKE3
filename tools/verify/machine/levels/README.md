@@ -190,7 +190,11 @@ And in the words a user reads (`../lang/Meets_hashl_bytes.lean`; `../spec/HashCo
       Abi.Meets Code_hashl.prog 0x40000 (Abi.ofBytes (Hash.byteContract out inp len key plat msg) 4608#64)
 
 with the specification's IV at `key` and no flags, the 32 bytes at `out` become `Blake3.hashBytes msg`:
-C2SP's `Blake3.hash` of the message.
+C2SP's `Blake3.hash` of the message. What a reader of that theorem reads, by Lean's own list
+(`../INDEX.md`): 1,357 lines in 18 files. It rests on Lean's three axioms and 2,501 of `bv_decide`'s.
+
+From nothing, everything side by side with the audits (`../prove_all.sh`, a 64-thread machine): all checked
+in 38 minutes, `hashl`'s own line 947 s (it checks again every proof it calls on) and its audit 832 s.
 
 | function | instructions | Lean's check | examples that meet its contract | each instruction made a no-op |
 |---|---|---|---|---|
@@ -199,7 +203,7 @@ C2SP's `Blake3.hash` of the message.
 | `chunk_node` | 81 | 121 to 186 s | 9 (2) | 81 of 81 (74, 7) |
 | `ladd` | 95 | 194 to 233 s | 8 (1) | 94 of 95 (88, 6); 1 accepted |
 | `lroot` | 107 | 269 to 406 s | 7 (1) | 104 of 107 (98, 6); 3 accepted |
-| `hashl` | 108 | 342 s | 7 (1): 0 to 5120 bytes, both kernels, keyed | see `../prove_all.sh`'s `audit-hashl` |
+| `hashl` | 108 | 342 s | 7 (1): 0 to 5120 bytes, both kernels, keyed | 108 of 108 (98, 10) |
 
 The accepted ones are each a move of a value its register still holds (the compiler does not know what a
 register holds).
