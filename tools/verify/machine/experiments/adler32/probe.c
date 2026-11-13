@@ -94,6 +94,9 @@ uint32_t PROBE_NAME(const uint8_t *p, size_t len) {
     const Vec ones=ONES(1), w=LOAD(weights);
     while (len) {
         size_t n=len < CHUNK ? len : CHUNK;
+#if REDUCE32
+        const int small = n <= 5552;
+#endif
         b += a*n;
         len -= n;
         Vec s0=ZERO(),s1=ZERO(),s2=ZERO(),s3=ZERO();
@@ -143,8 +146,16 @@ uint32_t PROBE_NAME(const uint8_t *p, size_t len) {
             sum=DOT(sum,x,ones);
             p+=n;
         }
+#if REDUCE32
+        /* a + sum(bytes) < 65521 + 255*16384 < 2^32.
+         * The conventional 5552-byte bound also keeps the entire b update
+         * below 2^32 even with the largest canonical entry a and b. */
+        a=(uint32_t)(a+sum32(sum))%65521;
+        b=small ? (uint32_t)(b+sum32(weighted))%65521 : (b+sum64(weighted))%65521;
+#else
         a=(a+sum32(sum))%65521;
         b=(b+sum64(weighted))%65521;
+#endif
     }
     return (uint32_t)((b<<16)|a);
 }

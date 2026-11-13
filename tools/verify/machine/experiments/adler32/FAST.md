@@ -53,3 +53,40 @@ An Ode implementation then needs its generated machine proof and the full paired
 comparison, plus real libdeflate integration measurements. Instruction semantics
 and proof assumptions remain explicit. The current x86 model's vector state is
 128 bits; wide-vector/VNNI/mask support needs coordinated work with Sam.
+
+## Targeted follow-up, declared November 13 before collection
+
+Separate vector-width policy from algorithm gains. Libdeflate prefers its 256-bit
+kernel on Ice Lake. Expose its existing `adler32_x86_avx512_vl512_vnni` and
+`adler32_impl` symbols in a **copy** of the built static archive. Verify every
+archive member's section contents, section headers and relocations unchanged.
+Bind the copy privately; keep the ordinary public dispatcher as `libdeflate`
+and name the direct existing kernel `libdeflate512`. Record the actual selected
+pointer after validation, beside the 512-bit kernel pointer and symbol listing.
+The forced-width control retains libdeflate's release flags (normally -O2).
+
+Complete the preserved `REDUCE32` probe as `probe512-r32`: four prefix sums,
+512-bit vectors, 16 KiB blocks, u32 reduction of A; u32 reduction of B only when
+the block has at most 5552 bytes. Larger B sums retain the widened reduction.
+Compare it with the unchanged `probe512` (-O3 for both). All native probes
+remain UNVERIFIED. Before timing: fixed/reference vectors, all small lengths
+0–257 at every byte alignment, all byte-mask tails against both read-only guard
+edges, reduction boundaries, and a deliberate overread that must fault.
+
+On both declared CPUs use four paired layouts (padding 0/256/1024/2048),
+alternating order and rotating questions. Retain the 16-cell random probe
+workload and 20 ms requested batches. Questions (old → new):
+
+1. `libdeflate` → `libdeflate512` (existing width policy).
+2. `libdeflate512` → `probe512` (same width, combined algorithm/compiler effects).
+3. `libdeflate512` → `probe512-r32` (same width, new reductions).
+4. `probe512` → `probe512-r32` (reduction change with matched flags).
+5. `libdeflate` → `libdeflate` (same-code control).
+6. `libdeflate512` → `libdeflate512` (same-code width control).
+
+Judge each question's 16 cells together using the shared rule. Retain every
+attempt; busy or missing-load pairs abstain, with at most two whole-pair retries.
+Inspect all small-cell costs before choosing an Ode design. Sampling and flags
+stay explicit; a native result supplies candidate evidence, separate from a
+machine theorem. A fixed 4 KiB straight-line block kernel is a later hypothesis
+that may simplify the proof boundary; it has yet to be implemented or measured.

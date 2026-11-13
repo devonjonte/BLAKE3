@@ -34,6 +34,21 @@ mod probes {
         fn probe512_one(p: *const u8, n: usize) -> u32;
         fn probe256(p: *const u8, n: usize) -> u32;
         fn probe256_one(p: *const u8, n: usize) -> u32;
+        fn probe512_r32(p: *const u8, n: usize) -> u32;
+        fn adler32_x86_avx512_vl512_vnni(seed: u32, p: *const u8, n: usize) -> u32;
+        static adler32_impl: unsafe extern "C" fn(u32, *const u8, usize) -> u32;
+    }
+    pub unsafe fn dispatch_record() {
+        println!("# libdeflate selected pointer: {:p}; existing 512-bit kernel: {:p}",
+                 adler32_impl as *const (), adler32_x86_avx512_vl512_vnni as *const ());
+    }
+    #[inline(never)]
+    pub unsafe fn libdeflate512(p: *const u8, n: usize) -> u32 {
+        adler32_x86_avx512_vl512_vnni(1, p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn wide512_r32(p: *const u8, n: usize) -> u32 {
+        probe512_r32(p, n)
     }
     #[inline(never)]
     pub unsafe fn isal(p: *const u8, n: usize) -> u32 {
@@ -61,6 +76,10 @@ const ENGINES: &[(&str, Engine)] = &[
     ("zlib", zlib),
     ("zlib-ng", zlib_ng),
     ("libdeflate", libdeflate),
+    #[cfg(feature = "probe")]
+    ("libdeflate512", probes::libdeflate512),
+    #[cfg(feature = "probe")]
+    ("probe512-r32", probes::wide512_r32),
     #[cfg(feature = "probe")]
     ("isa-l", probes::isal),
     #[cfg(feature = "probe")]
@@ -120,6 +139,22 @@ fn validate() {
             }
         }
     }
+    // All byte-mask tails and every address alignment, with fixed and
+    // independently computed expected values, before any timing.
+    for n in 0..=257 {
+        for pattern in 0..4 {
+            let (bytes, start) = input(pattern, n, 0);
+            let want = reference(&bytes[start..start + n]);
+            for offset in 0..64 {
+                let mut storage = vec![0; n + 127];
+                let aligned = (64 - storage.as_ptr() as usize % 64) % 64 + offset;
+                storage[aligned..aligned + n].copy_from_slice(&bytes[start..start + n]);
+                for &(name, f) in ENGINES {
+                    assert_eq!(checksum(f, &storage[aligned..aligned + n]), want, "{name}, small {n}, alignment {offset}, pattern {pattern}");
+                }
+            }
+        }
+    }
     guard_pages(ENGINES);
 }
 
@@ -135,7 +170,7 @@ fn guard_pages(engines: &[(&str, Engine)]) {
     unsafe {
         let page = sysconf(30) as usize;
         assert!(page.is_power_of_two());
-        for n in [0, 1, 15, 16, 31, 32, 63, 64, 127, 128, 255, 256, 257, 4095, 4096, 4097, 16383, 16384, 16385] {
+        for n in (0..=257).chain([4095, 4096, 4097, 5551, 5552, 5553, 16383, 16384, 16385]) {
             let span = (n / page + 1) * page;
             let total = span + 2 * page;
             let map = mmap(std::ptr::null_mut(), total, 0, 0x22, -1, 0);
@@ -209,6 +244,8 @@ fn collect(name: &str, probe: bool) -> i32 {
         println!("# engine proof: UNVERIFIED native C algorithm probe, not an Ode implementation");
     }
     println!("# scope: warmed seed-one native calls; indirect adapter boundary; includes result consumption; buffers 64-byte aligned or offset by 1");
+    #[cfg(feature = "probe")]
+    unsafe { probes::dispatch_record(); }
     println!("# Ode address: {:p}; padding: {}", b3l_adler32 as *const (), env!("ODE_PADDING"));
     for &(n, f) in ENGINES {
         println!("# adapter: {n} {:p}", f as *const ());
@@ -369,6 +406,8 @@ fn main() {
         Some("--validate") if args.len() == 1 => {
             validate();
             adler_validation_done();
+            #[cfg(feature = "probe")]
+            unsafe { probes::dispatch_record(); }
             println!("{} engines agree; linked Ode bytes checked; no timing performed", ENGINES.len());
         }
         Some("--overread-control") if args.len() == 1 => guard_pages(&[("deliberate one-byte overread", deliberate_overread)]),

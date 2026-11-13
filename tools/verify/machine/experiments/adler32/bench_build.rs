@@ -12,21 +12,26 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", out.display());
     println!("cargo:rustc-link-lib=static=ode");
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    for (dir, lib) in [("zlib", "z"), ("zlib-ng", "z-ng"), ("libdeflate", "deflate")] {
+    let probe = env::var_os("CARGO_FEATURE_PROBE").is_some();
+    let deflate = if probe { "deflate-wide" } else { "deflate" };
+    for (dir, lib) in [("zlib", "z"), ("zlib-ng", "z-ng"), ("libdeflate", deflate)] {
         let path = root.join("native").join(dir);
         assert!(path.join(format!("lib{lib}.a")).exists());
         println!("cargo:rustc-link-search=native={}", path.display());
         println!("cargo:rustc-link-lib=static={lib}");
     }
-    if env::var_os("CARGO_FEATURE_PROBE").is_some() {
+    if probe {
+        // Experimental symbols bind to this executable's copied archive.
+        println!("cargo:rustc-link-arg=-Wl,--exclude-libs,libdeflate-wide.a");
         let mut objects = Vec::new();
-        for (width, prefix, name) in [(64, 0, "probe512"), (64, 1, "probe512_one"), (32, 0, "probe256"), (32, 1, "probe256_one")] {
+        for (width, prefix, reduce32, name) in [(64, 0, 0, "probe512"), (64, 1, 0, "probe512_one"), (32, 0, 0, "probe256"), (32, 1, 0, "probe256_one"), (64, 0, 1, "probe512_r32")] {
             let object = out.join(format!("{name}.o"));
             assert!(Command::new(&cc)
                 .args(["-c", "-O3", "-DNDEBUG", "-fno-lto", "-mavx512bw", "-mavx512vl", "-mavx512vnni", "-mavx512dq"])
                 .args([
                     format!("-DVL={width}"),
                     format!("-DONEPREFIX={prefix}"),
+                    format!("-DREDUCE32={reduce32}"),
                     format!("-DPROBE_NAME={name}"),
                     "-DCHUNK=16384".into(),
                     format!("-mprefer-vector-width={}", width * 8)

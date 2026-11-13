@@ -24,6 +24,31 @@ DEPS = {
 }
 
 
+def verify_archive_sections(archive, exposed):
+    # objdump includes every archive member, including duplicate member names.
+    # -s includes allocated code/data and read-only constants; -h also covers
+    # zero-filled sections. Relocations must remain the same as well.
+    for flag in ["-s", "-h", "-r"]:
+        def snapshot(path):
+            return subprocess.check_output(["objdump", flag, path], text=True).replace(str(path), "ARCHIVE")
+        before, after = snapshot(archive), snapshot(exposed)
+        assert before == after, f"experimental libdeflate exposure changed {flag}"
+
+
+def expose_libdeflate(archive, out, observer):
+    """Globalize two experimental bindings in a copy; retain every section byte."""
+    exposed = archive.with_name("libdeflate-wide.a")
+    symbols = ["adler32_x86_avx512_vl512_vnni", "adler32_impl"]
+    subprocess.run(["objcopy", *["--globalize-symbol=" + s for s in symbols], archive, exposed], check=True)
+    verify_archive_sections(archive, exposed)
+    globals_ = subprocess.check_output(["nm", "-g", "--defined-only", exposed], text=True)
+    assert all(any(line.split()[-1:] == [s] for line in globals_.splitlines()) for s in symbols)
+    evidence = {"original": observer.digest(archive), "exposed": observer.digest(exposed),
+                "globalized": symbols, "check": "all archive members' section contents, headers and relocations unchanged"}
+    (out / "libdeflate-exposure.json").write_text(json.dumps(evidence, indent=2) + "\n")
+    return evidence
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("clocks", type=Path)
@@ -69,8 +94,10 @@ def main():
             subprocess.run(["timeout", "-k", "5", "240", "make", "-f", "Makefile.unx", "-j4", "bin/isa-l.a"], cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=250)
         shutil.copyfile(build / "bin/isa-l.a", build / "libisal.a")
         shutil.copyfile(HERE / "probe.c", out / "probe.c")
+        r["libdeflate_width_control"] = expose_libdeflate(out / "native/libdeflate/libdeflate.a", out, observer)
         r["experimental_probes"] = {"proof": "UNVERIFIED native C algorithm probes, not Ode implementations", "isa_l": ISAL_REV,
             "chunk": 16384, "widths": [32,64], "prefix_accumulators": [1,4],
+            "reduce32": "additional 512/four-prefix variant: u32 A; u32 B at blocks <=5552, otherwise u64",
             "flags": "-O3 -DNDEBUG -fno-lto -mavx512bw -mavx512vl -mavx512vnni -mavx512dq; prefer vector width matching probe"}
     r["comparison"] = {"seed": 1, "sources": {name: rev for name, (rev, _) in DEPS.items()},
                        "build": "CMake Release, each project's default optimization flags, runtime dispatch enabled, static linking, no LTO"}
