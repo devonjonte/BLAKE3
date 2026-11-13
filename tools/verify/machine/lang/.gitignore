@@ -46,3 +46,9 @@ Trace_*.lean
 Trace_*.out
 AdlerOde.lean
 adler32.*
+fillp.*
+tree32.*
+addn.*
+hashw.*
+hashf.*
+p16s.*

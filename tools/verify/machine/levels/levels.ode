@@ -329,6 +329,115 @@ fn hashl(out, input, len, key, flags, plat)
   }
 }
 
+// ---- The fast path: wide kernels behind contracts (../lang/DESIGN.md, "The fast path") ----
+
+// The table of addresses a wide kernel is given: lane j of the first n gets base + stride j, every lane
+// past them base again (it hashes the first input once more; its result is not used). What fillp is
+// claimed to do is Fillp.contract (../lang/Spec_fillp.lean).
+fn fillp(ptrs, base, n, stride)
+  meets Fillp.contract()
+  uses Lemmas_fillp
+  leave by Fillp.exit
+{
+  var i = 0
+  var cur = base
+  while i < 32
+    invariant Ptrs.Mid(ptrs, base, n, stride, i, cur)   by Ptrs.Mid.real | Ptrs.Mid.dup   from Ptrs.Mid.start
+    decreases 32 - i
+  {
+    if i < n { u64[ptrs + (i << 3)] = cur }
+    else     { u64[ptrs + (i << 3)] = base }
+    cur = cur + stride
+    i = i + 1
+  }
+}
+
+callee fillp at 0x110000 meets Fillp.contract by Proof_fillp.fillp_meets budget 64
+
+// The library's 16-lane parent kernel (AVX-512) is not in this machine model. A function that calls it is
+// proved over any program in which its address meets P16.contract (../lang/Spec_p16.lean): the theorem says
+// so in a hypothesis. When examples run, p16s below stands at that address.
+extern parents16/6 = "blake3_servil_avx512_p16"
+callee parents16 at 0x18000 assumes P16.contract (11) budget 4096 standin p16s
+
+// The stand-in: the same contract, one parent at a time through the one-block kernel. Tried on the
+// contract's examples; not proved yet (a proof of it is the witness that the contract can be met).
+fn p16s(inputs, blocks, key, counter, packed, out)
+  meets P16.contract(k: Blake3.CV, base: BitVec 64, n: BitVec 64, flags: BitVec 64, l: List Blake3.CV)
+{
+  var f = packed & 255
+  var i = 0
+  var src = 0
+  var dst = 0
+  while i < 16 {
+    src = u64[inputs + (i << 3)]
+    dst = out + (i << 5)
+    copy 32 dst <- key
+    compress_avx512(dst, src, 64, 0, f)
+    i = i + 1
+  }
+}
+
+// The value of the tree over 32 chaining values (a wide kernel's 32 chunks): 16 parents, 8, 4, 2, 1, each
+// level by the 16-lane parent kernel; its last call has one pair and writes that pair's parent in all sixteen
+// lanes at res. What tree32 is claimed to do is Tree32.contract (../lang/Spec_tree32.lean).
+fn tree32(res, cvs, key, flags)
+  meets Tree32.contract(k: Blake3.CV, l: List Blake3.CV)
+  uses Lemmas_tree32
+  enter know Tree32.len
+  leave by Tree32.exit
+{
+  buf ptrs[256]
+  buf a[512]
+  buf b[512]
+  var pp = flags | 0x40000004            // PARENT, and a block length of 64 packed above the flags
+  fillp(ptrs, cvs, 16, 64)
+    keep Cv.At(key, k)
+    keep Cvs32.At(cvs, l)
+    keep Region(res, 512)
+  parents16(ptrs, 1, key, 0, pp, a)
+    with k; cvs; 16#64; flags; l
+    know Tree32.in1
+    keep Cv.At(key, k)
+    keep Region(res, 512)
+  fillp(ptrs, a, 8, 64)
+    keep Cv.At(key, k)
+    keep Cvs16.At(a, Tree32.l1(k, flags, l))
+    keep Region(res, 512)
+  parents16(ptrs, 1, key, 0, pp, b)
+    with k; a; 8#64; flags; (Tree32.l1 k flags l)
+    know Tree32.in2
+    keep Cv.At(key, k)
+    keep Region(res, 512)
+  fillp(ptrs, b, 4, 64)
+    keep Cv.At(key, k)
+    keep Cvs16.At(b, Tree32.l2(k, flags, l))
+    keep Region(res, 512)
+  parents16(ptrs, 1, key, 0, pp, a)
+    with k; b; 4#64; flags; ((Tree32.l2 k flags l).take 8)
+    know Tree32.in3
+    keep Cv.At(key, k)
+    keep Region(res, 512)
+  fillp(ptrs, a, 2, 64)
+    keep Cv.At(key, k)
+    keep Cvs16.At(a, Tree32.l3(k, flags, l))
+    keep Region(res, 512)
+  parents16(ptrs, 1, key, 0, pp, b)
+    with k; a; 2#64; flags; ((Tree32.l3 k flags l).take 4)
+    know Tree32.in4
+    keep Cv.At(key, k)
+    keep Region(res, 512)
+  fillp(ptrs, b, 1, 64)
+    keep Cv.At(key, k)
+    keep Cvs16.At(b, Tree32.l4(k, flags, l))
+    keep Region(res, 512)
+  parents16(ptrs, 1, key, 0, pp, res)
+    with k; b; 1#64; flags; ((Tree32.l4 k flags l).take 2)
+    know Tree32.in5
+}
+
+callee tree32 at 0x120000 meets Tree32.contract by Proof_tree32.tree32_meets budget 8192
+
 def fill_ptrs(base, shift, count) {
   i = 0
   while i < count {

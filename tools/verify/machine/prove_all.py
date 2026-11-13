@@ -61,6 +61,10 @@ CHAINS = [
     [("hashl", "lang", fn("hashl", "0x40000", True), False),
      ("hash-bytes", "lang", 'lake build Meets_hashl_bytes > hashbytes.log 2>&1 && ! grep -q -E "error|sorry" hashbytes.log && grep -q "hashl_meets_bytes. depends on axioms" hashbytes.log', False),
      ("audit-hashl", "lang", audit("hashl", True), True)],
+    # the fast path: wide kernels behind contracts their callers assume (p16s stands in for one when examples run)
+    [("fillp", "lang", fn("fillp", "0x110000", True), False), ("audit-fillp", "lang", audit("fillp", True), True)],
+    [("p16s-tried", "lang", "PROVE=0 " + fn("p16s", "0x18000", True), False), ("tree32", "lang", fn("tree32", "0x120000", True), False),
+     ("audit-tree32", "lang", audit("tree32", True), True)],
     [("adler32", "lang", "SOURCE=../experiments/adler32/adler32.ode ODEMOD=AdlerOde ./prove_fn.sh adler32 0x100000", False)],
     [("any-machine", "lang", 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes UsableBytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ] && grep -q "usable_bytes. depends on axioms" any.log', False)],
     [(None, "lang", fn("push", "0x70000") + " && " + fn("merge", "0x60000"), False),
@@ -71,9 +75,9 @@ CHAINS = [
     [("audit-spec", "lang", f"python3 mutants_spec.py {AJ}", True)],
     [(None, "lang", "python3 odec.py hasher.ode HasherOde.lean", True), ("audit-hash", "lang", "python3 mutants_hash.py", True)],
 ]
-ORDER = ["hex", "merge", "push", "merge_sse", "add-and-swap", "merge_steps", "levels-model", "ladd", "lroot", "node_out", "pad", "chunk_node", "hashl", "hash-bytes", "adler32",
+ORDER = ["hex", "merge", "push", "merge_sse", "add-and-swap", "merge_steps", "levels-model", "ladd", "lroot", "node_out", "pad", "chunk_node", "hashl", "hash-bytes", "fillp", "p16s-tried", "tree32", "adler32",
          "any-machine", "direct", "hash-tried", "hex_neon", "push-aarch64",
-         "audit-merge", "audit-push", "audit-add", "audit-steps", "audit-ladd", "audit-lroot", "audit-node_out", "audit-pad", "audit-chunk_node", "audit-hashl",
+         "audit-merge", "audit-push", "audit-add", "audit-steps", "audit-ladd", "audit-lroot", "audit-node_out", "audit-pad", "audit-chunk_node", "audit-hashl", "audit-fillp", "audit-tree32",
          "audit-spec", "audit-hash"]
 GENERATED = re.compile(r"(Code|Proof|Checked)_\w+\.lean$")
 

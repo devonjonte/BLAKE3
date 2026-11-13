@@ -19,6 +19,11 @@ srcDir = "../alg"
 name = "Chunk"
 srcDir = "../alg"
 
+# Whole groups of chunks are leaves of the tree (a wide kernel takes 32 chunks at a time): also a file of ../alg.
+[[lean_lib]]
+name = "Groups"
+srcDir = "../alg"
+
 [[lean_lib]]
 name = "Contract"
 

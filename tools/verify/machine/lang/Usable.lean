@@ -9,6 +9,8 @@ import Spec_lroot
 import Lemmas_ladd
 import Spec_nodeout
 import Spec_pad
+import Spec_fillp
+import Spec_tree32
 import Spec_chunknode
 import Spec_hashl
 import Spec_adler32
@@ -167,6 +169,24 @@ theorem Pad.usable : (Pad.contract 0x100000#64 0x200000#64 0#64 []).Usable := by
   · simp only [Pad.contract]; decide
   · simp only [Pad.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
     exact ⟨zeroMem_region _ _, trivial, fun i h => absurd h (by simp)⟩
+
+theorem Fillp.usable : (Fillp.contract 0x100000#64 0x200000#64 0#64 64#64).Usable := by
+  refine ⟨0x7ff00000#64, zeroMem, zeroMem_region _ _, ?_, ?_, ?_⟩
+  · simp only [Fillp.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, Abi.AllApart, Abi.Apart]; decide
+  · simp only [Fillp.contract]
+  · simp only [Fillp.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
+    exact zeroMem_region _ _
+
+theorem zeroMem_cvl : ∀ (n : Nat) (a : BitVec 64), Cvl.At zeroMem a (List.replicate n zeroCv)
+  | 0, _ => trivial
+  | n + 1, a => ⟨zeroMem_cv a, zeroMem_cvl n (a + 32#64)⟩
+
+theorem Tree32.usable : (Tree32.contract 0x100000#64 0x200000#64 0x300000#64 0#64 zeroCv (List.replicate 32 zeroCv)).Usable := by
+  refine ⟨0x7ff00000#64, zeroMem, zeroMem_region _ _, ?_, ?_, ?_⟩
+  · simp only [Tree32.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true, Abi.AllApart, Abi.Apart]; decide
+  · simp only [Tree32.contract]; decide
+  · simp only [Tree32.contract, abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true]
+    exact ⟨zeroMem_region _ _, zeroMem_cv _, List.length_replicate, zeroMem_cvl 32 _⟩
 
 theorem ChunkNode.usable : (ChunkNode.contract 0x100000#64 0x200000#64 0#64 0#64 0#64 5#64 zeroCv []).Usable := by
   refine ⟨0x7ff00000#64, zeroMem, zeroMem_region _ _, ?_, ?_, ?_⟩

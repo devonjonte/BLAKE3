@@ -25,6 +25,13 @@ clauses, _, _ = odec.contracts_of(open(src).read())
 CNAME = re.match(r"[\w.]+", next(r for w, r in clauses[name]["head"] if w == "meets")).group(0)
 NS = CNAME.rsplit(".", 1)[0]
 ENTRY = int(open(rows_path).readline().split("\t")[0], 16)
+# A function that calls an external function by an assumed contract is a program over any other: the examples
+# run it over the functions of ours that stand in for those kernels (`standin NAME` in the source; without
+# one, over nothing: a call of the kernel then finds no instruction).
+ASSUMED = odec.assumed_of(clauses, name)
+STANDINS = [odec.own[c]["standin"] for c in ASSUMED if odec.own[c].get("standin")]
+OVER = "(fun pc => " + "".join(f"(Code_{s}.prog pc).or (" for s in STANDINS) + "none" + ")" * len(STANDINS) + ")"
+PROG = f"(Code_{name}.prog {OVER})" if ASSUMED else f"Code_{name}.prog"
 with open(f"{name}.pieces.lean", "w") as f:
     f.write(f"import Checks\nimport Spec_{CNAME.split('.')[0].lower()}\n#pieces {CNAME}\n")
 out = subprocess.run(["lake", "env", "lean", f"{name}.pieces.lean"], capture_output=True, text=True).stdout
@@ -53,7 +60,7 @@ puts = "".join(f"    let m0 := Try.fill m0 ({a}) (Array.replicate ({l}).size.toN
 L = f"""import Try
 import TrySem
 import {os.environ.get('ODEMOD', 'HasherOde')}
-import Code_{name}
+import Code_{name}{"".join(chr(10) + "import Code_" + s for s in STANDINS)}
 import Example_{CNAME.split('.')[0].lower()}
 open X86
 
@@ -76,24 +83,24 @@ def blame : {types} → Mem → String
       | some f => s!"The source breaks the contract on it too (not so: {{f}}): the source or the contract is wrong."
       | none => "The source keeps the contract on it: the code the compiler made is wrong."
 
-def one (i : Nat) : {types} → String
+def one (i_ : Nat) : {types} → String
   | ({names}) =>
     let c := {CNAME} {' '.join(n for n, _ in params)}
     let m0 : Mem := fun _ => none
 {puts}    let s0 := Try.start c 0x{ENTRY:X} m0
     let pre : List (String × Bool) := [{', '.join(pre)}]
     match Try.firstFailure pre with
-    | some f => s!"example {{i}}: NOT AN EXAMPLE: not so: {{f}}"
+    | some f => s!"example {{i_}}: NOT AN EXAMPLE: not so: {{f}}"
     | none =>
-      match Try.run Code_{name}.prog Try.returnAddress.toNat (Try.owned c) 100000 0 s0 with
-      | .faulted pc n => s!"example {{i}}: REFUTED: after {{n}} instructions {{Try.why Code_{name}.prog pc}}. {{blame ({names}) s0.mem}}"
-      | .outOfFuel _ => s!"example {{i}}: NO VERDICT: still running after 100000 instructions (a loop that does not end?)"
-      | .returned s' n =>
+      match Try.run {PROG} Try.returnAddress.toNat (Try.owned c) 100000 0 s0 with
+      | .faulted pc ran_ => s!"example {{i_}}: REFUTED: after {{ran_}} instructions {{Try.why {PROG} pc}}. {{blame ({names}) s0.mem}}"
+      | .outOfFuel _ => s!"example {{i_}}: NO VERDICT: still running after 100000 instructions (a loop that does not end?)"
+      | .returned s' ran_ =>
         let {returns[0]} := s'.rax
         let post : List (String × Bool) := Try.returnChecks c s0 s' ++ [{', '.join(post)}]
         match Try.firstFailure post with
-        | some f => s!"example {{i}}: REFUTED: not so: {{f}} (it returned after {{n}} instructions). {{blame ({names}) s0.mem}}"
-        | none => s!"example {{i}}: meets the contract ({{n}} instructions)"
+        | some f => s!"example {{i_}}: REFUTED: not so: {{f}} (it returned after {{ran_}} instructions). {{blame ({names}) s0.mem}}"
+        | none => s!"example {{i_}}: meets the contract ({{ran_}} instructions)"
 
 /-- Each example in turn; the first that does not meet the contract is enough. -/
 def all : List ({types}) → Nat → IO Unit

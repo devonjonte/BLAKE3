@@ -74,6 +74,16 @@ def contracts_of(text):
             own[m.group(1)] = {"at": int(m.group(2), 16), "contract": m.group(3), "theorem": m.group(4), "budget": int(m.group(5)),
                                "code": m.group(6) or m.group(1)}       # whose instructions stand there (Code_X.lean)
             kept.append(""); continue
+        # an external function this model does not hold (a wide kernel), called by a contract its caller assumes:
+        # where its call goes, the contract, how many things the contract is stated for, the stack it may use.
+        # The theorem of a function that calls it holds over any program in which that address meets the contract.
+        # (`standin NAME`: a function of ours assembled at that address, whose instructions take the kernel's
+        # place when the examples run: it is tried against the same contract.)
+        m = re.match(r"^callee\s+(\w+)\s+at\s+(0x[0-9a-fA-F]+)\s+assumes\s+([\w.]+)\s*\((\d+)\)\s+budget\s+(\d+)(?:\s+standin\s+(\w+))?$", s)
+        if m:
+            own[m.group(1)] = {"at": int(m.group(2), 16), "contract": m.group(3), "theorem": None, "budget": int(m.group(5)),
+                               "code": None, "arity": int(m.group(4)), "standin": m.group(6)}
+            kept.append(""); continue
         # in a function's body: a call of such a function, then what the prover needs at it, one a line:
         # `with TERM; TERM` (what its contract is stated for besides the arguments), `know LEMMA` (facts to
         # have at hand before it: what its contract asks, said in the contract's words) and `keep CLAUSE`
@@ -401,6 +411,19 @@ class Lower:
 contracts = []
 other = {}      # kernels for other architectures than x86-64: {arch: [(name, lines)]}
 own = {}        # functions of this file that others call by contract: {name: {at, contract, theorem, budget}}
+
+
+def assumed_of(clauses, fn, seen=None):
+    """The external functions called by an assumed contract that `fn` reaches, its own first, then its callees'
+    in the order it calls them: the hypotheses of its theorem, in their order."""
+    seen = [] if seen is None else seen
+    for c in clauses.get(fn, {}).get("calls", []):
+        n = c["callee"]
+        if own[n]["theorem"] is None:
+            if n not in seen: seen.append(n)
+        else:
+            assumed_of(clauses, n, seen)
+    return seen
 
 
 def kernels(text):

@@ -42,6 +42,12 @@ X86 = [  # (module, theorem, contract and where, what it says)
      "**the function computes BLAKE3**: for any message, with the specification's IV at `key`, `hashl` as assembled leaves `Blake3.hashBytes` of the message (C2SP's `Blake3.hash`) in the 32 bytes at `out`, and the message and the key as they were"),
     ("Proof_adler32", "Proof_adler32.adler32_meets", "`Adler32.contract` (experiments/adler32/Spec_adler32.lean)",
      "an outside project's function (Devon Jonte's Adler-32, RFC 1950), as assembled, returns the checksum of the bytes it is given and writes nothing but its stack"),
+    ("Proof_fillp", "Proof_fillp.fillp_meets", "`Fillp.contract` (lang/Spec_fillp.lean)",
+     "`fillp`, as assembled, fills the table of 32 addresses a wide kernel is given"),
+    ("Proof_tree32", "Proof_tree32.tree32_meets", "`Tree32.contract` (lang/Spec_tree32.lean); assumes `P16.contract` (lang/Spec_p16.lean) of the 16-lane parent kernel's address",
+     "**over any program in which the library's 16-lane parent kernel meets its contract**, `tree32`, as assembled, makes the value of the tree over 32 chaining values: five calls of that kernel"),
+    ("Groups", "Blake3.tree_groups", "no code: the specification's tree (alg/Groups.lean)",
+     "with the chunks in groups of a power of two, the last group short or whole, the specification's tree over the chunks is its tree over the groups' own trees"),
     ("AddTree", "Add.keeps_the_tree", "no code: `Add.contract`'s result and the specification's tree (alg/Stack.lean)",
      "on the tree's stack for `m` chunks, what `add` leaves is the tree's stack for `m + 1`"),
 ]

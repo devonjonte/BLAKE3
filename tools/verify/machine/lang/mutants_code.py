@@ -30,9 +30,8 @@ CNAME = re.match(r"[\w.]+", next(r for w, r in clauses["head"] if w == "meets"))
 EX = "Example_" + CNAME.split(".")[0].lower()
 # the options prove_fn.sh gave gen_code.py: the checked entry's rows, the callees' code
 more = [f"Lifted_{name}_checked.lean.rows"] if os.path.exists(os.path.join(here, f"Lifted_{name}_checked.lean.rows")) else []
-codes = list(dict.fromkeys(odec.own[c["callee"]]["code"] for c in clauses.get("calls", [])))
-codes.sort(key=lambda n: "import KCode" not in open(os.path.join(here, f"Code_{n}.lean")).read())
-withs = [x for n in codes for x in ("--with", n + ("+k" if "import KCode" in open(os.path.join(here, f"Code_{n}.lean")).read() else ""))]
+import fn_args
+withs = fn_args.code_args(SRC, name, here)
 targets = [f"Proof_{name}"]
 
 snap_dir = tempfile.mkdtemp(prefix="mut-code-snap-", dir=os.path.dirname(here))
@@ -102,7 +101,7 @@ def run(k):
             assert rc == 0 or stopping, out
         tried = "no examples"
         if os.path.exists(os.path.join(w, EX + ".lean")):
-            rc, _ = call(["lake", "build", f"Code_{name}", EX, "Checks", "TrySem", ODEMOD], w)
+            rc, _ = call(["lake", "build", f"Code_{name}"] + [f"Code_{s}" for s in fn_args.standins(SRC, name)] + [EX, "Checks", "TrySem", ODEMOD], w)
             if rc == 0:
                 _, tried_out = call([sys.executable, "try_fn.py", SRC, name, ROWS], w)
                 bad = [l for l in tried_out.splitlines() if "REFUTED" in l or "NO VERDICT" in l]

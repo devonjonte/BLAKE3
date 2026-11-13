@@ -85,6 +85,15 @@ def fact(i, passes):
 
 
 CARGS = " ".join(params + [g for g, _ in ghosts])
+# a function that calls a kernel by an assumed contract: its program is over any other, its theorem has the
+# assumptions as hypotheses (prove_fn.py), and so has this one
+ASSUMED = odec.assumed_of(clauses, name)
+PROG = f"(Code_{name}.prog ext)" if ASSUMED else f"Code_{name}.prog"
+def assumption(c):
+    info = odec.own[c]; xs = " ".join(f"x{i}" for i in range(info["arity"]))
+    return f"(hA_{c} : ∀ {xs}, Abi.Meets {PROG} 0x{info['at']:X} ({info['contract']} {xs}))"
+XDECL = ("(ext : Nat → Option (Instr × Nat)) " + " ".join(assumption(c) for c in ASSUMED) + " ") if ASSUMED else ""
+XUSE = ("ext " + " ".join(f"hA_{c}" for c in ASSUMED) + " ") if ASSUMED else ""
 ALL = f"({' '.join(params)} : BitVec 64) " + " ".join(f"({g} : {t})" for g, t in ghosts)
 ACCEPTS = " ∧ ".join(prop(c) for c in checks)
 XS = ", ".join(f"x{i}" for i in range(16))
@@ -96,8 +105,8 @@ L = ["import Cells", "import AbiProof", f"import Proof_{name}", "open X86 Cells"
      f"namespace Checked_{name}", "", "set_option maxRecDepth 1000000", "set_option maxHeartbeats 0", "",
      f"/-- **The checked entry of `{name}`, as assembled, meets the contract's checked form, whatever its arguments:**",
      f"it does as `{CNAME}` says where that accepts them, and returns {REFUSED} having changed nothing where it does not. -/",
-     f"theorem {name}_checked_meets : ∀ {ALL},",
-     f"    Abi.Meets Code_{name}.prog 0x{ENTRY:X} (({CNAME} {CARGS}).checked {REFUSED}#64) := by",
+     f"theorem {name}_checked_meets {XDECL}: ∀ {ALL},",
+     f"    Abi.Meets {PROG} 0x{ENTRY:X} (({CNAME} {CARGS}).checked {REFUSED}#64) := by",
      f"  intro {CARGS} s ra hpc hargs hra hstack hap _ hreq",
      f"  obtain ⟨{', '.join(REGS)}, zf, cf, {XS}, mem, pc⟩ := s",
      "  have hargs0 := hargs",
@@ -107,7 +116,7 @@ L = ["import Cells", "import AbiProof", f"import Proof_{name}", "open X86 Cells"
      "  have hra' := hra", "  simp only at hra'"]
 def accepted_path():
     hs = f"⟨{', '.join(f'h{j}' for j in range(n))}⟩" if n > 1 else "h0"
-    return [f"exact Abi.checked_accepted (Proof_{name}.{name}_meets {CARGS}) (K := {steps([True] * n)}) (by run_fn [{', '.join(f'c{j}' for j in range(n))}]; rfl)",
+    return [f"exact Abi.checked_accepted (Proof_{name}.{name}_meets {XUSE}{CARGS}) (K := {steps([True] * n)}) (by run_fn [{', '.join(f'c{j}' for j in range(n))}]; rfl)",
             f"  (show {ACCEPTS} from {hs}) hargs hra hstack hap hreq"]
 
 
