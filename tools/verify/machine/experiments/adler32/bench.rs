@@ -221,7 +221,7 @@ fn collect(name: &str, probe: bool) -> i32 {
         let (storage, start) = input(pattern, len, offset);
         let input = &storage[start..start + len];
         assert_eq!(input.as_ptr() as usize % 64, offset);
-        let samples = clocks::measure(12, if probe { 10_000_000 } else { 5_000_000 }, || {
+        let samples = clocks::measure(12, if probe { 20_000_000 } else { 5_000_000 }, || {
             black_box(checksum(f, black_box(input)));
         });
         let mean = clocks::summary::mean(samples.iter().map(|s| (s.wall_ns, s.calls)));
