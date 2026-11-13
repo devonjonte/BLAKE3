@@ -205,6 +205,7 @@ name = "Code_hashl"
 name = "Proof_hashl"
 [[lean_lib]]
 name = "Meets_hashl_bytes"
+[[lean_lib]]
 name = "Spec_adler32"
 srcDir = "../experiments/adler32"
 [[lean_lib]]
