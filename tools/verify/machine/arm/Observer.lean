@@ -35,6 +35,9 @@ def obsInstr (i : Instr) (s : State) : Option (List Obs) :=
   | .simdImmShift .. => some []
   | .simdThreeSame .. => some []
   | .simdPermute .. => some []
+  | .simdTbl .. => some []
+  | .simdInsDup .. => some []
+  | .moveWide .. => some []
   | .ret rn => some [.jump (s.readReg64 rn)]
   | _ => none
 
@@ -132,6 +135,35 @@ theorem cons_reg {w : BitVec 32} {i : Instr} {ws : List (BitVec 32)} {s s' : Sta
     exact ⟨by rw [r1, q1, h.regs], by rw [r2, q2, h.sp], by rw [r3, q3, h.pc], by rw [r4, q4, h.status],
       by rw [r5, q5]; exact h.map⟩
   simp only [runObs, hd, ho, ← h.status, ← h.pc, k _ _ a]
+
+/-- An instruction that works on the general registers alone (what it leaves in them depends on nothing
+else) and goes on to the next. -/
+def GprOnly (i : Instr) : Prop :=
+  ∀ s s', s.regs = s'.regs →
+    (execInst i s).regs = (execInst i s').regs ∧ (execInst i s).sp = s.sp ∧ (execInst i s).pc = s.pc + 4#64 ∧
+    (execInst i s).status = s.status ∧ (execInst i s).mem = s.mem
+
+theorem cons_gpr {w : BitVec 32} {i : Instr} {ws : List (BitVec 32)} {s s' : State}
+    (hd : decode w = some i) (hp : GprOnly i) (ho : ∀ t, obsInstr i t = some [])
+    (h : Agree s s') (k : ∀ t t', Agree t t' → runObs ws t = runObs ws t') :
+    runObs (w :: ws) s = runObs (w :: ws) s' := by
+  have a : Agree (execInst i s) (execInst i s') := by
+    obtain ⟨r1, r2, r3, r4, r5⟩ := hp s s' h.regs
+    obtain ⟨_, q2, q3, q4, q5⟩ := hp s' s' rfl
+    exact ⟨r1, by rw [r2, q2, h.sp], by rw [r3, q3, h.pc], by rw [r4, q4, h.status],
+      by rw [r5, q5]; exact h.map⟩
+  simp only [runObs, hd, ho, ← h.status, ← h.pc, k _ _ a]
+
+/-- A constant moved into one of X0 to X30 (`movz`, `movk`, `movn`) is such an instruction. -/
+theorem moveWide_gprOnly (w : RegWidth) (op : MoveWideOp) (idx : BitVec 5) (imm : BitVec 16) (hw : Nat)
+    (hi : (idx == 31#5) = false) : GprOnly (.moveWide w op (.gpr idx) imm hw) := by
+  intro s s' h
+  have e : ∀ t : State, execInst (.moveWide w op (.gpr idx) imm hw) t = execMoveWide w op (.gpr idx) imm hw t :=
+    fun _ => rfl
+  rw [e s, e s']
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩ <;> cases op <;> cases w <;>
+    simp [execMoveWide, State.writeReg, State.writeReg64, State.readReg, State.readReg32,
+      State.readReg64, State.advancePC, hi, h]
 
 /-- A load of two vectors at a general register plus a constant. -/
 theorem cons_ldp {w : BitVec 32} {vt1 vt2 r : BitVec 5} {off : BitVec 64} {ws : List (BitVec 32)} {s s' : State}

@@ -249,7 +249,7 @@ one kernel, their repository unchanged; `../arm/`.) What we learned by doing it:
 - **Their trusted part is enough to state our contracts**: a decoder from the 32-bit words, `execInst`,
   `Step`, and `subroutine_ok` (total correctness with a frame; the stack pointer and callee-saved
   registers kept). Our contract in bytes (`Hex.text`) is a `Spec` of theirs, 6 lines.
-- **Their proof library does the stepping** (`wp_init`, `wp_steps`: 32 NEON instructions in seconds) and
+- **Their proof library does the stepping** (`wp_init`, `wp_steps`: the kernel's NEON instructions in seconds) and
   leaves us the arithmetic: eight equalities of 64-bit values, which `bv_decide` closes. Their
   `wp_done` does not hand back what it cannot close; `SepWP.of_eq` (three lines, ours) replaces the
   spatial context by the specification's and leaves the value goals. The compiler's Arm generator
@@ -635,7 +635,7 @@ What the table says:
   `Merge.contract` itself, which `add`'s reader never reads (only `Merge.result`, which `Add.contract`
   names). `Push.contract` is not on the list at all. An internal contract is read by maintainers.
 - **Instructions are most of what is specific to a function**, and they are the lifter's reading of the
-  object, not checked by Lean on x86-64. On AArch64 they are 32 words in one line: Google's decoder is
+  object, not checked by Lean on x86-64. On AArch64 they are 27 words in one line: Google's decoder is
   in the model. That is the case for a decoder of our own, or for their kind of model, on x86-64.
 - **Google's model is twelve times ours to read, and it is not ours alone**: the same 6,106 lines stand
   under their Signal verification. Ours (417 lines) stands under nothing but this library. A reader who

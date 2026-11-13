@@ -460,8 +460,9 @@ of memory; then a control whose 32-bit writes keep the upper half. Needs AVX-512
 Sam's decision: for Arm we use the AArch64 model of `google-deepmind/code-verification` (`arm64-semantics`,
 Apache-2.0; the model of "AlphaProof Code: Verifying Signal's Security at the Machine-Code Level") rather
 than write one. Done for one kernel, their repository unchanged at b0f729ac: the constant-time `hex` for
-NEON, **written in our language** (`kernel hex_neon on aarch64` in `lang/hasher.ode`: 32 instructions, no
-table, no branch) **with its proofs written by the compiler**.
+NEON, **written in our language** (`kernel hex_neon on aarch64` in `lang/hasher.ode`: 27 instructions, no
+branch, no table in memory: since November 13 each character is looked up, `tbl`, in a register that
+immediates fill) **with its proofs written by the compiler**.
 
 **`./prove_arm.sh`: from the source to checked theorems.** `odec.py` prints the kernel's assembly
 (`hex_neon.S` here must be that); the assembler makes an ELF object; `gen_arm.py` asks their decoder
@@ -472,15 +473,16 @@ threads) and checks everything; then the audit runs.
 - `Quiet_hex_neon.lean` (generated; needs their trusted definitions only): **`hex_neon_quiet`**: two
   machines that agree on the general registers, the stack pointer, the program counter and on which
   memory is mapped with which permissions, and differ in any way in what memory holds and in the vector
-  registers, show the same while the 32 instructions run; **`hex_neon_observed`**: every one of the 32
+  registers, show the same while the 27 instructions run; **`hex_neon_observed`**: every one of the 27
   is an instruction the observer has an account of. Lean's three axioms; one second. The observer is
   ours (`Observer.lean`, 60 lines to read: fetches, the addresses read and written, where control
   goes), since their model has none.
 - `Proof_hex_neon.lean` (generated): **`hex_neon_ok`**: the kernel's own contract, in 16-byte vectors
   (`HexVec.lean`), as `subroutineOk` of their logic: a call returns to its caller with the stack
   pointer and callee-saved registers as they were, memory as the contract says and otherwise as it was.
-  Their tactics run the 32 instructions; eight equalities of 64-bit values are left, which `bv_decide`
-  closes.
+  Their tactics run the 27 instructions; eight equalities of 64-bit values are left, which `bv_decide`
+  closes (their `tbl` takes its index as a natural number; three lemmas of `WpKernel.lean` say it in
+  bit-vectors first).
 - `HexNeonBytes.lean` (by hand, as `lang/Meets_hex.lean` is on x86-64): **`hex_neon_bytes_ok`**: the
   reader's contract, in the words used on x86-64: with 32 bytes `hash` at X1 and 64 bytes at X0, the 64
   become `Hex.text hash` and the hash is unchanged. From `hex_neon_ok` by their `subroutine_ok_refine`.
@@ -530,9 +532,9 @@ threads) and checks everything; then the audit runs.
 | the contract | `Hex.contract`: 64 bytes at `out` become `Hex.text` of the 32 at `hash` | `hexBytesSpec`: the same words |
 | the source | `kernel hex` in `lang/hasher.ode` | `kernel hex_neon on aarch64`, the same file |
 | the theorem | `hex_meets` (`Abi.MeetsQuietly`) | `hex_neon_bytes_ok` (`subroutineOk`) |
-| what an observer sees | in the same theorem: one list for every hash | `hex_neon_quiet`, a second theorem, about the 32 words run in order |
+| what an observer sees | in the same theorem: one list for every hash | `hex_neon_quiet`, a second theorem, about the 27 words run in order |
 | axioms | 3 + 5 of `bv_decide` | 3 + 72 of `bv_decide`; the observer's theorems 3 |
-| instructions | 45 SSE2 | 32 NEON |
+| instructions | 45 SSE2 | 27 NEON |
 
 Not yet: the observer's theorem joined to their `Step` (it runs the words in order; that the model
 fetches exactly these from memory is `hex_neon_ok`'s part); an instruction's own time (Arm's DIT; no

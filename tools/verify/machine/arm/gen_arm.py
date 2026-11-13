@@ -42,7 +42,10 @@ def decoded(words):
     return out
 
 
-REG_ONLY = ("Arm64.Instr.simdImmShift ", "Arm64.Instr.simdThreeSame ", "Arm64.Instr.simdPermute ")
+REG_ONLY = ("Arm64.Instr.simdImmShift ", "Arm64.Instr.simdThreeSame ", "Arm64.Instr.simdPermute ", "Arm64.Instr.simdTbl ",
+            "Arm64.Instr.simdInsDup ")
+# a constant into a general register: movz, movk, movn
+MOVE_WIDE = re.compile(r"Arm64\.Instr\.moveWide \S+ \S+ \(Arm64\.Reg\.gpr \S+\) \S+ \S+$")
 PAIR = re.compile(r"Arm64\.Instr\.(ldpSimd|stpSimd) \(Arm64\.SimdMemSize\.Q128\) \S+ \S+ \(Arm64\.AddrMode\.Offset \(Arm64\.Reg\.gpr \S+\) \S+\)$")
 
 
@@ -68,6 +71,8 @@ def {name}_words : List (BitVec 32) := [{', '.join('0x' + w for w in words)}]
         if i.startswith(REG_ONLY) and not last:
             t += f"theorem {name}.p{k} : RegOnly ({i}) := fun _ => ⟨rfl, rfl, rfl, rfl, rfl⟩\n"
             steps.append(f"  refine cons_reg {name}.d{k} {name}.p{k} (fun _ => rfl) h ?_; intro s s' h\n")
+        elif MOVE_WIDE.match(i) and not last:
+            steps.append(f"  refine cons_gpr {name}.d{k} (moveWide_gprOnly _ _ _ _ _ (by decide)) (fun _ => rfl) h ?_; intro s s' h\n")
         elif PAIR.match(i) and not last:
             steps.append(f"  refine cons_{'ldp' if 'ldpSimd' in i else 'stp'} {name}.d{k} h ?_; intro s s' h\n")
         elif i.startswith("Arm64.Instr.ret ") and last:
@@ -144,7 +149,7 @@ def {name}_code : FnCode :=
   .ofFn "b3l_{name}"
     "{' '.join(words)}"
 
-set_option maxHeartbeats 4000000 in
+set_option maxHeartbeats 40000000 in
 theorem {name}_ok (prog : Program) (h_code : {name}_code.holds prog) :
     prog.subroutineOk "b3l_{name}" {name}_spec := by
   wp_init x s0
@@ -155,8 +160,9 @@ theorem {name}_ok (prog : Program) (h_code : {name}_code.holds prog) :
   case values =>
     repeat' (first | with_reducible rfl | apply sepConj_congr | apply pointsTo64_congr_val)
     all_goals (
-      simp only [forIn_range8_yield, bind_pure, Id.run_pure, Nat.reduceMul, Nat.reduceAdd, kernel_spec]
 {gens}
+      simp only [forIn_range8_yield, forIn_range16_yield, bind_pure, Id.run_pure, Nat.reduceMul, Nat.reduceAdd,
+        tbl_lt, tbl_reg, tbl_shift, kernel_spec]
       bv_decide)
   case rest =>
     wp_done
