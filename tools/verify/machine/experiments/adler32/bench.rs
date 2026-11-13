@@ -26,10 +26,62 @@ unsafe fn zlib_ng(p: *const u8, n: usize) -> u32 {
 unsafe fn libdeflate(p: *const u8, n: usize) -> u32 {
     libdeflate_adler32(1, p, n)
 }
-const ENGINES: [(&str, Engine); 4] = [("ode", ode), ("zlib", zlib), ("zlib-ng", zlib_ng), ("libdeflate", libdeflate)];
-const FORMAT: &str = "# ode-adler-samples-v2";
+#[cfg(feature = "probe")]
+mod probes {
+    unsafe extern "C" {
+        fn isal_adler32(seed: u32, input: *const u8, n: u64) -> u32;
+        fn probe512(p: *const u8, n: usize) -> u32;
+        fn probe512_one(p: *const u8, n: usize) -> u32;
+        fn probe256(p: *const u8, n: usize) -> u32;
+        fn probe256_one(p: *const u8, n: usize) -> u32;
+    }
+    #[inline(never)]
+    pub unsafe fn isal(p: *const u8, n: usize) -> u32 {
+        isal_adler32(1, p, n as u64)
+    }
+    #[inline(never)]
+    pub unsafe fn wide512(p: *const u8, n: usize) -> u32 {
+        probe512(p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn wide512_one(p: *const u8, n: usize) -> u32 {
+        probe512_one(p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn wide256(p: *const u8, n: usize) -> u32 {
+        probe256(p, n)
+    }
+    #[inline(never)]
+    pub unsafe fn wide256_one(p: *const u8, n: usize) -> u32 {
+        probe256_one(p, n)
+    }
+}
+const ENGINES: &[(&str, Engine)] = &[
+    ("ode", ode),
+    ("zlib", zlib),
+    ("zlib-ng", zlib_ng),
+    ("libdeflate", libdeflate),
+    #[cfg(feature = "probe")]
+    ("isa-l", probes::isal),
+    #[cfg(feature = "probe")]
+    ("probe512", probes::wide512),
+    #[cfg(feature = "probe")]
+    ("probe512-one", probes::wide512_one),
+    #[cfg(feature = "probe")]
+    ("probe256", probes::wide256),
+    #[cfg(feature = "probe")]
+    ("probe256-one", probes::wide256_one),
+];
+const FORMAT: &str = "# ode-adler-samples-v3";
 const LENGTHS: [usize; 10] = [0, 1, 16, 64, 256, 1024, 4096, 5552, 65536, 1048576];
 const EXPECTED_TEXT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/text.bin"));
+
+fn cells(probe: bool) -> Vec<(u8, usize, usize)> {
+    (0..4)
+        .flat_map(|p| LENGTHS.into_iter().flat_map(move |n| [0, 1].map(|o| (p, n, o))))
+        .filter(|&(p, n, _)| !probe || (p == 3 && ![1024, 5552].contains(&n)))
+        .collect()
+}
 
 fn engine(name: &str) -> Engine {
     ENGINES.iter().find(|e| e.0 == name).expect("declared engine").1
@@ -41,14 +93,24 @@ fn checksum(f: Engine, input: &[u8]) -> u32 {
 }
 
 fn validate() {
+    #[cfg(feature = "probe")]
+    assert!(
+        std::is_x86_feature_detected!("avx512bw")
+            && std::is_x86_feature_detected!("avx512vl")
+            && std::is_x86_feature_detected!("avx512vnni")
+            && std::is_x86_feature_detected!("avx512dq"),
+        "unverified probes require AVX-512 BW/VL/VNNI/DQ (or an explicitly configured emulator)"
+    );
     let actual = unsafe { std::slice::from_raw_parts(b3l_adler32 as *const u8, EXPECTED_TEXT.len()) };
     assert_eq!(actual, EXPECTED_TEXT, "linked Ode function differs from the proved observed bytes");
-    for (name, f) in ENGINES {
+    for &(name, f) in ENGINES {
         for (input, want) in [(b"".as_slice(), 1), (b"a".as_slice(), 0x00620062), (b"Wikipedia".as_slice(), 0x11e60398), (b"123456789".as_slice(), 0x091e01de)]
         {
             assert_eq!(checksum(f, input), want, "{name}");
         }
-        for n in [0, 1, 2, 16, 31, 32, 63, 64, 255, 256, 1024, 4096, 5551, 5552, 5553, 65520, 65521, 65522, 65536, 1048576] {
+        for n in [
+            0, 1, 2, 16, 31, 32, 63, 64, 127, 128, 255, 256, 257, 1024, 4096, 5551, 5552, 5553, 16383, 16384, 16385, 32768, 65520, 65521, 65522, 65536, 1048576,
+        ] {
             for pattern in 0..4 {
                 for offset in [0, 1] {
                     let (storage, start) = input(pattern, n, offset);
@@ -58,6 +120,48 @@ fn validate() {
             }
         }
     }
+    guard_pages(ENGINES);
+}
+
+fn guard_pages(engines: &[(&str, Engine)]) {
+    unsafe extern "C" {
+        fn mmap(p: *mut u8, n: usize, prot: i32, flags: i32, fd: i32, off: i64) -> *mut u8;
+        fn mprotect(p: *mut u8, n: usize, prot: i32) -> i32;
+        fn munmap(p: *mut u8, n: usize) -> i32;
+        fn sysconf(name: i32) -> i64;
+    }
+    // Linux's anonymous mapping, with read-only input against both guard edges.
+    // Borrowed slices live only while their pages are readable.
+    unsafe {
+        let page = sysconf(30) as usize;
+        assert!(page.is_power_of_two());
+        for n in [0, 1, 15, 16, 31, 32, 63, 64, 127, 128, 255, 256, 257, 4095, 4096, 4097, 16383, 16384, 16385] {
+            let span = (n / page + 1) * page;
+            let total = span + 2 * page;
+            let map = mmap(std::ptr::null_mut(), total, 0, 0x22, -1, 0);
+            assert_ne!(map as usize, usize::MAX);
+            let data = map.add(page);
+            for edge in [0, span - n] {
+                let p = data.add(edge);
+                for pattern in 0..4 {
+                    assert_eq!(mprotect(data, span, 3), 0);
+                    let (storage, start) = input(pattern, n, 0);
+                    std::ptr::copy_nonoverlapping(storage.as_ptr().add(start), p, n);
+                    let want = reference(&storage[start..start + n]);
+                    assert_eq!(mprotect(data, span, 1), 0);
+                    for &(name, f) in engines {
+                        assert_eq!(f(p, n), want, "guard: {name}, {n} bytes, edge {edge}, pattern {pattern}");
+                    }
+                }
+            }
+            assert_eq!(munmap(map, total), 0);
+        }
+    }
+}
+
+unsafe fn deliberate_overread(p: *const u8, n: usize) -> u32 {
+    std::ptr::read_volatile(p.add(n));
+    1
 }
 
 fn reference(input: &[u8]) -> u32 {
@@ -96,46 +200,45 @@ pub extern "C" fn adler_validation_done() {
     black_box(0u8);
 }
 
-fn collect(name: &str) -> i32 {
+fn collect(name: &str, probe: bool) -> i32 {
     validate();
     let f = black_box(engine(name));
     clocks::load::quiet_for(3).expect("collect needs a quiet measurement machine");
-    println!("{FORMAT}\n# engine: {name}");
+    println!("{FORMAT}\n# engine: {name}\n# workload: {}", if probe { "probe" } else { "full" });
+    if name.starts_with("probe") {
+        println!("# engine proof: UNVERIFIED native C algorithm probe, not an Ode implementation");
+    }
     println!("# scope: warmed seed-one native calls; indirect adapter boundary; includes result consumption; buffers 64-byte aligned or offset by 1");
     println!("# Ode address: {:p}; padding: {}", b3l_adler32 as *const (), env!("ODE_PADDING"));
-    for (n, f) in ENGINES {
+    for &(n, f) in ENGINES {
         println!("# adapter: {n} {:p}", f as *const ());
     }
     println!("# rustc: {}\n# clocks: bench-hashes 5f99f456951ab36f7201decd8aa5e0249ec67bd1; {}", env!("ODE_RUSTC"), clocks::WALL_CLOCK);
     println!("# report: {}", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/report.json")).replace('\n', " "));
     println!("pattern\tbytes\toffset\tsample\tcalls\twall_ns\tcpu_ns\tp_cycles\tp_instructions\tp_time_ns\te_cycles\te_instructions\te_time_ns\tstarted_ns");
     let mut all = vec![];
-    for pattern in 0..4 {
-        for len in LENGTHS {
-            for offset in [0, 1] {
-                let (storage, start) = input(pattern, len, offset);
-                let input = &storage[start..start + len];
-                assert_eq!(input.as_ptr() as usize % 64, offset);
-                let samples = clocks::measure(12, 5_000_000, || {
-                    black_box(checksum(f, black_box(input)));
-                });
-                let mean = clocks::summary::mean(samples.iter().map(|s| (s.wall_ns, s.calls)));
-                eprintln!("{name}, pattern {pattern}, {len} bytes, offset {offset}: {} ns/call (run mean)", decimal(mean));
-                for (i, s) in samples.into_iter().enumerate() {
-                    let c = s
-                        .counts
-                        .map(|c| format!("{}\t{}\t{}\t{}\t{}\t{}", c.p.cycles, c.p.instructions, c.p.time_ns, c.e.cycles, c.e.instructions, c.e.time_ns))
-                        .unwrap_or_else(|| "-\t-\t-\t-\t-\t-".into());
-                    println!(
-                        "{pattern}\t{len}\t{offset}\t{i}\t{}\t{}\t{}\t{c}\t{}",
-                        s.calls,
-                        s.wall_ns,
-                        s.cpu_ns.map_or_else(|| "-".into(), |n| n.to_string()),
-                        s.started_ns
-                    );
-                    all.push(s);
-                }
-            }
+    for (pattern, len, offset) in cells(probe) {
+        let (storage, start) = input(pattern, len, offset);
+        let input = &storage[start..start + len];
+        assert_eq!(input.as_ptr() as usize % 64, offset);
+        let samples = clocks::measure(12, 5_000_000, || {
+            black_box(checksum(f, black_box(input)));
+        });
+        let mean = clocks::summary::mean(samples.iter().map(|s| (s.wall_ns, s.calls)));
+        eprintln!("{name}, pattern {pattern}, {len} bytes, offset {offset}: {} ns/call (run mean)", decimal(mean));
+        for (i, s) in samples.into_iter().enumerate() {
+            let c = s
+                .counts
+                .map(|c| format!("{}\t{}\t{}\t{}\t{}\t{}", c.p.cycles, c.p.instructions, c.p.time_ns, c.e.cycles, c.e.instructions, c.e.time_ns))
+                .unwrap_or_else(|| "-\t-\t-\t-\t-\t-".into());
+            println!(
+                "{pattern}\t{len}\t{offset}\t{i}\t{}\t{}\t{}\t{c}\t{}",
+                s.calls,
+                s.wall_ns,
+                s.cpu_ns.map_or_else(|| "-".into(), |n| n.to_string()),
+                s.started_ns
+            );
+            all.push(s);
         }
     }
     let windows = clocks::load::windows();
@@ -173,8 +276,14 @@ fn read_text(text: &str) -> (String, BTreeMap<Cell, u128>) {
         assert_eq!(sample, v.len(), "samples appear once in order");
         v.push((p[5].parse().unwrap(), p[4].parse().unwrap()));
     }
-    let expected: Vec<_> = (0..4).flat_map(|p| LENGTHS.into_iter().flat_map(move |n| [0, 1].map(|o| (p, n, o)))).collect();
-    assert!(cells.keys().copied().eq(expected), "exactly the declared workload cells");
+    let modes: Vec<_> = text.lines().filter_map(|l| l.strip_prefix("# workload: ")).collect();
+    assert_eq!(modes.len(), 1, "one declared workload");
+    let probe = match modes[0] {
+        "full" => false,
+        "probe" => true,
+        _ => panic!("declared workload"),
+    };
+    assert!(cells.keys().copied().eq(self::cells(probe)), "exactly the declared workload cells");
     (
         names[0].into(),
         cells
@@ -260,11 +369,13 @@ fn main() {
         Some("--validate") if args.len() == 1 => {
             validate();
             adler_validation_done();
-            println!("four engines agree; linked Ode bytes checked; no timing performed");
+            println!("{} engines agree; linked Ode bytes checked; no timing performed", ENGINES.len());
         }
-        Some("--collect") if args.len() == 2 => std::process::exit(collect(&args[1])),
+        Some("--overread-control") if args.len() == 1 => guard_pages(&[("deliberate one-byte overread", deliberate_overread)]),
+        Some("--collect") if args.len() == 2 => std::process::exit(collect(&args[1], false)),
+        Some("--probe") if args.len() == 2 => std::process::exit(collect(&args[1], true)),
         Some("--compare") => compare(&args[1..]),
-        _ => panic!("usage: --validate | --collect ENGINE | --compare OLD NEW [OLD NEW ...]"),
+        _ => panic!("usage: --validate | --collect ENGINE | --probe ENGINE | --compare OLD NEW [OLD NEW ...]"),
     }
 }
 
@@ -275,17 +386,30 @@ mod tests {
         super::validate();
     }
     fn fixture(ns: u64) -> String {
-        let mut s = format!("{}\n# engine: ode\n", super::FORMAT);
-        for p in 0..4 {
-            for n in super::LENGTHS {
-                for o in [0, 1] {
-                    for i in 0..12 {
-                        s.push_str(&format!("{p}\t{n}\t{o}\t{i}\t1\t{ns}\t-\t-\t-\t-\t-\t-\t-\t0\n"));
-                    }
-                }
+        fixture_mode(ns, false)
+    }
+    fn fixture_mode(ns: u64, probe: bool) -> String {
+        let mut s = format!("{}\n# engine: ode\n# workload: {}\n", super::FORMAT, if probe { "probe" } else { "full" });
+        for (p, n, o) in super::cells(probe) {
+            for i in 0..12 {
+                s.push_str(&format!("{p}\t{n}\t{o}\t{i}\t1\t{ns}\t-\t-\t-\t-\t-\t-\t-\t0\n"));
             }
         }
         s + "# accepted: quiet\n"
+    }
+    #[test]
+    fn probe_contract() {
+        let (_, rows) = super::read_text(&fixture_mode(100, true));
+        assert_eq!(
+            rows.keys().copied().collect::<Vec<_>>(),
+            [0, 1, 16, 64, 256, 4096, 65536, 1048576].into_iter().flat_map(|n| [(3, n, 0), (3, n, 1)]).collect::<Vec<_>>()
+        );
+        assert_eq!(super::cells(false).len(), 80);
+    }
+    #[test]
+    #[should_panic(expected = "exactly the declared workload cells")]
+    fn mislabeled_workload_is_refused() {
+        super::read_text(&fixture(100).replace("workload: full", "workload: probe"));
     }
     #[test]
     fn raw_reader_and_shared_judge_controls() {

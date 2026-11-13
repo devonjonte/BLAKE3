@@ -58,8 +58,10 @@ evidence. Never retry individual samples or cells to improve an answer.
 
 ## Analysis and limits
 
-The Rust reader requires the current `ode-adler-samples-v2` contract. Historical
-pilot samples retain their source-matched reader in their original commit.
+The current Rust reader requires `ode-adler-samples-v3`, with a declared full or
+probe workload. The published native comparison used v2 at commit `83f2730a`;
+read those records with that source-matched reader. Historical pilot samples
+likewise retain their reader in their original commit.
 
 Each run's cost is total wall time divided by total calls. Compare four pairs
 using clocks' existing paired log-ratio test, 5% false-discovery rate over all 80

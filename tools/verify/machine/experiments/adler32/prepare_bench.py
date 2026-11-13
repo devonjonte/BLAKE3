@@ -16,6 +16,7 @@ import subprocess
 
 HERE = Path(__file__).resolve().parent
 CLOCKS_REV = "5f99f456951ab36f7201decd8aa5e0249ec67bd1"
+ISAL_REV = "7c3479e0a9dac17f448603ec1ad64c7c625f530c"
 DEPS = {
     "zlib": ("99623ef7097352da7993ba614161fd6a311e046e", ["-DZLIB_BUILD_SHARED=OFF", "-DZLIB_BUILD_TESTING=OFF"]),
     "zlib-ng": ("12731092979c6d07f42da27da673a9f6c7b13586", ["-DBUILD_SHARED_LIBS=OFF", "-DBUILD_TESTING=OFF", "-DZLIB_COMPAT=OFF", "-DWITH_NATIVE_INSTRUCTIONS=OFF"]),
@@ -29,6 +30,7 @@ def main():
     ap.add_argument("observation", type=Path)
     ap.add_argument("deps", type=Path)
     ap.add_argument("out", type=Path)
+    ap.add_argument("--skip-proof", action="store_true", help="include explicitly UNVERIFIED native algorithm probes (AVX-512 VNNI required)")
     a = ap.parse_args()
     clocks, obs, deps, out = a.clocks.resolve(), a.observation.resolve(), a.deps.resolve(), a.out.resolve()
     # These are contracts for this deliberately small first workload adapter.
@@ -56,15 +58,29 @@ def main():
         ]:
             with (out / f"{name}-{kind}.log").open("w") as log:
                 subprocess.run(["timeout", "-k", "5", "240", *cmd], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=250)
+    if a.skip_proof:
+        src = deps / "isa-l"
+        actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=src, text=True).strip()
+        assert actual == ISAL_REV
+        subprocess.run(["git", "diff", "--exit-code", "HEAD"], cwd=src, check=True, capture_output=True)
+        build = out / "native" / "isa-l"
+        shutil.copytree(src, build, ignore=shutil.ignore_patterns(".git"))
+        with (out / "isa-l-build.log").open("w") as log:
+            subprocess.run(["timeout", "-k", "5", "240", "make", "-f", "Makefile.unx", "-j4", "bin/isa-l.a"], cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=250)
+        shutil.copyfile(build / "bin/isa-l.a", build / "libisal.a")
+        shutil.copyfile(HERE / "probe.c", out / "probe.c")
+        r["experimental_probes"] = {"proof": "UNVERIFIED native C algorithm probes, not Ode implementations", "isa_l": ISAL_REV,
+            "chunk": 16384, "widths": [32,64], "prefix_accumulators": [1,4],
+            "flags": "-O3 -DNDEBUG -fno-lto -mavx512bw -mavx512vl -mavx512vnni -mavx512dq; prefer vector width matching probe"}
     r["comparison"] = {"seed": 1, "sources": {name: rev for name, (rev, _) in DEPS.items()},
                        "build": "CMake Release, each project's default optimization flags, runtime dispatch enabled, static linking, no LTO"}
-    r["benchmark_files"] = {name: observer.digest(HERE / name) for name in ["bench.rs", "bench_build.rs", "prepare_bench.py"]}
+    r["benchmark_files"] = {name: observer.digest(HERE / name) for name in ["bench.rs", "bench_build.rs", "prepare_bench.py"] + (["probe.c"] if a.skip_proof else [])}
     (out / "report.json").write_text(json.dumps(r, indent=2) + "\n")
     for src, dst in [("bench.rs", "main.rs"), ("bench_build.rs", "build.rs")]:
         shutil.copyfile(HERE / src, out / dst)
     (out / "Cargo.toml").write_text(
         '[package]\nname = "ode-adler-observer"\nversion = "0.0.0"\nedition = "2021"\n'
-        '[workspace]\n[[bin]]\nname = "ode-adler-observer"\npath = "main.rs"\n'
+        '[workspace]\n[features]\nprobe = []\n' + ('default = ["probe"]\n' if a.skip_proof else '') + '\n[[bin]]\nname = "ode-adler-observer"\npath = "main.rs"\n'
         '[dependencies]\nclocks = { path = ' + json.dumps(str(clocks / "clocks")) + ' }\n'
         '[profile.release]\ncodegen-units = 1\n')
     print(out / "Cargo.toml")

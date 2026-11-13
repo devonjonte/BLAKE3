@@ -197,6 +197,14 @@ release gate or a reliability claim. Its scope is warmed native checksum calls o
 one core. Cold calls, concurrent callers, other architectures, allocation, energy,
 code/data cache misses and hardware latency models remain outside this exercise.
 
+## Faster implementation experiment
+
+[The active plan](FAST.md) probes larger reduction intervals and fewer vector
+prefix accumulators, and adds ISA-L to the contender search. These native C
+probes require explicit `prepare_bench.py ... --skip-proof` and are marked
+UNVERIFIED. They select a design before extending Ode's wide-vector model.
+The original checksum's proof remains the project's verified result.
+
 ## Reuse in a larger codebase
 
 [The libdeflate integration experiment](REUSE.md) imports this project's proved
