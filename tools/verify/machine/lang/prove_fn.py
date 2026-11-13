@@ -23,7 +23,7 @@ reader needs:
                                              turn (without one: it is read off, or kept by `P.frame`), `by A | B`
                                              by the first of the lemmas that applies on a path; `from` shows it
                                              of the state the loop is entered in (without one: read off, or kept)
-        decreases VARIABLE
+        decreases EXPRESSION                a decreasing word expression, for example n - i
         [open LEMMA as names [when CONDITION]]   takes an invariant's fact apart before a turn's instructions;
                                              with `when`, on the ways through the turn where that condition of
                                              the body holds (a fact only one branch has)
@@ -33,6 +33,8 @@ reader needs:
 A clause is a comparison of the language's expressions (variables, numbers, `+ - | & << >>`, `low8(e)`,
 `low32(e)`, `Name(args)` for a Lean definition), or `Name(args)` alone, which says `Name` of memory. A
 buffer's name in a clause is its address.
+Read-only leaf functions may compute and branch on byte loads inside the loop body. Opening lemmas give the byte's
+cell and its read value; each condition is then checked against the machine's actual read.
 Whatever the contract requires of the arguments alone is known at every turn without being repeated.
 By convention a lemma's memory is `m`, and for a predicate `P` over memory `P.cells` (if there is one)
 gives what its holder may read at once and `P.frame` says it depends on its own bytes only.
@@ -143,7 +145,11 @@ def lean_low(e, env):
     if k == "const": return f"{e[1]}#64"
     if k == "var":
         v = env.get(e[1]); assert v is not None, f"{e[1]} has no known value here"; return v
-    if k == "load": return None
+    if k == "load":
+        memory = env.get("$memory") if e[1] == 8 else None
+        if memory is None: return None
+        addr = lean_low(e[2], env)
+        return f"(({memory}.read {addr} {e[1]}).getD 0#64)" if addr else None
     a = lean_low(e[1], env)
     if k in ("shl", "shr"): return None if a is None else f"({a} {'<<<' if k == 'shl' else '>>>'} {e[2]})"
     b = lean_low(e[2], env)
@@ -298,10 +304,19 @@ for s_ in wbody:
         if x in first_use or not mentions(s_, x): continue
         first_use[x] = "set" if (s_[0] == "set" and s_[1] == x and x not in reads(s_[2])) else "read"
 live = {x for x in changed if x in (reads(wcond[1]) | reads(wcond[2]) if wcond else set()) | reads(fn["ret"]) or first_use.get(x) == "read"}
+if decreases:
+    live |= {x for x in changed if re.search(r"\b" + re.escape(x) + r"\b", decreases)}
 for x in live: assert slot_of(x) is None, f"{x} changes in the loop and lives in the frame: not yet"
 # a variable set before the loop and not in it: the invariant must say what it is (`invariant x == E`)
 frozen = {}
 base_env = {p: p for p in params}
+# Read-only leaf functions can name a load by its value in the current memory.
+# The source's opening lemma supplies its cell and value; Lean checks the run.
+def writes(ss):
+    return any(s[0] in ("store", "copy") or (s[0] == "ite" and (writes(s[2]) or writes(s[3])))
+               or (s[0] == "while" and writes(s[2])) for s in ss)
+readonly = not has_call(body) and not writes(body)
+if readonly: base_env["$memory"] = "m0"
 base_env.update({g: g for g, _ in fn_ghosts})
 base_env.update({b: at(C0 + off) for b, off in bufat.items()})          # a buffer's name is its address in the frame
 for cl, *_ in invariants:
@@ -315,6 +330,7 @@ inv_user = [(cl, by, frm) for cl, by, frm in invariants if not (re.match(r"^(\w+
 def env_at(reg):
     """Each variable as a Lean term at the loop's head; `reg` gives a register-homed variable's term."""
     env = dict(base_env); env.update(frozen)
+    if readonly: env["$memory"] = "mem"
     for x in live: env[x] = reg(x)
     env.update({g: g for g, _ in loop_ghosts})
     return env
@@ -339,7 +355,7 @@ unpushed = [r for r in CALLEE_SAVED if r not in saved]
 # (text, how it is proved of a state that was run to, its name when the invariant is taken apart)
 inv_fixed = [f"s.pc = 0x{HEAD or 0:X}", f"s.rsp = {at(C0)}"] + [f"s.{r} = {p}" for p, r in param_reg] + [f"s.{r} = sv.{r}" for r in unpushed]
 inv_mem = [(f"Region s.mem fb {F}#64", "mem_region", "hF"), (f"Quad s.mem (fb + {F}#64) ra", "mem_fact", "hRa")] + \
-    [(f"Quad s.mem (fb + {F - 8 * (i + 1)}#64) sv.{r}", "mem_fact", f"hS{i}") for i, r in enumerate(saved)] + \
+    [(f"Quad s.mem {at(F - 8 * (i + 1))} sv.{r}", "mem_fact", f"hS{i}") for i, r in enumerate(saved)] + \
     [(f"Quad s.mem {at(o)} {p}", "mem_fact", f"hPs{i}") for i, (p, o) in enumerate(param_slot)] + \
     [(f"Abi.AllApart ((fb, {C}.stack + 8#64) :: {C}.regions)", "exact hAp0", "hAp"), (outside, None, "hOut"),
      (f"{C}.accepts", "exact hAcc0", "hAcc"), (f"{C}.requires m0", "exact hReq0", "hReq")]
@@ -493,6 +509,8 @@ def run_piece(events, start, stop, extra, ind, prev="mem", has_out=True, own_at=
     conds = [e for e in events if e[0] == "cond"]
     for i, e in enumerate(conds):
         t.append(f"{ind}have c{i} : {cond_fact(e[1], e[2], e[4])} := by bv_decide")
+        if readonly:
+            t.append(f"{ind}try simp (disch := mem_auto) only [read8_cell, Option.getD_some, add_sub_lit, BitVec.add_assoc] at c{i}")
     pieces, calls = segments(start, events, stop)
     facts = ", ".join([f"c{i}" for i in range(len(conds))] + extra)
     k = own_at
@@ -642,7 +660,11 @@ open_head = [f"  obtain {STATE(head_names)} := s", f"  obtain ⟨{', '.join(inv_
              f"  simp only at {' '.join(on_state)} hc",
              f"  subst pc rsp {' '.join([r for _, r in param_reg] + unpushed + frozen_reg)}".rstrip()] + known("  ", "mem", True)
 wc_env = dict(env_h)
-measure_reg = home[decreases]; assert slot_of(decreases) is None
+# A variant is an expression, such as n - i for an increasing index.
+def measure(state):
+    term = Clause(decreases).expr(env_at(lambda x: f"{state}.{home[x]}"), "?")
+    return f"{term}.toNat" if re.fullmatch(r"[\w'.]+", term) else f"({term}).toNat"
+measure_s, measure_next = measure("s"), measure("s'")
 
 # ---------------------------------------------------------------- turn
 turn_open = []
@@ -665,7 +687,7 @@ def turn_leaf(ev, ind):
 
 L += [f"theorem turn {ARGDECL}",
       f"    (s : State) (hI : Inv {ARGUSE} s) (hc : {cond_prop(wcond, env_s)}) :",
-      f"    ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ (Inv {ARGUSE} s' ∧ s'.{measure_reg}.toNat < s.{measure_reg}.toNat) := by"] + open_head + turn_open + \
+      f"    ∃ n_ s', steps Code_{name}.prog n_ s = some s' ∧ (Inv {ARGUSE} s' ∧ {measure_next} < {measure_s}) := by"] + open_head + turn_open + \
      tree(tp, set(), turn_leaf, "  ") + [""]
 
 # ---------------------------------------------------------------- leave
@@ -696,7 +718,7 @@ L += [f"/-- **`{name}`, as assembled, meets its contract, whatever its arguments
       f"  refine Abi.meets_of_triple {F}#64 (by dsimp only [{CNAME}]; decide) (by dsimp only [{CNAME}]; decide) (fun fb ra sv m0 => ?_)",
       f"  refine Hoare.seq (Q := Inv {ARGUSE}) ?_ ?_",
       f"  · intro s hP", f"    exact enter {ARGUSE} s hP",
-      f"  · refine Hoare.loop (fun s => s.{measure_reg}.toNat) (fun s hI => ?_)",
+      f"  · refine Hoare.loop (fun s => {measure_s}) (fun s hI => ?_)",
       f"    by_cases hc : {cond_prop(wcond, env_s)}",
       f"    · obtain ⟨n_, s', h, hi, hm⟩ := turn {ARGUSE} s hI hc", "      exact ⟨n_, s', h, Or.inl ⟨hi, hm⟩⟩",
       f"    · obtain ⟨n_, s', h, hq⟩ := leave {ARGUSE} s hI hc", "      exact ⟨n_, s', h, Or.inr hq⟩", "",

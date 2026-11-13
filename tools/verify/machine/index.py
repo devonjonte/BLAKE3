@@ -40,6 +40,8 @@ X86 = [  # (module, theorem, contract and where, what it says)
      "**the whole hash**: `hashl`, as assembled, with every function it calls (each by its contract), writes the first 32 bytes of BLAKE3's output for any message under any key and mode, one block at a time through the one-block kernels"),
     ("Meets_hashl_bytes", "hashl_meets_bytes", "`Hash.byteContract` (spec/HashContract.lean)",
      "**the function computes BLAKE3**: for any message shorter than 2^64 - 1024 bytes, with the specification's IV at `key`, `hashl` as assembled leaves `Blake3.hashBytes` of the message (C2SP's `Blake3.hash`) in the 32 bytes at `out`, and the message and the key as they were"),
+    ("Proof_adler32", "Proof_adler32.adler32_meets", "`Adler32.contract` (experiments/adler32/Spec_adler32.lean)",
+     "an outside project's function (Devon Jonte's Adler-32, RFC 1950), as assembled, returns the checksum of the bytes it is given and writes nothing but its stack"),
     ("AddTree", "Add.keeps_the_tree", "no code: `Add.contract`'s result and the specification's tree (alg/Stack.lean)",
      "on the tree's stack for `m` chunks, what `add` leaves is the tree's stack for `m + 1`"),
 ]

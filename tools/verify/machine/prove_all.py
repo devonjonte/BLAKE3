@@ -61,6 +61,7 @@ CHAINS = [
     [("hashl", "lang", fn("hashl", "0x40000", True), False),
      ("hash-bytes", "lang", 'lake build Meets_hashl_bytes > hashbytes.log 2>&1 && ! grep -q -E "error|sorry" hashbytes.log && grep -q "hashl_meets_bytes. depends on axioms" hashbytes.log', False),
      ("audit-hashl", "lang", audit("hashl", True), True)],
+    [("adler32", "lang", "SOURCE=../experiments/adler32/adler32.ode ODEMOD=AdlerOde ./prove_fn.sh adler32 0x100000", False)],
     [("any-machine", "lang", 'lake build Meets_hex_bytes Meets_push_bytes Meets_merge_bytes UsableBytes > any.log 2>&1 && ! grep -q -E "error|sorry" any.log && [ "$(grep -c "_meets_bytes. depends on axioms" any.log)" = 4 ] && grep -q "usable_bytes. depends on axioms" any.log', False)],
     [(None, "lang", fn("push", "0x70000") + " && " + fn("merge", "0x60000"), False),
      ("direct", "lang", 'python3 direct_fn.py push Push.contract Push.byteContract 64 StackAsBytes Cv.opens Stack.opens && python3 direct_fn.py merge Merge.contract Merge.byteContract 256 MergeAsBytes Cv.opens Stack.opens Merge.merged_eq && lake build Direct_push Direct_merge > direct.log 2>&1 && ! grep -q -E "error|sorry" direct.log && grep -q "Direct_push.push_meets. depends on axioms" direct.log && grep -q "Direct_merge.merge_meets. depends on axioms" direct.log', False)],
@@ -70,7 +71,7 @@ CHAINS = [
     [("audit-spec", "lang", f"python3 mutants_spec.py {AJ}", True)],
     [(None, "lang", "python3 odec.py hasher.ode HasherOde.lean", True), ("audit-hash", "lang", "python3 mutants_hash.py", True)],
 ]
-ORDER = ["hex", "merge", "push", "merge_sse", "add-and-swap", "merge_steps", "levels-model", "ladd", "lroot", "node_out", "pad", "chunk_node", "hashl", "hash-bytes",
+ORDER = ["hex", "merge", "push", "merge_sse", "add-and-swap", "merge_steps", "levels-model", "ladd", "lroot", "node_out", "pad", "chunk_node", "hashl", "hash-bytes", "adler32",
          "any-machine", "direct", "hash-tried", "hex_neon", "push-aarch64",
          "audit-merge", "audit-push", "audit-add", "audit-steps", "audit-ladd", "audit-lroot", "audit-node_out", "audit-pad", "audit-chunk_node", "audit-hashl",
          "audit-spec", "audit-hash"]
@@ -83,7 +84,7 @@ def lab_copy(dest):
         big = [n for n in names if re.match(r"(Proof|Direct|Checked|Meets)_", n) and not n.endswith(".lean")]
         return set(big) | set(shutil.ignore_patterns("mut-*", "swap-*", "par-*", "*.o", "prove_all.*.log")(_, names))
     shutil.copytree(os.path.join(HERE, "lang"), os.path.join(dest, "w"), symlinks=True, ignore=unneeded)
-    for dep in ("one", "spec", "levels", "alg"):
+    for dep in ("one", "spec", "levels", "alg", "experiments"):
         os.symlink(os.path.join("..", dep), os.path.join(dest, dep))
 
 

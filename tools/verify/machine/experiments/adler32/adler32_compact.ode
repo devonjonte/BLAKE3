@@ -1,0 +1,21 @@
+// Adler-32, RFC 1950 section 8. An integrity checksum, not a cryptographic hash.
+// Caller supplies n readable bytes at input; neither input nor n is secret.
+// Equivalent spelling of the reductions: a > MOD - 1, rather than a >= MOD.
+// This avoids the current printer's empty true branches and jumps over them.
+// Executable tests only; no machine-code correctness theorem.
+const MOD = 65521
+
+fn adler32(input, n)
+{
+  var a = 1
+  var b = 0
+  var i = 0
+  while i < n {
+    a = a + u8[input + i]
+    if a > MOD - 1 { a = a - MOD }
+    b = b + a
+    if b > MOD - 1 { b = b - MOD }
+    i = i + 1
+  }
+  return (b << 16) | a
+}

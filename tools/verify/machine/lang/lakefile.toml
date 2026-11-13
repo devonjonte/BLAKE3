@@ -205,3 +205,14 @@ name = "Code_hashl"
 name = "Proof_hashl"
 [[lean_lib]]
 name = "Meets_hashl_bytes"
+name = "Spec_adler32"
+srcDir = "../experiments/adler32"
+[[lean_lib]]
+name = "Lemmas_adler32"
+srcDir = "../experiments/adler32"
+[[lean_lib]]
+name = "AdlerOde"
+[[lean_lib]]
+name = "Code_adler32"
+[[lean_lib]]
+name = "Proof_adler32"

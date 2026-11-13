@@ -7,6 +7,7 @@
 #       and the whole hash on the levels, by small functions each called by its contract: pad, chunk_node,
 #       node_out, hashl (hashl_meets); "hash-bytes" is hashl against Hash.byteContract, the statement a user
 #       reads (hashl_meets_bytes: the function computes BLAKE3)
+#       and adler32, an outside project's function (experiments/adler32, Devon Jonte's)
 #   AArch64 (Google DeepMind's model, arm/; fetched at the commit arm/lakefile.toml names):
 #       hex_neon (the kernel), push (the same source function, printed for AArch64)
 #   "direct": the compiler's proofs of push and merge again, about the contracts in bytes themselves, with

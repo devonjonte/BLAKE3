@@ -61,7 +61,7 @@ def run(k):
     try:
         w = os.path.join(d, "w")
         shutil.copytree(snapshot, w, symlinks=True)
-        for dep in ("one", "spec"):
+        for dep in ("one", "spec", "experiments"):
             os.symlink(os.path.join("..", dep), os.path.join(d, dep))      # the copy is one level deeper
         if k is None:
             with open(os.path.join(w, f"Proof_{name}.lean"), "a") as f: f.write("\n-- the control's copy\n")
