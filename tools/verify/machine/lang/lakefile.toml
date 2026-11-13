@@ -212,8 +212,13 @@ srcDir = "../experiments/adler32"
 name = "Lemmas_adler32"
 srcDir = "../experiments/adler32"
 [[lean_lib]]
+name = "Block_adler32"
+srcDir = "../experiments/adler32"
+[[lean_lib]]
 name = "AdlerOde"
 [[lean_lib]]
 name = "Code_adler32"
 [[lean_lib]]
 name = "Proof_adler32"
+[[lean_lib]]
+name = "Example_adler32"

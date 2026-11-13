@@ -111,13 +111,26 @@ Lean's three standard axioms and 32 native `bv_decide` axioms, as printed in
 Sam's design. It makes no claim about every behavior of real processors beyond
 the model's assumptions.
 
-An audit regenerates the unchanged proof and rechecks it directly with Lean,
-bypassing the target cache. Wrong seed, overread and wrong result-contract variants
-are refused by the machine-code proof; an impossible contract is refused by the
-usability theorem. Wrong-reduction and wrong-packing variants time out at 30 seconds
-and receive **no verdict**. The first wrong-reduction attempt also timed out at
-120 seconds. The original proof is restored and checked again. These timeouts
-remain a diagnostic limitation; they are not reported as caught mutants.
+The normal driver first runs `Example_adler32.lean` against the assembled machine
+model and the source interpreter. Fixed vectors and all-255 inputs exercise packing
+and both reductions. A refuted example stops the build with the concrete input
+and tells whether the source or the generated code breaks the contract.
+
+The audit reports these execution refutations separately from theorem failures.
+Wrong seed, reduction, overread, packing and result-contract variants now refute
+on examples before proof generation. Every example falls outside the deliberately
+impossible contract, so that build also stops. Passing examples still proceed to
+the complete machine-code theorem. Both unchanged audit controls receive fresh
+Lean checks; the audit restores the original source and checked proof last.
+Earlier audits without examples recorded reduction/packing timeouts, preserved
+with their original tools and **no verdict**.
+
+`Block_adler32.lean` proves the block formula against the original byte-wise
+specification: add the byte sum to `a`, and the position-weighted byte sum plus
+length times the old `a` to `b`, then reduce. It also proves how these sums compose
+across blocks. These mathematical lemmas use only `propext` and `Quot.sound`;
+they supply algebra for a future vector proof. Vector instructions, overflow
+bounds and the optimized machine code still need their own proofs.
 
 ## Run the exercise
 
@@ -237,8 +250,7 @@ ordinary and substituted zlib-format streams.
    a structural control and measured costs each establish something different. The
    report states its proof status explicitly so a user can see what remains open.
 
-The next proof-tool improvement is a faster, source-level diagnosis of the two
-wrong variants whose proofs timed out. Proving the compact variant is separate:
-it cannot inherit the original's theorem. Improving the branch printer is also
-a separate candidate, weighed against existing functions' proofs and code before
-changing the shared compiler.
+The examples now give quick source-level refutations for the two previously
+timed-out variants. Proving the compact variant remains separate: its changed
+bytes need their own theorem. Further branch-printer work remains a candidate
+to weigh against existing functions' proofs and code.

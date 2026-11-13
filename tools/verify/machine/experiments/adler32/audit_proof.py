@@ -3,11 +3,14 @@
 
 Run after a successful build, under a bounded process-group supervisor. Each child
 has a 30-second limit. The original source/contract and checked generated files are
-restored last. Only a named theorem failure counts as rejection. Timeouts are
-reported separately and give overall exit status 2. OUTPUT must be new.
+restored last. Report executable counterexamples, examples outside the contract,
+and named theorem failures separately. A counterexample from running the machine
+model is a refutation test, not a correctness theorem. Timeouts are reported
+separately and give overall exit status 2. OUTPUT must be new.
 """
 import argparse
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -31,6 +34,11 @@ def main():
         source.write_text(src); spec.write_text(statement)
         (out / f"{name}.ode").write_text(src)
         (out / f"{name}.contract.lean").write_text(statement)
+        # An early example refutation leaves no fresh theorem-build log.
+        build_log = LANG / "adler32.build.log"
+        if build_log.exists():
+            (out / f"{name}.prior-build.log").write_bytes(build_log.read_bytes())
+            build_log.unlink()
         try:
             r = subprocess.run(["timeout", "-k", "5", "30", "./prove_fn.sh", "adler32", "0x100000"], cwd=LANG,
                                env=env, text=True, capture_output=True, timeout=40)
@@ -53,9 +61,15 @@ def main():
             assert fresh.returncode == 0 and "sorry" not in fresh.stdout, f"{name}: fresh proof check"
             print(f"{name}: CHECKED (fresh Lean run)", flush=True)
         else:
-            expected = "error: Usable.lean:" if name == "impossible-contract" else "error: Proof_adler32.lean:"
-            assert r.returncode != 0 and expected in log, f"{name}: failed outside the expected theorem"
-            print(f"{name}: REFUSED by {'usability' if name == 'impossible-contract' else 'machine-code proof'}", flush=True)
+            assert r.returncode != 0, f"{name}: accepted a deliberately wrong program or contract"
+            if any(line.startswith("example ") and ": REFUTED:" in line for line in r.stdout.splitlines()):
+                print(f"{name}: REFUTED by machine-model execution (no correctness theorem)", flush=True)
+            elif name == "impossible-contract" and "NO VERDICT" not in r.stdout and re.search(r"^tried: 0 meet, 0 refuted, [1-9][0-9]* not examples$", r.stdout, re.M):
+                print(f"{name}: REFUSED: every example is outside the contract", flush=True)
+            else:
+                expected = "error: Usable.lean:" if name == "impossible-contract" else "error: Proof_adler32.lean:"
+                assert expected in log, f"{name}: failed outside the expected refutation or theorem"
+                print(f"{name}: REFUSED by {'usability' if name == 'impossible-contract' else 'machine-code proof'}", flush=True)
 
     try:
         attempt("unchanged-control", good, contract, True)
