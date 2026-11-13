@@ -19,12 +19,15 @@ checksum as well; retaining that API keeps streaming callers' contract intact.
    check it, observe the object and verify the two compilation paths agree.
 2. Copies libdeflate's pinned source into the output directory. The checkout stays
    unchanged. Replaces its two seed-one calls with calls to `b3l_adler32`.
-3. Adds a C declaration for the two-argument function and one CMake object link.
-   The C declaration requires a 64-bit length. The result converts to u32, the
-   checksum's public representation.
+3. Adds a C declaration for the two-argument function and packages the checked
+   object in a static archive. CMake links that archive privately with
+   `--exclude-libs,libode-adler.a`: both assembler aliases stay local, and internal
+   calls bind to this library's checked body. The C declaration requires a 64-bit
+   length. The result converts to u32, the checksum's public representation.
 4. Builds ordinary and substituted shared libraries with the same release options.
 5. Locates the Ode function in the final shared object and requires all 171 bytes
-   to match the proved object before loading it.
+   to match the proved object before loading it. Requires the Ode symbols to stay
+   out of the public exports and dynamic relocation table.
 6. Exercises compression and decompression through each library's public API.
 
 The experiment publishes the complete patch. It leaves libdeflate's DEFLATE engine

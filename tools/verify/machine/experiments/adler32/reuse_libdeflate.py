@@ -60,7 +60,8 @@ def main():
     subprocess.run(["git", "diff", "--exit-code", "HEAD"], cwd=source, check=True, capture_output=True)
     out.mkdir(parents=True, exist_ok=False)
     proved = out / "proved"
-    run(["sh", HERE / "build.sh", proved], out / "ode-build.log")
+    run(["sh", HERE / "build.sh", proved], out / "proof-build.log")
+    subprocess.run(["ar", "crs", str(proved / "libode-adler.a"), str(proved / "function.o")], check=True)
     report = json.loads((proved / "report.json").read_text())
     assert report["proof"].startswith("Lean checked Proof_adler32.adler32_meets")
     modified = out / "source"
@@ -81,14 +82,14 @@ def main():
     changes.extend(difflib.unified_diff([], header.read_text().splitlines(True), fromfile="/dev/null", tofile="b/lib/ode_adler32.h"))
     p = modified / "CMakeLists.txt"
     original = p.read_text()
-    changed = original + '\n# Experiment: link the object produced by the proof-first Ode build.\ntarget_sources(libdeflate_shared PRIVATE "${ODE_ADLER_OBJECT}")\n'
+    changed = original + '\n# Experiment: bind the checked Ode body privately inside this consumer.\ntarget_link_libraries(libdeflate_shared PRIVATE "${ODE_ADLER_ARCHIVE}")\ntarget_link_options(libdeflate_shared PRIVATE "LINKER:--exclude-libs,libode-adler.a")\n'
     p.write_text(changed)
     changes.extend(difflib.unified_diff(original.splitlines(True), changed.splitlines(True), fromfile="a/CMakeLists.txt", tofile="b/CMakeLists.txt"))
     (out / "integration.patch").write_text("".join(changes))
     for name, src in [("native", source), ("ode", modified)]:
         build = out / name
         cmd = ["cmake", "-S", src, "-B", build, "-DCMAKE_BUILD_TYPE=Release", "-DLIBDEFLATE_BUILD_STATIC_LIB=OFF", "-DLIBDEFLATE_BUILD_GZIP=OFF"]
-        if name == "ode": cmd += ["-DODE_ADLER_OBJECT=" + str(proved / "function.o")]
+        if name == "ode": cmd += ["-DODE_ADLER_ARCHIVE=" + str(proved / "libode-adler.a")]
         run(cmd, out / f"{name}-configure.log")
         run(["cmake", "--build", build, "-j", "4"], out / f"{name}-build.log")
     library = out / "ode/libdeflate.so"
@@ -101,6 +102,10 @@ def main():
     position = int(text[2], 16) + int(symbol[1], 16) - int(text[1], 16)
     expected = (proved / "text.bin").read_bytes()
     assert library.read_bytes()[position:position+len(expected)] == expected, "consumer changed the proved function"
+    exports = subprocess.check_output(["nm", "-D", "--defined-only", library], text=True)
+    assert "b3l_adler32" not in exports, "keep both assembler aliases private"
+    relocations = subprocess.check_output(["readelf", "-rW", library], text=True)
+    assert "b3l_adler32" not in relocations, "consumer calls must bind to its checked body"
     (out / "linked-ode.txt").write_text(subprocess.check_output(["objdump", "-d", "--disassemble=b3l_adler32", library], text=True))
     native, ode = load(out / "native/libdeflate.so"), load(library)
     rng = random.Random(0xAD1E32)
