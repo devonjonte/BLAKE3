@@ -189,6 +189,14 @@ release gate or a reliability claim. Its scope is warmed native checksum calls o
 one core. Cold calls, concurrent callers, other architectures, allocation, energy,
 code/data cache misses and hardware latency models remain outside this exercise.
 
+## Reuse in a larger codebase
+
+[The libdeflate integration experiment](REUSE.md) imports this project's proved
+object into a real C compression/decompression library. Its two whole-buffer
+checksum calls fit the seed-one contract. The experiment preserves the general
+incremental checksum API and checks the final linked bytes before cross-testing
+ordinary and substituted zlib-format streams.
+
 ## What using Ode taught us
 
 1. **A small non-BLAKE3 function works without extending the language.** All values
