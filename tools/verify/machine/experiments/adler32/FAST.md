@@ -34,7 +34,10 @@ Cheap collection: `--probe ENGINE` takes 16 cells: deterministic random bytes at
 0,1,16,64,256,4096,65536,1048576 bytes, aligned or offset by one. Other patterns and
 reduction boundaries are validated before timing. Full `--collect ENGINE` retains
 the 80-cell workload. Each current v3 sample file declares which workload it holds;
-the reader requires exactly that cell set. Historical v2 data uses its pinned reader.
+the reader requires exactly that cell set. Probe batches target 10 ms so the run
+lasts long enough to observe machine load; full-workload batches keep 5 ms.
+The first 5 ms probe attempts finished under a second and correctly received no
+load verdict; those records are retained. Historical v2 data uses its pinned reader.
 
 On EPYC 9275F and Xeon 6330: compare libdeflate against each of zlib-ng, ISA-L and
 the four probes. Three paired runs per question, paddings 0,256,1024, alternating
