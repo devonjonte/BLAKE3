@@ -237,3 +237,36 @@ A winner still needs a checked optimized machine theorem, full matrix and real
 caller/adverse/cold evidence. The arithmetic reduction for a later Ode caller is
 checked separately in `WordReduce_adler32`: two16-bit folds and one conditional
 subtraction reduce every value below2^36, with Lean's three standard axioms only.
+
+## Compact fixed-count kernel, declared before collection
+
+EPYC's delivered cleanup study leaves all16 old-versus-cleanup cells Level;
+LF512's aligned64KiB stays about294 ns versus the raw caller's431 ns. A remaining
+concrete difference is the unrolled body versus native compact loops. Test
+`probe4096-loop`: the same source stripe/combination/reduction macros, replacing
+16 expanded turns with a fixed16-turn runtime loop. Original per-block cleanup,
+word caller, reductions, tails and peel stay unchanged. The caller object's text
+must equal the baseline; only the raw callee relocation changes. The loop adds
+counter initialization, pointer advance, counter subtraction and a backward
+conditional jump. Record their exact forms and derive the source from the single
+raw kernel. This changes instruction-cache footprint and branch scheduling together.
+
+All19 engines, all raw packed returns, critical/all-small/all-alignment/reference/
+read-only guards must validate first; a15-turn mutant must fail, restored passes.
+Earlier native objects must keep exact sections. Capture linked loop text/tables,
+source, both printer outputs and flag/provenance records before collection.
+
+Five questions, both CPUs/four paired layouts, same v3 random16-cell/20ms requested
+batches, alternating sides/rotating questions, same load/rule; at most two whole-
+pair retries for load, preserve every attempt:
+
+1. `probe4096` → `probe4096-loop`.
+2. `libdeflate512` → `probe4096-loop`.
+3. `libdeflate` → `probe4096-loop`.
+4. `libdeflate512` → `libdeflate512` (control).
+5. `probe4096` → `probe4096` (control).
+
+This is another UNVERIFIED diagnostic, retaining the old raw caller's tiny costs.
+The runtime loop needs coordinated finite-trace proof support; existing straight-
+line kernel verification alone covers its own scope. No optimized theorem or
+whole-checksum competitive tail claim follows from this experiment.

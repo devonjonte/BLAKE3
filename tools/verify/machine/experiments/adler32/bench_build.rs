@@ -52,15 +52,21 @@ fn main() {
                 .success());
             objects.push(object);
         }
-        for (batch, split, cleanup, name) in [(0, 0, 0, "probe4096"), (1, 0, 0, "probe4096_batch"), (0, 1, 0, "probe4096_entry"), (0, 0, 1, "probe4096_cleanup")] {
+        for (batch, split, cleanup, kernel, name) in [
+            (0, 0, 0, "b3l_raw4096", "probe4096"),
+            (1, 0, 0, "b3l_raw4096", "probe4096_batch"),
+            (0, 1, 0, "b3l_raw4096", "probe4096_entry"),
+            (0, 0, 1, "b3ldirty_raw4096", "probe4096_cleanup"),
+            (0, 0, 0, "b3lloop_raw4096", "probe4096_loop"),
+        ] {
             let object = out.join(format!("{name}.c.o"));
             assert!(Command::new(&cc).args(["-c", "-O3", "-DNDEBUG", "-fno-lto"])
                 .args([format!("-DBATCH4={batch}"), format!("-DENTRY_SPLIT={split}"), format!("-DPROBE_NAME={name}"),
-                    format!("-DCLEAN_AT_END={cleanup}"), format!("-DRAW_KERNEL={}", if cleanup == 1 { "b3ldirty_raw4096" } else { "b3l_raw4096" })])
+                    format!("-DCLEAN_AT_END={cleanup}"), format!("-DRAW_KERNEL={kernel}")])
                 .arg("probe4096.c").arg("-o").arg(&object).status().unwrap().success());
             objects.push(object);
         }
-        for source in ["raw4096.S", "raw4096-dirty.S"] {
+        for source in ["raw4096.S", "raw4096-dirty.S", "raw4096-loop.S"] {
             let object = out.join(format!("{source}.o"));
             assert!(Command::new(&cc).args(["-c", "-O3", "-DNDEBUG", "-fno-lto"])
                 .arg(source).arg("-o").arg(&object).status().unwrap().success());

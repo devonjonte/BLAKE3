@@ -85,6 +85,26 @@ def main():
         expected = raw_asm.replace("from raw4096.ode", "from raw4096-dirty.ode").replace("b3l_", "b3ldirty_")
         assert dirty == expected.replace("    vzeroupper\n", ""), "cleanup variant changes more than its return cleanup"
         (out / "raw4096-dirty.S").write_text(dirty)
+        turns = """  for k in 0..16 {
+    stripe(zmm0, zmm4, zmm8, $k*256)
+    stripe(zmm1, zmm5, zmm9, $k*256 + 64)
+    stripe(zmm2, zmm6, zmm10, $k*256 + 128)
+    stripe(zmm3, zmm7, zmm11, $k*256 + 192)
+  }"""
+        compact = """  mov ecx, 16
+  @turn:
+    stripe(zmm0, zmm4, zmm8, 0)
+    stripe(zmm1, zmm5, zmm9, 64)
+    stripe(zmm2, zmm6, zmm10, 128)
+    stripe(zmm3, zmm7, zmm11, 192)
+    add rdi, 256
+    sub rcx, 1
+    jne @turn"""
+        assert source.count(turns) == 1
+        (out / "raw4096-loop.ode").write_text(source.replace(turns, compact))
+        loop = subprocess.check_output([sys.executable, str(HERE.parents[1] / "lang/odec.py"),
+            str(out / "raw4096-loop.ode"), "x86_64", "raw4096", "b3lloop_"], text=True)
+        (out / "raw4096-loop.S").write_text(loop)
     for name in ["function.S", "text.bin"]:
         shutil.copyfile(obs / name, out / name)
     for name, (rev, options) in DEPS.items():
@@ -124,6 +144,9 @@ def main():
             "cleanup": "probe4096-cleanup: original per4096 reductions; no per-block vzeroupper, one at whole-call exit",
             "raw_dirty_source": observer.digest(out / "raw4096-dirty.ode"),
             "raw_dirty_assembly": observer.digest(out / "raw4096-dirty.S"),
+            "compact_loop": "probe4096-loop: original per-block cleanup/reductions; fixed16-turn runtime loop instead of source unrolling; proof needs fixed-trace extension",
+            "raw_loop_source": observer.digest(out / "raw4096-loop.ode"),
+            "raw_loop_assembly": observer.digest(out / "raw4096-loop.S"),
             "source_kernel_printer": observer.digest(HERE.parents[1] / "lang/odec.py"),
             "flags": "-O3 -DNDEBUG -fno-lto -mavx512bw -mavx512vl -mavx512vnni -mavx512dq; prefer vector width matching probe"}
     r["comparison"] = {"seed": 1, "sources": {name: rev for name, (rev, _) in DEPS.items()},
