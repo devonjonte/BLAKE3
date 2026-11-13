@@ -457,7 +457,7 @@ def own_call(i, sym, target, args, ra, oc, ind, prev, has_out):
         assert c.pred, f"keep {cl}: a predicate of memory, Name(args)"
         if c.pred == "Region":
             # bytes the program owns stay its own across any call, whatever the callee writes there
-            t.append(f"{ind}have hK{i}_{j} : {prop} := hown{i} _ _ (by assumption)"); continue
+            t.append(f"{ind}have hK{i}_{j} : {prop} := hown{i} _ _ (by mem_region)"); continue
         t.append(f"{ind}have hK{i}_{j} : {prop} := {c.pred}.frame (m := {prev}) (by assumption) (fun x hx => by rw [hout{i} x (by bv_decide) (by bv_decide)]; first | rfl | mem_away)")
     t += [f"{ind}have hOut : {outside.replace('s.mem x', f'mem{i} x')} := by",
           f"{ind}  intro x hx hmod", f"{ind}  have hx' := hx", f"{ind}  have hmod' := hmod",

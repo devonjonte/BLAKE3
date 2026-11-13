@@ -65,12 +65,15 @@ namespace Mid
 
 variable {m m' : Mem} {nd input len counter flags p rem first : BitVec 64} {k : Blake3.CV} {bytes : List (BitVec 8)}
 
-/-- What its holder may use at once. -/
+/-- What its holder may use at once: the node's place; where `p` lies in the chunk's bytes (in the words a
+proof of apartness speaks: the chunk's piece is `BitVec.ofNat 64 bytes.length` bytes from `input`). -/
 theorem cells (h : Mid m nd input len counter flags k bytes p rem first) :
-    Region m nd 120#64 ∧ first ≤ 1#64 ∧ rem ≤ 1024#64 ∧ flags < 256#64 := by
-  obtain ⟨hn, hl, hf, hr, _, _, _, hfirst, _, _, hR⟩ := h
-  refine ⟨hR, ?_, by bv_omega, hf⟩
-  rw [hfirst]; split <;> decide
+    Region m nd 120#64 ∧ first ≤ 1#64 ∧ rem ≤ 1024#64 ∧ flags < 256#64 ∧
+    len = BitVec.ofNat 64 bytes.length ∧ p = input + (len - rem) ∧ rem ≤ len ∧ len ≤ 1024#64 := by
+  obtain ⟨hn, hl, hf, hr, _, _, hp, hfirst, _, _, hR⟩ := h
+  refine ⟨hR, ?_, by bv_omega, hf, ?_, hp, by bv_omega, by bv_omega⟩
+  · rw [hfirst]; split <;> decide
+  · apply BitVec.eq_of_toNat_eq; rw [hn, BitVec.toNat_ofNat]; omega
 
 /-- **Before the loop:** no block hashed, the key in the node's `h`. -/
 theorem start (hk : Cv.At m nd k) (hT : Region m (nd + 32#64) 88#64) (hb : Bytes.At m input bytes)
@@ -204,7 +207,8 @@ function needs of the node's place. -/
 theorem last (h : Mid m nd input len counter flags k bytes p rem first) (hc : ¬ 64#64 < rem) :
     ∃ _u : Unit, Cv.At m nd (Chunk.h k flags counter bytes) ∧ Bytes.At m p (rest bytes) ∧
       rem.toNat = (rest bytes).length ∧ (rest bytes).length ≤ 64 ∧
-      Region m (nd + 32#64) 64#64 ∧ Region m nd 120#64 ∧ first = Chunk.first bytes := by
+      Region m (nd + 32#64) 64#64 ∧ Region m nd 120#64 ∧ first = Chunk.first bytes ∧
+      BitVec.ofNat 64 (rest bytes).length = rem ∧ (rest bytes).length < 2 ^ 64 := by
   have hs := done_mul h
   have hp := p_eq h
   have hd := done_last h hc
@@ -212,7 +216,8 @@ theorem last (h : Mid m nd input len counter flags k bytes p rem first) (hc : ¬
   have hrem : rem.toNat ≤ 64 := by simpa [BitVec.lt_def] using hc
   have hlen : (rest bytes).length = rem.toNat := by
     unfold rest; rw [List.length_drop, ← hd]; omega
-  refine ⟨(), by unfold Chunk.h; rw [node_h, ← hd]; exact hcv, ?_, hlen.symm, by omega, ?_, hR, ?_⟩
+  refine ⟨(), by unfold Chunk.h; rw [node_h, ← hd]; exact hcv, ?_, hlen.symm, by omega, ?_, hR, ?_,
+    by rw [hlen, BitVec.ofNat_toNat, BitVec.setWidth_eq], by omega⟩
   · intro i hi
     have hi' : 64 * done len rem + i < bytes.length := by rw [hs]; omega
     have := hb _ hi'

@@ -57,7 +57,7 @@ theorem Hex.exists_vec (l : List (BitVec 8)) (h : l.length = 16) : ∃ v : BitVe
   subst enil e15 e14 e13 e12 e11 e10 e9 e8 e7 e6 e5 e4 e3 e2 e1 e0
   refine ⟨b15 ++ b14 ++ b13 ++ b12 ++ b11 ++ b10 ++ b9 ++ b8 ++ b7 ++ b6 ++ b5 ++ b4 ++ b3 ++ b2 ++ b1 ++ b0, ?_⟩
   simp only [Hex.bytes16, unpack64, List.cons_append, List.nil_append, List.cons.injEq, and_true]
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> first | bv_kernel | bv_decide
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> bv_kernel
 
 /-- Thirty-two bytes in memory are two vectors in memory. -/
 theorem bytes32_vecs (a : BitVec 64) (l : List (BitVec 8)) (h : l.length = 32) :
@@ -90,13 +90,37 @@ theorem bytes64_vecs (a : BitVec 64) (l : List (BitVec 8)) (h : l.length = 64) :
     pointsTo128_eq_bytes, pointsTo128_eq_bytes]
   simp only [List.length_append, Hex.bytes16_length, sepConj_assoc]
 
+/-- A byte of a 64-bit half of a vector is a byte of the vector. -/
+theorem Hex.slice8 (v : BitVec 128) (a b : Nat) (h : a + 8 ≤ 64) :
+    (v.extractLsb' b 64).extractLsb' a 8 = v.extractLsb' (a + b) 8 := by
+  ext i hi
+  simp only [BitVec.getElem_extractLsb']
+  rw [BitVec.getLsbD_extractLsb']
+  have : a + i < 64 := by omega
+  simp only [this, decide_true, Bool.true_and]
+  congr 1; omega
+
+seal Hex.char in
+/-- The hexadecimal of eight bytes of a vector is the sixteen bytes of the vector the kernel writes for them. (With
+`Hex.char` closed: each character is then a byte like any other, and the claim is one of which byte is where.) -/
+theorem Hex.text_half (v : BitVec 128) (k : Nat) (hk : k = 0 ∨ k = 8) :
+    Hex.text (unpack64 (v.extractLsb' (8 * k) 64)) = Hex.bytes16 (Hex.hex16 v k) := by
+  rcases hk with rfl | rfl <;>
+  · simp (disch := decide) only [Hex.text, Hex.bytes16, unpack64, List.cons_append, List.nil_append, List.flatMap_cons, List.flatMap_nil,
+      List.append_nil, List.cons.injEq, and_true, Hex.hex16, Hex.byte, Hex.slice8, Nat.reduceMul, Nat.reduceAdd]
+    refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> bv_kernel
+
 /-- The hexadecimal of two vectors' bytes is the bytes of the four vectors the kernel writes. -/
 theorem Hex.text_vecs (v0 v1 : BitVec 128) :
     Hex.text (Hex.bytes16 v0 ++ Hex.bytes16 v1) =
       Hex.bytes16 (Hex.hex16 v0 0) ++ Hex.bytes16 (Hex.hex16 v0 8) ++ Hex.bytes16 (Hex.hex16 v1 0) ++ Hex.bytes16 (Hex.hex16 v1 8) := by
-  simp only [Hex.text, Hex.bytes16, unpack64, List.cons_append, List.nil_append, List.flatMap_cons, List.flatMap_nil,
-    List.append_nil, List.cons.injEq, and_true, Hex.hex16, Hex.byte, Hex.char_bif, Nat.reduceMul, Nat.reduceAdd]
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> first | bv_kernel | bv_decide
+  have t0 := Hex.text_half v0 0 (Or.inl rfl)
+  have t1 := Hex.text_half v0 8 (Or.inr rfl)
+  have t2 := Hex.text_half v1 0 (Or.inl rfl)
+  have t3 := Hex.text_half v1 8 (Or.inr rfl)
+  simp only [Nat.reduceMul] at t0 t1 t2 t3
+  rw [← t0, ← t1, ← t2, ← t3]
+  simp only [Hex.text, Hex.bytes16, List.flatMap_append, List.append_assoc]
 
 structure HexBytesArgs where
   out : BitVec 64

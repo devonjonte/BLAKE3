@@ -8,6 +8,17 @@ A contract speaks of bytes one after another (`Bytes.At`); vector code reads and
 (`Vec`). These lemmas, written once, go from one to the other for 32 bytes read as two vectors and 64
 bytes written as four. Checked by Lean; not to be read. (The case-by-case parts were written by a script.) -/
 
+/-- Bytes are in their own place: a memory that agrees there holds them too. (A list of 2^64 bytes or more
+could not lie in memory one after another: the bound is asked for.) -/
+theorem Bytes.At.frame {m m' : Mem} {a : BitVec 64} {l : List (BitVec 8)} (h : Bytes.At m a l)
+    (same : ∀ x : BitVec 64, x - a < BitVec.ofNat 64 l.length → m' x = m x) (hl : l.length < 2 ^ 64) : Bytes.At m' a l := by
+  intro i hi
+  rw [same _ (by
+    have e : a + BitVec.ofNat 64 i - a = BitVec.ofNat 64 i := by bv_omega
+    rw [e]; simp only [BitVec.lt_def, BitVec.toNat_ofNat]
+    rw [Nat.mod_eq_of_lt (by omega), Nat.mod_eq_of_lt hl]; exact hi)]
+  exact h i hi
+
 /-- The sixteen bytes of a vector, lowest first. -/
 def Bytes.ofVec (v : V) : List (BitVec 8) := [by8 v 0, by8 v 1, by8 v 2, by8 v 3, by8 v 4, by8 v 5, by8 v 6, by8 v 7, by8 v 8, by8 v 9, by8 v 10, by8 v 11, by8 v 12, by8 v 13, by8 v 14, by8 v 15]
 
