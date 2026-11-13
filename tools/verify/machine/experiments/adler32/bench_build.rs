@@ -11,6 +11,13 @@ fn main() {
     assert!(Command::new("ar").arg("crs").arg(out.join("libode.a")).arg(out.join("function.o")).status().unwrap().success());
     println!("cargo:rustc-link-search=native={}", out.display());
     println!("cargo:rustc-link-lib=static=ode");
+    let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    for (dir, lib) in [("zlib", "z"), ("zlib-ng", "z-ng"), ("libdeflate", "deflate")] {
+        let path = root.join("native").join(dir);
+        assert!(path.join(format!("lib{lib}.a")).exists());
+        println!("cargo:rustc-link-search=native={}", path.display());
+        println!("cargo:rustc-link-lib=static={lib}");
+    }
     println!("cargo:rerun-if-changed=function.S");
     println!("cargo:rerun-if-changed=text.bin");
     println!("cargo:rerun-if-env-changed=ODE_PADDING");

@@ -151,21 +151,27 @@ and checked generated proof are restored last.
 ## Measure on a dedicated machine
 
 `bench.rs` is the first workload adapter, using bench-hashes' existing **clocks**
-crate for timing, load, summaries and paired comparisons. It measures warm,
-back-to-back checksum calls at eight lengths and three byte patterns, including
-consumption of each result. Raw wall times, call counts, process CPU times and
-available per-thread cycles/instructions are preserved. Missing counters are
-explicit. Busy or unobserved load receives no comparison verdict.
+crate for timing, load, summaries and paired comparisons. It compares the proved
+Ode baseline with zlib 1.4, zlib-ng 2.3.3 and libdeflate 1.26 through the same native
+adapter boundary. Ten lengths, four patterns and two alignments give 80 cells.
+See [the declared comparison procedure](COMPARISON.md) for exact versions, build
+settings, call overhead, paired controls and limits. Raw wall times, call counts,
+process CPU times and available cycles/instructions are preserved. Missing counters
+are explicit. Busy or unobserved load receives no comparison verdict.
 
 Give the adapter a bench-hashes checkout at
-**5f99f456951ab36f7201decd8aa5e0249ec67bd1**, with its clocks directory unchanged:
+**5f99f456951ab36f7201decd8aa5e0249ec67bd1**, with its clocks directory unchanged.
+`/path/to/deps` contains clean checkouts named `zlib`, `zlib-ng` and `libdeflate` at
+the commits declared in `COMPARISON.md`. Preparation needs CMake and builds the
+libraries with their release defaults:
 
 ```sh
-python3 experiments/adler32/prepare_bench.py /path/to/bench-hashes /path/to/observation /path/to/build
+python3 experiments/adler32/prepare_bench.py /path/to/bench-hashes /path/to/checked-build /path/to/deps /path/to/build
 ODE_PADDING=256 cargo build --release --manifest-path /path/to/build/Cargo.toml
 /path/to/build/target/release/ode-adler-observer --validate
 # On a quiet measurement machine, pin each run of a pair to the same CPU:
-taskset -c CPU /path/to/build/target/release/ode-adler-observer --collect > samples.tsv
+taskset -c CPU /path/to/build/target/release/ode-adler-observer --collect ode > ode.tsv
+# Other engines: zlib, zlib-ng, libdeflate
 ```
 
 `--validate` reads no clock. `ODE_PADDING` chooses 0 to 4096 bytes in multiples of
@@ -179,7 +185,7 @@ quiet pairs exist:
 ```
 
 This calls clocks' existing comparison rule. It is an exploratory pilot, not a
-release gate or a reliability claim. Its scope is warmed scalar checksum calls on
+release gate or a reliability claim. Its scope is warmed native checksum calls on
 one core. Cold calls, concurrent callers, other architectures, allocation, energy,
 code/data cache misses and hardware latency models remain outside this exercise.
 
