@@ -264,6 +264,7 @@ macro "mem_auto" : tactic => `(tactic| skip_unless_prop (first
   | with_reducible assumption
   | (mem_fact; done)
   | mem_region
+  | (mem_subregion; done)
   | (intros; mem_away; done)
   | bv_decide))
 
@@ -343,3 +344,12 @@ elab "apply_frame" : tactic => withMainContext do
   match t.getAppFn with
   | .const n _ => evalTactic (← `(tactic| apply $(mkIdent (n ++ `frame))))
   | _ => throwError "apply_frame: the goal is not a predicate applied to memory"
+
+open Lean Elab Tactic Meta in
+/-- For a goal `P m args` about memory: apply `P.intro` (by convention, the lemma that makes `P` from the cells
+and parts it is made of), whatever `P` is. -/
+elab "apply_intro" : tactic => withMainContext do
+  let t ← instantiateMVars (← getMainTarget)
+  match t.getAppFn with
+  | .const n _ => evalTactic (← `(tactic| apply $(mkIdent (n ++ `intro))))
+  | _ => throwError "apply_intro: the goal is not a predicate applied to memory"

@@ -130,7 +130,7 @@ def segments(pc, events, stop):
         if kind == "jmp": pc = target
         elif kind == "call":
             ev = events.pop(0); assert ev[0] == "call", ev
-            calls.append((ev[1], target, ev[2], nxt)); pieces.append(n); n = 0; pc = nxt
+            calls.append((ev[1], target, ev[2], nxt, ev[3], ev[4])); pieces.append(n); n = 0; pc = nxt
         else:
             ev = events.pop(0); assert ev[0] == "cond", ev
             pc = nxt if ev[2] else target
@@ -380,6 +380,19 @@ def cond_prop(c, env):
     return f"{a} < {b}" if kind == "ltu" else f"{a} ≠ {b}" if kind == "ne" else f"{a} = {b}"
 
 
+def call_order(ss, acc):
+    """The calls of this file's functions, in the order the source has them (the order of their `with` and
+    `keep` lines): a way through the code meets them in another order, or meets only some."""
+    for s in ss:
+        if (s[0] == "call" and s[1] in OWN) or (s[0] == "callr" and s[2] in OWN): acc.append(id(s))
+        elif s[0] == "ite": call_order(s[2], acc); call_order(s[3], acc)
+        elif s[0] == "while": call_order(s[2], acc)
+    return acc
+
+
+CALL_IDX = {sid: i for i, sid in enumerate(call_order(body, []))}
+
+
 def paths(ss, env):
     """Every way through the statements: lists of events (a condition with its value, or a call)."""
     res = [([], env)]
@@ -390,13 +403,13 @@ def paths(ss, env):
             if k == "set":
                 # a value read from memory is what the invariant says the variable is, if it says (`invariant x == E`)
                 e2 = dict(e); v = lean_low(s[2], e); e2[s[1]] = v if v is not None else frozen.get(s[1]); new.append((ev, e2))
-            elif k == "call": new.append((ev + [("call", s[1], [lean_low(a, e) for a in s[2]] if s[1] in OWN else None)], e))
+            elif k == "call": new.append((ev + [("call", s[1], [lean_low(a, e) for a in s[2]] if s[1] in OWN else None, e, CALL_IDX.get(id(s)))], e))
             elif k == "callr":
                 # the result is the callee's RAX at its return: the state there is named by the call's number
                 assert s[2] in OWN, "a kernel's result: not yet"
                 n = 1 + sum(1 for x in ev if x[0] == "call" and x[1] in OWN)
                 e2 = dict(e); e2[s[1]] = f"rax_{n}"
-                new.append((ev + [("call", s[2], [lean_low(a, e) for a in s[3]])], e2))
+                new.append((ev + [("call", s[2], [lean_low(a, e) for a in s[3]], e, CALL_IDX.get(id(s)))], e2))
             elif k == "trap": pass
             elif k == "ite":
                 tp, ep = paths(s[2], e), paths(s[3], e); split = bool(tp) and bool(ep)
@@ -411,7 +424,7 @@ NORM = "add_sub_lit, BitVec.add_assoc, BitVec.add_zero, BitVec.reduceAdd, BitVec
 LISTS = "abi, List.map_cons, List.map_nil, List.cons_append, List.nil_append, List.forall_mem_cons, List.not_mem_nil, false_imp_iff, implies_true, and_true"
 
 
-def own_call(i, sym, target, args, ra, oc, ind, prev, has_out):
+def own_call(i, sym, target, args, ra, oc, ind, prev, has_out, env):
     """A call of one of this file's functions, by its contract: what the contract asks is shown of the state
     at the callee's first instruction; then the state at the return is known by what the contract promises,
     and what holds of its memory is said again: the frame's cells, what the source says is kept, and the
@@ -425,7 +438,11 @@ def own_call(i, sym, target, args, ra, oc, ind, prev, has_out):
     hs = f"hpc{i} hsp{i} hbx{i} hbp{i} h12_{i} h13_{i} h14_{i} h15_{i} hens{i} hout{i} hown{i}"
     slots = [(F, "ra")] + [(F - 8 * (j + 1), f"sv.{r}") for j, r in enumerate(saved)] + [(o, p_) for p_, o in param_slot] + \
         [(slot_of(x), e) for x, e in frozen.items() if slot_of(x) is not None]
-    t = [f"{ind}refine Abi.call_meets (c := {CK}) (ra := {ra}#64)",
+    t = []
+    for j, lemma in enumerate(oc.get("know", [])):
+        # facts the call needs, from a lemma named at it: its hypotheses found, its conclusion's parts at hand
+        t += [f"{ind}have_by hN{i}_{j} := {lemma} (m := {prev})", f"{ind}try norm_addr at hN{i}_{j}", f"{ind}split_ands hN{i}_{j}"]
+    t += [f"{ind}refine Abi.call_meets (c := {CK}) (ra := {ra}#64)",
          f"{ind}  (Abi.Meets.mono Code_{name}.has_{info['code']} ({info['theorem']} {a})) rfl rfl ?_ ?_ ?_ ?_ ?_ ?_",
          f"{ind}· dsimp only; mem_fact",
          f"{ind}· dsimp only [{info['contract']}]; mem_subregion",
@@ -440,7 +457,7 @@ def own_call(i, sym, target, args, ra, oc, ind, prev, has_out):
          f"{ind}· dsimp only",
          f"{ind}  simp only [{OPENK}]",
          f"{ind}  repeat' (with_reducible apply And.intro)",
-         f"{ind}  all_goals (first | mem_auto | (apply_frame <;> mem_auto))",
+         f"{ind}  all_goals (first | mem_auto | (apply_frame <;> mem_auto) | (apply_intro <;> first | mem_auto | (apply_frame <;> mem_auto)))",
          f"{ind}· intro s{i} {hs}"]
     ind += "  "
     t += [f"{ind}obtain {st} := s{i}",
@@ -453,7 +470,7 @@ def own_call(i, sym, target, args, ra, oc, ind, prev, has_out):
     for j, (off, v) in enumerate(slots):
         t.append(f"{ind}have hS{i}_{j} : Quad mem{i} {at(off)} {v} := X86.Quad.frame (by mem_fact) (fun x hx => hout{i} x (by bv_decide) (by bv_decide))")
     for j, cl in enumerate(oc["keep"]):
-        c = Clause(cl); prop = c.clause(base_env, f"mem{i}")
+        c = Clause(cl); prop = c.clause(env, f"mem{i}")          # the variables as they are at the call
         assert c.pred, f"keep {cl}: a predicate of memory, Name(args)"
         if c.pred == "Region":
             # bytes the program owns stay its own across any call, whatever the callee writes there
@@ -482,10 +499,10 @@ def run_piece(events, start, stop, extra, ind, prev="mem", has_out=True, own_at=
     for i, n in enumerate(pieces):
         t += [f"{ind}refine runs_then (a := {n}) (s1 := ?_) ?_ ?_", f"{ind}case refine_2 => run_fn [{facts}]; rfl"]
         if i < len(calls):
-            sym, target, args, ra = calls[i]
+            sym, target, args, ra, cenv, which = calls[i]
             if sym in OWN:
                 k += 1
-                more, ind = own_call(k, sym, target, args, ra, own_calls[k - 1], ind, prev, has_out)
+                more, ind = own_call(k, sym, target, args, ra, own_calls[which], ind, prev, has_out, cenv)
                 t += more; prev, has_out = f"mem{k}", True
             else:
                 callee = sym_extern[sym]; assert callee in callees, f"no contract for {callee} (callee ... meets ...)"

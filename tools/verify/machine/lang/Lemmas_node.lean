@@ -39,6 +39,10 @@ theorem Node.At.frame {m m' : Mem} {a : BitVec 64} {n : Blake3.Node} (h : Node.A
     (same : ∀ x : BitVec 64, x - a < 120#64 → m' x = m x) : Node.At m' a n :=
   ⟨Cv.At.frame h.1 (fun x hx => same x (by bv_omega)), Node.Tail.frame h.2 (fun x hx => same x (by bv_omega))⟩
 
+/-- A node is its `h` and its tail. -/
+theorem Node.At.intro {m : Mem} {a b : BitVec 64} {n : Blake3.Node} (h : Cv.At m a n.h) (t : Node.Tail m b n)
+    (e : b = a + 32#64) : Node.At m a n := ⟨h, e ▸ t⟩
+
 /-- What a holder of a node may read at once: its three words, and their bounds. -/
 theorem Node.At.cells {m : Mem} {a : BitVec 64} {n : Blake3.Node} (h : Node.At m a n) :
     Quad m (a + 96#64) n.t.toBitVec ∧ Quad m (a + 104#64) (n.len.toBitVec.setWidth 64) ∧

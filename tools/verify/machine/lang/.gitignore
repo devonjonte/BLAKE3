@@ -41,3 +41,6 @@ lroot.*
 node_out.*
 pad.*
 chunk_node.*
+hashl.*
+Trace_*.lean
+Trace_*.out

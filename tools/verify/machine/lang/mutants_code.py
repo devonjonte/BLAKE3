@@ -3,10 +3,12 @@
 
     [SOURCE=FILE.ode ODEMOD=Module] mutants_code.py NAME [JOBS]      (as prove_fn.sh: hasher.ode and HasherOde unless said)
 
-One instruction at a time is replaced by a no-op in the lifter's rows (Lifted_NAME.lean.rows), the
-program is written again from the rows (as prove_fn.sh wrote it) and `lake build Proof_NAME` must fail;
-before that the function is tried on its contract's examples, which says at once whether the examples
-see the change. The control: an unchanged copy, forced to check again, must be accepted.
+One instruction at a time is replaced by a no-op in the lifter's rows (Lifted_NAME.lean.rows) and the
+program is written again from the rows (as prove_fn.sh wrote it). The changed function is first tried on
+its contract's examples: one that refutes it settles it in seconds, and the proof is not asked (FULL=1 asks
+the proof of every change all the same: how many the theorem refuses by itself, minutes more). Where the
+examples see nothing, `lake build Proof_NAME` must fail. The control: an unchanged copy, forced to check
+again, must be accepted.
 
 An instruction whose removal the proof accepts is one the contract does not need: dead code, or a claim
 the contract does not make. Each is printed, to be looked at."""
@@ -16,7 +18,8 @@ import odec
 
 here = os.path.dirname(os.path.abspath(__file__))
 name = sys.argv[1]
-jobs = int(sys.argv[2]) if len(sys.argv) > 2 else 6
+jobs = int(sys.argv[2]) if len(sys.argv) > 2 else 12
+FULL = os.environ.get("FULL") == "1"
 SRC, ROWS = os.path.abspath(os.path.join(here, os.environ.get("SOURCE", "hasher.ode"))), f"Lifted_{name}.lean.rows"
 ODEMOD = os.environ.get("ODEMOD", "HasherOde")
 LIMIT = 900
@@ -33,7 +36,21 @@ targets = [f"Proof_{name}"]
 
 snap_dir = tempfile.mkdtemp(prefix="mut-code-snap-", dir=os.path.dirname(here))
 snapshot = os.path.join(snap_dir, "w")
-shutil.copytree(here, snapshot, symlinks=True, ignore=shutil.ignore_patterns("mut-*", "swap-*", "*.o"))
+# A proof's compiled form is hundreds of megabytes: the copies take only those this function's proof imports
+# (its callees' theorems), not every function's.
+def proofs_under(mod, seen):
+    """The proofs a module imports, and theirs: a callee's theorem rests on its own callees' theorems."""
+    path = os.path.join(here, mod + ".lean")
+    if os.path.exists(path):
+        for imp in re.findall(r"^import (\w+)", open(path).read(), re.M):
+            if imp not in seen:
+                seen.add(imp); proofs_under(imp, seen)
+    return seen
+KEEP = {m for m in proofs_under(f"Proof_{name}", set()) if m.startswith("Proof_")}
+def unneeded(_, names):
+    big = [n for n in names if re.match(r"(Proof|Direct|Checked|Meets)_", n) and not n.endswith(".lean") and n.split(".")[0] not in KEEP]
+    return set(big) | set(shutil.ignore_patterns("mut-*", "swap-*", "par-*", "*.o")(_, names))
+shutil.copytree(here, snapshot, symlinks=True, ignore=unneeded)
 import atexit; atexit.register(lambda: shutil.rmtree(snap_dir, ignore_errors=True))
 
 
@@ -63,6 +80,8 @@ def run(k):
                 tr = subprocess.run([sys.executable, "try_fn.py", SRC, name, ROWS], cwd=w, capture_output=True, text=True)
                 bad = [l for l in tr.stdout.splitlines() if "REFUTED" in l or "NO VERDICT" in l]
                 tried = ("the examples: " + bad[0][:150]) if bad else "the examples see nothing"
+                if bad and k is not None and not FULL:
+                    return k, what, "refuted", time.time() - start, tried
             else:
                 tried = "the examples do not build"
         pr = subprocess.Popen(["lake", "build"] + targets, cwd=w, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
@@ -77,16 +96,20 @@ def run(k):
         shutil.rmtree(d, ignore_errors=True)
 
 
-_, what, verdict, secs, tried = run(None)
-print(f"control: {verdict} in {secs:.0f} s ({tried})", flush=True)
-if verdict != "ACCEPTED" or secs < 5:
-    raise SystemExit("the control failed (or answered without checking): the audit proves nothing")
 tally, seen = {}, {}
 with ThreadPoolExecutor(jobs) as pool:
-    for k, what, verdict, secs, tried in pool.map(run, range(len(rows))):
+    # the control runs beside the changes (it is the longest: the whole proof, accepted); its line comes first
+    for k, what, verdict, secs, tried in pool.map(run, [None] + list(range(len(rows)))):
+        if k is None:
+            print(f"control: {verdict} in {secs:.0f} s ({tried})", flush=True)
+            if verdict != "ACCEPTED" or secs < 5:
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise SystemExit("the control failed (or answered without checking): the audit proves nothing")
+            continue
         tally[verdict] = tally.get(verdict, 0) + 1
         key = "refuted by an example" if "REFUTED" in tried or "NO VERDICT" in tried else "not seen by the examples"
         seen[key] = seen.get(key, 0) + 1
         print(f"{verdict:<10} {secs:4.0f} s  {what}\n{'':17}{tried}", flush=True)
-print(f"{name}: {len(rows)} instructions, each in turn made a no-op: " + ", ".join(f"{n} {k}" for k, n in sorted(tally.items())) +
-      "; " + ", ".join(f"{n} {k}" for k, n in sorted(seen.items())))
+WORDS = {"refuted": "refuted by an example (the proof not asked)", "rejected": "rejected by the proof"}
+print(f"{name}: {len(rows)} instructions, each in turn made a no-op: " + ", ".join(f"{n} {WORDS.get(k, k)}" for k, n in sorted(tally.items())) +
+      ("; " + ", ".join(f"{n} {k}" for k, n in sorted(seen.items())) if FULL else ""))

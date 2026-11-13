@@ -193,3 +193,13 @@ name = "Example_chunknode"
 name = "Code_chunk_node"
 [[lean_lib]]
 name = "Proof_chunk_node"
+[[lean_lib]]
+name = "Spec_hashl"
+[[lean_lib]]
+name = "Lemmas_hashl"
+[[lean_lib]]
+name = "Example_hashl"
+[[lean_lib]]
+name = "Code_hashl"
+[[lean_lib]]
+name = "Proof_hashl"
