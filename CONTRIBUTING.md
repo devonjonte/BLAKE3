@@ -40,8 +40,8 @@ The README lists what BLAKE3-Servil adds for callers; the code is laid out so:
   of each call: `lanes.rs` (the pool), `park.rs` and `finish.rs` (its
   handshakes), `lib.rs` (the calls). It reaches the core's inside
   through `hazmat`, a hidden module of the core that changes with the
-  two crates. `stream.rs` is the engine the Pipeline is to be built on
-  (BLAKE3 #356), compiled for this crate's tests alone until then.
+  two crates. `pipeline.rs` implements the bounded streaming Pipeline;
+  `waker.rs` connects its progress to callers waiting asynchronously.
 - `version/`: `blake3-servil-version`, the build's version string, in a
   crate of its own so that the kernels are not rebuilt for every edit.
 - `b3sum/`: the CLI (`b3sums` on crates.io), on `blake3-servil`.
