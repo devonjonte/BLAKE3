@@ -2560,17 +2560,27 @@ mod test {
     fn unit_ring_pack_rooms_and_thread_park_primitives() {
         let arc = Arc::new(());
         {
-            let mut ring = Ring::new(3);
+            // A failed count assertion must escape even when a mutant broke
+            // the pop_front that Ring::drop uses to drain the queue.
+            let mut ring = std::mem::ManuallyDrop::new(Ring::new(3));
             assert!(ring.is_empty() && ring.len() == 0 && ring.front().is_none() && ring.pop_front().is_none());
             ring.push_back((10, Arc::clone(&arc)));
+            assert_eq!(ring.len(), 1);
             ring.push_back((20, Arc::clone(&arc)));
             assert_eq!(ring.len(), 2);
             assert_eq!(ring.front().unwrap().0, 10);
             assert_eq!(ring.pop_front().unwrap().0, 10);
+            assert_eq!(ring.len(), 1);
             ring.push_back((30, Arc::clone(&arc)));
+            assert_eq!(ring.len(), 2);
             ring.push_back((40, Arc::clone(&arc)));
+            assert_eq!(ring.len(), 3);
             assert_eq!(ring.pop_front().unwrap().0, 20);
+            assert_eq!(ring.len(), 2);
             assert_eq!(Arc::strong_count(&arc), 3);
+            // SAFETY: drop the initialized ring exactly once on the successful
+            // path. The wrapper does not drop it again, and no use follows.
+            unsafe { std::mem::ManuallyDrop::drop(&mut ring); }
         }
         assert_eq!(Arc::strong_count(&arc), 1, "Ring::drop must drop remaining elements");
 
