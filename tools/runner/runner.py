@@ -60,8 +60,11 @@ Mac can only make some mutants time out, an outcome of their own.)
 (A whole mutation run of one crate, the core at "." or the crate in
 threads/: tools/mutants/check.py --whole --write --crate CRATE at the fork
 commit, which writes this machine's lists anew. The job's lists/ holds the
-lists as written, lists-diff.txt what that changes in the commit's, and
-outcomes.tsv every mutant's outcome and seconds. Its exit is the verdict, as
+lists to land: the survivors as the run wrote them, and the time-outs with
+the commit's rows the run did not see put back (lists-put-back.txt names
+them: a time-out can be a crash in another run, #380). lists-diff.txt is
+what they change in the commit's, lists-written/ the lists as this run
+alone wrote them, and outcomes.tsv every mutant's outcome and seconds. Its exit is the verdict, as
 a mutants job's. One crate a job: the core's run took 39 minutes on an M6
 and the other crate's 23 (November 12, 2026), so its time limit is two
 hours unless the job names another.)
@@ -413,10 +416,48 @@ def outcomes_of(last):
     return "".join(lines)
 
 
+def list_rows(text):
+    """A list's rows by what names each: file, mutant, and the CPU
+    condition its reason opens with (check.py's CONDITION: a name has one
+    row a condition)."""
+    found = {}
+    for line in text.splitlines():
+        if line and not line.startswith(("#", "files:", "model files:")):
+            file, mutant, _, reason = line.split("\t")
+            condition = reason[:reason.index("]") + 1] if reason.startswith("[cpu ") else ""
+            found[(file, mutant, condition)] = line
+    return found
+
+
+def list_union(before, written, survived=()):
+    """The time-outs as one whole run wrote them, with the rows of the
+    commit's list that the run did not see put back (BLAKE3 #380). Where a
+    mutant's outcome varies from run to run (on the Apple M6 a changed Ring
+    crashes some tests and stops the clock in others, and a run that ends
+    at the first failure sees either), --write drops the time-outs one run
+    happened not to see, and the next run's list drops others: the list to
+    land is what the runs have shown together. A row put back with its
+    reason and every place of its name is a known hang (check.py), which
+    whole runs skip; any other can read NO LONGER TIMES OUT in a run that
+    does not see it, as it could before. A name both lists hold keeps the
+    run's row. A name the run saw survive
+    (`survived`: file and mutant) is not put back: it would stand in both
+    lists, and that is for a person to settle. Returns the text, the rows
+    put back, and the rows left out for that reason."""
+    old, new = list_rows(before), list_rows(written)
+    missing = {key: line for key, line in old.items() if key not in new}
+    back = sorted(line for key, line in missing.items() if key[:2] not in survived)
+    left = sorted(line for key, line in missing.items() if key[:2] in survived)
+    head = [line for line in written.splitlines() if line.startswith(("#", "files:", "model files:"))]
+    return "\n".join(head + sorted(list(new.values()) + back)) + "\n", back, left
+
+
 def mutants_whole(job, run, work, out):
     """One crate's whole mutation run with --write at fork_commit (BLAKE3
-    #374): the lists this machine writes, what that changes in the
-    commit's lists, and every mutant's outcome."""
+    #374): the lists to land (the survivors as this run wrote them; the
+    time-outs with the commit's rows the run did not see put back:
+    list_union), what they change in the commit's lists, the lists as
+    this run alone wrote them, and every mutant's outcome."""
     crate = job.get("crate")
     assert crate in (".", "threads"), 'crate must be "." (the core) or "threads" (the crate in threads/)'
     fork, _ = run.checkouts(hex_commit(job, "fork_commit"), None)
@@ -424,8 +465,21 @@ def mutants_whole(job, run, work, out):
     fork = Path(fork)
     lists = fork / "tools" / "mutants" / ("" if crate == "." else crate)
     (out / "lists").mkdir(exist_ok=True)
-    for kind in ("known", "timeouts"):
-        written = lists / f"{kind}-{platform.machine()}.txt"
+    (out / "lists-written").mkdir(exist_ok=True)
+    known, timeouts = (lists / f"{kind}-{platform.machine()}.txt" for kind in ("known", "timeouts"))
+    for written in (known, timeouts):
+        if written.exists():
+            shutil.copy(written, out / "lists-written" / written.name)
+    notes = []
+    if timeouts.exists():
+        listed = subprocess.run(["git", "show", f"HEAD:{timeouts.relative_to(fork)}"], cwd=fork, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        survived = {key[:2] for key in list_rows(known.read_text())} if known.exists() else set()
+        # a list the commit does not hold yet (a new machine's) has no rows to put back
+        text, back, left = list_union(listed.stdout if listed.returncode == 0 else "", timeouts.read_text(), survived)
+        timeouts.write_text(text)
+        notes = [f"put back\t{row}\n" for row in back] + [f"NOT put back: this run saw it survive\t{row}\n" for row in left]
+    (out / "lists-put-back.txt").write_text("".join(notes))
+    for written in (known, timeouts):
         if written.exists():
             shutil.copy(written, out / "lists" / written.name)
     (out / "lists-diff.txt").write_text(run.run(["git", "diff", "--", str(lists.relative_to(fork))], cwd=fork, capture=True))

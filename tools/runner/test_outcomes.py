@@ -65,7 +65,7 @@ class WholeMutationRun(unittest.TestCase):
         lists = Path(root) / "tools" / "mutants" / ("" if crate == "." else crate)
         lists.mkdir(parents=True)
         for kind in ("known", "timeouts"):
-            (lists / f"{kind}-{runner.platform.machine()}.txt").write_text(f"{kind} of {crate}\n")
+            (lists / f"{kind}-{runner.platform.machine()}.txt").write_text(f"# {kind} of {crate}\nsrc/x.rs\tdelete ! in f\t1\ta reason\n")
             (lists / f"{kind}-another.txt").write_text("another machine's\n")
         shard = Path(root) / "tmp" / "mutants-last" / ("" if crate == "." else crate) / "run" / "shard0"
         shard.mkdir(parents=True)
@@ -85,7 +85,10 @@ class WholeMutationRun(unittest.TestCase):
                 self.assertEqual(run.commands[0][1:], ["tools/mutants/check.py", "--whole", "--write", "--crate", crate])
                 machine = runner.platform.machine()
                 self.assertEqual(sorted(p.name for p in (Path(out) / "lists").iterdir()), [f"known-{machine}.txt", f"timeouts-{machine}.txt"])
-                self.assertEqual((Path(out) / "lists" / f"known-{machine}.txt").read_text(), f"known of {crate}\n")
+                self.assertEqual((Path(out) / "lists" / f"known-{machine}.txt").read_text(), f"# known of {crate}\nsrc/x.rs\tdelete ! in f\t1\ta reason\n")
+                # the lists as the run alone wrote them, beside the lists to land (test_union.py: where they differ)
+                self.assertEqual(sorted(p.name for p in (Path(out) / "lists-written").iterdir()), [f"known-{machine}.txt", f"timeouts-{machine}.txt"])
+                self.assertEqual((Path(out) / "lists-put-back.txt").read_text(), "")
                 self.assertEqual((Path(out) / "lists-diff.txt").read_text(), "+a row\n")
                 # The exchange publishes a file by its kind: one of another kind stays on the machine, as the
                 # first run's lists.diff did.
