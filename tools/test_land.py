@@ -33,5 +33,17 @@ class Gates(unittest.TestCase):
         self.assertEqual(land.verdicts([], run("success", "cancelled"))["CI"][0], "failure")
 
 
+class Landable(unittest.TestCase):
+    def test_the_status_text_fits_github_for_every_set_of_gates(self):
+        base = "0123456789abcdef"
+        for paths in (["AGENTS.md"], ["src/lib.rs"], ["c/x.S"]):
+            text = land.landable(base, list(land.required(paths)))
+            self.assertLessEqual(len(text), 140, paths)
+            self.assertTrue(text.startswith("every gate green on top of 0123456789ab: "))
+        self.assertIn("check-builds", land.landable(base, list(land.required(["src/lib.rs"]))))
+        self.assertTrue(land.landable(base, list(land.required(["c/x.S"]))).endswith(": 9 gates"))
+        self.assertTrue(land.landable(base, []).endswith("*.md only"))
+
+
 if __name__ == "__main__":
     unittest.main()

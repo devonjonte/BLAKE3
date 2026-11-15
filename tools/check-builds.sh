@@ -26,6 +26,11 @@ RUSTFLAGS="-D warnings" step cargo check -q --release --tests --examples
 # the pool has no worker thread, and the caller hashes everything (the
 # suites run on many CPUs and never reach that path).
 step sh -c 'cd threads && taskset -c 0 cargo nextest run --cargo-quiet --release --lib'
+# The pool's handshakes (the finish line, the park, the waker slot) under
+# the model checker, every schedule Shuttle explores: seconds. Until
+# November 15, 2026 they ran only inside the mutation check, so a change
+# that broke one could pass every gate that was not about its own lines.
+step sh -c 'cd threads && RUSTFLAGS="--cfg shuttle" cargo test -q --release --test shuttle_finish --test shuttle_park --test shuttle_waker'
 RUSTFLAGS="-D warnings" step sh -c 'cd threads && cargo check -q --release --tests'
 RUSTFLAGS="-D warnings" step sh -c 'cd threads && cargo check -q --tests --target x86_64-unknown-linux-gnu'
 RUSTFLAGS="-D warnings" step cargo check -q --release --manifest-path b3sum/Cargo.toml

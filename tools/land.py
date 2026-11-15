@@ -79,6 +79,14 @@ def verdicts(statuses, check_runs):
     return seen
 
 
+def landable(base, gates):
+    """The `landable` status's text, within GitHub's 140 characters: the
+    gates by name while they fit (a proof input's eight did not, and the
+    landing stopped on its last step), else their count."""
+    text = f"every gate green on top of {base[:12]}: " + (", ".join(gates) or "*.md only")
+    return text if len(text) <= 140 else f"every gate green on top of {base[:12]}: {len(gates)} gates"
+
+
 def resolve(commit):
     git("fetch", "-q", "origin", "next")
     sha, base = git("rev-parse", commit + "^{commit}"), git("rev-parse", "origin/next")
@@ -139,7 +147,7 @@ def main(argv):
         return
     if missing:
         sys.exit(f"land: {sha[:12]} does not land: " + ", ".join(missing))
-    post(sha, "landable", "success", f"every gate green on top of {base[:12]}: " + (", ".join(g for g, _, _ in gates) or "*.md only"))
+    post(sha, "landable", "success", landable(base, [g for g, _, _ in gates]))
     subprocess.run(["git", "-C", ROOT, "push", "origin", f"{sha}:refs/heads/next"], check=True)
     print(f"land: next is {sha}")
 
