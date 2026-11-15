@@ -483,15 +483,62 @@ class Quad(Unit):
     Rotates by 12 and 7 go through `rtemp` (shl + sri); the value moves
     between `b` and `rtemp` and is back in `b` at the end of the G."""
 
-    def __init__(self, *args, rtemp, **kwargs):
+    def __init__(self, *args, rtemp, steps=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.rtemp = rtemp
+        self.steps = steps  # the four Gs a step at a time (half_step)
 
     def g(self, ai, bi, ci, di, mx, my):
         a, b, c, d, m, t = self.v(ai), self.v(bi), self.v(ci), self.v(di), self.mtemp[1:], self.rtemp
         if self.spill_d:
             return [f"QG_SPILL {a}, {b}, {c}, {d[1:]}, {m}, {t}, {self.msg + 16 * mx}, {self.msg + 16 * my}, {F_DSPILL + 16 * (di - 12)}"]
         return [f"QG {a}, {b}, {c}, {d}, {m}, {t}, {self.msg + 16 * mx}, {self.msg + 16 * my}"]
+
+    def half_step(self, quads, sched, base):
+        """With `steps`, the four Gs of a half-round a step at a time
+        across the four: each step's four instructions are independent and
+        sit together. One G after another, a core must see past a whole G
+        (18 instructions) to find the next one's work: an AmpereOne does
+        not, and ran four chunks in 0.94 ns/B so and runs them in 0.70
+        this way (official BLAKE3's NEON: 0.70). The kernels of cores that
+        are not Apple's have it (kn, pn: their one quad, or the first of
+        two); Apple's cores see past the G, their kernels were measured as
+        they are, and they stay so. The
+        rotates by 12 and 7 need a register besides b; with one to spare,
+        each G's b moves into the spare one and leaves its own for the
+        next G's, and the second rotate, taken in the other order, puts
+        every b back. The steps go out in eight parts, to sit among the
+        scalar lanes' eight half-Gs."""
+        if self.spill_d or not self.steps:
+            return super().half_step(quads, sched, base)
+        m, qm = self.mtemp, "q" + self.mtemp[1:]
+        cols = [(self.v(ai), self.v(bi), self.v(ci), self.v(di), self.msg + 16 * sched[base + k], self.msg + 16 * sched[base + k + 1]) for (ai, bi, ci, di), k in zip(quads, range(0, 8, 2))]
+        home = [b for _, b, _, _, _, _ in cols]
+        at, spare = list(home), self.rtemp
+        out = []
+        for a, _, _, _, mx, _ in cols:
+            out += [f"ldr {qm}, [sp, #{mx}]", f"add {a}.4s, {a}.4s, {m}.4s"]
+        out += [f"add {a}.4s, {a}.4s, {b}.4s" for a, b, _, _, _, _ in cols]
+        out += [f"eor {d}.16b, {d}.16b, {a}.16b" for a, _, _, d, _, _ in cols]
+        out += [f"rev32 {d}.8h, {d}.8h" for _, _, _, d, _, _ in cols]
+        out += [f"add {c}.4s, {c}.4s, {d}.4s" for _, _, c, d, _, _ in cols]
+        out += [f"eor {b}.16b, {b}.16b, {c}.16b" for _, b, c, _, _, _ in cols]
+        for j in range(4):
+            out += [f"shl {spare}.4s, {at[j]}.4s, #20", f"sri {spare}.4s, {at[j]}.4s, #12"]
+            at[j], spare = spare, at[j]
+        for a, _, _, _, _, my in cols:
+            out += [f"ldr {qm}, [sp, #{my}]", f"add {a}.4s, {a}.4s, {m}.4s"]
+        out += [f"add {cols[j][0]}.4s, {cols[j][0]}.4s, {at[j]}.4s" for j in range(4)]
+        out += [f"eor {d}.16b, {d}.16b, {a}.16b" for a, _, _, d, _, _ in cols]
+        out += [f"tbl {d}.16b, {{{d}.16b}}, v31.16b" for _, _, _, d, _, _ in cols]
+        out += [f"add {c}.4s, {c}.4s, {d}.4s" for _, _, c, d, _, _ in cols]
+        out += [f"eor {at[j]}.16b, {at[j]}.16b, {cols[j][2]}.16b" for j in range(4)]
+        for j in reversed(range(4)):
+            out += [f"shl {spare}.4s, {at[j]}.4s, #25", f"sri {spare}.4s, {at[j]}.4s, #7"]
+            at[j], spare = spare, at[j]
+        assert at == home and spare == self.rtemp, "every b is back in its register"
+        assert len(out) == 72
+        return ["\n        ".join(out[i : i + 9]) for i in range(0, 72, 9)]
 
     def prologue(self):
         out = []
@@ -1260,6 +1307,9 @@ def build():
     ppair = lambda idx, slots: Pair(idx, slots, u0 if idx == 0 else u1, idx == 1, "v28", "v29", **P)
     plone = lambda slots: Pair(0, slots, u0, False, "v28", "v29", msg_regs=list(range(16, 32)), **P)
     pquad = lambda idx, slots: Quad(idx, slots, u0 if idx == 0 else u1, idx == 1, "v28", "v29", rtemp="v30", **P)
+    # The same with the Gs a step at a time, for the kn and pn kernels.
+    nquad = lambda idx, slots: Quad(idx, slots, u0 if idx == 0 else u1, idx == 1, "v28", "v29", rtemp="v30", steps=True)
+    npquad = lambda idx, slots: Quad(idx, slots, u0 if idx == 0 else u1, idx == 1, "v28", "v29", rtemp="v30", steps=True, **P)
     # A parent (or one-block message) on the integer units beside NEON parents.
     psc1 = lambda slot: [Scalar(0, slot, one, "w23", preg="x24", ctr_step=0)]
     psc2 = lambda s0, s1: [Scalar(0, s0, two_a, "w2", "w3", preg="x0", ctr_step=0), Scalar(1, s1, two_b, "w4", "w5", preg="x1", ctr_step=0)]
@@ -1309,15 +1359,15 @@ def build():
         # need no SHA-3 (the quads rotate with rev32, tbl, and shl + sri):
         # with k1, k9, k10, p8, and p9, every count on a CPU without SHA-3.
         "kn2": kernel("blake3_servil_hybrid_kn2", sc2(0, 1), []),
-        "kn4": kernel("blake3_servil_hybrid_kn4", [], [quad(0, (0, 1, 2, 3))]),
-        "kn5": kernel("blake3_servil_hybrid_kn5", sc1(0), [quad(0, (1, 2, 3, 4))]),
-        "kn6": kernel("blake3_servil_hybrid_kn6", sc2(0, 1), [quad(0, (2, 3, 4, 5))]),
-        "kn8": kernel("blake3_servil_hybrid_kn8", [], [quad(0, (0, 1, 2, 3)), quad(1, (4, 5, 6, 7))]),
+        "kn4": kernel("blake3_servil_hybrid_kn4", [], [nquad(0, (0, 1, 2, 3))]),
+        "kn5": kernel("blake3_servil_hybrid_kn5", sc1(0), [nquad(0, (1, 2, 3, 4))]),
+        "kn6": kernel("blake3_servil_hybrid_kn6", sc2(0, 1), [nquad(0, (2, 3, 4, 5))]),
+        "kn8": kernel("blake3_servil_hybrid_kn8", [], [nquad(0, (0, 1, 2, 3)), nquad(1, (4, 5, 6, 7))]),
         "pn2": kernel("blake3_servil_hybrid_pn2", psc2(0, 1), []),
-        "pn4": kernel("blake3_servil_hybrid_pn4", [], [pquad(0, (0, 1, 2, 3))]),
-        "pn5": kernel("blake3_servil_hybrid_pn5", psc1(0), [pquad(0, (1, 2, 3, 4))]),
-        "pn6": kernel("blake3_servil_hybrid_pn6", psc2(0, 1), [pquad(0, (2, 3, 4, 5))]),
-        "pn10": kernel("blake3_servil_hybrid_pn10", psc2(0, 1), [pquad(0, (2, 3, 4, 5)), pquad(1, (6, 7, 8, 9))]),
+        "pn4": kernel("blake3_servil_hybrid_pn4", [], [npquad(0, (0, 1, 2, 3))]),
+        "pn5": kernel("blake3_servil_hybrid_pn5", psc1(0), [npquad(0, (1, 2, 3, 4))]),
+        "pn6": kernel("blake3_servil_hybrid_pn6", psc2(0, 1), [npquad(0, (2, 3, 4, 5))]),
+        "pn10": kernel("blake3_servil_hybrid_pn10", psc2(0, 1), [npquad(0, (2, 3, 4, 5)), npquad(1, (6, 7, 8, 9))]),
         # x<n>: extended output, n blocks of one block's output at counters
         # counter + i (every table entry the same block), both halves; x1
         # on the integer units, x4 and x8 on NEON quads.

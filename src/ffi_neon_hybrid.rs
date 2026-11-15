@@ -1,6 +1,7 @@
 //! `hash_many` for AArch64, built from the kernels in
-//! c/blake3_neon_hybrid_aarch64.S: with the SHA-3 extension the table
-//! below, without it the scalar and quad kernels alone (`PLAIN_PLANS`).
+//! c/blake3_neon_hybrid_aarch64.S: on Apple's cores the table below, on
+//! other cores with the SHA-3 extension `OTHER_PLANS`, without it the
+//! scalar and quad kernels alone (`PLAIN_PLANS`).
 //!
 //! Each kernel hashes a fixed number of inputs given as a pointer table. Chunk
 //! kernels (`k<n>`) take whole 1024-byte chunks with a counter that
@@ -370,9 +371,48 @@ static WITH_SHA3: Family = Family { chunk_plans: &CHUNK_PLANS, chunk_kernels: &C
 static PLAIN: Family =
     Family { chunk_plans: &PLAIN_PLANS, chunk_kernels: &PLAIN_CHUNK_KERNELS, parent_plans: &PLAIN_PLANS, parent_kernels: &PLAIN_PARENT_KERNELS };
 
-/// This CPU's family.
+/// The kernels of a core with SHA-3 that is not Apple's, per exact input
+/// count: the pair alone and beside one scalar, the quad alone and beside
+/// one scalar.
+const OTHER_CHUNK_KERNELS: [Option<Kernel>; 6] = [
+    None,
+    Some(asm::blake3_servil_hybrid_k1),
+    Some(asm::blake3_servil_hybrid_k2),
+    Some(asm::blake3_servil_hybrid_k3),
+    Some(asm::blake3_servil_hybrid_kn4),
+    Some(asm::blake3_servil_hybrid_kn5),
+];
+
+/// Kernel sizes per chunk count 1..=16 on a core with SHA-3 that is not
+/// Apple's: measured on an AmpereOne (Ampere-1a, a
+/// 4-CPU VM), the one such core we have. It runs about as many
+/// instructions a cycle whatever they are, so what counts is instructions
+/// a byte: a quad's G is 18 instructions for four chunks, a scalar's 16
+/// for one, and one scalar chunk beside a quad is the most that pays
+/// (kn5 0.61 ns/B; kn6, with two, 0.75; k10, two scalars and two quads,
+/// 0.82). Apple's plans ran there at 0.84 ns/B in bulk, these at 0.61
+/// (official BLAKE3's NEON: 0.68); every count's plan is the fastest of
+/// all its splits into four kernels or fewer (#395). Parents keep
+/// Apple's plans and kernels: in a tree they read level under five plans
+/// tried, and a batch of 32 short messages, which is all parent kernels,
+/// read 13% slower under these plans than under Apple's (bench-hashes,
+/// 64 pairs). Other makers' cores (Arm's Neoverse) are unmeasured and
+/// take these plans: they too are narrower than Apple's.
+const OTHER_PLANS: [&[usize]; 17] =
+    [&[], &[1], &[2], &[3], &[4], &[5], &[3, 3], &[5, 2], &[5, 3], &[5, 4], &[5, 5], &[5, 3, 3], &[5, 5, 2], &[5, 5, 3], &[5, 5, 4], &[5, 5, 5], &[5, 5, 3, 3]];
+
+static OTHER: Family = Family { chunk_plans: &OTHER_PLANS, chunk_kernels: &OTHER_CHUNK_KERNELS, parent_plans: &PARENT_PLANS, parent_kernels: &PARENT_KERNELS };
+
+/// This CPU's family: without SHA-3 the scalars and quads; with it,
+/// Apple's cores the plans measured on them, and other cores theirs.
 fn family() -> &'static Family {
-    if sha3_detected() { &WITH_SHA3 } else { &PLAIN }
+    if !sha3_detected() {
+        &PLAIN
+    } else if apple_cores() {
+        &WITH_SHA3
+    } else {
+        &OTHER
+    }
 }
 
 #[cfg(feature = "std")]
@@ -396,6 +436,8 @@ mod ends {
         pub static blake3_servil_hybrid_k8_end: u8;
         pub static blake3_servil_hybrid_k9_end: u8;
         pub static blake3_servil_hybrid_k10_end: u8;
+        pub static blake3_servil_hybrid_kn4_end: u8;
+        pub static blake3_servil_hybrid_kn5_end: u8;
         pub static blake3_servil_hybrid_q1_end: u8;
         pub static blake3_servil_hybrid_q2_end: u8;
         pub static blake3_servil_hybrid_q3_end: u8;
@@ -413,6 +455,9 @@ mod ends {
 /// the q kernel for `n` whole chunks and a partial one (1 to 9): start
 /// and end addresses.
 fn chunk_code(n: usize, partial: bool) -> (usize, usize) {
+    if !apple_cores() && !partial && (4..=5).contains(&n) {
+        return other_code(n);
+    }
     macro_rules! code {
         ($kernel:ident, $end:ident) => {
             (asm::$kernel as *const () as usize, &raw const ends::$end as usize)
@@ -439,6 +484,23 @@ fn chunk_code(n: usize, partial: bool) -> (usize, usize) {
         (8, true) => code!(blake3_servil_hybrid_q8, blake3_servil_hybrid_q8_end),
         (9, true) => code!(blake3_servil_hybrid_q9, blake3_servil_hybrid_q9_end),
         _ => unreachable!("no kernel for {n} whole chunks (partial: {partial})"),
+    }
+}
+
+#[cfg(feature = "std")]
+/// The code of the quad kernels that cores not Apple's run for four and
+/// five chunks, kn4 and kn5, where Apple's run a hybrid
+/// (OTHER_CHUNK_KERNELS; its other sizes are the kernels Apple's run).
+fn other_code(n: usize) -> (usize, usize) {
+    macro_rules! code {
+        ($kernel:ident, $end:ident) => {
+            (asm::$kernel as *const () as usize, &raw const ends::$end as usize)
+        };
+    }
+    match n {
+        4 => code!(blake3_servil_hybrid_kn4, blake3_servil_hybrid_kn4_end),
+        5 => code!(blake3_servil_hybrid_kn5, blake3_servil_hybrid_kn5_end),
+        _ => unreachable!("no quad kernel of its own for {n} chunks"),
     }
 }
 
@@ -472,12 +534,12 @@ fn parent_code(n: usize) -> (usize, usize) {
 pub fn prefetch_tree_code(whole: usize, partial: usize) {
     if partial > 0 && partial_pays(whole, partial) {
         let lead = whole.saturating_sub(9);
-        for &n in CHUNK_PLANS[lead] {
+        for &n in family().chunk_plans[lead] {
             crate::platform::prefetch_code(chunk_code(n, false));
         }
         crate::platform::prefetch_code(chunk_code(whole - lead, true));
     } else {
-        for &n in CHUNK_PLANS[whole] {
+        for &n in family().chunk_plans[whole] {
             crate::platform::prefetch_code(chunk_code(n, false));
         }
     }
@@ -496,6 +558,69 @@ pub fn prefetch_parent_code(mut values: usize) {
         values = values / 2 + values % 2;
     }
     crate::platform::prefetch_code(parent_code(1));
+}
+
+/// Whether this CPU's cores are Apple's: the cores the hybrid kernels
+/// were measured on, whose integer units hash two chunks beside eight on
+/// NEON at a gain. macOS runs on no other; Linux says by the implementer
+/// byte of MIDR_EL1 (0x61), which a program may read where the kernel
+/// reports HWCAP_CPUID (it emulates the read; Linux 4.11). Without
+/// that, not Apple's.
+#[inline]
+pub fn apple_cores() -> bool {
+    let detected = crate::platform::DETECTED.load(core::sync::atomic::Ordering::Relaxed);
+    if detected & CORES_ASKED == 0 {
+        return ask_cores();
+    }
+    detected & APPLE_CORES != 0
+}
+
+/// platform::DETECTED's bits for the cores: Apple's, and asked.
+const APPLE_CORES: u16 = 1 << 8;
+const CORES_ASKED: u16 = 1 << 9;
+
+#[cold]
+#[inline(never)]
+fn ask_cores() -> bool {
+    let apple = read_apple_cores();
+    crate::platform::DETECTED.fetch_or(CORES_ASKED | if apple { APPLE_CORES } else { 0 }, core::sync::atomic::Ordering::Relaxed);
+    apple
+}
+
+/// [`apple_cores`], read from the system: asked once and kept beside the
+/// platform (on Linux the read is a trap the kernel emulates).
+fn read_apple_cores() -> bool {
+    #[cfg(target_vendor = "apple")]
+    {
+        true
+    }
+    #[cfg(all(not(target_vendor = "apple"), target_os = "linux"))]
+    {
+        midr_implementer() == Some(0x61)
+    }
+    #[cfg(all(not(target_vendor = "apple"), not(target_os = "linux")))]
+    {
+        false
+    }
+}
+
+/// The implementer byte of MIDR_EL1 (0x61 Apple, 0x41 Arm, 0xc0 Ampere),
+/// where the kernel lets a program read the register.
+#[cfg(all(not(target_vendor = "apple"), target_os = "linux"))]
+fn midr_implementer() -> Option<u8> {
+    {
+        // AT_HWCAP from <elf.h>, HWCAP_CPUID from <asm/hwcap.h>.
+        const AT_HWCAP: libc::c_ulong = 16;
+        const HWCAP_CPUID: libc::c_ulong = 1 << 11;
+        // Sound: getauxval reads the process's own vector.
+        if unsafe { libc::getauxval(AT_HWCAP) } & HWCAP_CPUID == 0 {
+            return None;
+        }
+        let midr: u64;
+        // Sound: with HWCAP_CPUID the kernel answers this read at EL0.
+        unsafe { core::arch::asm!("mrs {}, midr_el1", out(reg) midr, options(nomem, nostack, preserves_flags)) };
+        Some((midr >> 24) as u8)
+    }
 }
 
 /// True when the CPU has the SHA-3 extension that provides `xar`. Every
@@ -617,7 +742,7 @@ pub(crate) fn entries() -> std::vec::Vec<(std::string::String, *const ())> {
         }
     }
     if sha3_detected() {
-        for n in 1..=9 {
+        for n in 1..=if apple_cores() { 9 } else { 2 } {
             out.push((std::format!("q{n}"), partial_kernel(n) as *const ()));
         }
     }
@@ -660,9 +785,13 @@ fn partial_covers(n: usize) -> bool {
 /// scalar kernel to q1's NEON pair, whose time does not grow with the
 /// partial chunk: from five blocks on, the M4 Max's P-cores are level or
 /// faster and its E-cores faster (1300 B: P level, E -14%; 2000 B: P -32%,
-/// E -36%); at two blocks (1100 B) P-cores paid 14%.
+/// E -36%); at two blocks (1100 B) P-cores paid 14%. On other cores only
+/// one or two whole chunks, the q kernels that are a pair and the scalar:
+/// an AmpereOne hashes 1.5 KiB 7% faster and 2.5 KiB 20% faster so, and
+/// 3.5 to 15.5 KiB 4 to 28% faster by its own plans and the partial chunk
+/// after them.
 pub fn partial_pays(n: usize, len: usize) -> bool {
-    partial_covers(n) && (n > 1 || len > 4 * BLOCK_LEN)
+    partial_covers(n) && (n > 1 || len > 4 * BLOCK_LEN) && (n <= 2 || apple_cores())
 }
 
 /// The chaining values of `chunks` (whole, at `counter` on) and of
@@ -977,6 +1106,135 @@ mod test {
         }
     }
 
+    /// Every family this CPU can run (with SHA-3 all three, without it
+    /// the plain one) hashes 1 to 16 chunks, and 1 to 16 parent blocks, as
+    /// the scalar kernel hashes them one at a time. A machine chooses one
+    /// family, so its other tests run that one's plans and no other's.
+    #[test]
+    fn test_every_family_against_the_scalar_kernel() {
+        let families: &[(&str, &Family)] =
+            if sha3_detected() { &[("Apple's", &WITH_SHA3), ("other", &OTHER), ("plain", &PLAIN)] } else { &[("plain", &PLAIN)] };
+        let key: CVWords = core::array::from_fn(|i| 0x9e37_79b9u32.wrapping_mul(i as u32 + 3));
+        let mut x = 0x1234_5678_9abc_def1u64;
+        let mut chunks = [[0u8; CHUNK_LEN]; 16];
+        for b in chunks.iter_mut().flatten() {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            *b = x as u8;
+        }
+        let blocks: [[u8; BLOCK_LEN]; 16] = core::array::from_fn(|i| chunks[i][..BLOCK_LEN].try_into().unwrap());
+        for (name, family) in families {
+            for plans in [family.chunk_plans, family.parent_plans] {
+                for (n, plan) in plans.iter().enumerate() {
+                    assert_eq!(plan.iter().sum::<usize>(), n, "{name}: the plan for {n} is {n} inputs");
+                }
+            }
+            for n in 1..=16 {
+                let inputs: [&[u8; CHUNK_LEN]; 16] = core::array::from_fn(|i| &chunks[i]);
+                let (mut got, mut want) = ([0u8; 16 * OUT_LEN], [0u8; 16 * OUT_LEN]);
+                // Sound: NEON is every AArch64 CPU's, and SHA-3 this one's where a family with pairs runs.
+                unsafe {
+                    hash_many_in(
+                        family,
+                        &inputs[..n],
+                        &key,
+                        7,
+                        IncrementCounter::Yes,
+                        crate::KEYED_HASH,
+                        crate::CHUNK_START,
+                        crate::CHUNK_END,
+                        BLOCK_LEN,
+                        &mut got,
+                    )
+                };
+                for i in 0..n {
+                    unsafe {
+                        hash_many_in(
+                            &PLAIN,
+                            &inputs[i..i + 1],
+                            &key,
+                            7 + i as u64,
+                            IncrementCounter::Yes,
+                            crate::KEYED_HASH,
+                            crate::CHUNK_START,
+                            crate::CHUNK_END,
+                            BLOCK_LEN,
+                            &mut want[i * OUT_LEN..],
+                        )
+                    };
+                }
+                assert_eq!(got[..n * OUT_LEN], want[..n * OUT_LEN], "{name}: {n} chunks");
+                let inputs: [&[u8; BLOCK_LEN]; 16] = core::array::from_fn(|i| &blocks[i]);
+                let (mut got, mut want) = ([0u8; 16 * OUT_LEN], [0u8; 16 * OUT_LEN]);
+                unsafe { hash_many_in(family, &inputs[..n], &key, 0, IncrementCounter::No, crate::KEYED_HASH | crate::PARENT, 0, 0, BLOCK_LEN, &mut got) };
+                for i in 0..n {
+                    unsafe {
+                        hash_many_in(
+                            &PLAIN,
+                            &inputs[i..i + 1],
+                            &key,
+                            0,
+                            IncrementCounter::No,
+                            crate::KEYED_HASH | crate::PARENT,
+                            0,
+                            0,
+                            BLOCK_LEN,
+                            &mut want[i * OUT_LEN..],
+                        )
+                    };
+                }
+                assert_eq!(got[..n * OUT_LEN], want[..n * OUT_LEN], "{name}: {n} parents");
+            }
+        }
+    }
+
+    /// The family is the CPU's, as the system describes it apart from our
+    /// reading (/proc/cpuinfo's implementer and features): Apple's cores
+    /// their plans, other cores with SHA-3 theirs, and
+    /// without SHA-3 the plain ones. Where the system lets a program read
+    /// the register (the `cpuid` feature), we read the implementer it
+    /// reports, and the answer kept is the same.
+    #[test]
+    #[cfg(all(target_os = "linux", feature = "std"))]
+    fn test_the_family_is_the_cpus_as_cpuinfo_has_it() {
+        let info = std::fs::read_to_string("/proc/cpuinfo").expect("/proc/cpuinfo");
+        let field =
+            |name: &str| -> std::vec::Vec<&str> { info.lines().filter(|l| l.starts_with(name)).filter_map(|l| l.split(':').nth(1)).map(str::trim).collect() };
+        let (implementers, features) = (field("CPU implementer"), field("Features"));
+        if implementers.is_empty() || features.is_empty() {
+            // Not an AArch64 system's file (an emulator shows its host's).
+            return;
+        }
+        let has = |feature: &str| features.iter().all(|f| f.split_whitespace().any(|w| w == feature));
+        let apple = implementers.iter().all(|i| i.eq_ignore_ascii_case("0x61"));
+        if has("cpuid") {
+            assert_eq!(midr_implementer().map(|byte| std::format!("{byte:#04x}")), Some(implementers[0].to_ascii_lowercase()), "the register's byte");
+            assert_eq!(read_apple_cores(), apple, "implementers {implementers:?}");
+            assert_eq!(apple_cores(), apple, "the answer, asked");
+            assert_eq!(apple_cores(), apple, "the answer kept");
+        } else {
+            assert_eq!((midr_implementer(), read_apple_cores(), apple_cores()), (None, false, false), "no register to read: not Apple's");
+        }
+        assert_eq!(sha3_detected(), has("sha3"));
+        let want: &Family = if !has("sha3") {
+            &PLAIN
+        } else if apple_cores() {
+            &WITH_SHA3
+        } else {
+            &OTHER
+        };
+        assert!(core::ptr::eq(family(), want), "the family");
+    }
+
+    /// macOS runs on Apple's cores: their plans.
+    #[test]
+    #[cfg(target_vendor = "apple")]
+    fn test_a_mac_runs_apples_plans() {
+        assert!(read_apple_cores() && apple_cores() && apple_cores(), "read, asked, and kept");
+        assert!(core::ptr::eq(family(), &WITH_SHA3));
+    }
+
     #[test]
     fn test_kernel_code_ranges() {
         // Each kernel's code runs from its symbol to its end label: present,
@@ -991,10 +1249,17 @@ mod test {
             let (start, end) = parent_code(n);
             assert!(start < end && end - start < 32 * 1024, "parent kernel {n}: {start:#x}..{end:#x}");
         }
-        // The plans' mirror takes every shape compress_chunks_parallel does.
-        for whole in 1..=16 {
-            for partial in [0, 1, 63, 64, 65, 500, 1023] {
-                prefetch_tree_code(whole, if whole == 16 { 0 } else { partial });
+        for n in [4, 5] {
+            let (start, end) = other_code(n);
+            assert!(start < end && (1024..32 * 1024).contains(&(end - start)), "the quad kernel for {n} chunks: {start:#x}..{end:#x}");
+        }
+        // The plans' mirror takes every shape compress_chunks_parallel does
+        // (where it runs: the families with SHA-3).
+        if sha3_detected() {
+            for whole in 1..=16 {
+                for partial in [0, 1, 63, 64, 65, 500, 1023] {
+                    prefetch_tree_code(whole, if whole == 16 { 0 } else { partial });
+                }
             }
         }
     }

@@ -112,9 +112,21 @@ impl Drop for Sme2Turn {
     }
 }
 
-/// The platform `initialize` detected, as its discriminant (1 and up), or 0
-/// before `initialize` has run.
-static DETECTED: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+/// What this process has detected. The low byte: the platform `initialize`
+/// detected, as its discriminant (1 and up), or 0 before it has run. Bits 8
+/// and 9: whether the cores are Apple's, and whether that has been asked
+/// (neon_hybrid::apple_cores: AArch64's kernel plans differ by it, the
+/// self-test's too, which runs before the platform is recorded). One word, so that the second answer
+/// costs a call no cache line the first did not already bring: read from
+/// a static of its own, it made calls after a pause 3 to 12% slower on an
+/// AmpereOne (bench-hashes, 64 pairs, #395).
+pub(crate) static DETECTED: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
+
+/// DETECTED's word with `platform` in its low byte and its other bits as
+/// they were.
+const fn with_platform(detected: u16, platform: u8) -> u16 {
+    (detected & 0xff00) + platform as u16
+}
 
 /// A call before `initialize`: the caller broke the contract. The crate's
 /// own unit tests, many small programs in one, initialize here instead.
@@ -124,7 +136,7 @@ fn not_initialized() -> u8 {
     #[cfg(test)]
     {
         crate::initialize();
-        DETECTED.load(core::sync::atomic::Ordering::Relaxed)
+        DETECTED.load(core::sync::atomic::Ordering::Relaxed) as u8
     }
     #[cfg(not(test))]
     panic!("blake3-servil: call blake3_servil_core::initialize() once, before any other call: it runs the startup self-test and detects the CPU")
@@ -153,11 +165,11 @@ impl Platform {
     /// which every call makes anyway.
     #[inline]
     pub fn detect() -> Self {
-        let mut code = DETECTED.load(core::sync::atomic::Ordering::Relaxed);
+        let mut code = DETECTED.load(core::sync::atomic::Ordering::Relaxed) as u8;
         if code == 0 {
             code = not_initialized();
         }
-        // Sound: DETECTED holds 0 or a Platform's discriminant (`record`).
+        // Sound: DETECTED's low byte holds 0 or a Platform's discriminant (`record`).
         unsafe { core::mem::transmute::<u8, Platform>(code) }
     }
 
@@ -177,7 +189,12 @@ impl Platform {
     /// Make `self` what [`Platform::detect`] returns from now on, in every
     /// thread: `initialize` does, once its self-test has passed.
     pub(crate) fn record(self) {
-        DETECTED.store(self as u8, core::sync::atomic::Ordering::Relaxed);
+        // The other bits stay (the cores, asked by now or later).
+        use core::sync::atomic::Ordering::Relaxed;
+        let mut detected = DETECTED.load(Relaxed);
+        while let Err(now) = DETECTED.compare_exchange_weak(detected, with_platform(detected, self as u8), Relaxed, Relaxed) {
+            detected = now;
+        }
     }
 
     /// [`Platform::detect`] without the startup self-test: an assembly
@@ -781,6 +798,20 @@ fn sme2_reported() -> bool {
     const HWCAP2_SME2: libc::c_ulong = 1 << 37;
     let hwcap2 = unsafe { libc::getauxval(AT_HWCAP2) };
     hwcap2 & HWCAP2_SME2 != 0
+}
+
+#[cfg(test)]
+mod detected_test {
+    /// Recording a platform changes the word's low byte alone: the bits
+    /// above it (AArch64's answer about the cores) stay, whichever
+    /// platform was there before.
+    #[test]
+    fn test_a_recorded_platform_keeps_the_words_other_bits() {
+        assert_eq!(super::with_platform(0, 3), 3);
+        assert_eq!(super::with_platform(0x0300, 3), 0x0303);
+        assert_eq!(super::with_platform(0x0305, 2), 0x0302, "the platform before goes");
+        assert_eq!(super::with_platform(0x02ff, 0x41), 0x0241);
+    }
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
