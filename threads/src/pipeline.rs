@@ -264,6 +264,9 @@ struct PipeStorage {
     loan_completed: Box<[OwnLine<AtomicU64>]>,
     saved_loan_epoch: UnsafeCell<u64>,
     saved_group_epoch: UnsafeCell<u64>,
+    /// The workers' view of the Pipeline that holds this storage, kept for
+    /// the next one (the owner's alone to read and write: `create`).
+    shared: UnsafeCell<*mut Shared>,
 }
 
 unsafe impl Send for PipeStorage {}
@@ -328,6 +331,7 @@ impl PipeStorage {
             loan_completed: (0..messages).map(|_| OwnLine(AtomicU64::new(0))).collect(),
             saved_loan_epoch: UnsafeCell::new(1),
             saved_group_epoch: UnsafeCell::new(1),
+            shared: UnsafeCell::new(core::ptr::null_mut()),
         }))
     }
 }
@@ -402,46 +406,22 @@ struct MultiDesc {
 
 /// The last thing a worker does for a task: `publish` stores the task's
 /// completion, then the owner is woken. From that store on the owner may
-/// see every task done, drop the Pipeline and free its `Shared`, so the
-/// worker reads nothing of `Shared` after it: the storage, which outlives
-/// every Pipeline, is taken before. (A worker that read `self.storage`
-/// after the store read freed memory: one b3sum test run in about 400
-/// died of it on a 4-CPU machine.) A wake that comes after the storage
-/// has gone to another Pipeline is a wake that one may get at any time.
+/// see every task done and drop the Pipeline, and its storage and its
+/// `Shared` may serve the next Pipeline: so the worker writes nothing
+/// after the store, and reads only the storage, taken before it. Neither
+/// is ever freed (a `Shared` that was, once, was read after: #399), so a
+/// late read finds memory; a late write would land in another Pipeline's
+/// work. A wake that reaches the next Pipeline is a wake one may get at
+/// any time (tests/shuttle_waker.rs has the slot under late finishers).
 #[inline(always)]
 fn finished(storage: &'static PipeStorage, publish: impl FnOnce()) {
     publish();
-    #[cfg(test)]
-    test_hooks::after_publish();
     storage.waker.notify_after_seqcst();
 }
 
-/// The tests' seams for [`finished`].
-#[cfg(test)]
-mod test_hooks {
-    use core::sync::atomic::{AtomicU64, Ordering};
-    /// Milliseconds a worker waits between a completion's store and the wake.
-    pub(super) static PAUSE_MS: AtomicU64 = AtomicU64::new(0);
-    pub(super) fn after_publish() {
-        let ms = PAUSE_MS.load(Ordering::Relaxed);
-        if ms > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(ms));
-        }
-    }
-}
-
-/// Under test, a freed `Shared` leaves no usable storage behind: a worker
-/// that reads it late faults, where it would otherwise read what the
-/// allocator has not yet reused.
-#[cfg(test)]
-impl Drop for Shared {
-    fn drop(&mut self) {
-        // Sound for the test: the field is never read again by correct code.
-        unsafe { core::ptr::write_volatile((&raw mut self.storage).cast::<usize>(), 1) };
-    }
-}
-
-/// Worker-visible per-pipeline state.
+/// Worker-visible per-pipeline state. Never freed: it stays with its
+/// storage for the next Pipeline of its size (`create`), as the storage
+/// does, so nothing a worker can reach is memory an owner gives back.
 struct Shared {
     key: CVWords,
     flags: u8,
@@ -731,39 +711,57 @@ impl<T, B> Pipeline<T, B> {
         for i in 0..limits.rooms {
             local_free_rooms.push_back(i as u32);
         }
-        let shared = Box::new(Shared {
-            key,
-            flags,
-            storage,
-            hashes: (0..m).map(|_| UnsafeCell::new([0u8; OUT_LEN])).collect(),
-            cvs: (0..m).map(|_| UnsafeCell::new([[0u8; OUT_LEN]; MAX_SLOT_PIECES + 1])).collect(),
-            slot_done: (0..m).map(|_| OwnLine(AtomicBool::new(true))).collect(),
-            tasks_left: (0..m).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
-            multi: (0..m)
-                .map(|_| {
-                    UnsafeCell::new(MultiDesc {
-                        input: core::ptr::null(),
-                        total_len: 0,
-                        piece_len: TASK_LEN,
-                        pieces: 0,
-                        batch: None,
-                        digests: core::ptr::null_mut(),
-                        loan_epoch: 0,
+        // The storage's `Shared`, where it has one of this size: every task
+        // of the Pipeline before is done (its drop saw to that), and only
+        // the mode is this Pipeline's own.
+        let held = unsafe { *storage.shared.get() };
+        let shared: *mut Shared = if !held.is_null() && unsafe { (&(*held).hashes).len() >= m } {
+            // A storage has one count of rooms, so pieces enough too.
+            assert!(unsafe { (&(*held).pieces).len() } >= p_cap, "a Shared of as many messages has as many pieces");
+            unsafe {
+                (*held).key = key;
+                (*held).flags = flags;
+            }
+            held
+        } else {
+            // One it replaces stays allocated: a worker of an earlier
+            // Pipeline may still be reading it.
+            let new = Box::into_raw(Box::new(Shared {
+                key,
+                flags,
+                storage,
+                hashes: (0..m).map(|_| UnsafeCell::new([0u8; OUT_LEN])).collect(),
+                cvs: (0..m).map(|_| UnsafeCell::new([[0u8; OUT_LEN]; MAX_SLOT_PIECES + 1])).collect(),
+                slot_done: (0..m).map(|_| OwnLine(AtomicBool::new(true))).collect(),
+                tasks_left: (0..m).map(|_| OwnLine(AtomicUsize::new(0))).collect(),
+                multi: (0..m)
+                    .map(|_| {
+                        UnsafeCell::new(MultiDesc {
+                            input: core::ptr::null(),
+                            total_len: 0,
+                            piece_len: TASK_LEN,
+                            pieces: 0,
+                            batch: None,
+                            digests: core::ptr::null_mut(),
+                            loan_epoch: 0,
+                        })
                     })
-                })
-                .collect(),
-            pieces: (0..p_cap)
-                .map(|_| PieceNode {
-                    room: UnsafeCell::new(0),
-                    offset: UnsafeCell::new(0),
-                    len: UnsafeCell::new(0),
-                    counter: UnsafeCell::new(0),
-                    out: OwnLine(UnsafeCell::new([0u8; 64])),
-                    done: OwnLine(AtomicBool::new(true)),
-                    next: UnsafeCell::new(NONE),
-                })
-                .collect(),
-        });
+                    .collect(),
+                pieces: (0..p_cap)
+                    .map(|_| PieceNode {
+                        room: UnsafeCell::new(0),
+                        offset: UnsafeCell::new(0),
+                        len: UnsafeCell::new(0),
+                        counter: UnsafeCell::new(0),
+                        out: OwnLine(UnsafeCell::new([0u8; 64])),
+                        done: OwnLine(AtomicBool::new(true)),
+                        next: UnsafeCell::new(NONE),
+                    })
+                    .collect(),
+            }));
+            unsafe { *storage.shared.get() = new };
+            new
+        };
 
         let mut free_slots = Ring::new(m);
         for i in 0..m {
@@ -779,7 +777,7 @@ impl<T, B> Pipeline<T, B> {
             limits,
             group_count: g_cap,
             source_slot,
-            shared: Box::into_raw(shared),
+            shared,
             slots: (0..m).map(|_| SlotMeta { tag: None, kind: SlotKind::Free }).collect(),
             room_streams: vec![RoomStream::EMPTY; m].into_boxed_slice(),
             owners: (0..m).map(|_| UnsafeCell::new(MaybeUninit::uninit())).collect(),
@@ -1618,7 +1616,6 @@ impl<T, B> Drop for Pipeline<T, B> {
                 _ => {}
             }
         }
-        unsafe { drop(Box::from_raw(self.shared)) };
         if storage.rooms.caller_held.load(Ordering::Acquire) == 0 {
             PipeStorage::release(storage);
         }
@@ -2331,70 +2328,44 @@ mod test {
         }
     }
 
-    /// A worker reads nothing of a Pipeline's `Shared` after it stores a
-    /// task's completion: the owner may free it from then on. Here every
-    /// worker waits 30 ms between the store and the wake, the owner (which
-    /// runs no task itself) drops the Pipeline as soon as it sees the work
-    /// done, and a freed `Shared` holds no usable storage (its test-only
-    /// Drop): a late read faults. A long owned message (a slot's pieces)
-    /// and a batch (a slot's parts) end that way here, and each faulted
-    /// before `finished` held the rule; a room's piece and a group are
-    /// held by the same function, and this test's two (a message in a
-    /// room, short messages sharing one) do not reach a worker's hands in
-    /// a way that shows it.
+    /// What a worker can reach is never given back: a Pipeline's `Shared`
+    /// stays with its storage when the Pipeline is dropped, and the next
+    /// Pipeline of that size takes both and hashes rightly in its own mode
+    /// (a worker that read it late once read freed memory, #399). A
+    /// larger Pipeline on the same storage gets one of its own size.
     #[test]
-    fn a_worker_reads_nothing_of_the_pipeline_after_its_completion() {
-        // On one CPU the pool has no workers (the owner runs every task):
-        // there is no late reader, and the wait below would have no end.
-        if std::thread::available_parallelism().map_or(1, |n| n.get()) < 2 {
-            return;
-        }
+    fn a_pipelines_shared_state_outlives_it_and_serves_the_next() {
         crate::initialize_multithreaded(None);
-        test_hooks::PAUSE_MS.store(30, Ordering::Relaxed);
-        for case in 0..4 {
-            let mut pipe = Pipeline::<usize, Vec<u8>>::with_owners(Mode::Plain, Limits { messages: 8, rooms: 2 });
-            let mut m = block_on(pipe.message(case, None));
-            match case {
-                0 => pipe.owned(m, vec![5u8; 1 << 20]),
-                1 => {
-                    let mut batch = Batch::new(64, 2048);
-                    for i in 0..2048 {
-                        batch.set(i, &[i as u8; 64]);
-                    }
-                    pipe.batch(m, batch, vec![[0u8; 32]; 2048].into_boxed_slice());
-                }
-                2 => {
-                    let mut room = block_on(pipe.room());
-                    room.bytes_mut().fill(7);
-                    pipe.commit(&mut m, &mut room, ROOM_LEN);
-                    drop(room);
-                    pipe.end(m);
-                }
-                _ => {
-                    let mut room = block_on(pipe.room());
-                    for i in 0..8 {
-                        room.bytes_mut()[..100].fill(i as u8);
-                        pipe.commit(&mut m, &mut room, 100);
-                        pipe.end(m);
-                        if i == 7 {
-                            break;
-                        }
-                        m = block_on(pipe.message(case, None));
-                    }
-                }
-            }
-            pipe.publish_open();
-            let started = std::time::Instant::now();
-            while pipe.has_in_flight_work() {
-                assert!(started.elapsed().as_secs() < 30, "case {case}: the workers finish the tasks");
-                pipe.shared().storage.source.wake_for_waiting();
-                std::thread::yield_now();
-            }
-            drop(pipe);
-            // The worker's wake comes 30 ms after its store: past it, a late read has faulted.
-            std::thread::sleep(std::time::Duration::from_millis(80));
+        let limits = Limits { messages: 3, rooms: 2 };
+        let first = Pipeline::<usize, Vec<u8>>::with_owners(Mode::Plain, limits);
+        let (shared, storage) = (first.shared, first.shared().storage as *const PipeStorage);
+        drop(first);
+        assert_eq!(unsafe { *(*storage).shared.get() }, shared, "the storage keeps it");
+        let key = [9u8; 32];
+        let mut second = Pipeline::<usize, Vec<u8>>::with_owners(Mode::Keyed(&key), limits);
+        assert_eq!((second.shared, second.shared().storage as *const PipeStorage), (shared, storage), "the next Pipeline of this size takes both");
+        let m = block_on(second.message(0, None));
+        second.owned(m, vec![5u8; 1 << 20]);
+        match drain_all(&mut second, 1).pop().unwrap() {
+            Event::Hashed { hash, .. } => assert_eq!(hash, convenience::hash_with(Mode::Keyed(&key), &vec![5u8; 1 << 20]), "in its own mode"),
+            _ => panic!("expected Hashed"),
         }
-        test_hooks::PAUSE_MS.store(0, Ordering::Relaxed);
+        drop(second);
+        // A larger Pipeline that the storage still fits: a Shared of its own
+        // size, which holds every one of its messages.
+        let mut larger = Pipeline::<usize, Vec<u8>>::with_owners(Mode::Plain, Limits { messages: 10, rooms: 2 });
+        assert_eq!(larger.shared().storage as *const PipeStorage, storage, "the storage serves ten messages too");
+        assert_ne!(larger.shared, shared, "the Shared of three messages does not");
+        for tag in 0..10 {
+            let m = block_on(larger.message(tag, None));
+            larger.owned(m, vec![tag as u8; 300_000]);
+        }
+        for event in drain_all(&mut larger, 10) {
+            match event {
+                Event::Hashed { tag, hash, .. } => assert_eq!(hash, convenience::hash(&vec![tag as u8; 300_000])),
+                _ => panic!("expected Hashed"),
+            }
+        }
     }
 
     #[test]
