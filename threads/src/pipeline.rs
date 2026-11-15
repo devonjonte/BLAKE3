@@ -2344,6 +2344,11 @@ mod test {
     /// a way that shows it.
     #[test]
     fn a_worker_reads_nothing_of_the_pipeline_after_its_completion() {
+        // On one CPU the pool has no workers (the owner runs every task):
+        // there is no late reader, and the wait below would have no end.
+        if std::thread::available_parallelism().map_or(1, |n| n.get()) < 2 {
+            return;
+        }
         crate::initialize_multithreaded(None);
         test_hooks::PAUSE_MS.store(30, Ordering::Relaxed);
         for case in 0..4 {
@@ -2379,7 +2384,9 @@ mod test {
                 }
             }
             pipe.publish_open();
+            let started = std::time::Instant::now();
             while pipe.has_in_flight_work() {
+                assert!(started.elapsed().as_secs() < 30, "case {case}: the workers finish the tasks");
                 pipe.shared().storage.source.wake_for_waiting();
                 std::thread::yield_now();
             }
