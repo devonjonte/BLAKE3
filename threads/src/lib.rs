@@ -315,7 +315,9 @@ pub(crate) fn ran(kind: Ran) {
 /// efficiency core or by another program takes fewer of a call's pieces,
 /// and the pieces shrink toward the end of the input, so the slowest thread
 /// finishes holding a small one. To leave CPUs to other work, pass fewer
-/// threads.
+/// threads. The count is also the one setting for energy against speed:
+/// every thread started may be woken by a call, and while a `Pipeline` is
+/// open one that finds no work looks for 5 us before it sleeps.
 ///
 /// On Linux, on a machine with more than one last-level cache (several
 /// sockets, or an EPYC, whose cores share one in groups), each worker is

@@ -2022,7 +2022,7 @@ pub(crate) mod sources {
 
     static REGISTERED: [AtomicPtr<Source>; SLOTS] = [const { AtomicPtr::new(core::ptr::null_mut()) }; SLOTS];
     static ACTIVE: AtomicU64 = AtomicU64::new(0);
-    /// Streams open: workers spin a while for more work only when some are.
+    /// Pipelines open: workers spin a while for more work only when some are.
     static OPEN: OwnLine<AtomicUsize> = OwnLine(AtomicUsize::new(0));
 
     /// Bit 63 of an action's `arg`: whether the SME2 thread runs it under

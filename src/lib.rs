@@ -308,35 +308,32 @@ pub(crate) enum Counted {
     /// A round of hash_each_on's shared lanes: one hash_many call over the
     /// k-th chunk of every message that has one.
     EachRound = 0,
-    /// A message whose bytes past it a stream's batch fill zeroed
-    /// (Stream::submit_batch_with).
-    BatchZeroed = 1,
     /// One root output block computed alone (Output::root_output_block):
     /// OutputReader::fill's tails, where its whole blocks go to xof_many.
-    RootBlock = 2,
+    RootBlock = 1,
     /// One group of short collection items hashed together by blocks.
-    ByBlocksCall = 3,
+    ByBlocksCall = 2,
     /// One AVX-512 finalize_each dispatch turn, requiring a full group.
-    OutputGroupTurn = 4,
+    OutputGroupTurn = 3,
     /// One pass of update_each's held groups hashed together.
-    HeldPass = 5,
+    HeldPass = 4,
     /// One update of a block or less staged as a padded block
     /// (Hasher::update's path for an empty stage).
-    PaddedFirstBlock = 6,
+    PaddedFirstBlock = 5,
     /// One copy of bytes into a Hasher's stage (Hasher::stage): what an
     /// update's whole groups skip.
-    Staged = 7,
+    Staged = 6,
     /// One whole subtree cut into a row for the Hasher's stack.
-    Row = 8,
+    Row = 7,
     /// One `finalize` that hashed the staged bytes apart and read the
     /// stack, the core not copied.
-    TailApart = 9,
+    TailApart = 8,
 }
 
 #[cfg(all(test, feature = "std"))]
 std::thread_local! {
     /// This thread's counts since the test last cleared them, by Counted.
-    pub(crate) static COUNTED: [core::cell::Cell<u64>; 10] = const { [const { core::cell::Cell::new(0) }; 10] };
+    pub(crate) static COUNTED: [core::cell::Cell<u64>; 9] = const { [const { core::cell::Cell::new(0) }; 9] };
 }
 
 /// Count one of `what`: in the tests' record, and nothing in any other
