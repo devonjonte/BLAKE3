@@ -67,7 +67,6 @@ src/hasher.rs	replace - with + in feed	1	equivalent: ahead is read by the SME2 k
 src/hasher.rs	replace - with / in feed	1	equivalent: ahead is read by the SME2 kernels alone (AArch64); on x86-64 the value passes through the walk to kernels that ignore it
 src/hasher.rs	replace < with <= in ChunkState<P>::fill_buf	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/hasher.rs	replace < with <= in fill	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/hasher.rs	replace CvStack::array -> Option<&[Cv; DEPTH]> with Some(Box::leak(Box::new([Default::default(); DEPTH])))	1	test-only code (cfg(test)): the test's own accessor
 src/hasher.rs	replace | with ^ in ChunkState<P>::absorb	1	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
 src/hasher.rs	replace | with ^ in ChunkState<P>::output	2	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
 src/hasher.rs	replace | with ^ in Output<P>::root_bytes	1	equivalent: | made ^ on flag bits that never overlap (the mode's flag beside CHUNK_START, CHUNK_END, PARENT, or ROOT)
