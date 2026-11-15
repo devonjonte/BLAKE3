@@ -30,7 +30,7 @@ CLANG = next(c for c in ("clang-19", "clang-18", "clang-17", "clang") if shutil.
 
 def assemble():
     obj = os.path.join(tempfile.mkdtemp(), "sme2.o")
-    subprocess.run([CLANG, "-c", "-march=armv9-a+sme2", os.path.join(ROOT_DIR, "c/blake3_sme2_aarch64.S"), "-o", obj], check=True)
+    subprocess.run([CLANG, "-c", "--target=aarch64-linux-gnu", "-march=armv9-a+sme2", os.path.join(ROOT_DIR, "c/blake3_sme2_aarch64.S"), "-o", obj], check=True)
     return obj
 
 
@@ -371,7 +371,7 @@ HYBRID_GROUP = 18
 
 def assemble_hybrid():
     obj = os.path.join(tempfile.mkdtemp(), "sme2_hybrid.o")
-    subprocess.run([CLANG, "-c", "-march=armv9-a+sme2", os.path.join(ROOT_DIR, "c/blake3_sme2_hybrid_aarch64.S"), "-o", obj], check=True)
+    subprocess.run([CLANG, "-c", "--target=aarch64-linux-gnu", "-march=armv9-a+sme2", os.path.join(ROOT_DIR, "c/blake3_sme2_hybrid_aarch64.S"), "-o", obj], check=True)
     return obj
 
 

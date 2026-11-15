@@ -96,7 +96,7 @@ class LongProofCarryOver(unittest.TestCase):
             env = dict(os.environ, PATH=str(bin_dir) + ":" + os.environ["PATH"])
             result = subprocess.run(
                 ["sh", "tools/verify/long-proofs.sh", commit], cwd=root, env=env,
-                capture_output=True, text=True, timeout=30)
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("same proof inputs as " + prior + ", not rerun", result.stdout)
             self.assertIn('"state": "success"', curl_log.read_text())

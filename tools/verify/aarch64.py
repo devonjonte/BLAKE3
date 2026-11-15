@@ -384,7 +384,15 @@ class Machine:
             r.bytes[k] = Extract(8 * i + 7, 8 * i, val)
 
 
+import platform
 import shutil
+# The assembler and disassembler for the NEON file: on an Arm host the
+# system's own, elsewhere the cross tools (Debian: gcc-aarch64-linux-gnu),
+# so that the proofs run on a machine with the memory the x86 ones need.
+# What is proved is the object's instructions, which the two assemble alike.
+ARM_HOST = platform.machine() in ("aarch64", "arm64")
+CC = "cc" if ARM_HOST else "aarch64-linux-gnu-gcc"
+OBJDUMP = "objdump" if ARM_HOST else "aarch64-linux-gnu-objdump"
 # A disassembler that decodes SME2 (LLVM 17 and later).
 LLVM_OBJDUMP = next((c for c in ("llvm-objdump-19", "llvm-objdump-18", "llvm-objdump-17", "llvm-objdump",
                                  "/usr/lib/llvm-19/bin/llvm-objdump", "/usr/lib/llvm-18/bin/llvm-objdump")
@@ -396,7 +404,7 @@ def disassemble(obj, start, stop, llvm=False):
     """{address: (mnemonic, [operand strings])} for [start, stop) of `obj`.
     GNU objdump for the NEON file; LLVM's (`llvm`) for the SME2 file, whose
     instructions binutils 2.40 does not decode."""
-    tool = [LLVM_OBJDUMP, "--mattr=+sme2,+sve2,+sve2-sha3"] if llvm else ["objdump"]
+    tool = [LLVM_OBJDUMP, "--mattr=+sme2,+sve2,+sve2-sha3"] if llvm else [OBJDUMP]
     out = subprocess.run(tool + ["-d", "--no-show-raw-insn", f"--start-address={start}",
                           f"--stop-address={stop}", obj], capture_output=True, text=True, check=True).stdout
     code = {}
@@ -412,7 +420,7 @@ def disassemble(obj, start, stop, llvm=False):
 @functools.lru_cache(None)
 def text_bytes(obj):
     """The .text section's bytes, {address: int}."""
-    out = subprocess.run(["objdump", "-s", "-j", ".text", obj], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([OBJDUMP, "-s", "-j", ".text", obj], capture_output=True, text=True, check=True).stdout
     data = {}
     for line in out.splitlines():
         m = re.match(r"\s([0-9a-f]+) ((?:[0-9a-f]{2,8} ?){1,4})", line)
@@ -430,10 +438,10 @@ def image_bytes(obj):
     """The loaded sections' bytes, {address: int}: the image a shared
     library maps, for its read-only constants. Sections that are not
     loaded (debug information) overlap these addresses and are left out."""
-    heads = subprocess.run(["objdump", "-h", obj], capture_output=True, text=True, check=True).stdout.splitlines()
+    heads = subprocess.run([OBJDUMP, "-h", obj], capture_output=True, text=True, check=True).stdout.splitlines()
     loaded = [heads[i].split()[1] for i in range(len(heads) - 1)
               if re.match(r"\s+\d+ ", heads[i]) and "ALLOC" in heads[i + 1] and "CONTENTS" in heads[i + 1]]
-    out = subprocess.run(["objdump", "-s"] + [f"-j{n}" for n in loaded] + [obj], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([OBJDUMP, "-s"] + [f"-j{n}" for n in loaded] + [obj], capture_output=True, text=True, check=True).stdout
     data = {}
     for line in out.splitlines():
         mt = re.match(r"\s([0-9a-f]+) ((?:[0-9a-f]{2,8} ?){1,4})", line)

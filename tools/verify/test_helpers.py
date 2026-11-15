@@ -18,6 +18,9 @@ class ContextTests(unittest.TestCase):
     def test_array_fingerprint_distinguishes_chunk_offsets(self):
         from z3 import Array, BitVecSort, BitVecVal, Select, simplify
         name = "stride_test_input"
+        # The sample is a Z3 term in a cache; one left there as the
+        # interpreter exits crashed Z3 4.13.3 (its context freed first).
+        self.addCleanup(lambda: [canon._samples.pop(k) for k in [k for k in canon._samples if k[0] == name]])
         array = Array(name, BitVecSort(64), BitVecSort(8))
         canon._values[(name, 0, 0)] = 0x0123456789ABCDEF
         canon._values[(name, 0, 1)] = 0

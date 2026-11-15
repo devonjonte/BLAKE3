@@ -26,12 +26,18 @@ Logs are retained in `tmp/long-proofs/COMMIT-INPUTS/`. Distinct drivers can
 check the same target commit without overwriting each other's evidence;
 cache-hit output names the matching prior log directory.
 
-The AArch64 proofs need Python 3 with Z3 (`python3-z3`), an AArch64
-machine with the SHA-3 extension, and Clang and llvm-objdump 17 or later
-(for SME2). The project's VM runs them (`long-proofs.sh`); the SME2
-cross-check needs an SME2 CPU (Apple M4, or the VM on it). The x86-64
-proofs run on any machine with Python 3, `python3-z3`, Clang and LLVM's
-`ld.lld`.
+The proofs need Python 3 with Z3 4.15 or later (`pip install z3-solver`;
+4.13.3, some distributions' `python3-z3`, crashes as the interpreter
+exits when a term is still alive), Clang and LLVM's `llvm-objdump` and
+`ld.lld`, 17 or later, and for the NEON file an AArch64 assembler and
+`objdump`: the system's own on an Arm machine, `gcc-aarch64-linux-gnu`
+elsewhere. The x86-64 proofs' widest cases hold up to 22 GB each and run
+as many at once as the free memory holds, three at most. Only the CPU
+cross-checks need their CPU: `cross_check.py` an AArch64 one with the
+SHA-3 extension, the SME2 one an SME2 CPU (Apple M4, or a VM on it).
+`long-proofs.sh` runs on either kind of host: on one that is not Arm,
+`LONG_PROOFS_ARM` names a program that runs `cross_check.py` at the
+commit on an Arm CPU. Its `versions` log records what ran the proofs.
 
 **Coverage.** The hybrid kernels at every block count they take (1 to
 16; the q kernels' partial chunk at every block count), those without

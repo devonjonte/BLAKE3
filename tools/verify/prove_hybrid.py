@@ -31,7 +31,7 @@ STACK = 1 << 16
 
 def assemble():
     obj = os.path.join(tempfile.mkdtemp(), "hybrid.o")
-    subprocess.run(["cc", "-c", os.path.join(ROOT_DIR, "c/blake3_neon_hybrid_aarch64.S"), "-o", obj], check=True)
+    subprocess.run([aarch64.CC, "-c", os.path.join(ROOT_DIR, "c/blake3_neon_hybrid_aarch64.S"), "-o", obj], check=True)
     return obj
 
 

@@ -220,7 +220,18 @@ def prove_hash_many(so, isa, n, blocks, increment):
 
 
 WIDE = {"k32": (32, True), "p32": (32, False), "p16": (16, False)}
-WIDE_WORKERS = 3  # their memory: at most three wide cases at once (main)
+WIDE_GB = 24  # what one wide case may hold, with room (k32 at 16 blocks: 22 GB)
+
+
+def wide_workers():
+    """How many wide cases run at once: three, or fewer where the memory
+    free now does not hold three (one at the least: a machine with less
+    than one case's memory has its worker killed, and the run says so)."""
+    with open("/proc/meminfo") as f:
+        free_gb = next(int(line.split()[1]) for line in f if line.startswith("MemAvailable:")) >> 20
+    return max(1, min(3, free_gb // WIDE_GB))
+
+
 
 
 def prove_wide(so, kernel, blocks):
@@ -474,9 +485,9 @@ def main():
         return (arg or 0) + 1
     todo.sort(key=lambda c: -work(c))
     # A 32-input wide case holds up to 22 GB (k32 at 16 blocks, the VM,
-    # October 26): those run WIDE_WORKERS at a time, the rest `count`.
+    # October 26): those run wide_workers() at a time, the rest `count`.
     failed = 0
-    for batch, n in (([c for c in todo if c[1] == "wide"], min(count, WIDE_WORKERS)), ([c for c in todo if c[1] != "wide"], count)):
+    for batch, n in (([c for c in todo if c[1] == "wide"], min(count, wide_workers())), ([c for c in todo if c[1] != "wide"], count)):
         for (isa, kind, arg), verdict in workers.each(prove_case, batch, n):
             print(f"{isa} {kind} {arg or ''}: {verdict}", flush=True)
             failed += verdict.startswith("NOT")

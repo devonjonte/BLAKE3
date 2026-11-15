@@ -45,11 +45,22 @@ if [ -f "$record" ]; then
 	echo "long proofs passed for $commit; same proof inputs as $prior, not rerun; logs in $root/tmp/long-proofs/$prior-$inputs, SHA-256 $psha, BLAKE3 $pb3 (hex)"
 	exit 0
 fi
+# The CPU cross-check needs an Arm CPU, and the x86 proofs up to 24 GB a
+# case (prove_x86.py's wide cases), which one machine of ours does not
+# have together. On a host that is not Arm, LONG_PROOFS_ARM names a
+# program that runs `python3 tools/verify/cross_check.py` at COMMIT (its
+# one argument) on an Arm CPU and passes on its output and exit status.
+arm=yes
+case $(uname -m) in aarch64 | arm64) ;; *)
+	arm=no
+	[ -n "${LONG_PROOFS_ARM:-}" ] || { echo "long-proofs: this host is not Arm: set LONG_PROOFS_ARM to the program that runs cross_check.py on an Arm CPU" >&2; exit 1; }
+	;;
+esac
 mkdir -p "$logs"
 rm -rf "$tree"
 git -C "$root" worktree prune
 git -C "$root" worktree add -q --detach "$tree" "$commit"
-status pending "running on BLAKE3-Servil's VM"
+status pending "running on $(uname -n)"
 cd "$tree"
 export ELAN_HOME=${ELAN_HOME:-"$HOME/.elan"}
 export PATH="$ELAN_HOME/bin:$PATH"
@@ -60,6 +71,9 @@ run() {  # name, command...: its log in $logs/name.txt; a failure ends the run
 	"$@" > "$logs/$name.txt" 2>&1 || { verdict="FAILED ($name)" state=failure; }
 }
 run lean_spec python3 c2sp/BLAKE3/check.py
+# What ran the proofs, in the logs the status's hashes cover: the solver's
+# version above all (Z3 4.13.3 crashed as it exited, November 15, 2026).
+run versions sh -c 'uname -srm && python3 --version && python3 -c "import z3; print(\"z3\", z3.get_version_string())" && (cd c2sp/BLAKE3 && lake --version)'
 run lean_emit sh -c 'python3 tools/verify/lean/emit.py && git diff --exit-code tools/verify/lean/compress.json tools/verify/lean/Generic.lean'
 run generated sh -c 'python3 tools/gen_neon_hybrid.py | cmp - c/blake3_neon_hybrid_aarch64.S && python3 tools/gen_sme2_hybrid.py | cmp - c/blake3_sme2_hybrid_aarch64.S && python3 tools/gen_x86.py | cmp - c/blake3_partial_x86-64_unix.S && python3 tools/gen_output16.py | cmp - c/blake3_output16.S && python3 tools/gen_output8.py | cmp - c/blake3_output8.S'
 run helpers python3 -m unittest discover -s tools/verify -p 'test_*.py'
@@ -73,7 +87,11 @@ run prove_x86 python3 tools/verify/prove_x86.py
 run prove_output python3 tools/verify/prove_output.py
 run prove_output8 python3 tools/verify/prove_output8.py
 run prove_x86_loop sh -c 'ulimit -v 6291456; exec python3 tools/verify/prove_x86_loop.py'
-run cross_check python3 tools/verify/cross_check.py
+if [ $arm = yes ]; then
+	run cross_check python3 tools/verify/cross_check.py
+else
+	run cross_check "$LONG_PROOFS_ARM" "$commit"
+fi
 run mutants python3 tools/verify/mutants.py
 b3=$(cat "$logs"/*.txt | cargo run -q --release --manifest-path b3sum/Cargo.toml -- --no-names)
 sha=$(cat "$logs"/*.txt | sha256sum | cut -d' ' -f1)
