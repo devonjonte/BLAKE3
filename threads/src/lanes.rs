@@ -316,13 +316,15 @@ fn with_scratch<C, T>(cut: impl FnOnce(&mut Vec<Piece>) -> C, job: impl FnOnce(C
 /// takes one), handed to `merge`.
 fn tree_cvs<T>(pool: &Pool, input: &[u8], key: &crate::CVWords, counter: u64, flags: u8, merge: impl FnOnce(&[Piece], &mut [ChainingValue]) -> T) -> T {
     let turn = crate::platform::Sme2Turn::take(Platform::detect(), true);
-    let threads = tree_threads(input.len(), pool.threads, turn.platform().simd_degree());
+    let plan = pool.plan(places::Kind::Tree, input.len());
+    let threads = tree_threads(input.len(), plan.threads, turn.platform().simd_degree());
     let prefix = prefix_for(&turn, input.len(), threads);
     with_scratch(
         |pieces| cut_with_prefix(pieces, input.len(), threads, prefix),
         |own, pieces, cvs| {
             let work = Work::Tree { input, pieces, cvs: cvs.as_mut_ptr(), key: *key, counter, flags };
-            pool.run_job(work, pieces.len(), own, turn.platform());
+            pool.run_job(work, pieces.len(), own, turn.platform(), threads, plan.near());
+            plan.done();
             drop(turn);
             merge(pieces, cvs)
         },
@@ -367,11 +369,13 @@ fn hash_many_over_pool(input: &[u8], message_len: usize, slot: usize, key: &crat
         return crate::hash_many_serial(input, message_len, slot, key, flags, outputs);
     };
     let count = outputs.len();
+    let plan = pool.plan(places::Kind::Messages, input.len());
     with_scratch(
-        |pieces| cut_messages(pieces, count, slot, pool.threads),
+        |pieces| cut_messages(pieces, count, slot, plan.threads),
         |(), pieces, _| {
             let work = Work::Messages { input, message_len, slot, key: *key, flags, pieces, outputs: outputs.as_mut_ptr() };
-            pool.run_job(work, pieces.len(), 0, pool_platform());
+            pool.run_job(work, pieces.len(), 0, pool_platform(), plan.threads, plan.near());
+            plan.done();
         },
     )
 }
@@ -386,11 +390,13 @@ pub(crate) fn hash_each(key: &crate::CVWords, flags: u8, items: &[(&[crate::thro
         let platform = Platform::detect();
         return crate::each::hash_each_on(key, flags, items, out, platform, |item| hash_small_on(item, key, flags, platform));
     };
+    let plan = pool.plan(places::Kind::Each, items.iter().map(|i| i.1).sum());
     with_scratch(
-        |pieces| cut_items(pieces, items, pool.threads),
+        |pieces| cut_items(pieces, items, plan.threads),
         |(), pieces, _| {
             let work = Work::Each { items, key: *key, flags, pieces, outputs: out.as_mut_ptr() };
-            pool.run_job(work, pieces.len(), 0, pool_platform());
+            pool.run_job(work, pieces.len(), 0, pool_platform(), plan.threads, plan.near());
+            plan.done();
         },
     )
 }
@@ -767,9 +773,1007 @@ pub(crate) fn initialize(threads: usize) {
             for worker in 2..threads {
                 std::thread::Builder::new().name(format!("blake3-worker-{worker}")).spawn(move || worker_main(worker - 1)).expect("spawning a BLAKE3 worker");
             }
+            // After the workers have started, never before: reading the
+            // machine's caches takes 2 ms on a machine of 96 CPUs, and
+            // b3sum has hashed a 16 MiB file by then (read first, it made
+            // b3sum's warm 16 MiB 1.4 ms slower on two servers).
+            places::settle(Pool::workers_of(threads));
             worker_main(0)
         })
         .expect("spawning a BLAKE3 worker");
+}
+
+/// The workers' places. On a machine with more than one last-level cache
+/// (several sockets, or an EPYC's cores in groups of six or eight), each
+/// worker runs on the CPUs under one of them, its place, and a waker wakes
+/// the workers of its own place first, then its socket's, then any.
+///
+/// Work a caller has just written is in its cache, and a worker under
+/// another fetches it line by line across the machine. 2x EPYC 7443 (eight
+/// caches of six cores), 64 KiB rooms through a Pipeline: 3.0 us a room
+/// with places, 6.4 us (3.7 to 10.7 from run to run) without; a 1 MiB
+/// message through `hash_multithreaded`, read into a buffer and hashed:
+/// 74 us with places, 437 us without, 236 us on one thread (BLAKE3 #389).
+/// Both parts are needed: the wake order alone, with the workers free to
+/// move, gained nothing, and neither did the workers held in place and
+/// woken in any order.
+///
+/// With one such cache, or where the system does not say (any system but
+/// Linux), nothing is set and the workers run where the system puts
+/// them. The workers' CPUs are among those the process may run on, and the
+/// calling threads are left alone.
+pub(crate) mod places {
+    use super::*;
+    use std::vec::Vec;
+
+    /// Which workers a job uses: its caller's place's alone, or all.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub(crate) enum Reach {
+        All = 0,
+        Near = 1,
+    }
+
+    /// A job's kind: one message's tree, a batch of equal messages, a
+    /// collection. A thread learns for each apart.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub(crate) enum Kind {
+        Tree = 0,
+        Messages = 1,
+        Each = 2,
+    }
+
+    /// What a thread has learned about one kind of job in one size class:
+    /// which reach hashes a byte sooner.
+    ///
+    /// Neither is right for every job, and what decides is nothing a call
+    /// can see: whether the caller has just written the data. Written a
+    /// moment ago, it is in the caller's cache, and workers under other
+    /// caches fetch it line by line and leave the lines where the caller's
+    /// next write must call them back; in memory alone, it is every
+    /// worker's alike, and the more the sooner. 2x EPYC 7443, a 4 MiB
+    /// collection written before each call: 0.31 ms near, 1.5 ms all; the
+    /// same left alone between calls: 0.17 ms near, 0.09 ms all; 16 MiB
+    /// of it: 1.5 against 5.5 ms written, 0.62 against 0.18 ms left alone
+    /// (BLAKE3 #389).
+    ///
+    /// So each thread tries both and keeps the faster, by the clock from
+    /// the end of its last such job to the end of this one where the jobs
+    /// follow closely (what the caller does between them is part of the
+    /// price: after a job that reached every place, the caller's next
+    /// write calls its lines back), else by the job's own time.
+    ///
+    /// A reach is judged by the fastest of MEASURED jobs on end: one job's
+    /// time carries whatever else the caller did before it and whatever
+    /// else the machine did during it, all of which only add (judged by
+    /// its last job alone, a 1 MiB message hashed between other work ran
+    /// 12% slower on 2x Xeon 6330: the thread kept changing its mind). A
+    /// trial is one job more, the first, which is not measured: a reach's
+    /// first job after the other's pays for the other's leavings (lines
+    /// to call back, workers asleep).
+    ///
+    /// The first TRIAL jobs are all's (a program's only call is then as
+    /// it would be without places), the next near's. Then come rounds:
+    /// the faster reach's jobs, the last MEASURED of them measured, then
+    /// a trial of the other. A round is ROUND jobs, and twice as many
+    /// after each round whose trial changed nothing, up to ROUND <<
+    /// LONGEST: where the other reach is six times slower, a trial in
+    /// every 16 jobs doubled the thread's mean time, and in every 256 it
+    /// adds a tenth. A round whose trial wins is followed by a round of
+    /// ROUND again, the other reach's.
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub(crate) struct Learned {
+        /// The next job's number: 0 to 2 TRIAL - 1 for the first trials,
+        /// then around the round from 2 TRIAL.
+        job: u16,
+        /// Each reach's nanoseconds a KiB: the least of its last measured
+        /// jobs (while they are being measured, of those so far).
+        rate: [u32; 2],
+        /// This round's reach: the faster as the round began.
+        round: Option<Reach>,
+        /// This round is ROUND << longer jobs.
+        longer: u8,
+    }
+
+    /// The jobs on end by the fastest of which a reach is judged.
+    pub(crate) const MEASURED: u16 = 4;
+    /// The jobs on end that try a reach: one unmeasured, then MEASURED.
+    pub(crate) const TRIAL: u16 = MEASURED + 1;
+    /// The jobs of the shortest round: the faster reach's, then TRIAL of
+    /// the other.
+    pub(crate) const ROUND: u16 = 16;
+    /// The longest round is ROUND << LONGEST jobs: 256.
+    pub(crate) const LONGEST: u8 = 4;
+
+    impl Learned {
+        fn faster(&self) -> Reach {
+            if self.rate[Reach::Near as usize] < self.rate[Reach::All as usize] { Reach::Near } else { Reach::All }
+        }
+
+        /// The job number that ends this round.
+        fn round_end(&self) -> u16 {
+            2 * TRIAL + (ROUND << self.longer) - 1
+        }
+
+        /// Where the next job stands: its reach, and whether it is the
+        /// first of the measured jobs (the second of a trial, or the
+        /// first of a round's last MEASURED of its own reach).
+        fn stands(&self) -> (Reach, bool) {
+            let other = |reach| match reach {
+                Reach::Near => Reach::All,
+                Reach::All => Reach::Near,
+            };
+            // The first trials: all's, then near's.
+            if self.job < 2 * TRIAL {
+                return (if self.job < TRIAL { Reach::All } else { Reach::Near }, self.job % TRIAL == 1);
+            }
+            // A round: its reach's jobs, then a trial of the other.
+            let round = self.round.unwrap_or(Reach::All);
+            let left = self.round_end() - self.job;
+            if left < TRIAL { (other(round), left == MEASURED - 1) } else { (round, left == TRIAL + MEASURED - 1) }
+        }
+
+        /// The reach of the next job.
+        pub(crate) fn choose(&self) -> Reach {
+            self.stands().0
+        }
+
+        /// The job [`Learned::choose`] gave its reach took `nanos` for `len` bytes.
+        pub(crate) fn record(&mut self, nanos: u64, len: usize) {
+            let rate = u32::try_from(nanos.saturating_mul(1024) / len.max(1) as u64).unwrap_or(u32::MAX);
+            // The fastest since the first of the measured jobs. (What the
+            // jobs before it add is forgotten at that job, before the
+            // rates are next compared, at a round's end.)
+            let (reach, first) = self.stands();
+            let kept = &mut self.rate[reach as usize];
+            *kept = if first { rate } else { rate.min(*kept) };
+            if self.job == 2 * TRIAL - 1 {
+                // The first trials are over: the first round.
+                (self.job, self.round) = (2 * TRIAL, Some(self.faster()));
+            } else if self.job == self.round_end() {
+                let faster = Some(self.faster());
+                self.longer = if faster == self.round { (self.longer + 1).min(LONGEST) } else { 0 };
+                (self.job, self.round) = (2 * TRIAL, faster);
+            } else {
+                self.job += 1;
+            }
+        }
+    }
+
+    /// The size classes a thread learns in: jobs of 2^19 to 2^27 bytes
+    /// and over, by their length's highest bit; shorter jobs with the
+    /// first, and jobs of FAR_LEN or more are every thread's unasked.
+    const CLASSES: usize = 9;
+
+    /// A job of this many bytes or more is every thread's: 256 MiB, more
+    /// than any cache holds, where the caller's place alone was never the
+    /// faster (2x EPYC 7443, 256 MiB written and hashed: 25 against 21 ms).
+    pub(crate) const FAR_LEN: usize = 1 << 28;
+
+    fn class(len: usize) -> usize {
+        ((usize::BITS - 1 - len.max(1).leading_zeros()) as usize).clamp(19, 19 + CLASSES - 1) - 19
+    }
+
+    std::thread_local! {
+        static LEARNED: core::cell::Cell<[[Learned; CLASSES]; 3]> = const { core::cell::Cell::new([[Learned { job: 0, rate: [0; 2], round: None, longer: 0 }; CLASSES]; 3]) };
+        /// The thread's last learning job: its kind and class, and when it ended.
+        static LAST: core::cell::Cell<Option<(Kind, usize, std::time::Instant)>> = const { core::cell::Cell::new(None) };
+    }
+
+    /// What a job cost, for learning, in nanoseconds: `job` is its own
+    /// time and `cycle` the time since the thread's last job of its kind
+    /// and class ended, if that was the thread's last learning job. The
+    /// cycle, where the jobs follow closely (it is under CLOSE times the
+    /// job's own time); else the job's own time: what the caller did in a
+    /// long gap says nothing of the reach.
+    fn cost(job: std::time::Duration, cycle: Option<std::time::Duration>) -> u64 {
+        let nanos = |d: std::time::Duration| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
+        match cycle {
+            Some(cycle) if nanos(cycle) < CLOSE.saturating_mul(nanos(job)) => nanos(cycle),
+            _ => nanos(job),
+        }
+    }
+
+    /// Jobs follow closely when one ends within this many times its own
+    /// time of the last one's end: 64. (At 8, a 43 MB collection written
+    /// in 12 ms and hashed in 1.5 by every thread, 2 by the caller's
+    /// place, was costed by its own time with the one and by its cycle
+    /// with the other, and the thread kept the slower. Past 64 times
+    /// its time, the job is under a sixtieth of what the caller spends.)
+    const CLOSE: u64 = 64;
+
+    /// A job's plan, and its clock where the thread is learning.
+    pub(crate) struct Plan {
+        /// The threads the job is cut for and wakes, its caller among them.
+        pub(crate) threads: usize,
+        learning: Option<(Kind, usize, Reach, std::time::Instant)>,
+    }
+
+    impl Plan {
+        /// The plan for a job of `len` bytes of `kind` in a pool of `all`
+        /// threads: all of them, where the workers have no places, where
+        /// the caller's place has none, and from FAR_LEN up.
+        pub(crate) fn new(kind: Kind, len: usize, all: usize) -> Plan {
+            let Some(near) = near_workers() else { return Plan { threads: all, learning: None } };
+            if len >= FAR_LEN {
+                return Plan { threads: all, learning: None };
+            }
+            let reach = LEARNED.with(|l| l.get()[kind as usize][class(len)].choose());
+            let threads = if reach == Reach::Near { (near + 1).min(all) } else { all };
+            Plan { threads, learning: Some((kind, len, reach, now())) }
+        }
+
+        /// Whether the job stays with the caller's place.
+        pub(crate) fn near(&self) -> bool {
+            matches!(self.learning, Some((_, _, Reach::Near, _)))
+        }
+
+        /// The job is done: the thread learns from it.
+        pub(crate) fn done(&self) {
+            if let Some((kind, len, _, started)) = self.learning {
+                let ended = now();
+                let nanos = cost(
+                    ended - started,
+                    LAST.with(|l| l.replace(Some((kind, class(len), ended))))
+                        .filter(|&(k, c, _)| k == kind && c == class(len))
+                        .map(|(_, _, last)| ended - last),
+                );
+                LEARNED.with(|l| {
+                    let mut all = l.get();
+                    all[kind as usize][class(len)].record(nanos, len);
+                    l.set(all);
+                });
+            }
+        }
+    }
+
+    /// The most CPUs a set names: the kernel's own limit.
+    const CPUS: usize = 1024;
+    type Set = [u64; CPUS / 64];
+
+    /// A CPU the process may run on: its number, its last-level cache
+    /// (any number that the CPUs sharing it share), its socket.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub(crate) struct Cpu {
+        pub(crate) cpu: usize,
+        pub(crate) cache: usize,
+        pub(crate) socket: usize,
+    }
+
+    /// The places of a machine and of `workers` workers.
+    #[derive(Debug, PartialEq)]
+    pub(crate) struct Places {
+        /// Each CPU's place (0 for a CPU the process may not run on).
+        of_cpu: Box<[u8]>,
+        /// Each place's CPUs.
+        cpus: Box<[Set]>,
+        /// Each worker's place.
+        of_worker: Box<[u8]>,
+        /// Each place's workers, as bits (crate::park's `parked`).
+        near: Box<[Box<[u64]>]>,
+        /// Each place's socket's workers, as bits.
+        beside: Box<[Box<[u64]>]>,
+        /// How many workers each place has.
+        count: Box<[usize]>,
+    }
+
+    impl Places {
+        /// The workers of `place`, where it has any.
+        fn near_of(&self, place: usize) -> Option<usize> {
+            self.count.get(place).copied().filter(|&near| near > 0)
+        }
+    }
+
+    static PLACES: OnceLock<Places> = OnceLock::new();
+    /// Set once `settle` has run, with places or without.
+    static SETTLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+    /// The places for `cpus` (in any order) and `workers` workers, started
+    /// by a thread on CPU `starter`: None with fewer than two caches, or
+    /// more than 256. The places are numbered from the starter's, its
+    /// socket's first; worker k is of the place of CPU k + 1 in that
+    /// order (one CPU of the starter's place is left for the starter),
+    /// around again where there are more workers than CPUs.
+    pub(crate) fn assign(cpus: &[Cpu], starter: usize, workers: usize) -> Option<Places> {
+        let mut caches: Vec<usize> = cpus.iter().map(|c| c.cache).collect();
+        caches.sort_unstable();
+        caches.dedup();
+        if caches.len() < 2 || caches.len() > 256 || cpus.iter().any(|c| c.cpu >= CPUS) {
+            return None;
+        }
+        let first = cpus.iter().find(|c| c.cpu == starter).unwrap_or(&cpus[0]);
+        // The caches in order: the starter's, its socket's others, the rest.
+        caches.sort_by_key(|&cache| {
+            let socket = cpus.iter().find(|c| c.cache == cache).expect("a cache of some CPU").socket;
+            (cache != first.cache, socket != first.socket, socket, cache)
+        });
+        let place = |cache: usize| caches.iter().position(|&c| c == cache).expect("every CPU's cache is listed");
+        let mut order: Vec<(usize, Cpu)> = cpus.iter().map(|&c| (place(c.cache), c)).collect();
+        order.sort_by_key(|&(place, c)| (place, c.cpu));
+        let words = workers.div_ceil(64).max(1);
+        let mut places = Places {
+            of_cpu: std::vec![0u8; CPUS].into(),
+            cpus: std::vec![[0u64; CPUS / 64]; caches.len()].into(),
+            of_worker: (0..workers).map(|k| order[(k + 1) % order.len()].0 as u8).collect(),
+            near: std::vec![std::vec![0u64; words].into_boxed_slice(); caches.len()].into(),
+            beside: std::vec![std::vec![0u64; words].into_boxed_slice(); caches.len()].into(),
+            count: std::vec![0usize; caches.len()].into(),
+        };
+        let mut socket_of = std::vec![0usize; caches.len()];
+        for &(place, c) in &order {
+            places.of_cpu[c.cpu] = place as u8;
+            places.cpus[place][c.cpu / 64] |= 1 << (c.cpu % 64);
+            socket_of[place] = c.socket;
+        }
+        for k in 0..workers {
+            let place = places.of_worker[k] as usize;
+            places.count[place] += 1;
+            for q in 0..caches.len() {
+                if q == place {
+                    places.near[q][k / 64] |= 1 << (k % 64);
+                }
+                if socket_of[q] == socket_of[place] {
+                    places.beside[q][k / 64] |= 1 << (k % 64);
+                }
+            }
+        }
+        Some(places)
+    }
+
+    #[cfg(target_os = "linux")]
+    unsafe extern "C" {
+        fn sched_getcpu() -> i32;
+        fn sched_getaffinity(pid: i32, len: usize, set: *mut Set) -> i32;
+        fn sched_setaffinity(pid: i32, len: usize, set: *const Set) -> i32;
+    }
+
+    /// The CPUs this process may run on, as the system describes them:
+    /// None where it does not (a file missing, a call refused).
+    #[cfg(target_os = "linux")]
+    fn read() -> Option<Vec<Cpu>> {
+        #[cfg(test)]
+        if let Some(pretended) = test::PRETENDED.get() {
+            return Some(pretended.clone());
+        }
+        let number =
+            |cpu: usize, file: &str| std::fs::read_to_string(std::format!("/sys/devices/system/cpu/cpu{cpu}/{file}")).ok()?.trim().parse::<usize>().ok();
+        allowed()?
+            .into_iter()
+            .map(|cpu| Some(Cpu { cpu, cache: number(cpu, "cache/index3/id")?, socket: number(cpu, "topology/physical_package_id")? }))
+            .collect()
+    }
+
+    /// The CPUs this thread may run on, in order: None where the system
+    /// refuses to say.
+    #[cfg(target_os = "linux")]
+    fn allowed() -> Option<Vec<usize>> {
+        let mut allowed: Set = [0; CPUS / 64];
+        // Sound: the set is `len` writable bytes.
+        if unsafe { sched_getaffinity(0, core::mem::size_of::<Set>(), &mut allowed) } != 0 {
+            return None;
+        }
+        Some((0..CPUS).filter(|c| allowed[c / 64] >> (c % 64) & 1 == 1).collect())
+    }
+
+    /// The calling thread's place (0 where none are set).
+    fn here() -> usize {
+        #[cfg(target_os = "linux")]
+        if let Some(places) = PLACES.get() {
+            // Sound: no arguments, no memory.
+            let cpu = unsafe { sched_getcpu() };
+            return usize::try_from(cpu).ok().and_then(|c| places.of_cpu.get(c)).map_or(0, |&p| p as usize);
+        }
+        0
+    }
+
+    /// Read the machine's caches and give each of the `workers` workers
+    /// a place: the first worker's work, once it has started the others
+    /// (two files a CPU, 2 ms on a machine of 96). Each worker moves to
+    /// its place when it next finds nothing to do (`take`), and every
+    /// parked worker is woken once so that it does; until the places are
+    /// set, wakes and jobs are as on a machine without them.
+    pub(crate) fn settle(workers: usize) {
+        #[cfg(target_os = "linux")]
+        if let Some(cpus) = read()
+            // Sound: no arguments, no memory.
+            && let Some(places) = assign(&cpus, usize::try_from(unsafe { sched_getcpu() }).unwrap_or(0), workers)
+            && PLACES.set(places).is_ok()
+        {
+            let places = PLACES.get().expect("just set");
+            let park = &pool().park;
+            park.set_places(places.near.clone(), places.beside.clone(), here);
+            SETTLED.store(true, Ordering::SeqCst);
+            park.wake_all();
+        }
+        let _ = workers;
+        SETTLED.store(true, Ordering::SeqCst);
+    }
+
+    /// The workers of the calling thread's place, where workers have
+    /// places and its place has any.
+    pub(crate) fn near_workers() -> Option<usize> {
+        PLACES.get()?.near_of(here())
+    }
+
+    /// Whether `settle` has run.
+    pub(crate) fn settled() -> bool {
+        SETTLED.load(Ordering::SeqCst)
+    }
+
+    /// Whether the places are settled (true too where there will be
+    /// none); if they are, worker `me` moves to its place.
+    pub(crate) fn take(me: usize) -> bool {
+        if !settled() {
+            return false;
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(places) = PLACES.get() {
+            let set = &places.cpus[places.of_worker[me] as usize];
+            // Sound: the set is `len` readable bytes. A failure leaves
+            // the worker where the system puts it.
+            unsafe { sched_setaffinity(0, core::mem::size_of::<Set>(), set) };
+        }
+        let _ = me;
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) mod test {
+        use super::*;
+
+        /// The CPUs a test has the pool read in place of the machine's
+        /// (set before the test's first pool call: each test is a process
+        /// of its own under nextest).
+        pub(crate) static PRETENDED: OnceLock<Vec<Cpu>> = OnceLock::new();
+
+        /// A list of CPUs as the system writes one: "0-3,8,10-11".
+        #[cfg(target_os = "linux")]
+        fn listed(text: &str) -> Vec<usize> {
+            text.trim()
+                .split(',')
+                .flat_map(|range| {
+                    let mut ends = range.split('-').map(|n| n.parse::<usize>().unwrap());
+                    let first = ends.next().unwrap();
+                    first..=ends.next().unwrap_or(first)
+                })
+                .collect()
+        }
+
+        /// The CPUs this thread may run on, as the system's own list of
+        /// them says (on every Linux machine, whatever it says of caches).
+        #[test]
+        #[cfg(target_os = "linux")]
+        fn the_allowed_cpus_are_the_systems_list() {
+            let status = std::fs::read_to_string("/proc/thread-self/status").unwrap();
+            let list = status.lines().find_map(|line| line.strip_prefix("Cpus_allowed_list:")).unwrap();
+            assert_eq!(allowed().unwrap(), listed(list));
+            assert!(!allowed().unwrap().is_empty());
+        }
+
+        /// The machine as the system describes it, read by `read` and read
+        /// again here another way: the CPUs are the ones this process may
+        /// run on, each once, and two share a cache exactly when the
+        /// system lists each among the other's cache's CPUs.
+        #[test]
+        #[cfg(target_os = "linux")]
+        fn the_machine_is_read_as_the_system_describes_it() {
+            let Some(cpus) = read() else {
+                assert!(!std::path::Path::new("/sys/devices/system/cpu/cpu0/cache/index3/id").exists(), "the files are there: read() reads them");
+                return;
+            };
+            assert_eq!(cpus.iter().map(|c| c.cpu).collect::<Vec<_>>(), allowed().unwrap());
+            let listed = |cpu: usize| -> Vec<usize> {
+                let text = std::fs::read_to_string(std::format!("/sys/devices/system/cpu/cpu{cpu}/cache/index3/shared_cpu_list")).unwrap();
+                text.trim()
+                    .split(',')
+                    .flat_map(|range| {
+                        let mut ends = range.split('-').map(|n| n.parse::<usize>().unwrap());
+                        let first = ends.next().unwrap();
+                        first..=ends.next().unwrap_or(first)
+                    })
+                    .collect()
+            };
+            for a in &cpus {
+                let shared = listed(a.cpu);
+                for b in &cpus {
+                    assert_eq!(a.cache == b.cache, shared.contains(&b.cpu), "CPUs {} and {}", a.cpu, b.cpu);
+                }
+                let socket = std::fs::read_to_string(std::format!("/sys/devices/system/cpu/cpu{}/topology/physical_package_id", a.cpu)).unwrap();
+                assert_eq!(a.socket, socket.trim().parse::<usize>().unwrap());
+            }
+        }
+
+        /// On a machine pretended to have two caches (this process's CPUs
+        /// in turn, one socket), the pool gives its workers places as
+        /// `assign` says, each worker's thread is kept to its place's
+        /// CPUs once the pool is at rest, a thread's place is its CPU's,
+        /// and a thread learns: its first TRIAL jobs of a kind and size
+        /// are every thread's, the next TRIAL its place's alone, a job
+        /// from FAR_LEN up is every thread's and teaches nothing, and a
+        /// job's cost is its cycle after a job of its kind and class and
+        /// its own time after any other. The digests are right whatever
+        /// the reach.
+        #[test]
+        #[cfg(target_os = "linux")]
+        fn the_workers_take_their_places_and_a_thread_learns() {
+            let cpus = allowed().unwrap();
+            if cpus.len() < 4 {
+                return;
+            }
+            let pretended: Vec<Cpu> = cpus.iter().enumerate().map(|(i, &cpu)| Cpu { cpu, cache: i % 2, socket: 0 }).collect();
+            PRETENDED.set(pretended.clone()).unwrap();
+            crate::initialize_multithreaded(None);
+            let pool = pool();
+            let workers = pool.workers();
+            // Settled, and every worker in its place and parked.
+            let started = now();
+            while !(settled() && pool.park.parked_count() == workers) {
+                assert!(now() - started < std::time::Duration::from_secs(5), "the pool settles and rests");
+                std::thread::yield_now();
+            }
+            let places = PLACES.get().expect("two caches: places");
+            // The starter was worker 1's thread, on some CPU: assign's
+            // answer for each CPU it may have been on has the same counts
+            // up to which place is first, and the place sets are the
+            // pretended caches'.
+            assert_eq!(places.cpus.len(), 2);
+            let mut sets: Vec<Vec<usize>> = places.cpus.iter().map(|set| bits(set)).collect();
+            sets.sort();
+            let mut want: Vec<Vec<usize>> = (0..2).map(|c| pretended.iter().filter(|p| p.cache == c).map(|p| p.cpu).collect()).collect();
+            want.sort();
+            assert_eq!(sets, want);
+            assert_eq!(places.count.iter().sum::<usize>(), workers);
+            assert_eq!(places.of_worker.len(), workers);
+            // Each worker's thread is kept to its place's CPUs, by the
+            // system's own word: as many threads kept to each place's CPUs
+            // as the place has workers. (A thread's name is cut at 15
+            // characters, so worker 10's reads as worker 1's: the threads
+            // are counted, not told apart. A worker moves just before it
+            // parks, and one that saw the places settle as it parked goes
+            // around once more: the count is awaited.)
+            let kept_to = || {
+                let mut kept_to = [0usize; 3];
+                for task in std::fs::read_dir("/proc/self/task").unwrap() {
+                    let task = task.unwrap().path();
+                    if !std::fs::read_to_string(task.join("comm")).unwrap().starts_with("blake3-worker-") {
+                        continue;
+                    }
+                    let status = std::fs::read_to_string(task.join("status")).unwrap();
+                    let list = status.lines().find_map(|line| line.strip_prefix("Cpus_allowed_list:")).unwrap().trim();
+                    let kept: Vec<usize> = list
+                        .split(',')
+                        .flat_map(|range| {
+                            let mut ends = range.split('-').map(|n| n.parse::<usize>().unwrap());
+                            let first = ends.next().unwrap();
+                            first..=ends.next().unwrap_or(first)
+                        })
+                        .collect();
+                    // Index 2: kept to neither place's CPUs.
+                    kept_to[(0..2).find(|&p| kept == bits(&places.cpus[p])).unwrap_or(2)] += 1;
+                }
+                kept_to
+            };
+            while kept_to() != [places.count[0], places.count[1], 0] {
+                assert!(now() - started < std::time::Duration::from_secs(5), "the workers kept to each place: {:?} of {:?}", kept_to(), places.count);
+                std::thread::yield_now();
+            }
+            for me in 0..workers {
+                assert_eq!(
+                    places.of_worker[me] as usize,
+                    usize::from(me + 1 >= cpus.len().div_ceil(2) && me + 1 < cpus.len()),
+                    "worker {me}: the starter's place first, then the other, then around"
+                );
+            }
+            // At rest and settled: a worker in its place parks, and one
+            // not yet in its place would stay up.
+            assert!(!stays(true) && stays(false));
+            // This thread's place is its CPU's: kept to one CPU of each
+            // place in turn, it is in that place and counts its workers.
+            for place in 0..2 {
+                let cpu = bits(&places.cpus[place])[0];
+                let mut one: Set = [0; CPUS / 64];
+                one[cpu / 64] |= 1 << (cpu % 64);
+                // Sound: the set is `len` readable bytes.
+                assert_eq!(unsafe { sched_setaffinity(0, core::mem::size_of::<Set>(), &one) }, 0);
+                assert_eq!(here(), place);
+                assert_eq!(near_workers(), (places.count[place] > 0).then_some(places.count[place]));
+            }
+            // Learning, from place 1 (this thread stays on its CPU there),
+            // on the tests' clock: every read a millisecond after the last.
+            let near = places.count[1];
+            assert!(near > 0, "four CPUs or more: place 1 has a worker");
+            let all = pool.threads;
+            let base = now();
+            TEST_CLOCK.with(|c| c.set(Some((base, std::time::Duration::ZERO, std::time::Duration::from_millis(1)))));
+            let len = 3 << 20;
+            let learned = |kind: Kind, len: usize| LEARNED.with(|l| l.get()[kind as usize][class(len)]);
+            for job in 0..2 * TRIAL {
+                let plan = Plan::new(Kind::Tree, len, all);
+                let want_near = job >= TRIAL;
+                assert_eq!((plan.threads, plan.near()), (if want_near { near + 1 } else { all }, want_near), "job {job}");
+                plan.done();
+            }
+            // Each job's own time is one step of the clock (1 ms); its
+            // cycle, from the last job's end, two (the plan's read and
+            // the end's): 2 ms for 3 MiB, 651 ns a KiB.
+            assert_eq!(learned(Kind::Tree, len).rate, [651, 651]);
+            // The round is all's (the rates are level), and its jobs are
+            // not measured before its last MEASURED ahead of the trial.
+            for job in 0..ROUND - TRIAL - MEASURED {
+                let plan = Plan::new(Kind::Tree, len, all);
+                assert_eq!((plan.threads, plan.near()), (all, false), "the round's job {job}");
+                plan.done();
+            }
+            // The first measured: its cycle, 2 ms.
+            Plan::new(Kind::Tree, len, all).done();
+            assert_eq!(learned(Kind::Tree, len).rate, [651, 651]);
+            // After another kind's job (which teaches that kind nothing
+            // yet: its first is not measured), a job costs its own time,
+            // 1 ms, and so after another class's of its own kind.
+            Plan::new(Kind::Each, len, all).done();
+            assert_eq!(learned(Kind::Each, len).rate, [0, 0]);
+            Plan::new(Kind::Tree, len, all).done();
+            assert_eq!(learned(Kind::Tree, len).rate, [325, 651]);
+            let mut other_class = learned(Kind::Tree, len);
+            other_class.rate[Reach::All as usize] = 651;
+            LEARNED.with(|l| {
+                let mut all = l.get();
+                all[Kind::Tree as usize][class(len)] = other_class;
+                l.set(all);
+            });
+            Plan::new(Kind::Tree, len / 4, all).done();
+            Plan::new(Kind::Tree, len, all).done();
+            assert_eq!(learned(Kind::Tree, len).rate, [325, 651]);
+            // From FAR_LEN up: every thread's, and nothing learned.
+            let before = LEARNED.with(|l| l.get());
+            let plan = Plan::new(Kind::Tree, FAR_LEN, all);
+            assert_eq!((plan.threads, plan.near(), plan.learning.is_none()), (all, false, true));
+            plan.done();
+            assert_eq!(LEARNED.with(|l| l.get()), before);
+            assert!(Plan::new(Kind::Tree, FAR_LEN - 1, all).learning.is_some());
+            TEST_CLOCK.with(|c| c.set(None));
+            // Real jobs, of both reaches: the digests are right, and a
+            // near job asks for no more workers than its place has.
+            let input: Vec<crate::throughput::Block> = (0..(2 << 20) / 64).map(|i| crate::throughput::Block([(i * 7) as u8; 64])).collect();
+            let bytes = crate::throughput::Block::bytes(&input);
+            let want = crate::convenience::hash(bytes);
+            let mut nears = 0;
+            for _ in 0..2 * TRIAL + ROUND {
+                let reach = learned(Kind::Tree, bytes.len()).choose();
+                assert_eq!(hash_with_key(bytes, crate::IV, 0), want);
+                if reach == Reach::Near {
+                    nears += 1;
+                    assert!(WAKES_WANTED.with(|w| w.get()).unwrap() <= near, "a near job wakes its place's workers at most");
+                }
+            }
+            assert!(nears >= TRIAL as usize, "the first trials try near");
+        }
+
+        /// A machine of `sockets` sockets, each of `caches` caches of
+        /// `cores` cores of two CPUs, numbered as Linux numbers them:
+        /// every core's first CPU, then every core's second.
+        fn machine(sockets: usize, caches: usize, cores: usize) -> Vec<Cpu> {
+            let all = sockets * caches * cores;
+            (0..2 * all).map(|cpu| Cpu { cpu, cache: 100 + (cpu % all) / cores, socket: (cpu % all) / (caches * cores) }).collect()
+        }
+
+        fn bits(words: &[u64]) -> Vec<usize> {
+            (0..64 * words.len()).filter(|k| words[k / 64] >> (k % 64) & 1 == 1).collect()
+        }
+
+        /// A thread tries all for TRIAL jobs, then near for TRIAL, each
+        /// judged by the fastest of its last MEASURED jobs; then it runs
+        /// the faster, judged anew by the fastest of its last MEASURED
+        /// jobs before the trial, and the other for the last TRIAL jobs
+        /// of each round; a round whose trial changes nothing is followed
+        /// by one twice as long, up to ROUND << LONGEST; when the trial
+        /// is the faster, the thread follows from the next round, a
+        /// round of ROUND again.
+        #[test]
+        fn a_thread_keeps_the_faster_reach_and_tries_the_other_each_round() {
+            let mib = 1 << 20;
+            let mut l = Learned::default();
+            // What a job of a reach takes: its steady time, ten times
+            // that for a reach's first job after the other's, and half as
+            // much again for every third job (something else the machine
+            // did): neither is to count.
+            let (mut last, mut jobs) = (None, 0u32);
+            let mut run = |l: &mut Learned, near_nanos: u64, all_nanos: u64| {
+                let reach = l.choose();
+                let steady = if reach == Reach::Near { near_nanos } else { all_nanos };
+                jobs += 1;
+                l.record(
+                    if last != Some(reach) {
+                        10 * steady
+                    } else if jobs % 3 == 0 {
+                        steady + steady / 2
+                    } else {
+                        steady
+                    },
+                    mib,
+                );
+                last = Some(reach);
+                reach
+            };
+            // Near is three times as fast.
+            let first: Vec<Reach> = (0..2 * TRIAL).map(|_| run(&mut l, 100_000, 300_000)).collect();
+            assert_eq!(first[..TRIAL as usize], [Reach::All; TRIAL as usize]);
+            assert_eq!(first[TRIAL as usize..], [Reach::Near; TRIAL as usize]);
+            // Nanoseconds a KiB, the fastest of each trial's measured jobs.
+            assert_eq!(l.rate, [292, 97]);
+            // Rounds of 16, 32, 64, 128, 256 and 256 jobs.
+            for round in [16, 32, 64, 128, 256, 256] {
+                for job in 0..round {
+                    let want = if job < round - TRIAL { Reach::Near } else { Reach::All };
+                    assert_eq!(run(&mut l, 100_000, 300_000), want, "a round of {round}, job {job}");
+                }
+                assert_eq!(l.rate, [292, 97], "the fastest of the measured jobs, each round");
+            }
+            // Near's rate is measured anew each round, by its last
+            // MEASURED jobs before the trial: a round of slower near jobs
+            // raises it (and all's trial, slower still, changes nothing).
+            for _ in 0..256 {
+                run(&mut l, 200_000, 300_000);
+            }
+            assert_eq!(l.rate, [292, 195]);
+            // Now all is the faster by far: this round (256 jobs) is still
+            // near's, its trial finds all at 9 a KiB, and the next round is
+            // all's, of 16 jobs, then 32.
+            for job in 0..256 {
+                let want = if job < 256 - TRIAL { Reach::Near } else { Reach::All };
+                assert_eq!(run(&mut l, 100_000, 10_000), want, "job {job}");
+            }
+            assert_eq!(l.rate, [9, 97]);
+            for round in [16, 32] {
+                for job in 0..round {
+                    let want = if job < round - TRIAL { Reach::All } else { Reach::Near };
+                    assert_eq!(run(&mut l, 100_000, 10_000), want, "a round of {round}, job {job}");
+                }
+                assert_eq!(l.rate, [9, 97]);
+            }
+            // The rates do not wrap: the longest job, the shortest length.
+            let mut l = Learned::default();
+            for _ in 0..2 * TRIAL + 2 {
+                l.record(u64::MAX, 0);
+            }
+            assert_eq!(l.rate, [u32::MAX, u32::MAX]);
+            assert_eq!(l.choose(), Reach::All, "level: all");
+        }
+
+        /// Which jobs are measured, exactly: of each first trial's five
+        /// jobs the last four; of a round of 16, its jobs 7 to 10 (the
+        /// round's reach, the four before the trial) and 12 to 15 (the
+        /// trial's last four), and no other. A measured job counts when
+        /// it is the fastest of its four, and the first of the four
+        /// forgets what was measured before.
+        #[test]
+        fn the_measured_jobs_exactly() {
+            let mib = 1 << 20;
+            // Every job takes 1024 ns a KiB but the one numbered `fast`,
+            // which takes 1: the rates after `jobs` jobs.
+            let rates = |jobs: usize, fast: usize| {
+                let mut l = Learned::default();
+                for job in 0..jobs {
+                    l.record(if job == fast { 1024 } else { mib as u64 }, mib);
+                }
+                l.rate
+            };
+            // The first trials: five jobs of all, then five of near.
+            let mut l = Learned::default();
+            let mut first = Vec::new();
+            for _ in 0..10 {
+                first.push(l.choose());
+                l.record(1, mib);
+            }
+            assert_eq!(first, [Reach::All, Reach::All, Reach::All, Reach::All, Reach::All, Reach::Near, Reach::Near, Reach::Near, Reach::Near, Reach::Near]);
+            for fast in 0..10 {
+                let want = match fast {
+                    0 | 5 => [1024, 1024],
+                    1..=4 => [1, 1024],
+                    _ => [1024, 1],
+                };
+                assert_eq!(rates(10, fast), want, "the fast job is job {fast}");
+            }
+            // Level rates: the first round is all's, 16 jobs, numbered
+            // from 10: its reach's four measured are 17 to 20, its trial
+            // (near's) 21 to 25, of which 22 to 25 are measured.
+            for fast in 10..26 {
+                let want = match fast {
+                    17..=20 => [1, 1024],
+                    22..=25 => [1024, 1],
+                    _ => [1024, 1024],
+                };
+                assert_eq!(rates(26, fast), want, "the fast job is job {fast}");
+            }
+            // The first of the measured forgets the old rate: a fast job
+            // in the first trial is forgotten once the round's four are
+            // measured, and a fast job in the round's four once the next
+            // round's are (32 jobs: its reach's four are 26 + 23 to 26).
+            assert_eq!(rates(16, 2), [1, 1024]);
+            assert_eq!(rates(17, 2), [1, 1024], "job 16 is not measured");
+            assert_eq!(rates(18, 2), [1024, 1024], "job 17 is the first of the round's four");
+            // A trial's first measured job forgets that reach's last
+            // trial. Near takes 10 a KiB and all 1024, but for all's job 2,
+            // which takes 512: the rounds are near's, and the first one's
+            // trial of all (jobs 21 to 25) forgets the 512 at job 22.
+            let rates_near = |jobs: usize| {
+                let mut l = Learned::default();
+                for job in 0..jobs {
+                    let reach = l.choose();
+                    l.record(
+                        if reach == Reach::Near {
+                            10 * 1024
+                        } else if job == 2 {
+                            mib as u64 / 2
+                        } else {
+                            mib as u64
+                        },
+                        mib,
+                    );
+                }
+                l.rate
+            };
+            assert_eq!(rates_near(22), [512, 10]);
+            assert_eq!(rates_near(23), [1024, 10]);
+            assert_eq!(rates(26 + 23, 18), [1, 1024]);
+            assert_eq!(rates(26 + 24, 18), [1024, 1024]);
+            // A fast job in near's trial makes the next round near's, of
+            // 16 jobs again, whose own four (26 + 7 to 10) forget it.
+            assert_eq!(rates(26 + 7, 23), [1024, 1]);
+            assert_eq!(rates(26 + 8, 23), [1024, 1024]);
+            let mut l = Learned::default();
+            for job in 0..26 + 16 {
+                if job >= 26 {
+                    assert_eq!(l.choose(), if job < 26 + 11 { Reach::Near } else { Reach::All }, "job {job}");
+                }
+                l.record(if job == 23 { 1024 } else { mib as u64 }, mib);
+            }
+        }
+
+        /// A job's cost for learning: the time since the last such job
+        /// ended where that is under CLOSE times the job's own, else the
+        /// job's own.
+        #[test]
+        fn a_jobs_cost_is_its_cycle_where_jobs_follow_closely() {
+            let us = std::time::Duration::from_micros;
+            assert_eq!(cost(us(100), None), 100_000);
+            assert_eq!(cost(us(100), Some(us(150))), 150_000);
+            assert_eq!(cost(us(100), Some(us(6399))), 6_399_000);
+            assert_eq!(cost(us(100), Some(us(6400))), 100_000, "CLOSE times the job: a gap");
+            assert_eq!(cost(us(100), Some(us(5_000_000))), 100_000);
+            assert_eq!(cost(us(0), Some(us(0))), 0);
+        }
+
+        /// On every system the pool settles (with places or without), and
+        /// then a worker in its place parks when nothing waits, and one
+        /// not yet placed stays up to take its place.
+        #[test]
+        fn once_settled_a_placed_worker_parks_and_an_unplaced_one_stays_up() {
+            crate::initialize_multithreaded(None);
+            if pool().threads == 1 {
+                return;
+            }
+            let started = now();
+            while !(settled() && pool().park.parked_count() == pool().workers()) {
+                assert!(now() - started < std::time::Duration::from_secs(5), "the pool settles and rests");
+                std::thread::yield_now();
+            }
+            assert!(!stays(true) && stays(false));
+        }
+
+        /// The size classes: by the length's highest bit from 512 KiB to
+        /// 128 MiB, shorter and longer with the first and the last.
+        #[test]
+        fn the_size_classes() {
+            for (len, want) in [
+                (0usize, 0),
+                (1, 0),
+                (1 << 19, 0),
+                ((1 << 20) - 1, 0),
+                (1 << 20, 1),
+                (3 << 20, 2),
+                (1 << 26, 7),
+                ((1 << 27) - 1, 7),
+                (1 << 27, 8),
+                (1 << 30, 8),
+                (usize::MAX, 8),
+            ] {
+                assert_eq!(class(len), want, "len={len}");
+            }
+        }
+
+        /// Where the workers have no places (this machine's tests: none
+        /// are set under test), a plan is every thread's and learns
+        /// nothing.
+        #[test]
+        fn without_places_a_plan_is_every_threads() {
+            if PLACES.get().is_none() {
+                let plan = Plan::new(Kind::Tree, 1 << 20, 7);
+                assert_eq!((plan.threads, plan.near(), plan.learning.is_none()), (7, false, true));
+                plan.done();
+            }
+        }
+
+        /// One cache, or none described, has no places: the pool is as it
+        /// was. Two have.
+        #[test]
+        fn one_cache_has_no_places() {
+            assert_eq!(assign(&machine(1, 1, 8), 0, 15), None);
+            assert!(assign(&machine(1, 2, 8), 0, 31).is_some());
+            assert!(assign(&machine(2, 1, 8), 0, 31).is_some());
+        }
+
+        /// 2x EPYC 7443 (two sockets of four caches of six cores, 96
+        /// CPUs), started on CPU 30 (socket 1, its second cache): the
+        /// places are numbered from the starter's cache, its socket's
+        /// others next, the other socket's last; a place's CPUs are its
+        /// cache's twelve; the first eleven workers share the starter's
+        /// place and the others fill the places in order, twelve each;
+        /// a place's socket holds four places' workers.
+        #[test]
+        fn the_places_of_two_sockets_of_four_caches() {
+            let cpus = machine(2, 4, 6);
+            let p = assign(&cpus, 30, 95).unwrap();
+            assert_eq!(p.cpus.len(), 8);
+            // CPU 30 is of core 30: socket 1, cache 105 (cores 30..36).
+            let place_of = |cpu: usize| p.of_cpu[cpu] as usize;
+            assert_eq!(place_of(30), 0);
+            assert_eq!(place_of(30 + 48), 0, "the core's second CPU");
+            assert_eq!((30..36).chain(78..84).filter(|&c| place_of(c) == 0).count(), 12);
+            assert_eq!((0..96).filter(|&c| place_of(c) == 0).count(), 12);
+            assert_eq!(bits(&p.cpus[0]), (30..36).chain(78..84).collect::<Vec<_>>());
+            // Places 1 to 3: socket 1's other caches; 4 to 7: socket 0's.
+            for cpu in 24..48 {
+                assert!(place_of(cpu) < 4, "socket 1's CPU {cpu}");
+            }
+            for cpu in 0..24 {
+                assert!(place_of(cpu) >= 4, "socket 0's CPU {cpu}");
+            }
+            assert_eq!(p.count[..], [11, 12, 12, 12, 12, 12, 12, 12]);
+            assert_eq!(bits(&p.near[0]), (0..11).collect::<Vec<_>>());
+            assert_eq!(bits(&p.near[1]), (11..23).collect::<Vec<_>>());
+            assert_eq!(bits(&p.beside[0]), (0..47).collect::<Vec<_>>());
+            assert_eq!(bits(&p.beside[3]), (0..47).collect::<Vec<_>>());
+            assert_eq!(bits(&p.beside[4]), (47..95).collect::<Vec<_>>());
+            assert_eq!(p.of_worker.len(), 95);
+            for k in 0..95 {
+                assert!(bits(&p.near[p.of_worker[k] as usize]).contains(&k));
+            }
+        }
+
+        /// Fewer workers than a place has CPUs all share the starter's
+        /// place; more workers than CPUs go around again; a process
+        /// confined to some CPUs has places among those alone; a starter
+        /// on a CPU that is not listed starts from the first.
+        #[test]
+        fn few_workers_many_workers_and_a_confined_process() {
+            let cpus = machine(2, 4, 6);
+            let p = assign(&cpus, 0, 3).unwrap();
+            assert_eq!(p.count[..], [3, 0, 0, 0, 0, 0, 0, 0]);
+            let p = assign(&cpus, 0, 200).unwrap();
+            assert_eq!(p.count.iter().sum::<usize>(), 200);
+            assert_eq!(p.count[0], 11 + 12 + 9, "the first place again for workers 95 to 106, and for 191 to 199");
+            let confined: Vec<Cpu> = cpus.iter().copied().filter(|c| c.cpu < 12).collect();
+            let p = assign(&confined, 7, 11).unwrap();
+            assert_eq!(p.cpus.len(), 2);
+            assert_eq!(bits(&p.cpus[0]), (6..12).collect::<Vec<_>>());
+            assert_eq!(p.count[..], [5, 6]);
+            let p = assign(&cpus, 500, 95).unwrap();
+            assert_eq!(p.of_cpu[0], 0);
+            // A place's workers, where it has any.
+            let p = assign(&cpus, 0, 3).unwrap();
+            assert_eq!((p.near_of(0), p.near_of(1), p.near_of(7), p.near_of(8)), (Some(3), None, None, None));
+            // 256 caches have places; 257 have none, nor has a machine
+            // with a CPU numbered past the sets' size.
+            let many = |caches: usize| -> Vec<Cpu> { (0..caches).map(|cpu| Cpu { cpu, cache: cpu, socket: 0 }).collect() };
+            assert!(assign(&many(256), 0, 7).is_some());
+            assert_eq!(assign(&many(257), 0, 7), None);
+            let mut far = machine(1, 2, 2);
+            far[3].cpu = CPUS - 1;
+            assert!(assign(&far, 0, 7).is_some());
+            far[3].cpu = CPUS;
+            assert_eq!(assign(&far, 0, 7), None);
+        }
+    }
 }
 
 /// The contract's check at every multithreaded call and stream: a call
@@ -858,7 +1862,7 @@ impl Pool {
     /// hashes pieces `0..own` on `own_platform`, back to back (the SME2
     /// thread's prefix; the workers' pieces start after it). A caller that
     /// finds no source slot free hashes every piece itself.
-    fn run_job(&self, work: Work, pieces: usize, own: usize, own_platform: Platform) {
+    fn run_job(&self, work: Work, pieces: usize, own: usize, own_platform: Platform, threads: usize, near: bool) {
         crate::ran(crate::Ran::Pool);
         #[cfg(test)]
         WAKES_WANTED.with(|w| w.set(None));
@@ -872,18 +1876,20 @@ impl Pool {
         // wait is over: nothing runs on the normal path).
         let ptr = &job as *const Job as *mut Job<'static>;
         let published = AbortOnUnwind;
-        let target = source.publish_job(ptr, pieces, own);
+        let target = source.publish_job(ptr, pieces, own, near);
         if slot.is_some() {
             // A worker for each piece past the caller's first (none for a
             // job of one past its own: a wake for none is nothing); for a
             // tree, within the wide kernel's thread budget.
-            let wanted = match &job.work {
-                Work::Tree { input, .. } => (pieces - own - 1).min(tree_threads(input.len(), self.threads, own_platform.simd_degree()).saturating_sub(1)),
-                _ => pieces - own - 1,
-            };
+            let wanted = (pieces - own - 1).min(threads.saturating_sub(1));
             #[cfg(test)]
             WAKES_WANTED.with(|w| w.set(Some(wanted)));
-            self.wake_for(wanted);
+            if near {
+                // The first few; each worker that takes a piece wakes the next.
+                let _ = (0..wanted.min(crate::park::FANOUT)).take_while(|_| self.park.wake_one_near()).count();
+            } else {
+                self.wake_for(wanted);
+            }
         }
         for index in 0..own {
             // Sound: the workers' pieces start past these.
@@ -904,6 +1910,14 @@ impl Pool {
         }
     }
 
+    /// How a job of `len` bytes of `kind` runs: the threads it is cut
+    /// for and wakes, its caller among them. Where the workers have places
+    /// that is every thread or the caller's place's alone, whichever this
+    /// thread has found faster for such jobs (`places::Learned`).
+    fn plan(&self, kind: places::Kind, len: usize) -> places::Plan {
+        places::Plan::new(kind, len, self.threads)
+    }
+
     /// Wake workers for `wanted` pieces of new work (crate::park).
     pub(crate) fn wake_for(&self, wanted: usize) {
         self.park.wake_for(wanted, self.workers());
@@ -922,6 +1936,7 @@ impl Pool {
     /// when a stream is open (more is coming), else parked, whenever it
     /// finds nothing.
     fn serve(&self, me: usize) -> ! {
+        let mut placed = false;
         loop {
             if sources::run_one() {
                 continue;
@@ -929,13 +1944,28 @@ impl Pool {
             if sources::open() && spin_for_work() {
                 continue;
             }
+            // With nothing to do, and once: the worker moves to its place,
+            // if the first worker has settled the places by now.
+            if !placed {
+                placed = places::take(me);
+            }
             // Park unless work shows (crate::park's handshake); woken, pay
             // the wakes owed before working.
-            if self.park.park_unless(me, || sources::visible(false)) {
+            // (A worker not yet in its place does not park once the places
+            // are settled: it sets its parked bit, then looks, and `settle`
+            // stores, then wakes the parked, both SeqCst: one sees the
+            // other, as with work.)
+            if self.park.park_unless(me, || stays(placed)) {
                 self.park.pay_owed();
             }
         }
     }
+}
+
+/// Whether a worker about to park stays up: work waits, or the places
+/// are settled and it is not yet in its own.
+fn stays(placed: bool) -> bool {
+    sources::visible(false) || (!placed && places::settled())
 }
 
 /// How long a worker that finds nothing keeps looking while a stream is
@@ -1019,6 +2049,9 @@ pub(crate) mod sources {
         /// claimed numbers' until `finish.finished` passes them.
         job: AtomicPtr<Job<'static>>,
         base: AtomicUsize,
+        /// Whether the current job stays with the workers of its caller's
+        /// place (a job under FAR_LEN, where workers have places).
+        near: core::sync::atomic::AtomicBool,
         /// What is published and what is finished, and the handshake
         /// between the waiting caller and the worker finishing its last
         /// piece (crate::finish, which Loom checks).
@@ -1059,6 +2092,7 @@ pub(crate) mod sources {
                     .collect(),
                 job: AtomicPtr::new(core::ptr::null_mut()),
                 base: AtomicUsize::new(0),
+                near: core::sync::atomic::AtomicBool::new(false),
                 finish: crate::finish::Finish::new(),
             }
         }
@@ -1126,9 +2160,10 @@ pub(crate) mod sources {
 
         /// Make `job` the caller's current job, its pieces `0..own` the
         /// caller's own: the number `finished` must reach when it is done.
-        pub(crate) fn publish_job(&self, job: *mut Job<'static>, pieces: usize, own: usize) -> usize {
+        pub(crate) fn publish_job(&self, job: *mut Job<'static>, pieces: usize, own: usize, near: bool) -> usize {
             let base = self.finish.published.load(Ordering::Relaxed);
             debug_assert_eq!(self.finish.finished_count(), base, "the last job is finished");
+            self.near.store(near, Ordering::Relaxed);
             self.job.store(job, Ordering::Relaxed);
             self.base.store(base, Ordering::Relaxed);
             // No worker can claim a number yet (claimed == published), so
@@ -1327,7 +2362,11 @@ pub(crate) mod sources {
     fn serve(source: &'static Source, item: Item) {
         if source.waiting() >= 2 {
             noted(Noted::WakeTry);
-            pool().park.wake_one();
+            if source.near.load(Ordering::Relaxed) {
+                pool().park.wake_one_near();
+            } else {
+                pool().park.wake_one();
+            }
         }
         match item {
             Item::Action { run, context, arg } => {
@@ -1402,8 +2441,10 @@ pub(crate) mod sources {
             let stream: &'static Source = &*Box::leak(Box::new(Source::with_actions(4)));
             let slots = [job.register().expect("a free slot"), stream.register().expect("a free slot")];
             assert!(!visible(false) && !visible(true), "nothing published: nothing visible");
+            assert!(!stays(true) && !stays(false), "no work, and no places settled (no pool here): a worker parks");
             job.finish.published.store(1, Ordering::SeqCst);
             assert!(visible(false), "a job's piece waits: a worker sees it");
+            assert!(stays(true) && stays(false), "work waits: a worker stays up, in its place or not");
             assert!(!visible(true), "the SME2 thread looks at streams alone");
             job.claimed.store(1, Ordering::SeqCst);
             assert!(!visible(false), "the piece was claimed: nothing waits");
@@ -1785,7 +2826,7 @@ mod test {
         // waiting forever (a broken build's every mutant hung this test).
         let _ = pool();
         let source = sources::job_source();
-        let target = source.publish_job(core::ptr::null_mut(), 1, 0);
+        let target = source.publish_job(core::ptr::null_mut(), 1, 0, false);
         // An unpark this thread received earlier would let one park()
         // return at once and hide a missing wake-up.
         std::thread::park_timeout(core::time::Duration::ZERO);
@@ -2381,8 +3422,8 @@ mod test {
         assert_eq!((pieces.len(), own), (3, 0));
         let mut cvs = std::vec![ChainingValue::default(); 3];
         let work = Work::Tree { input: &input[..24 * 1024], pieces: &pieces, cvs: cvs.as_mut_ptr(), key: *crate::IV, counter: 0, flags: 0 };
-        pool.run_job(work, 3, 0, Platform::detect());
         let budget = tree_threads(24 * 1024, pool.threads, degree) - 1;
+        pool.run_job(work, 3, 0, Platform::detect(), budget + 1, false);
         assert_eq!(wanted(), Some(2.min(budget)), "three pieces: two workers, or the budget");
         assert_eq!(merge_root(&pieces, &mut cvs, crate::IV, 0), crate::convenience::hash(&input[..24 * 1024]));
         // A call the pool never sees asks for nothing (run_job clears the
