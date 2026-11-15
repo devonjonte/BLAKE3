@@ -248,7 +248,12 @@ margin.
 
 `next` is the development line and `main` the release line. Work happens
 on `candidate/<topic>` branches; a candidate joins `next` as a
-fast-forward of its tip (so what was checked is what lands) once:
+fast-forward of its tip (so what was checked is what lands), by
+`python3 tools/land.py land COMMIT` and no other push: each gate below
+is a status on the commit (`land.py gate` runs this machine's and posts
+them, `land.py record` posts one that ran elsewhere, `land.py status`
+lists what is missing), and `next` accepts only a commit that `land.py`
+found complete. A candidate lands once:
 
 - every suite above passes, and `sh tools/check-builds.sh`;
 - CI passes on it, started by hand (`workflow_dispatch`) when it changes
