@@ -24,6 +24,11 @@
 use blake3::throughput::{Cv, TreeHasher};
 use std::path::Path;
 
+#[cfg(target_os = "linux")]
+use crate::direct::PIECE;
+#[cfg(target_os = "linux")]
+pub(crate) use crate::direct::Piece;
+
 /// A chunk group: sixteen chunks, bao-tree's block size 4.
 pub(crate) const GROUP: usize = 16 * blake3::CHUNK_LEN;
 
@@ -106,63 +111,10 @@ fn build<E>(
     Ok(tree.root_hash(&cvs[top], &cvs[top + 1]))
 }
 
-/// A cold file is read in pieces of this many bytes, each by one direct
-/// read: 128 groups, so a piece starts on a group and its groups'
-/// chaining values are a run of the file's.
-#[cfg(target_os = "linux")]
-const PIECE: usize = 2 << 20;
-
-/// A file of at least this many bytes that the page cache does not hold
-/// is read directly.
-#[cfg(target_os = "linux")]
-const DIRECT_MIN: u64 = 2 * PIECE as u64;
-
-/// A buffer a direct read can fill: PIECE bytes, on a page boundary.
-#[cfg(target_os = "linux")]
-pub(crate) struct Piece(*mut u8);
-
-// Sound: the buffer is the Piece's own.
-#[cfg(target_os = "linux")]
-unsafe impl Send for Piece {}
-
-#[cfg(target_os = "linux")]
-impl Piece {
-    const LAYOUT: std::alloc::Layout = match std::alloc::Layout::from_size_align(PIECE, 4096) {
-        Ok(layout) => layout,
-        Err(_) => panic!(),
-    };
-    pub(crate) fn new() -> Piece {
-        // Sound: the layout's size is not zero. Not zeroed: zeroing would
-        // touch every page (512 page faults, 0.7 ms on a Ryzen 7700X), and
-        // only bytes that a read has filled are ever read.
-        let at = unsafe { std::alloc::alloc(Self::LAYOUT) };
-        if at.is_null() {
-            std::alloc::handle_alloc_error(Self::LAYOUT);
-        }
-        Piece(at)
-    }
-}
-
-#[cfg(target_os = "linux")]
-impl Drop for Piece {
-    fn drop(&mut self) {
-        // Sound: allocated in `new` with this layout.
-        unsafe { std::alloc::dealloc(self.0, Self::LAYOUT) }
-    }
-}
-
 /// The hash and outboard of the file at `path`, read past the page cache
-/// (O_DIRECT) by `threads` threads, a piece each at a time: None where
-/// that is not the way to read it (a short file; one the page cache holds
-/// the start of, which is mapped instead; a file system without direct
-/// reads) or where a read failed, and then `out` is as it was and the
-/// caller reads the file as ever, and reports what fails then.
-///
-/// A drive answers several reads at once faster than one after another,
-/// and a direct read skips the page cache's copy: on a Ryzen 9700X's NVMe
-/// drives a cold 1 GiB file is read at 10 GB/s this way, at 7.6 GB/s
-/// through the cache by a ring, at 5 GB/s through a map. The page cache
-/// does not hold the file afterwards.
+/// (`direct::read`): None where that is not the way to read it or where a
+/// read failed, and then `out` is as it was and the caller reads the file
+/// as ever, and reports what fails then.
 #[cfg(target_os = "linux")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn outboard_direct(
@@ -175,73 +127,28 @@ pub(crate) fn outboard_direct(
     cvs: &mut Vec<Cv>,
     out: &mut Vec<u8>,
 ) -> Option<blake3::Hash> {
-    use std::os::fd::AsRawFd;
-    if len < DIRECT_MIN {
-        return None;
-    }
-    // Is the first byte in the page cache? A read that may not wait says.
-    let mut byte = 0u8;
-    let iov = libc::iovec { iov_base: (&raw mut byte).cast(), iov_len: 1 };
-    // Sound: one iovec over one writable byte.
-    // (A file system without such reads, as a tmpfs, says something else:
-    // its files are in memory.)
-    let got = unsafe { libc::preadv2(file.as_raw_fd(), &iov, 1, 0, libc::RWF_NOWAIT) };
-    let cold = got == -1 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::WouldBlock;
-    // The tests' seam: a file just written is in the cache.
-    #[cfg(test)]
-    let cold = cold || test::TAKE_FOR_COLD.with(|c| c.get());
-    if !cold {
+    if !crate::direct::is_for(file, len) {
         return None;
     }
     direct(mode, path, usize::try_from(len).ok()?, threads, mine.get_or_insert_with(Piece::new), cvs, out)
 }
 
 /// [`outboard_direct`]'s reading and hashing, for a file of `len` bytes,
-/// PIECE or more.
+/// PIECE or more: each piece's groups' chaining values are a run of the
+/// file's (a piece is 128 groups).
 #[cfg(target_os = "linux")]
 fn direct(mode: blake3::Mode, path: &Path, len: usize, threads: usize, mine: &mut Piece, cvs: &mut Vec<Cv>, out: &mut Vec<u8>) -> Option<blake3::Hash> {
-    use std::os::fd::AsRawFd;
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECT).open(path).ok()?;
     let before = out.len();
     let done = build(mode, len, cvs, out, |tree, cvs| {
         // Many of these run at once, one a core: each on its own core's kernels.
         let tree = tree.clone().on_this_core();
-        let threads = threads.min(len.div_ceil(PIECE)).max(1);
-        let pieces = std::sync::Mutex::new(cvs.chunks_mut(PIECE / GROUP).enumerate());
-        let failed = std::sync::atomic::AtomicBool::new(false);
-        let work = |buffer: &mut Piece| {
-            loop {
-                let Some((i, cvs)) = pieces.lock().unwrap().next() else { return };
-                let want = PIECE.min(len - i * PIECE);
-                // Sound: the buffer holds PIECE writable bytes. A piece
-                // starts on a multiple of PIECE, so of the drive's blocks.
-                let got = unsafe { libc::pread(file.as_raw_fd(), buffer.0.cast(), PIECE, (i * PIECE) as libc::off_t) };
-                // A short read, an error, or a last piece with fewer
-                // bytes or more than the file had when it was opened: the
-                // caller reads the file the other way.
-                if got != want as isize {
-                    return failed.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-                // Sound: `want` initialized bytes of the buffer.
-                let bytes = unsafe { core::slice::from_raw_parts(buffer.0, want) };
-                for (g, cv) in cvs.iter_mut().enumerate() {
-                    let group = &bytes[g * GROUP..want.min((g + 1) * GROUP)];
-                    *cv = tree.subtree_cv(((i * PIECE + g * GROUP) / blake3::CHUNK_LEN) as u64, group);
-                }
+        crate::direct::read(path, len, threads, mine, cvs, PIECE / GROUP, |i, bytes, cvs| {
+            for (g, cv) in cvs.iter_mut().enumerate() {
+                let group = &bytes[g * GROUP..bytes.len().min((g + 1) * GROUP)];
+                *cv = tree.subtree_cv(((i * PIECE + g * GROUP) / blake3::CHUNK_LEN) as u64, group);
             }
-        };
-        if threads == 1 {
-            work(mine);
-        } else {
-            std::thread::scope(|scope| {
-                for _ in 1..threads {
-                    scope.spawn(|| work(&mut Piece::new()));
-                }
-                work(mine);
-            });
-        }
-        if failed.into_inner() { Err(()) } else { Ok(()) }
+        })
+        .ok_or(())
     });
     if done.is_err() {
         out.truncate(before);
@@ -304,11 +211,8 @@ pub(crate) fn path_in(dir: &Path, hash: &blake3::Hash) -> std::path::PathBuf {
 pub(crate) mod test {
     use super::*;
 
-    std::thread_local! {
-        /// Set: this thread's `outboard_direct` takes every file for cold.
-        #[cfg(target_os = "linux")]
-        pub(crate) static TAKE_FOR_COLD: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
-    }
+    #[cfg(target_os = "linux")]
+    use crate::direct::{DIRECT_MIN, TAKE_FOR_COLD};
 
     fn painted(len: usize) -> Vec<u8> {
         (0..len).map(|i| (i.wrapping_mul(31) ^ (i >> 9)) as u8).collect()

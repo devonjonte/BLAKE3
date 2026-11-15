@@ -94,6 +94,14 @@ CPUs.
 
 [What `--check` does](what_does_check_do.md) explains checkfiles.
 
+## Large files the cache does not hold
+
+On Linux, a file of 4 MiB or more that the page cache does not hold is read past the
+cache (direct I/O), several reads at once: for one file given alone, and for every file
+with `--outboard`. It is the fast way to read a large set of files once: a cold 1 GiB
+file hashes in 0.10 s where it took 0.22 s through the cache (a Ryzen 9700X's NVMe
+drives). The cache does not hold such a file afterwards.
+
 ## Outboards for verified streaming
 
 `--outboard DIR` also writes each file's outboard to `DIR/<HASH>.obao4`: the file's
@@ -112,10 +120,6 @@ $ ls outboards
 ```
 
 It works in the plain and keyed modes, the two bao-tree reads.
-
-On Linux, a file of 4 MiB or more that the page cache does not hold is read past the
-cache (direct I/O), several reads at once, which is the fast way to read a large set of
-files once. The cache does not hold such a file afterwards.
 
 ## Hashes as sigils
 

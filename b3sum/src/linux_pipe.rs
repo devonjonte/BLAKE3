@@ -423,8 +423,15 @@ impl WarmBatch {
 static FORCE_MISS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(test)]
-fn force_miss() -> bool {
+pub(crate) fn force_miss() -> bool {
     FORCE_MISS.load(Ordering::Relaxed)
+}
+
+/// The tests' seam: with it set, every file is taken for one the page
+/// cache does not hold.
+#[cfg(test)]
+pub(crate) fn set_force_miss(on: bool) {
+    FORCE_MISS.store(on, Ordering::Relaxed)
 }
 
 #[cfg(not(test))]

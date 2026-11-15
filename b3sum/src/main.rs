@@ -12,6 +12,11 @@
 //!   directly from storage into 64 KiB `Pipeline::room()`s via batched
 //!   `IORING_OP_READ`s, overlapping NVMe DMA with all-core subtree hashing.
 //!
+//! - One cold file of 4 MiB or more, with more than one thread, is read
+//!   past the page cache (O_DIRECT), 2 MiB a read on up to 16 threads, each
+//!   hashing the piece it read (`direct`); the cache does not hold the
+//!   file afterwards.
+//!
 //! Single small files read into a stack buffer with zero `mmap` or ring setup,
 //! and standard 32-byte digests format on the stack into a 32 KiB buffered
 //! writer without cloning an 18 KiB `Hasher` per file.
@@ -29,6 +34,8 @@ mod unit_tests;
 
 const NAME: &str = "b3sum";
 
+#[cfg(target_os = "linux")]
+mod direct;
 #[cfg(target_os = "linux")]
 mod linux_pipe;
 mod outboard;
@@ -355,7 +362,11 @@ pub(crate) fn hash_path_hash(args: &Args, path: &Path) -> anyhow::Result<blake3:
             && len >= MAP_LEN
             && let Ok(map) = unsafe { memmap2::Mmap::map(&file) }
         {
-            if resident(&map) {
+            let warm = resident(&map);
+            // The tests' seam: a file just written is in the cache.
+            #[cfg(all(test, target_os = "linux"))]
+            let warm = warm && !linux_pipe::force_miss();
+            if warm {
                 let h = hash_slice_32(args.mode, &map);
                 hold(map);
                 return Ok(h);
@@ -372,6 +383,16 @@ pub(crate) fn hash_path_hash(args: &Args, path: &Path) -> anyhow::Result<blake3:
                 let n = read_all_uninit(&mut file, &mut buf)?;
                 return Ok(hash_slice_32(args.mode, &buf[..n]));
             } else {
+                // A cold file of 4 MiB or more: read past the page cache,
+                // several reads at once, each thread hashing its piece
+                // (direct.rs). Where that cannot be (the file system, a
+                // short read), the map below.
+                if direct::is_for(&file, size)
+                    && let Some(h) = direct::hash(args.mode, path, len, threads().get().min(DIRECT_THREADS), &mut direct::Piece::new())
+                {
+                    drop(map);
+                    return Ok(h);
+                }
                 // Multi-threaded single cold file (`>= 512 KiB`): start pool and fault
                 // disjoint subtrees in parallel across all NUMA nodes and NVMe RAID stripes.
                 init_pool_once(pool_threads().get());
@@ -469,6 +490,12 @@ const POOL_LEN: usize = 512 << 10;
 /// thread (~0.3-2 ms), which exceeds the whole hash time below ~4 MiB; once
 /// started, inputs from `POOL_LEN` up use it.
 const POOL_START_LEN: usize = 4 << 20;
+
+/// The threads that read one cold file directly, each a read at a time:
+/// a drive's answer grows little past this many reads at once (a Ryzen
+/// 9700X's: 5.7 GB/s at 2, 8.8 at 4, 10.3 at 8, 10.7 at 16).
+#[cfg(target_os = "linux")]
+const DIRECT_THREADS: usize = 16;
 
 static POOL_ONCE: std::sync::Once = std::sync::Once::new();
 
