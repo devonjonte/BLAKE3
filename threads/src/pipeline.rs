@@ -400,6 +400,47 @@ struct MultiDesc {
     loan_epoch: u64,
 }
 
+/// The last thing a worker does for a task: `publish` stores the task's
+/// completion, then the owner is woken. From that store on the owner may
+/// see every task done, drop the Pipeline and free its `Shared`, so the
+/// worker reads nothing of `Shared` after it: the storage, which outlives
+/// every Pipeline, is taken before. (A worker that read `self.storage`
+/// after the store read freed memory: one b3sum test run in about 400
+/// died of it on a 4-CPU machine.) A wake that comes after the storage
+/// has gone to another Pipeline is a wake that one may get at any time.
+#[inline(always)]
+fn finished(storage: &'static PipeStorage, publish: impl FnOnce()) {
+    publish();
+    #[cfg(test)]
+    test_hooks::after_publish();
+    storage.waker.notify_after_seqcst();
+}
+
+/// The tests' seams for [`finished`].
+#[cfg(test)]
+mod test_hooks {
+    use core::sync::atomic::{AtomicU64, Ordering};
+    /// Milliseconds a worker waits between a completion's store and the wake.
+    pub(super) static PAUSE_MS: AtomicU64 = AtomicU64::new(0);
+    pub(super) fn after_publish() {
+        let ms = PAUSE_MS.load(Ordering::Relaxed);
+        if ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
+    }
+}
+
+/// Under test, a freed `Shared` leaves no usable storage behind: a worker
+/// that reads it late faults, where it would otherwise read what the
+/// allocator has not yet reused.
+#[cfg(test)]
+impl Drop for Shared {
+    fn drop(&mut self) {
+        // Sound for the test: the field is never read again by correct code.
+        unsafe { core::ptr::write_volatile((&raw mut self.storage).cast::<usize>(), 1) };
+    }
+}
+
 /// Worker-visible per-pipeline state.
 struct Shared {
     key: CVWords,
@@ -429,7 +470,8 @@ impl Shared {
     }
 
     fn run_group(&self, group_idx: usize, platform: Platform) {
-        let group = &self.storage.groups[group_idx];
+        let storage = self.storage;
+        let group = &storage.groups[group_idx];
         let task = unsafe { &*group.task.get() };
         let count = task.members;
         let epoch = unsafe { *group.epoch.get() };
@@ -457,8 +499,9 @@ impl Shared {
         }
 
         // Single SeqCst swap completes all 64 events AND all 64 short `Lent` guards!
-        group.completed_epoch.swap(epoch, Ordering::SeqCst);
-        self.storage.waker.notify_after_seqcst();
+        finished(storage, || {
+            group.completed_epoch.swap(epoch, Ordering::SeqCst);
+        });
     }
 
     fn run_room_piece(&self, pnode_idx: usize, platform: Platform) {
@@ -475,9 +518,11 @@ impl Shared {
         } else {
             out[..OUT_LEN].copy_from_slice(&crate::hash_all_at_once(bytes, &self.key, counter, self.flags, platform).chaining_value());
         }
-        self.storage.rooms.release_n(room_idx, 1);
-        pnode.done.swap(true, Ordering::SeqCst);
-        self.storage.waker.notify_after_seqcst();
+        let storage = self.storage;
+        storage.rooms.release_n(room_idx, 1);
+        finished(storage, || {
+            pnode.done.swap(true, Ordering::SeqCst);
+        });
     }
 
     fn run_multi_piece(&self, slot: usize, piece_idx: usize, platform: Platform) {
@@ -488,9 +533,11 @@ impl Shared {
             let bytes = unsafe { core::slice::from_raw_parts(desc.input.add(first * slot_len), count * slot_len) };
             let digests = unsafe { core::slice::from_raw_parts_mut(desc.digests.add(first), count) };
             crate::many::hash_many_on(bytes, message_len, slot_len, &self.key, self.flags, digests, platform);
+            let storage = self.storage;
             if self.tasks_left[slot].fetch_sub(1, Ordering::AcqRel) == 1 {
-                self.slot_done[slot].swap(true, Ordering::SeqCst);
-                self.storage.waker.notify_after_seqcst();
+                finished(storage, || {
+                    self.slot_done[slot].swap(true, Ordering::SeqCst);
+                });
             }
             return;
         }
@@ -514,6 +561,7 @@ impl Shared {
             }
         }
 
+        let storage = self.storage;
         if self.tasks_left[slot].fetch_sub(1, Ordering::AcqRel) == 1 {
             let cvs = unsafe { &*self.cvs[slot].get() };
             let hash = fold_multi_cvs(&self.key, self.flags, cvs, desc.pieces);
@@ -521,8 +569,9 @@ impl Shared {
             if desc.loan_epoch != 0 {
                 self.storage.loan_completed[slot].0.store(desc.loan_epoch, Ordering::Release);
             }
-            self.slot_done[slot].swap(true, Ordering::SeqCst);
-            self.storage.waker.notify_after_seqcst();
+            finished(storage, || {
+                self.slot_done[slot].swap(true, Ordering::SeqCst);
+            });
         }
     }
 }
@@ -2280,6 +2329,65 @@ mod test {
                 _ => panic!("expected Batch"),
             }
         }
+    }
+
+    /// A worker reads nothing of a Pipeline's `Shared` after it stores a
+    /// task's completion: the owner may free it from then on. Here every
+    /// worker waits 30 ms between the store and the wake, the owner (which
+    /// runs no task itself) drops the Pipeline as soon as it sees the work
+    /// done, and a freed `Shared` holds no usable storage (its test-only
+    /// Drop): a late read faults. A long owned message (a slot's pieces)
+    /// and a batch (a slot's parts) end that way here, and each faulted
+    /// before `finished` held the rule; a room's piece and a group are
+    /// held by the same function, and this test's two (a message in a
+    /// room, short messages sharing one) do not reach a worker's hands in
+    /// a way that shows it.
+    #[test]
+    fn a_worker_reads_nothing_of_the_pipeline_after_its_completion() {
+        crate::initialize_multithreaded(None);
+        test_hooks::PAUSE_MS.store(30, Ordering::Relaxed);
+        for case in 0..4 {
+            let mut pipe = Pipeline::<usize, Vec<u8>>::with_owners(Mode::Plain, Limits { messages: 8, rooms: 2 });
+            let mut m = block_on(pipe.message(case, None));
+            match case {
+                0 => pipe.owned(m, vec![5u8; 1 << 20]),
+                1 => {
+                    let mut batch = Batch::new(64, 2048);
+                    for i in 0..2048 {
+                        batch.set(i, &[i as u8; 64]);
+                    }
+                    pipe.batch(m, batch, vec![[0u8; 32]; 2048].into_boxed_slice());
+                }
+                2 => {
+                    let mut room = block_on(pipe.room());
+                    room.bytes_mut().fill(7);
+                    pipe.commit(&mut m, &mut room, ROOM_LEN);
+                    drop(room);
+                    pipe.end(m);
+                }
+                _ => {
+                    let mut room = block_on(pipe.room());
+                    for i in 0..8 {
+                        room.bytes_mut()[..100].fill(i as u8);
+                        pipe.commit(&mut m, &mut room, 100);
+                        pipe.end(m);
+                        if i == 7 {
+                            break;
+                        }
+                        m = block_on(pipe.message(case, None));
+                    }
+                }
+            }
+            pipe.publish_open();
+            while pipe.has_in_flight_work() {
+                pipe.shared().storage.source.wake_for_waiting();
+                std::thread::yield_now();
+            }
+            drop(pipe);
+            // The worker's wake comes 30 ms after its store: past it, a late read has faulted.
+            std::thread::sleep(std::time::Duration::from_millis(80));
+        }
+        test_hooks::PAUSE_MS.store(0, Ordering::Relaxed);
     }
 
     #[test]
