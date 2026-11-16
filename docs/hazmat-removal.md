@@ -1,7 +1,6 @@
 # Removing `hazmat`: what is left, and what each piece needs
 
-A proposal (November 16, 2026), for Zooko to decide the names and the
-order. `docs/tree-api.md` was layer 1 and is landed: `throughput::TreeHasher`,
+A plan (November 16, 2026); the names at its end are decided. `docs/tree-api.md` was layer 1 and is landed: `throughput::TreeHasher`,
 `Cv`, `left_len`. This is the rest.
 
 `blake3_servil_core::hazmat` is hidden (`#[doc(hidden)]`) and has one user,
@@ -82,8 +81,30 @@ returned no verdict since November 14 (ops #14).
 
 After 1 and 2, `hazmat` holds C's and D's names only.
 
-## What I need decided
+## Decided
 
-- A's name and home (a method on `TreeHasher`, or a prepared-mode type).
-- Whether B's calls are methods beside A's.
-- For D, whether to try keeping the turn wholly inside the core crate.
+Zooko left the remaining names to me (November 16, 2026). They are:
+
+- **A is a method, `TreeHasher::hash(&self, input: &[u8]) -> Hash`.** A
+  `TreeHasher` is already "a mode, prepared": a second type that held the
+  same three fields would be one mechanism too many. The whole-message
+  hash is the tree's root, so it belongs with the tree's other pieces.
+- **B's calls are methods beside it, `TreeHasher::hash_many` and
+  `TreeHasher::hash_each`,** with the arguments of `throughput::hash_many`
+  and `throughput::hash_each` less the mode. The two free functions stay,
+  as the one-call forms (they make the `TreeHasher` and call these).
+- **C is `Hasher::update_with`:** an update that hands its whole subtrees
+  to a function the caller gives, which returns their chaining values. Its
+  exact signature waits for the code, with Rüdiger's use (#378) as the
+  test of it; the name is settled.
+- **D: the SME2 unit's turn stays inside the core crate** and gets no
+  public type. A call says only `on_this_core` or not, as now. If the
+  Mac's measurements show the pool needs more than that, D comes back
+  with the numbers.
+
+`first_chunk`, `Cv` and `on_this_core` keep the names layer 1 gave them.
+
+## State
+
+Not started in code. The order above stands: A and B first, on the x86
+machines and the Arm VM; C; D when the Mac measures again (ops #14).
