@@ -88,7 +88,12 @@ b3_digest b3_hash(const b3_mode *mode, const void *input, size_t len);
  * `has_length_hint` 0: a scheduling hint, never part of the hash, so the
  * digest is the same whatever it says. Heap storage must also be 64-byte aligned;
  * ordinary malloc does not guarantee this over-alignment. Use a
- * platform-appropriate aligned allocator and its matching deallocator.
+ * platform-appropriate aligned allocator and its matching deallocator:
+ * in C11, aligned_alloc(64, sizeof(b3_hasher)). In C++, `new b3_hasher`
+ * gives 64-byte alignment only from C++17 on; C++11 and C++14 ignore the
+ * alignment there, and b3_hasher_new then stops the process on about
+ * three allocations in four. Before C++17, allocate as in C, or keep the
+ * b3_hasher on the stack or in an aligned member.
  * Use the header matching the linked library. */
 #define B3_HASHER_SIZE 26624
 #ifdef __cplusplus

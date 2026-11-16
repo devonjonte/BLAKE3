@@ -3,8 +3,9 @@
 `libb3_servil` exposes BLAKE3-Servil's convenience API through
 [`b3.h`](b3.h): one-shot and incremental hashing on the calling thread,
 in every mode of BLAKE3. The header documents each call's contract. It
-works with C11 and C++11. Batches and other cores are the Rust crates'
-throughput API.
+works with C11 and C++11; in C++, `new b3_hasher` needs C++17, since a
+`b3_hasher` is aligned to 64 bytes (see the header). Batches and other
+cores are the Rust crates' throughput API.
 
 ## Build and install
 

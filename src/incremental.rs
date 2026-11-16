@@ -552,6 +552,11 @@ impl Hasher {
     ///
     /// This method requires the `std` Cargo feature, which is enabled by default.
     ///
+    /// The buffer holds the message's last bytes when the call returns, and
+    /// is not cleared: [`Zeroize`](https://docs.rs/zeroize) on the `Hasher`
+    /// does not reach it. For a secret message, read into a buffer of your
+    /// own, call [`update`](Hasher::update), and clear the buffer.
+    ///
     /// # Example
     ///
     /// ```no_run
