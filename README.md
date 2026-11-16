@@ -86,7 +86,8 @@ Jack O'Connor's, kept and rebuilt around. `b3sum`'s command line and checkfiles 
 vectors are the BLAKE3 team's. What this fork adds: the
 64-bit Arm kernels (NEON with integer lanes, and SME2), the x86-64 kernels for whole
 chunks with a partial one, for the chunk root and, on AMD Zen 5 and later, for 32 chunks
-or 16 parent nodes at once, the thread pool, the batch calls, the C API, the
+or 16 parent nodes at once, the thread pool, the batch calls, the Pipeline, the tree
+API, the C API, the
 proofs, and the tests of the tests.
 
 ## Contributing and licenses

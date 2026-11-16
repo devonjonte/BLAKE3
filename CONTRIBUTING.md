@@ -153,7 +153,7 @@ official BLAKE3, which supports them, and
 [#160](https://github.com/servil-software-factory/BLAKE3/issues/160) holds what full
 support takes (dedicated hardware of ours to benchmark, optimize and
 test on, then the kernels and the gates). The Mac runner
-(`tools/runner/`) runs the Rust suites natively. `sh tools/check-builds.sh`
+(`tools/runner/`) runs the Rust suites natively, on a Mac Mini M6. `sh tools/check-builds.sh`
 runs, in minutes, the builds the suites above leave out: without std, on
 one CPU without SME2, warnings as errors, and compile checks for x86-64.
 
@@ -266,7 +266,8 @@ found complete. A candidate lands once:
   `python3 tools/size.py BASE REV`'s output where it changes the
   library's code (a few minutes: it counts and builds);
 - the regression check finds no slowdown on AArch64 Linux in a VM and
-  natively on the shared queue's Mac, over every cell (`--cells all`:
+  natively on the timing Mac (a Mac Mini M6 that runs timing jobs
+  alone), over every cell (`--cells all`:
   about twenty minutes there). A candidate that changes no compiled code
   needs no speed check: it would compare identical code. The Mac
   check is a job you queue yourself, through the shared exchange
@@ -329,9 +330,10 @@ lists what it takes and ticks each step:
 2. CI, every job, dispatched with `workflow_dispatch` on the exact candidate;
    `sh tools/check-builds.sh`. Pull-request CI normally checks a synthetic
    merge, so its head-SHA label alone is not evidence for the release commit.
-3. `bench-hashes check --against <previous release tag> --cells all`, on
-   the VM, on the shared queue's Mac, and on an Apple M4 Max, the Mac the
-   kernels were tuned on: each commit was checked against its parent alone,
+3. `bench-hashes check --against <previous release tag> --cells all`,
+   with bench-hashes at its latest release, on the Arm VM, on each x86
+   machine of the fleet, and on the timing Mac (a Mac Mini M6 that runs
+   timing jobs alone): each commit was checked against its parent alone,
    and this sees what small slowdowns add up to. When the old side
    predates the bench's calls, `--old-bench <bench commit>` builds it with
    a bench that calls it the same way (the runner's "old_bench_commit").

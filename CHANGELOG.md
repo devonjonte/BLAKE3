@@ -40,6 +40,10 @@ figure names its machine. bench-hashes' page for this release sets 0.8,
 
 ## Faster
 
+Each pair of figures is the commit before the change and the commit
+with it, on the machine named. bench-hashes' page (above) measures
+0.9.0 against 0.10.0 as released.
+
 - **`b3sum`, a file of 4 MiB or more from storage (Linux)**: direct
   reads, several at once, each thread hashing what it read. 1 GiB: 217 to
   100 ms on a Ryzen 9700X, 241 to 140 on 2x EPYC 7443, 203 to 127 on 2x
@@ -47,10 +51,6 @@ figure names its machine. bench-hashes' page for this release sets 0.8,
 - **`b3sum < file`** is hashed as the file is, not as a stream. 1 GiB on
   a Ryzen 9700X: 37.7 to 25.0 ms from the page cache, 418 to 99 from
   storage (official b3sum 1.8.7: 121 and 452).
-- **`b3sum`, a hundred or so files (Linux)**: the threads that read grow
-  with the files. A hundred 16 KiB files in the page cache: 3.13 to 2.47
-  ms on 2x EPYC 7443, 2.46 to 2.10 on 2x Xeon 6330, 0.70 to 0.61 on a
-  Ryzen 9700X.
 - **A Hasher fed in pieces**: its stack holds rows of chaining values
   and hashes parents a full layer at a time. One core, 16 KiB pieces:
   10.3 to 12.3 GB/s (Ryzen 9700X), 3.89 to 4.17 (2x EPYC 7443), 3.44 to

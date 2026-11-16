@@ -474,8 +474,8 @@ each bug are in `git log`.
    like a padded group, and an assertion stopped the program. The
    function now records its own choice.
 4. **A `Stream` branch would have hashed only the last buffer**
-   (`finalize_handed_over`, in the stream's code of that time; 0.9
-   offers no stream). That state cannot
+   (`finalize_handed_over`, in the stream's code of that time; the
+   Pipeline has since replaced it). That state cannot
    occur once a buffer has been handed over; the branch is now a
    fail-stop `expect`.
 5. **On macOS a pool could allocate after warm-up** (`threads/src/lanes.rs`).
@@ -587,9 +587,11 @@ among them, and however often the hash is timed.
 ## Not yet done
 
 No human has reviewed the code line by line, and nobody has audited it.
-The test suites have run on an Apple M4 Max, under macOS and in a
-Debian 12 AArch64 VM on it (whose SME2 unit the VM exposes), and on
-CI's hosted machines.
+The test suites run on Apple M6 Macs under macOS, on an AmpereOne VM
+under Linux, on x86-64 servers (AMD Zen 3 and Zen 5, Intel Ice Lake),
+and on CI's hosted machines. Under Linux the SME2 kernels now run on no
+machine of ours: the AmpereOne has no SME2. Through 0.9 they ran in a
+Debian 12 VM on an Apple M4 Max, which exposes its SME2 unit.
 
 Not yet proved: that the Rust around the kernels (the dispatch, the tree,
 the `Hasher`) keeps secrets from steering a whole call, which is

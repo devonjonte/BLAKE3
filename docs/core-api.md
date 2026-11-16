@@ -1,6 +1,6 @@
-# `blake3-servil-core` 0.9 (API Preview)
+# `blake3-servil-core`'s API
 
-*0.9 is unreleased ([release plan](https://github.com/servil-software-factory/BLAKE3/issues/357)). Signatures below reflect current code and may change before release, when full rustdoc will publish at <https://servil-software-factory.github.io/BLAKE3/>.*
+*An overview. The full rustdoc of the latest release is at <https://servil-software-factory.github.io/BLAKE3/>; signatures below reflect the code at this commit.*
 
 `blake3-servil-core` is a fast, single-threaded BLAKE3 library for 64-bit Arm (Linux, macOS) and x86-64 (Linux). Every call runs on the calling thread, spawns zero background threads, and produces the same digests as official BLAKE3. Every assembly kernel is formally proved against the BLAKE3 specification; the surrounding Rust is tested.
 
