@@ -38,6 +38,8 @@ class Versions(unittest.TestCase):
         (self.root / "CHANGELOG.md").write_text("# blake3-servil 0.8.0+" + "a" * 40 + ", against official BLAKE3\n")
         (self.root / "capi/b3.h").write_text(f'#define B3_VERSION "{DEV}"\n')
         self.run_command("cargo", "generate-lockfile", "--offline", "--manifest-path", "b3sum/Cargo.toml")
+        (self.root / "tools/release").mkdir()
+        shutil.copyfile(self.root / "b3sum/Cargo.lock", self.root / "tools/release/Cargo.lock")
         self.git("init", "-q")
         self.git("config", "user.name", "Version test")
         self.git("config", "user.email", "version-test@example.invalid")
@@ -74,6 +76,7 @@ class Versions(unittest.TestCase):
         for path in MANIFESTS:
             self.assertIn(f'version = "{full}"', (self.root / path).read_text())
         self.assertEqual((self.root / "b3sum/Cargo.lock").read_text().count(f'version = "{full}"'), 4)
+        self.assertEqual((self.root / "tools/release/Cargo.lock").read_text().count(f'version = "{full}"'), 4)
         notes = (self.root / "CHANGELOG.md").read_text()
         self.assertTrue(notes.startswith(f"# blake3-servil {full},"))
         self.assertEqual(self.git("status", "--porcelain"), "")
@@ -90,7 +93,7 @@ class Versions(unittest.TestCase):
     def test_check_rejects_each_stale_copy(self):
         cases = [(path, f'version = "{DEV}"') for path in MANIFESTS if path != "Cargo.toml"]
         cases += [(path, f'version = "={DEV}"') for path in ("Cargo.toml", "threads/Cargo.toml", "b3sum/Cargo.toml")]
-        cases += [("capi/b3.h", DEV), ("b3sum/Cargo.lock", DEV)]
+        cases += [("capi/b3.h", DEV), ("b3sum/Cargo.lock", DEV), ("tools/release/Cargo.lock", DEV)]
         for path, old in cases:
             with self.subTest(path=path, old=old):
                 file = self.root / path
@@ -98,6 +101,23 @@ class Versions(unittest.TestCase):
                 file.write_text(original.replace(old, old.replace(DEV, "0.7.0+dev"), 1))
                 self.assertIn(path, self.stamp("--check", succeeds=False))
                 file.write_text(original)
+        self.stamp("--check")
+
+    def test_check_holds_the_release_lock_to_b3sums(self):
+        # The crates ship the release lock's dependencies, and b3sum is
+        # tested with its own lock's: a package of b3sum's lock is in the
+        # release lock, the same version and the same archive.
+        b3sum, release = self.root / "b3sum/Cargo.lock", self.root / "tools/release/Cargo.lock"
+        package = '\n[[package]]\nname = "dependency"\nversion = "{}"\nsource = "registry+https://example.invalid"\nchecksum = "{}"\n'
+        ours, theirs = b3sum.read_text(), release.read_text()
+        b3sum.write_text(ours + package.format("1.2.3", "aa"))
+        self.assertIn("b3sum/Cargo.lock has dependency 1.2.3, and the release lock has none", self.stamp("--check", succeeds=False))
+        release.write_text(theirs + package.format("1.2.4", "aa"))
+        self.assertIn("the release lock has ['1.2.4']", self.stamp("--check", succeeds=False))
+        release.write_text(theirs + package.format("1.2.3", "bb"))
+        self.stamp("--check", succeeds=False)
+        # The same, beside a package of the libraries' tests alone.
+        release.write_text(theirs + package.format("1.2.3", "aa") + package.format("9.9.9", "cc").replace("dependency", "for-tests"))
         self.stamp("--check")
 
     def test_dirty_tree_is_unchanged(self):

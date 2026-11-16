@@ -4,7 +4,7 @@
     python3 tools/release_artifacts.py TAG FILE...       artifacts on disk
     python3 tools/release_artifacts.py TAG --published   what users download: the GitHub
                                                          release's assets, crates.io's packages
-    ... --rebuilt DIR    each b3sum program is also, byte for byte, the build of it in DIR
+    ... --rebuilt DIR    each b3sum program and each crate is also, byte for byte, the one in DIR
     ... --commit COMMIT  the version commit, where its tag is not made yet
 
 TAG is a release's tag, vX.Y.Z+<code commit>: it names the version commit
@@ -25,21 +25,23 @@ What makes an artifact clean, by its kind:
   machine is checked without running it. This is the build's own word:
   it catches a mistake, as 0.9.0's was, and not a forgery.
 
-  A b3sum program, with --rebuilt DIR: it is also the same bytes as a
-  second build of the version commit, made by tools/b3sum-release.sh on
-  another machine and put in DIR under the same name. That script's
-  build is a function of the commit and the toolchain it names, so two
-  honest builds agree; a program that differs from yours was not built
-  from the commit, whatever it says of itself. Before a release the two
-  builders are our machine and GitHub's (tools/release-check.py); after
-  it, the `release artifacts` workflow rebuilds what was published, and
-  so can anyone.
+  A b3sum program or a .crate, with --rebuilt DIR: it is also the same
+  bytes as a second one made from the version commit on another machine
+  (tools/b3sum-release.sh, tools/crates-release.sh) and put in DIR under
+  the same name. Each script's output is a function of the commit and of
+  the toolchain and lock the repository names, so two honest builders
+  agree; an artifact that differs from yours was not made from the
+  commit, whatever it says of itself. For a crate this covers the files
+  Cargo writes too. Before a release the two builders are our machine
+  and GitHub's (tools/release-check.py); after it, the `release
+  artifacts` workflow makes again what was published, and so can anyone.
 
   A .crate: Cargo's record in it (.cargo_vcs_info.json) names the version
   commit and no dirty tree, and every file in it is that commit's file,
-  byte for byte. Three files are Cargo's own and are not compared:
-  Cargo.toml (its rewriting of the manifest, whose original,
+  byte for byte. Three files are Cargo's own and are not compared with
+  the commit: Cargo.toml (its rewriting of the manifest, whose original,
   Cargo.toml.orig, is compared), Cargo.lock, and the record itself.
+  --rebuilt covers those: the whole archive against a second packaging.
 
 Why (BLAKE3 #435): 0.9.0's two b3sum programs were built in checkouts that
 held untracked files. They say `dirty`, nothing checked, and nobody saw
@@ -275,29 +277,30 @@ def published(release):
 
 
 def rebuilt_problems(name, data, rebuilt):
-    """Why the b3sum program `name` is not the second build of it in the
+    """Why the b3sum program or crate `name` is not the second one in the
     folder `rebuilt`: nothing where the two are the same bytes."""
     path = os.path.join(rebuilt, name)
     if not os.path.isfile(path):
-        return [f"no second build of it in {rebuilt} to compare with (sh tools/b3sum-release.sh at the version commit, on another machine)"]
+        script = "crates-release" if name.endswith(".crate") else "b3sum-release"
+        return [f"no second build of it in {rebuilt} to compare with (sh tools/{script}.sh at the version commit, on another machine)"]
     other = read(path)
     if other == data:
         return []
     digests = [hashlib.sha256(d).hexdigest() for d in (data, other)]
-    return [f"its bytes (SHA-256 {digests[0]}) are not the second build's in {rebuilt} (SHA-256 {digests[1]}): one of the two was not built from the version commit by tools/b3sum-release.sh"]
+    return [f"its bytes (SHA-256 {digests[0]}) are not the second build's in {rebuilt} (SHA-256 {digests[1]}): one of the two was not made from the version commit by the release's script"]
 
 
 def check(items, release, out=None, rebuilt=None):
     """Print a line for each artifact (more for one with several
     problems); how many are not clean or not there. With `rebuilt`, a
-    folder, each b3sum program is also the second build of it there."""
+    folder, each b3sum program and crate is also the second one there."""
     bad = 0
     for label, name, data in items:
         if data is None:
             lines = [f"MISSING    {label}"]
         else:
             found = problems(name, data, release)
-            if rebuilt is not None and name.startswith("b3sum-"):
+            if rebuilt is not None and (name.startswith("b3sum-") or name.endswith(".crate")):
                 found = found + rebuilt_problems(name, data, rebuilt)
             lines = [f"NOT CLEAN  {label}: {problem}" for problem in found]
         bad += bool(lines)

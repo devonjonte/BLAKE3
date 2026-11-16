@@ -326,7 +326,7 @@ class Rebuilt(Gathered):
     def test_the_same_bytes_as_the_second_build_pass(self):
         with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as second:
             self.fill(folder)
-            self.fill(second, crates=())
+            self.fill(second)
             self.assertEqual(ra.directory(folder, self.release, rebuilt=second), (True, []))
 
     def test_a_program_that_says_it_is_clean_and_differs_from_the_second_build_fails(self):
@@ -334,7 +334,7 @@ class Rebuilt(Gathered):
         # in it, and other code.
         with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as second:
             self.fill(folder)
-            self.fill(second, crates=())
+            self.fill(second)
             name = f"b3sum-{self.tag}-aarch64-unknown-linux-gnu"
             with open(os.path.join(folder, name), "ab") as f:
                 f.write(b"and one byte more")
@@ -345,13 +345,33 @@ class Rebuilt(Gathered):
             self.assertTrue(lines[0].startswith(f"NOT CLEAN  {name}: its bytes (SHA-256 "), lines[0])
             self.assertIn(f"are not the second build's in {second} (SHA-256 ", lines[0])
 
-    def test_a_program_with_no_second_build_fails_and_crates_need_none(self):
+    def test_a_program_or_a_crate_with_no_second_build_fails(self):
         with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as second:
             self.fill(folder)
-            self.fill(second, programs=("x86_64-unknown-linux-gnu",), crates=())
+            self.fill(second, programs=("x86_64-unknown-linux-gnu",), crates=("",))
             ok, lines = ra.directory(folder, self.release, rebuilt=second)
             self.assertIs(ok, False)
-            self.assertEqual(lines, [f"NOT CLEAN  b3sum-{self.tag}-aarch64-unknown-linux-gnu: no second build of it in {second} to compare with (sh tools/b3sum-release.sh at the version commit, on another machine)"])
+            self.assertEqual(lines, [
+                f"NOT CLEAN  b3sum-{self.tag}-aarch64-unknown-linux-gnu: no second build of it in {second} to compare with (sh tools/b3sum-release.sh at the version commit, on another machine)",
+                f"NOT CLEAN  sub-crate-{self.version}.crate: no second build of it in {second} to compare with (sh tools/crates-release.sh at the version commit, on another machine)",
+            ])
+
+    def test_a_crate_of_the_commits_files_that_is_not_the_second_packaging_fails(self):
+        # What the file-by-file check passes over: Cargo's own files in
+        # the archive (its Cargo.toml, its lock).
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as second:
+            self.fill(folder)
+            self.fill(second)
+            def cargos(files, record):
+                files["Cargo.toml"] = b'[dependencies]\nsomething-else = "1"\n'
+            name = f"top-crate-{self.version}.crate"
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(self.crate("", cargos))
+            self.assertEqual(ra.directory(folder, self.release), (True, []), "file by file, it is the commit's")
+            ok, lines = ra.directory(folder, self.release, rebuilt=second)
+            self.assertIs(ok, False)
+            self.assertEqual(len(lines), 1)
+            self.assertTrue(lines[0].startswith(f"NOT CLEAN  {name}: its bytes (SHA-256 "), lines[0])
 
 
 class CommandLine(Repository):

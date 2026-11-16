@@ -353,7 +353,7 @@ lists what it takes and ticks each step:
 8. Once the gates and human reviews accept that exact version commit,
    publish its tag and artifacts:
    - the crates: publish all four from the same staged checkout and lock
-     used for the dry-run, with `--locked` and the same explicit `-p` names.
+     used for the dry-run, with `--frozen` and the same explicit `-p` names.
      Cargo publishes each dependency first: `blake3-servil-version`
      (`version/`), `blake3-servil-core` (the repository root), `blake3-servil`
      (`threads/`), then `b3sums` (`b3sum/`; crates.io's `b3sum` is official
@@ -369,42 +369,46 @@ lists what it takes and ticks each step:
 
 ### The packages' dry-run, before any crate is published
 
-From the version-stamped checkout, with no tracked changes, use Cargo's
-multi-package support in a temporary parent workspace. The staged clone
-is clean; the candidate's manifests and Git tree stay unchanged. Select
-the four packages explicitly; the C package and test-vector crate stay
-outside this publication:
+From the version-stamped checkout:
 
 ```sh
-(
-set -eu
-git diff --quiet HEAD
-commit=$(git rev-parse HEAD)
-stage=$(mktemp -d)
-git clone --shared --no-checkout . "$stage/checkout"
-git -C "$stage/checkout" checkout --detach "$commit"
-printf '[workspace]\nmembers = ["checkout/version", "checkout", "checkout/threads", "checkout/b3sum"]\nresolver = "3"\n' > "$stage/Cargo.toml"
-cargo publish --dry-run --manifest-path "$stage/Cargo.toml" \
-    --target-dir "$stage/target" \
-    -p blake3-servil-version -p blake3-servil-core -p blake3-servil -p b3sums
-mkdir -p dist && cp "$stage"/target/package/*.crate dist/
-echo "Retain the packages' workspace: $stage"
-)
+sh tools/crates-release.sh
 ```
 
-Cargo stages each unpublished dependency while verifying its dependents.
-Retain the workspace lock, logs and archives, with each artifact's digests.
-The CLI's packaged lock must name the checksums of those exact dependency
-archives.
-Append `publish-dry-run: ok` to the commit-named release log only when the
-command succeeds; this is a dry-run, never permission to upload.
-The final publication uses the same source and locked dependency resolution.
+It packages the four crates together from a fresh clone of the version
+commit, in a temporary parent workspace (the C package and test-vector
+crate stay outside this publication), builds each packaged crate, and
+copies the archives to `dist/`. Cargo resolves nothing while it does:
+the dependencies are those of `tools/release/Cargo.lock`, fetched with
+`--locked`, and the packaging runs `--frozen`. The CLI's packaged lock
+names the checksums of those exact dependency archives.
+
+Save its output to the commit-named release log and append
+`publish-dry-run: ok` only when the command succeeds; this is a dry-run,
+never permission to upload. The final publication runs from the directory
+the script names, with `cargo publish --frozen` and the same `-p` names.
+
+### The release lock
+
+`tools/release/Cargo.lock` names every dependency the four crates are
+packaged with. No release takes "the newest version today": a dependency
+changes when a commit changes that file. (0.9.0's crates were packaged
+with no lock, and its `b3sums` crate shipped dependency versions that no
+test of ours had run, BLAKE3 #436.)
+
+`b3sum/Cargo.lock` is what `b3sum` is built and tested with, and the
+release lock holds each of its packages as it is there, plus the
+libraries' test dependencies; `python3 tools/gen-ver.py --check` fails
+where the two differ. To change a dependency: change it in `b3sum/`
+(`cargo update -p NAME --precise VERSION`), commit, then
+`sh tools/crates-release.sh --relock`, read the lock's change, and commit
+it.
 
 ### Every artifact is a clean build of the version commit
 
 Before anything is published, the release's artifacts are gathered in the
 version-stamped checkout's `dist/`: the crates' archives (the dry-run
-above copies them) and b3sum from each machine's own `dist/`.
+above writes them) and b3sum from each machine's own `dist/`.
 `tools/release-check.py` passes only when each is a clean build of the
 version commit, by `python3 tools/release_artifacts.py TAG FILE...`: a
 program by the build version it holds, a crate file by file against the
@@ -419,11 +423,16 @@ not a forgery. So b3sum's Linux binary is also built reproducibly:
 `tools/b3sum-release.sh` gives the same bytes on any machine from the
 same commit, with the compiler and C library that
 `tools/b3sum-release.toolchain` names (the script stops on any other).
+The crates' archives are reproducible too, given the release lock and the
+same Cargo: `tools/crates-release.sh` gives the same bytes wherever it
+runs, the files Cargo writes into an archive (its `Cargo.toml`, its
+lock) included.
 Two builders must agree before a release: `release-check.py` passes only
-when each binary in `dist/` is, byte for byte, the one GitHub's machines
-built in the commit's CI run (the `b3sum release build` jobs). After the
-release, the `release artifacts` workflow builds the tag again and
-compares what was published, and so can anyone with Docker or Podman:
+when each binary and each crate in `dist/` is, byte for byte, the one
+GitHub's machines made in the commit's CI run (the `b3sum release build`
+jobs). After the release, the `release artifacts` workflow makes them
+again from the tag and compares what was published, and so can anyone
+with Docker or Podman:
 
 ```sh
 git checkout TAG
@@ -432,8 +441,7 @@ python3 tools/release_artifacts.py TAG --published --rebuilt dist
 ```
 
 The C library's archive is not rebuilt so: it is checked by its build
-version alone. A crate's `Cargo.toml` and `Cargo.lock` are Cargo's
-rewriting and are not compared with the commit (BLAKE3 #436).
+version alone (BLAKE3 #436).
 
 ## Maintainers' notes
 

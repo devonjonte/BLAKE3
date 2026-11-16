@@ -163,9 +163,9 @@ def mutation_result(path, commit):
 
 
 def ci_builds(run, into):
-    """Write into the folder `into` the b3sum programs that the CI run
-    `run` built (its `b3sum release build` jobs' artifacts, each a zip of
-    that job's dist/)."""
+    """Write into the folder `into` the b3sum programs and the crates
+    that the CI run `run` made (its `b3sum release build` jobs' artifacts,
+    each a zip of that job's dist/)."""
     token = open(os.path.join(MAIN, "ghtokenclassic.txt")).read().strip()
     for artifact in github(f"/repos/servil-software-factory/BLAKE3/actions/runs/{run['id']}/artifacts?per_page=100")["artifacts"]:
         if not artifact["name"].startswith("b3sum-"):
@@ -176,7 +176,9 @@ def ci_builds(run, into):
                                  env={**os.environ, "GH_TOKEN": token}, capture_output=True, check=True, timeout=300).stdout
         with zipfile.ZipFile(io.BytesIO(archive)) as files:
             for name in files.namelist():
-                if os.path.basename(name).startswith("b3sum-") and not release_artifacts.is_digest(name):
+                if os.path.basename(name).startswith("b3sum-") or name.endswith(".crate"):
+                    if release_artifacts.is_digest(name):
+                        continue
                     with open(os.path.join(into, os.path.basename(name)), "wb") as f:
                         f.write(files.read(name))
 
@@ -187,8 +189,8 @@ def artifacts_result(commit, run=None):
     build of `commit`, False where one is not (or `commit` is no version
     commit), None where some are not there yet; and what to say of it.
     `run`: the commit's dispatched CI run, where it has completed. Each
-    b3sum program must be, byte for byte, the one that run built: two
-    builders, ours and GitHub's, and neither's word alone."""
+    b3sum program and each crate must be, byte for byte, the one that run
+    made: two builders, ours and GitHub's, and neither's word alone."""
     version = re.search(r'(?m)^version = "([^"]+)"', git("show", f"{commit}:Cargo.toml")).group(1)
     try:
         release = release_artifacts.Release("v" + version, ROOT, commit)
@@ -200,10 +202,10 @@ def artifacts_result(commit, run=None):
             ci_builds(run, second)
         ok, lines = release_artifacts.directory(dist, release, rebuilt=None if run is None else second)
     if ok is None:
-        return None, (f"not in {dist} yet: {', '.join(lines)}. On each machine `sh tools/b3sum-release.sh` writes b3sum to its dist/; "
-                      "the packages' dry-run (CONTRIBUTING.md) leaves the crates' archives in its target/package/. Copy them there")
+        return None, (f"not in {dist} yet: {', '.join(lines)}. On each machine `sh tools/b3sum-release.sh` writes b3sum to its dist/, "
+                      "and `sh tools/crates-release.sh` writes the crates' archives there. Gather them here")
     if ok and run is None:
-        return None, "each is clean by its own word; CI's builds of b3sum, which each program must equal byte for byte, are not there yet (dispatch the tests workflow on the commit)"
+        return None, "each is clean by its own word; CI's builds, which each b3sum program and crate must equal byte for byte, are not there yet (dispatch the tests workflow on the commit)"
     return ok, "; ".join(line.replace(second, "CI's run") for line in lines)
 
 

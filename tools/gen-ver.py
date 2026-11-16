@@ -79,6 +79,9 @@ PINS = {
 }
 
 
+RELEASE_LOCK = "tools/release/Cargo.lock"
+
+
 def check_copies(full):
     """Each package, dependency pin, header and CLI lock names the same code."""
     for name, path in PACKAGES.items():
@@ -90,10 +93,22 @@ def check_copies(full):
     if f'#define B3_VERSION "{full}"' not in Path("capi/b3.h").read_text().splitlines():
         sys.exit(f"capi/b3.h: B3_VERSION must be {full}")
     lock = tomllib.loads(Path("b3sum/Cargo.lock").read_text())
+    release = tomllib.loads(Path(RELEASE_LOCK).read_text())
     for name in PACKAGES.keys() - {"blake3-servil-c"}:
-        versions = [p["version"] for p in lock["package"] if p["name"] == name]
-        if versions != [full]:
-            sys.exit(f"b3sum/Cargo.lock: expected one {name} at {full}, found {versions}")
+        for path, packages in (("b3sum/Cargo.lock", lock), (RELEASE_LOCK, release)):
+            versions = [p["version"] for p in packages["package"] if p["name"] == name]
+            if versions != [full]:
+                sys.exit(f"{path}: expected one {name} at {full}, found {versions}")
+    # The crates are packaged with the release lock (tools/crates-release.sh)
+    # and b3sum is built and tested with its own: one set of dependencies,
+    # so every package of b3sum's lock is in the release lock as it is there.
+    pinned = {(p["name"], p["version"]): p.get("checksum") for p in release["package"]}
+    for p in lock["package"]:
+        key = (p["name"], p["version"])
+        if key not in pinned or pinned[key] != p.get("checksum"):
+            sys.exit(f"{RELEASE_LOCK}: b3sum/Cargo.lock has {p['name']} {p['version']}, and the release lock has "
+                     f"{sorted(v for n, v in pinned if n == p['name']) or 'none'}: the crates would ship another dependency than b3sum is "
+                     f"tested with (CONTRIBUTING.md, \"The release lock\")")
 
 
 def set_version(full, notes=True):
@@ -110,7 +125,12 @@ def set_version(full, notes=True):
     # The CLI's tracked lock contains all four published packages.
     subprocess.run(["cargo", "update", "-q", *[a for name in PACKAGES if name != "blake3-servil-c" for a in ("-p", name)]],
                    cwd="b3sum", check=True)
-    files += ["b3sum/Cargo.lock", "capi/b3.h"]
+    # The release lock names them too, as its workspace's members: no
+    # workspace of theirs is in the repository for Cargo to update it by.
+    for name in PACKAGES:
+        if name != "blake3-servil-c":
+            edit(RELEASE_LOCK, rf'^(name = "{re.escape(name)}"\nversion = ")[^"]*', rf"\g<1>{full}")
+    files += ["b3sum/Cargo.lock", RELEASE_LOCK, "capi/b3.h"]
     check_copies(full)
     return files
 

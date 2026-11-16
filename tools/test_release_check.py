@@ -258,11 +258,13 @@ class Artifacts(unittest.TestCase):
     def git(self, *args):
         return subprocess.check_output(["git", "-C", str(self.repo), *args], text=True, stderr=subprocess.PIPE).strip()
 
-    def result(self, commit, ci_built=None):
+    def result(self, commit, ci_built=None, ci_crate=None):
         """`ci_built`: the bytes of the program the commit's CI run built,
-        where that run has completed."""
+        where that run has completed; `ci_crate`: of the crate it made."""
         def ci_builds(run, into):
             (Path(into) / f"b3sum-v0.3.0+{self.code}-x86_64-unknown-linux-gnu").write_bytes(ci_built)
+            if ci_crate is not None:
+                (Path(into) / f"top-crate-0.3.0+{self.code}.crate").write_bytes(ci_crate)
 
         with patch.object(check, "ROOT", str(self.repo)), patch.object(check, "git", self.git), patch.object(check, "ci_builds", ci_builds), \
              patch.object(check.release_artifacts, "CRATE_DIRS", ("",)), patch.object(check.release_artifacts, "B3SUM_TARGETS", ("x86_64-unknown-linux-gnu",)):
@@ -316,9 +318,18 @@ class Artifacts(unittest.TestCase):
         (self.repo / "dist" / f"top-crate-0.3.0+{self.code}.crate").write_bytes(crate.getvalue())
         ok, why = self.result(self.commit)
         self.assertIsNone(ok)
-        self.assertIn("CI's builds of b3sum, which each program must equal byte for byte, are not there yet", why)
-        ok, why = self.result(self.commit, ci_built=f"b3sums 0.3.0+{self.code}\0".encode())
+        self.assertIn("CI's builds, which each b3sum program and crate must equal byte for byte, are not there yet", why)
+        clean = f"b3sums 0.3.0+{self.code}\0".encode()
+        ok, why = self.result(self.commit, ci_built=clean, ci_crate=crate.getvalue())
         self.assertIs(ok, True, why)
+        # A crate whose files are all the commit's, and whose archive is
+        # not the one CI packaged: Cargo's own files in it may differ.
+        ok, why = self.result(self.commit, ci_built=clean, ci_crate=crate.getvalue() + b"\0")
+        self.assertIs(ok, False)
+        self.assertIn(f"top-crate-0.3.0+{self.code}.crate: its bytes", why)
+        ok, why = self.result(self.commit, ci_built=clean)
+        self.assertIs(ok, False)
+        self.assertIn("no second build of it in CI's run to compare with (sh tools/crates-release.sh", why)
 
 
 class PreviousRelease(unittest.TestCase):
