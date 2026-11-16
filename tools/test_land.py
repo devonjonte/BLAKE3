@@ -33,6 +33,16 @@ class Gates(unittest.TestCase):
         self.assertEqual(land.verdicts([], run("success", "cancelled"))["CI"][0], "failure")
 
 
+class Subjects(unittest.TestCase):
+    def test_a_working_title_does_not_land(self):
+        for subject in ("x", "wip: many cold files by direct reads", "WIP stuff for later on", "PROBE ONLY: loop the b3sum test", "LAB ONLY: k1 unrolled now",
+                        "fix it", "The Hasher's stack holds rows (draft)", "fixup! the thing before this one"):
+            self.assertIsNotNone(land.unfit(subject), subject)
+        for subject in ("b3sum reads one cold file of 4 MiB or more past the page cache", "docs/hazmat-removal.md: what is left of hazmat",
+                        "Pipeline: the workers' view of a Pipeline is never freed"):
+            self.assertIsNone(land.unfit(subject), subject)
+
+
 class Landable(unittest.TestCase):
     def test_the_status_text_fits_github_for_every_set_of_gates(self):
         base = "0123456789abcdef"

@@ -87,11 +87,28 @@ def landable(base, gates):
     return text if len(text) <= 140 else f"every gate green on top of {base[:12]}: {len(gates)} gates"
 
 
+def unfit(subject):
+    """Why a commit's subject cannot land, or None: next is never
+    rewritten, so a working title stays in its history for good (one
+    did: 6a9c999f's subject is "x", an amend's stray -m)."""
+    words = subject.split()
+    if len(subject) < 20 or len(words) < 3:
+        return "too short to say what the commit does"
+    if words[0].rstrip(":").lower() in ("wip", "fixup!", "squash!", "probe", "lab", "trial", "tmp", "x"):
+        return f"a working title ({words[0]})"
+    if subject.rstrip().lower().endswith("(draft)"):
+        return "marked a draft"
+    return None
+
+
 def resolve(commit):
     git("fetch", "-q", "origin", "next")
     sha, base = git("rev-parse", commit + "^{commit}"), git("rev-parse", "origin/next")
     if git("rev-list", "--count", f"{base}..{sha}") != "1" or git("merge-base", base, sha) != base:
         sys.exit(f"land: {sha[:12]} is not one commit on top of next ({base[:12]}): rebase and squash first")
+    subject = git("log", "-1", "--format=%s", sha)
+    if unfit(subject):
+        sys.exit(f"land: {sha[:12]}'s subject, {subject!r}, is {unfit(subject)}: reword it (its gates start again)")
     return sha, base, git("diff", "--name-only", base, sha).split("\n")
 
 
