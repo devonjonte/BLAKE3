@@ -24,7 +24,7 @@
 
 #[cfg(feature = "std")]
 pub use crate::block::Packed;
-pub use crate::block::{Batch, Block, Prepared};
+pub use crate::block::{Batch, Block, Part, Prepared};
 #[cfg(feature = "std")]
 pub use crate::each::{finalize_each, hash_each, update_each};
 
@@ -46,8 +46,11 @@ use crate::{CHUNK_LEN, ContextKey, DERIVE_KEY_CONTEXT, Hash, IV, Mode, OUT_LEN};
 /// # }
 /// ```
 // Inlined, so a constant mode folds to its constants (as
-// convenience::hash is: no mode stored for the call to read).
-#[inline]
+// convenience::hash is: no mode stored for the call to read). Always:
+// as the short path of the threads crate's hash_multithreaded it was
+// left a call (64 B there 5 to 7% slower, a Ryzen 9700X, instructions
+// level within the half percent the check reports).
+#[inline(always)]
 pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
     let mut room = core::mem::MaybeUninit::uninit();
     let (key, flags) = mode.key(&mut room);
@@ -204,6 +207,38 @@ impl TreeHasher {
         Self { key, flags, on_this_core: false }
     }
 
+    /// The `TreeHasher` of a Hasher's key words and flags, for the pool its
+    /// large updates go to (incremental::Pool).
+    pub(crate) fn of_words(key: &crate::CVWords, flags: u8) -> Self {
+        Self { key: *key, flags, on_this_core: false }
+    }
+
+    /// The kernels of this `TreeHasher`'s parents: a core's own, or the
+    /// detected platform's.
+    #[inline]
+    fn parents_platform(&self) -> crate::platform::Platform {
+        if self.on_this_core { crate::platform::Platform::own_core() } else { crate::platform::Platform::detect() }
+    }
+
+    /// [`subtree_cv`](TreeHasher::subtree_cv) on `platform`'s kernels: for
+    /// the threads crate's caller, which holds the shared accelerator's
+    /// turn for a whole job (docs/hazmat-removal.md, D).
+    #[doc(hidden)]
+    pub fn subtree_cv_on(&self, platform: crate::platform::Platform, first_chunk: u64, input: &[u8]) -> Cv {
+        Self::assert_subtree(first_chunk, input);
+        self.cv_on(platform, first_chunk, input)
+    }
+
+    /// A whole subtree's chaining value, on `platform`'s kernels.
+    #[inline]
+    fn cv_on(&self, platform: crate::platform::Platform, first_chunk: u64, input: &[u8]) -> Cv {
+        if input.len() <= CHUNK_LEN {
+            return Cv(crate::ChunkState::new(&self.key, first_chunk, self.flags, platform).update(input).output().chaining_value());
+        }
+        let [left, right] = crate::tree::root_children(&crate::tree::PlatformKernels { key: &self.key, flags: self.flags, platform }, input, 0, first_chunk);
+        Cv(crate::hasher::parent_output(&left, &right, &self.key, self.flags, platform).chaining_value())
+    }
+
     /// This `TreeHasher`, its calls kept to the calling core's own kernels: for
     /// a program that runs many of them at once on different cores. On
     /// Apple M4 and later one accelerator serves the whole chip, and a
@@ -223,6 +258,54 @@ impl TreeHasher {
             return crate::platform::Sme2Turn::take(crate::platform::Platform::own_core(), false);
         }
         crate::platform::Sme2Turn::take(crate::platform::Platform::detect(), len >= crate::SME2_SIZED_LEN)
+    }
+
+    /// The kernels for a call that may take the shared accelerator's turn
+    /// when `sme2_sized` says its work is the accelerator's size.
+    #[inline]
+    fn turn_if(&self, sme2_sized: bool) -> crate::platform::Sme2Turn {
+        if self.on_this_core {
+            return crate::platform::Sme2Turn::take(crate::platform::Platform::own_core(), false);
+        }
+        crate::platform::Sme2Turn::take(crate::platform::Platform::detect(), sme2_sized)
+    }
+
+    /// The hash of the whole message `input`: what
+    /// [`convenience::hash_with`](crate::convenience::hash_with) returns
+    /// for this `TreeHasher`'s mode, the mode's key not derived again. A
+    /// program that hashes many messages under one key-derivation context
+    /// pays for the context once, in [`new`](TreeHasher::new).
+    ///
+    /// ```
+    /// # blake3_servil_core::initialize();
+    /// use blake3_servil_core::{Mode, convenience, throughput::TreeHasher};
+    /// let tree = TreeHasher::new(Mode::DeriveKey("example.com 2026-11-16 session keys"));
+    /// assert_eq!(tree.hash(b"material"), convenience::hash_with(Mode::DeriveKey("example.com 2026-11-16 session keys"), b"material"));
+    /// ```
+    pub fn hash(&self, input: &[u8]) -> Hash {
+        let turn = self.turn(input.len());
+        crate::hash_serial_on(input, &self.key, self.flags, turn.platform())
+    }
+
+    /// The hashes of a batch's messages, as [`hash_many`] gives them, in
+    /// this `TreeHasher`'s mode: `out[i]` becomes the hash of message `i`.
+    ///
+    /// Requires one output a message.
+    pub fn hash_many<P: Prepared>(&self, batch: &P, out: &mut [[u8; OUT_LEN]]) {
+        let turn = self.turn_if(crate::many::sme2_sized(batch.message_len(), out.len()));
+        crate::many::hash_many_on(batch.bytes(), batch.message_len(), batch.slot(), &self.key, self.flags, out, turn.platform());
+    }
+
+    /// The hash of each message, of any lengths, as [`hash_each`] gives
+    /// them, in this `TreeHasher`'s mode: `out[i]` becomes the hash of the
+    /// message of `items[i].1` bytes that starts `items[i].0`.
+    ///
+    /// Requires `out.len() == items.len()`.
+    #[cfg(feature = "std")]
+    pub fn hash_each(&self, items: &[(&[Block], usize)], out: &mut [[u8; OUT_LEN]]) {
+        assert_eq!(items.len(), out.len(), "one digest per item");
+        let platform = if self.on_this_core { crate::platform::Platform::own_core() } else { crate::platform::Platform::detect() };
+        crate::each::hash_each_on(&self.key, self.flags, items, out, platform, |item| self.hash(item));
     }
 
     /// Requires that `input` is a whole subtree whose first chunk is
@@ -246,12 +329,7 @@ impl TreeHasher {
     pub fn subtree_cv(&self, first_chunk: u64, input: &[u8]) -> Cv {
         Self::assert_subtree(first_chunk, input);
         let turn = self.turn(input.len());
-        if input.len() <= CHUNK_LEN {
-            return Cv(crate::ChunkState::new(&self.key, first_chunk, self.flags, turn.platform()).update(input).output().chaining_value());
-        }
-        let [left, right] =
-            crate::tree::root_children(&crate::tree::PlatformKernels { key: &self.key, flags: self.flags, platform: turn.platform() }, input, 0, first_chunk);
-        Cv(crate::hasher::parent_output(&left, &right, &self.key, self.flags, turn.platform()).chaining_value())
+        self.cv_on(turn.platform(), first_chunk, input)
     }
 
     /// The subtree [`subtree_cv`](TreeHasher::subtree_cv) hashes, as the
@@ -271,7 +349,7 @@ impl TreeHasher {
 
     /// The chaining value of the parent of two subtrees.
     pub fn parent_cv(&self, left: &Cv, right: &Cv) -> Cv {
-        Cv(crate::hasher::parent_output(&left.0, &right.0, &self.key, self.flags, crate::platform::Platform::detect()).chaining_value())
+        Cv(crate::hasher::parent_output(&left.0, &right.0, &self.key, self.flags, self.parents_platform()).chaining_value())
     }
 
     /// A layer of parents: `out[i]` is the parent of `children[2 * i]` and
@@ -281,7 +359,7 @@ impl TreeHasher {
     pub fn parent_cvs(&self, children: &[Cv], out: &mut [Cv]) {
         assert_eq!(children.len() % 2, 0, "parents take their children in pairs");
         assert_eq!(out.len(), children.len() / 2, "one parent per pair of children");
-        let platform = crate::platform::Platform::detect();
+        let platform = self.parents_platform();
         // As many pairs a call as the kernels take.
         let pairs = crate::platform::MAX_SIMD_DEGREE;
         for (children, out) in children.chunks(2 * pairs).zip(out.chunks_mut(pairs)) {
@@ -300,13 +378,13 @@ impl TreeHasher {
     /// The hash of the message whose root has these two children: the
     /// tree's top, where the chaining values end.
     pub fn root_hash(&self, left: &Cv, right: &Cv) -> Hash {
-        crate::hasher::parent_output(&left.0, &right.0, &self.key, self.flags, crate::platform::Platform::detect()).root_hash()
+        crate::hasher::parent_output(&left.0, &right.0, &self.key, self.flags, self.parents_platform()).root_hash()
     }
 
     /// The extended output of the message whose root has these two
     /// children: its first 32 bytes are [`root_hash`](TreeHasher::root_hash)'s.
     pub fn root_output(&self, left: &Cv, right: &Cv) -> crate::OutputReader {
-        crate::OutputReader::new(crate::hasher::parent_output(&left.0, &right.0, &self.key, self.flags, crate::platform::Platform::detect()))
+        crate::OutputReader::new(crate::hasher::parent_output(&left.0, &right.0, &self.key, self.flags, self.parents_platform()))
     }
 }
 
@@ -584,5 +662,118 @@ mod tree_test {
         crate::initialize();
         let cvs = [Cv::from_bytes([1; 32]); 4];
         TreeHasher::new(Mode::Plain).parent_cvs(&cvs, &mut [Cv::from_bytes([0; 32])]);
+    }
+
+    /// The hash of a whole message, a batch and a collection in a prepared
+    /// mode: official BLAKE3's hashes, in each mode, with the shared
+    /// accelerator and on this core, at lengths from empty to past the
+    /// accelerator's size and the batch sizes its turn starts at.
+    #[test]
+    fn a_whole_message_a_batch_and_a_collection_match_official_blake3() {
+        crate::initialize();
+        let input = painted(40 * CHUNK_LEN + 7);
+        let lens = [0, 1, 63, 64, 65, 1023, 1024, 1025, 2048, 3 * 1024 + 5, 15 * 1024, 16 * 1024 - 1, 16 * 1024, 16 * 1024 + 1, 40 * 1024 + 7];
+        for mode in modes() {
+            let want = |message: &[u8]| *official::hasher(mode).update(message).finalize().as_bytes();
+            for tree in [TreeHasher::new(mode), TreeHasher::new(mode).on_this_core()] {
+                for len in lens {
+                    assert_eq!(*tree.hash(&input[..len]).as_bytes(), want(&input[..len]), "a message of {len} bytes");
+                }
+                // Batches: one message and many, a block or less, a chunk
+                // or less, several chunks, and the accelerator's size.
+                for (len, count) in [(1, 1), (32, 300), (64, 3), (64, 40), (100, 17), (1024, 9), (5000, 4), (5000, 20), (16 * 1024, 2)] {
+                    let mut batch = Batch::new(len, count);
+                    for i in 0..count {
+                        batch.set(i, &input[i..i + len]);
+                    }
+                    let mut out = std::vec![[0u8; 32]; count];
+                    tree.hash_many(&batch, &mut out);
+                    for (i, digest) in out.iter().enumerate() {
+                        assert_eq!(*digest, want(&input[i..i + len]), "message {i} of {count} of {len} bytes");
+                    }
+                }
+                let mut packed = Packed::<32>::new(50);
+                for (i, message) in packed.iter_mut().enumerate() {
+                    message.copy_from_slice(&input[i..i + 32]);
+                }
+                let mut out = std::vec![[0u8; 32]; 50];
+                tree.hash_many(&packed, &mut out);
+                for (i, digest) in out.iter().enumerate() {
+                    assert_eq!(*digest, want(&input[i..i + 32]), "packed message {i}");
+                }
+                // A collection of every length above, twice over, so the
+                // short ones go by their blocks and the middle ones share
+                // lanes.
+                let blocks: Vec<Vec<Block>> = lens
+                    .iter()
+                    .chain(&lens)
+                    .map(|&len| {
+                        let mut blocks = std::vec![Block([0; 64]); len.div_ceil(64)];
+                        Block::bytes_mut(&mut blocks)[..len].copy_from_slice(&input[..len]);
+                        blocks
+                    })
+                    .collect();
+                let items: Vec<(&[Block], usize)> = blocks.iter().zip(lens.iter().chain(&lens)).map(|(b, &len)| (&b[..], len)).collect();
+                let mut out = std::vec![[0u8; 32]; items.len()];
+                tree.hash_each(&items, &mut out);
+                for (digest, &len) in out.iter().zip(lens.iter().chain(&lens)) {
+                    assert_eq!(*digest, want(&input[..len]), "an item of {len} bytes");
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "one digest per item")]
+    fn a_collection_takes_one_output_an_item() {
+        crate::initialize();
+        let block = [Block([0; 64])];
+        TreeHasher::new(Mode::Plain).hash_each(&[(&block[..], 3), (&block[..], 4)], &mut [[0u8; 32]]);
+    }
+
+    /// A batch's parts hash as the batch does, for messages in blocks and
+    /// packed ones, at every cut; and the caller's kernels, named, give
+    /// the subtree's own chaining value.
+    #[test]
+    fn a_batchs_parts_hash_as_the_batch_does() {
+        crate::initialize();
+        let input = painted(64 * 1024);
+        let tree = TreeHasher::new(Mode::Keyed(&KEY));
+        let mut batch = Batch::new(100, 9);
+        let mut packed = Packed::<16>::new(9);
+        for i in 0..9 {
+            batch.set(i, &input[i..i + 100]);
+            packed[i].copy_from_slice(&input[i..i + 16]);
+        }
+        let (mut whole, mut whole_packed) = ([[0u8; 32]; 9], [[0u8; 32]; 9]);
+        tree.hash_many(&batch, &mut whole);
+        tree.hash_many(&packed, &mut whole_packed);
+        for cut in 0..=9 {
+            let (mut parts, mut parts_packed) = ([[0u8; 32]; 9], [[0u8; 32]; 9]);
+            tree.hash_many(&batch.part(0..cut), &mut parts[..cut]);
+            tree.hash_many(&batch.part(cut..9), &mut parts[cut..]);
+            tree.hash_many(&packed.part(0..cut), &mut parts_packed[..cut]);
+            // A part of a part counts from the part's first message.
+            tree.hash_many(&packed.part(1.min(cut)..9).part(cut - 1.min(cut)..9 - 1.min(cut)), &mut parts_packed[cut..]);
+            assert_eq!((whole, whole_packed), (parts, parts_packed), "cut at {cut}");
+        }
+        for len in [1, 1024, 1025, 16 * 1024, 64 * 1024] {
+            assert!(tree.subtree_cv_on(crate::platform::Platform::detect(), 64, &input[..len]) == tree.subtree_cv(64, &input[..len]), "{len} bytes");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "lies within the batch")]
+    fn a_part_lies_within_its_batch() {
+        let batch = Batch::new(100, 9);
+        let _ = batch.part(3..10);
+    }
+
+    #[test]
+    #[should_panic(expected = "lies within the batch")]
+    fn a_part_runs_forward() {
+        let batch = Batch::new(100, 9);
+        #[allow(clippy::reversed_empty_ranges)]
+        let _ = batch.part(3..2);
     }
 }

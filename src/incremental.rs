@@ -113,14 +113,14 @@ struct HasherHooks<'a> {
     pooled: Option<Pool>,
 }
 
-/// Another crate's threads, for a Hasher's whole subtrees: `children`
-/// gives the two child chaining values of a subtree of `min_len` bytes or
-/// more (what `compress_subtree_to_parent_node` returns), hashed however
-/// its crate likes.
+/// Another crate's threads, for a Hasher's whole subtrees: `halves`
+/// gives the two halves' chaining values of a subtree of `min_len` bytes
+/// or more whose first chunk is the message's chunk `first_chunk` (what
+/// `TreeHasher::subtree_halves` returns), hashed however its crate likes.
 #[derive(Clone, Copy)]
 pub struct Pool {
     pub min_len: usize,
-    pub children: fn(&[u8], &CVWords, u64, u8) -> [u8; 2 * OUT_LEN],
+    pub halves: fn(tree: &crate::throughput::TreeHasher, first_chunk: u64, input: &[u8]) -> [crate::throughput::Cv; 2],
 }
 
 impl hasher::Hooks for HasherHooks<'_> {
@@ -143,7 +143,11 @@ impl hasher::Hooks for HasherHooks<'_> {
     #[inline(always)]
     fn children(&self, input: &[u8], ahead: usize, counter: u64) -> [CVBytes; 2] {
         let pair = if let Some(pool) = self.pooled.filter(|pool| input.len() >= pool.min_len) {
-            (pool.children)(input, self.key, counter, self.flags)
+            let [left, right] = (pool.halves)(&crate::throughput::TreeHasher::of_words(self.key, self.flags), counter, input);
+            let mut pair = [0u8; 2 * OUT_LEN];
+            pair[..OUT_LEN].copy_from_slice(left.as_bytes());
+            pair[OUT_LEN..].copy_from_slice(right.as_bytes());
+            pair
         } else if self.pooled.is_some() {
             // Pooled, the subtrees below take the lock one at a time, and
             // the pool's own never use SME2.

@@ -180,6 +180,13 @@ fn from_bytes(bytes: &[u8]) -> Option<&[Block]>
 Implements: `Clone`, `Copy`, `Debug`, `Eq`, `PartialEq`.
 
 
+### `struct Part<'a>`
+
+Some of a batch's messages, in place.
+
+Implements: `Clone`, `Copy`, `Prepared`.
+
+
 ### `trait Prepared`
 
 The batch calls' input.
@@ -204,6 +211,9 @@ A `Mode` prepared for a program that builds or verifies a BLAKE3 tree itself (ve
 ```rust
 fn new(mode: Mode<'_>) -> Self
 fn on_this_core(self) -> Self
+fn hash(&self, input: &[u8]) -> Hash
+fn hash_many<P: Prepared>(&self, batch: &P, out: &mut [[u8; 32]])
+fn hash_each(&self, items: &[(&[Block], usize)], out: &mut [[u8; 32]])
 fn subtree_cv(&self, first_chunk: u64, input: &[u8]) -> Cv
 fn subtree_halves(&self, first_chunk: u64, input: &[u8]) -> [Cv; 2]
 fn parent_cv(&self, left: &Cv, right: &Cv) -> Cv

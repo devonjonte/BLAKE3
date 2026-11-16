@@ -210,8 +210,8 @@ pub(crate) use blake3_servil_core::convenience::Hasher;
 pub(crate) use blake3_servil_core::hazmat::platform::MAX_SIMD_DEGREE;
 #[allow(unused_imports)]
 pub(crate) use blake3_servil_core::hazmat::{
-    CHUNK_END, CHUNK_START, CVBytes, CVWords, DERIVE_KEY_MATERIAL, IV, KEYED_HASH, MAX_DEPTH, Output, ROOT, compress_parents_parallel,
-    compress_subtree_to_parent_node, hash_all_at_once, hash_many_serial, hash_serial, hash_serial_on, hasher, incremental, many, platform, tree,
+    CHUNK_END, CHUNK_START, CVBytes, CVWords, DERIVE_KEY_MATERIAL, IV, KEYED_HASH, Output, ROOT, compress_subtree_to_parent_node, hash_all_at_once,
+    hash_serial, hash_serial_on, hasher, incremental, many, platform, tree,
 };
 #[allow(unused_imports)]
 pub(crate) mod block {
@@ -397,14 +397,12 @@ pub fn __all_workers_parked() -> bool {
 /// The throughput API: the core's, and the calls that use other cores.
 pub mod throughput {
     pub use crate::pipeline::{Event, Lent, Limits, Message, Pipeline, ROOM_LEN, Room, block_on};
-    use crate::platform::Platform;
     use crate::{Hash, Hasher, Mode, OUT_LEN};
-    use blake3_servil_core::hazmat::each::{Item, hash_each_on};
     pub use blake3_servil_core::throughput::*;
 
     /// This crate's pool, for the core's Hasher: its whole subtrees of
     /// MIN_SPLIT_LEN and more.
-    const POOL: crate::incremental::Pool = crate::incremental::Pool { min_len: crate::lanes::MIN_SPLIT_LEN, children: crate::lanes::subtree_children };
+    const POOL: crate::incremental::Pool = crate::incremental::Pool { min_len: crate::lanes::MIN_SPLIT_LEN, halves: crate::lanes::subtree_halves };
 
     /// [`Hasher::update`](crate::convenience::Hasher::update), using other CPU
     /// cores where that is faster: the same result, never slower. Pieces of
@@ -450,12 +448,16 @@ pub mod throughput {
     #[inline(always)]
     pub fn hash_many_multithreaded<P: Prepared>(mode: Mode, batch: &P, out: &mut [[u8; OUT_LEN]]) {
         crate::lanes::require();
-        let mut room = core::mem::MaybeUninit::uninit();
-        let (key, flags) = mode.key(&mut room);
-        // Its length against the digests here, on the caller's thread, as
-        // hash_many's kernels check it: a multiplication.
-        crate::many::assert_slots(batch.bytes(), batch.message_len(), batch.slot(), out.len());
-        crate::lanes::hash_many(batch.bytes(), batch.message_len(), batch.slot(), key, flags, out);
+        // The short path first and inline, so a small batch costs what
+        // hash_many costs (which checks its length against the digests);
+        // everything the pool needs is behind the call after.
+        if out.len() < 2 || batch.bytes().len() < crate::lanes::MIN_SPLIT_LEN {
+            return hash_many(mode, batch, out);
+        }
+        // The whole batch as a part: its length is checked against the
+        // digests there, on the caller's thread.
+        let (kind, key, context) = crate::lanes::parts(mode);
+        crate::lanes::hash_many_in(kind, key, context, batch.part(0..batch.bytes().len() / batch.slot()), out);
     }
 
     /// [`hash`], using other CPU cores where that is faster: the same
@@ -500,9 +502,13 @@ pub mod throughput {
     #[inline]
     pub fn hash_multithreaded(mode: Mode, input: &[Block], len: usize) -> Hash {
         crate::lanes::require();
-        let mut room = core::mem::MaybeUninit::uninit();
-        let (key, flags) = mode.key(&mut room);
-        crate::lanes::hash_with_key(&Block::bytes(input)[..len], key, flags)
+        // The short path first and inline, so a small input costs what
+        // hash costs; everything the pool needs is behind the call after.
+        if len < crate::lanes::MIN_SPLIT_LEN {
+            return hash(mode, input, len);
+        }
+        let (kind, key, context) = crate::lanes::parts(mode);
+        crate::lanes::hash_in(kind, key, context, &Block::bytes(input)[..len])
     }
 
     /// [`hash_each`], using other CPU cores where that is faster: the
@@ -523,22 +529,18 @@ pub mod throughput {
     pub fn hash_each_multithreaded(mode: Mode, items: &[(&[Block], usize)], out: &mut [[u8; OUT_LEN]]) {
         crate::lanes::require();
         assert_eq!(items.len(), out.len(), "one digest per item");
-        let mut room = core::mem::MaybeUninit::uninit();
-        let (key, flags) = mode.key(&mut room);
-        let alone_len = |len: usize| len >= crate::lanes::MIN_SPLIT_LEN;
-        let alone = |item: &[u8]| alone_len(item.len());
-        // The items that hash alone are set aside in the pool's collection
-        // call (a zero stand-in) and hashed after, each over the whole pool.
-        if items.iter().map(|i| i.bytes().len()).filter(|&len| !alone_len(len)).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN {
-            hash_each_on(key, flags, items, out, Platform::detect(), |item| {
-                if alone(item) { Hash::from_bytes([0; OUT_LEN]) } else { crate::hash_serial(item, key, flags) }
-            });
+        let tree = TreeHasher::new(mode);
+        let alone = |len: usize| len >= crate::lanes::MIN_SPLIT_LEN;
+        // The items that hash alone are set aside in the collection's
+        // call and hashed after, each over the whole pool.
+        if items.iter().map(|i| i.1).filter(|&len| !alone(len)).sum::<usize>() < crate::lanes::MIN_SPLIT_LEN {
+            crate::lanes::hash_each_small(&tree, items, out);
         } else {
-            crate::lanes::hash_each(key, flags, items, out);
+            crate::lanes::hash_each(&tree, items, out);
         }
-        for (item, out) in items.iter().map(Item::bytes).zip(out.iter_mut()) {
-            if alone(item) {
-                *out = *crate::lanes::hash_with_key(item, key, flags).as_bytes();
+        for (item, out) in items.iter().zip(out.iter_mut()) {
+            if alone(item.1) {
+                *out = *crate::lanes::hash_over_pool(&tree, &Block::bytes(item.0)[..item.1]).as_bytes();
             }
         }
     }

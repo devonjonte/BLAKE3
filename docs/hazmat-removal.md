@@ -92,7 +92,7 @@ Zooko left the remaining names to me (November 16, 2026). They are:
 - **B's calls are methods beside it, `TreeHasher::hash_many` and
   `TreeHasher::hash_each`,** with the arguments of `throughput::hash_many`
   and `throughput::hash_each` less the mode. The two free functions stay,
-  as the one-call forms (they make the `TreeHasher` and call these).
+  as the one-call forms.
 - **C is `Hasher::update_with`:** an update that hands its whole subtrees
   to a function the caller gives, which returns their chaining values. Its
   exact signature waits for the code, with Rüdiger's use (#378) as the
@@ -106,5 +106,39 @@ Zooko left the remaining names to me (November 16, 2026). They are:
 
 ## State
 
-Not started in code. The order above stands: A and B first, on the x86
-machines and the Arm VM; C; D when the Mac measures again (ops #14).
+**Landed with this page's last change: A, B, and the pool's calls on them.**
+
+- Core: `TreeHasher::hash`, `hash_many`, `hash_each`; `Prepared::part`,
+  which gives some of a batch's messages as a batch (a `Part`), so a pool
+  can hand each thread its share; a `TreeHasher` kept `on_this_core` runs
+  its parents and root on the core's own kernels too.
+- `threads/src/lanes.rs` and the multithreaded calls (`hash_multithreaded`,
+  `hash_many_multithreaded`, `hash_each_multithreaded`,
+  `update_multithreaded`) carry a `TreeHasher` and call only its public
+  methods, with one exception below. Their short paths are the core's
+  public one-thread calls.
+- The free functions `throughput::hash`, `hash_many` and `hash_each` did
+  not become "make a `TreeHasher` and call it" as the list above says:
+  a `TreeHasher` holds a copy of its key words, and for the plain mode that
+  copy is 32 bytes of stores a short call would pay (measured October 24).
+  They keep their own way to the same kernels.
+- C's hook has its shape inside the crates: the pool a Hasher's large
+  updates go to is `fn(&TreeHasher, first_chunk, input) -> [Cv; 2]`
+  (`incremental::Pool::halves`), which is `subtree_halves` over threads.
+  `Hasher::update_with` would publish it.
+
+**Left in `hazmat`:**
+
+- D: `platform::{Platform, Sme2Turn, MAX_SIMD_DEGREE}`, and the hidden
+  `TreeHasher::subtree_cv_on(platform, ..)`, for the caller that holds the
+  SME2 unit's turn over a whole job and hashes a prefix on it.
+- The `Pipeline` (`threads/src/pipeline.rs`) and its tasks of short
+  messages (`lanes::Task`): they still carry `(key, flags)` and take a
+  `Platform` from the thread that runs them, the SME2 thread among them,
+  so they wait for D. With them: `hash_all_at_once`,
+  `compress_subtree_to_parent_node`, `hash_serial`, `hash_serial_on`,
+  `many::{assert_slots, hash_many_on, slot_len}`, `hasher::parent_output`,
+  `tree::left_len`, `each::*`, `incremental::Pool`, and the constants.
+
+Next: C's public call with Rüdiger's use (#378); then D and the
+`Pipeline`, when the Mac measures again (ops #14).

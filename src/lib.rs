@@ -1130,8 +1130,8 @@ pub fn initialize() {
 #[cfg(feature = "std")]
 pub mod hazmat {
     pub use crate::{
-        CHUNK_END, CHUNK_START, CVBytes, CVWords, DERIVE_KEY_MATERIAL, IV, KEYED_HASH, MAX_DEPTH, Output, ROOT, compress_parents_parallel,
-        compress_subtree_to_parent_node, hash_all_at_once, hash_many_serial, hash_serial, hash_serial_on,
+        CHUNK_END, CHUNK_START, CVBytes, CVWords, DERIVE_KEY_MATERIAL, IV, KEYED_HASH, Output, ROOT, compress_subtree_to_parent_node, hash_all_at_once,
+        hash_serial, hash_serial_on,
     };
     pub mod platform {
         pub use crate::platform::{MAX_SIMD_DEGREE, Platform, Sme2Turn, words_from_le_bytes_32};
@@ -1140,7 +1140,7 @@ pub mod hazmat {
         pub use crate::many::{assert_slots, hash_many_on, slot_len};
     }
     pub mod hasher {
-        pub use crate::hasher::{parent_output, subtree_len};
+        pub use crate::hasher::parent_output;
     }
     pub mod tree {
         pub use crate::tree::left_len;

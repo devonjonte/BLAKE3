@@ -255,11 +255,60 @@ pub trait Prepared: sealed::Sealed {
     /// The stride from one message to the next.
     #[doc(hidden)]
     fn slot(&self) -> usize;
+    /// The messages `messages` of this batch, as a batch: for a program
+    /// that hashes a batch in parts (each part on a thread of its own).
+    ///
+    /// Requires a range within the batch.
+    ///
+    /// ```
+    /// # blake3_servil_core::initialize();
+    /// # #[cfg(feature = "std")] {
+    /// use blake3_servil_core::{Mode, throughput::{self, Batch, Prepared}};
+    /// let mut batch = Batch::new(100, 8);
+    /// for i in 0..8 {
+    ///     batch.set(i, &[i as u8; 100]);
+    /// }
+    /// let (mut whole, mut parts) = ([[0u8; 32]; 8], [[0u8; 32]; 8]);
+    /// throughput::hash_many(Mode::Plain, &batch, &mut whole);
+    /// throughput::hash_many(Mode::Plain, &batch.part(0..3), &mut parts[..3]);
+    /// throughput::hash_many(Mode::Plain, &batch.part(3..8), &mut parts[3..]);
+    /// assert_eq!(whole, parts);
+    /// # }
+    /// ```
+    fn part(&self, messages: core::ops::Range<usize>) -> Part<'_> {
+        let slot = self.slot();
+        assert!(messages.start <= messages.end && messages.end <= self.bytes().len() / slot, "the part {messages:?} lies within the batch");
+        Part { bytes: &self.bytes()[messages.start * slot..messages.end * slot], message_len: self.message_len(), slot }
+    }
+}
+
+/// Some of a batch's messages, in place: [`Prepared::part`] makes it.
+#[derive(Clone, Copy)]
+pub struct Part<'a> {
+    bytes: &'a [u8],
+    message_len: usize,
+    slot: usize,
+}
+
+impl Prepared for Part<'_> {
+    #[inline]
+    fn bytes(&self) -> &[u8] {
+        self.bytes
+    }
+    #[inline]
+    fn message_len(&self) -> usize {
+        self.message_len
+    }
+    #[inline]
+    fn slot(&self) -> usize {
+        self.slot
+    }
 }
 
 mod sealed {
     pub trait Sealed {}
     impl Sealed for super::Batch<'_> {}
+    impl Sealed for super::Part<'_> {}
     #[cfg(feature = "std")]
     impl<const N: usize> Sealed for super::Packed<N> {}
 }
