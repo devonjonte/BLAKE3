@@ -743,19 +743,25 @@ pub(crate) fn hash_paths(args: &Args, paths: &[PathBuf], on_ordered: &mut dyn Fn
     hash_paths_inner(args, paths, false, on_ordered);
 }
 
+/// The threads that read and hash `nfiles` files, of `total_threads`:
+/// four for up to 63 files, one more for every 32 files from 64, twelve
+/// at the most. Each thread costs its start and its ring, which a hundred
+/// small files do not repay. A hundred 16 KiB files, milliseconds with 6
+/// threads and with 12: on 2x EPYC 7443 (96 CPUs) 2.47 and 3.13 in the page
+/// cache, 3.54 and 4.67 from storage; on a Ryzen 9700X 0.61 and 0.70, and
+/// 1.08 both. A thousand want the twelve: from storage on the 9700X 3.57 ms
+/// with 12 and 4.34 with 6.
+fn readers(total_threads: usize, nfiles: usize) -> usize {
+    (3 + nfiles / 32).clamp(4, 12).min(nfiles).min(total_threads)
+}
+
 fn hash_paths_inner(args: &Args, paths: &[PathBuf], force_no_uring: bool, on_ordered: &mut dyn FnMut(usize, anyhow::Result<blake3::Hash>) -> bool) {
     let nfiles = paths.len();
     if nfiles == 0 {
         return;
     }
     let total_threads = crate::threads().get();
-    let io_threads = if total_threads == 1 {
-        1
-    } else if nfiles < 32 {
-        total_threads.min(4).min(nfiles)
-    } else {
-        total_threads.min(12).min(nfiles)
-    };
+    let io_threads = readers(total_threads, nfiles);
     let slots_per_ring = if io_threads <= 4 { SLOTS_PER_RING_SINGLE } else { SLOTS_PER_RING_MULTI };
 
     grow_descriptor_table(io_threads * (slots_per_ring + 8) + 64);
@@ -1071,6 +1077,29 @@ fn run_hybrid_worker(
 mod test {
     use std::os::fd::AsRawFd;
     use std::path::PathBuf;
+
+    #[test]
+    fn the_readers_grow_with_the_files() {
+        // (threads, files) -> readers: never more than the files or the
+        // threads; four up to 63 files, then one more every 32, to twelve.
+        for (threads, files, want) in [
+            (1, 1000, 1),
+            (16, 1, 1),
+            (16, 3, 3),
+            (16, 4, 4),
+            (16, 31, 4),
+            (16, 63, 4),
+            (16, 64, 5),
+            (16, 100, 6),
+            (16, 287, 11),
+            (16, 288, 12),
+            (16, 100_000, 12),
+            (8, 1000, 8),
+            (2, 100, 2),
+        ] {
+            assert_eq!(super::readers(threads, files), want, "{threads} threads, {files} files");
+        }
+    }
 
     #[test]
     fn sync_fallback_pread_and_uring_disabled_mode_match_reference() {
