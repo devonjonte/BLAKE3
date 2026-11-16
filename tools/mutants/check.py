@@ -450,6 +450,23 @@ def scratch_dir():
 WORKTREES = os.path.join(tempfile.gettempdir(), "blake3-servil-mutants")
 
 
+def one_run_at_a_time():
+    """This run's hold on the worktrees: a lock beside them, kept until the
+    process ends. Two runs at once share the shards' worktrees and
+    outcomes, and each fails in the other's files (November 16: a second
+    run started by hand took a landing gate's logs from under it). A second
+    run stops here and says what to do."""
+    import fcntl
+
+    lock = open(WORKTREES + ".lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
+        sys.exit(f"mutants: another run is using {WORKTREES} (it holds {WORKTREES}.lock): wait for it, or give this run a TMPDIR of its own")
+    return lock
+
+
 def remove_leftovers():
     """The worktrees an earlier run left that no shard reuses (a crash, a
     stop by hand: a run removes none of its own, crash-only), removed before
@@ -1187,6 +1204,8 @@ def main():
             since = base.stdout.strip()
         else:
             sys.exit("mutants: no origin/next to take a base from; fetch it or name --since REV (--whole asks for every mutant)")
+    global RUN_LOCK
+    RUN_LOCK = one_run_at_a_time()
     remove_leftovers()
     listed = check_rows_exist(remove=not whole)
     files, known = read_known()
