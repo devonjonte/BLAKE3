@@ -76,7 +76,11 @@ keeps Rust's memory rules, which the compiler checks everywhere else.
 - **A model checker (Shuttle)** runs the small pieces of threaded code
   where one thread waits for another under thousands of thread
   schedules. A wait that could hang shows up immediately as a deadlock
-  with the schedule that caused it.
+  with the schedule that caused it. Every change runs these models
+  before it lands.
+- **Shared memory that is never freed.** The Pipeline's state that
+  worker threads can reach lives as long as the process, so no worker
+  can touch memory its owner gave back (see the next section for why).
 - **Guard pages** cover every call. Tests place an inaccessible page
   of memory immediately beside each input, output, key and context of
   every public call, in Rust and in C. If the code reads or writes even
@@ -96,6 +100,14 @@ The checks found eight bugs. All are fixed. Examples:
 - batch assembly on Intel and AMD processors read beyond the end of
   an input, which could crash a program.
 
+One more bug was found by luck, not by a check built to find it. In
+development, before any release held the code, a worker thread could
+read a Pipeline's memory after the Pipeline had been dropped. It showed
+as one crashed test in about 1,200 runs on a 4-CPU machine. A build
+with a memory sanitizer crashed about as rarely as a plain one. The fix
+removed the possibility rather than the instance: that memory is no
+longer freed.
+
 The proofs have not found a bug in the Arm kernels. They did find
 mistakes in some of the tools and models used to construct the proofs.
 
@@ -112,10 +124,19 @@ checked this until 0.8, on Rust kernels users never ran, and found one
 such bug. These checks reduce risk, but they cannot guarantee that no bug
 remains.
 
+## How a change lands
+
+The development line accepts only a commit on which every check has
+passed, each recorded against that exact commit: the tests and the
+mutation testing on x86-64, an Arm server and a Mac; every benchmark
+cell against the commit before; the builds; and the long proofs when a
+kernel or its proof changed. A tool posts the final status, and GitHub
+refuses a push without it, from anyone.
+
 ## Run the checks
 
 ```sh
-git clone -b servil https://github.com/servil-software-factory/BLAKE3
+git clone -b main https://github.com/servil-software-factory/BLAKE3
 cd BLAKE3
 cargo nextest run --release --lib --tests   # with cargo-nextest (https://nexte.st)
 ```

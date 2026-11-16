@@ -1,3 +1,116 @@
+# blake3-servil 0.10.0+SHA, against blake3-servil 0.9.0
+
+What changed since 0.9.0, each item with where it is described. Every
+figure names its machine. bench-hashes' page for this release sets 0.8,
+0.9 and 0.10 side by side on every machine of its fleet (BLAKE3 #402).
+
+## New
+
+- **The Pipeline** (`throughput::Pipeline`, #356): the streaming API,
+  which 0.9 left out. Messages are written into rooms the Pipeline lends
+  or are lent to it in place; results arrive as events, in order; the
+  pool hashes them. Misuse stops the process: it does not unwind
+  (crash-only).
+- **The tree API** (`throughput::TreeHasher`, `Cv`, `left_len`, #378), for
+  programs that build or check a BLAKE3 tree themselves (verified
+  streaming, Bao, iroh): a subtree's chaining value, a layer of parents,
+  the root. A `TreeHasher` is also a mode prepared once: `hash`,
+  `hash_many` and `hash_each` hash whole messages in it, so a
+  key-derivation context is hashed once for many messages.
+  `Prepared::part` gives some of a batch's messages as a batch, for a
+  pool of the program's own. The library's pool runs on these calls
+  (`docs/hazmat-removal.md`).
+- **`b3sum --outboard DIR`** writes each file's bao-tree outboard beside
+  its hash, byte for byte bao-tree 0.17.0's
+  (`BlockSize::from_chunk_log(4)`). A 1 GiB file from storage: 120 ms,
+  where official BLAKE3 with rayon and bao-tree take 222 and 584 (Ryzen
+  9700X).
+
+## What a program on 0.9 changes
+
+- **`Hasher::finalize` and `finalize_xof` take `&self`** (0.9 took the
+  hasher): a hasher can be finalized and fed further, as with official
+  BLAKE3.
+- **A `Hasher` is 26,624 bytes** (it was 18,432). C callers recompile:
+  `B3_HASHER_SIZE` in `capi/b3.h` changed.
+- **`b3sum` reads a large file past the page cache** when the cache does
+  not hold it (Linux, 4 MiB and more). The file is not in the cache
+  afterwards, so a second pass reads the drive again.
+- **`b3sum < file`** gives the hash it always gave, sooner (below).
+
+## Faster
+
+- **`b3sum`, a file of 4 MiB or more from storage (Linux)**: direct
+  reads, several at once, each thread hashing what it read. 1 GiB: 217 to
+  100 ms on a Ryzen 9700X, 241 to 140 on 2x EPYC 7443, 203 to 127 on 2x
+  Xeon 6330.
+- **`b3sum < file`** is hashed as the file is, not as a stream. 1 GiB on
+  a Ryzen 9700X: 37.7 to 25.0 ms from the page cache, 418 to 99 from
+  storage (official b3sum 1.8.7: 121 and 452).
+- **`b3sum`, a hundred or so files (Linux)**: the threads that read grow
+  with the files. A hundred 16 KiB files in the page cache: 3.13 to 2.47
+  ms on 2x EPYC 7443, 2.46 to 2.10 on 2x Xeon 6330, 0.70 to 0.61 on a
+  Ryzen 9700X.
+- **A Hasher fed in pieces**: its stack holds rows of chaining values
+  and hashes parents a full layer at a time. One core, 16 KiB pieces:
+  10.3 to 12.3 GB/s (Ryzen 9700X), 3.89 to 4.17 (2x EPYC 7443), 3.44 to
+  3.72 (2x Xeon 6330).
+- **A short message through a Hasher**: 64 bytes, new, update and
+  finalize, 197 to 50 ns (Ryzen 9700X; official BLAKE3 53).
+- **Multithreaded calls on machines of several last-level caches**
+  (several sockets, or an EPYC, #389): each worker keeps to one cache's
+  CPUs, and a thread learns whether its own cache's workers or all of
+  them serve a kind and size of call sooner. 2x EPYC 7443, a 1 MiB
+  message read into a buffer and hashed: 437 to 74 us.
+- **Arm servers** (cores with SHA-3 that are not Apple's; measured on an
+  AmpereOne, #395): chunk plans of their own, and a quad kernel that
+  takes its four Gs a step at a time. One core, 16 KiB: 0.85 to 0.63 ns
+  a byte (official BLAKE3 0.69); 1 MiB: 0.87 to 0.62 (0.71). A chunk or
+  less is unchanged there (1 KiB: 1.32, official 1.22).
+
+## Slower
+
+Each is accepted, with its issue.
+
+- **Machines of several caches, a process's first large pool calls**
+  (#401): the pool learns a reach by trying both, so a process's first
+  ten pool calls of a size are five on every thread and five on the
+  caller's cache's threads, and each later round of 16 to 256 calls ends
+  with five on the reach that lost. On two EPYCs a benchmark of 24 calls
+  of 32 or 128 MiB reads 8 to 20% slower than 0.9.0; a long-lived caller
+  about 1 to 2%.
+- **Xeon Gold 6330, a turn of many open messages fed 1 KiB each**
+  (#404): 2 to 5% slower than 0.9.0, the price there of the Hasher's
+  rows.
+- **2x EPYC 7443, a thousand 16 KiB files from storage in one `b3sum`
+  run** (#403): level to 5% slower than 0.9.0 (10.4 to 10.9 ms), with a
+  third less CPU.
+- **A `Hasher` finalized again and again mid-message**: clone and
+  finalize after 300,000 bytes, 2.42 to 2.86 us (Ryzen 9700X).
+- **Against 0.8's stream, 64-byte messages on 2x EPYC 7443 with two
+  caches busy** (#389): the Pipeline reads them 37% slower.
+
+## Safer
+
+- **The Pipeline frees nothing a worker can reach** (#399). Before any
+  release held it, a worker could read a Pipeline's memory after the
+  Pipeline was dropped: about once in 1,200 runs on a 4-CPU machine,
+  seen as one crashed test in CI and not by a check built to find it.
+  The shared state now lives as long as the process and serves the next
+  Pipeline of its size.
+
+## Checked more
+
+- `next` moves only by `tools/land.py`, to a commit whose every gate is
+  a green status on that exact commit: the tests and the mutation check
+  on x86-64, an Arm server and a Mac, every benchmark cell, the builds,
+  and the long proofs where a kernel or its proof changed. GitHub refuses
+  any other push.
+- The builds' gate runs the three Shuttle models of the pool's waits.
+- The long proofs run on a machine with the memory the x86-64 proofs
+  need, with the instruction models checked on an Arm CPU; they record
+  the solver's version. The one-chunk kernel's table form is proved too.
+
 # blake3-servil 0.9.0+73ee859efce085d28f1c2b22c35a5703403476f7, against blake3-servil 0.8.0
 
 What changed since 0.8.0, each item with where it is described. The

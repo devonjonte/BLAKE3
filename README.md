@@ -45,7 +45,7 @@ version names the commit of its code, so the version alone identifies
 what you have (`b3sum --version` and the C library's `b3_version()`
 print it). The code after a release reads `X.Y.Z+dev`, "newer than
 X.Y.Z", and a build of it prints its commit too, and from a dirty tree the
-Git tree id of its working tree: `0.8.0+dev.<commit>.dirty.<tree>`. Write
+Git tree id of its working tree: `0.10.0+dev.<commit>.dirty.<tree>`. Write
 it whole wherever you write it: tools that check it may come.
 
 ```rust
@@ -53,7 +53,7 @@ blake3_servil::initialize(); // once, before any other call
 let hash = blake3_servil::convenience::hash(b"foobarbaz");
 ```
 
-`blake3-servil-core` provides everything except multithreading, running on the calling thread with zero background threads. `blake3-servil` re-exports `blake3-servil-core` and adds multithreading.
+`blake3-servil-core` provides everything except multithreading, running on the calling thread with zero background threads. `blake3-servil` re-exports `blake3-servil-core` and adds multithreading: a multithreaded form of each call, and the `Pipeline`, which hashes a stream of messages as they arrive.
 
 The [crate documentation](https://servil-software-factory.github.io/BLAKE3/blake3_servil/) covers the
 calls for programs that hash a lot, and the C library in [`capi/`](capi/).

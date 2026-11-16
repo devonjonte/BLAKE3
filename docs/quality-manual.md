@@ -427,7 +427,7 @@ On an Apple Silicon Mac, or on Linux with a C compiler that assembles
 SME2 (clang 17 or later; set `CC=clang-19` or similar):
 
 ```sh
-git clone -b servil https://github.com/servil-software-factory/BLAKE3 && cd BLAKE3
+git clone -b main https://github.com/servil-software-factory/BLAKE3 && cd BLAKE3
 cargo nextest run --release --lib --tests         # each test in its own process
 cargo test --release --doc                        # each doc example in its own process
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
