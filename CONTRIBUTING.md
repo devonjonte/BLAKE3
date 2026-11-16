@@ -359,8 +359,8 @@ lists what it takes and ticks each step:
      (`threads/`), then `b3sums` (`b3sum/`; crates.io's `b3sum` is official
      BLAKE3's). The C package has `publish = false` and ships as libraries;
    - b3sum's binaries, built on each machine by `sh tools/b3sum-release.sh`
-     from a fresh clone of the tag's commit (statically linked on Linux),
-     each with its `.sha256` and `.b3`;
+     from a fresh clone of the version commit (statically linked on Linux,
+     the same bytes whoever builds them), each with its `.sha256` and `.b3`;
    - the C library, staged by `cargo cinstall --release --destdir=STAGE`
      in `capi/`: the static and shared libraries, `b3.h`, and the
      pkg-config file (`capi/README.md`);
@@ -413,6 +413,27 @@ checks what users download the same way, as anyone can:
 `python3 tools/release_artifacts.py TAG --published`. (0.9.0's two b3sum
 binaries were built in checkouts that held untracked files and say
 "dirty", BLAKE3 #435: that command fails on them.)
+
+A program's build version is its own word, which shows a mistake and
+not a forgery. So b3sum's Linux binary is also built reproducibly:
+`tools/b3sum-release.sh` gives the same bytes on any machine from the
+same commit, with the compiler and C library that
+`tools/b3sum-release.toolchain` names (the script stops on any other).
+Two builders must agree before a release: `release-check.py` passes only
+when each binary in `dist/` is, byte for byte, the one GitHub's machines
+built in the commit's CI run (the `b3sum release build` jobs). After the
+release, the `release artifacts` workflow builds the tag again and
+compares what was published, and so can anyone with Docker or Podman:
+
+```sh
+git checkout TAG
+docker run --rm -v "$PWD":/src -w /src ubuntu:26.04 sh tools/b3sum-release-container.sh
+python3 tools/release_artifacts.py TAG --published --rebuilt dist
+```
+
+The C library's archive is not rebuilt so: it is checked by its build
+version alone. A crate's `Cargo.toml` and `Cargo.lock` are Cargo's
+rewriting and are not compared with the commit (BLAKE3 #436).
 
 ## Maintainers' notes
 

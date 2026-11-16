@@ -319,6 +319,41 @@ class Published(Repository):
         self.assertIn("installer.sh: an artifact of a kind this check does not know", lines[-1])
 
 
+@patch.object(ra, "CRATE_DIRS", ("", "sub"))
+class Rebuilt(Gathered):
+    """A b3sum program against a second build of the same commit."""
+
+    def test_the_same_bytes_as_the_second_build_pass(self):
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as second:
+            self.fill(folder)
+            self.fill(second, crates=())
+            self.assertEqual(ra.directory(folder, self.release, rebuilt=second), (True, []))
+
+    def test_a_program_that_says_it_is_clean_and_differs_from_the_second_build_fails(self):
+        # The forgery the build's own word cannot show: the right version
+        # in it, and other code.
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as second:
+            self.fill(folder)
+            self.fill(second, crates=())
+            name = f"b3sum-{self.tag}-aarch64-unknown-linux-gnu"
+            with open(os.path.join(folder, name), "ab") as f:
+                f.write(b"and one byte more")
+            self.assertEqual(ra.directory(folder, self.release), (True, []), "its own word is clean")
+            ok, lines = ra.directory(folder, self.release, rebuilt=second)
+            self.assertIs(ok, False)
+            self.assertEqual(len(lines), 1)
+            self.assertTrue(lines[0].startswith(f"NOT CLEAN  {name}: its bytes (SHA-256 "), lines[0])
+            self.assertIn(f"are not the second build's in {second} (SHA-256 ", lines[0])
+
+    def test_a_program_with_no_second_build_fails_and_crates_need_none(self):
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as second:
+            self.fill(folder)
+            self.fill(second, programs=("x86_64-unknown-linux-gnu",), crates=())
+            ok, lines = ra.directory(folder, self.release, rebuilt=second)
+            self.assertIs(ok, False)
+            self.assertEqual(lines, [f"NOT CLEAN  b3sum-{self.tag}-aarch64-unknown-linux-gnu: no second build of it in {second} to compare with (sh tools/b3sum-release.sh at the version commit, on another machine)"])
+
+
 class CommandLine(Repository):
     def run_main(self, *argv):
         out = io.StringIO()
@@ -337,6 +372,20 @@ class CommandLine(Repository):
             code, said = self.run_main(self.tag, clean, dirty)
             self.assertEqual(code, 1)
             self.assertIn("1 artifacts are not clean builds of it, or are missing", said)
+
+    def test_rebuilt_and_commit_are_options_wherever_they_stand(self):
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as second:
+            name = f"b3sum-{self.tag}-a"
+            for where, more in ((folder, b""), (second, b"!")):
+                with open(os.path.join(where, name), "wb") as f:
+                    f.write(self.program() + more)
+            path = os.path.join(folder, name)
+            self.assertEqual(self.run_main(self.tag, path, "--commit", self.commit)[0], 0)
+            self.assertEqual(self.run_main(self.tag, "--rebuilt", folder, path)[0], 0)
+            self.assertEqual(self.run_main(self.tag, path, "--rebuilt", second)[0], 1)
+            self.assertEqual(self.run_main(self.tag, path, "--commit", self.code)[0], f"release_artifacts: {self.tag} names commit {self.code}, whose parent is not {self.code}: not a version commit")
+            self.assertEqual(self.run_main(self.tag, path, "--rebuilt")[0], 2, "an option without its value")
+            self.assertEqual(self.run_main(self.tag, path, "--rebuild", second)[0], 2, "an option this does not know")
 
     def test_no_artifact_named_is_a_usage_error(self):
         self.assertEqual(self.run_main(self.tag)[0], 2)

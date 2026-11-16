@@ -285,3 +285,26 @@ jobs:
     - run: grep -o -w 'avx512f\|avx512vl\|avx2\|sse4_1' /proc/cpuinfo | sort -u
     - run: sudo apt-get install -y llvm lld clang && pip install z3-solver
     - run: python3 tools/verify/cross_check_x86.py
+
+  b3sum_release_build:
+    # b3sum's release binary, built as a release builds it
+    # (tools/b3sum-release.sh): for a version commit, the second build
+    # that tools/release-check.py compares ours with, byte for byte; for
+    # every other commit, the proof that the script still works.
+    name: b3sum release build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # The commit and its parent: a version commit names its parent.
+        fetch-depth: 2
+    - run: docker run --rm -e B3SUM_RELEASE_ANY_COMMIT=1 -v "$PWD":/src -w /src ubuntu:26.04 sh tools/b3sum-release-container.sh
+    - uses: actions/upload-artifact@v4
+      with:
+        name: b3sum-${{ runner.arch }}
+        path: dist/

@@ -41,8 +41,10 @@ and the rest timed out or have no verdict.
   is published: b3sum for each machine (tools/b3sum-release.sh writes it
   there) and the four crates' archives (the packages' dry-run's, copied
   there), each a clean build of this commit by tools/release_artifacts.py:
-  the programs by the build version they hold, the crates file by file
-  against the commit. 0.9.0's two b3sum programs were built in checkouts
+  the programs by the build version they hold and, byte for byte, by the
+  builds GitHub's machines made of the commit in the CI run above (the
+  build is reproducible, so two honest builders agree, and neither's
+  word is taken alone); the crates file by file against the commit. 0.9.0's two b3sum programs were built in checkouts
   holding untracked files and say "dirty" (BLAKE3 #435); no step looked.
 - The pages: README.md, QUALITY.md, CHANGELOG.md changed since the
   previous release (a release rewrites them for its readers).
@@ -56,6 +58,7 @@ and its pages are read fresh rather than diffed.
 """
 
 import glob
+import io
 import json
 import socket
 import urllib.error
@@ -64,7 +67,9 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.request
+import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import release_artifacts  # noqa: E402 (beside this file)
@@ -157,22 +162,49 @@ def mutation_result(path, commit):
     return next((r for r in (False, None, NO_VERDICT) if r in results), True)
 
 
-def artifacts_result(commit):
+def ci_builds(run, into):
+    """Write into the folder `into` the b3sum programs that the CI run
+    `run` built (its `b3sum release build` jobs' artifacts, each a zip of
+    that job's dist/)."""
+    token = open(os.path.join(MAIN, "ghtokenclassic.txt")).read().strip()
+    for artifact in github(f"/repos/servil-software-factory/BLAKE3/actions/runs/{run['id']}/artifacts?per_page=100")["artifacts"]:
+        if not artifact["name"].startswith("b3sum-"):
+            continue
+        # GitHub answers with a redirect to its storage, which refuses the
+        # token: gh follows it without.
+        archive = subprocess.run(["gh", "api", f"repos/servil-software-factory/BLAKE3/actions/artifacts/{artifact['id']}/zip"],
+                                 env={**os.environ, "GH_TOKEN": token}, capture_output=True, check=True, timeout=300).stdout
+        with zipfile.ZipFile(io.BytesIO(archive)) as files:
+            for name in files.namelist():
+                if os.path.basename(name).startswith("b3sum-") and not release_artifacts.is_digest(name):
+                    with open(os.path.join(into, os.path.basename(name)), "wb") as f:
+                        f.write(files.read(name))
+
+
+def artifacts_result(commit, run=None):
     """The release's artifacts in this checkout's dist/, by
     release_artifacts.directory: True where every one is there and a clean
     build of `commit`, False where one is not (or `commit` is no version
-    commit), None where some are not there yet; and what to say of it."""
+    commit), None where some are not there yet; and what to say of it.
+    `run`: the commit's dispatched CI run, where it has completed. Each
+    b3sum program must be, byte for byte, the one that run built: two
+    builders, ours and GitHub's, and neither's word alone."""
     version = re.search(r'(?m)^version = "([^"]+)"', git("show", f"{commit}:Cargo.toml")).group(1)
     try:
         release = release_artifacts.Release("v" + version, ROOT, commit)
     except release_artifacts.NotARelease as e:
         return False, f"{e} (python3 tools/gen-ver.py X.Y.Z makes a version commit)"
     dist = os.path.join(ROOT, "dist")
-    ok, lines = release_artifacts.directory(dist, release)
+    with tempfile.TemporaryDirectory() as second:
+        if run is not None:
+            ci_builds(run, second)
+        ok, lines = release_artifacts.directory(dist, release, rebuilt=None if run is None else second)
     if ok is None:
         return None, (f"not in {dist} yet: {', '.join(lines)}. On each machine `sh tools/b3sum-release.sh` writes b3sum to its dist/; "
                       "the packages' dry-run (CONTRIBUTING.md) leaves the crates' archives in its target/package/. Copy them there")
-    return ok, "; ".join(lines)
+    if ok and run is None:
+        return None, "each is clean by its own word; CI's builds of b3sum, which each program must equal byte for byte, are not there yet (dispatch the tests workflow on the commit)"
+    return ok, "; ".join(line.replace(second, "CI's run") for line in lines)
 
 
 def ci_result(run):
@@ -214,6 +246,7 @@ def main():
     commit = git("rev-parse", sys.argv[1] if len(sys.argv) > 1 else "main")
     previous = previous_release(commit)
     results = []
+    built = None
 
     def step(name, ok, how):
         """ok: True (PASS), False (FAIL), None (OPEN), or TIMED_OUT or
@@ -226,6 +259,7 @@ def main():
         runs = github(f"/repos/servil-software-factory/BLAKE3/actions/runs?head_sha={commit}&event=workflow_dispatch&per_page=20").get("workflow_runs", [])
         ci = [r for r in runs if r["name"] == "tests"]
         result = ci_result(ci[0]) if ci else None
+        built = ci[0] if result is True else None
         step("CI, every job", result,
              "dispatch the tests workflow on the commit; every job must run and succeed" if result != TIMED_OUT else "a job reached its timeout-minutes")
     except GitHubTimedOut as e:
@@ -272,7 +306,10 @@ def main():
     step("cargo publish --dry-run", log_ends_with(f"tmp/night/publish-dry-run-{commit[:12]}.log", "publish-dry-run: ok"),
          f"the packages' dry-run in CONTRIBUTING.md; save its output to tmp/night/publish-dry-run-{commit[:12]}.log and append 'publish-dry-run: ok' only on success")
 
-    step("release artifacts, each a clean build of this commit", *artifacts_result(commit))
+    try:
+        step("release artifacts, each a clean build of this commit", *artifacts_result(commit, built))
+    except GitHubTimedOut as e:
+        step("release artifacts, each a clean build of this commit", TIMED_OUT, str(e))
 
     if previous:
         changed = set(git("diff", "--name-only", previous, commit).split())

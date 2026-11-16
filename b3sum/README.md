@@ -41,6 +41,18 @@ commit, so nothing else the checkout holds reaches the binary. On Linux
 it links statically, as above, and it writes the binary's SHA-256 and
 BLAKE3 digests beside it.
 
+**The Linux binaries are reproducible.** You need not trust the file we
+published: build it again from the tag and compare. From a clone at the
+release's tag, with Docker or Podman:
+
+```sh
+docker run --rm -v "$PWD":/src -w /src ubuntu:26.04 sh tools/b3sum-release-container.sh
+sha256sum dist/b3sum-*
+```
+
+The digest is the published binary's, or the published binary was not
+built from that source. (Releases after 0.9.0.)
+
 # Example
 
 ```bash

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -117,7 +118,7 @@ class ReleaseEvidence(unittest.TestCase):
                 (logs / f"mutants-{candidate}.log").write_text(text.replace(HEAD, identity))
             output = io.StringIO()
             with patch.object(check, "MAIN", tmp), patch.object(check, "EXCHANGE", str(root / "mac-runner")), patch.object(check, "git", git_override or git), \
-                 patch.object(check, "github", github), patch.object(check, "artifacts_result", lambda commit: artifacts), \
+                 patch.object(check, "github", github), patch.object(check, "artifacts_result", lambda commit, run=None: artifacts), \
                  patch("sys.argv", ["release-check.py", "candidate"]), contextlib.redirect_stdout(output):
                 with self.assertRaises(SystemExit) as caught:
                     check.main()
@@ -257,10 +258,15 @@ class Artifacts(unittest.TestCase):
     def git(self, *args):
         return subprocess.check_output(["git", "-C", str(self.repo), *args], text=True, stderr=subprocess.PIPE).strip()
 
-    def result(self, commit):
-        with patch.object(check, "ROOT", str(self.repo)), patch.object(check, "git", self.git), \
+    def result(self, commit, ci_built=None):
+        """`ci_built`: the bytes of the program the commit's CI run built,
+        where that run has completed."""
+        def ci_builds(run, into):
+            (Path(into) / f"b3sum-v0.3.0+{self.code}-x86_64-unknown-linux-gnu").write_bytes(ci_built)
+
+        with patch.object(check, "ROOT", str(self.repo)), patch.object(check, "git", self.git), patch.object(check, "ci_builds", ci_builds), \
              patch.object(check.release_artifacts, "CRATE_DIRS", ("",)), patch.object(check.release_artifacts, "B3SUM_TARGETS", ("x86_64-unknown-linux-gnu",)):
-            return check.artifacts_result(commit)
+            return check.artifacts_result(commit, None if ci_built is None else {"id": 7})
 
     def test_a_commit_that_is_no_version_commit_fails(self):
         ok, why = self.result(self.code)
@@ -283,6 +289,36 @@ class Artifacts(unittest.TestCase):
         ok, why = self.result(self.commit)
         self.assertIsNone(ok, "the crate's archive is not there yet")
         self.assertIn(f"top-crate-0.3.0+{self.code}.crate", why)
+
+
+    def test_a_clean_program_must_also_be_the_one_ci_built(self):
+        (self.repo / "dist").mkdir()
+        clean = f"b3sums 0.3.0+{self.code}\0".encode()
+        (self.repo / "dist" / f"b3sum-v0.3.0+{self.code}-x86_64-unknown-linux-gnu").write_bytes(clean)
+        # Other code under the release's version: its own word is clean.
+        ok, why = self.result(self.commit, ci_built=clean + b"other code")
+        self.assertIs(ok, False)
+        self.assertIn("are not the second build's in CI's run", why)
+        ok, why = self.result(self.commit, ci_built=clean)
+        self.assertIsNone(ok, "the same bytes: only the crate's archive is not there yet")
+        self.assertIn("not in", why)
+
+    def test_without_cis_builds_clean_artifacts_stay_open(self):
+        (self.repo / "dist").mkdir()
+        (self.repo / "dist" / f"b3sum-v0.3.0+{self.code}-x86_64-unknown-linux-gnu").write_bytes(f"b3sums 0.3.0+{self.code}\0".encode())
+        crate = io.BytesIO()
+        with tarfile.open(fileobj=crate, mode="w:gz") as archive:
+            for name, data in ((".cargo_vcs_info.json", json.dumps({"git": {"sha1": self.commit}, "path_in_vcs": ""}).encode()),
+                               ("Cargo.toml.orig", (self.repo / "Cargo.toml").read_bytes()), ("Cargo.toml", b"cargo's")):
+                info = tarfile.TarInfo(f"top-crate-0.3.0+{self.code}/{name}")
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+        (self.repo / "dist" / f"top-crate-0.3.0+{self.code}.crate").write_bytes(crate.getvalue())
+        ok, why = self.result(self.commit)
+        self.assertIsNone(ok)
+        self.assertIn("CI's builds of b3sum, which each program must equal byte for byte, are not there yet", why)
+        ok, why = self.result(self.commit, ci_built=f"b3sums 0.3.0+{self.code}\0".encode())
+        self.assertIs(ok, True, why)
 
 
 class PreviousRelease(unittest.TestCase):

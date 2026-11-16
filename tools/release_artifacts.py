@@ -4,6 +4,8 @@
     python3 tools/release_artifacts.py TAG FILE...       artifacts on disk
     python3 tools/release_artifacts.py TAG --published   what users download: the GitHub
                                                          release's assets, crates.io's packages
+    ... --rebuilt DIR    each b3sum program is also, byte for byte, the build of it in DIR
+    ... --commit COMMIT  the version commit, where its tag is not made yet
 
 TAG is a release's tag, vX.Y.Z+<code commit>: it names the version commit
 (tools/gen-ver.py), whose parent is the code commit. Run this from a clone
@@ -23,6 +25,16 @@ What makes an artifact clean, by its kind:
   machine is checked without running it. This is the build's own word:
   it catches a mistake, as 0.9.0's was, and not a forgery.
 
+  A b3sum program, with --rebuilt DIR: it is also the same bytes as a
+  second build of the version commit, made by tools/b3sum-release.sh on
+  another machine and put in DIR under the same name. That script's
+  build is a function of the commit and the toolchain it names, so two
+  honest builds agree; a program that differs from yours was not built
+  from the commit, whatever it says of itself. Before a release the two
+  builders are our machine and GitHub's (tools/release-check.py); after
+  it, the `release artifacts` workflow rebuilds what was published, and
+  so can anyone.
+
   A .crate: Cargo's record in it (.cargo_vcs_info.json) names the version
   commit and no dirty tree, and every file in it is that commit's file,
   byte for byte. Three files are Cargo's own and are not compared:
@@ -37,6 +49,7 @@ this check's control: `release_artifacts.py v0.9.0+73ee859e... --published`
 fails on them and passes the release's library and its four crates.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -243,12 +256,14 @@ def published(release):
         except urllib.error.HTTPError as e:
             if e.code not in (403, 404):
                 raise
+            e.close()
             yield f"crates.io: {name}", name, None
     try:
         listing = json.loads(fetch(f"https://api.github.com/repos/{REPO}/releases/tags/{urllib.parse.quote(release.tag)}"))
     except urllib.error.HTTPError as e:
         if e.code != 404:
             raise
+        e.close()
         yield f"the GitHub release {release.tag}", release.tag, None
         return
     names = [asset["name"] for asset in listing["assets"]]
@@ -259,45 +274,69 @@ def published(release):
         yield f"the GitHub release: {missing}", missing, None
 
 
-def check(items, release, out=None):
+def rebuilt_problems(name, data, rebuilt):
+    """Why the b3sum program `name` is not the second build of it in the
+    folder `rebuilt`: nothing where the two are the same bytes."""
+    path = os.path.join(rebuilt, name)
+    if not os.path.isfile(path):
+        return [f"no second build of it in {rebuilt} to compare with (sh tools/b3sum-release.sh at the version commit, on another machine)"]
+    other = read(path)
+    if other == data:
+        return []
+    digests = [hashlib.sha256(d).hexdigest() for d in (data, other)]
+    return [f"its bytes (SHA-256 {digests[0]}) are not the second build's in {rebuilt} (SHA-256 {digests[1]}): one of the two was not built from the version commit by tools/b3sum-release.sh"]
+
+
+def check(items, release, out=None, rebuilt=None):
     """Print a line for each artifact (more for one with several
-    problems); how many are not clean or not there."""
+    problems); how many are not clean or not there. With `rebuilt`, a
+    folder, each b3sum program is also the second build of it there."""
     bad = 0
     for label, name, data in items:
         if data is None:
             lines = [f"MISSING    {label}"]
         else:
-            lines = [f"NOT CLEAN  {label}: {problem}" for problem in problems(name, data, release)]
+            found = problems(name, data, release)
+            if rebuilt is not None and name.startswith("b3sum-"):
+                found = found + rebuilt_problems(name, data, rebuilt)
+            lines = [f"NOT CLEAN  {label}: {problem}" for problem in found]
         bad += bool(lines)
         print("\n".join(lines or [f"clean      {label}"]), file=out or sys.stdout)
     return bad
 
 
-def directory(path, release):
+def directory(path, release, rebuilt=None):
     """A release's artifacts gathered in the folder `path` before anything
     is published (the files there that carry its version): (True, [])
     where every one a release has is there and each is clean; (False, the
-    lines of those that are not clean); (None, the names not there yet)."""
+    lines of those that are not clean); (None, the names not there yet).
+    `rebuilt`: as check's."""
     names = sorted(n for n in os.listdir(path) if release.version in n and not is_digest(n)) if os.path.isdir(path) else []
     report = io.StringIO()
-    if check(((n, n, read(os.path.join(path, n))) for n in names), release, out=report):
+    if check(((n, n, read(os.path.join(path, n))) for n in names), release, out=report, rebuilt=rebuilt):
         return False, [line for line in report.getvalue().splitlines() if not line.startswith("clean")]
     missing = [n for n in expected(release) if n not in names]
     return (None, missing) if missing else (True, [])
 
 
 def main(argv):
+    argv, options = list(argv), {}
+    for option in ("--rebuilt", "--commit"):
+        if option in argv[:-1]:
+            at = argv.index(option)
+            options[option] = argv[at + 1]
+            del argv[at : at + 2]
     paths = [path for path in argv[1:] if not is_digest(path)]
-    if not paths or argv[0].startswith("-"):
+    if not paths or argv[0].startswith("-") or any(path.startswith("--") for path in paths if path != "--published"):
         print(__doc__.split("\n\n")[1], file=sys.stderr)
         sys.exit(2)
     try:
-        release = Release(argv[0])
+        release = Release(argv[0], commit=options.get("--commit"))
         if paths == ["--published"]:
             items = published(release)
         else:
             items = ((path, os.path.basename(path), read(path)) for path in paths)
-        bad = check(items, release)
+        bad = check(items, release, rebuilt=options.get("--rebuilt"))
     except NotARelease as e:
         sys.exit(f"release_artifacts: {e}")
     print(f"release_artifacts: {release.tag} is commit {release.commit}: " + (f"{bad} artifacts are not clean builds of it, or are missing" if bad else "every artifact is a clean build of it"))

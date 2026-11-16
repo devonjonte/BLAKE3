@@ -3,7 +3,10 @@ name: release artifacts
 # What users download for a release is a clean build of the release's
 # version commit: the GitHub release's programs and libraries by the
 # build version they hold, crates.io's packages file by file against the
-# commit (tools/release_artifacts.py). Run when a release is published,
+# commit (tools/release_artifacts.py). And each b3sum program is, byte for
+# byte, what these machines build from the tag (tools/b3sum-release.sh,
+# whose build is reproducible): a program with other code in it fails
+# here whatever it says of itself. Run when a release is published,
 # and by hand for any release's tag. 0.9.0's two b3sum programs say
 # "dirty" (BLAKE3 #435): dispatched with its tag, this fails on them.
 on:
@@ -19,17 +22,44 @@ permissions:
   contents: read
 
 jobs:
+  build:
+    name: b3sum, built again from the tag
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.release.tag_name || inputs.tag }}
+        # The version commit and its parent, which it names.
+        fetch-depth: 2
+    - run: docker run --rm -v "$PWD":/src -w /src ubuntu:26.04 sh tools/b3sum-release-container.sh
+    - uses: actions/upload-artifact@v4
+      with:
+        name: b3sum-${{ runner.arch }}
+        path: dist/
+
   clean:
     name: every published artifact is a clean build of the version commit
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@v4
       with:
+        ref: ${{ github.event.release.tag_name || inputs.tag }}
         # The tag and its commit's files, to compare the crates with.
         fetch-depth: 0
-    - name: tools/release_artifacts.py TAG --published
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: b3sum-*
+        path: rebuilt
+        merge-multiple: true
+    - name: tools/release_artifacts.py TAG --published --rebuilt rebuilt
       env:
         TAG: ${{ github.event.release.tag_name || inputs.tag }}
         GITHUB_TOKEN: ${{ github.token }}
-      run: python3 tools/release_artifacts.py "$TAG" --published
+      run: python3 tools/release_artifacts.py "$TAG" --published --rebuilt rebuilt
