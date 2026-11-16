@@ -36,7 +36,9 @@ On Linux the test runner (test-runner) sees it while nextest lists the
 binaries, and its first test stops at once, so it costs a build and no
 test. It is a survivor of its own kind, "same code": --write gives its
 row the reason SAME_REASON, and a run fails (NO LONGER SAME CODE) on a
-row with that reason whose mutant now builds to other code. A survivor
+row with that reason whose mutant now builds to other code. A change's
+check (--since) names a new one (SAME CODE HERE) and does not fail on it:
+no test on this machine could catch it, and the whole run lists it. A survivor
 whose tested build hashes otherwise gets a second look (release_same.py):
 built as a release build with the lines it deletes left blank, it may hash
 alike, since a deleted line moves every later panic's location and the
@@ -1236,16 +1238,25 @@ def main():
                                                                    | {k for k in timed if timed[k] > tknown.get(k, (0, ""))[0]}))
         new = {k: n for k, n in found.items() if n > known.get(k, (0, ""))[0]}
         new_timed = {k: n for k, n in timed.items() if n > tknown.get(k, (0, ""))[0]}
+        # A name all of whose places build to the same code changes nothing
+        # this machine runs, so no test here could catch it and no row of
+        # this list adds to what is known: the change does not wait for
+        # one. It is named, and a whole run with --write gives it its row
+        # (SAME_REASON, or SAME_RELEASE_REASON). Until November 16, 2026 it
+        # failed the change's check: a 20-line function for one
+        # architecture cost 11 rows by hand on another before it could land.
+        same_here = {k for k, n in new.items() if SAME["run"][k] == n}
         for k, n in sorted(new.items()):
-            # A name all of whose places build to the same code gets that
-            # row's reason (SAME_REASON, or SAME_RELEASE_REASON), as --write
-            # gives it in a whole run.
-            same = " same code" + (", in a release build" if RELEASE_SAME["run"][k] else "") if SAME["run"][k] == n else ""
-            print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}{';' + same if same else ''}): {k}")
+            if k in same_here:
+                print(f"SAME CODE HERE ({n - known.get(k, (0, ''))[0]}{', in a release build' if RELEASE_SAME['run'][k] else ''}; no row asked of a change): {k}")
+            else:
+                print(f"NEW SURVIVOR ({n - known.get(k, (0, ''))[0]}): {k}")
+        new = {k: n for k, n in new.items() if k not in same_here}
         for k, n in sorted(new_timed.items()):
             print(f"NEW TIME-OUT ({n - tknown.get(k, (0, ''))[0]}): {k}")
         print(f"mutants: the change since {since}: {sum(1 for f in functions.values() for _ in f)} mutants, "
               + ("no new survivor" if not new else f"{len(new)} names with a new survivor")
+              + ("" if not same_here else f", {len(same_here)} names that build to the same code here (another platform's check judges them)")
               + ("" if not new_timed else f", {len(new_timed)} names with a new time-out (no verdict on them)"))
         budget(started)
         sys.exit(1 if new else 2 if new_timed else 0)
