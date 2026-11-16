@@ -340,12 +340,34 @@ pub(crate) fn hash_path_hash(args: &Args, path: &Path) -> anyhow::Result<blake3:
         if args.keyed() {
             bail!("Cannot open `-` in keyed mode");
         }
+        // `b3sum < file`: a file, hashed as a file named is.
+        #[cfg(unix)]
+        if let Some(file) = stdin_file() {
+            return hash_open_file(args, file, Path::new("/dev/stdin"));
+        }
         let mut hasher = args.base_hasher.clone();
         update_from(&mut hasher, io::stdin())?;
         return Ok(hasher.finalize());
     }
+    hash_open_file(args, File::open(path)?, path)
+}
 
-    let mut file = File::open(path)?;
+/// Standard input as a file, where it is a regular file read from its
+/// start (`b3sum < file`): the same file, its position shared. A pipe, a
+/// terminal, or a file some reader has already advanced is read as a
+/// stream, from where it stands.
+#[cfg(unix)]
+fn stdin_file() -> Option<File> {
+    use std::os::fd::AsFd;
+    let stdin = io::stdin();
+    let file = File::from(stdin.as_fd().try_clone_to_owned().ok()?);
+    let from_start = io::Seek::stream_position(&mut &file).ok()? == 0;
+    (file.metadata().ok()?.is_file() && from_start).then_some(file)
+}
+
+/// [`hash_path_hash`] for a file opened: `path` names it for a direct
+/// read, which opens it again.
+fn hash_open_file(args: &Args, mut file: File, path: &Path) -> anyhow::Result<blake3::Hash> {
     if let Ok(meta) = file.metadata()
         && meta.is_file()
     {

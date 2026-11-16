@@ -886,3 +886,32 @@ fn test_outboard_files_are_bao_trees() {
         assert!(!result.status.success(), "--outboard with {refused:?}");
     }
 }
+
+/// `b3sum < file` hashes the file as `b3sum file` does, at every size
+/// class (a stack buffer's, a map's, a direct read's where the file is
+/// cold), and a file whose reader has moved on is hashed from where it
+/// stands.
+#[test]
+#[cfg(unix)]
+fn test_stdin_from_a_file_is_hashed_as_the_file() {
+    use std::io::{Seek, SeekFrom};
+    blake3::initialize();
+    let dir = tempfile::tempdir().unwrap();
+    for len in [0usize, 1, 4096, 65_536, 600_000, 5_000_000] {
+        let data: Vec<u8> = (0..len).map(|i| (i.wrapping_mul(31) ^ (i >> 7)) as u8).collect();
+        let path = dir.path().join(format!("in-{len}"));
+        fs::write(&path, &data).unwrap();
+        let run = |file: fs::File| {
+            let out = std::process::Command::new(b3sum_exe()).stdin(file).output().unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let whole = run(fs::File::open(&path).unwrap());
+        assert_eq!(whole, format!("{}  -\n", blake3::convenience::hash(&data).to_hex()), "len={len}");
+        if len > 100 {
+            let mut file = fs::File::open(&path).unwrap();
+            file.seek(SeekFrom::Start(100)).unwrap();
+            assert_eq!(run(file), format!("{}  -\n", blake3::convenience::hash(&data[100..]).to_hex()), "len={len}, from byte 100");
+        }
+    }
+}
