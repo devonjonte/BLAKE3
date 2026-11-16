@@ -858,8 +858,12 @@ pub(crate) mod places {
     /// after each round whose trial changed nothing, up to ROUND <<
     /// LONGEST: where the other reach is six times slower, a trial in
     /// every 16 jobs doubled the thread's mean time, and in every 256 it
-    /// adds a tenth. A round whose trial wins is followed by a round of
-    /// ROUND again, the other reach's.
+    /// added a tenth. So a trial also ends at its first measured job
+    /// that is hopeless (HOPELESS), and rounds whose trials end so grow
+    /// on, up to ROUND << HOPELESS_LONGEST: two such jobs in 4096 add a
+    /// four-hundredth. A round whose
+    /// trial wins is followed by a round of ROUND again, the other
+    /// reach's.
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
     pub(crate) struct Learned {
         /// The next job's number: 0 to 2 TRIAL - 1 for the first trials,
@@ -883,6 +887,17 @@ pub(crate) mod places {
     pub(crate) const ROUND: u16 = 16;
     /// The longest round is ROUND << LONGEST jobs: 256.
     pub(crate) const LONGEST: u8 = 4;
+    /// A trial's measured job more than this many times as slow as the
+    /// round's reach ends the trial. Without it a trial was TRIAL such jobs: on
+    /// 2x EPYC 7443 a 64 MiB message lent, where the caller's place alone
+    /// is several times slower, read 7 to 11% slower than 0.8 (bench-hashes,
+    /// 64 pairs), the tenth the rounds' doc above names.
+    pub(crate) const HOPELESS: u32 = 3;
+    /// The longest round after a hopeless trial is ROUND <<
+    /// HOPELESS_LONGEST jobs: 4096. Ending the trial early left two jobs
+    /// in 256 at several times the time: the same cell read 6 to 7%
+    /// slower than 0.8 still.
+    pub(crate) const HOPELESS_LONGEST: u8 = 8;
 
     impl Learned {
         fn faster(&self) -> Reach {
@@ -924,14 +939,27 @@ pub(crate) mod places {
             // jobs before it add is forgotten at that job, before the
             // rates are next compared, at a round's end.)
             let (reach, first) = self.stands();
+            // A round's trial ends at a hopeless job: a measured one (not
+            // the trial's first, which pays for the other reach's
+            // leavings) more than HOPELESS times as slow as the round's
+            // reach. The trial is lost, and its other jobs are not spent
+            // on learning it again.
+            // (The first trials' jobs stand further than that from the
+            // first round's end.)
+            let measured = self.round_end() - self.job < MEASURED;
             let kept = &mut self.rate[reach as usize];
             *kept = if first { rate } else { rate.min(*kept) };
+            let hopeless = measured && rate / HOPELESS > self.rate[self.round.unwrap_or(Reach::All) as usize];
+            if hopeless {
+                self.job = self.round_end();
+            }
             if self.job == 2 * TRIAL - 1 {
                 // The first trials are over: the first round.
                 (self.job, self.round) = (2 * TRIAL, Some(self.faster()));
             } else if self.job == self.round_end() {
                 let faster = Some(self.faster());
-                self.longer = if faster == self.round { (self.longer + 1).min(LONGEST) } else { 0 };
+                let longest = if hopeless { HOPELESS_LONGEST } else { LONGEST };
+                self.longer = if faster == self.round { (self.longer + 1).min(longest) } else { 0 };
                 (self.job, self.round) = (2 * TRIAL, faster);
             } else {
                 self.job += 1;
@@ -1445,7 +1473,7 @@ pub(crate) mod places {
                     assert!(WAKES_WANTED.with(|w| w.get()).unwrap() <= near, "a near job wakes its place's workers at most");
                 }
             }
-            assert!(nears >= TRIAL as usize, "the first trials try near");
+            assert!(nears >= 2, "a trial tries near: two jobs at the least, where the second finds it hopeless");
         }
 
         /// A machine of `sockets` sockets, each of `caches` caches of
@@ -1494,41 +1522,69 @@ pub(crate) mod places {
                 last = Some(reach);
                 reach
             };
-            // Near is three times as fast.
-            let first: Vec<Reach> = (0..2 * TRIAL).map(|_| run(&mut l, 100_000, 300_000)).collect();
+            // Near is nearly twice as fast (all is not hopeless, a job
+            // half as slow again included).
+            let first: Vec<Reach> = (0..2 * TRIAL).map(|_| run(&mut l, 100_000, 190_000)).collect();
             assert_eq!(first[..TRIAL as usize], [Reach::All; TRIAL as usize]);
             assert_eq!(first[TRIAL as usize..], [Reach::Near; TRIAL as usize]);
             // Nanoseconds a KiB, the fastest of each trial's measured jobs.
-            assert_eq!(l.rate, [292, 97]);
+            assert_eq!(l.rate, [185, 97]);
             // Rounds of 16, 32, 64, 128, 256 and 256 jobs.
             for round in [16, 32, 64, 128, 256, 256] {
                 for job in 0..round {
                     let want = if job < round - TRIAL { Reach::Near } else { Reach::All };
-                    assert_eq!(run(&mut l, 100_000, 300_000), want, "a round of {round}, job {job}");
+                    assert_eq!(run(&mut l, 100_000, 190_000), want, "a round of {round}, job {job}");
                 }
-                assert_eq!(l.rate, [292, 97], "the fastest of the measured jobs, each round");
+                assert_eq!(l.rate, [185, 97], "the fastest of the measured jobs, each round");
             }
             // Near's rate is measured anew each round, by its last
             // MEASURED jobs before the trial: a round of slower near jobs
             // raises it (and all's trial, slower still, changes nothing).
             for _ in 0..256 {
-                run(&mut l, 200_000, 300_000);
+                run(&mut l, 150_000, 190_000);
             }
-            assert_eq!(l.rate, [292, 195]);
+            assert_eq!(l.rate, [185, 146]);
             // Now all is the faster by far: this round (256 jobs) is still
             // near's, its trial finds all at 9 a KiB, and the next round is
-            // all's, of 16 jobs, then 32.
+            // all's, of 16 jobs, then 32. Near is now hopeless (ten times
+            // as slow): its trial ends at its first measured job, the
+            // second, and the round with it.
             for job in 0..256 {
                 let want = if job < 256 - TRIAL { Reach::Near } else { Reach::All };
                 assert_eq!(run(&mut l, 100_000, 10_000), want, "job {job}");
             }
             assert_eq!(l.rate, [9, 97]);
             for round in [16, 32] {
-                for job in 0..round {
+                for job in 0..round - TRIAL + 2 {
                     let want = if job < round - TRIAL { Reach::All } else { Reach::Near };
                     assert_eq!(run(&mut l, 100_000, 10_000), want, "a round of {round}, job {job}");
                 }
-                assert_eq!(l.rate, [9, 97]);
+                // Near's one measured job: steady, or half as slow again.
+                assert!(l.rate == [9, 97] || l.rate == [9, 146], "{:?}", l.rate);
+            }
+            // A trial twice as slow is not hopeless (nor is its job half
+            // as slow again) and runs whole; its first job, ten times as
+            // slow, ends nothing.
+            for job in 0..64 {
+                let want = if job < 64 - TRIAL { Reach::All } else { Reach::Near };
+                assert_eq!(run(&mut l, 19_000, 10_000), want, "a round of 64, job {job}");
+            }
+            assert_eq!(l.rate, [9, 18]);
+            // Hopeless again, round after round: the rounds grow on past
+            // 256 jobs, to 4096 and no further, each trial two jobs.
+            for round in [128, 256, 512, 1024, 2048, 4096, 4096] {
+                for job in 0..round - TRIAL + 2 {
+                    let want = if job < round - TRIAL { Reach::All } else { Reach::Near };
+                    assert_eq!(run(&mut l, 100_000, 10_000), want, "a round of {round}, job {job}");
+                }
+            }
+            // A trial that loses without being hopeless runs whole, and
+            // the round after it is the longest of such rounds, 256.
+            for round in [4096, 256, 256] {
+                for job in 0..round {
+                    let want = if job < round - TRIAL { Reach::All } else { Reach::Near };
+                    assert_eq!(run(&mut l, 19_000, 10_000), want, "a round of {round}, job {job}");
+                }
             }
             // The rates do not wrap: the longest job, the shortest length.
             let mut l = Learned::default();
@@ -1587,7 +1643,7 @@ pub(crate) mod places {
             // The first of the measured forgets the old rate: a fast job
             // in the first trial is forgotten once the round's four are
             // measured, and a fast job in the round's four once the next
-            // round's are (32 jobs: its reach's four are 26 + 23 to 26).
+            // round's are (32 jobs: its reach's four are its jobs 23 to 26).
             assert_eq!(rates(16, 2), [1, 1024]);
             assert_eq!(rates(17, 2), [1, 1024], "job 16 is not measured");
             assert_eq!(rates(18, 2), [1024, 1024], "job 17 is the first of the round's four");
@@ -1614,8 +1670,11 @@ pub(crate) mod places {
             };
             assert_eq!(rates_near(22), [512, 10]);
             assert_eq!(rates_near(23), [1024, 10]);
-            assert_eq!(rates(26 + 23, 18), [1, 1024]);
-            assert_eq!(rates(26 + 24, 18), [1024, 1024]);
+            // (That round's trial is hopeless beside the fast job's rate,
+            // and ends at its first measured job, 22: the next round
+            // starts at job 23.)
+            assert_eq!(rates(23 + 23, 18), [1, 1024]);
+            assert_eq!(rates(23 + 24, 18), [1024, 1024]);
             // A fast job in near's trial makes the next round near's, of
             // 16 jobs again, whose own four (26 + 7 to 10) forget it.
             assert_eq!(rates(26 + 7, 23), [1024, 1]);
