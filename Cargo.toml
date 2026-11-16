@@ -4,7 +4,7 @@ name = "blake3-servil-core"
 # tools/gen-ver.py sets X.Y.Z+<commit> here and tags vX.Y.Z+<commit>.
 version = "0.9.0+dev"
 authors = ["Jack O'Connor <oconnor663@gmail.com>", "Samuel Neves", "John Servil"]
-description = "the BLAKE3 hash function, with SME2 and integer + NEON kernels for AArch64 and a shared thread pool"
+description = "the BLAKE3 hash function, on one thread: proved SME2 and integer + NEON kernels for AArch64, and x86-64 kernels"
 repository = "https://github.com/servil-software-factory/BLAKE3"
 license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
 readme = "README.md"

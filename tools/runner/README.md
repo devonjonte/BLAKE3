@@ -1,6 +1,6 @@
 # Mac benchmark runner
 
-`runner.py` runs benchmark jobs on the Mac as the hidden standard account
+`runner.py` runs jobs on a Mac as the hidden standard account
 `benchrunner`, with code from GitHub at the commits each job names.
 Jobs and results pass through an *exchange*, a folder holding `jobs/`
 and `results/`. The team's exchange is the Git repository
@@ -10,9 +10,9 @@ it, claims it by pushing `results/<job>.<time>-<machine>/claimed.json`,
 runs it, and pushes the results' text (`verdict.json`, `runner.log`,
 samples, reports). Several runners may share one exchange; the claim
 makes sure a job runs once, and the folder's name says which machine ran
-it (results from different machines never compare). A private exchange
-is a plain folder, `runner/` in a checkout (out of git by
-`.git/info/exclude`). A job's files are written on the runner's own disk
+it (results from different machines never compare). The team runs two
+Mac Mini M6s: one takes timing jobs and nothing else, the other the
+suites and the mutants. A private exchange is any plain folder. A job's files are written on the runner's own disk
 and copied into the exchange when the job ends, so a folder served by
 another process (a mount) costs that process nothing while a job times. Operator notes are in the private repository
 servil-software-factory/ops. The runner keeps its clones of BLAKE3-Servil and of

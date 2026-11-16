@@ -16,9 +16,11 @@ and the rest timed out or have no verdict.
   Pull-request runs check a synthetic merge by default, not the head SHA
   GitHub associates with the run, so they are not release evidence.
 - Long proofs: the commit's GitHub status "long proofs" (long-proofs.sh).
-- Mac check: runner/results/*/verdict.json whose job names this commit as
-  new_commit and the previous release as old_commit (a "check" job with
-  "cells": "all"), run on AC power from start to end (its verdict's "power
+- Mac check: results/*/verdict.json, in a clone of the Mac runners'
+  exchange (servil-software-factory/mac-runner; $MAC_RUNNER, or
+  mac-runner beside the main checkout; pull it first), whose job names
+  this commit as new_commit and the previous release as old_commit (a
+  "check" job with "cells": "all"), run on AC power from start to end (its verdict's "power
   at start" and "power at end"); on battery it is NO VERDICT.
 - The logs, each named for the commit it ran on (C: the commit's first 12
   hex digits), so an earlier commit's log cannot stand in for it:
@@ -62,6 +64,8 @@ ROOT = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=Tr
 # night's logs, for a worktree too.
 MAIN = subprocess.run(["git", "-C", ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir"], capture_output=True, text=True, check=True).stdout.strip()
 MAIN = os.path.dirname(MAIN) if MAIN.endswith("/.git") else MAIN
+# A clone of the Mac runners' exchange: its jobs/ and results/.
+EXCHANGE = os.environ.get("MAC_RUNNER") or os.path.join(os.path.dirname(MAIN), "mac-runner")
 
 
 # A step's two outcomes besides PASS, FAIL and OPEN.
@@ -207,9 +211,9 @@ def main():
         step("long proofs", TIMED_OUT, str(e))
 
     mac, mac_power = None, None
-    for verdict in sorted(glob.glob(os.path.join(MAIN, "runner/results/*/verdict.json"))):
+    for verdict in sorted(glob.glob(os.path.join(EXCHANGE, "results/*/verdict.json"))):
         v = json.loads(Path(verdict).read_text())
-        job = os.path.join(MAIN, "runner/jobs", v["job"])
+        job = os.path.join(EXCHANGE, "jobs", v["job"])
         if not os.path.exists(job):
             continue
         j = json.loads(Path(job).read_text())
@@ -227,7 +231,7 @@ def main():
     # pass nor a regression.
     step("Mac check against the previous release",
          None if mac is None else TIMED_OUT if mac == "timed out" else NO_VERDICT if mac == "no verdict" or mac_power else mac == "no regression",
-         f"a check job (cells all) with old_commit {previous or '<the main line before this release>'} and new_commit {commit[:10]}, and old_bench_commit when the old side predates the bench's calls"
+         f"in {EXCHANGE} (pulled), a check job (cells all) with old_commit {previous or '<the main line before this release>'} and new_commit {commit[:10]}, and old_bench_commit when the old side predates the bench's calls"
          + (f" (the last one: {mac})" if mac in ("timed out", "no verdict") else "")
          + (f" (the last one ran off AC power: {mac_power}; run it again plugged in)" if mac_power else ""))
 

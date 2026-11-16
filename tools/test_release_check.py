@@ -94,14 +94,14 @@ class ReleaseEvidence(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "runner/jobs").mkdir(parents=True)
-            (root / "runner/results/1").mkdir(parents=True)
+            (root / "mac-runner/jobs").mkdir(parents=True)
+            (root / "mac-runner/results/1").mkdir(parents=True)
             task = {"type": kind, "old_commit": old, "new_commit": new}
             if cells is not None:
                 task["cells"] = cells
-            (root / "runner/jobs/job.json").write_text(json.dumps(task))
+            (root / "mac-runner/jobs/job.json").write_text(json.dumps(task))
             readings = {k: v for k, v in zip(("power at start", "power at end"), power) if v is not None}
-            (root / "runner/results/1/verdict.json").write_text(json.dumps({"job": "job.json", "status": verdict, **readings}))
+            (root / "mac-runner/results/1/verdict.json").write_text(json.dumps({"job": "job.json", "status": verdict, **readings}))
             logs = root / "tmp/night"
             logs.mkdir(parents=True)
             candidate = (git_override or git)("rev-parse", "candidate")[:12]
@@ -116,7 +116,7 @@ class ReleaseEvidence(unittest.TestCase):
                         + "mutants: 2 crates took 99 s in all\n")
                 (logs / f"mutants-{candidate}.log").write_text(text.replace(HEAD, identity))
             output = io.StringIO()
-            with patch.object(check, "MAIN", tmp), patch.object(check, "git", git_override or git), \
+            with patch.object(check, "MAIN", tmp), patch.object(check, "EXCHANGE", str(root / "mac-runner")), patch.object(check, "git", git_override or git), \
                  patch.object(check, "github", github), \
                  patch("sys.argv", ["release-check.py", "candidate"]), contextlib.redirect_stdout(output):
                 with self.assertRaises(SystemExit) as caught:
