@@ -70,7 +70,7 @@ class CI(unittest.TestCase):
 
 
 class ReleaseEvidence(unittest.TestCase):
-    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch", mutation_log=MUTATION_OK, core_log=MUTATION_OK, power=("AC Power, 100%", "AC Power, 100%")):
+    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch", mutation_log=MUTATION_OK, core_log=MUTATION_OK, power=("AC Power, 100%", "AC Power, 100%"), artifacts=(True, "")):
         jobs = [job(), job()] if ci_jobs is None else ci_jobs
         def git(*args):
             if args[0] == "rev-parse":
@@ -117,7 +117,7 @@ class ReleaseEvidence(unittest.TestCase):
                 (logs / f"mutants-{candidate}.log").write_text(text.replace(HEAD, identity))
             output = io.StringIO()
             with patch.object(check, "MAIN", tmp), patch.object(check, "EXCHANGE", str(root / "mac-runner")), patch.object(check, "git", git_override or git), \
-                 patch.object(check, "github", github), \
+                 patch.object(check, "github", github), patch.object(check, "artifacts_result", lambda commit: artifacts), \
                  patch("sys.argv", ["release-check.py", "candidate"]), contextlib.redirect_stdout(output):
                 with self.assertRaises(SystemExit) as caught:
                     check.main()
@@ -125,6 +125,17 @@ class ReleaseEvidence(unittest.TestCase):
 
     def test_complete_fixture_passes(self):
         self.assertEqual(self.run_gate()[0], 0)
+
+    def test_artifacts_not_gathered_yet_are_open(self):
+        code, output = self.run_gate(artifacts=(None, "not in dist/ yet: b3sum-v0.3.1+c-x86_64-unknown-linux-gnu"))
+        self.assertEqual(code, 1)
+        self.assertIn("OPEN  release artifacts, each a clean build of this commit: not in dist/ yet: b3sum-v0.3.1+c-x86_64-unknown-linux-gnu", output)
+
+    def test_an_artifact_that_is_not_clean_fails(self):
+        # 0.9.0's b3sum programs said so, and no step looked (BLAKE3 #435).
+        code, output = self.run_gate(artifacts=(False, "NOT CLEAN  b3sum-v0.9.0+c-x86_64-unknown-linux-gnu: its build version is 0.9.0+c.d.dirty.e"))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  release artifacts, each a clean build of this commit: NOT CLEAN  b3sum-v0.9.0+c-x86_64-unknown-linux-gnu", output)
 
     def test_pr_merge_ci_not_pass(self):
         code, output = self.run_gate(ci_event="pull_request")
@@ -221,6 +232,57 @@ class ReleaseEvidence(unittest.TestCase):
                 code, output = self.run_gate(verdict=verdict)
                 self.assertEqual(code, 2)
                 self.assertIn(label + "  Mac check", output)
+
+
+class Artifacts(unittest.TestCase):
+    """The artifacts step on a real history: what it asks of the commit
+    and of this checkout's dist/ (the artifacts' own checks have
+    tools/test_release_artifacts.py)."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.repo = Path(temporary.name)
+        self.git("init", "-q", "--initial-branch=main")
+        for key, value in [("user.name", "A Test"), ("user.email", "test@example.invalid"), ("commit.gpgsign", "false"), ("core.hooksPath", str(self.repo / "no-hooks"))]:
+            self.git("config", key, value)
+        (self.repo / "Cargo.toml").write_text('[package]\nname = "top-crate"\nversion = "0.3.0+dev"\n')
+        self.git("add", ".")
+        self.git("commit", "-qm", "the code")
+        self.code = self.git("rev-parse", "HEAD")
+        (self.repo / "Cargo.toml").write_text(f'[package]\nname = "top-crate"\nversion = "0.3.0+{self.code}"\n')
+        self.git("commit", "-qam", "the version")
+        self.commit = self.git("rev-parse", "HEAD")
+
+    def git(self, *args):
+        return subprocess.check_output(["git", "-C", str(self.repo), *args], text=True, stderr=subprocess.PIPE).strip()
+
+    def result(self, commit):
+        with patch.object(check, "ROOT", str(self.repo)), patch.object(check, "git", self.git), \
+             patch.object(check.release_artifacts, "CRATE_DIRS", ("",)), patch.object(check.release_artifacts, "B3SUM_TARGETS", ("x86_64-unknown-linux-gnu",)):
+            return check.artifacts_result(commit)
+
+    def test_a_commit_that_is_no_version_commit_fails(self):
+        ok, why = self.result(self.code)
+        self.assertIs(ok, False)
+        self.assertIn("v0.3.0+dev is no release tag", why)
+
+    def test_nothing_gathered_is_open_and_names_what_and_where(self):
+        ok, why = self.result(self.commit)
+        self.assertIsNone(ok)
+        self.assertIn(f"not in {self.repo / 'dist'} yet: b3sum-v0.3.0+{self.code}-x86_64-unknown-linux-gnu, top-crate-0.3.0+{self.code}.crate", why)
+
+    def test_a_dirty_program_in_dist_fails_and_a_clean_one_is_not_enough_alone(self):
+        (self.repo / "dist").mkdir()
+        program = self.repo / "dist" / f"b3sum-v0.3.0+{self.code}-x86_64-unknown-linux-gnu"
+        program.write_bytes(f"b3sums 0.3.0+{self.code}.{self.commit}.dirty".encode())
+        ok, why = self.result(self.commit)
+        self.assertIs(ok, False)
+        self.assertIn("built at the version commit from a dirty tree", why)
+        program.write_bytes(f"b3sums 0.3.0+{self.code}\0".encode())
+        ok, why = self.result(self.commit)
+        self.assertIsNone(ok, "the crate's archive is not there yet")
+        self.assertIn(f"top-crate-0.3.0+{self.code}.crate", why)
 
 
 class PreviousRelease(unittest.TestCase):

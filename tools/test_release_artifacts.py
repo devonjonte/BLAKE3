@@ -1,0 +1,352 @@
+"""Controls for tools/release_artifacts.py: every kind of artifact, clean
+and not, against a Git history made here; what users download, with the
+network's answers as fixtures."""
+import contextlib
+import io
+import json
+import os
+import subprocess
+import tarfile
+import tempfile
+import unittest
+import urllib.error
+from unittest.mock import patch
+
+import release_artifacts as ra
+
+# 0.9.0's two released b3sum programs said this (BLAKE3 #435).
+V090 = "0.9.0+73ee859efce085d28f1c2b22c35a5703403476f7"
+DIRTY_090 = [
+    V090 + ".bf2da8b957f5e0c80babb57952de3e53f95c921a.dirty.347ca7b26fa57c6937e310dd509edd994500c83e",
+    V090 + ".bf2da8b957f5e0c80babb57952de3e53f95c921a.dirty.f42581ee9d779607f10121fa4cf0f6e0f9a95143",
+]
+
+
+def not_found(url):
+    """crates.io's and GitHub's answer for what is not there."""
+    return urllib.error.HTTPError(url, 404, "Not Found", {}, io.BytesIO(b""))
+
+
+def tar_gz(files):
+    """A .tar.gz of `files` (name: bytes), in memory."""
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w:gz") as archive:
+        for name, data in files.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
+    return out.getvalue()
+
+
+class Repository(unittest.TestCase):
+    """A repository with one release: a crate at its top, and one in sub/
+    whose licence is a link and whose readme is the top's, as threads/ has
+    them here."""
+
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.repo = scratch.name
+        self.git("init", "-q", "--initial-branch=main")
+        for key, value in [("user.name", "A Test"), ("user.email", "test@example.invalid"), ("commit.gpgsign", "false"), ("core.hooksPath", os.path.join(self.repo, "no-hooks"))]:
+            self.git("config", key, value)
+        self.write("Cargo.toml", '[package]\nname = "top-crate"\nversion = "0.3.0+dev"\n')
+        self.write("src/lib.rs", "pub fn top() {}\n")
+        self.write("LICENSE", "a licence\n")
+        self.write("README.md", "the readme\n")
+        self.write("sub/Cargo.toml", '[package]\nname = "sub-crate"\nversion = "0.3.0+dev"\nreadme = "../README.md"\n')
+        self.write("sub/src/lib.rs", "pub fn sub() {}\n")
+        os.symlink("../LICENSE", os.path.join(self.repo, "sub/LICENSE"))
+        self.git("add", ".")
+        self.git("commit", "-qm", "the code")
+        self.code = self.git("rev-parse", "HEAD")
+        self.version = "0.3.0+" + self.code
+        for manifest in ("Cargo.toml", "sub/Cargo.toml"):
+            self.write(manifest, self.read(manifest).replace("0.3.0+dev", self.version))
+        self.git("commit", "-qam", "Version " + self.version)
+        self.commit = self.git("rev-parse", "HEAD")
+        self.tag = "v" + self.version
+        self.git("tag", self.tag)
+        self.release = ra.Release(self.tag, self.repo)
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", self.repo, *args], check=True, capture_output=True, text=True).stdout.strip()
+
+    def write(self, path, text):
+        full = os.path.join(self.repo, path)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(text)
+
+    def read(self, path):
+        with open(os.path.join(self.repo, path)) as f:
+            return f.read()
+
+    def crate(self, folder, change=lambda files, record: None):
+        """The .crate Cargo makes of the crate in `folder` at the version
+        commit: its record, its rewriting of the manifest beside the
+        original, a lock, and the files, links followed and the outside
+        readme copied in. `change` edits the files and the record first."""
+        name = "sub-crate" if folder else "top-crate"
+        files = {"Cargo.toml": b"# Cargo's rewriting\n", "Cargo.lock": b"# Cargo's lock\n", "Cargo.toml.orig": self.read(os.path.join(folder, "Cargo.toml")).encode()}
+        files["src/lib.rs"] = self.read(os.path.join(folder, "src/lib.rs")).encode()
+        files["LICENSE"] = b"a licence\n"
+        files["README.md"] = b"the readme\n"
+        record = {"git": {"sha1": self.commit}, "path_in_vcs": folder}
+        change(files, record)
+        if record is not None:
+            files[".cargo_vcs_info.json"] = json.dumps(record).encode()
+        prefix = f"{name}-{self.version}/"
+        return tar_gz({prefix + path: data for path, data in files.items()})
+
+    def program(self, said=""):
+        """A program's bytes, its build version `said` past the release's."""
+        return b"\x7fELF\0\0" + b"b3sums " + self.version.encode() + said.encode() + b"\0more bytes"
+
+
+class Crates(Repository):
+    def test_the_commits_files_are_clean_links_and_an_outside_readme_too(self):
+        for folder in ("", "sub"):
+            self.assertEqual(ra.crate_problems(self.crate(folder), self.release), [], folder)
+
+    def test_a_changed_file_is_named(self):
+        def change(files, record):
+            files["src/lib.rs"] += b"// one more line\n"
+        self.assertEqual(ra.crate_problems(self.crate("sub", change), self.release), ["src/lib.rs differs from the version commit's sub/src/lib.rs"])
+
+    def test_an_added_file_is_named(self):
+        def change(files, record):
+            files["src/extra.rs"] = b"pub fn extra() {}\n"
+        self.assertEqual(ra.crate_problems(self.crate("", change), self.release), ["src/extra.rs is no file of the version commit"])
+
+    def test_a_changed_manifest_is_named_by_its_original(self):
+        def change(files, record):
+            files["Cargo.toml.orig"] += b'[dependencies]\nother = "1"\n'
+        self.assertEqual(ra.crate_problems(self.crate("", change), self.release), ["Cargo.toml.orig differs from the version commit's Cargo.toml"])
+
+    def test_a_changed_licence_behind_the_link_and_a_changed_readme_are_named(self):
+        def change(files, record):
+            files["LICENSE"] = b"another licence\n"
+            files["README.md"] = b"another readme\n"
+        self.assertEqual(
+            ra.crate_problems(self.crate("sub", change), self.release),
+            ["LICENSE differs from the version commit's sub/LICENSE", "README.md differs from the version commit's README.md"],
+        )
+
+    def test_cargos_dirty_mark_and_another_commit_are_named(self):
+        def dirty(files, record):
+            record["git"]["dirty"] = True
+        self.assertEqual(ra.crate_problems(self.crate("", dirty), self.release), ["Cargo packaged it from a dirty tree"])
+
+        def elsewhere(files, record):
+            record["git"]["sha1"] = self.code
+        self.assertEqual(ra.crate_problems(self.crate("", elsewhere), self.release), [f"packaged at commit {self.code}, not the version commit"])
+
+    def test_a_path_out_of_the_repository_is_no_file_of_the_commit(self):
+        def change(files, record):
+            files["../outside.rs"] = b""
+        self.assertEqual(ra.crate_problems(self.crate("", change), self.release), ["../outside.rs is no file of the version commit"])
+        self.assertIsNone(self.release.file("/etc/hostname"))
+
+    def test_a_crate_without_cargos_record_or_original_is_not_clean(self):
+        def no_original(files, record):
+            del files["Cargo.toml.orig"]
+        self.assertEqual(ra.crate_problems(self.crate("", no_original), self.release), ["has no Cargo.toml.orig: not as Cargo packages a crate from a Git checkout"])
+        archive = tar_gz({f"top-crate-{self.version}/src/lib.rs": b"pub fn top() {}\n"})
+        self.assertEqual(ra.crate_problems(archive, self.release), ["has no .cargo_vcs_info.json: not as Cargo packages a crate from a Git checkout"])
+
+
+class Programs(Repository):
+    def test_the_versions_0_9_0s_programs_carried_are_not_clean(self):
+        for said in DIRTY_090:
+            more = ra.said_beyond(b"\0b3sums " + said.encode() + b"\0", V090)
+            self.assertEqual(more, [said[len(V090):]])
+        self.assertEqual(ra.said_beyond(b"b3sums " + V090.encode() + b"\0", V090), [], "the release's version alone")
+        self.assertIsNone(ra.said_beyond(b"b3sums 0.9.0+dev.0123", V090), "no build version of this release")
+
+    def test_a_clean_program(self):
+        self.assertEqual(ra.program_problems(self.program(), self.release), [])
+
+    def test_a_dirty_tree_is_named_with_its_tree(self):
+        tree = "347ca7b26fa57c6937e310dd509edd994500c83e"
+        said = f".{self.commit}.dirty.{tree}"
+        self.assertEqual(
+            ra.program_problems(self.program(said), self.release),
+            [f"its build version is {self.version}{said}: built at the version commit from a dirty tree, files changed or added (its tree: {tree})"],
+        )
+
+    def test_a_dirty_package_and_another_commit_are_named(self):
+        self.assertEqual(
+            ra.program_problems(self.program(f".{self.commit}.dirty"), self.release),
+            [f"its build version is {self.version}.{self.commit}.dirty: built at the version commit from a dirty tree, files changed or added"],
+        )
+        self.assertEqual(
+            ra.program_problems(self.program("." + self.code), self.release),
+            [f"its build version is {self.version}.{self.code}: built at another commit ({self.code[:12]})"],
+        )
+
+    def test_one_dirty_version_among_clean_ones_is_not_clean(self):
+        # A program holds its packages' plain versions beside its build version.
+        data = self.program() + self.program(f".{self.commit}.dirty") + self.program()
+        self.assertEqual(len(ra.program_problems(data, self.release)), 1)
+
+    def test_a_program_of_no_such_release_is_not_clean(self):
+        self.assertEqual(ra.program_problems(b"\x7fELF b3sums 0.2.0", self.release), [f"holds no build version of {self.version}: not a build of this release"])
+
+    def test_an_archives_libraries_are_each_checked(self):
+        clean = tar_gz({"usr/lib/libb3_servil.so.0.3.0": self.program(), "usr/lib/libb3_servil.a": self.program(), "usr/include/b3.h": b"/* no version */"})
+        self.assertEqual(ra.archive_problems(clean, self.release), [])
+        dirty = tar_gz({"usr/lib/libb3_servil.so.0.3.0": self.program(), "usr/lib/libb3_servil.a": self.program(f".{self.commit}.dirty")})
+        self.assertEqual(len(ra.archive_problems(dirty, self.release)), 1)
+        self.assertTrue(ra.archive_problems(dirty, self.release)[0].startswith("usr/lib/libb3_servil.a: its build version is "))
+        self.assertEqual(ra.archive_problems(tar_gz({"usr/include/b3.h": b""}), self.release), ["holds no library (*.so, *.a, *.dylib)"])
+
+    def test_each_kind_goes_to_its_check_and_an_unknown_kind_is_a_problem(self):
+        self.assertEqual(ra.problems(f"b3sum-{self.tag}-x86_64-unknown-linux-gnu", self.program(), self.release), [])
+        self.assertEqual(ra.problems("libb3_servil.0.3.0.dylib", self.program(), self.release), [])
+        self.assertEqual(ra.problems(f"top-crate-{self.version}.crate", self.crate(""), self.release), [])
+        self.assertEqual(ra.problems("lib.tar.gz", tar_gz({"libb3_servil.a": self.program()}), self.release), [])
+        self.assertEqual(len(ra.problems(f"b3sum-{self.tag}-x86_64-unknown-linux-gnu", self.program(".dirty"), self.release)), 1)
+        self.assertEqual(ra.problems("notes.txt", b"", self.release), ["an artifact of a kind this check does not know (a program, a library, a .tar.gz of libraries, a .crate)"])
+
+
+class Releases(Repository):
+    def test_a_tag_that_is_no_version_commits_is_refused(self):
+        self.git("tag", "v0.3.1+" + self.code, self.code)
+        for tag in ("v0.3.1+" + self.code, "v0.3.0", "0.3.0+" + self.code, "v0.4.0+" + "0" * 40):
+            with self.assertRaises(ra.NotARelease, msg=tag):
+                ra.Release(tag, self.repo)
+
+    def test_a_candidate_is_named_by_its_commit_before_its_tag_is_made(self):
+        self.git("tag", "-d", self.tag)
+        self.assertEqual(ra.Release(self.tag, self.repo, self.commit).commit, self.commit)
+        with self.assertRaises(ra.NotARelease):
+            ra.Release(self.tag, self.repo, self.code)
+
+
+@patch.object(ra, "CRATE_DIRS", ("", "sub"))
+@patch.object(ra, "B3SUM_TARGETS", ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"))
+class Gathered(Repository):
+    """A release's artifacts in one folder, before anything is published."""
+
+    def fill(self, folder, programs=("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"), crates=("", "sub"), said=""):
+        for target in programs:
+            with open(os.path.join(folder, f"b3sum-{self.tag}-{target}"), "wb") as f:
+                f.write(self.program(said))
+        for crate in crates:
+            with open(os.path.join(folder, f"{'sub-crate' if crate else 'top-crate'}-{self.version}.crate"), "wb") as f:
+                f.write(self.crate(crate))
+
+    def test_every_artifact_there_and_clean_passes_digest_files_and_other_releases_aside(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.fill(folder)
+            for other in (f"b3sum-{self.tag}-x86_64-unknown-linux-gnu.sha256", f"b3sum-{self.tag}-x86_64-unknown-linux-gnu.b3", "b3sum-v0.2.0+old-x86_64-unknown-linux-gnu"):
+                open(os.path.join(folder, other), "wb").close()
+            self.assertEqual(ra.directory(folder, self.release), (True, []))
+
+    def test_an_artifact_not_there_yet_is_named(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(ra.directory(os.path.join(folder, "none"), self.release)[0], None)
+            self.fill(folder, programs=("x86_64-unknown-linux-gnu",), crates=("",))
+            self.assertEqual(ra.directory(folder, self.release), (None, [f"b3sum-{self.tag}-aarch64-unknown-linux-gnu", f"sub-crate-{self.version}.crate"]))
+
+    def test_one_that_is_not_clean_fails_whatever_else_is_missing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.fill(folder, programs=("x86_64-unknown-linux-gnu",), crates=(), said=f".{self.commit}.dirty")
+            ok, lines = ra.directory(folder, self.release)
+            self.assertIs(ok, False)
+            self.assertEqual(len(lines), 1)
+            self.assertTrue(lines[0].startswith(f"NOT CLEAN  b3sum-{self.tag}-x86_64-unknown-linux-gnu: its build version is "))
+
+
+@patch.object(ra, "CRATE_DIRS", ("", "sub"))
+@patch.object(ra, "B3SUM_TARGETS", ("x86_64-unknown-linux-gnu",))
+class Published(Repository):
+    """What users download, the network's answers given here."""
+
+    def answers(self, assets, crates=("top-crate", "sub-crate")):
+        quoted = self.version.replace("+", "%2B")
+        served = {f"https://static.crates.io/crates/{name}/{name}-{quoted}.crate": self.crate("sub" if name == "sub-crate" else "") for name in crates}
+        listing = {"assets": [{"name": name, "browser_download_url": "https://github.invalid/" + name} for name in assets]}
+        served[f"https://api.github.com/repos/{ra.REPO}/releases/tags/v{quoted}"] = json.dumps(listing).encode()
+        served.update({"https://github.invalid/" + name: data for name, data in assets.items() if data is not None})
+
+        def fetch(url):
+            if url not in served:
+                raise not_found(url)
+            return served[url]
+
+        return fetch
+
+    def run_check(self, fetch):
+        out = io.StringIO()
+        with patch.object(ra, "fetch", fetch):
+            bad = ra.check(ra.published(self.release), self.release, out=out)
+        return bad, out.getvalue().splitlines()
+
+    def test_a_clean_release_passes_and_its_digest_files_are_not_fetched(self):
+        program = f"b3sum-{self.tag}-x86_64-unknown-linux-gnu"
+        # A digest file's download would be a 404 here: it is never asked for.
+        bad, lines = self.run_check(self.answers({program: self.program(), program + ".sha256": None, program + ".b3": None, "lib.tar.gz": tar_gz({"libb3_servil.a": self.program()})}))
+        self.assertEqual(bad, 0, lines)
+        self.assertEqual(len(lines), 4)
+        self.assertTrue(all(line.startswith("clean      ") for line in lines), lines)
+
+    def test_a_dirty_program_fails_and_the_rest_still_pass(self):
+        program = f"b3sum-{self.tag}-x86_64-unknown-linux-gnu"
+        bad, lines = self.run_check(self.answers({program: self.program(f".{self.commit}.dirty.{'1' * 40}")}))
+        self.assertEqual(bad, 1)
+        self.assertEqual([line[:9] for line in lines], ["clean    ", "clean    ", "NOT CLEAN"])
+        self.assertIn(f"the GitHub release: {program}: its build version is", lines[2])
+
+    def test_a_crate_or_a_program_not_published_is_missing(self):
+        bad, lines = self.run_check(self.answers({}, crates=("top-crate",)))
+        self.assertEqual(bad, 2)
+        self.assertEqual(lines[1:], [f"MISSING    crates.io: sub-crate-{self.version}.crate", f"MISSING    the GitHub release: b3sum-{self.tag}-x86_64-unknown-linux-gnu"])
+
+    def test_no_github_release_is_missing(self):
+        def fetch(url):
+            if "api.github.com" in url:
+                raise not_found(url)
+            return self.answers({})(url)
+        bad, lines = self.run_check(fetch)
+        self.assertEqual((bad, lines[-1]), (1, f"MISSING    the GitHub release {self.tag}"))
+
+    def test_an_asset_of_an_unknown_kind_fails(self):
+        program = f"b3sum-{self.tag}-x86_64-unknown-linux-gnu"
+        bad, lines = self.run_check(self.answers({program: self.program(), "installer.sh": b"#!/bin/sh\n"}))
+        self.assertEqual(bad, 1)
+        self.assertIn("installer.sh: an artifact of a kind this check does not know", lines[-1])
+
+
+class CommandLine(Repository):
+    def run_main(self, *argv):
+        out = io.StringIO()
+        with patch.object(ra, "ROOT", self.repo), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            with self.assertRaises(SystemExit) as stopped:
+                ra.main(list(argv))
+        return stopped.exception.code, out.getvalue()
+
+    def test_files_clean_exit_0_not_clean_exit_1_and_digest_files_are_passed_over(self):
+        with tempfile.TemporaryDirectory() as folder:
+            clean, dirty = os.path.join(folder, f"b3sum-{self.tag}-a"), os.path.join(folder, f"b3sum-{self.tag}-b")
+            for path, said in ((clean, ""), (dirty, f".{self.commit}.dirty"), (clean + ".sha256", "")):
+                with open(path, "wb") as f:
+                    f.write(self.program(said))
+            self.assertEqual(self.run_main(self.tag, clean, clean + ".sha256")[0], 0)
+            code, said = self.run_main(self.tag, clean, dirty)
+            self.assertEqual(code, 1)
+            self.assertIn("1 artifacts are not clean builds of it, or are missing", said)
+
+    def test_no_artifact_named_is_a_usage_error(self):
+        self.assertEqual(self.run_main(self.tag)[0], 2)
+        self.assertEqual(self.run_main(self.tag, "x.sha256")[0], 2)
+        self.assertEqual(self.run_main()[0], 2)
+
+    def test_a_tag_that_is_no_releases_stops_saying_so(self):
+        code, _ = self.run_main("v0.3.0", "some-file")
+        self.assertEqual(code, "release_artifacts: v0.3.0 is no release tag (vX.Y.Z+<the code commit's 40 hex digits>)")
+
+
+if __name__ == "__main__":
+    unittest.main()

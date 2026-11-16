@@ -36,8 +36,10 @@ crates.io is official BLAKE3's); the program it installs is `b3sum`, in
 give official BLAKE3's `b3sum`.)
 
 **For packagers:** build the release binary with `sh tools/b3sum-release.sh`
-from a clean checkout of a release tag. On Linux it links statically, as
-above, and it writes the binary's SHA-256 and BLAKE3 digests beside it.
+in a checkout of a release tag: it builds a fresh clone of the tag's
+commit, so nothing else the checkout holds reaches the binary. On Linux
+it links statically, as above, and it writes the binary's SHA-256 and
+BLAKE3 digests beside it.
 
 # Example
 

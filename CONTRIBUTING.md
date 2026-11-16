@@ -358,9 +358,9 @@ lists what it takes and ticks each step:
      (`version/`), `blake3-servil-core` (the repository root), `blake3-servil`
      (`threads/`), then `b3sums` (`b3sum/`; crates.io's `b3sum` is official
      BLAKE3's). The C package has `publish = false` and ships as libraries;
-   - b3sum's binaries, built from a clean tree at the tag on each machine
-     by `sh tools/b3sum-release.sh` (statically linked on Linux), each
-     with its `.sha256` and `.b3`;
+   - b3sum's binaries, built on each machine by `sh tools/b3sum-release.sh`
+     from a fresh clone of the tag's commit (statically linked on Linux),
+     each with its `.sha256` and `.b3`;
    - the C library, staged by `cargo cinstall --release --destdir=STAGE`
      in `capi/`: the static and shared libraries, `b3.h`, and the
      pkg-config file (`capi/README.md`);
@@ -387,6 +387,7 @@ printf '[workspace]\nmembers = ["checkout/version", "checkout", "checkout/thread
 cargo publish --dry-run --manifest-path "$stage/Cargo.toml" \
     --target-dir "$stage/target" \
     -p blake3-servil-version -p blake3-servil-core -p blake3-servil -p b3sums
+mkdir -p dist && cp "$stage"/target/package/*.crate dist/
 echo "Retain the packages' workspace: $stage"
 )
 ```
@@ -398,6 +399,20 @@ archives.
 Append `publish-dry-run: ok` to the commit-named release log only when the
 command succeeds; this is a dry-run, never permission to upload.
 The final publication uses the same source and locked dependency resolution.
+
+### Every artifact is a clean build of the version commit
+
+Before anything is published, the release's artifacts are gathered in the
+version-stamped checkout's `dist/`: the crates' archives (the dry-run
+above copies them) and b3sum from each machine's own `dist/`.
+`tools/release-check.py` passes only when each is a clean build of the
+version commit, by `python3 tools/release_artifacts.py TAG FILE...`: a
+program by the build version it holds, a crate file by file against the
+commit. Once the release is published, the `release artifacts` workflow
+checks what users download the same way, as anyone can:
+`python3 tools/release_artifacts.py TAG --published`. (0.9.0's two b3sum
+binaries were built in checkouts that held untracked files and say
+"dirty", BLAKE3 #435: that command fails on them.)
 
 ## Maintainers' notes
 

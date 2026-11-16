@@ -37,6 +37,13 @@ and the rest timed out or have no verdict.
   - Publish dry run: tmp/night/publish-dry-run-C.log, from the
     packages' dry-run in CONTRIBUTING.md, followed by "publish-dry-run: ok"
     only on success.
+- The release's artifacts, gathered in this checkout's dist/ before any
+  is published: b3sum for each machine (tools/b3sum-release.sh writes it
+  there) and the four crates' archives (the packages' dry-run's, copied
+  there), each a clean build of this commit by tools/release_artifacts.py:
+  the programs by the build version they hold, the crates file by file
+  against the commit. 0.9.0's two b3sum programs were built in checkouts
+  holding untracked files and say "dirty" (BLAKE3 #435); no step looked.
 - The pages: README.md, QUALITY.md, CHANGELOG.md changed since the
   previous release (a release rewrites them for its readers).
 
@@ -58,6 +65,9 @@ import re
 import subprocess
 import sys
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import release_artifacts  # noqa: E402 (beside this file)
 
 ROOT = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip()
 # The main checkout holds the token, the runner's jobs and results, and the
@@ -145,6 +155,24 @@ def mutation_result(path, commit):
     results = [mutation_crate(lines[1:middle], commit), mutation_crate(lines[middle + 1:-1], commit)]
     # A failure stays visible beside an incomplete or undecided run.
     return next((r for r in (False, None, NO_VERDICT) if r in results), True)
+
+
+def artifacts_result(commit):
+    """The release's artifacts in this checkout's dist/, by
+    release_artifacts.directory: True where every one is there and a clean
+    build of `commit`, False where one is not (or `commit` is no version
+    commit), None where some are not there yet; and what to say of it."""
+    version = re.search(r'(?m)^version = "([^"]+)"', git("show", f"{commit}:Cargo.toml")).group(1)
+    try:
+        release = release_artifacts.Release("v" + version, ROOT, commit)
+    except release_artifacts.NotARelease as e:
+        return False, f"{e} (python3 tools/gen-ver.py X.Y.Z makes a version commit)"
+    dist = os.path.join(ROOT, "dist")
+    ok, lines = release_artifacts.directory(dist, release)
+    if ok is None:
+        return None, (f"not in {dist} yet: {', '.join(lines)}. On each machine `sh tools/b3sum-release.sh` writes b3sum to its dist/; "
+                      "the packages' dry-run (CONTRIBUTING.md) leaves the crates' archives in its target/package/. Copy them there")
+    return ok, "; ".join(lines)
 
 
 def ci_result(run):
@@ -243,6 +271,8 @@ def main():
          f"sh tools/check-builds.sh > tmp/night/check-builds-{commit[:12]}.log")
     step("cargo publish --dry-run", log_ends_with(f"tmp/night/publish-dry-run-{commit[:12]}.log", "publish-dry-run: ok"),
          f"the packages' dry-run in CONTRIBUTING.md; save its output to tmp/night/publish-dry-run-{commit[:12]}.log and append 'publish-dry-run: ok' only on success")
+
+    step("release artifacts, each a clean build of this commit", *artifacts_result(commit))
 
     if previous:
         changed = set(git("diff", "--name-only", previous, commit).split())

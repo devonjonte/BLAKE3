@@ -1,0 +1,35 @@
+name: release artifacts
+
+# What users download for a release is a clean build of the release's
+# version commit: the GitHub release's programs and libraries by the
+# build version they hold, crates.io's packages file by file against the
+# commit (tools/release_artifacts.py). Run when a release is published,
+# and by hand for any release's tag. 0.9.0's two b3sum programs say
+# "dirty" (BLAKE3 #435): dispatched with its tag, this fails on them.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release's tag: vX.Y.Z+<the code commit>"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  clean:
+    name: every published artifact is a clean build of the version commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # The tag and its commit's files, to compare the crates with.
+        fetch-depth: 0
+    - name: tools/release_artifacts.py TAG --published
+      env:
+        TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: python3 tools/release_artifacts.py "$TAG" --published
