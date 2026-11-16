@@ -27,7 +27,7 @@ use super::*;
 /// hasher.update(b"foo");
 /// hasher.update(b"bar");
 /// hasher.update(b"baz");
-/// // finalize takes the Hasher: the next message gets a new one.
+/// // finalize borrows the Hasher: more updates may follow it.
 /// assert_eq!(hasher.finalize(), blake3_servil_core::convenience::hash(b"foobarbaz"));
 ///
 /// // Extended output. OutputReader also implements Read and Seek.

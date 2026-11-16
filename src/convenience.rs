@@ -36,8 +36,9 @@ use crate::{Hash, IV, Mode, OutputReader};
 /// share one accelerator: one runs at full speed and the others at about
 /// two thirds of it.
 ///
-/// The first hash in a process first runs a self-test (see the crate's
-/// documentation), under 0.2 ms; [`initialize`](crate::initialize) moves it to start-up.
+/// Call [`initialize`](crate::initialize) once, before the first hash in
+/// a process: it runs the self-test (see the crate's documentation), under
+/// 0.2 ms. A hash before it panics.
 // Inlined into its caller: its one call, out of line, sat apart from
 // hash_serial, one more code line to fetch from DRAM in a call after a pause
 // (i7-12700K, after idling, 64 B: -16.5%, 8 fresh layouts a side).

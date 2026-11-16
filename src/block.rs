@@ -214,6 +214,7 @@ impl Packed<32> {
     /// each the pair of its children's digests, borrowed as a
     /// [`Batch`] with [`Batch::from_blocks`]`(.., 64)`. Requires an even
     /// count (a layer of an odd count pads or carries its last digest).
+    /// Hash a tree's nodes apart from its leaves ([`hash_many`](crate::throughput::hash_many)).
     pub fn as_blocks(&self) -> &[Block] {
         assert!(self.count % 2 == 0, "pairs of digests: an even count, not {}", self.count);
         // Sound: count * 32 bytes on a 128-byte boundary, read as count / 2

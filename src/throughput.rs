@@ -63,6 +63,14 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// two 32-byte children, which the layer below writes straight into the
 /// next layer's batch ([`Batch::digests_mut`]).
 ///
+/// Such a tree is one of your own design, not BLAKE3's own tree: each
+/// node here is the hash of a whole 64-byte message, where BLAKE3's
+/// parents are [`TreeHasher::parent_cvs`]'. In your design, hash the
+/// leaves and the nodes apart, with two modes (two
+/// [`Mode::DeriveKey`] contexts, say) or leaves that are never 64 bytes.
+/// Hashed alike, a 64-byte leaf made of two digests passes for a node,
+/// and a proof for one tree's leaf proves another tree's node.
+///
 /// ```
 /// # blake3_servil_core::initialize();
 /// # #[cfg(feature = "std")] {
@@ -176,6 +184,14 @@ impl Eq for Cv {}
 /// ([`left_len`]), its right subtree the rest, and so on down. A message
 /// of one chunk or less is its root alone: [`hash`] or
 /// [`convenience::hash_with`](crate::convenience::hash_with).
+///
+/// **The tree's shape is yours to keep.** A [`Cv`] is 32 bytes and
+/// carries neither its place nor its length, so no call here can tell
+/// whether two values are the children BLAKE3's tree has: values of other
+/// subtrees give a hash that is no BLAKE3 hash of the message, with no
+/// error. Split where [`left_len`] says, at every level. Parts of a fixed
+/// size are subtrees only where that size is a power of two of chunks
+/// (1 MiB, 4 MiB; not 5 MiB), and then only all but the last.
 ///
 /// ```
 /// # blake3_servil_core::initialize();
