@@ -19,22 +19,23 @@ Some of the code is `unsafe` Rust or assembly. Its safety depends on
 contracts the compiler cannot check. We reduce that responsibility where
 we can:
 
-- The Pipeline's shared state lives as long as the process. Workers
-  cannot read it after its owner has freed it. It is reused between
-  Pipelines, which still requires correct synchronization.
+- The Pipeline's shared state is never freed, so a worker cannot read
+  it after its owner has given it up. It is reused between Pipelines,
+  which still requires correct synchronization.
 - Dropping a Pipeline loan's guard before its work completes stops the
   process. The unsafe lending call still requires the caller to keep
   the loaned memory valid.
-- In `b3sum`, direct reads use the already-open file, rather than looking
-  up its pathname again. Replacing the name after open cannot switch
-  that read to another file.
+- `b3sum` hashes the file it opened and never looks up its name again.
+  Replacing the name after open cannot switch it to another file.
 - An `io_uring` submission/wait failure stops `b3sum` without unwinding:
   the kernel might still be writing into its buffers. An individual
   read's completed error is reported as a file error instead.
 - `b3sum` reports failure if it cannot write its output, or if a checkfile
   is empty. Success cannot mean that no checks were supplied.
+- A panic in `b3sum` stops the process at once. Nothing unwinds past a
+  read the kernel still has in flight.
 
-The last three protections are added for 0.10.0. They address specific
+The last four protections are added for 0.10.0. They address specific
 failure paths, not every possible I/O or concurrency bug.
 
 ## Proofs of the assembly

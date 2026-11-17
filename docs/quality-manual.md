@@ -26,13 +26,16 @@ release's measure of assurance.
 |---|---|---|
 | Wrong kernel output, out-of-bounds access, secret-dependent branch/address | proofs over assembled kernels under stated contracts; planted bad kernels rejected | correctness of all Rust callers, every toolchain's output, or the processor |
 | Worker reads state after its owner frees it | Pipeline worker-visible state lives for the process | correct reuse or synchronization of that state |
-| A wait loses a wake or races on a waker | Shuttle checks the production finish/park/waker modules | every possible schedule, weak-memory execution, or the whole Pipeline |
-| Kernel still writes an I/O buffer after error recovery frees it | failed `io_uring_enter` aborts before recovery or unwind | every other lifetime or cancellation path |
-| File name replaced between ordinary open and direct open | direct reads reopen the original descriptor through procfs | a coherent snapshot against concurrent writes to that inode |
+| A wait loses a wake or races on a waker | Shuttle checks the production finish/park/waker modules | every possible schedule, or weak-memory execution |
+| The Pipeline hands a result, a Room or a storage over too early, or loses a wake | Shuttle runs the whole of `pipeline.rs` against a stand-in pool; nine planted faults each make that model fail | schedules not tried, weak-memory execution, and the pool itself, which the model replaces |
+| An `unsafe` block rests on a reason no one wrote down | every block of `pipeline.rs` and of `b3sum` states its reason; a check refuses one without | that each stated reason is true: they are read by people and by the audits, not proved |
+| Kernel still writes an I/O buffer after error recovery frees it | failed `io_uring_enter` aborts before recovery or unwind; a ring dropped with reads in flight aborts; a panic in `b3sum` aborts | every other lifetime or cancellation path |
+| File name replaced after the file is opened | every path hashes the file already open; direct reads reopen that descriptor through procfs | a coherent snapshot against concurrent writes to that inode: a file changed while it is hashed can give the hash of bytes it never held (`b3sum/README.md`, #443) |
 | Incomplete output, or empty verification input, reported as success | output errors propagated; each checkfile must contain a line, and each invalid line fails | complete directory verification or authentication of the expected digests |
+| A `b3sum` protection lost in a later change | `tools/b3sum_controls.py` takes eleven of them out one at a time; the test for each must fail | protections it does not list; `b3sum` is outside the mutation gate |
 
-The I/O protections in the last three rows are additions for 0.10.0.
-They change production behavior; their fault controls are described below.
+The rows from the Pipeline's model on are additions for 0.10.0. The I/O
+ones change production behavior; their fault controls are described below.
 
 ## What is new, and so where the risk is
 
@@ -320,6 +323,14 @@ cargo nextest run --release --manifest-path b3sum/Cargo.toml --tests \
 The output, empty-checkfile and pathname tests failed on the old code.
 The enter test rejected the planted continuation. These are checks of
 specific faults, not evidence that all I/O failures are safe.
+
+`python3 tools/b3sum_controls.py` repeats such controls by program, for
+these four protections and seven more (the file's end on a direct read
+and on a sized read, the small file's slot, the buffer sized by what was
+read, the descriptor table, a ring dropped with reads in flight, and
+the file already open where there is no `io_uring`): it makes the edit,
+runs the test, requires the failure, and puts the file back.
+`check-builds.sh` runs it before each landing.
 
 `Uring::new` can fail before reads exist: then an ordinary read is safe.
 Once SQEs have been published, a failed submission/wait may leave some

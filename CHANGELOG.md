@@ -29,7 +29,7 @@ figure names its machine. bench-hashes' page for this release sets 0.8,
 ## Safety and assurance
 
 - `b3sum` reports failure on output errors and empty checkfiles.
-- Direct reads keep the originally opened file, including if its
+- `b3sum` hashes the file it opened on every path, including if its
   pathname has been replaced. Hashing still requires stable contents.
 - A file that `b3sum` reads is read to where its reads end, whatever
   its size said. (A mapped file is hashed to the size it had when
@@ -50,14 +50,23 @@ figure names its machine. bench-hashes' page for this release sets 0.8,
   build. 0.9 gave the second the empty message's hash in release builds.
 - `Pipeline::with_owners` and `owned` need an owner that borrows nothing
   (`B: 'static`): a `Vec<u8>`, not a `&[u8]`.
-- `b3sum`'s Linux release binaries are reproducible: anyone can rebuild
-  one from the tag and compare its bytes ([how](b3sum/README.md)).
+- `b3sum`'s Linux release binaries and the four crates are
+  reproducible: anyone can rebuild one from the tag and compare its
+  bytes ([how](b3sum/README.md)). The crates are packed from a
+  committed dependency lock. A release's tag names its source by hash
+  and cannot be moved. Releases come with SHA-256 files; the `.b3`
+  files and the C library's archive are no longer published (build the
+  C library from source, `capi/README.md`).
 - A failed `io_uring` submission/wait stops the process before pending
   reads' buffers can be released. A completed read error remains a
   file error.
 - The build check runs Shuttle's finish, park and wake-up models on each
-  candidate. The development branch requires explicit checks or waivers
-  on the exact commit before it can move.
+  candidate, and a model of the whole Pipeline against a stand-in pool:
+  nine faults planted in the Pipeline one at a time each make it fail.
+  Every `unsafe` block of the Pipeline and of `b3sum` states why it is
+  sound, and a check refuses one that does not. The development branch
+  requires explicit checks or waivers on the exact commit before it can
+  move.
 - Before each stable release, separate AI agents using different
   leading-edge models perform deep security audits. Reports and finding
   dispositions accompany the release evidence; this is not a claim of
