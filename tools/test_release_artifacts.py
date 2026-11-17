@@ -3,6 +3,7 @@ and not, against a Git history made here; what users download, with the
 network's answers as fixtures."""
 import contextlib
 import hashlib
+import gzip
 import io
 import json
 import os
@@ -31,11 +32,15 @@ def not_found(url):
 def tar_gz(files):
     """A .tar.gz of `files` (name: bytes), in memory."""
     out = io.BytesIO()
-    with tarfile.open(fileobj=out, mode="w:gz") as archive:
-        for name, data in files.items():
-            member = tarfile.TarInfo(name)
-            member.size = len(data)
-            archive.addfile(member, io.BytesIO(data))
+    # The gzip header's time is fixed: with the clock's, two archives of
+    # the same files differed when a second turned between them, and the
+    # test of two equal builds failed once in CI (November 17).
+    with gzip.GzipFile(fileobj=out, mode="wb", mtime=0) as packed:
+        with tarfile.open(fileobj=packed, mode="w") as archive:
+            for name, data in files.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                archive.addfile(member, io.BytesIO(data))
     return out.getvalue()
 
 
