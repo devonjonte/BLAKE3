@@ -446,6 +446,25 @@ fn force_miss() -> bool {
     false
 }
 
+/// The system's page size.
+#[inline]
+fn page_size() -> usize {
+    static PAGE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *PAGE.get_or_init(|| unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize })
+}
+
+/// The file's bytes from `at`, as far as the page cache gives them without
+/// waiting, read into `dst_ptr[at..dst_cap]`: where the read stopped, and
+/// whether that is the file's end. `hint` is the file's size when it was
+/// opened; the file may have grown since.
+///
+/// The file's end is a read of no bytes. One case spares that second read:
+/// a read that stops exactly at `hint`, where `hint` is no multiple of the
+/// page size. A read without waiting stops short at a page the cache does
+/// not hold, and so at a multiple of the page size; anywhere else it
+/// stopped at the file's end. At a multiple of the page size the two look
+/// alike (a file that grew, its new pages not cached), and the next read
+/// tells them apart (#424).
 #[inline]
 fn try_pread_cached(fd: RawFd, dst_ptr: *mut u8, dst_cap: usize, mut at: usize, hint: usize) -> io::Result<(usize, bool)> {
     if force_miss() {
@@ -468,7 +487,7 @@ fn try_pread_cached(fd: RawFd, dst_ptr: *mut u8, dst_cap: usize, mut at: usize, 
             return Ok((at, false));
         }
         at += rc as usize;
-        if hint > 0 && at == hint && at < dst_cap {
+        if at == hint && at < dst_cap && !hint.is_multiple_of(page_size()) {
             return Ok((at, true));
         }
     }
@@ -1075,6 +1094,96 @@ fn run_hybrid_worker(
 mod test {
     use std::os::fd::AsRawFd;
     use std::path::PathBuf;
+
+    /// A file of `bytes` on a filesystem whose cached pages can be dropped
+    /// (the crate's folder: a tmpfs keeps every page), synced, with none of
+    /// it cached and no read-ahead. The folder is removed when dropped.
+    fn uncached(bytes: &[u8]) -> (tempfile::TempDir, std::fs::File) {
+        use std::io::Write;
+        let dir = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let mut file = std::fs::OpenOptions::new().create(true).truncate(true).read(true).write(true).open(dir.path().join("file")).unwrap();
+        file.write_all(bytes).unwrap();
+        file.sync_all().unwrap();
+        for advice in [libc::POSIX_FADV_DONTNEED, libc::POSIX_FADV_RANDOM] {
+            assert_eq!(unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, advice) }, 0);
+        }
+        (dir, file)
+    }
+
+    /// The bytes of `file` the cache gives without waiting, from its start.
+    fn cached(file: &std::fs::File) -> usize {
+        let mut probe = vec![0u8; 1 << 16];
+        let iov = libc::iovec { iov_base: probe.as_mut_ptr().cast(), iov_len: probe.len() };
+        unsafe { libc::preadv2(file.as_raw_fd(), &iov, 1, 0, libc::RWF_NOWAIT) }.max(0) as usize
+    }
+
+    /// A file that grew after its size was read, its new bytes not in the
+    /// page cache: the read from the cache stops at the old size, and that
+    /// is not the file's end (#424: it was taken for it, and the file was
+    /// hashed as its first bytes).
+    #[test]
+    fn a_cached_read_that_stops_at_the_old_size_is_not_the_files_end() {
+        use std::os::unix::fs::FileExt;
+        let page = super::page_size();
+        let mut bytes = vec![1u8; page]; // the file when its size was read
+        bytes.extend(vec![2u8; page]); // what it grew by
+        let (_dir, file) = uncached(&bytes);
+        file.read_exact_at(&mut vec![0u8; page], 0).unwrap();
+        if cached(&file) != page {
+            eprintln!("the cache gave {} bytes, not the first page alone: nothing to show on this filesystem", cached(&file));
+            return;
+        }
+        let mut dst = vec![0u8; 3 * page];
+        let (n, end) = super::try_pread_cached(file.as_raw_fd(), dst.as_mut_ptr(), dst.len(), 0, page).unwrap();
+        assert_eq!((n, end), (page, false), "the file holds {} bytes", 2 * page);
+    }
+
+    /// The ring's read of a file is whole: where the cache holds the first
+    /// page alone, the read still gives every byte asked for that the file
+    /// holds (the kernel reads on), and stops short only at the file's end.
+    /// The completion's shortcut at the size hint rests on this.
+    #[test]
+    fn the_rings_read_stops_short_only_at_the_files_end() {
+        use std::os::unix::fs::FileExt;
+        let page = super::page_size();
+        let (_dir, file) = uncached(&vec![3u8; 2 * page]);
+        file.read_exact_at(&mut vec![0u8; page], 0).unwrap();
+        if cached(&file) != page {
+            eprintln!("the cache gave {} bytes, not the first page alone: nothing to show on this filesystem", cached(&file));
+            return;
+        }
+        let Ok(mut ring) = crate::uring::Uring::new(8) else {
+            eprintln!("no ring on this system");
+            return;
+        };
+        let mut dst = vec![0u8; 3 * page];
+        assert!(unsafe { ring.push_read(file.as_raw_fd(), dst.as_mut_ptr(), dst.len() as u32, 0, 0, 7) });
+        ring.submit_and_wait(1);
+        let cqe = ring.pop_cqe().unwrap();
+        assert_eq!((cqe.user_data, cqe.res), (7, 2 * page as i32), "a read that stopped at the cache's edge");
+    }
+
+    /// A cached file is read to its end: of a size that is a multiple of
+    /// the page size, of one that is not, and one that grew past the size
+    /// read when it was opened, its new bytes cached.
+    #[test]
+    fn a_cached_file_is_read_to_its_end() {
+        use std::os::unix::fs::FileExt;
+        let page = super::page_size();
+        for (len, hint) in [(2 * page, 2 * page), (page + 904, page + 904), (3 * page + 7, page + 904), (3 * page, page), (page + 904, 0)] {
+            let bytes: Vec<u8> = (0..len).map(|i| (i * 7 + len) as u8).collect();
+            let (_dir, file) = uncached(&bytes);
+            file.read_exact_at(&mut vec![0u8; len], 0).unwrap();
+            if cached(&file) != len {
+                eprintln!("the cache gave {} of {len} bytes: nothing to show on this filesystem", cached(&file));
+                return;
+            }
+            let mut dst = vec![0u8; len + page];
+            let (n, end) = super::try_pread_cached(file.as_raw_fd(), dst.as_mut_ptr(), dst.len(), 0, hint).unwrap();
+            assert_eq!((n, end), (len, true), "{len} bytes, opened at {hint}");
+            assert_eq!(dst[..len], bytes[..], "{len} bytes, opened at {hint}");
+        }
+    }
 
     #[test]
     fn the_readers_grow_with_the_files() {
