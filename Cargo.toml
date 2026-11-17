@@ -6,7 +6,7 @@ version = "0.9.0+dev"
 authors = ["Jack O'Connor <oconnor663@gmail.com>", "Samuel Neves", "John Servil"]
 description = "the BLAKE3 hash function, on one thread: proved SME2 and integer + NEON kernels for AArch64, and x86-64 kernels"
 repository = "https://github.com/servil-software-factory/BLAKE3"
-license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
+license = "MIT OR Apache-2.0 OR TGPPL-1.0" # OR BOSL-1.0, see LICENSE-BOSL.txt
 readme = "README.md"
 edition = "2024"
 # Its build script tells the crates that depend on it what it built
@@ -14,7 +14,7 @@ edition = "2024"
 links = "blake3_servil_core"
 # What a build from crates.io needs: the library, its assembly and build
 # script, the pages users read, the licences, and the file the tests include.
-include = ["/src", "/c", "/build.rs", "/README.md", "/CHANGELOG.md", "/QUALITY.md", "/LICENSE_*", "/tools/require_nextest.rs"]
+include = ["/src", "/c", "/build.rs", "/README.md", "/CHANGELOG.md", "/QUALITY.md", "/LICENSE-*", "/tools/require_nextest.rs"]
 
 [features]
 default = ["std"]

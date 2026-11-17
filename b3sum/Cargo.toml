@@ -6,7 +6,7 @@ version = "0.9.0+dev"
 authors = ["Jack O'Connor <oconnor663@gmail.com>", "John Servil"]
 description = "b3sum, the BLAKE3 command-line hasher, on blake3-servil: the same digests, faster"
 repository = "https://github.com/servil-software-factory/BLAKE3"
-license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
+license = "MIT OR Apache-2.0 OR TGPPL-1.0" # OR BOSL-1.0, see LICENSE-BOSL.txt
 readme = "README.md"
 edition = "2024"
 

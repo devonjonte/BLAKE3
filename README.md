@@ -92,6 +92,17 @@ proofs, and the tests of the tests.
 
 ## Contributing and licenses
 
-[CONTRIBUTING.md](CONTRIBUTING.md) says how to work on this repository. Released into the
-public domain with [CC0 1.0](./LICENSE_CC0), or under [Apache 2.0](./LICENSE_A2) or
-[Apache 2.0 with LLVM exceptions](./LICENSE_A2LLVM).
+[CONTRIBUTING.md](CONTRIBUTING.md) says how to work on this repository.
+
+Copyright (c) the BLAKE3-Servil contributors. You may use BLAKE3-Servil under the terms of any of these
+four Free and Open Source Software licences, at your choice:
+
+* MIT license ([LICENSE-MIT](LICENSE-MIT))
+* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+* Transitive Grace Period Public Licence 1.0 ([LICENSE-TGPPL](LICENSE-TGPPL)):
+  *Licensed under the Transitive Grace Period Public Licence version 1.0*
+* Bootstrap Open Source Licence v1.0 ([LICENSE-BOSL.txt](LICENSE-BOSL.txt)):
+  *Licensed under the Bootstrap Open Source Licence version 1.0*
+
+BLAKE3-Servil began as a fork of [BLAKE3](https://github.com/BLAKE3-team/BLAKE3), whose authors
+released it into the public domain under CC0 1.0; their code is used here on those terms.
