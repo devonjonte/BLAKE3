@@ -13,6 +13,19 @@ that has the tag; anyone can. It prints one line an artifact. Exit status
 0: every artifact is a clean build of the version commit; 1: one is not,
 or one a release has is missing.
 
+The tag's name is the release's source. The 40 hex digits in it (which a
+program's --version prints too) are the code commit's hash, and this
+check holds the version commit to that commit: the same files, but for
+the release's version written where a version stood. So a tag that was
+moved, or a version commit with anything else in it, is no release here,
+and every check below is then of the source the name commits to. With
+--published the version commit must also be in the history of the
+remote's main branch, which only a release moves.
+
+Take this checker from a commit you trust, not from the tag's own: the
+code commit the name gives (git checkout <those 40 digits>) or main. A
+forged version commit could carry a checker that passes it.
+
 What makes an artifact clean, by its kind:
 
   A program or a library (b3sum-*, *.so, *.a, *.dylib, and the libraries
@@ -71,6 +84,9 @@ CRATE_DIRS = ("version", "", "threads", "b3sum")
 # The machines a release has a b3sum program for (b3sum/README.md,
 # "Installation").
 B3SUM_TARGETS = ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu")
+# A version as tools/gen-ver.py writes one: a release's, or the
+# development line's.
+STAMP = re.compile(rb"\d+\.\d+\.\d+\+(?:[0-9a-f]{40}|dev)")
 LIBRARY = re.compile(r"\.(so|a|dylib)(\.[0-9.]+)?$")
 # Cargo's own files in a .crate: not the commit's.
 CARGOS = (".cargo_vcs_info.json", "Cargo.toml", "Cargo.lock")
@@ -100,6 +116,50 @@ class Release:
         self.commit = commit
         if self.found(commit + "^") != named.group(1):
             raise NotARelease(f"{tag} names commit {commit}, whose parent is not {named.group(1)}: not a version commit")
+        more = self.stamp_problems(named.group(1))
+        if more:
+            raise NotARelease(f"{tag} names commit {commit}, which is not its parent with the version written in: {more[0]}"
+                              + (f" (and {len(more) - 1} more)" if len(more) > 1 else "") + ": not a version commit")
+
+    def stamp_problems(self, code):
+        """Why the version commit is not the code commit `code` with the
+        release's version written in: nothing where each file is the
+        same but for lines in which a version (X.Y.Z+<commit>, or
+        X.Y.Z+dev) became this release's. tools/gen-ver.py makes it so,
+        and nothing else belongs in a version commit: its hash is not in
+        the tag's name, and the code commit's is."""
+        problems = []
+        raw = subprocess.run(["git", "-C", self.repo, "diff-tree", "-r", "--raw", "--no-renames", "-z", code, self.commit], capture_output=True, check=True).stdout
+        fields = raw.split(b"\0")
+        for entry, path in zip(fields[0::2], fields[1::2]):
+            old_mode, new_mode, old, new, status = entry.decode().lstrip(":").split()
+            path = path.decode(errors="replace")
+            if status != "M" or old_mode != new_mode:
+                problems.append(f"{path} is added, removed, or of another kind")
+                continue
+            before, after = (subprocess.run(["git", "-C", self.repo, "cat-file", "blob", blob], capture_output=True, check=True).stdout.split(b"\n") for blob in (old, new))
+            if len(before) != len(after):
+                problems.append(f"{path} has lines added or removed")
+                continue
+            for number, (was, now) in enumerate(zip(before, after), 1):
+                if was == now:
+                    continue
+                stamps_were, stamps_are = STAMP.findall(was), STAMP.findall(now)
+                written = [n for w, n in zip(stamps_were, stamps_are) if w != n]
+                # The same count of stamps: with one removed or added, what
+                # is left around them can still read the same.
+                if len(stamps_were) != len(stamps_are) or STAMP.split(was) != STAMP.split(now) or any(n != self.version.encode() for n in written):
+                    problems.append(f"{path} line {number} changes more than a version to this release's")
+                    break
+        return problems
+
+    def on_main(self):
+        """Whether the version commit is in the history of the remote's
+        main branch: True or False, or None where this clone has no
+        origin/main to ask."""
+        if self.found("refs/remotes/origin/main") is None:
+            return None
+        return subprocess.run(["git", "-C", self.repo, "merge-base", "--is-ancestor", self.commit, "refs/remotes/origin/main"]).returncode == 0
 
     def found(self, revision):
         """The commit `revision` names here, or None."""
@@ -177,9 +237,21 @@ def crate_problems(data, release):
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
         members = archive.getmembers()
         odd = [m.name for m in members if not (m.isfile() or m.isdir())]
+        names = [m.name for m in members if m.isfile()]
         files = {m.name.split("/", 1)[1]: archive.extractfile(m).read() for m in members if m.isfile() and "/" in m.name}
     if odd:
         return [f"holds what is no plain file ({odd[0]})"]
+    # Every file once, and in the one folder Cargo packs a crate into: a
+    # second entry of a name, or one outside the folder, is a file some
+    # reader of the archive sees and this check would not.
+    twice = sorted(n for n in set(names) if names.count(n) > 1)
+    if twice:
+        return [f"holds {twice[0]} more than once"]
+    folders = sorted({n.split("/", 1)[0] if "/" in n else "" for n in names} | {m.name.split("/", 1)[0] for m in members if m.isdir()})
+    if len(folders) != 1 or not folders[0]:
+        return [f"holds files outside one folder ({', '.join(f or 'the top' for f in folders)})"]
+    if any(os.path.normpath(n) != n or n.startswith("/") for n in names):
+        return ["holds a file whose path is not plain"]
     for cargos in (".cargo_vcs_info.json", "Cargo.toml.orig"):
         if cargos not in files:
             return [f"has no {cargos}: not as Cargo packages a crate from a Git checkout"]
@@ -216,7 +288,10 @@ def problems(name, data, release):
         return crate_problems(data, release)
     if name.endswith((".tar.gz", ".tgz")):
         return archive_problems(data, release)
-    if name.startswith("b3sum-") or LIBRARY.search(name):
+    # b3sum as tools/b3sum-release.sh names it, for some machine: a file of
+    # another name beside it (b3sum-...-x86_64-unknown-linux-gnu.b3) is
+    # not taken for the program.
+    if re.fullmatch(re.escape(f"b3sum-{release.tag}-") + r"[A-Za-z0-9_-]+", name) or LIBRARY.search(name):
         return program_problems(data, release)
     return ["an artifact of a kind this check does not know (a program, a library, a .tar.gz of libraries, a .crate)"]
 
@@ -234,8 +309,18 @@ def read(path):
 
 
 def is_digest(name):
-    """A digest file beside an artifact (tools/b3sum-release.sh writes two)."""
-    return name.endswith((".sha256", ".b3"))
+    """A digest file beside an artifact (tools/b3sum-release.sh writes one)."""
+    return name.endswith(".sha256")
+
+
+def digest_problems(name, data, seen):
+    """Why the digest file `name` is not the SHA-256 line of the artifact
+    it is named for, among those checked before it (`seen`, by name)."""
+    of = name[: -len(".sha256")]
+    if of not in seen:
+        return [f"is the digest of {of}, which is no artifact here"]
+    want = f"{hashlib.sha256(seen[of]).hexdigest()}  {of}\n".encode()
+    return [] if data == want else [f"is not the SHA-256 line of {of}"]
 
 
 def fetch(url):
@@ -269,9 +354,9 @@ def published(release):
         yield f"the GitHub release {release.tag}", release.tag, None
         return
     names = [asset["name"] for asset in listing["assets"]]
-    for asset in listing["assets"]:
-        if not is_digest(asset["name"]):
-            yield f"the GitHub release: {asset['name']}", asset["name"], fetch(asset["browser_download_url"])
+    # Each artifact before its digest file, which is checked against it.
+    for asset in sorted(listing["assets"], key=lambda asset: (is_digest(asset["name"]), asset["name"])):
+        yield f"the GitHub release: {asset['name']}", asset["name"], fetch(asset["browser_download_url"])
     for missing in [n for n in expected(release) if not n.endswith(".crate") and n not in names]:
         yield f"the GitHub release: {missing}", missing, None
 
@@ -295,10 +380,14 @@ def check(items, release, out=None, rebuilt=None):
     problems); how many are not clean or not there. With `rebuilt`, a
     folder, each b3sum program and crate is also the second one there."""
     bad = 0
+    seen = {}
     for label, name, data in items:
         if data is None:
             lines = [f"MISSING    {label}"]
+        elif is_digest(name):
+            lines = [f"NOT CLEAN  {label}: {problem}" for problem in digest_problems(name, data, seen)]
         else:
+            seen[name] = data
             found = problems(name, data, release)
             if rebuilt is not None and (name.startswith("b3sum-") or name.endswith(".crate")):
                 found = found + rebuilt_problems(name, data, rebuilt)
@@ -314,7 +403,7 @@ def directory(path, release, rebuilt=None):
     where every one a release has is there and each is clean; (False, the
     lines of those that are not clean); (None, the names not there yet).
     `rebuilt`: as check's."""
-    names = sorted(n for n in os.listdir(path) if release.version in n and not is_digest(n)) if os.path.isdir(path) else []
+    names = sorted((n for n in os.listdir(path) if release.version in n), key=lambda n: (is_digest(n), n)) if os.path.isdir(path) else []
     report = io.StringIO()
     if check(((n, n, read(os.path.join(path, n))) for n in names), release, out=report, rebuilt=rebuilt):
         return False, [line for line in report.getvalue().splitlines() if not line.startswith("clean")]
@@ -329,17 +418,24 @@ def main(argv):
             at = argv.index(option)
             options[option] = argv[at + 1]
             del argv[at : at + 2]
-    paths = [path for path in argv[1:] if not is_digest(path)]
+    paths = sorted(argv[1:], key=is_digest)
     if not paths or argv[0].startswith("-") or any(path.startswith("--") for path in paths if path != "--published"):
         print(__doc__.split("\n\n")[1], file=sys.stderr)
         sys.exit(2)
     try:
         release = Release(argv[0], commit=options.get("--commit"))
+        bad = 0
         if paths == ["--published"]:
             items = published(release)
+            # Published from main: the branch only a release moves.
+            on_main = release.on_main()
+            if on_main is not True:
+                bad = 1
+                print(f"NOT CLEAN  the tag: its commit {release.commit} is not in origin/main's history" if on_main is False
+                      else "MISSING    origin/main in this clone, whose history a release's commit is in (git fetch origin main)")
         else:
             items = ((path, os.path.basename(path), read(path)) for path in paths)
-        bad = check(items, release, rebuilt=options.get("--rebuilt"))
+        bad += check(items, release, rebuilt=options.get("--rebuilt"))
     except NotARelease as e:
         sys.exit(f"release_artifacts: {e}")
     print(f"release_artifacts: {release.tag} is commit {release.commit}: " + (f"{bad} artifacts are not clean builds of it, or are missing" if bad else "every artifact is a clean build of it"))

@@ -13,12 +13,12 @@ On Linux, download the binary for your machine from the
 `b3sum-VERSION-aarch64-unknown-linux-gnu`, each beside its SHA-256 and
 BLAKE3 digests. They are statically linked, so each run starts in about
 two thirds of the time a dynamically linked build takes, which matters
-where `b3sum` runs once per file. Check both digests, then put it on
-your `PATH` as `b3sum`:
+where `b3sum` runs once per file. Check the digest, then put it on your
+`PATH` as `b3sum`:
 
 ```
 sha256sum -c b3sum-VERSION-TARGET.sha256
-chmod +x b3sum-VERSION-TARGET && ./b3sum-VERSION-TARGET -c b3sum-VERSION-TARGET.b3
+chmod +x b3sum-VERSION-TARGET
 ```
 
 To build it yourself on Linux, with [Rust and Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html),

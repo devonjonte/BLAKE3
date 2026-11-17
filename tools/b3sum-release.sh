@@ -76,7 +76,7 @@ elif grep -a -q "$commit\.dirty" "$out"; then
 fi
 # The binary checks itself against BLAKE3's published digest of nothing.
 test "$(printf '' | "$out" --no-names)" = af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262
-(cd dist && { sha256sum "$name" 2>/dev/null || shasum -a 256 "$name"; } > "$name.sha256" && "./$name" "$name" > "$name.b3")
+(cd dist && { sha256sum "$name" 2>/dev/null || shasum -a 256 "$name"; } > "$name.sha256")
 file "$out"
 cat "dist/$name.sha256"
-echo "b3sum-release: $root/$out, with .sha256 and .b3 beside it"
+echo "b3sum-release: $root/$out, with .sha256 beside it"

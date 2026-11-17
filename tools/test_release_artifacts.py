@@ -2,6 +2,7 @@
 and not, against a Git history made here; what users download, with the
 network's answers as fixtures."""
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -145,8 +146,30 @@ class Crates(Repository):
     def test_a_path_out_of_the_repository_is_no_file_of_the_commit(self):
         def change(files, record):
             files["../outside.rs"] = b""
-        self.assertEqual(ra.crate_problems(self.crate("", change), self.release), ["../outside.rs is no file of the version commit"])
+        self.assertEqual(ra.crate_problems(self.crate("", change), self.release), ["holds a file whose path is not plain"])
         self.assertIsNone(self.release.file("/etc/hostname"))
+
+    def test_a_file_twice_or_outside_the_crates_folder_is_not_clean(self):
+        # BLAKE3 #439: a second entry of a name replaced the first in this
+        # check, and an entry outside the folder was not looked at.
+        clean = self.crate("")
+        with tarfile.open(fileobj=io.BytesIO(clean), mode="r:gz") as archive:
+            files = {m.name: archive.extractfile(m).read() for m in archive.getmembers()}
+        source = f"top-crate-{self.version}/src/lib.rs"
+
+        def packed(entries):
+            out = io.BytesIO()
+            with tarfile.open(fileobj=out, mode="w:gz") as archive:
+                for name, data in entries:
+                    member = tarfile.TarInfo(name)
+                    member.size = len(data)
+                    archive.addfile(member, io.BytesIO(data))
+            return out.getvalue()
+
+        twice = packed([(source, b"pub fn back_door() {}\n")] + list(files.items()))
+        self.assertEqual(ra.crate_problems(twice, self.release), [f"holds {source} more than once"])
+        self.assertEqual(ra.crate_problems(packed(list(files.items()) + [("build.rs", b"")]), self.release), [f"holds files outside one folder (the top, top-crate-{self.version})"])
+        self.assertEqual(ra.crate_problems(packed(list(files.items()) + [("other/build.rs", b"")]), self.release), [f"holds files outside one folder (other, top-crate-{self.version})"])
 
     def test_a_crate_without_cargos_record_or_original_is_not_clean(self):
         def no_original(files, record):
@@ -224,6 +247,71 @@ class Releases(Repository):
             ra.Release(self.tag, self.repo, self.code)
 
 
+class TheNameIsTheSource(Repository):
+    """The tag's name holds the code commit's hash, and the version commit
+    is that commit with the version written in: nothing else. Each test
+    makes a version commit of its own on the fixture's code commit."""
+
+    def version_commit(self, change):
+        """A tag on a version commit made as the fixture's, then changed
+        by `change`: whether it is a release, and why not."""
+        self.git("checkout", "-q", "--detach", self.code)
+        for manifest in ("Cargo.toml", "sub/Cargo.toml"):
+            self.write(manifest, self.read(manifest).replace("0.3.0+dev", self.version))
+        change()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "another version commit")
+        try:
+            ra.Release(self.tag, self.repo, self.git("rev-parse", "HEAD"))
+        except ra.NotARelease as e:
+            return str(e)
+        return None
+
+    def test_the_version_written_in_and_nothing_else_is_a_release(self):
+        self.assertIsNone(self.version_commit(lambda: None))
+
+    def test_a_changed_line_of_code_is_refused(self):
+        why = self.version_commit(lambda: self.write("src/lib.rs", "pub fn top() { /* and more */ }\n"))
+        self.assertIn("which is not its parent with the version written in: src/lib.rs line 1 changes more than a version to this release's", why)
+
+    def test_an_added_file_and_a_removed_one_are_refused(self):
+        self.assertIn("build.rs is added, removed, or of another kind", self.version_commit(lambda: self.write("build.rs", "fn main() {}\n")))
+        self.assertIn("LICENSE is added, removed, or of another kind", self.version_commit(lambda: os.remove(os.path.join(self.repo, "LICENSE"))))
+
+    def test_an_added_line_is_refused(self):
+        why = self.version_commit(lambda: self.write("Cargo.toml", self.read("Cargo.toml") + 'build = "other.rs"\n'))
+        self.assertIn("Cargo.toml has lines added or removed", why)
+
+    def test_more_than_the_version_on_a_versions_line_is_refused(self):
+        why = self.version_commit(lambda: self.write("Cargo.toml", self.read("Cargo.toml").replace(f'version = "{self.version}"', f'version = "{self.version}" # more')))
+        self.assertIn("Cargo.toml line 3 changes more than a version to this release's", why)
+
+    def test_another_version_than_the_releases_is_refused(self):
+        other = "0.3.0+" + "5" * 40
+        why = self.version_commit(lambda: self.write("sub/Cargo.toml", self.read("sub/Cargo.toml").replace(self.version, other)))
+        self.assertIn("sub/Cargo.toml line 3 changes more than a version to this release's", why)
+
+    def test_a_version_written_twice_where_one_stood_is_refused(self):
+        # BLAKE3 #439: with the stamps taken out, both lines read the same.
+        twice = self.version + self.version
+        why = self.version_commit(lambda: self.write("Cargo.toml", self.read("Cargo.toml").replace(f'version = "{self.version}"', f'version = "{twice}"')))
+        self.assertIn("Cargo.toml line 3 changes more than a version to this release's", why)
+
+    def test_a_file_made_executable_is_refused(self):
+        why = self.version_commit(lambda: os.chmod(os.path.join(self.repo, "src/lib.rs"), 0o755))
+        self.assertIn("src/lib.rs is added, removed, or of another kind", why)
+
+    def test_main_holds_a_published_releases_commit(self):
+        self.assertIsNone(self.release.on_main(), "no origin/main in this clone")
+        self.git("update-ref", "refs/remotes/origin/main", self.code)
+        self.assertIs(self.release.on_main(), False, "main is still at the code commit")
+        self.git("update-ref", "refs/remotes/origin/main", self.commit)
+        self.assertIs(self.release.on_main(), True)
+        self.git("commit", "--allow-empty", "-qm", "the development line after the release")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.assertIs(self.release.on_main(), True, "and in its history later")
+
+
 @patch.object(ra, "CRATE_DIRS", ("", "sub"))
 @patch.object(ra, "B3SUM_TARGETS", ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"))
 class Gathered(Repository):
@@ -240,9 +328,16 @@ class Gathered(Repository):
     def test_every_artifact_there_and_clean_passes_digest_files_and_other_releases_aside(self):
         with tempfile.TemporaryDirectory() as folder:
             self.fill(folder)
-            for other in (f"b3sum-{self.tag}-x86_64-unknown-linux-gnu.sha256", f"b3sum-{self.tag}-x86_64-unknown-linux-gnu.b3", "b3sum-v0.2.0+old-x86_64-unknown-linux-gnu"):
-                open(os.path.join(folder, other), "wb").close()
+            program = f"b3sum-{self.tag}-x86_64-unknown-linux-gnu"
+            open(os.path.join(folder, "b3sum-v0.2.0+old-x86_64-unknown-linux-gnu"), "wb").close()
+            with open(os.path.join(folder, program), "rb") as f:
+                line = f"{hashlib.sha256(f.read()).hexdigest()}  {program}\n"
+            with open(os.path.join(folder, program + ".sha256"), "w") as f:
+                f.write(line)
             self.assertEqual(ra.directory(folder, self.release), (True, []))
+            with open(os.path.join(folder, program + ".sha256"), "w") as f:
+                f.write(line.replace(line[0], "0" if line[0] != "0" else "1", 1))
+            self.assertEqual(ra.directory(folder, self.release), (False, [f"NOT CLEAN  {program}.sha256: is not the SHA-256 line of {program}"]))
 
     def test_an_artifact_not_there_yet_is_named(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -284,13 +379,23 @@ class Published(Repository):
             bad = ra.check(ra.published(self.release), self.release, out=out)
         return bad, out.getvalue().splitlines()
 
-    def test_a_clean_release_passes_and_its_digest_files_are_not_fetched(self):
+    def test_a_clean_release_passes_with_its_digest_file(self):
         program = f"b3sum-{self.tag}-x86_64-unknown-linux-gnu"
-        # A digest file's download would be a 404 here: it is never asked for.
-        bad, lines = self.run_check(self.answers({program: self.program(), program + ".sha256": None, program + ".b3": None, "lib.tar.gz": tar_gz({"libb3_servil.a": self.program()})}))
+        line = f"{hashlib.sha256(self.program()).hexdigest()}  {program}\n".encode()
+        bad, lines = self.run_check(self.answers({program + ".sha256": line, program: self.program(), "lib.tar.gz": tar_gz({"libb3_servil.a": self.program()})}))
         self.assertEqual(bad, 0, lines)
-        self.assertEqual(len(lines), 4)
+        self.assertEqual(len(lines), 5)
         self.assertTrue(all(line.startswith("clean      ") for line in lines), lines)
+
+    def test_a_digest_file_of_other_bytes_or_of_nothing_here_or_of_another_kind_fails(self):
+        # BLAKE3 #439: digest files were passed over.
+        program = f"b3sum-{self.tag}-x86_64-unknown-linux-gnu"
+        line = f"{hashlib.sha256(b'another program').hexdigest()}  {program}\n".encode()
+        bad, lines = self.run_check(self.answers({program: self.program(), program + ".sha256": line, "gone.sha256": line, program + ".b3": line}))
+        self.assertEqual(bad, 3, lines)
+        self.assertIn(f"NOT CLEAN  the GitHub release: {program}.sha256: is not the SHA-256 line of {program}", lines)
+        self.assertIn("NOT CLEAN  the GitHub release: gone.sha256: is the digest of gone, which is no artifact here", lines)
+        self.assertTrue(any(l.startswith(f"NOT CLEAN  the GitHub release: {program}.b3: ") for l in lines), lines)
 
     def test_a_dirty_program_fails_and_the_rest_still_pass(self):
         program = f"b3sum-{self.tag}-x86_64-unknown-linux-gnu"
@@ -382,13 +487,16 @@ class CommandLine(Repository):
                 ra.main(list(argv))
         return stopped.exception.code, out.getvalue()
 
-    def test_files_clean_exit_0_not_clean_exit_1_and_digest_files_are_passed_over(self):
+    def test_files_clean_exit_0_not_clean_exit_1_and_a_digest_file_is_checked(self):
         with tempfile.TemporaryDirectory() as folder:
             clean, dirty = os.path.join(folder, f"b3sum-{self.tag}-a"), os.path.join(folder, f"b3sum-{self.tag}-b")
-            for path, said in ((clean, ""), (dirty, f".{self.commit}.dirty"), (clean + ".sha256", "")):
+            for path, said in ((clean, ""), (dirty, f".{self.commit}.dirty")):
                 with open(path, "wb") as f:
                     f.write(self.program(said))
-            self.assertEqual(self.run_main(self.tag, clean, clean + ".sha256")[0], 0)
+            with open(clean + ".sha256", "w") as f:
+                f.write(f"{hashlib.sha256(self.program()).hexdigest()}  {os.path.basename(clean)}\n")
+            self.assertEqual(self.run_main(self.tag, clean + ".sha256", clean)[0], 0)
+            self.assertEqual(self.run_main(self.tag, clean + ".sha256")[0], 1, "a digest file with no artifact")
             code, said = self.run_main(self.tag, clean, dirty)
             self.assertEqual(code, 1)
             self.assertIn("1 artifacts are not clean builds of it, or are missing", said)
@@ -407,9 +515,23 @@ class CommandLine(Repository):
             self.assertEqual(self.run_main(self.tag, path, "--rebuilt")[0], 2, "an option without its value")
             self.assertEqual(self.run_main(self.tag, path, "--rebuild", second)[0], 2, "an option this does not know")
 
+    def test_published_needs_the_commit_in_mains_history(self):
+        def nothing_published(release):
+            return iter(())
+
+        with patch.object(ra, "published", nothing_published):
+            code, said = self.run_main(self.tag, "--published")
+            self.assertEqual(code, 1)
+            self.assertIn("MISSING    origin/main in this clone", said)
+            self.git("update-ref", "refs/remotes/origin/main", self.code)
+            code, said = self.run_main(self.tag, "--published")
+            self.assertEqual(code, 1)
+            self.assertIn(f"NOT CLEAN  the tag: its commit {self.commit} is not in origin/main's history", said)
+            self.git("update-ref", "refs/remotes/origin/main", self.commit)
+            self.assertEqual(self.run_main(self.tag, "--published")[0], 0)
+
     def test_no_artifact_named_is_a_usage_error(self):
         self.assertEqual(self.run_main(self.tag)[0], 2)
-        self.assertEqual(self.run_main(self.tag, "x.sha256")[0], 2)
         self.assertEqual(self.run_main()[0], 2)
 
     def test_a_tag_that_is_no_releases_stops_saying_so(self):
