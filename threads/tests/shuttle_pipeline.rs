@@ -39,6 +39,12 @@
 //! so a fault that needs a weaker ordering to show is outside it. It
 //! checks the schedules it tries, not all. The pool itself is not here:
 //! its handshakes have their own models (shuttle_finish, shuttle_park).
+//! Two things the real pool does and this stand-in does not (BLAKE3
+//! #445, from the 0.10.0 review): it sends actions marked for SME2 to
+//! the thread that holds that unit (here every worker runs every action,
+//! the mark dropped), and a caller spins for 200 microseconds before it
+//! sleeps (here it sleeps at once: Shuttle has no clock, and the sleep is
+//! where a lost wake shows).
 #![cfg(shuttle)]
 #![allow(dead_code, unused_imports)]
 
@@ -212,6 +218,8 @@ mod lanes {
         }
 
         shuttle::lazy_static! {
+            /// Set by a scenario: the pool has no slot free for a Pipeline.
+            pub(crate) static ref NO_SLOT: shuttle::sync::atomic::AtomicBool = shuttle::sync::atomic::AtomicBool::new(false);
             /// The Sources a worker serves: those of the Pipelines open now.
             static ref REGISTERED: Mutex<Vec<usize>> = Mutex::new(Vec::new());
             static ref NEWS: Mutex<u64> = Mutex::new(0);
@@ -226,6 +234,11 @@ mod lanes {
                 self.actions
             }
             pub(crate) fn register(&'static self) -> Option<usize> {
+                // The pool has 64 slots, and a Pipeline that finds none
+                // free runs each action itself, where it dispatches it.
+                if NO_SLOT.load(shuttle::sync::atomic::Ordering::SeqCst) {
+                    return None;
+                }
                 let at = self as *const Source as usize;
                 REGISTERED.lock().unwrap().push(at);
                 Some(at)
@@ -616,6 +629,28 @@ fn batches_are_whole_when_their_events_come() {
     });
 }
 
+/// A Pipeline for which the pool has no slot free: it runs each action
+/// itself, where it would have handed it to the pool, and no worker
+/// takes part. Its messages complete all the same, and it never waits
+/// for a wake no one will send.
+fn a_pipeline_with_no_pool_slot_does_its_own_work() {
+    check(|| {
+        with_workers(1, || {
+            lanes::sources::NO_SLOT.store(true, Ordering::SeqCst);
+            let (inputs, want) = inputs_of(&[0, 64, 1024, 2 * ROOM_LEN + 1, 5]);
+            let mut pipe = Pipeline::<usize, ()>::new(Mode::Plain, Limits { messages: 2, rooms: 2 });
+            through_rooms(&mut pipe, 2, &inputs, &want);
+            let (owned, owned_want) = inputs_of(&[100, 5 * ROOM_LEN + 3]);
+            let mut owners = Pipeline::<usize, Vec<u8>>::with_owners(Mode::Plain, Limits { messages: 2, rooms: 0 });
+            for (tag, bytes) in owned.iter().enumerate() {
+                let message = block_on(owners.message(tag, None));
+                owners.owned(message, bytes.clone());
+            }
+            drain(&mut owners, owned.len(), &owned_want);
+        });
+    });
+}
+
 /// A message aborted with Rooms of it at the workers, among others that
 /// complete.
 fn an_aborted_message_leaves_the_others_whole() {
@@ -680,7 +715,7 @@ fn an_aborted_message_leaves_the_others_whole() {
 #[test]
 fn the_pipeline_under_shuttle() {
     blake3_servil_core::initialize();
-    let scenarios: [(&str, fn()); 7] = [
+    let scenarios: [(&str, fn()); 8] = [
         ("messages_through_rooms_complete_with_their_own_digests", messages_through_rooms_complete_with_their_own_digests),
         ("owned_messages_complete_and_wake_the_caller", owned_messages_complete_and_wake_the_caller),
         ("a_pipeline_after_another_reuses_its_storage_soundly", a_pipeline_after_another_reuses_its_storage_soundly),
@@ -688,6 +723,7 @@ fn the_pipeline_under_shuttle() {
         ("lent_messages_are_complete_when_their_events_come", lent_messages_are_complete_when_their_events_come),
         ("an_aborted_message_leaves_the_others_whole", an_aborted_message_leaves_the_others_whole),
         ("batches_are_whole_when_their_events_come", batches_are_whole_when_their_events_come),
+        ("a_pipeline_with_no_pool_slot_does_its_own_work", a_pipeline_with_no_pool_slot_does_its_own_work),
     ];
     for (name, scenario) in scenarios {
         eprintln!("shuttle_pipeline: {name}");

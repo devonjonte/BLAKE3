@@ -18,7 +18,6 @@ src/lanes.rs	replace sources::serve with ()	1	as on aarch64: times out (timeouts
 src/lanes.rs	replace worker_main with ()	1	no worker serves: the tests that wait for a worker to run a stream's task or to park wait until the clock; callers' own work stays right (gate16's logs). On eight cores (a Ryzen 9700X) the clock stops it; with 24 cores and more a test fails first (an EPYC 9255, an EPYC 7443, November 10, 2026)
 src/lib.rs	replace __all_workers_parked -> bool with false	1	a test-only hook (__all_workers_parked): a no that never turns yes, so the stream tests wait for every worker parked, forever
 src/pipeline.rs	delete match arm SlotKind::WaitSingle{group, ..} | SlotKind::WaitBatch{group, ..} | SlotKind::WaitAborted{group, ..} in Pipeline<T, B>::front_uses_open_group	1	hang: front_uses_open_group returns false for an unsealed front group, so poll_ready parks without publishing open_group
-src/pipeline.rs	replace != with == in Shared::run_group	1	hang: run_group releases room credits only for NONE instead of real rooms, so rooms never return to zero credits
 src/pipeline.rs	replace += with *= in Shared::run_group	1	hang: `0 *= 1` never advances `i` in run_group's member loop
 src/pipeline.rs	replace += with -= in Pipeline<T, B>::commit_multi	1	hang: room_pieces underflows, so merged_pieces == room_pieces is never reached
 src/pipeline.rs	replace += with -= in Pipeline<T, B>::drain_slot_pieces	1	hang: merged_pieces / stack_len underflows, so merged_pieces == room_pieces is never reached
