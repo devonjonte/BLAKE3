@@ -642,7 +642,8 @@ struct Piece {
 /// prefix, each piece is [`next_piece_len`] of what remains, and the last
 /// is whatever is left. The prefix is whole subtrees of up to
 /// [`MAX_PREFIX_PIECE_LEN`], rounded down to a multiple of the first piece
-/// after it. A piece's length never exceeds the one before it (the
+/// after it (the piece that follows the prefix as rounded, not as asked
+/// for). A piece's length never exceeds the one before it (the
 /// prefix's last piece is at least the first after it, and a share only
 /// falls as the input shrinks) and every piece starts at a multiple of
 /// its own length, so each is a whole subtree at its offset. Fills `pieces` and returns how many form the prefix
@@ -654,8 +655,25 @@ fn cut_with_prefix(pieces: &mut Vec<Piece>, len: usize, threads: usize, prefix: 
     assert!(len > MIN_PIECE_LEN, "one piece has no parent to merge; hash it whole instead");
     assert!(prefix < len, "the SME2 thread's prefix leaves the pool some input");
     let mut offset = 0;
-    let first_after = next_piece_len(len - prefix, threads);
-    let prefix = prefix / first_after * first_after;
+    // The first piece after the prefix is a share of what the prefix
+    // leaves, and rounding the prefix down leaves more: a larger share,
+    // at some lengths twice the size the prefix was rounded to. So the
+    // two are settled together: round, look at the piece that follows,
+    // and round to that when it is larger (it only grows, to
+    // MAX_PIECE_LEN at most).
+    let mut first_after = next_piece_len(len - prefix, threads);
+    let mut rounded = prefix / first_after * first_after;
+    // It only grows, and there are five piece sizes it can be.
+    for _ in 0..5 {
+        let after = next_piece_len(len - rounded, threads);
+        if after == first_after {
+            break;
+        }
+        first_after = after;
+        rounded = prefix / first_after * first_after;
+    }
+    assert!(next_piece_len(len - rounded, threads) == first_after, "the SME2 prefix and the piece after it settle");
+    let prefix = rounded;
     while offset < prefix {
         let piece = MAX_PREFIX_PIECE_LEN.min(1 << (usize::BITS - 1 - (prefix - offset).leading_zeros()));
         pieces.push(Piece { offset, len: piece });
@@ -3654,6 +3672,66 @@ mod test {
                 let last = tree.last_cv((end.offset / CHUNK_LEN) as u64, &input[end.offset..][..end.len]);
                 assert_eq!(merge_root(&pieces, &mut cvs, last, &tree, len), crate::convenience::hash(&input[..len]), "{len} {threads}");
             }
+        }
+    }
+
+    /// Check whole-KiB cuts near the transitions between piece sizes. The
+    /// cut is independent of the kernels, so every target can check it.
+    #[test]
+    fn the_prefix_cut_keeps_subtrees_aligned() {
+        let mut pieces = Vec::new();
+        for threads in 2..=64 {
+            let limit = threads * MAX_PIECE_LEN + (1 << 20);
+            for len in (MIN_SPLIT_LEN..=limit).step_by(CHUNK_LEN) {
+                pieces.clear();
+                let own = cut_with_prefix(&mut pieces, len, threads, sme2_prefix(len, threads));
+                assert!(pieces.len() >= 2 && own < pieces.len());
+                assert!(
+                    pieces.windows(2).all(|pair| {
+                        let [left, right] = [pair[0], pair[1]];
+                        left.len.is_power_of_two() && left.offset % left.len == 0 && left.len >= right.len && left.offset + left.len == right.offset
+                    }),
+                    "{len} bytes, {threads} threads: {pieces:?}"
+                );
+                let tail = pieces.last().unwrap();
+                assert_eq!(tail.offset + tail.len, len);
+            }
+        }
+    }
+
+    #[test]
+    fn the_prefix_cut_keeps_a_prefix_that_already_fits() {
+        let len = 2176 * 1024;
+        let (pieces, own) = cut_with_prefix_vec(len, 16, sme2_prefix(len, 16));
+        assert_eq!(own, 2);
+        assert_eq!((pieces[0].len, pieces[1].len), (128 * 1024, 64 * 1024));
+    }
+
+    /// The first share rounds down to leave a larger piece. Rounding to
+    /// that piece's size must keep the aligned portion of the prefix.
+    #[test]
+    fn the_prefix_cut_keeps_the_aligned_prefix_after_rounding_again() {
+        let (pieces, own) = cut_with_prefix_vec(MIN_SPLIT_LEN, 2, sme2_prefix(MIN_SPLIT_LEN, 2));
+        assert_eq!(own, 1);
+        assert_eq!(pieces[0].len, 256 * 1024);
+    }
+
+    #[cfg(blake3_sme2)]
+    #[test]
+    fn sme2_prefix_hashes_through_the_public_call() {
+        crate::initialize_multithreaded(core::num::NonZeroUsize::new(2));
+        if !pool().sme2 {
+            return;
+        }
+        // Give the SME2 worker time to finish its startup outside the
+        // hash call: only then does it release the shared accelerator.
+        while !all_workers_parked() {
+            std::thread::yield_now();
+        }
+        let mut input = vec![0u8; MIN_SPLIT_LEN + CHUNK_LEN + 1];
+        crate::test::paint_test_input(&mut input);
+        for len in [MIN_SPLIT_LEN, MIN_SPLIT_LEN + 1, input.len()] {
+            assert_eq!(hash_mt(&input[..len], crate::Mode::Plain), crate::convenience::hash(&input[..len]));
         }
     }
 
