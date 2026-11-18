@@ -104,7 +104,26 @@ Compute in integers; use floating point where the domain is continuous by nature
 
 ## Coding: Design By Contract
 
-We document every precondition our code relies on; the caller carries the responsibility. **We check statically first**: where a mistake is easy to make, a type or a safe API that cannot express it makes it impossible to write (the batch calls' `Batch`, whose bytes past each message the program cannot write; a stream's `fill`, with `Read::read`'s contract). **Dynamic checks are `debug_assert`**: a debug build stops on a broken contract, a release build pays nothing to check it, and a caller who breaks it gets what follows. **The exception** (Zooko, October 28): a check runs in every build when the mistake would cause one of the harms that matter most, memory mismanagement or a silently wrong result, and the check is cheap: folded into work the call already does (a precondition read from a value the call loads anyway), or measured, its cost stated beside it. Contracts are **expansive** (the caller carries the responsibility), **conceptually simple** (a few sentences of English; simplicity beats familiarity), and **structurally simple** to enforce (few lines, types, data elements, conditionals).
+Document each precondition. The caller is responsible for meeting it. Prefer
+simple types and APIs that make invalid calls impossible to write. Put runtime
+checks where values are built or handed off. Use the same checked API or
+shared code for our own callers, where the cost is acceptable.
+
+**Check in every build when all three are true:**
+
+- Breaking the rule could violate memory safety or return a silently wrong
+  result. An existing check that stops in time is enough.
+- The rule is easy to break and the break is hard to notice. Check internal
+  invariants too, especially when they span calls or depend on the platform.
+- The check costs little. Use data the call already reads. Check once at
+  construction or handoff, or once per large unit of work. Measure the cost
+  when it is not clear.
+
+Use `debug_assert!` for other runtime checks. A surviving mutant shows only
+that the tests did not distinguish the change. Before removing a guard as
+redundant, show that it cannot fire for any allowed input. An exhaustive check
+of a smaller domain counts only if the argument reduces all allowed inputs
+to it.
 
 We never write "defensive code" — code that complicates a contract to ease the caller's life. When a check detects that a caller misunderstood the contract, it **fails stop**: panic with a clear message. Stopping is safer than proceeding, and it lets people fix the caller or loosen the contract. Defensive codebases grow buggier over time; DBC codebases stay predictable.
 
