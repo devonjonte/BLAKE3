@@ -8,14 +8,13 @@
 //!
 //! The handshake is Dekker's: a worker sets its parked bit, then looks once
 //! more for work, then parks; a publisher publishes, then looks at the
-//! parked bits and wakes one. Each side stores, then loads, in SeqCst, so
-//! in the one total order of SeqCst operations one of the two sees the
-//! other: the worker sees the work and does not park, or the publisher
-//! sees the bit and wakes it. That order is what the hardware gives SeqCst
-//! on every target BLAKE3-Servil builds for, and what Shuttle models (Loom
-//! does not: data branch, 2026-10-23/model-checkers).
+//! parked bits and wakes one. Work publication and the visibility re-check
+//! may use Release and Acquire. The two sides place a SeqCst fence between
+//! publishing and checking, so one sees the other: the worker sees work
+//! and does not park, or a publisher that must wake a worker sees its bit.
+//! Shuttle checks the handshake under SC, not the weaker load order on Arm.
 
-use super::park_sync::{AtomicU64, AtomicUsize, OnceLock, Ordering, thread};
+use super::park_sync::{AtomicU64, AtomicUsize, OnceLock, Ordering, fence, thread};
 
 /// Any value on a cache line of its own.
 #[repr(align(128))]
@@ -187,6 +186,8 @@ impl Park {
     pub(crate) fn park_unless(&self, me: usize, visible: impl Fn() -> bool) -> bool {
         let (word, bit) = self.place(me);
         word.fetch_or(bit, Ordering::SeqCst);
+        // An acquire-only visibility check does not order the parked bit.
+        fence(Ordering::SeqCst);
         if visible() {
             // Ours to clear, unless a waker cleared it first: then its wake
             // was spent on a worker that was leaving anyway (its unpark

@@ -18,7 +18,7 @@
 
 /// Shuttle's primitives, under the names src/park.rs imports them by.
 mod park_sync {
-    pub use shuttle::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    pub use shuttle::sync::atomic::{AtomicU64, AtomicUsize, Ordering, fence};
     pub use shuttle::thread;
 
     /// A once-set cell, as std's OnceLock (which Shuttle lacks): set once,

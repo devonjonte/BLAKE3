@@ -2885,6 +2885,7 @@ fn sme2_serve() -> ! {
         }
         // Park as a worker does: the flag, one more look, the token.
         SME2_PARKED.store(true, Ordering::SeqCst);
+        core::sync::atomic::fence(Ordering::SeqCst);
         if sources::visible(true) {
             SME2_PARKED.store(false, Ordering::SeqCst);
             continue;

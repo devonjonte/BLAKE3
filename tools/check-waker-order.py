@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Check the real WakerSlot publication on Apple arm64 (#463).
+"""Check the sleep announcements on Apple arm64 (#463).
 
-Shuttle checks schedules under SC; it cannot detect the missing barrier
-between the registration store and an RCpc completion re-check. Compile
-waker.rs with its production atomic primitives, then remove just the
-fence in a scratch copy to check that this test distinguishes the two.
+Shuttle checks schedules under SC, not order against an RCpc completion
+re-check. Compile the production wait paths with real atomics, then remove
+just the fences in scratch copies to check that the probe detects the loss.
 No target linker or hardware is needed.
 """
 from pathlib import Path
@@ -26,6 +25,13 @@ mod waker_sync {
     }
 }
 mod waker;
+mod park_sync {
+    pub use std::sync::OnceLock;
+    pub use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering, fence};
+    pub use std::thread;
+}
+mod park;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[unsafe(no_mangle)]
 pub(crate) fn register_then_recheck(
@@ -34,44 +40,81 @@ pub(crate) fn register_then_recheck(
     completed: &core::sync::atomic::AtomicUsize,
 ) -> usize {
     slot.register(cx);
-    completed.load(core::sync::atomic::Ordering::Acquire)
+    completed.load(Ordering::Acquire)
+}
+
+#[unsafe(no_mangle)]
+pub(crate) fn park_then_recheck(park: &park::Park, worker: usize, published: &AtomicUsize) -> bool {
+    park.park_unless(worker, || published.load(Ordering::Acquire) != 0)
+}
+
+#[unsafe(no_mangle)]
+pub(crate) fn sme2_then_recheck(flag: &AtomicBool, published: &AtomicUsize) -> bool {
+    // SME2_ADVERTISEMENT
+    published.load(Ordering::Acquire) != 0
 }
 """
 
 
-def ordered(waker, directory):
-    (directory / "waker.rs").write_text(waker)
+def compile_probe(sources, directory):
+    for name, source in sources.items():
+        (directory / name).write_text(source)
     asm = directory / "probe.s"
     subprocess.run([
         "rustc", "--edition", "2024", "--crate-type", "lib", "-O", "-C", "panic=abort",
         "--target", "aarch64-apple-darwin", "--emit", "asm", "-o", str(asm),
         str(directory / "probe.rs"),
     ], check=True)
-    body = asm.read_text().split("\n_register_then_recheck:\n", 1)[1].split(".cfi_endproc", 1)[0]
-    # This probe inlines register; the release-store publishes REGISTERED
-    # and the RCpc acquire-load reads completion. Fail rather than silently
-    # credit a different compiler sequence or a fence in another function.
-    stores = list(re.finditer(r"^[ \t]+stlr\b[^\n]*\n", body, re.M))
+    return asm.read_text()
+
+
+def ordered(asm, function, announce):
+    body = asm.split(f"\n_{function}:\n", 1)[1]
+    body = re.split(r"^[ \t]*\.(?:cfi_endproc|globl|subsections_via_symbols)\b", body, maxsplit=1, flags=re.M)[0]
+    # Fail rather than credit a different instruction sequence, or a
+    # barrier belonging to another function.
+    stores = list(re.finditer(rf"^[ \t]+{announce}\b[^\n]*\n", body, re.M))
     loads = list(re.finditer(r"^[ \t]+ldapr\b", body, re.M))
     if len(stores) != 1 or len(loads) != 1 or stores[0].end() > loads[0].start():
-        raise SystemExit("waker ordering: no unique stlr/ldapr pair in the Apple arm64 probe")
+        raise SystemExit(f"sleep ordering: no unique {announce}/ldapr pair in {function}")
     between = body[stores[0].end():loads[0].start()]
     return re.match(r"[ \t]+dmb[ \t]+ish[ \t]*\n", between) is not None
 
 
 def main():
-    source = (Path(__file__).resolve().parents[1] / "threads/src/waker.rs").read_text()
-    fence = "fence(Ordering::SeqCst);"
-    if source.count(fence) != 1:
-        raise SystemExit("waker ordering: expected one SeqCst fence in waker.rs")
-    with tempfile.TemporaryDirectory(prefix="waker-order-") as tmp:
+    src = Path(__file__).resolve().parents[1] / "threads/src"
+    sources = {name: (src / name).read_text() for name in ("waker.rs", "park.rs")}
+    # Reuse the actual SME2 announcement; compile only this prelude, not
+    # the hardware-dependent worker loop (which needs the Apple SDK).
+    lanes = (src / "lanes.rs").read_text()
+    advertisement = re.search(
+        r"(SME2_PARKED\.store\(true, Ordering::SeqCst\);\s+"
+        r"core::sync::atomic::fence\(Ordering::SeqCst\);)\s+if sources::visible\(true\)", lanes
+    )
+    if advertisement is None:
+        raise SystemExit("sleep ordering: SME2 must order its announcement before the work re-check")
+    probe = PROBE.replace("// SME2_ADVERTISEMENT", advertisement[1].replace("SME2_PARKED", "flag"))
+    paths = {
+        "waker.rs": [("register_then_recheck", "stlr")],
+        "park.rs": [("park_then_recheck", "ldsetal")],
+        "probe.rs": [("sme2_then_recheck", "stlrb")],
+    }
+    with tempfile.TemporaryDirectory(prefix="sleep-order-") as tmp:
         directory = Path(tmp)
-        (directory / "probe.rs").write_text(PROBE)
-        if not ordered(source, directory):
-            raise SystemExit("waker ordering: missing dmb ish after register's stlr")
-        if ordered(source.replace(fence, ""), directory):
-            raise SystemExit("waker ordering: removing the fence did not remove the barrier")
-    print("waker ordering: Apple arm64 stlr/dmb ish/ldapr; unfenced control rejected")
+        sources["probe.rs"] = probe
+        asm = compile_probe(sources, directory)
+        for name, checks in paths.items():
+            prefix = "core::sync::atomic::" if name == "probe.rs" else ""
+            fence = prefix + "fence(Ordering::SeqCst);"
+            if sources[name].count(fence) != 1:
+                raise SystemExit(f"sleep ordering: expected one SeqCst fence in {name}")
+            unfenced = compile_probe({**sources, name: sources[name].replace(fence, "")}, directory)
+            for function, announce in checks:
+                if not ordered(asm, function, announce):
+                    raise SystemExit(f"sleep ordering: missing dmb ish in {function}")
+                if ordered(unfenced, function, announce):
+                    raise SystemExit(f"sleep ordering: negative control retained a barrier in {function}")
+                print(f"sleep ordering: {function} has {announce}/dmb ish/ldapr; unfenced control rejected")
 
 
 if __name__ == "__main__":

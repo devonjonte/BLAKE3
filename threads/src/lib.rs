@@ -240,7 +240,7 @@ mod finish;
 /// own `park_sync`.
 mod park_sync {
     pub use std::sync::OnceLock;
-    pub use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    pub use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering, fence};
     pub use std::thread;
 }
 mod waker_sync {
