@@ -1131,11 +1131,21 @@ pub(crate) mod guard_pages {
     /// page, after it and before it, and its values' places likewise: the
     /// parent kernel reads a group of sixteen blocks through the run's
     /// own pointer, and a byte read or written outside either buffer
-    /// faults here. 1 to 49 blocks: fewer than a group, whole groups, and
-    /// every count left over after one group and after two (the NEON
-    /// kernels up to twelve, the overlapping last group from thirteen),
-    /// then three groups and one block more. In two modes, each value
-    /// official BLAKE3's (its portable kernel).
+    /// faults here. 0 to 49 blocks: none, fewer than a group, whole
+    /// groups, and every count left over after one group and after two
+    /// (the NEON kernels up to twelve, the overlapping last group from
+    /// thirteen), then three groups and one block more. In two modes,
+    /// each value official BLAKE3's (its portable kernel).
+    ///
+    /// Each case also with one place more than the run has blocks, which
+    /// the call leaves as it found it (`compress_parents_parallel` hands
+    /// over its caller's whole buffer, which is longer than its parents'
+    /// values), and with the run and the places one byte off their pages'
+    /// start, aligned to nothing. Each case's kernels are read from the
+    /// tests' record: the parent kernel for sixteen blocks and more, the
+    /// NEON kernels for fewer than sixteen in all and for 1 to 12 left
+    /// over after a group, and no NEON kernel from 13 left over (no
+    /// mutant is made in an unsafe function, so this holds the threshold).
     #[test]
     #[cfg(blake3_sme2)]
     fn test_a_run_of_blocks_against_a_guard_page() {
@@ -1143,19 +1153,78 @@ pub(crate) mod guard_pages {
             return;
         }
         let keyed: CVWords = [7, 6, 5, 4, 3, 2, 1, 0];
+        let parents = crate::sme2::ffi::blake3_servil_sme2_hash16_parents_512 as *const () as usize;
         for (key, flags) in [(IV, PARENT), (&keyed, KEYED_HASH | CHUNK_START | CHUNK_END | ROOT)] {
-            for count in 1..=49usize {
-                for at_end in [true, false] {
-                    let mut pages = filled(count * BLOCK_LEN, at_end);
-                    let run: &[u8] = pages.bytes();
-                    let (_places, got) = digests(count, at_end);
+            for count in 0..=49usize {
+                for (at_end, spare, skew) in [(true, 0, 0), (false, 0, 0), (true, 1, 0), (false, 1, 0), (false, 0, 1)] {
+                    let mut pages = filled(count * BLOCK_LEN + skew, at_end);
+                    let run: &[u8] = &pages.bytes()[skew..];
+                    let mut places = Guarded::new((count + spare) * OUT_LEN + skew, at_end);
+                    let got: &mut [u8] = &mut places.bytes()[skew..];
+                    got[count * OUT_LEN..].fill(0xee);
+                    crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
                     // Sound: SME2 was found above, and NEON is wherever it is.
-                    unsafe { crate::sme2::hash_block_run(run, key, flags, got.as_flattened_mut()) };
+                    unsafe { crate::sme2::hash_block_run(run, key, flags, got) };
+                    let ran = crate::RAN_ENTRIES.with(|r| r.borrow().clone());
                     let table: Vec<&[u8; BLOCK_LEN]> = run.as_chunks::<BLOCK_LEN>().0.iter().collect();
                     let mut want = vec![0u8; count * OUT_LEN];
                     crate::test::official::hash_many::<BLOCK_LEN>(&table, key, 0, false, flags, 0, 0, &mut want);
-                    assert!(got.as_flattened() == &want[..], "{count} blocks under flags {flags:#x}, flush against the page after them: {at_end}");
+                    let case = format!(
+                        "{count} blocks, flags {flags:#x}, flush against the page after: {at_end}, spare places: {spare}, off the page's start: {skew}"
+                    );
+                    assert!(got[..count * OUT_LEN] == want[..], "{case}");
+                    assert!(got[count * OUT_LEN..].iter().all(|&byte| byte == 0xee), "a place past the run's values was written: {case}");
+                    let left = count % crate::sme2::GROUP;
+                    assert_eq!(ran.contains(&parents), count >= crate::sme2::GROUP, "the parent kernel: {case}");
+                    assert_eq!(ran.iter().any(|&entry| entry != parents), left > 0 && (count < crate::sme2::GROUP || left < 13), "a NEON kernel: {case}");
                 }
+            }
+        }
+    }
+
+    /// SME2's `hash_many` given a table of one-block inputs, each a borrow
+    /// of its own (here each block in an allocation of its own): whole
+    /// groups are copied into one buffer for the parent kernel, eight
+    /// groups to a buffer; the last sixteen go as one more group from 13
+    /// left over; fewer go to the NEON kernels. The callers that hold
+    /// their blocks in one buffer hand it to `hash_block_run`, so a table
+    /// comes from a caller whose inputs are separate borrows
+    /// (`many::try_whole_group`), of TABLE inputs at the most: eight
+    /// groups, one buffer. 0 to 49 inputs, then the counts around eight
+    /// groups, and around nine and ten, which no caller makes and the
+    /// function takes (a second buffer). In two modes, each value
+    /// official BLAKE3's (its portable kernel), with one place more than
+    /// the table has inputs, which the call leaves as it found it, and
+    /// each case's kernels and its copy read from the tests' record as
+    /// above.
+    #[test]
+    #[cfg(blake3_sme2)]
+    fn test_a_table_of_blocks_of_any_count_is_copied_for_the_parent_kernel() {
+        let Some(sme2) = platform::Platform::sme2() else { return };
+        const GROUP: usize = crate::sme2::GROUP;
+        let keyed: CVWords = [7, 6, 5, 4, 3, 2, 1, 0];
+        let parents = crate::sme2::ffi::blake3_servil_sme2_hash16_parents_512 as *const () as usize;
+        let mut bytes = vec![0u8; 173 * BLOCK_LEN];
+        crate::test::paint_test_input(&mut bytes);
+        let blocks: Vec<Box<[u8; BLOCK_LEN]>> = bytes.as_chunks::<BLOCK_LEN>().0.iter().map(|block| Box::new(*block)).collect();
+        for (key, flags) in [(IV, PARENT), (&keyed, KEYED_HASH | CHUNK_START | CHUNK_END | ROOT)] {
+            for count in (0..=49usize).chain([127, 128, 129, 140, 141, 143, 144, 145, 156, 157, 160, 161, 173]) {
+                let table: Vec<&[u8; BLOCK_LEN]> = blocks[..count].iter().map(|block| &**block).collect();
+                let mut got = vec![0xeeu8; (count + 1) * OUT_LEN];
+                crate::RAN.with(|r| r.set(0));
+                crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
+                sme2.hash_many(&table, key, 0, IncrementCounter::No, flags, 0, 0, &mut got);
+                let copied = crate::RAN.with(|r| r.get()) & crate::Ran::Gathered as u32 != 0;
+                let ran = crate::RAN_ENTRIES.with(|r| r.borrow().clone());
+                let mut want = vec![0u8; count * OUT_LEN];
+                crate::test::official::hash_many::<BLOCK_LEN>(&table, key, 0, false, flags, 0, 0, &mut want);
+                let case = format!("a table of {count} blocks under flags {flags:#x}");
+                assert!(got[..count * OUT_LEN] == want[..], "{case}");
+                assert!(got[count * OUT_LEN..].iter().all(|&byte| byte == 0xee), "the place past the table's values was written: {case}");
+                let left = count % GROUP;
+                assert_eq!(copied, count >= GROUP, "the copy: {case}");
+                assert_eq!(ran.contains(&parents), count >= GROUP, "the parent kernel: {case}");
+                assert_eq!(ran.iter().any(|&entry| entry != parents), left > 0 && (count < GROUP || left < 13), "a NEON kernel: {case}");
             }
         }
     }

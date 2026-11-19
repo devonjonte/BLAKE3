@@ -355,8 +355,11 @@ process_static! {
     /// connection grew by one at each connection beyond 16 at once (BLAKE3
     /// #427). The process now holds, for Pipelines of the same Limits, as
     /// many as its most such Pipelines at once (`acquire` gives a storage
-    /// only to a Pipeline of as many rooms and no more messages: one of
-    /// another size takes a new storage).
+    /// only to a Pipeline of as many rooms whose actions, messages and
+    /// groups all fit in it: one of another size takes a new storage. A
+    /// storage is made with 1,024 actions, 64 messages and 64 groups at
+    /// the least, and the actions bind first: with one Room, 15 messages
+    /// fit a storage made for one, and 16 do not).
     static FREE_STORAGES: Mutex<Vec<&'static PipeStorage>> = Mutex::new(Vec::new());
 }
 
@@ -843,16 +846,19 @@ process_static! {
 /// A Pipeline's storage (its Rooms, about 64 KiB each, and what it
 /// shares with the pool's workers) is never returned to the system. It
 /// is in use while its Pipeline or any [`Room`] of that Pipeline is
-/// alive, and is then kept for a later Pipeline of as many Rooms that it
-/// has room for (a storage is made with room for 64 messages at the
-/// least, so Pipelines of few messages are served alike). A process
-/// whose Pipelines all have the same [`Limits`] so holds as many
-/// storages as it has had in use at once: a Room kept past its
-/// Pipeline's drop keeps that Pipeline's storage, and the next Pipeline
-/// takes another. A Pipeline of another number of Rooms, or of more
-/// messages than a kept storage has room for, is given new storage, and
-/// the old is kept. The storage is not cleared: a keyed Pipeline's key and
-/// the bytes last written to its Rooms stay in the process's memory until
+/// alive, and is then kept for a later Pipeline. A process whose
+/// Pipelines all have the same [`Limits`] so holds as many storages as
+/// it has had in use at once: a Room kept past its Pipeline's drop keeps
+/// that Pipeline's storage, and the next Pipeline takes another. No
+/// more than that is promised. A kept storage serves a Pipeline of
+/// other Limits only where it has as many Rooms and room in each of its
+/// queues for that Pipeline's messages, which a small change of
+/// `messages` may or may not leave it (and what the storage shares with
+/// the workers may then be made anew, the old kept beside it); any
+/// other Pipeline is given new storage, and the old is kept. So a
+/// process that varies its Limits holds more than its most in use at
+/// once. The storage is not cleared: a keyed Pipeline's key and the
+/// bytes last written to its Rooms stay in the process's memory until
 /// another Pipeline writes over them, and no call of this crate wipes
 /// them.
 ///

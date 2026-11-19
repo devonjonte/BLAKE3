@@ -191,17 +191,23 @@ pub unsafe fn hash_many<const N: usize>(
 /// One-block inputs that lie one after another in `run` (whole 64-byte
 /// blocks, nothing between them), each compressed alone at counter zero
 /// with `flags`, their values to `out` in order: what [`hash_many`] does
-/// for a table of them, without the table. Parent blocks and one-block
-/// messages come here from every caller that holds them in one buffer.
+/// for a table of them, without the table. Three callers hold such a run
+/// in one buffer and bring it here, where they made a table before: a
+/// batch of one-block messages (`many::hash_run`, at the counts it does
+/// not pad for the message kernel), a tree's parents
+/// (`compress_parents_parallel`), and the parents over hashers fed
+/// together (`each::hash_cohort`).
 ///
 /// The parent kernel reads a group's sixteen blocks through one pointer.
 /// Here that pointer is the run's own, a borrow of every byte the kernel
 /// reads; a table of sixteen separate borrows has no such pointer, which
 /// is why `hash_many` copies its blocks first.
 ///
-/// As in `hash_many`: the whole groups in one kernel call; with
-/// OVERLAP_MIN or more blocks left over after a group, the run's last
-/// sixteen as one more group; otherwise what is left on the NEON kernels.
+/// The whole groups go in one kernel call, however many they are
+/// (`hash_many` copies a table eight groups at a time and calls the
+/// kernel for each buffer). What is left over goes as it does in
+/// `hash_many`: with OVERLAP_MIN or more blocks after a group, the run's
+/// last sixteen as one more group; otherwise on the NEON kernels.
 ///
 /// Unsafe because this may only be called on CPUs that report SME2 with a
 /// 512-bit streaming vector length, and on which NEON is also available.

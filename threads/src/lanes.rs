@@ -516,10 +516,11 @@ fn started<T>(spawned: std::io::Result<T>) -> T {
 /// end with it.
 ///
 /// A panic is not this: it goes through the process's panic hook before
-/// anything here runs. The standard hook writes its message to
-/// descriptor 2 without asking first (a write that can wait, as above),
-/// and a hook of the program's does what it does, for as long as it
-/// takes. The stops that follow a panic on a pool thread
+/// anything here runs. The standard hook ordinarily writes its message
+/// to descriptor 2 without asking first (a write that can wait, as
+/// above; a test harness that captures output has it write there
+/// instead), and a hook of the program's does what it does, for as long
+/// as it takes. The stops that follow a panic on a pool thread
 /// (`AbortOnUnwind`, a worker's own) say their words that way.
 pub(crate) fn stop(why: &str) -> ! {
     #[repr(C)]

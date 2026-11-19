@@ -288,6 +288,26 @@ fn a_plain_neighbor_hashes_its_own_bytes() {
         w.check();
     }
 }
+/// One hasher alone in its slice, every pair of steps. (The walks above
+/// hold three hashers and more, and an auditor's fault, an `update_each`
+/// that dropped the pieces of a slice of one hasher, passed them all.)
+#[test]
+fn a_hasher_alone_in_its_slice_keeps_its_message() {
+    initialize();
+    let data: Vec<u8> = (0..40_000u32).map(|i| (i % 251) as u8).collect();
+    // `clone_from` wants a second hasher to copy from.
+    let steps: Vec<Step> = STEPS.into_iter().filter(|step| !matches!(step, CloneFrom)).collect();
+    for (a, &first) in steps.iter().enumerate() {
+        for (b, &second) in steps.iter().enumerate() {
+            for hint in [false, true] {
+                let mut w = Walk::new(1, hint);
+                w.step(first, 0, &data[..EDGES[(a + b) % 8]]);
+                w.step(second, 0, &data[7..7 + EDGES[(a + 3 * b + 5) % 8]]);
+                w.step(Finish, 0, &[]);
+            }
+        }
+    }
+}
 #[test]
 fn reader_copies_seek_and_read_independently_to_the_end() {
     initialize();
@@ -321,6 +341,14 @@ fn reader_copies_seek_and_read_independently_to_the_end() {
         d.set_position(u64::MAX - 3);
         assert_eq!(c.seek(SeekFrom::Current(i64::MAX)).unwrap(), u64::MAX);
         assert_eq!(d.seek(SeekFrom::Current(i64::MAX)).unwrap(), u64::MAX);
+        // A seek to a place that is not the start, counted from the
+        // start (an auditor's fault, a seek that took every such place
+        // for the start, passed: the only one here had been the start).
+        let to = pos / 2 + 7;
+        assert_eq!((c.seek(SeekFrom::Start(to)).unwrap(), d.seek(SeekFrom::Start(to)).unwrap()), (to, to));
+        c.fill(&mut x[..9]);
+        d.fill(&mut y[..9]);
+        assert_eq!(x[..9], y[..9]);
         assert_eq!(a.position(), pos + n as u64);
         assert_eq!(format!("{a:?}"), format!("OutputReader {{ position: {} }}", a.position()));
     }
