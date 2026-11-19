@@ -245,7 +245,7 @@ mod park_sync {
 }
 mod waker_sync {
     pub use core::cell::UnsafeCell;
-    pub use std::sync::atomic::{AtomicUsize, Ordering};
+    pub use std::sync::atomic::{AtomicUsize, Ordering, fence};
     #[inline(always)]
     pub fn spin() {
         core::hint::spin_loop();

@@ -94,7 +94,7 @@ mod pipeline_sync {
 
 /// As tests/shuttle_waker.rs has it.
 mod waker_sync {
-    pub use shuttle::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    pub use shuttle::sync::atomic::{AtomicBool, AtomicUsize, Ordering, fence};
     pub struct UnsafeCell<T> {
         busy: AtomicBool,
         inner: core::cell::UnsafeCell<T>,

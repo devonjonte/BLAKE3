@@ -1,13 +1,15 @@
 //! The pipeline's single-waiter lockless Dekker handshake (`WakerSlot`):
 //! a waiting caller stores its `Waker` and publishes `REGISTERED` in `SeqCst`
-//! before re-checking completion; a worker finishes its item with a `SeqCst`
-//! operation and then checks `state == REGISTERED` in `SeqCst`.
+//! before re-checking completion. A `SeqCst` fence orders publication
+//! before the re-check's acquire-only loads, including on Arm RCpc.
+//! A worker finishes its item with a `SeqCst` operation and then checks
+//! `state == REGISTERED` in `SeqCst`.
 //!
 //! `tests/shuttle_waker.rs` compiles this same file beside Shuttle's
 //! atomics and `UnsafeCell` (`waker_sync`), checking both causal race-freedom
 //! on the stored `Waker` and freedom from lost wakes.
 
-use super::waker_sync::{AtomicUsize, Ordering, UnsafeCell, spin, with_mut};
+use super::waker_sync::{AtomicUsize, Ordering, UnsafeCell, fence, spin, with_mut};
 use core::task::{Context, Waker};
 
 const IDLE: usize = 0;
@@ -31,6 +33,7 @@ impl WakerSlot {
         WakerSlot { state: Line(AtomicUsize::new(IDLE)), waker: UnsafeCell::new(None) }
     }
 
+    /// Publish interest before the caller rechecks the completion predicate.
     pub(crate) fn register(&self, cx: &Context<'_>) {
         let next = cx.waker().clone();
         loop {
@@ -38,6 +41,9 @@ impl WakerSlot {
             if (s == IDLE || s == REGISTERED) && self.state.0.compare_exchange(s, WRITING, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
                 let old = unsafe { with_mut(&self.waker, |slot| slot.replace(next)) };
                 self.state.0.store(REGISTERED, Ordering::SeqCst);
+                // The completion re-check may load with Acquire (RCpc
+                // on Arm). It must not move before publishing the waiter.
+                fence(Ordering::SeqCst);
                 drop(old);
                 return;
             }

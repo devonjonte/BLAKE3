@@ -13,7 +13,7 @@ set -eu
 cd "$(git rev-parse --show-toplevel)"
 [ "${CARGO_TARGET_DIR:-}" != /tmp/target ] || unset CARGO_TARGET_DIR
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$PWD/target"}
-rustup target add x86_64-unknown-linux-gnu 2>/dev/null
+rustup target add x86_64-unknown-linux-gnu aarch64-apple-darwin 2>/dev/null
 step() { echo "== $*"; "$@"; }
 # The version names this commit truly (tools/gen-ver.py: a release's on
 # the release commit alone, X.Y.Z+dev after it).
@@ -39,6 +39,8 @@ step sh -c 'cd threads && taskset -c 0 cargo nextest run --cargo-quiet --release
 step sh -c 'cd threads && RUSTFLAGS="--cfg shuttle" cargo test -q --release --test shuttle_finish --test shuttle_park --test shuttle_waker --test shuttle_pipeline'
 # The Pipeline's model fails for each planted fault (a build of it each).
 step python3 tools/pipeline_model_controls.py
+# Shuttle's SC model cannot check the RCpc wake-publication barrier.
+step python3 tools/check-waker-order.py
 RUSTFLAGS="-D warnings" step sh -c 'cd threads && cargo check -q --release --tests'
 RUSTFLAGS="-D warnings" step sh -c 'cd threads && cargo check -q --tests --target x86_64-unknown-linux-gnu'
 RUSTFLAGS="-D warnings" step cargo check -q --release --manifest-path b3sum/Cargo.toml
