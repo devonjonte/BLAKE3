@@ -782,8 +782,7 @@ process_static! {
 /// holds as much as its most Pipelines alive at once. The storage is not
 /// cleared: a keyed Pipeline's key and the bytes last written to its
 /// Rooms stay in the process's memory until another Pipeline writes over
-/// them. Where that matters, hash with a `Hasher` and the `zeroize`
-/// feature.
+/// them, and no call of this crate wipes them.
 ///
 /// # Giving up a message
 ///

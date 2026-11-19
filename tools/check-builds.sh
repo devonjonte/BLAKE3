@@ -26,7 +26,7 @@ step cargo test -q --release --doc --no-default-features
 # (compile_fail,E0308) where the compiler gives one a code. Stable
 # rustdoc takes any failure for it; with
 # this switch it holds each such example to its reason, in both crates.
-step sh -c 'RUSTC_BOOTSTRAP=1 cargo test -q --doc --features serde,zeroize && cd threads && RUSTC_BOOTSTRAP=1 cargo test -q --doc'
+step sh -c 'RUSTC_BOOTSTRAP=1 cargo test -q --doc --features serde && cd threads && RUSTC_BOOTSTRAP=1 cargo test -q --doc'
 RUSTFLAGS="-D warnings" step cargo check -q --release --tests --examples
 # The crate with the pool (threads/). One CPU, as in a one-CPU container:
 # the pool has no worker thread, and the caller hashes everything (the
@@ -66,7 +66,7 @@ step sh -c 'python3 tools/gen_avx512_32.py | cmp - c/blake3_avx512_32.S'
 step sh -c 'python3 tools/gen_output16.py | cmp - c/blake3_output16.S'
 step sh -c 'python3 tools/gen_output8.py | cmp - c/blake3_output8.S'
 # The core's API page lists what the crate offers, item for item.
-step sh -c 'RUSTC_BOOTSTRAP=1 cargo rustdoc -q --lib --features serde,zeroize -- -Z unstable-options --output-format json && python3 tools/api.py "$CARGO_TARGET_DIR/doc/blake3_servil_core.json" --check docs/core-api.md'
+step sh -c 'RUSTC_BOOTSTRAP=1 cargo rustdoc -q --lib --features serde -- -Z unstable-options --output-format json && python3 tools/api.py "$CARGO_TARGET_DIR/doc/blake3_servil_core.json" --check docs/core-api.md'
 # Each of b3sum's protections has a test that fails without it.
 step python3 tools/b3sum_controls.py
 echo "check-builds: every build passes"

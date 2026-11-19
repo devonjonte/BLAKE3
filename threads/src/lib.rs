@@ -161,6 +161,13 @@
 //!   of the calling thread's stack while it runs (it allocates nothing),
 //!   and the threads: by default a worker per CPU beyond the first, each with the
 //!   standard library's stack, started by [`initialize_multithreaded`].
+//! - **Nothing is wiped**: this crate does not clear what it held from
+//!   memory, and offers no call that does. A key, the message bytes a
+//!   [`Hasher`] or a Pipeline holds and the chaining values made from
+//!   them stay in the value, in the copies the kernels leave on the
+//!   stacks, and in the pool's and the Pipelines' storage, until
+//!   something else overwrites them. Official BLAKE3 offers `Zeroize` for
+//!   its types.
 //!
 //! # Panics
 //!
@@ -192,9 +199,8 @@
 //! # Cargo Features
 //!
 //! This crate needs the standard library; the core alone builds without
-//! it. The `zeroize` and `serde` features (off by default) are the core's,
-//! passed on: `Zeroize` for its types, and `Serialize` and `Deserialize`
-//! for [`Hash`](struct@Hash).
+//! it. The `serde` feature (off by default) is the core's, passed on:
+//! `Serialize` and `Deserialize` for [`Hash`](struct@Hash).
 //!
 //! The build needs a C compiler that assembles the kernels (GCC 12 or
 //! later, or Clang); without one it stops and says so. This crate runs its

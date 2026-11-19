@@ -94,6 +94,12 @@ figure names its machine. bench-hashes' page for this release sets 0.8,
   BLAKE3.
 - **A `Hasher` is 26,624 bytes** (it was 18,432). C callers recompile:
   `B3_HASHER_SIZE` in `capi/b3.h` changed.
+- **The `zeroize` feature is gone**, and with it `Zeroize` for `Hasher`,
+  `OutputReader` and `Hash`. The crates wipe nothing they held from
+  memory; each crate's "Memory" section says where a key and a
+  message's bytes stay. A program that must wipe a hasher can use
+  official BLAKE3, whose types implement `Zeroize`. ("Safer", below,
+  says what went wrong with it.)
 - **`b3sum` reads a large file past the page cache** when the cache does
   not hold it (Linux, 4 MiB and more). The file is not in the cache
   afterwards, so a second pass reads the drive again.
@@ -159,6 +165,14 @@ Each is accepted, with its issue.
 
 ## Safer
 
+- **A wiped `Hasher` cannot change another hasher's hash**
+  (GHSA-v237-j9h9-8pf7). In 0.9, `zeroize()` left a `Hasher` with zero
+  key words and no mode, which the grouped calls took for a plain
+  hasher, and `update_each` hashed a group of plain hashers under the
+  key words of its first: named first in a call, a wiped hasher gave
+  the plain hashers beside it wrong hashes, and nothing reported it.
+  0.10 has no `zeroize` feature, and a plain group hashes under
+  BLAKE3's constant itself, never under a member's copy of it.
 - **The Pipeline frees nothing a worker can reach** (#399). Before any
   release held it, a worker could read a Pipeline's memory after the
   Pipeline was dropped: about once in 1,200 runs on a 4-CPU machine,

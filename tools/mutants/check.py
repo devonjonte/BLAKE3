@@ -149,7 +149,7 @@ def other_crates(entries, has_list):
 def build_args(crate):
     """How every mutant builds: the mutants profile, and in the root's
     crate its public features on (the other crate has none)."""
-    return ["--profile", "mutants"] + ([] if crate else ["--features", "serde,zeroize"])
+    return ["--profile", "mutants"] + ([] if crate else ["--features", "serde"])
 
 
 def divide_list(text, moved):

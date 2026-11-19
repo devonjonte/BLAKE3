@@ -563,8 +563,7 @@ impl Hasher {
     /// This method requires the `std` Cargo feature, which is enabled by default.
     ///
     /// The buffer holds the message's last bytes when the call returns, and
-    /// is not cleared: [`Zeroize`](https://docs.rs/zeroize) on the `Hasher`
-    /// does not reach it. For a secret message, read into a buffer of your
+    /// is not cleared. For a secret message, read into a buffer of your
     /// own, call [`update`](Hasher::update), and clear the buffer.
     ///
     /// # Example
@@ -765,28 +764,6 @@ impl std::io::Write for Hasher {
     #[inline]
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
-    }
-}
-
-#[cfg(feature = "zeroize")]
-impl Zeroize for Hasher {
-    fn zeroize(&mut self) {
-        self.core.zeroize();
-        crate::hasher::wipe(&mut self.stage);
-        self.staged = 0;
-    }
-}
-
-#[cfg(feature = "zeroize")]
-impl Zeroize for HasherCore {
-    fn zeroize(&mut self) {
-        // Destructuring to trigger compile error as a reminder to update this impl.
-        let Self { key, chunk_state, initial_chunk_counter, cv_stack } = self;
-
-        key.zeroize();
-        chunk_state.zeroize();
-        initial_chunk_counter.zeroize();
-        cv_stack.zeroize();
     }
 }
 

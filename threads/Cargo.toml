@@ -17,7 +17,6 @@ default = ["std"]
 std = []
 # The core's optional trait implementations, passed on.
 serde = ["blake3-servil-core/serde"]
-zeroize = ["blake3-servil-core/zeroize"]
 
 [dependencies]
 # The one-thread library: the kernels and their proofs, the Hasher, the

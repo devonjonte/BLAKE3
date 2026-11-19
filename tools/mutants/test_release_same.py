@@ -61,7 +61,6 @@ edition = "2021"
 
 [features]
 serde = []
-zeroize = []
 
 [profile.mutants]
 inherits = "release"
@@ -138,7 +137,7 @@ class Confirm(unittest.TestCase):
 
 
 def release_same_build_args():
-    return ["--profile", "mutants", "--features", "serde,zeroize"]
+    return ["--profile", "mutants", "--features", "serde"]
 
 
 if __name__ == "__main__":

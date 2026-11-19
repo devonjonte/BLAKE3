@@ -263,7 +263,9 @@ pub struct Cv {
 
 impl Cv {
     /// A slot not yet filled, for an array that a call will fill: every
-    /// call that reads a `Cv` refuses it. Zeroed memory is the same value.
+    /// call that takes a `Cv` as a subtree's value refuses it
+    /// ([`as_bytes`](Cv::as_bytes) gives its 32 zero bytes). Zeroed memory
+    /// is the same value.
     pub const fn unset() -> Self {
         Cv { value: BareCv([0; OUT_LEN]), place: UNSET }
     }
@@ -607,6 +609,12 @@ impl TreeHasher {
 
     /// A worker's slice of a batch. Slot shape and output count are
     /// checked by the same code as `hash_many`.
+    ///
+    /// Requires each slot's bytes past its message to be zero, as a
+    /// `Batch` and a `Packed` keep them (checked in debug builds only: a
+    /// kernel that takes whole blocks hashes those bytes too). Outside the
+    /// documented API: the thread library passes its batches' slices here,
+    /// until it passes a checked view (BLAKE3 #458).
     #[doc(hidden)]
     #[inline]
     pub fn hash_slots_on(&self, platform: crate::platform::Platform, bytes: &[u8], len: usize, slot: usize, out: &mut [[u8; OUT_LEN]]) {
@@ -817,17 +825,6 @@ impl TreeHasher {
     pub fn root_output(&self, left: &Cv, right: &LastCv, len: u64) -> crate::OutputReader {
         Self::root_children(left, right, len);
         self.bare_root_output(&left.value, &right.value)
-    }
-}
-
-#[cfg(feature = "zeroize")]
-impl zeroize::Zeroize for TreeHasher {
-    fn zeroize(&mut self) {
-        // Destructured, so that a new field is not forgotten here.
-        let Self { key, flags, on_this_core } = self;
-        key.zeroize();
-        flags.zeroize();
-        on_this_core.zeroize();
     }
 }
 
@@ -1046,21 +1043,12 @@ mod tree_test {
         }
     }
 
-    /// Chaining values compare by their bytes, and a `TreeHasher` zeroized
-    /// holds no key.
+    /// Chaining values compare by their bytes.
     #[test]
-    fn chaining_values_compare_and_a_tree_zeroizes() {
+    fn chaining_values_compare_by_their_bytes() {
         let (one, other) = (BareCv::from_bytes([1; 32]), BareCv::from_bytes([2; 32]));
         assert!(one == BareCv::from_bytes([1; 32]));
         assert!(one != other);
-        #[cfg(feature = "zeroize")]
-        {
-            use zeroize::Zeroize;
-            let mut tree = TreeHasher::new(Mode::Keyed(&KEY)).on_this_core();
-            assert_ne!((tree.key, tree.flags, tree.on_this_core), ([0; 8], 0, false));
-            tree.zeroize();
-            assert_eq!((tree.key, tree.flags, tree.on_this_core), ([0; 8], 0, false));
-        }
     }
 
     #[test]

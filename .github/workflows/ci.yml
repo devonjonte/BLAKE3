@@ -69,8 +69,8 @@ jobs:
     # "Tests run under nextest"); the doc examples under cargo test --doc.
     # Default tests plus the optional trait implementations (every public
     # feature).
-    - run: cargo nextest run --features=serde,zeroize
-    - run: cargo test --doc --features=serde,zeroize
+    - run: cargo nextest run --features=serde
+    - run: cargo test --doc --features=serde
     # no_std tests.
     - run: cargo nextest run --no-default-features
     - name: Make sure enabling LTO via CFLAGS doesn't break the build.
@@ -150,7 +150,7 @@ jobs:
     - uses: taiki-e/install-action@v2
       with:
         tool: cargo-c@0.10.26
-    - run: cargo nextest run --lib --tests --features=serde,zeroize
+    - run: cargo nextest run --lib --tests --features=serde
     - name: threads
       run: cargo nextest run --lib --tests --no-fail-fast
       working-directory: ./threads
@@ -165,7 +165,7 @@ jobs:
         cargo run -q --release --manifest-path b3sum/Cargo.toml -- -c qemu.b3
         ar x qemu-user_11.1.2+ds-3_arm64.deb data.tar.xz && tar xJf data.tar.xz ./usr/bin/qemu-aarch64
         sudo install usr/bin/qemu-aarch64 /usr/local/bin/qemu-aarch64 && qemu-aarch64 --version
-    - run: cargo nextest run --lib --tests --features=serde,zeroize
+    - run: cargo nextest run --lib --tests --features=serde
       env:
         CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
         # tests/pool_fairness.rs measures the pool's shares by time, which an

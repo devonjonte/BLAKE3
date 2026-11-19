@@ -10,7 +10,7 @@ A page is its own opening, then the list from the line "## Crate root"
 to its end; `--check` compares that part and prints what differs
 (tools/check-builds.sh runs it on docs/core-api.md).
 
-DOC.json: `RUSTC_BOOTSTRAP=1 cargo rustdoc --lib --features serde,zeroize --
+DOC.json: `RUSTC_BOOTSTRAP=1 cargo rustdoc --lib --features serde --
 -Z unstable-options --output-format json` writes it under target/doc/.
 Hidden items (`#[doc(hidden)]`) are left out: they are not for programs.
 """

@@ -145,6 +145,12 @@
 //!   [`throughput::update_each`] allocates and frees nothing.
 //! - **Once per process**: the startup self-test's buffers, about 45 KiB
 //!   of the calling thread's stack while it runs (it allocates nothing).
+//! - **Nothing is wiped**: this crate does not clear what it held from
+//!   memory, and offers no call that does. A key, the message bytes a
+//!   [`Hasher`] holds and the chaining values made from them stay in the
+//!   value and in the copies the kernels leave on the stack, until
+//!   something else overwrites them. Official BLAKE3 offers `Zeroize` for
+//!   its types.
 //!
 //! # Panics
 //!
@@ -172,11 +178,6 @@
 //! [`Write`] implementation and the [`update_reader`](convenience::Hasher::update_reader)
 //! method for [`Hasher`], and also the [`Read`] and [`Seek`] implementations
 //! for [`OutputReader`].
-//!
-//! The `zeroize` feature (off by default, on for [docs.rs])
-//! implements
-//! [`Zeroize`](https://docs.rs/zeroize/latest/zeroize/trait.Zeroize.html) for
-//! this crate's types.
 //!
 //! The build needs a C compiler that assembles the kernels (GCC 12 or
 //! later, or Clang); without one it stops and says so. This crate runs its
@@ -367,8 +368,6 @@ use arrayvec::{ArrayString, ArrayVec};
 use core::cmp;
 use core::fmt;
 use platform::{MAX_SIMD_DEGREE, Platform};
-#[cfg(feature = "zeroize")]
-use zeroize::Zeroize;
 
 /// This build's version: the crate's version, and for any build but a
 /// release's own commit, the commit built and, from a dirty tree, the Git
@@ -568,15 +567,6 @@ impl core::str::FromStr for Hash {
     }
 }
 
-#[cfg(feature = "zeroize")]
-impl Zeroize for Hash {
-    fn zeroize(&mut self) {
-        // Destructuring to trigger compile error as a reminder to update this impl.
-        let Self(bytes) = self;
-        bytes.zeroize();
-    }
-}
-
 /// This implementation is constant-time.
 impl PartialEq for Hash {
     #[inline]
@@ -686,20 +676,6 @@ impl Output {
     }
 }
 
-#[cfg(feature = "zeroize")]
-impl Zeroize for Output {
-    fn zeroize(&mut self) {
-        // Destructuring to trigger compile error as a reminder to update this impl.
-        let Self { input_chaining_value, block, block_len, counter, flags, platform: _ } = self;
-
-        input_chaining_value.zeroize();
-        block.zeroize();
-        block_len.zeroize();
-        counter.zeroize();
-        flags.zeroize();
-    }
-}
-
 type ChunkState = hasher::ChunkState<Platform>;
 
 impl hasher::Blocks for Platform {
@@ -736,21 +712,6 @@ impl ChunkState {
         self.absorb(input);
         debug_assert!(self.count() <= CHUNK_LEN);
         self
-    }
-}
-
-#[cfg(feature = "zeroize")]
-impl Zeroize for ChunkState {
-    fn zeroize(&mut self) {
-        // Destructuring to trigger compile error as a reminder to update this impl.
-        let Self { cv, chunk_counter, buf, buf_len, blocks_compressed, flags, platform: _ } = self;
-
-        cv.zeroize();
-        chunk_counter.zeroize();
-        buf.zeroize();
-        buf_len.zeroize();
-        blocks_compressed.zeroize();
-        flags.zeroize();
     }
 }
 
@@ -1508,18 +1469,5 @@ impl std::io::Seek for OutputReader {
         }
         self.set_position(cmp::min(target_position, max_position) as u64);
         Ok(self.position())
-    }
-}
-
-#[cfg(feature = "zeroize")]
-impl Zeroize for OutputReader {
-    fn zeroize(&mut self) {
-        // Destructuring to trigger compile error as a reminder to update this impl.
-        let Self { inner, position_within_block, cached_block, cache_valid } = self;
-
-        inner.zeroize();
-        position_within_block.zeroize();
-        cached_block.zeroize();
-        cache_valid.zeroize();
     }
 }
