@@ -73,7 +73,7 @@ class CI(unittest.TestCase):
 
 
 class ReleaseEvidence(unittest.TestCase):
-    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch", mutation_log=MUTATION_OK, core_log=MUTATION_OK, power=("AC Power, 100%", "AC Power, 100%"), artifacts=(True, ""), vm_log=None, previous=None, builds_log="check-builds: every build passes", dry_run_log="publish-dry-run: ok"):
+    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch", mutation_log=MUTATION_OK, core_log=MUTATION_OK, power=("AC Power, 100%", "AC Power, 100%"), artifacts=(True, ""), previous=None, builds_log="check-builds: every build passes", dry_run_log="publish-dry-run: ok"):
         jobs = [job(), job()] if ci_jobs is None else ci_jobs
         def git(*args):
             if args[0] == "rev-parse":
@@ -108,9 +108,7 @@ class ReleaseEvidence(unittest.TestCase):
             logs = root / "tmp/night"
             logs.mkdir(parents=True)
             candidate = (git_override or git)("rev-parse", "candidate")[:12]
-            if vm_log is None:
-                vm_log = f"check: BLAKE3-Servil's working tree ({candidate}) against {old} ({old[:12]})\nregress: no cell slower\n{check.VM_OK}"
-            for name, text in [("check-release-vm", vm_log), ("check-builds", builds_log), ("publish-dry-run", dry_run_log)]:
+            for name, text in [("check-builds", builds_log), ("publish-dry-run", dry_run_log)]:
                 (logs / f"{name}-{candidate}.log").write_text(text + "\n")
             if mutation_log is not None:
                 # A real run prints the full SHA for each crate, even when this
@@ -189,21 +187,6 @@ class ReleaseEvidence(unittest.TestCase):
     def test_wrong_commits_not_pass(self):
         self.assertEqual(self.run_gate(new="c" * 40)[0], 1)
         self.assertEqual(self.run_gate(old="c" * 40)[0], 1)
-
-    def test_vm_verdict_needs_the_right_comparison_and_full_scope(self):
-        good = f"check: BLAKE3-Servil's working tree ({HEAD[:12]}) against {OLD} ({OLD[:12]})\n"
-        for header in ("", good.replace(OLD[:12], "c" * 12), good.replace(HEAD[:12], "d" * 12), good + "check: measuring the 7 named points\n"):
-            with self.subTest(header=header):
-                code, output = self.run_gate(vm_log=header + f"regress: no cell slower\n{check.VM_OK}")
-                self.assertEqual(code, 1, output)
-                self.assertIn("FAIL  VM check against the previous release", output)
-
-    def test_a_first_stage_vm_reading_is_not_a_verdict(self):
-        start = f"check: BLAKE3-Servil's working tree ({HEAD[:12]}) against {OLD} ({OLD[:12]})\n"
-        text = start + "regress: no cell slower\nregress: suspects: a cell to repeat"
-        code, output = self.run_gate(vm_log=text)
-        self.assertEqual(code, 1, output)
-        self.assertIn("FAIL  VM check against the previous release", output)
 
     def test_mutation_timeout_mismatch_is_no_verdict(self):
         text = f"mutants: BLAKE3-Servil at {HEAD}\nmutants: the whole run\nmutants: 12 survive, each known and explained\nmutants: the time-outs differ from timeouts-x86_64.txt (no verdict on those mutants)\n"

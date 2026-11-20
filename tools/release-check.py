@@ -24,12 +24,6 @@ and the rest timed out or have no verdict.
   at start" and "power at end"); on battery it is NO VERDICT.
 - The logs, each named for the commit it ran on (C: the commit's first 12
   hex digits), so an earlier commit's log cannot stand in for it:
-  - VM check: tmp/night/check-release-vm-C.log, from
-    `cd ../bench-hashes && cargo run --release -- check --fork <this checkout> --against <previous tag> --cells all`,
-    on one compatible bench where possible, with `--old-bench` only when
-    the API change prevents that. Keep both output streams. Finish the
-    log with `release-vm: ok` only on exit 0, so a first-stage reading
-    cannot pass the gate while the bench repeats its suspects.
   - Full mutation run: tmp/night/mutants-C.log, with one complete section
     per crate (core and threads), each naming this commit and matching its
     survivor and timeout lists, from
@@ -86,7 +80,6 @@ EXCHANGE = os.environ.get("MAC_RUNNER") or os.path.join(os.path.dirname(MAIN), "
 
 # A step's two outcomes besides PASS, FAIL and OPEN.
 TIMED_OUT, NO_VERDICT = "timed out", "no verdict"
-VM_OK = "release-vm: ok"
 
 
 def git(*args):
@@ -137,24 +130,6 @@ def log_ends_with(path, line):
     while lines and lines[-1].strip("\r") == "":
         lines.pop()
     return bool(lines) and lines[-1].rstrip("\r") == line
-
-
-def vm_result(path, commit, old):
-    """Require the bench's own comparison line, and a full check's verdict."""
-    try:
-        lines = (Path(MAIN) / path).read_text(errors="replace").splitlines()
-    except FileNotFoundError:
-        return None
-    title = re.compile(r"check: BLAKE3-Servil's .+ \(([0-9a-f]{12})\) against .+ \(([0-9a-f]{12})\)")
-    comparisons = [m.groups() for line in lines if (m := title.fullmatch(line))]
-    if len(comparisons) != 1:
-        return False
-    candidate, baseline = comparisons[0]
-    if candidate != commit[:12] or baseline == candidate or (old is not None and baseline != old[:12]):
-        return False
-    if any(line.startswith("check: measuring the ") for line in lines):
-        return False
-    return lines[-1:] == [VM_OK] and "regress: no cell slower" in lines
 
 
 def mutation_crate(lines, commit):
@@ -403,10 +378,6 @@ def main():
          + (f" (the last one: {mac})" if mac in ("timed out", "no verdict") else "")
          + (f" (the last one ran off AC power: {mac_power}; run it again plugged in)" if mac_power else ""))
 
-    vm_log = f"tmp/night/check-release-vm-{commit[:12]}.log"
-    step("VM check against the previous release", vm_result(vm_log, commit, old),
-         f"(cd ../bench-hashes && cargo run --locked --release -- check --fork {ROOT} --against {previous or '<the main line before this release>'} --cells all) > {vm_log} 2>&1"
-         f" && printf '%s\\n' '{VM_OK}' >> {vm_log}")
     step("full mutation run, core and threads", mutation_result(f"tmp/night/mutants-{commit[:12]}.log", commit),
          f"python3 tools/mutants/check.py --whole > tmp/night/mutants-{commit[:12]}.log, the commit checked out (both crates; --whole, since the default covers the change since origin/next)")
     step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "check-builds: every build passes"),

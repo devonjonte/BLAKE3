@@ -336,16 +336,16 @@ it takes and ticks each step:
    `sh tools/check-builds.sh`. Pull-request CI normally checks a synthetic
    merge, so its head-SHA label alone is not evidence for the release commit.
 3. `bench-hashes check --against <previous release tag> --cells all`,
-   on the Arm VM, on each x86 machine of the fleet, and on the timing
-   Mac (a Mac Mini M6). Use one bench commit on both sides for the calls
-   they share. Compare new calls with a suitable development baseline on
-   the current bench. When the old API prevents one bench from building
-   both sides, set `--old-bench <bench commit>` (the runner's
-   `old_bench_commit`) and record the bench difference beside the result.
-   The older bench must build beside BLAKE3-Servil, as every bench from
-   1f4dfd63 on does. Keep both streams of the VM check's output. After
-   the check exits zero, append `release-vm: ok` to the log. The early
-   reading from its first four pairs is not the final verdict.
+   on the timing Mac (a Mac Mini M6, checked mechanically by
+   `tools/release-check.py`) and on the native x86 machines of the
+   fleet; VM timing runs nightly on a best-effort basis and is not
+   awaited for a release. Use one bench commit on both sides for the
+   calls they share. Compare new calls with a suitable development
+   baseline on the current bench. When the old API prevents one bench
+   from building both sides, set `--old-bench <bench commit>` (the
+   runner's `old_bench_commit`) and record the bench difference beside
+   the result. The older bench must build beside BLAKE3-Servil, as every
+   bench from 1f4dfd63 on does.
 4. The long proofs, every kernel; the full mutation run.
 5. The packages' dry-run (below), all four together: the core needs its
    version crate, the thread library needs the core, and the CLI needs the

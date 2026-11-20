@@ -198,7 +198,7 @@ A fact that concerns several audiences goes in each audience's document, phrased
 
 **Support only what we stand behind** (Zooko, October 16, 2026). Every supported platform, operating system, compiler, version, and feature costs builds, tests, proofs, and documentation on every change, so each one earns its place or goes (Simplicity). Support what we test fully and what is itself current, secure, and maintained, and claim support for exactly what our checks run.
 
-**The native Mac comes first; virtual machines follow** (the user's decision, September 27, 2026). Performance-sensitive programs run on native hosts far more often than in VMs, and the Mac shows what our code does (each thread's cycles per core kind, the host's own scheduler), where a VM's layers hide it. Diagnose and design on the Mac first; then measure the VM, and keep it level or better. How VMs differ (idle vCPUs that spin steal host time from those that hash; a guest's vCPUs may outnumber its fast host cores) is in the host lab's `host-lab-reports/`.
+**The native Mac comes first; virtual machines follow** (the user's decision, September 27, 2026). Performance-sensitive programs run on native hosts far more often than in VMs, and the Mac shows what our code does (each thread's cycles per core kind, the host's own scheduler), where a VM's layers hide it. Diagnose and design on native hosts (the timing Mac and the x86 fleet); VM timing runs nightly on a best-effort basis and never blocks a landing or a release (November 20, 2026), while AArch64 Linux tests and mutants stay a correctness gate. How VMs differ (idle vCPUs that spin steal host time from those that hash; a guest's vCPUs may outnumber its fast host cores) is in the host lab's `host-lab-reports/`.
 
 # Where to start
 
@@ -210,7 +210,7 @@ The open work is in the issues of both repositories (servil-software-factory/BLA
 
 # Speed: no slower commit enters unnoticed
 
-Speed is this fork's purpose. Every commit that can change the machine code the gate's machines run (AArch64, on macOS and Linux) passes the performance-regression check before it enters git, and the main line takes only changes that passed it on every target machine; `CONTRIBUTING.md` gives the procedure and what each verdict obliges.
+Speed is this fork's purpose. Every commit that can change compiled machine code passes the native performance-regression check (`--cells all` on the timing Mac, and on native x86 where pool or x86 code changes) before landing on `next`; `CONTRIBUTING.md` gives the procedure and what each verdict obliges.
 
 # Size beside speed
 

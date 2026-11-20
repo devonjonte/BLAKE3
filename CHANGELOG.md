@@ -57,23 +57,26 @@ figure names its machine. bench-hashes' page for this release sets 0.8,
   never sees a partial outboard. `--keyed --outboard -` is an error.
 - `throughput::finalize_each` panics on an index named twice or out of
   range in every build, leaving the hashers unmarked where the call is
-  refused. 0.9 gave a repeated index the empty message's hash in release
-  builds. `update_each` leaves no hasher's stage held if a call unwinds.
+  refused. On 0.9's scalar path a repeated index could receive the empty
+  message's hash in release builds. `update_each` leaves no hasher's
+  stage held if a call unwinds.
 - `Batch::new` and `Batch::message_mut` check that their slot and block
-  lengths fit in `usize`; `hash_many_multithreaded` refuses a borrowed
-  batch whose slices do not share one length above the split.
+  lengths fit in `usize`; `hash_many_multithreaded` checks that a
+  borrowed batch's block buffer equals `slot * out.len()` above the
+  split as well as below it.
 - On Arm64, the Pipeline waiter and worker sleep paths place a barrier
   between storing a waiter's state and checking for work (#463, an
   unbounded stall seen on the Apple M6).
 - On Linux, the CPU-affinity mask handles kernels configured for up to
-  8,192 CPUs (0.9 assumed at most 1,024). A worker thread that the
+  8,192 CPUs. A worker thread that the
   system refuses to start stops the process rather than leaving callers
   waiting; `blake3-servil`'s "Panics" section lists every condition on
   which the crate ends the process.
-- `b3sum`: standard input named more than once (`b3sum - -`, or by
-  another name of the same pipe under `/dev` or `/proc`) is read once,
-  in order, in every mode; 0.9 split inputs of a megabyte or more across
-  file threads and printed two wrong hashes. Only `-` itself is standard
+- `b3sum`: where repeated standard input is accepted, naming it more
+  than once (`b3sum - -`, or by another name of the same pipe under
+  `/dev` or `/proc`) reads it once, in order, in the 32-byte, extended
+  and outboard paths; 0.9 could split large piped or redirected inputs
+  across file threads and print two wrong hashes. Only `-` itself is standard
   input (`-/` was hashed as standard input). `b3sum --check` on a pipe
   that names that pipe fails the entry instead of waiting for ever, and
   a `--tag` line whose filename holds two spaces checks. The output's
@@ -118,7 +121,7 @@ figure names its machine. bench-hashes' page for this release sets 0.8,
 
 - **The licence.** From this release BLAKE3-Servil is under any of MIT,
   Apache-2.0, TGPPL-1.0 or BOSL-1.0, at your choice, as smalloc is
-  (#450). 0.9.0 and earlier stay under the terms they were published
+  (#450). 0.9.1 and earlier stay under the terms they were published
   with: CC0-1.0, Apache-2.0, or Apache-2.0 with the LLVM exception. A
   program that relied on CC0 has MIT and Apache-2.0 to choose from.
 - **`Hasher::finalize` and `finalize_xof` take `&self`** (0.9 took the
@@ -139,8 +142,8 @@ figure names its machine. bench-hashes' page for this release sets 0.8,
 - **One memory node on Linux** (#452, #457): where the system shows
   several memory nodes and allows the binding, `initialize_multithreaded`
   keeps its workers on one node (the starting thread's node, or one with
-  at least twice as many allowed CPUs), and `None` sizes the pool to
-  that node's allowed CPUs. `b3sum` keeps its main thread and workers on
+  at least twice as many allowed CPUs), and `None` bounds the default
+  thread count to that node's allowed CPUs. `b3sum` keeps its main thread and workers on
   one node too. Where the system hides the topology or refuses the
   binding, both run on the CPUs they have. A build for a 32-bit-pointer
   target stops with a message pointing to official BLAKE3.
@@ -148,8 +151,8 @@ figure names its machine. bench-hashes' page for this release sets 0.8,
 ## Faster
 
 Each pair of figures is the commit before the change and the commit
-with it, on the machine named. bench-hashes' page (above) measures
-0.9.0 against 0.10.0 as released.
+with it (or 0.9.1 against 0.10 where noted), on the machine named.
+bench-hashes' page (above) measures 0.9 against 0.10.0 as released.
 
 - **`b3sum`, a file of 4 MiB or more from storage (Linux)**: direct
   reads, several at once, each thread hashing what it read. 1 GiB: 217 to
@@ -169,11 +172,12 @@ with it, on the machine named. bench-hashes' page (above) measures
   CPUs, and a thread learns whether its own cache's workers or all of
   them serve a kind and size of call sooner. 2x EPYC 7443, a 1 MiB
   message read into a buffer and hashed: 437 to 74 us.
-- **One memory node on two-socket Linux** (#457): on an unbound 2x EPYC
-  7443 (96 CPUs across two memory nodes), `hash_multithreaded` after
-  `initialize_multithreaded(None)` hashes a 1 GiB buffer in 15.0 to
-  15.7 ms on one node's 48 threads, where 0.9.1 took 41.7 to 43.0 ms
-  across all 96 (256 MiB: 4.3 vs 9.5 ms; 16 MiB: 0.18 vs 0.23 ms).
+- **One memory node on two-socket Linux** (#457, against 0.9.1): on an
+  unbound 2x EPYC 7443 (96 CPUs across two memory nodes),
+  `hash_multithreaded` after `initialize_multithreaded(None)` hashes a
+  1 GiB buffer in 15.0 to 15.7 ms on one node's 48 threads, where 0.9.1
+  took 41.7 to 43.0 ms across all 96 (256 MiB: 4.3 vs 9.4 to 9.7 ms;
+  16 MiB: 0.17 to 0.18 vs 0.20 to 0.25 ms).
 - **Arm servers** (cores with SHA-3 that are not Apple's; measured on an
   AmpereOne, #395): chunk plans of their own, and a quad kernel that
   takes its four Gs a step at a time. One core, 16 KiB: 0.85 to 0.63 ns
@@ -203,15 +207,16 @@ Each is accepted, with its issue.
   caches busy** (#389): the Pipeline reads them 37% slower.
 - **One-memory-node rule when a caller asks for more threads than one
   node holds, or starts under a lopsided CPU mask** (#457): an explicit
-  `Some(96)` on the 2x EPYC 7443 packs all 96 threads onto one 48-CPU
-  node (1 GiB: 19 to 22 ms vs 15 ms at `None`; 16 MiB: 0.29 ms vs
-  0.22 ms in 0.9.1). And a buffer already spread in caches across both
-  sockets can hash faster across all nodes than on one (`lanes.rs`:
-  16 MiB untouched between calls took 0.18 ms across all vs 0.62 ms on
-  the caller's cache). With 1 allowed CPU on the starting node and 1 on
-  another, the default pool has 1 thread where 0.9 had 2 (another node
-  is chosen only when it holds at least twice the starting node's
-  allowed CPUs).
+  `Some(96)` on the 2x EPYC 7443 binds all 95 workers onto one 48-CPU
+  node while leaving the calling thread unbound (1 GiB: 19 to 22 ms vs
+  15 ms at `None`; 16 MiB: 0.28 to 0.29 ms vs 0.21 to 0.22 ms in 0.9.1).
+  And a buffer already resident in caches across the machine can hash
+  faster across all workers than within one subset (`lanes.rs`, #389:
+  16 MiB untouched between calls took 0.18 ms across all workers vs
+  0.62 ms on the caller's last-level cache). With 1 allowed CPU on the
+  starting node and 1 on another, the default pool has 1 thread where
+  0.9 had 2 (another node is chosen only when it holds at least twice
+  the starting node's allowed CPUs).
 - **A Pipeline's caller whose SMT sibling runs a worker** (#237): the
   caller's copy into rooms slows, and whether a worker lands there is
   decided when the process starts. EPYC 9255, 1 MiB messages, 8 in
@@ -248,10 +253,11 @@ Each is accepted, with its issue.
 ## Checked more
 
 - `next` moves only by `tools/land.py`, to a commit whose every gate is
-  a green status on that exact commit: CI's tests workflow, the native
-  tests and mutation check on x86-64, an Arm server and a Mac, every
-  benchmark cell on the timing Mac, the builds, and the long proofs
-  where a kernel or its proof changed. GitHub refuses any other push.
+  a green status on that exact commit: CI's tests workflow, the build
+  check and x86-64 mutation check, native tests and mutation checks on
+  AArch64 Linux and on macOS Arm64, the `cells` benchmark gate (on the
+  timing Mac), and the long proofs where a kernel or its proof changed.
+  Branch protection refuses direct pushes.
 - The builds' gate runs the three Shuttle models of the pool's waits and
   the Pipeline model with its ten planted-fault controls, checks the
   documented trait implementations against rustdoc JSON, and runs the
