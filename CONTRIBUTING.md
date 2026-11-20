@@ -265,9 +265,9 @@ found complete. A candidate lands once:
 - its commit message says what it adds to the library or removes, with
   `python3 tools/size.py BASE REV`'s output where it changes the
   library's code (a few minutes: it counts and builds);
-- the regression check finds no slowdown on AArch64 Linux in a VM and
-  natively on the timing Mac (a Mac Mini M6 that runs timing jobs
-  alone), over every cell (`--cells all`:
+- the regression check finds no slowdown natively on the timing Mac (a
+  Mac Mini M6 that runs timing jobs alone), over every cell
+  (`--cells all`:
   about twenty minutes there). A candidate that changes no compiled code
   needs no speed check: it would compare identical code. The Mac
   check is a job you queue yourself, through the shared exchange
@@ -276,7 +276,11 @@ found complete. A candidate lands once:
   checked at the points its author expected can slow one nobody named;
   a cell slower where the change means it to be (a call outside the
   pattern its API is tuned for) is recorded with its number in the
-  commit message. Whoever made the candidate lands it once every check has passed,
+  commit message. Virtual machines are timed nightly on a best-effort
+  basis (never awaited for a landing or a release, and a slowdown seen
+  only on a VM is looked into when nothing better waits); the VM's
+  correctness checks, tests and mutants on AArch64 Linux, stay a gate.
+  Whoever made the candidate lands it once every check has passed,
 the same day: no review gate stands between a passing candidate and
 `next`.
 

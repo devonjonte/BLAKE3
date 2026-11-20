@@ -1,5 +1,10 @@
 # A tree API, and the end of `hazmat` (design draft)
 
+> **Historical design draft (November 14, 2026).** Parts of what follows
+> were built differently: read [`hazmat-removal.md`](hazmat-removal.md)
+> and the [`TreeHasher`](../src/throughput.rs) documentation for what
+> 0.10 ships.
+
 *A draft for BLAKE3 #378, November 14, 2026. Layer 1 is built
 (`throughput::TreeHasher`), with one client, `b3sum --outboard`; the threads
 crate is not yet moved onto it, and layers 2 and 3 are not built. The
