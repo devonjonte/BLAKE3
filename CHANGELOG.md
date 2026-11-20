@@ -1,4 +1,4 @@
-# blake3-servil 0.10.0+dev, against blake3-servil 0.9.1
+# blake3-servil 0.10.0+42fe3d48dae85b4469c4edfffd17578fa114c0d7, against blake3-servil 0.9.1
 
 What changed since 0.9.1 (0.9.0 with the one fix of GHSA-q4c5-2759-8c8x), each item with where it is described. Every
 figure names its machine. bench-hashes' page for this release sets 0.8,
