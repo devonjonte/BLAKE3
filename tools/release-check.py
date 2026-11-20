@@ -100,7 +100,9 @@ class GitHubTimedOut(Exception):
 
 def github(path):
     token = open(os.path.join(MAIN, "ghtokenclassic.txt")).read().strip()
-    request = urllib.request.Request("https://api.github.com" + path, headers={"Authorization": f"token {token}"})
+    request = urllib.request.Request("https://api.github.com" + path)
+    # Not sent on to where a redirect leads.
+    request.add_unredirected_header("Authorization", f"token {token}")
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.load(response)
@@ -119,9 +121,22 @@ def log_tail(path):
     return Path(full).read_text(errors="replace")[-4000:]
 
 
-def log_ends_with(path, text):
-    tail = log_tail(path)
-    return None if tail is None else text in tail
+def log_ends_with(path, line):
+    """Whether the log's last line is `line`: None where there is no log.
+    A line above the last is an earlier run's, with whatever was written
+    after it: a rerun that failed, appended to the same log, left the
+    first run's line in the tail, and a search of the tail found it."""
+    full = os.path.join(MAIN, path)
+    if not os.path.exists(full):
+        return None
+    # Whole lines of the whole log (the last 4,000 characters could begin
+    # inside a line, and "Note: " before the words then passed); empty
+    # lines after the last are skipped, and the line is compared as it is
+    # but for its end.
+    lines = Path(full).read_text(errors="replace").split("\n")
+    while lines and lines[-1].strip("\r") == "":
+        lines.pop()
+    return bool(lines) and lines[-1].rstrip("\r") == line
 
 
 def vm_result(path, commit, old):
@@ -345,8 +360,10 @@ def main():
         print(f"{label}  {name}" + ("" if ok is True else f": {how}"))
 
     try:
-        runs = github(f"/repos/servil-software-factory/BLAKE3/actions/runs?head_sha={commit}&event=workflow_dispatch&per_page=20").get("workflow_runs", [])
-        ci = [r for r in runs if r["name"] == "tests"]
+        runs = github(f"/repos/servil-software-factory/BLAKE3/actions/runs?head_sha={commit}&event=workflow_dispatch&per_page=100").get("workflow_runs", [])
+        # The tests' workflow by its file, newest run first: another
+        # workflow may bear the name.
+        ci = sorted((r for r in runs if r.get("path") == ".github/workflows/ci.yml"), key=lambda r: r["run_number"], reverse=True)
         result = ci_result(ci[0]) if ci else None
         built = ci[0] if result is True else None
         step("CI, every job", result,
@@ -392,7 +409,7 @@ def main():
          f" && printf '%s\\n' '{VM_OK}' >> {vm_log}")
     step("full mutation run, core and threads", mutation_result(f"tmp/night/mutants-{commit[:12]}.log", commit),
          f"python3 tools/mutants/check.py --whole > tmp/night/mutants-{commit[:12]}.log, the commit checked out (both crates; --whole, since the default covers the change since origin/next)")
-    step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "every build passes"),
+    step("check-builds", log_ends_with(f"tmp/night/check-builds-{commit[:12]}.log", "check-builds: every build passes"),
          f"sh tools/check-builds.sh > tmp/night/check-builds-{commit[:12]}.log")
     step("cargo publish --dry-run", log_ends_with(f"tmp/night/publish-dry-run-{commit[:12]}.log", "publish-dry-run: ok"),
          f"the packages' dry-run in CONTRIBUTING.md; save its output to tmp/night/publish-dry-run-{commit[:12]}.log and append 'publish-dry-run: ok' only on success")

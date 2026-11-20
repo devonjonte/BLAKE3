@@ -115,7 +115,8 @@ class Release:
         candidate whose tag is not made yet); else the tag's, in `repo`
         (this checkout's repository unless another is named)."""
         self.tag, self.repo, self.version = tag, repo or ROOT, tag[1:]
-        named = re.fullmatch(r"v\d+\.\d+\.\d+\+([0-9a-f]{40})", tag)
+        # Numbers as Cargo writes them: no zero before another digit.
+        named = re.fullmatch(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\+([0-9a-f]{40})", tag)
         if not named:
             raise NotARelease(f"{tag} is no release tag (vX.Y.Z+<the code commit's 40 hex digits>)")
         if commit is None:
@@ -333,17 +334,27 @@ def digest_problems(name, data, seen):
 
 
 def fetch(url):
-    headers = {"User-Agent": f"{REPO} tools/release_artifacts.py"}
-    if "api.github.com" in url and os.environ.get("GITHUB_TOKEN"):
-        headers["Authorization"] = "Bearer " + os.environ["GITHUB_TOKEN"]
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=300) as response:
+    # (A search of the whole address for GitHub's name once sent the
+    # token wherever a path or a longer host held the name.)
+    with urllib.request.urlopen(request_for(url), timeout=300) as response:
         return response.read()
+
+
+def request_for(url):
+    """The request for `url`. The token goes to GitHub's API alone, told
+    by the address's host, and is a header that is not sent on to where
+    a redirect leads: an ordinary header is, whatever host that is."""
+    request = urllib.request.Request(url, headers={"User-Agent": f"{REPO} tools/release_artifacts.py"})
+    where = urllib.parse.urlsplit(url)
+    if (where.scheme, where.hostname) == ("https", "api.github.com") and os.environ.get("GITHUB_TOKEN"):
+        request.add_unredirected_header("Authorization", "Bearer " + os.environ["GITHUB_TOKEN"])
+    return request
 
 
 def published(release):
     """What users download for the release, each as (name, bytes or None
     where it is not there): the four crates from crates.io, and every
-    asset of the GitHub release but the digest files."""
+    asset of the GitHub release, each program's digest file among them."""
     for folder in CRATE_DIRS:
         crate = release.crate(folder)
         name = f"{crate}-{release.version}.crate"
@@ -366,7 +377,11 @@ def published(release):
     # Each artifact before its digest file, which is checked against it.
     for asset in sorted(listing["assets"], key=lambda asset: (is_digest(asset["name"]), asset["name"])):
         yield f"the GitHub release: {asset['name']}", asset["name"], fetch(asset["browser_download_url"])
-    for missing in [n for n in expected(release) if not n.endswith(".crate") and n not in names]:
+    # Each program, and the digest file the release has beside it
+    # (CONTRIBUTING, tools/b3sum-release.sh): a digest file that was not
+    # there was passed over, where a wrong one failed.
+    programs = [n for n in expected(release) if not n.endswith(".crate")]
+    for missing in [n for n in programs + [n + ".sha256" for n in programs] if n not in names]:
         yield f"the GitHub release: {missing}", missing, None
 
 
