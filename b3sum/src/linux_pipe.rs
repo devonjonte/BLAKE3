@@ -871,7 +871,7 @@ impl ColdRingState {
 /// Hash `paths` in parallel and deliver `(index, result)` in exact `0..paths.len()`
 /// order to `on_ordered` (which returns `false` to stop early).
 pub(crate) fn hash_paths(args: &Args, paths: &[PathBuf], on_ordered: &mut dyn FnMut(usize, anyhow::Result<blake3::Hash>) -> bool) {
-    hash_paths_inner(args, paths, false, on_ordered);
+    hash_paths_inner(args, paths, true, on_ordered); // EXPERIMENT: no io_uring
 }
 
 /// The threads that read and hash `nfiles` files, of `total_threads`:
