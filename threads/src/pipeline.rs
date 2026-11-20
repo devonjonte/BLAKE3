@@ -3580,6 +3580,18 @@ mod test {
         use std::os::unix::process::ExitStatusExt as _;
         const ENV: &str = "BLAKE3_PIPELINE_ABORT_CASE";
         if let Ok(which) = std::env::var(ENV) {
+            // Each case aborts on purpose: keep the kernel's crash
+            // handler (Ubuntu's apport: 1 s of D-Bus timeout a child,
+            // serialized across shards) from inspecting a deliberate
+            // SIGABRT under the mutation profile's 15 s clock.
+            #[cfg(target_os = "linux")]
+            // Sound: PR_SET_DUMPABLE(0) affects only this child process.
+            unsafe {
+                unsafe extern "C" {
+                    fn prctl(option: i32, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> i32;
+                }
+                prctl(4, 0, 0, 0, 0);
+            }
             match which.as_str() {
                 "lent" => {
                     let completed = AtomicU64::new(0);

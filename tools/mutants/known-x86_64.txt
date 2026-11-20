@@ -63,6 +63,8 @@ src/ffi_output.rs	replace | with ^ in packed	3	equivalent: | and ^ agree on flag
 src/ffi_output.rs	replace | with ^ in self_test_shape	2	equivalent: fixture structural flags (3, 2, 4), mode flags (0, 16, 32, 64) and optional ROOT (8) occupy disjoint bits
 src/ffi_partial.rs	replace % with + in rotation	1	equivalent: k % 4 becomes k + 4, which adds 16 to each shuffle index; pshufb reads an index's low four bits (and bit 7, clear: the largest is 47), so the shuffle is the same
 src/ffi_partial.rs	replace | with ^ in rotation	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
+src/hasher.rs	replace + with *	1	untested bound: `const DEPTH: usize = MAX_DEPTH + 1` (55 -> 53 or 54) holds lazy-merged stack entries up to 2^64 bytes; no test feeds >= 2^53 chunks (8 EiB)
+src/hasher.rs	replace + with -	1	untested bound: `const DEPTH: usize = MAX_DEPTH + 1` (55 -> 53 or 54) holds lazy-merged stack entries up to 2^64 bytes; no test feeds >= 2^53 chunks (8 EiB)
 src/hasher.rs	replace - with + in feed	1	equivalent: ahead is read by the SME2 kernels alone (AArch64); on x86-64 the value passes through the walk to kernels that ignore it
 src/hasher.rs	replace - with / in feed	1	equivalent: ahead is read by the SME2 kernels alone (AArch64); on x86-64 the value passes through the walk to kernels that ignore it
 src/hasher.rs	replace < with <= in ChunkState<P>::fill_buf	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
@@ -79,7 +81,7 @@ src/incremental.rs	replace + with - in Hasher::update_longer	1	same code: every 
 src/incremental.rs	replace / with * in HasherCore::push_group	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace <impl hasher::Hooks for HasherHooks<'_>>::subtree_cv -> Option<CVBytes> with None	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/incremental.rs	replace == with != in Hasher::update_longer	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/incremental.rs	replace >= with < in <impl hasher::Hooks for HasherHooks<'_>>::children	2	as on aarch64: survives (known-aarch64.txt): speed: chooses between equally correct paths
+src/incremental.rs	replace >= with < in <impl hasher::Hooks for HasherHooks<'_>>::children	1	as on aarch64: survives (known-aarch64.txt): speed: chooses between equally correct paths
 src/incremental.rs	replace >= with < in Hasher::update_longer	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace >= with < in HasherCore::update_pooled	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/incremental.rs	replace Hasher::held_group -> Option<(u64, &[u8; STAGE_LEN])> with Some((0, Box::leak(Box::new([0; STAGE_LEN]))))	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)

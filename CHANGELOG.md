@@ -188,13 +188,14 @@ bench-hashes' page (above) measures 0.9 against 0.10.0 as released.
 
 Each is accepted, with its issue.
 
-- **Machines of several caches, a process's first large pool calls**
-  (#401): the pool learns a reach by trying both, so a process's first
-  ten pool calls of a size are five on every thread and five on the
-  caller's cache's threads, and each later round of 16 to 256 calls ends
-  with five on the reach that lost. On two EPYCs a benchmark of 24 calls
-  of 32 or 128 MiB reads 8 to 20% slower than 0.9.0; a long-lived caller
-  about 1 to 2%.
+- **Machines of several caches, a process's first large pool calls and
+  64 MiB lent calls** (#401): the pool learns a reach by trying both, so
+  a process's first ten pool calls of a size are five on every thread
+  and five on the caller's cache's threads, and each later round ends
+  with trials on the reach that lost. Against 0.9.1 on EPYC 9255, EPYC
+  9275F and 2x EPYC 7443, a benchmark of 24 calls of 32 to 128 MiB reads
+  4 to 13% slower and `LentMessages` at 64 MiB reads 10 to 19% slower on
+  9255 and 2x 7443; a long-lived caller pays about 1 to 2%.
 - **Xeon Gold 6330, a turn of many open messages fed 1 KiB each**
   (#404): 2 to 5% slower than 0.9.0, the price there of the Hasher's
   rows.
