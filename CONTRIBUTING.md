@@ -336,8 +336,9 @@ it takes and ticks each step:
    `sh tools/check-builds.sh`. Pull-request CI normally checks a synthetic
    merge, so its head-SHA label alone is not evidence for the release commit.
 3. `bench-hashes check --against <previous release tag> --cells all`,
-   on the timing Mac (a Mac Mini M6, checked mechanically by
-   `tools/release-check.py`) and on the native x86 machines of the
+   on the timing Mac (a Mac Mini M6, `mac-m6-timing` in the runners'
+   exchange; `tools/release-check.py` reads that Mac's latest such
+   check) and on the native x86 machines of the
    fleet; VM timing runs nightly on a best-effort basis and is not
    awaited for a release. Use one bench commit on both sides for the
    calls they share. Compare new calls with a suitable development
@@ -367,11 +368,17 @@ it takes and ticks each step:
    move `main` to it, then publish its tag and artifacts (a release's
    commit is in `main`'s history, and the published check asks it):
    - the crates: publish all four from the same staged checkout and lock
-     used for the dry-run, with `--frozen` and the same explicit `-p` names.
-     Cargo publishes each dependency first: `blake3-servil-version`
-     (`version/`), `blake3-servil-core` (the repository root), `blake3-servil`
+     used for the dry-run, one at a time, each dependency first, stopping
+     at the first that fails: `blake3-servil-version` (`version/`),
+     `blake3-servil-core` (the repository root), `blake3-servil`
      (`threads/`), then `b3sums` (`b3sum/`; crates.io's `b3sum` is official
-     BLAKE3's). The C package has `publish = false` and ships as libraries;
+     BLAKE3's). Each is `cargo publish --locked --no-verify` with the
+     dry-run's `--manifest-path` and `--target-dir` and the one `-p` name.
+     (`--frozen` cannot publish: it forbids the request to the registry,
+     as 0.10.0's first attempt found. The dry-run has built each package,
+     and `python3 tools/release_artifacts.py TAG --published` then holds
+     what crates.io serves to the commit.) The C package has
+     `publish = false` and ships as libraries;
    - b3sum's binaries, built on each machine by `sh tools/b3sum-release.sh`
      from a fresh clone of the version commit (statically linked on Linux,
      the same bytes whoever builds them), each with its `.sha256`;
@@ -403,7 +410,8 @@ names the checksums of those exact dependency archives.
 Save its output to the commit-named release log and append
 `publish-dry-run: ok` only when the command succeeds; this is a dry-run,
 never permission to upload. The final publication runs from the directory
-the script names, with `cargo publish --frozen` and the same `-p` names.
+the script names, with `cargo publish --locked --no-verify` and the same
+`-p` names, one at a time (step 9).
 
 ### The release lock
 

@@ -73,7 +73,7 @@ class CI(unittest.TestCase):
 
 
 class ReleaseEvidence(unittest.TestCase):
-    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch", mutation_log=MUTATION_OK, core_log=MUTATION_OK, power=("AC Power, 100%", "AC Power, 100%"), artifacts=(True, ""), previous=None, builds_log="check-builds: every build passes", dry_run_log="publish-dry-run: ok"):
+    def run_gate(self, cells="all", kind="check", ci_jobs=None, new=HEAD, old=OLD, verdict="no regression", git_override=None, ci_event="workflow_dispatch", mutation_log=MUTATION_OK, core_log=MUTATION_OK, power=("AC Power, 100%", "AC Power, 100%"), artifacts=(True, ""), previous=None, builds_log="check-builds: every build passes", dry_run_log="publish-dry-run: ok", mac_results=None):
         jobs = [job(), job()] if ci_jobs is None else ci_jobs
         def git(*args):
             if args[0] == "rev-parse":
@@ -98,13 +98,16 @@ class ReleaseEvidence(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "mac-runner/jobs").mkdir(parents=True)
-            (root / "mac-runner/results/1").mkdir(parents=True)
             task = {"type": kind, "old_commit": old, "new_commit": new}
             if cells is not None:
                 task["cells"] = cells
             (root / "mac-runner/jobs/job.json").write_text(json.dumps(task))
             readings = {k: v for k, v in zip(("power at start", "power at end"), power) if v is not None}
-            (root / "mac-runner/results/1/verdict.json").write_text(json.dumps({"job": "job.json", "status": verdict, **readings}))
+            # A results folder is NAME.TIME-MACHINE; `mac_results` gives
+            # others than the one check on the timing Mac.
+            for folder, status in mac_results or [("job.20261120T135633Z-mac-m6-timing", verdict)]:
+                (root / "mac-runner/results" / folder).mkdir(parents=True)
+                (root / "mac-runner/results" / folder / "verdict.json").write_text(json.dumps({"job": "job.json", "status": status, **readings}))
             logs = root / "tmp/night"
             logs.mkdir(parents=True)
             candidate = (git_override or git)("rev-parse", "candidate")[:12]
@@ -175,6 +178,36 @@ class ReleaseEvidence(unittest.TestCase):
             self.assertEqual(code, 2, power)
             self.assertIn("NO VERDICT  Mac check", output)
             self.assertIn("run it again plugged in", output)
+
+    def test_another_macs_check_is_not_the_timing_macs(self):
+        # The exchange serves other Macs. 0.10.0's step read an Apple M4's
+        # check of the same commits, the last by name, and failed where
+        # the timing Mac's had passed. Alone, another Mac's check leaves
+        # the step open, whatever it says.
+        m6, m4 = "3547-check.20261120T135633Z-mac-m6-timing", "3564-check.20261121T032909Z-mac-m4-timing"
+        code, output = self.run_gate(mac_results=[(m6, "no regression"), (m4, "regression")])
+        self.assertEqual(code, 0, output)
+        code, output = self.run_gate(mac_results=[(m6, "regression"), (m4, "no regression")])
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  Mac check", output)
+        for status in ["no regression", "regression"]:
+            code, output = self.run_gate(mac_results=[(m4, status), ("9999-check.20261121T040000Z-mac-m6-build", status), ("1", status)])
+            self.assertEqual(code, 1, status)
+            self.assertIn("OPEN  Mac check", output)
+            self.assertIn("on mac-m6-timing", output)
+
+    def test_the_timing_macs_latest_check_counts(self):
+        # By the time in the folder's name: a job's name may begin with a
+        # number or with a date, so the names' order is not the jobs'.
+        early, late = "3547-check.20261120T135633Z-mac-m6-timing", "20261122T020016Z-check.20261122T020027Z-mac-m6-timing"
+        self.assertLess(late, early, "the later job's name sorts first")
+        for results in ([(early, "regression"), (late, "no regression")], [(late, "no regression"), (early, "regression")]):
+            code, output = self.run_gate(mac_results=results)
+            self.assertEqual(code, 0, output)
+        for results in ([(early, "no regression"), (late, "regression")], [(late, "regression"), (early, "no regression")]):
+            code, output = self.run_gate(mac_results=results)
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL  Mac check", output)
 
     def test_partial_mac_not_pass(self):
         code, output = self.run_gate(cells=None)
