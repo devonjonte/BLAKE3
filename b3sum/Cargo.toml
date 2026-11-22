@@ -19,8 +19,6 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0.25"
 blake3 = { version = "=0.10.0+dev", path = "../threads", package = "blake3-servil" }
-clap = { version = "4.0.8", features = ["derive", "wrap_help"] }
-hex = "0.4.0"
 # --sigilcode: each hash as a sigil (johnservil/sigil), its full version pinned.
 sigilcode = "=0.1.0+81af550bfd3eb2aff85c3ddf0a21446e78a1809d"
 
@@ -33,6 +31,7 @@ memmap2 = "0.9"
 # bao-tree, the outboard's independent implementation (--outboard's tests).
 bao-tree = { version = "=0.17.0", default-features = false }
 duct = "1.0.0"
+hex = "0.4.0"
 tempfile = "3.1.0"
 
 # A panic stops the process at once (crash-only): nothing unwinds past a

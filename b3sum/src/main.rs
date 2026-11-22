@@ -22,7 +22,8 @@
 //! writer without cloning a 26 KiB `Hasher` per file.
 
 use anyhow::{bail, ensure};
-use clap::Parser;
+mod args;
+use args::{ParseOutcome, ParsedArgs as Inner};
 use std::cmp;
 use std::fs::File;
 use std::io;
@@ -42,105 +43,6 @@ mod outboard;
 #[cfg(target_os = "linux")]
 mod uring;
 
-const DERIVE_KEY_ARG: &str = "derive_key";
-const KEYED_ARG: &str = "keyed";
-const LENGTH_ARG: &str = "length";
-const NO_NAMES_ARG: &str = "no_names";
-const RAW_ARG: &str = "raw";
-const TAG_ARG: &str = "tag";
-const CHECK_ARG: &str = "check";
-
-#[derive(Parser)]
-#[command(
-    version = blake3::BUILD_VERSION,
-    max_term_width(100),
-    after_help = "More information: b3sum/README.md at https://github.com/servil-software-factory/BLAKE3/blob/main/b3sum/README.md"
-)]
-struct Inner {
-    /// Files to hash, or checkfiles to check
-    file: Vec<PathBuf>,
-
-    /// Use the keyed mode, reading the 32-byte key from stdin
-    #[arg(long, requires("file"))]
-    keyed: bool,
-
-    /// Use the key derivation mode, with the given context string
-    #[arg(long, value_name("CONTEXT"), conflicts_with(KEYED_ARG))]
-    derive_key: Option<String>,
-
-    /// The number of output bytes, before hex or sigil encoding
-    #[arg(
-        short,
-        long,
-        default_value_t = blake3::OUT_LEN as u64,
-        value_name("LEN")
-    )]
-    length: u64,
-
-    /// The starting output byte offset, before hex or sigil encoding
-    #[arg(long, default_value_t = 0, value_name("SEEK"))]
-    seek: u64,
-
-    /// The most threads hashing at once [default: as fast as b3sum can]
-    #[arg(long, value_name("NUM"))]
-    num_threads: Option<std::num::NonZeroUsize>,
-
-    /// Read every file and map none: a file that another program
-    /// shortens while b3sum hashes it then cannot stop the run
-    #[arg(long)]
-    no_mmap: bool,
-
-    /// Omit filenames in the output
-    #[arg(long)]
-    no_names: bool,
-
-    /// Write raw output bytes to stdout, rather than hex
-    #[arg(long)]
-    raw: bool,
-
-    /// Write each hash as a sigil (25 characters for 32 bytes; see
-    /// johnservil/sigil), rather than hex, of at most 65536 output bytes;
-    /// with --check, read sigils as well as hex
-    #[arg(long, conflicts_with(RAW_ARG))]
-    sigilcode: bool,
-
-    /// Output BSD-style checksums: BLAKE3 ([FILE]) = [HASH]
-    #[arg(long)]
-    tag: bool,
-
-    /// Read BLAKE3 sums from the [FILE]s and check them
-    #[arg(
-        short,
-        long,
-        conflicts_with(DERIVE_KEY_ARG),
-        conflicts_with(KEYED_ARG),
-        conflicts_with(LENGTH_ARG),
-        conflicts_with(RAW_ARG),
-        conflicts_with(TAG_ARG),
-        conflicts_with(NO_NAMES_ARG),
-        conflicts_with("seek")
-    )]
-    check: bool,
-
-    /// Skip printing OK for each checked file
-    #[arg(long, requires(CHECK_ARG))]
-    quiet: bool,
-
-    /// Also write each file's outboard to DIR/<HASH>.obao4: its BLAKE3
-    /// tree over 16 KiB chunk groups in bao-tree's pre-order form, for
-    /// verified streaming
-    #[arg(
-        long,
-        value_name("DIR"),
-        conflicts_with(CHECK_ARG),
-        conflicts_with(DERIVE_KEY_ARG),
-        conflicts_with(LENGTH_ARG),
-        conflicts_with(RAW_ARG),
-        conflicts_with("seek")
-    )]
-    outboard: Option<PathBuf>,
-}
-
 struct Args {
     inner: Inner,
     file_args: Vec<PathBuf>,
@@ -150,7 +52,31 @@ struct Args {
 
 impl Args {
     fn parse() -> anyhow::Result<Self> {
-        let inner = Inner::parse_from(std::env::args_os());
+        let inner = match args::parse_from(std::env::args_os()) {
+            Ok(ParseOutcome::Parsed(inner)) => inner,
+            Ok(ParseOutcome::Help) => {
+                let mut stdout = io::stdout().lock();
+                if let Err(e) = stdout.write_all(args::HELP_TEXT.as_bytes()).and_then(|()| stdout.flush()) {
+                    let _ = writeln!(io::stderr().lock(), "{NAME}: {e}");
+                    std::process::exit(1);
+                }
+                std::process::exit(0);
+            }
+            Ok(ParseOutcome::Version) => {
+                let mut stdout = io::stdout().lock();
+                if let Err(e) = writeln!(stdout, "b3sums {}", blake3::BUILD_VERSION).and_then(|()| stdout.flush()) {
+                    let _ = writeln!(io::stderr().lock(), "{NAME}: {e}");
+                    std::process::exit(1);
+                }
+                std::process::exit(0);
+            }
+            Err(msg) => {
+                let mut stderr = io::stderr().lock();
+                let _ = writeln!(stderr, "error: {msg}\n\nUsage: b3sum [OPTIONS] [FILE]...\n\nFor more information, try '--help'.");
+                let _ = stderr.flush();
+                std::process::exit(2);
+            }
+        };
         let file_args = if !inner.file.is_empty() { inner.file.clone() } else { vec!["-".into()] };
         if inner.raw && file_args.len() > 1 {
             bail!("Only one filename can be provided when using --raw");
@@ -1642,11 +1568,50 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod test {
     include!("../../tools/require_nextest.rs");
-    use clap::CommandFactory;
+    use crate::args::{ParseOutcome, parse_from};
 
     #[test]
-    fn test_args() {
+    fn test_args_basics_and_conflicts() {
         blake3::initialize();
-        crate::Inner::command().debug_assert();
+        assert_eq!(parse_from(["b3sum", "--help"]), Ok(ParseOutcome::Help));
+        assert_eq!(parse_from(["b3sum", "-h"]), Ok(ParseOutcome::Help));
+        assert_eq!(parse_from(["b3sum", "--version"]), Ok(ParseOutcome::Version));
+        assert_eq!(parse_from(["b3sum", "-V"]), Ok(ParseOutcome::Version));
+
+        let Ok(ParseOutcome::Parsed(p)) = parse_from(["b3sum", "-l64", "--seek=8", "--num-threads", "2", "--", "-weird"]) else {
+            panic!("expected parsed");
+        };
+        assert_eq!(p.length, 64);
+        assert_eq!(p.seek, 8);
+        assert_eq!(p.num_threads.unwrap().get(), 2);
+        assert_eq!(p.file, vec![std::path::PathBuf::from("-weird")]);
+
+        // Conflicts & requirements
+        assert!(parse_from(["b3sum", "--keyed"]).is_err());
+        assert!(parse_from(["b3sum", "--keyed", "--derive-key", "ctx", "f"]).is_err());
+        assert!(parse_from(["b3sum", "--raw", "--sigilcode"]).is_err());
+        assert!(parse_from(["b3sum", "--quiet"]).is_err());
+        assert!(parse_from(["b3sum", "--check", "--seek", "0"]).is_err());
+        assert!(parse_from(["b3sum", "--check", "--length", "32"]).is_err());
+        assert!(parse_from(["b3sum", "--check", "--raw"]).is_err());
+        assert!(parse_from(["b3sum", "--check", "--tag"]).is_err());
+        assert!(parse_from(["b3sum", "--check", "--no-names"]).is_err());
+        assert!(parse_from(["b3sum", "--check", "--keyed", "f"]).is_err());
+        assert!(parse_from(["b3sum", "--check", "--derive-key", "x"]).is_err());
+        assert!(parse_from(["b3sum", "--check", "--outboard", "d"]).is_err());
+        assert!(parse_from(["b3sum", "--outboard", "d", "--length", "32"]).is_err());
+        assert!(parse_from(["b3sum", "--outboard", "d", "--seek", "0"]).is_err());
+        assert!(parse_from(["b3sum", "--outboard", "d", "--raw"]).is_err());
+        assert!(parse_from(["b3sum", "--outboard", "d", "--derive-key", "x"]).is_err());
+        // Check + sigilcode + quiet IS allowed; outboard + keyed + file IS allowed
+        assert!(matches!(parse_from(["b3sum", "-c", "--quiet", "--sigilcode"]), Ok(ParseOutcome::Parsed(_))));
+        assert!(matches!(parse_from(["b3sum", "--outboard", "d", "--keyed", "f"]), Ok(ParseOutcome::Parsed(_))));
+        // Duplicate flags rejected
+        assert!(parse_from(["b3sum", "--raw", "--raw"]).is_err());
+        assert!(parse_from(["b3sum", "-l", "16", "--length", "32"]).is_err());
+        // Missing / invalid values
+        assert!(parse_from(["b3sum", "--length"]).is_err());
+        assert!(parse_from(["b3sum", "--num-threads", "0"]).is_err());
+        assert!(parse_from(["b3sum", "--unknown"]).is_err());
     }
 }

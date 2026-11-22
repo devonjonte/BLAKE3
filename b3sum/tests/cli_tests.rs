@@ -17,7 +17,7 @@ fn test_output_error_is_failure() {
     fs::write(dir.path().join("empty"), b"").unwrap();
     // Published BLAKE3 test vector for the empty input, not this binary's output.
     fs::write(dir.path().join("sums"), b"af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262  empty\n").unwrap();
-    for args in [&[][..], &["--raw"][..], &["--length", "64"][..], &["--check", "sums"][..]] {
+    for args in [&[][..], &["--raw"][..], &["--length", "64"][..], &["--check", "sums"][..], &["--help"][..], &["--version"][..]] {
         let output = std::process::Command::new(b3sum_exe())
             .args(args)
             .current_dir(dir.path())
@@ -26,8 +26,47 @@ fn test_output_error_is_failure() {
             .stderr(std::process::Stdio::piped())
             .output()
             .unwrap();
-        assert!(!output.status.success(), "{args:?}: exit 0 after an output error");
+        assert_eq!(output.status.code(), Some(1), "{args:?}: expected clean exit 1 (not 0 or signal) after /dev/full");
         assert!(!output.stderr.is_empty(), "{args:?}: the error is reported");
+    }
+    // Usage error with stderr redirected to /dev/full must still exit 2 cleanly (no abort/panic).
+    let output = std::process::Command::new(b3sum_exe())
+        .arg("--not-a-flag")
+        .stdin(std::process::Stdio::null())
+        .stderr(fs::OpenOptions::new().write(true).open("/dev/full").unwrap())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2), "usage error with /dev/full stderr must exit 2 cleanly");
+}
+
+/// Missing option values before another flag or `--`, and empty positional paths,
+/// must fail with exit 2 before any hashing or outboard side effects.
+#[test]
+fn test_missing_option_value_and_empty_positional_fail_cleanly() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("sums");
+    fs::write(&f, b"not a valid checkfile\n").unwrap();
+    let out_dir = dir.path().join("--check");
+    fs::create_dir(&out_dir).unwrap();
+
+    for args in [
+        &["--derive-key", "--check", "sums"][..],
+        &["--derive-key", "--", "sums"][..],
+        &["--outboard", "--check", "sums"][..],
+        &["--outboard", "--", "sums"][..],
+        &["sums", ""][..],
+        &["--", "sums", ""][..],
+    ] {
+        let output = std::process::Command::new(b3sum_exe()).args(args).current_dir(dir.path()).stdin(std::process::Stdio::null()).output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{args:?}: expected exit 2, got {:?}", output.status);
+        assert!(output.stdout.is_empty(), "{args:?}: expected no stdout, got {:?}", String::from_utf8_lossy(&output.stdout));
+        assert_eq!(fs::read_dir(&out_dir).unwrap().count(), 0, "{args:?}: expected no outboard side effects");
+    }
+
+    // Inline `--derive-key=` (empty context) and `--derive-key=--weird` remain valid.
+    for args in [&["--derive-key=", "--no-names", "sums"][..], &["--derive-key=--weird", "--no-names", "sums"][..]] {
+        let output = std::process::Command::new(b3sum_exe()).args(args).current_dir(dir.path()).stdin(std::process::Stdio::null()).output().unwrap();
+        assert!(output.status.success(), "{args:?}: expected success, stderr={:?}", String::from_utf8_lossy(&output.stderr));
     }
 }
 
