@@ -3,7 +3,8 @@
 //!
 //!   each-st   `throughput::update_each`, then `finalize_each` (the bench's turn cell, single-threaded)
 //!   each-mt   `throughput::update_each_multithreaded`, then `finalize_each`
-//!   pipeline  `throughput::Pipeline`
+//!   pipeline  `throughput::Pipeline`, its caller knowing the messages' lengths
+//!   pipe-rooms  `throughput::Pipeline`, a Room per open message whatever its length
 //!
 //! Two workloads. `short`: 1,024 open messages of 1 KiB in 256-byte pieces, a
 //! turn one piece of every message (the bench's `1024 x 1 KiB` turn point).
@@ -145,6 +146,38 @@ fn pipeline_long(w: &Work, src: &[u8], pipe: &mut Pipeline<usize>, out: &mut [[u
     black_box(&out);
 }
 
+/// One cycle through the Pipeline, a Room per open message whatever its
+/// length (the caller that knows no lengths: arrivals land in the message's
+/// Room, a full Room is committed, the last commit is what is left).
+fn pipeline_rooms(w: &Work, src: &[u8], pipe: &mut Pipeline<usize>, out: &mut [[u8; 32]]) {
+    let turns = w.len / w.piece;
+    let mut open: Vec<_> = (0..w.messages).map(|i| (block_on(pipe.message(i, None)), Some(block_on(pipe.room())), 0usize)).collect();
+    for t in 0..turns {
+        for (i, (message, room, filled)) in open.iter_mut().enumerate() {
+            let r = room.get_or_insert_with(|| block_on(pipe.room()));
+            r.bytes_mut()[*filled..][..w.piece].copy_from_slice(&black_box(src)[i * w.len + t * w.piece..][..w.piece]);
+            *filled += w.piece;
+            if *filled == ROOM_LEN {
+                pipe.commit(message, r, ROOM_LEN);
+                *filled = 0;
+                *room = None;
+            }
+        }
+    }
+    for (mut message, room, filled) in open {
+        if let Some(mut r) = room {
+            if filled > 0 {
+                pipe.commit(&mut message, &mut r, filled);
+            }
+        }
+        pipe.end(message);
+    }
+    for _ in 0..w.messages {
+        take(pipe, out);
+    }
+    black_box(&out);
+}
+
 fn main() {
     blake3_servil::initialize_multithreaded(None);
     let rounds: usize = std::env::args().nth(1).map_or(15, |a| a.parse().unwrap());
@@ -163,16 +196,18 @@ fn main() {
         // Rooms: the open messages' own, and as many again in the workers' hands.
         let limits = if short { Limits { messages: w.messages, rooms: 16 } } else { Limits { messages: w.messages, rooms: 2 * w.messages + 16 } };
         let mut pipe: Pipeline<usize> = Pipeline::new(Mode::Plain, limits);
-        let mut outs = [vec![[0u8; 32]; w.messages], vec![[0u8; 32]; w.messages], vec![[0u8; 32]; w.messages]];
-        let names = ["each-st", "each-mt", "pipeline"];
-        let mut run = |arm: usize, outs: &mut [Vec<[u8; 32]>; 3]| match arm {
+        let mut pipe_rooms: Pipeline<usize> = Pipeline::new(Mode::Plain, Limits { messages: w.messages, rooms: 2 * w.messages + 16 });
+        let mut outs = [vec![[0u8; 32]; w.messages], vec![[0u8; 32]; w.messages], vec![[0u8; 32]; w.messages], vec![[0u8; 32]; w.messages]];
+        let names = ["each-st", "each-mt", "pipeline", "pipe-rooms"];
+        let mut run = |arm: usize, outs: &mut [Vec<[u8; 32]>; 4]| match arm {
             0 => each_cycle(w, &src, &mut hashers, &mut receive, &which, &mut outs[0], update_each),
             1 => each_cycle(w, &src, &mut hashers, &mut receive, &which, &mut outs[1], update_each_multithreaded),
-            _ if short => pipeline_short(w, &src, &mut pipe, &mut gather, &mut outs[2]),
-            _ => pipeline_long(w, &src, &mut pipe, &mut outs[2]),
+            2 if short => pipeline_short(w, &src, &mut pipe, &mut gather, &mut outs[2]),
+            2 => pipeline_long(w, &src, &mut pipe, &mut outs[2]),
+            _ => pipeline_rooms(w, &src, &mut pipe_rooms, &mut outs[3]),
         };
         // Warm up, and check the three agree with the one-call hash.
-        for arm in 0..3 {
+        for arm in 0..4 {
             run(arm, &mut outs);
             run(arm, &mut outs);
         }
@@ -180,11 +215,11 @@ fn main() {
             let want = *blake3_servil::convenience::hash(&src[i * w.len..][..w.len]).as_bytes();
             assert!(outs.iter().all(|o| o[i] == want), "message {i}: an arm's digest differs");
         }
-        let mut wall = [Vec::new(), Vec::new(), Vec::new()];
-        let mut cpu = [Vec::new(), Vec::new(), Vec::new()];
+        let mut wall = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        let mut cpu = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         for r in 0..rounds {
-            for k in 0..3 {
-                let arm = (r + k) % 3;
+            for k in 0..4 {
+                let arm = (r + k) % 4;
                 let (c0, t0) = (cpu_ns(), Instant::now());
                 for _ in 0..w.cycles {
                     run(arm, &mut outs);
@@ -194,11 +229,11 @@ fn main() {
             }
         }
         println!("{}  ({} rounds of {} cycles, {:.0} MiB a round)", w.name, rounds, w.cycles, bytes / (1 << 20) as f64);
-        println!("  {:9} {:>12} {:>12} {:>14}", "arm", "fastest ns/B", "median ns/B", "median CPU ns/B");
-        for arm in 0..3 {
+        println!("  {:10} {:>12} {:>12} {:>14}", "arm", "fastest ns/B", "median ns/B", "median CPU ns/B");
+        for arm in 0..4 {
             wall[arm].sort_by(f64::total_cmp);
             cpu[arm].sort_by(f64::total_cmp);
-            println!("  {:9} {:>12.4} {:>12.4} {:>14.4}", names[arm], wall[arm][0], wall[arm][rounds / 2], cpu[arm][rounds / 2]);
+            println!("  {:10} {:>12.4} {:>12.4} {:>14.4}", names[arm], wall[arm][0], wall[arm][rounds / 2], cpu[arm][rounds / 2]);
         }
     }
 }
