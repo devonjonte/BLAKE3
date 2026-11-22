@@ -159,7 +159,7 @@ jobs:
     # emulating a test's intended panic (#113).
     - name: QEMU 11.1.2
       run: |
-        curl -sSfLO http://deb.debian.org/debian/pool/main/q/qemu/qemu-user_11.1.2+ds-3_arm64.deb
+        curl -sSfLO --retry 3 https://snapshot.debian.org/archive/debian/20261115T000000Z/pool/main/q/qemu/qemu-user_11.1.2+ds-3_arm64.deb
         echo "e278d393447a97b548728918af8e395a33086f5b7100138e38cf06a41766612e  qemu-user_11.1.2+ds-3_arm64.deb" | sha256sum -c
         echo "7c3f49bb0945cf7e2148480118a34dc34ef1641cf5f83f0137996b78f2202945  qemu-user_11.1.2+ds-3_arm64.deb" > qemu.b3
         cargo run -q --release --manifest-path b3sum/Cargo.toml -- -c qemu.b3
