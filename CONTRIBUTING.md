@@ -1,5 +1,17 @@
 # Working on BLAKE3 servil
 
+## Servil Software Factory: values, goals, and principles
+
+**We aspire to create software that serves its users reliably and loyally.** That is easy to say and hard to do. [The Servil Software Factory's page](https://github.com/servil-software-factory) says how we do it: the practices its projects share, which projects it supports (from version 1.0; this one is the first candidate), and what a project needs before it is supported. Five principles govern every change here:
+
+1. **Loyalty to the user:** minimize what the user has to trust — small owned code over sprawling dependency trees, hash-verified build inputs, and byte-for-byte reproducible releases.
+2. **Reliability by construction:** make invalid states unrepresentable, keep critical invariant checks active in release builds, fail closed, prove critical kernels, and test the tests with mutation testing and planted faults.
+3. **Radical honesty:** document what every check covers *and* what remains outside it (`QUALITY.md`), disclose AI authorship and lack of independent human audits plainly, never hide a slowdown, and publish frank after-action reports when serious bugs slip through.
+4. **Evidence over claims:** a commit lands only with every gate recorded on that exact commit (`tools/land.py`); speed is measured on quiet native machines kept for timing, and a virtual machine's timing never decides a landing or a release; an AI auditor counts toward a release once its recall has been measured on a tree of ours with known defects.
+5. **Clear boundaries:** support only the platforms we build and test natively, stop the build on any other with a message that names an alternative, and call a project supported from version 1.0.
+
+---
+
 BLAKE3-Servil, a fork of BLAKE3 1.8.7, aims at the fastest BLAKE3 in
 every situation a program meets: alone, beside other work, beside other
 hashing threads, natively and in virtual machines. It is two crates:
@@ -38,8 +50,9 @@ The README lists what BLAKE3-Servil adds for callers; the code is laid out so:
 - `threads/`: `blake3-servil`, the crate most programs use. It
   re-exports the core whole and adds the pool and a multithreaded form
   of each call: `lanes.rs` (the pool), `park.rs` and `finish.rs` (its
-  handshakes), `lib.rs` (the calls). It reaches the core's inside
-  through `hazmat`, a hidden module of the core that changes with the
+  handshakes), `lib.rs` (the calls). It hashes through the core's checked
+  calls, and takes its scheduling and storage setup from
+  `thread_support`, a hidden module of the core that changes with the
   two crates. `stream.rs` is the engine the Pipeline is to be built on
   (BLAKE3 #356), compiled for this crate's tests alone until then.
 - `version/`: `blake3-servil-version`, the build's version string, in a

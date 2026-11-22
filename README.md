@@ -1,6 +1,13 @@
 # blake3-servil
 
-A fast [BLAKE3](https://blake3.io) implementation for 64-bit Arm and x86-64.
+A fast [BLAKE3](https://blake3.io) implementation for 64-bit Arm and x86-64, from the
+[Servil Software Factory](https://github.com/servil-software-factory).
+
+**Before 1.0.** The Servil Software Factory aims at software that serves its users reliably
+and loyally; [its page](https://github.com/servil-software-factory) says how, and what it
+promises for a project it supports. It counts a project as supported from version 1.0.
+blake3-servil is at 0.10, its first candidate: [SECURITY.md](SECURITY.md) says what we do
+about a vulnerability today, and the API may still change between minor versions.
 
 ## How fast
 
@@ -43,7 +50,8 @@ Its checks go further than most:
   BLAKE3, and each process checks its kernels before its first hash.
 - Memory use is checked with guard pages that catch a kernel reading one byte too far.
 
-Details: [`QUALITY.md`](QUALITY.md).
+Details: [`QUALITY.md`](QUALITY.md). The practices every Servil Software Factory project is
+to share: [the Factory's page](https://github.com/servil-software-factory).
 
 ## Using it
 

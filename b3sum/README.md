@@ -192,7 +192,9 @@ $ ls outboards
 5da5ad397cd129294c30f415b7d4e091b155a5faa37ba0b154ed10a5e5dbfca9.obao4
 ```
 
-## Hashes as sigils
+## Hashes as sigils (experimental)
+
+> **Experimental:** `--sigilcode` uses [Sigil](https://github.com/johnservil/sigil) 0.1, which is experimental and not yet stable. Sigil 0.1 has a known Unicode 15.1 line-break flaw in 52 Cham letters, and Sigil 0.2 will change the format incompatibly. Do not store long-lived checkfiles in Sigil 0.1 format; wait for Sigil 0.2.
 
 `--sigilcode` prints each 32-byte hash as a 25-character
 [sigil](https://github.com/johnservil/sigil) instead of hex. A sigil is a
