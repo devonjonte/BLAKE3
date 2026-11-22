@@ -157,6 +157,7 @@ impl hasher::Hooks for HasherHooks<'_> {
         // unit in its slow state: `sme2`'s documentation).
         #[cfg(blake3_sme2)]
         if self.pooled.is_none() && matches!(self.platform, Platform::SME2) && sme2::flat_takes(input.len()) {
+            crate::counted(crate::Counted::Flat);
             // Safe: the SME2 platform is selected only where the CPU has it.
             return Some(unsafe { sme2::compress_subtree_flat_to_cv(input, ahead, self.key, counter, self.flags) });
         }
@@ -314,7 +315,7 @@ impl Hasher {
                 let groups = input.len() / STAGE_LEN * STAGE_LEN;
                 // The loop's variant on this path: a group or more leaves the input.
                 assert!(groups > 0, "no whole group went to the core");
-                self.core.update_pooled(&input[..groups], pooled);
+                self.update_groups(&input[..groups], pooled);
                 input = &input[groups..];
                 continue;
             }
@@ -335,9 +336,22 @@ impl Hasher {
             // Sound: the first `staged` bytes were written; the core reads
             // them before the stage is written again.
             let bytes = unsafe { core::slice::from_raw_parts(self.stage.as_ptr() as *const u8, staged) };
-            self.core.update_pooled(bytes, pooled);
+            self.update_groups(bytes, pooled);
         }
         &[]
+    }
+
+    /// Whole groups to the core, pooled only where they reach the pool's
+    /// threshold: shorter, they hold no subtree for the pool, and hash
+    /// exactly as the serial update hashes them. Kept pooled, they would
+    /// lose what the hooks do only without a pool: the rows a whole group
+    /// is cut into, and the SME2 turn over the whole input. (64 open
+    /// messages fed 16 KiB at a time took 9% to 15% longer through
+    /// update_each_multithreaded than through update_each, on a Ryzen
+    /// 9700X and an EPYC 9255: BLAKE3 #470.)
+    #[inline(always)]
+    fn update_groups(&mut self, groups: &[u8], pooled: Option<&Pool<'_>>) {
+        self.core.update_pooled(groups, pooled.filter(|pool| groups.len() >= pool.min_len));
     }
 
     /// A whole group in the stage, from offset zero: its first chunk's
@@ -815,6 +829,68 @@ mod test {
     #[should_panic(expected = "not the halves of level 4 index 0")]
     fn pool_rejects_a_wrong_right_half_alone() {
         update_with_one_wrong_half(1);
+    }
+
+    /// An update shorter than the pool's threshold is the serial update:
+    /// the callback is not asked, and the input's whole subtrees take the
+    /// serial update's paths. Counted, since the digests are the same
+    /// either way: the rows a whole group is cut into, and on SME2 the
+    /// flat walks. (Kept pooled, such an update cut no row and walked
+    /// none flat: `update_multithreaded` fed 64 KiB at a time was slower
+    /// than `update`, BLAKE3 #470.) At the threshold the callback is
+    /// asked (`pool_halves_use_the_subtrees_nonzero_place`), and above
+    /// it too.
+    #[test]
+    #[cfg(feature = "std")]
+    fn an_update_below_the_pools_threshold_is_the_serial_update() {
+        crate::initialize();
+        let mut input = std::vec![0u8; 16 * STAGE_LEN];
+        crate::test::paint_test_input(&mut input);
+        let counts = || [crate::Counted::Row, crate::Counted::Flat].map(|what| crate::COUNTED.with(|c| c[what as usize].replace(0)));
+        // The threshold of the library with threads: 512 KiB, above every
+        // piece here and every group they fill in the stage.
+        const THRESHOLD: usize = 32 * STAGE_LEN;
+        let key = [0x52u8; 32];
+        let platform = Platform::detect();
+        let rows_here = (4..=hasher::ROW).contains(&platform.simd_degree());
+        #[cfg(blake3_sme2)]
+        let flat_here = matches!(platform, Platform::SME2);
+        #[cfg(not(blake3_sme2))]
+        let flat_here = false;
+        for mode in [Mode::Plain, Mode::Keyed(&key), Mode::DeriveKey("below the pool's threshold")] {
+            let (mut serial, mut pooled) = (Hasher::new(mode, None), Hasher::new(mode, None));
+            let (mut fed, mut seen) = (0, [0u64; 2]);
+            // A group; a group and a part; the rest of that group; a
+            // group; then, from the 64 KiB boundary, four groups that are
+            // one subtree; two groups and a part.
+            for n in [STAGE_LEN, STAGE_LEN + 100, STAGE_LEN - 100, STAGE_LEN, 4 * STAGE_LEN, 2 * STAGE_LEN + 7] {
+                let piece = &input[fed..fed + n];
+                fed += n;
+                counts();
+                serial.update(piece);
+                let want = counts();
+                pooled.update_with(piece, THRESHOLD, &|_, _, _, _| panic!("an input below the threshold holds no subtree for the callback"));
+                assert_eq!(counts(), want, "{fed} bytes in, a piece of {n}: the serial update's rows and flat walks");
+                assert_eq!(pooled.finalize(), serial.finalize(), "{fed} bytes");
+                seen = [seen[0] + want[0], seen[1] + want[1]];
+            }
+            // The comparison is of something wherever the kernels have
+            // these paths: the pieces after the first group cut rows, and
+            // the 64 KiB subtree walks flat.
+            assert_eq!((seen[0] > 0, seen[1] > 0), (rows_here, flat_here), "rows and flat walks counted: {seen:?}");
+            // Above the threshold the callback takes its subtrees: here
+            // 64 KiB from the next 64 KiB boundary, one subtree, with a
+            // threshold of a group.
+            let calls = core::cell::Cell::new(0);
+            assert_eq!(fed, 10 * STAGE_LEN + 7);
+            pooled.update(&input[fed..12 * STAGE_LEN]);
+            pooled.update_with(&input[12 * STAGE_LEN..], STAGE_LEN, &|tree, level, index, bytes| {
+                calls.set(calls.get() + 1);
+                tree.subtree_halves(level, index, bytes)
+            });
+            assert_eq!(calls.get(), 1, "one subtree of 64 KiB, above a threshold of 16 KiB");
+            assert_eq!(*pooled.finalize().as_bytes(), crate::test::official::hash(mode, &input));
+        }
     }
 
     #[test]
