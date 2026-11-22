@@ -544,21 +544,59 @@ def scratch_dir():
 WORKTREES = os.path.join(tempfile.gettempdir(), "blake3-servil-mutants")
 
 
-def one_run_at_a_time():
-    """This run's hold on the worktrees: a lock beside them, kept until the
+# Set by a run of every crate for each crate's process: the number of the
+# process that holds the run's locks for it.
+LOCKS_HELD_BY = "MUTANTS_LOCKS_HELD_BY"
+
+
+class RunLocks:
+    """The lock files a run holds, each locked; close() gives them up."""
+
+    def __init__(self):
+        self.files = []
+
+    def close(self):
+        while self.files:
+            self.files.pop().close()
+
+
+def one_run_at_a_time(target_dirs=None):
+    """This run's hold on the worktrees and on the target directories it
+    builds in (by default this crate's): a lock for each, kept until the
     process ends. Two runs at once share the shards' worktrees and
     outcomes, and each fails in the other's files (November 16: a second
-    run started by hand took a landing gate's logs from under it). A second
-    run stops here and says what to do."""
+    run started by hand took a landing gate's logs from under it). Two
+    runs that build in one target directory share each shard's build, its
+    test binaries and its same-code records (TARGET_DIR/mutants/<label>-<k>),
+    whatever their worktrees: a linked worktree builds in the main
+    checkout's target/ (#453), so a TMPDIR of its own does not set a run
+    apart. A second run stops here and says what to do. Closing what this
+    returns gives every lock up.
+
+    A run of every crate takes the locks of all its crates before the
+    first starts (every_crate), and each crate's process inherits them
+    open: it takes none here. So a second run stops before it has taken
+    anything the first will need, and a crate's process that outlives the
+    run's keeps the hold."""
     import fcntl
 
-    lock = open(WORKTREES + ".lock", "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        lock.close()
-        sys.exit(f"mutants: another run is using {WORKTREES} (it holds {WORKTREES}.lock): wait for it, or give this run a TMPDIR of its own")
-    return lock
+    held = RunLocks()
+    if os.environ.get(LOCKS_HELD_BY) == str(os.getppid()):
+        return held
+    wanted = [(WORKTREES + ".lock", f"using {WORKTREES}", "give this run a TMPDIR of its own")]
+    # One lock a directory, whatever names it has: a second lock on one file would stop this run itself.
+    for target in sorted({os.path.realpath(t): t for t in ([TARGET_DIR] if target_dirs is None else target_dirs)}.values()):
+        os.makedirs(target, exist_ok=True)
+        wanted.append((os.path.join(target, "mutants.lock"), f"building in {target}", "give this run a CARGO_TARGET_DIR of its own"))
+    for path, doing, way_out in wanted:
+        lock = open(path, "w")
+        held.files.append(lock)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            held.close()
+            sys.exit(f"mutants: another run is {doing} (it holds {path}): wait for it, or {way_out}")
+    return held
 
 
 def remove_leftovers():
@@ -1476,17 +1514,24 @@ def every_crate():
     """The same run of each crate, the root's first, each in a process of
     its own (a crate's lists, target and outcomes are its own); the worst
     status of them: 1 a survivor or a list wrong, else 2 only time-outs
-    differ, else 0."""
+    differ, else 0. One run at a time: it holds every crate's locks from
+    before the first crate to the end of the last."""
     entries = os.listdir(lists_dir(ROOT, ""))
     others = other_crates(entries, lambda d: os.path.exists(os.path.join(lists_dir(ROOT, d), os.path.basename(KNOWN)))
                           and os.path.exists(os.path.join(ROOT, d, "Cargo.toml")))
     if not others:
         return main()
     started = time.monotonic()
+    crates = [".", *others]
+    # Every crate's locks before the first crate starts, kept to the end and
+    # inherited by each crate's process (one_run_at_a_time).
+    held = one_run_at_a_time([default_target_dir(ROOT, os.path.join(ROOT, crate)) for crate in crates])
+    env = dict(os.environ, **{LOCKS_HELD_BY: str(os.getpid())})
     statuses = []
-    for crate in [".", *others]:
+    for crate in crates:
         print(f"mutants: the crate {'at the root' if crate == '.' else 'in ' + crate + '/'}", flush=True)
-        statuses.append(subprocess.run([sys.executable, os.path.abspath(__file__), *sys.argv[1:], "--crate", crate]).returncode)
+        statuses.append(subprocess.run([sys.executable, os.path.abspath(__file__), *sys.argv[1:], "--crate", crate],
+                                       env=env, pass_fds=[lock.fileno() for lock in held.files]).returncode)
     print(f"mutants: {len(statuses)} crates took {round(time.monotonic() - started)} s in all")
     sys.exit(next((s for s in (1, 2) if s in statuses), max(statuses)))
 
