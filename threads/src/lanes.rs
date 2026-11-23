@@ -1785,6 +1785,41 @@ pub(crate) mod places {
             assert!(online_nodes(Ok("garbage\n".into())).is_none());
         }
 
+        #[cfg(target_os = "linux")]
+        struct TempDir(std::path::PathBuf);
+
+        #[cfg(target_os = "linux")]
+        impl TempDir {
+            fn new(tag: &str) -> Self {
+                use std::os::unix::fs::DirBuilderExt;
+                static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+                let base = std::env::temp_dir();
+                let base = if base.is_absolute() { base } else { std::env::current_dir().unwrap().join(base) };
+                let pid = std::process::id();
+                for _ in 0..1024 {
+                    let id = NEXT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                    let path = base.join(format!("blake3-servil-{tag}-{pid}-{id}"));
+                    match std::fs::DirBuilder::new().mode(0o700).create(&path) {
+                        Ok(()) => return Self(path),
+                        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                        Err(e) => panic!("TempDir::new failed for {}: {e}", path.display()),
+                    }
+                }
+                panic!("TempDir::new exhausted unique directory attempts for {tag}");
+            }
+
+            fn path(&self) -> &std::path::Path {
+                &self.0
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
         /// A node is found only where the system tells all of it, and all
         /// it tells agrees: more than one node online, one node for this
         /// CPU, that node online, and its CPUs, this one among them.
@@ -1796,7 +1831,7 @@ pub(crate) mod places {
         #[test]
         #[cfg(target_os = "linux")]
         fn a_node_is_found_only_where_the_system_tells_all_of_it() {
-            let root = tempfile::tempdir().unwrap();
+            let root = TempDir::new("node-find");
             // A machine of two nodes: CPUs 0-1 on node 0, CPUs 2-3 on node
             // 1, as `find` reads it for CPU 2; `change` then takes
             // something away.
@@ -1849,7 +1884,7 @@ pub(crate) mod places {
         #[test]
         #[cfg(target_os = "linux")]
         fn the_node_that_holds_the_most_allowed_cpus_is_kept_to() {
-            let root = tempfile::tempdir().unwrap();
+            let root = TempDir::new("node-largest");
             let case = |name: &str, cpu: usize, allowed: &str, change: &dyn Fn(&std::path::Path)| {
                 let system = root.path().join(name);
                 for cpu in 0..12 {
