@@ -58,7 +58,15 @@ class Reasons(unittest.TestCase):
             "version/build_version.rs",
         ):
             self.assertIn(must_include, discovered, f"shipped file missing from discovery: {must_include}")
-        for must_exclude in ("src/test.rs", "src/test_support.rs", "src/lifecycle_counts.rs", "src/ffi_avx512_32_guard_tests.rs", "threads/src/forms_test.rs", "b3sum/src/unit_tests.rs"):
+        for must_exclude in (
+            "src/test.rs",
+            "src/test_support.rs",
+            "src/lifecycle_counts.rs",
+            "src/ffi_avx512_32_guard_tests.rs",
+            "threads/src/forms_test.rs",
+            "b3sum/src/unit_tests.rs",
+            "b3sum/src/test_temp.rs",
+        ):
             self.assertNotIn(must_exclude, discovered, f"test-only file unexpectedly scanned: {must_exclude}")
 
     def test_all_shipped_files_pass(self):
