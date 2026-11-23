@@ -158,7 +158,7 @@ struct HasherHooks<'a> {
     pooled: Option<&'a Pool<'a>>,
 }
 
-/// The callback and threshold shared by Hasher::update_with and a turn.
+/// The callback and threshold that one call of Hasher::update_with lends.
 pub(crate) struct Pool<'a> {
     pub min_len: usize,
     pub halves: &'a dyn Fn(&TreeHasher, u32, u64, &[u8]) -> [Cv; 2],
@@ -740,7 +740,8 @@ impl HasherCore {
     /// Kept pooled, it would lose what the hooks do only without a pool:
     /// the rows a whole group is cut into, and the SME2 turn over the
     /// whole slice. (64 open messages fed 16 KiB at a time took 9% to 15%
-    /// longer through update_each_multithreaded than through update_each,
+    /// longer through a pooled turn (update_each_multithreaded, a call
+    /// since removed) than through update_each,
     /// on a Ryzen 9700X and an EPYC 9255: BLAKE3 #470.) The threshold is
     /// held against the slice, not against the update that completed it:
     /// a group gathered from shorter updates is the pool's where it
@@ -858,6 +859,38 @@ mod test {
         update_with_one_wrong_half(1);
     }
 
+    /// A panic of the caller's callback comes out of `update_with`, both
+    /// from a group the input holds whole and from one that a one-byte
+    /// update completes in the stage; and a hasher replaced after it (as
+    /// "After a panic" asks) hashes its next message. (A hook that caught
+    /// the panic and hashed the subtree itself passed every test, once the
+    /// turn's callback test went with `update_each_with`: BLAKE3 #476.)
+    #[cfg(feature = "std")]
+    #[test]
+    fn a_callbacks_panic_comes_out_of_update_with() {
+        crate::initialize();
+        let mut input = vec![0u8; 2 * STAGE_LEN];
+        crate::test::paint_test_input(&mut input);
+        let panics = |_: &TreeHasher, _: u32, _: u64, _: &[u8]| -> [Cv; 2] { panic!("this callback panics") };
+        for whole in [true, false] {
+            let mut hasher = Hasher::new(Mode::Plain, None);
+            let call = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+                if whole {
+                    hasher.update_with(&input, STAGE_LEN, &panics);
+                } else {
+                    hasher.update(&input[..STAGE_LEN + 1]);
+                    hasher.update(&input[STAGE_LEN + 1..2 * STAGE_LEN - 1]);
+                    hasher.update_with(&input[2 * STAGE_LEN - 1..], STAGE_LEN, &panics);
+                }
+            }));
+            let message = call.expect_err("the callback's panic did not come out");
+            assert_eq!(message.downcast_ref::<&str>(), Some(&"this callback panics"), "whole: {whole}");
+            let mut hasher = Hasher::new(Mode::Plain, None);
+            hasher.update_with(&input, STAGE_LEN, &|tree, level, index, bytes| tree.subtree_halves(level, index, bytes));
+            assert_eq!(*hasher.finalize().as_bytes(), crate::test::official::hash(Mode::Plain, &input), "whole: {whole}");
+        }
+    }
+
     /// Groups shorter than the pool's threshold go to the core as the
     /// serial update sends them: the callback is not asked, and their
     /// whole subtrees take the serial update's paths. Counted, since the
@@ -865,7 +898,8 @@ mod test {
     /// into, and on SME2 the flat walks to one value. (Kept pooled, such
     /// an update cut no row, and no subtree of it walked flat to its one
     /// value: 64 open messages fed 16 KiB at a time took 9% to 15% longer
-    /// through `update_each_multithreaded` than through `update_each`,
+    /// through a pooled turn (`update_each_multithreaded`, a call since
+    /// removed) than through `update_each`,
     /// BLAKE3 #470.) The threshold here
     /// is above every piece and every group the pieces fill in the stage;
     /// what is held to it is the group, not the piece that completes it

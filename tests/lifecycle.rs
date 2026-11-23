@@ -20,7 +20,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 // WALKED
 // Hasher::new Hasher::update Hasher::update_with Hasher::update_reader Hasher::finalize Hasher::finalize_xof
 // Hasher::Clone Hasher::Debug Hasher::Write
-// throughput::update_each throughput::update_each_with throughput::finalize_each
+// throughput::update_each throughput::finalize_each
 // OutputReader::fill OutputReader::position OutputReader::set_position OutputReader::Clone OutputReader::Read OutputReader::Seek OutputReader::Debug
 // NOT_WALKED
 // END
@@ -70,7 +70,6 @@ enum Step {
     Clone,
     CloneFrom,
     Turn,
-    TurnWith,
     TurnSome,
     TurnOne,
     TurnNone,
@@ -80,8 +79,7 @@ enum Step {
     New,
 }
 use Step::*;
-const STEPS: [Step; 17] =
-    [Update, With, Reader, Write, WriteAll, Flush, Clone, CloneFrom, Turn, TurnWith, TurnSome, TurnOne, TurnNone, Finish, Debug, Xof, New];
+const STEPS: [Step; 16] = [Update, With, Reader, Write, WriteAll, Flush, Clone, CloneFrom, Turn, TurnSome, TurnOne, TurnNone, Finish, Debug, Xof, New];
 
 struct Walk {
     h: Vec<Hasher>,
@@ -126,13 +124,9 @@ impl Walk {
                 }
                 self.m[j] = self.m[i].clone();
             }
-            Turn | TurnWith => {
+            Turn => {
                 let pieces: Vec<_> = (0..n).map(|k| ((i + k) % n, &bytes[k.min(bytes.len())..])).chain([(i, &bytes[..bytes.len().min(3)])]).collect();
-                if matches!(op, Turn) {
-                    update_each(&mut self.h, &pieces)
-                } else {
-                    update_each_with(&mut self.h, &pieces, 16384, &TreeHasher::subtree_halves)
-                }
+                update_each(&mut self.h, &pieces);
                 for (k, b) in pieces {
                     self.m[k].bytes.extend_from_slice(b);
                 }
@@ -150,11 +144,7 @@ impl Walk {
                     TurnOne => vec![(i, bytes)],
                     _ => vec![],
                 };
-                if i % 2 == 0 {
-                    update_each(&mut self.h, &pieces)
-                } else {
-                    update_each_with(&mut self.h, &pieces, 16384, &TreeHasher::subtree_halves)
-                }
+                update_each(&mut self.h, &pieces);
                 for (k, b) in pieces {
                     self.m[k].bytes.extend_from_slice(b);
                 }
@@ -211,7 +201,7 @@ fn short_histories_preserve_every_message() {
     }
 }
 /// Every step after every other, after every pair and after every three:
-/// the 17 steps to depth four (83,521 sequences), on three hashers (two
+/// the 16 steps to depth four (65,536 sequences), on three hashers (two
 /// plain and one keyed at the start; a step makes new ones in the other
 /// modes), the first step on hasher 0, the second on 1, and so on, with
 /// lengths on both sides of the 16 KiB group. A step that leaves a value
@@ -227,10 +217,15 @@ fn four_operations_in_a_row(part: usize) {
     initialize();
     const DEPTH: usize = 4;
     for path in (0..STEPS.len().pow(DEPTH as u32)).filter(|path| path % STEPS.len() % 4 == part) {
-        let mut w = Walk::new(3, path % 2 == 0);
+        // The lengths' order and the hints go by the sum of the path's
+        // steps, not by the path: the count of steps is a multiple of
+        // four, so by the path every sequence that begins with one step
+        // would begin with one length and one choice of hints.
+        let sum: usize = (0..DEPTH).map(|d| path / STEPS.len().pow(d as u32) % STEPS.len()).sum();
+        let mut w = Walk::new(3, sum / 4 % 2 == 0);
         for d in 0..DEPTH {
             let op = STEPS[path / STEPS.len().pow(d as u32) % STEPS.len()];
-            let len = [16385, 1025, 16384, 1][(path + d) % 4];
+            let len = [16385, 1025, 16384, 1][(sum + d) % 4];
             w.step(op, d % 3, &vec![(path + d) as u8; len]);
         }
     }
