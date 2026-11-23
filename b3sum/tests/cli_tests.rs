@@ -1338,3 +1338,288 @@ fn test_a_checkfile_on_stdin_cannot_check_stdin() {
         assert!(stdout.ends_with("f: OK\n"), "{stdout}");
     }
 }
+
+/// Relative spellings of `/dev/stdin` (e.g. `stdin` with cwd `/dev`) are
+/// recognized by the unified classifier in both operand hashing and `--check`.
+#[test]
+#[cfg(unix)]
+fn test_relative_dev_stdin_alias_and_checkfile_order() {
+    blake3::initialize();
+    let payload: Vec<u8> = (0..128 * 1024usize).map(|i| (i.wrapping_mul(13) ^ (i >> 5)) as u8).collect();
+    let xof33 = |input: &[u8]| {
+        let mut h = blake3::convenience::Hasher::new(blake3::Mode::Plain, None);
+        h.update(input);
+        let mut out = [0u8; 33];
+        h.finalize_xof().fill(&mut out);
+        hex::encode(out)
+    };
+    let whole33 = xof33(&payload);
+    let empty33 = xof33(b"");
+    for (first, second) in [("-", "stdin"), ("stdin", "-")] {
+        for _ in 0..3 {
+            let out = cmd!(b3sum_exe(), "--length=33", "--num-threads=2", first, second).dir("/dev").stdin_bytes(payload.clone()).read().unwrap();
+            assert_eq!(out, format!("{whole33}  {first}\n{empty33}  {second}"), "order ({first}, {second})");
+        }
+    }
+    // Same in `--check`: first line gets the pipe payload, second gets empty.
+    let dir = tempfile::tempdir().unwrap();
+    let whole = blake3::convenience::hash(b"hello-pipe").to_hex();
+    let empty = blake3::convenience::hash(b"").to_hex();
+    let manifest = dir.path().join("sums.b3");
+    fs::write(&manifest, format!("{whole}  -\n{empty}  stdin\n")).unwrap();
+    let checked = cmd!(b3sum_exe(), "--check", &manifest).dir("/dev").stdin_bytes("hello-pipe").read().unwrap();
+    assert_eq!(checked, "-: OK\nstdin: OK");
+}
+
+/// On both Linux and macOS, `/dev/stdin` and `/dev/fd/0` pointing at a regular
+/// file hash the full file independently from byte 0 without corrupting fd 0's
+/// shared offset (catching Darwin `fd(4)` F_DUPFD offset sharing).
+#[test]
+#[cfg(unix)]
+fn test_regular_file_stdin_aliases_work_independently_on_unix() {
+    use std::io::{Seek, SeekFrom};
+    blake3::initialize();
+    let dir = tempfile::tempdir().unwrap();
+    for len in [1usize, 37, 600_000] {
+        let data: Vec<u8> = (0..len).map(|i| (i.wrapping_mul(41) ^ (i >> 6)) as u8).collect();
+        let path = dir.path().join(format!("reg-{len}"));
+        fs::write(&path, &data).unwrap();
+        let want = blake3::convenience::hash(&data).to_hex();
+        for threads in ["1", "2"] {
+            // Two descriptor aliases: both hash the full file, and fd 0 offset stays 0.
+            let mut file = fs::File::open(&path).unwrap();
+            let out = std::process::Command::new(b3sum_exe())
+                .args(["--num-threads", threads, "/dev/stdin", "/dev/fd/0"])
+                .stdin(file.try_clone().unwrap())
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{want}  /dev/stdin\n{want}  /dev/fd/0\n"), "len={len} t={threads}");
+            assert_eq!(file.stream_position().unwrap(), 0, "fd 0 offset must stay untouched");
+
+            // Nonzero initial offset on fd 0: `/dev/stdin` and `/dev/fd/0` still hash from byte 0
+            // and preserve the parent's nonzero cursor.
+            if len > 10 {
+                let mut file = fs::File::open(&path).unwrap();
+                file.seek(SeekFrom::Start(5)).unwrap();
+                let out = std::process::Command::new(b3sum_exe())
+                    .args(["--num-threads", threads, "/dev/stdin", "/dev/fd/0"])
+                    .stdin(file.try_clone().unwrap())
+                    .output()
+                    .unwrap();
+                assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+                assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{want}  /dev/stdin\n{want}  /dev/fd/0\n"));
+                assert_eq!(file.stream_position().unwrap(), 5);
+            }
+
+            // `-` paired with `/dev/stdin` in both orders: both print the file's digest,
+            // and `-` advances fd 0 to EOF.
+            for (a, b) in [("-", "/dev/stdin"), ("/dev/stdin", "-")] {
+                let mut file = fs::File::open(&path).unwrap();
+                let out = std::process::Command::new(b3sum_exe()).args(["--num-threads", threads, a, b]).stdin(file.try_clone().unwrap()).output().unwrap();
+                assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+                assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{want}  {a}\n{want}  {b}\n"), "len={len} ({a},{b})");
+                assert_eq!(file.stream_position().unwrap(), len as u64);
+            }
+        }
+        // `--check` naming both `/dev/stdin` and `/dev/fd/0`.
+        let sums = dir.path().join(format!("sums-{len}"));
+        fs::write(&sums, format!("{want}  /dev/stdin\n{want}  /dev/fd/0\n")).unwrap();
+        let mut file = fs::File::open(&path).unwrap();
+        let out = std::process::Command::new(b3sum_exe()).args(["--check", sums.to_str().unwrap()]).stdin(file.try_clone().unwrap()).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), "/dev/stdin: OK\n/dev/fd/0: OK\n");
+        assert_eq!(file.stream_position().unwrap(), 0);
+    }
+}
+
+/// Inherited Unix sockets and named FIFOs on stdin work with `/dev/stdin`
+/// aliases because b3sum reuses fd 0 instead of reopening `/dev/stdin`
+/// (avoiding Linux `ENXIO` on sockets and blocking reopen on closed FIFOs).
+#[test]
+#[cfg(unix)]
+fn test_unix_socket_and_named_fifo_stdin_aliases() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    blake3::initialize();
+    let payload = b"socket-and-fifo-stream-payload";
+    let whole = blake3::convenience::hash(payload).to_hex();
+    let empty = blake3::convenience::hash(b"").to_hex();
+
+    // 1. Connected Unix stream socket on stdin.
+    for (first, second) in [("-", "/dev/stdin"), ("/dev/stdin", "-")] {
+        let (mut writer, reader) = UnixStream::pair().unwrap();
+        writer.write_all(payload).unwrap();
+        writer.shutdown(std::net::Shutdown::Write).unwrap();
+        drop(writer);
+        let out = std::process::Command::new(b3sum_exe())
+            .args([first, second])
+            .stdin(std::process::Stdio::from(std::os::fd::OwnedFd::from(reader)))
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "socket ({first}, {second}): {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{whole}  {first}\n{empty}  {second}\n"));
+    }
+
+    // 2. Named FIFO on stdin with a single finite writer that closes.
+    let dir = tempfile::tempdir().unwrap();
+    let fifo = dir.path().join("in.fifo");
+    assert!(std::process::Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+    let writer = std::thread::spawn({
+        let fifo = fifo.clone();
+        move || {
+            let mut f = fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+            f.write_all(payload).unwrap();
+        }
+    });
+    let reader = fs::File::open(&fifo).unwrap();
+    let out = std::process::Command::new(b3sum_exe()).args(["-", "/dev/stdin"]).stdin(reader).output().unwrap();
+    writer.join().unwrap();
+    assert!(out.status.success(), "fifo: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{whole}  -\n{empty}  /dev/stdin\n"));
+}
+
+/// Unwritable stderr (`/dev/full`) must never turn normal status-1 failures
+/// (missing operand, `--check` mismatch) into an abort via `eprintln!` panic.
+#[test]
+#[cfg(target_os = "linux")]
+fn test_stderr_full_does_not_abort_normal_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("f");
+    fs::write(&f, b"actual").unwrap();
+    let sums = dir.path().join("sums.b3");
+    fs::write(&sums, format!("{}  {}\n", "0".repeat(64), f.display())).unwrap();
+
+    for args in [vec!["no-such-file".to_string()], vec!["--check".to_string(), sums.to_string_lossy().into_owned()]] {
+        let full = fs::OpenOptions::new().write(true).open("/dev/full").unwrap();
+        let out = std::process::Command::new(b3sum_exe()).args(&args).current_dir(dir.path()).stderr(full).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "expected clean exit 1, not abort, for {args:?}");
+    }
+}
+
+/// Extreme `--num-threads` values (e.g. `usize::MAX`) are capped cleanly as an
+/// upper bound rather than panicking/aborting in thread-pool allocation.
+#[test]
+fn test_extreme_num_threads_is_capped_not_aborted() {
+    blake3::initialize();
+    let dir = tempfile::tempdir().unwrap();
+    let big = dir.path().join("big.bin");
+    let data = vec![0x5Au8; 4_500_000];
+    fs::write(&big, &data).unwrap();
+    let want = blake3::convenience::hash(&data).to_hex();
+    let max = usize::MAX.to_string();
+    let out = cmd!(b3sum_exe(), "--num-threads", &max, "--no-names", &big).read().unwrap();
+    assert_eq!(out, want.as_str());
+}
+
+/// A tight `RLIMIT_NOFILE` budget still makes forward progress through the
+/// Linux `io_uring` small-file batcher instead of failing queued opens with
+/// `EMFILE`, both with `--num-threads=1` and with default multi-worker mode.
+#[test]
+#[cfg(target_os = "linux")]
+fn test_low_nofile_budget_makes_progress_through_ring() {
+    blake3::initialize();
+    let dir = tempfile::tempdir().unwrap();
+    let mut names = Vec::new();
+    let mut expected = String::new();
+    for i in 0..32 {
+        let name = format!("f{i}");
+        let body = format!("file-body-{i}");
+        fs::write(dir.path().join(&name), &body).unwrap();
+        expected.push_str(&format!("{}  {name}\n", blake3::convenience::hash(body.as_bytes()).to_hex()));
+        names.push(name);
+    }
+    let files_arg = names.join(" ");
+    for extra_flag in ["--num-threads=1", ""] {
+        let script = format!("exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&-; ulimit -n 8; exec '{}' --no-mmap {extra_flag} {files_arg}", b3sum_exe().display());
+        let out = cmd!("sh", "-c", script).dir(dir.path()).stdout_capture().stderr_capture().unchecked().run().unwrap();
+        assert!(out.status.success(), "flag={extra_flag:?} stderr={}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), expected, "flag={extra_flag:?}");
+    }
+}
+
+/// Lexical path similarity to `/dev/stdin` must never override OS path
+/// resolution: `/dev/stdin/` fails as not-a-directory, and a symlink traversal
+/// whose lexical form reduces to `/dev/stdin` still hashes the OS target file.
+#[test]
+#[cfg(unix)]
+fn test_lexical_dev_stdin_does_not_override_os_stat() {
+    blake3::initialize();
+
+    // 1. Trailing slash on `/dev/stdin/` must fail (not silently read stdin).
+    let out = cmd!(b3sum_exe(), "/dev/stdin/").stdin_bytes("from-stdin").stdout_capture().stderr_capture().unchecked().run().unwrap();
+    assert_eq!(out.status.code(), Some(1), "trailing slash on /dev/stdin/ must fail");
+    assert!(out.stdout.is_empty(), "stdout={:?}", String::from_utf8_lossy(&out.stdout));
+
+    // 2. Linux/Unix `/dev/fd/7/../../stdin` where fd 7 is a directory two levels
+    //    deep: lexical `..` collapses to `/dev/stdin`, while the OS resolves
+    //    through fd 7 to the regular file `dir/stdin`. Must hash the real file!
+    #[cfg(target_os = "linux")]
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("a").join("b");
+        fs::create_dir_all(&sub).unwrap();
+        let real_file = dir.path().join("stdin");
+        let real_body = b"real-file-not-stdin";
+        fs::write(&real_file, real_body).unwrap();
+        let script = format!("exec 7<'{}'; exec '{}' --no-names /dev/fd/7/../../stdin", sub.display(), b3sum_exe().display());
+        let out = cmd!("sh", "-c", script).stdin_bytes("from-stdin").stdout_capture().stderr_capture().unchecked().run().unwrap();
+        assert!(out.status.success(), "stderr={}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), blake3::convenience::hash(real_body).to_hex().as_str());
+    }
+    let bad = cmd!(b3sum_exe(), "/dev/fd/0/../../stdin").stdin_bytes("from-stdin").stdout_capture().stderr_capture().unchecked().run().unwrap();
+    assert_eq!(bad.status.code(), Some(1), "/dev/fd/0/../../stdin must fail as ENOTDIR, not read stdin");
+    assert!(bad.stdout.is_empty(), "stdout={:?}", String::from_utf8_lossy(&bad.stdout));
+
+    // And with `cwd = /`, relative `dev/stdin` on a connected Unix socket
+    // resolves to stdin and succeeds without ENXIO.
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    let payload = b"from-root-cwd-socket";
+    let (mut writer, reader) = UnixStream::pair().unwrap();
+    writer.write_all(payload).unwrap();
+    writer.shutdown(std::net::Shutdown::Write).unwrap();
+    drop(writer);
+    let out = std::process::Command::new(b3sum_exe())
+        .args(["dev/stdin", "-"])
+        .current_dir("/")
+        .stdin(std::process::Stdio::from(std::os::fd::OwnedFd::from(reader)))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "cwd=/ dev/stdin stderr={}", String::from_utf8_lossy(&out.stderr));
+    let whole = blake3::convenience::hash(payload).to_hex();
+    let empty = blake3::convenience::hash(b"").to_hex();
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{whole}  dev/stdin\n{empty}  -\n"));
+}
+
+/// `--check /dev/stdin` and `--check /dev/fd/0` when stdin is a regular
+/// manifest file positioned past line 1 must still read the whole manifest from
+/// offset 0 and leave the parent's fd 0 offset untouched (including on macOS
+/// where opening `/dev/stdin` otherwise shares fd 0's offset via `fd(4)`).
+#[test]
+#[cfg(unix)]
+fn test_check_dev_stdin_regular_manifest_from_nonzero_offset() {
+    use std::io::{Seek, SeekFrom};
+    blake3::initialize();
+    let dir = tempfile::tempdir().unwrap();
+    let f1 = dir.path().join("one.bin");
+    let f2 = dir.path().join("two.bin");
+    fs::write(&f1, b"actual-one").unwrap();
+    fs::write(&f2, b"actual-two").unwrap();
+    let h2 = blake3::convenience::hash(b"actual-two").to_hex();
+    let bad_h1 = "0".repeat(64);
+    let line1 = format!("{bad_h1}  one.bin\n");
+    let line2 = format!("{h2}  two.bin\n");
+    let manifest = dir.path().join("manifest.b3");
+    fs::write(&manifest, format!("{line1}{line2}")).unwrap();
+
+    for check_arg in ["/dev/stdin", "/dev/fd/0"] {
+        let mut f = fs::File::open(&manifest).unwrap();
+        let start_pos = line1.len() as u64;
+        f.seek(SeekFrom::Start(start_pos)).unwrap();
+        let out = std::process::Command::new(b3sum_exe()).args(["--check", check_arg]).current_dir(dir.path()).stdin(f.try_clone().unwrap()).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{check_arg}: must catch line-1 mismatch");
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), "one.bin: FAILED\ntwo.bin: OK\n", "{check_arg}");
+        assert_eq!(f.stream_position().unwrap(), start_pos, "{check_arg}: must not move parent fd 0 offset");
+    }
+}

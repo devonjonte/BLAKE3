@@ -43,8 +43,8 @@ CONTROLS = [
     (
         "an output error is a failure (#406)",
         "b3sum/src/main.rs",
-        "                return Err(e);\n            }\n            bytes = &bytes[rc as usize..];",
-        "                return Ok(());\n            }\n            bytes = &bytes[rc as usize..];",
+        "            Err(e) => return (written, Err(e)),",
+        "            Err(_) => return (bytes.len(), Ok(())),",
         "test_output_error_is_failure",
     ),
     (
@@ -71,8 +71,8 @@ CONTROLS = [
     (
         "a buffer is sized by what was read, not by the file's size (#440)",
         "b3sum/src/linux_pipe.rs",
-        "    ensure_spare_cap(buf, (hint + 1).max(n + 4096));",
-        "    ensure_spare_cap(buf, (hint + 1).max(4096));",
+        "    let need = hint.saturating_add(1).max(prefix.len().saturating_add(4096)).min(SMALL_MEM_CAP + 1);",
+        "    let need = hint.saturating_add(1).max(4096).min(SMALL_MEM_CAP + 1);",
         "a_buffer_holds_what_was_read_whatever_the_size_said",
     ),
     (
@@ -100,7 +100,7 @@ CONTROLS = [
         "the file opened is the file hashed where there is no io_uring",
         "b3sum/src/linux_pipe.rs",
         "        } else {\n            sink.put(i, crate::hash_open_file(args, file));\n        }\n",
-        "        } else {\n            drop(file);\n            sink.put(i, crate::hash_path_hash(args, &paths[i]));\n        }\n",
+        "        } else {\n            drop(file);\n            let ctx = crate::file_end::StdinContext::current();\n            sink.put(i, crate::hash_path_hash(args, &paths[i], &ctx, forbidden));\n        }\n",
         "without_a_ring_the_file_opened_is_the_file_hashed",
     ),
 ]

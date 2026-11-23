@@ -265,7 +265,7 @@ pub(crate) fn write_in(dir: &Path, hash: &blake3::Hash, nodes: &[u8]) -> std::io
             Err(e) => return Err(e),
         }
     };
-    let written = file.write_all(nodes).and_then(|()| {
+    let written = file.write_all(nodes).and_then(|()| file.sync_all()).and_then(|()| {
         drop(file);
         std::fs::rename(&new, &place)
     });
@@ -350,9 +350,8 @@ pub(crate) mod test {
                     assert_eq!(direct(mode, &file, len, threads, &mut piece, &mut cvs, &mut got), Some(hash), "len={len} threads={threads}");
                     assert_eq!(got[..5], [0xee; 5]);
                     assert_eq!(got[5..], want, "len={len} threads={threads}");
-                    for wrong in [len + 1, len - 1, len + PIECE, len - GROUP] {
-                        // Bytes past a length that ends a piece are not read.
-                        if wrong < len && wrong % PIECE == 0 {
+                    for wrong in [len + 1, len - 1, len + PIECE, len - GROUP, len.next_multiple_of(PIECE).saturating_sub(PIECE)] {
+                        if wrong == len || wrong < PIECE {
                             continue;
                         }
                         let mut got = vec![0xee; 5];

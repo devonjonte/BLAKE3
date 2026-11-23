@@ -1,4 +1,5 @@
 //! Minimal Linux `io_uring` wrapper over `libc` (`SYS_io_uring_setup`,
+//! `SYS_io_uring_register` for `IORING_OP_READ` capability probing,
 //! `SYS_io_uring_enter`, and the ring mappings). Zero external dependencies.
 
 use core::cell::Cell;
@@ -8,6 +9,27 @@ use std::ptr;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 const IORING_OP_READ: u8 = 22;
+const IORING_REGISTER_PROBE: libc::c_uint = 8;
+const IO_URING_OP_SUPPORTED: u16 = 1 << 0;
+const PROBE_OPS: usize = 32;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct IoUringProbeOp {
+    op: u8,
+    resv: u8,
+    flags: u16,
+    resv2: u32,
+}
+
+#[repr(C)]
+struct IoUringProbe {
+    last_op: u8,
+    ops_len: u8,
+    resv: u16,
+    resv2: [u32; 3],
+    ops: [IoUringProbeOp; PROBE_OPS],
+}
 
 const IORING_OFF_SQ_RING: i64 = 0;
 const IORING_OFF_CQ_RING: i64 = 0x800_0000;
@@ -118,9 +140,9 @@ pub(crate) struct Uring {
     in_flight: u32,
 }
 
-// Sound: the pointers are into this ring's own mappings, which go where
-// the Uring goes and are unmapped by its drop alone.
-unsafe impl Send for Uring {}
+// `Uring` intentionally does NOT implement `Send` or `Sync`: its raw pointers
+// keep it `!Send + !Sync`, enforcing `IORING_SETUP_SINGLE_ISSUER` thread
+// affinity at compile time.
 
 thread_local! {
     /// Per-thread cached `Uring`: `IORING_SETUP_SINGLE_ISSUER` binds each ring
@@ -177,6 +199,15 @@ impl Uring {
         }
         if ring_fd < 0 {
             return Err(last_err);
+        }
+
+        // Verify the kernel actually supports `IORING_OP_READ` (introduced in
+        // Linux 5.6 alongside `IORING_REGISTER_PROBE`, whereas `io_uring_setup`
+        // dates to 5.1) before selecting the ring backend.
+        if !probe_op_read(ring_fd) {
+            // Sound: `ring_fd` is owned here and closed once on failure.
+            unsafe { libc::close(ring_fd) };
+            return Err(io::Error::from_raw_os_error(libc::EOPNOTSUPP));
         }
 
         let sq_size = params.sq_off.array as usize + (params.sq_entries as usize) * size_of::<u32>();
@@ -336,6 +367,7 @@ impl Uring {
     /// submitted, so unwinding could free buffers the kernel still writes.
     /// A read's error CQE, in contrast, has finished using that read's buffer.
     pub(crate) fn submit_and_wait(&mut self, min_complete: u32) {
+        assert!(min_complete <= self.in_flight, "submit_and_wait cannot wait for {min_complete} completions with only {} reads in flight", self.in_flight);
         if self.unsubmitted > 0 {
             // Sound: into the ring's mapping, as sq_space_left's.
             unsafe { (*self.sq_tail).store(self.local_sq_tail, Ordering::Release) };
@@ -405,10 +437,37 @@ fn read_len(room: usize) -> u32 {
     room.min(READ_MAX) as u32
 }
 
+/// Probe whether `ring_fd` supports `IORING_OP_READ`.
+/// `IoUringProbe.ops_len` MUST be 0 on input (the kernel validates it is
+/// zeroed and writes the returned op count there; capacity is passed via `nr_args`).
+fn probe_op_read(ring_fd: RawFd) -> bool {
+    #[cfg(test)]
+    if REFUSE_OP_READ.load(Ordering::Relaxed) {
+        return false;
+    }
+    let mut probe = IoUringProbe { last_op: 0, ops_len: 0, resv: 0, resv2: [0; 3], ops: [IoUringProbeOp::default(); PROBE_OPS] };
+    // Sound: `probe` is zeroed on input with `PROBE_OPS` trailing
+    // `io_uring_probe_op` entries matching the `nr_args` count passed.
+    let rc = unsafe {
+        libc::syscall(libc::SYS_io_uring_register, ring_fd, IORING_REGISTER_PROBE, (&raw mut probe).cast::<libc::c_void>(), PROBE_OPS as libc::c_uint)
+    };
+    if rc < 0 {
+        return false;
+    }
+    (probe.ops_len as usize) > (IORING_OP_READ as usize)
+        && (probe.last_op as usize) >= (IORING_OP_READ as usize)
+        && (probe.ops[IORING_OP_READ as usize].flags & IO_URING_OP_SUPPORTED) != 0
+}
+
 /// For the tests: no ring can be made, as where a sandbox refuses
 /// io_uring.
 #[cfg(test)]
 pub(crate) static REFUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// For the tests: `io_uring_setup` succeeds, but `IORING_OP_READ` is reported
+/// unsupported (as on Linux 5.1..5.5 or restricted rings).
+#[cfg(test)]
+pub(crate) static REFUSE_OP_READ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// For the tests: what becomes of the completions [`Uring::pop_cqe`]
 /// hands out. 1: every other read that gave more than one byte gave half
@@ -487,6 +546,25 @@ impl Drop for Uring {
 mod test {
     use super::Uring;
     use std::os::fd::AsRawFd;
+
+    /// On a host where raw `io_uring_setup` succeeds, `Uring::new` must also
+    /// succeed (proving `IORING_REGISTER_PROBE` does not spuriously disable
+    /// rings), while `REFUSE_OP_READ` causes `Uring::new` to fail with
+    /// `EOPNOTSUPP`.
+    #[test]
+    fn uring_probe_accepts_op_read_and_refuse_seam_rejects_it() {
+        let mut params = super::IoUringParams::default();
+        let raw_fd = unsafe { libc::syscall(libc::SYS_io_uring_setup, 8u32, &raw mut params) };
+        if raw_fd < 0 {
+            return;
+        }
+        unsafe { libc::close(raw_fd as std::os::fd::RawFd) };
+        assert!(Uring::new(8).is_ok(), "probe must accept IORING_OP_READ on a capable kernel");
+        super::REFUSE_OP_READ.store(true, std::sync::atomic::Ordering::Relaxed);
+        let err = Uring::new(8).err().expect("REFUSE_OP_READ must reject ring setup");
+        super::REFUSE_OP_READ.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(err.raw_os_error(), Some(libc::EOPNOTSUPP));
+    }
 
     /// A ring's read is asked for at least one byte and at most what its
     /// 32-bit length can say, whatever room the buffer has: at 4 GiB of

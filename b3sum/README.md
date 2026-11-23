@@ -122,8 +122,12 @@ See [What `--check` does](what_does_check_do.md) for checkfile rules.
 file during the run, the file hashed is still the one that was opened.
 
 **Hash files that are not changing.** `b3sum` takes no lock and no snapshot.
-If another program writes to a file while `b3sum` hashes it, the hash printed
-may be of bytes that the file never held all at once.
+Any path that memory-maps a file relies on the underlying file not being
+modified concurrently while `b3sum` hashes it (under Rust's memory model,
+external in-place writes into a live shared mapping violate the immutability
+contract of `&[u8]`, in addition to producing torn digests or `SIGBUS` on
+truncation). Pass `--no-mmap` whenever hashing live, untrusted, or potentially
+changing files.
 
 How much of the file is hashed depends on how `b3sum` takes it in:
 
@@ -143,14 +147,18 @@ any other place it is read, from there. Either way it is left at the file's
 end, as a stream read to its end is.
 
 Standard input is one stream, so name it once. Named again (`b3sum - -`), or
-by another of its names under `/dev` or `/proc` (`b3sum - /dev/stdin`,
-`b3sum /dev/stdin /dev/fd/0`), it goes to the first of the names, and the
-others find it at its end and hash no bytes. The entries of a checkfile
+by another of its names under `/dev` or `/proc` — absolute or relative to the
+working directory (`b3sum - /dev/stdin`, `cd /dev && b3sum - stdin`,
+`b3sum /dev/stdin /dev/fd/0`) — it goes to the first of the names, reading
+directly from standard input (including for inherited sockets and named FIFOs),
+and the others find it at its end and hash no bytes. The entries of a checkfile
 that name it are taken the same way, in the order of their lines. A name
 for the pipe anywhere else (a link of your own) is taken for a file of its
 own, and two readers of one pipe each get a part of it.
-Where standard input is a file, another name for it (`/dev/stdin`) opens
-that file again from its start, and is hashed as a file of its own.
+Where standard input is a regular file, another name for it (`/dev/stdin`,
+`/dev/fd/0`) hashes that file independently from byte zero on both Linux and
+macOS (using positioned reads on macOS so the shared descriptor offset is not
+disturbed).
 
 What happens when a file changes during the run:
 
@@ -184,7 +192,8 @@ that part arrives.
 - Files of 16 KiB or less have no parent nodes, so no `.obao4` file is written.
 - `DIR` must already exist.
 - Works in plain mode and `--keyed` mode.
-- Standard input (`-`) is read whole into memory first.
+- Standard input (`-`) and any named file whose fallback reads instead of
+  mapping are held whole in memory when building the outboard tree.
 
 ```bash
 $ mkdir outboards && b3sum --outboard outboards big.iso

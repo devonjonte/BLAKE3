@@ -170,22 +170,24 @@ fn test_no_mmap_maps_no_file() {
         std::fs::write(path, &bytes).unwrap();
     }
     let want = blake3::convenience::hash(&bytes);
+    let stdin_ctx = crate::file_end::StdinContext::current();
     let run = |args: &crate::Args| {
-        let before = crate::MAPPED.with(|m| m.get());
+        use std::sync::atomic::Ordering;
+        let before = crate::MAPPED.load(Ordering::Relaxed);
         assert_eq!(crate::hash_open_file(args, std::fs::File::open(&paths[0]).unwrap()).unwrap(), want);
-        let one = crate::MAPPED.with(|m| m.get());
+        let one = crate::MAPPED.load(Ordering::Relaxed);
         let mut out = [0u8; 32];
-        crate::hash_path(args, &paths[0]).unwrap().fill(&mut out);
+        crate::hash_path(args, &paths[0], &stdin_ctx).unwrap().fill(&mut out);
         assert_eq!(out, *want.as_bytes());
-        let xof = crate::MAPPED.with(|m| m.get());
-        crate::linux_pipe::hash_paths(args, &paths, &mut |_, hash| {
+        let xof = crate::MAPPED.load(Ordering::Relaxed);
+        crate::linux_pipe::hash_paths(args, &paths, None, &mut |_, hash| {
             assert_eq!(hash.unwrap(), want);
             true
         });
-        let many = crate::MAPPED.with(|m| m.get());
+        let many = crate::MAPPED.load(Ordering::Relaxed);
         let (mut rooms, mut nodes) = (crate::outboard::Rooms::new(), Vec::new());
-        assert_eq!(crate::outboard_of(args, &paths[0], 1, &mut rooms, &mut nodes).unwrap(), want);
-        let outboard = crate::MAPPED.with(|m| m.get());
+        assert_eq!(crate::outboard_of(args, &paths[0], &stdin_ctx, 1, &mut rooms, &mut nodes).unwrap(), want);
+        let outboard = crate::MAPPED.load(Ordering::Relaxed);
         [one - before, xof - one, many - xof, outboard - many]
     };
     let mut args = crate::Args::for_test_plain(paths.clone());
@@ -216,4 +218,98 @@ fn test_a_cold_long_file_on_one_thread_without_a_ring_is_read_in_pieces() {
         assert_eq!(crate::hash_open_file(&args, std::fs::File::open(&path).unwrap()).unwrap(), blake3::convenience::hash(&bytes[..len]), "len={len}");
         assert_eq!(crate::STREAMED.with(|streamed| streamed.get()) - before, in_pieces, "len={len}");
     }
+}
+
+#[test]
+fn write_all_with_stops_on_write_zero_and_reports_partial_progress() {
+    let mut calls = 0usize;
+    let (written, res) = crate::write_all_with(b"abcdef", |_| {
+        calls += 1;
+        Ok(0)
+    });
+    assert_eq!(calls, 1);
+    assert_eq!(written, 0);
+    assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::WriteZero);
+
+    // Partial write followed by EAGAIN reports exact bytes already delivered.
+    let mut step = 0usize;
+    let (written, res) = crate::write_all_with(b"abcdef", |chunk| {
+        step += 1;
+        match step {
+            1 => Ok(2.min(chunk.len())),
+            2 => Err(std::io::Error::from(std::io::ErrorKind::Interrupted)),
+            3 => Ok(1.min(chunk.len())),
+            _ => Err(std::io::Error::from(std::io::ErrorKind::WouldBlock)),
+        }
+    });
+    assert_eq!(written, 3);
+    assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+}
+
+#[test]
+fn read_check_line_bounded_caps_memory_and_isolates_bad_utf8() {
+    let mut input = Vec::new();
+    input.extend_from_slice(b"line1\n");
+    input.extend_from_slice(&vec![b'a'; 200]);
+    input.push(b'\n');
+    input.extend_from_slice(b"bad-\xff-utf8\n");
+    input.extend_from_slice(b"line4\n");
+    let mut reader = std::io::BufReader::with_capacity(16, &input[..]);
+    let mut raw = Vec::new();
+
+    assert_eq!(crate::read_check_line_bounded(&mut reader, &mut raw, 64).unwrap().unwrap().unwrap(), "line1\n");
+    let err_long = crate::read_check_line_bounded(&mut reader, &mut raw, 64).unwrap().unwrap().unwrap_err();
+    assert!(err_long.to_string().contains("maximum length"), "{err_long}");
+    assert!(raw.len() <= 64, "must not allocate past max_bytes");
+    let err_utf8 = crate::read_check_line_bounded(&mut reader, &mut raw, 64).unwrap().unwrap().unwrap_err();
+    assert!(err_utf8.to_string().contains("Invalid UTF-8"), "{err_utf8}");
+    assert_eq!(crate::read_check_line_bounded(&mut reader, &mut raw, 64).unwrap().unwrap().unwrap(), "line4\n");
+    assert!(crate::read_check_line_bounded(&mut reader, &mut raw, 64).unwrap().is_none());
+}
+
+#[test]
+fn cap_requested_threads_bounds_extreme_values() {
+    let capped = crate::cap_requested_threads(std::num::NonZeroUsize::new(usize::MAX).unwrap());
+    assert!(capped.get() >= 1 && capped.get() <= crate::MAX_THREADS);
+    let one = crate::cap_requested_threads(std::num::NonZeroUsize::MIN);
+    assert_eq!(one.get(), 1);
+}
+
+#[test]
+fn read_check_line_bounded_retries_interrupted() {
+    use std::io::Read;
+    struct InterruptOnce<'a> {
+        inner: &'a [u8],
+        interrupted: bool,
+    }
+    impl Read for InterruptOnce<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if !self.interrupted {
+                self.interrupted = true;
+                return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+            }
+            self.inner.read(buf)
+        }
+    }
+    let mut reader = std::io::BufReader::new(InterruptOnce { inner: b"ok-after-eintr\n", interrupted: false });
+    let mut raw = Vec::new();
+    let line = crate::read_check_line_bounded(&mut reader, &mut raw, 64).unwrap().unwrap().unwrap();
+    assert_eq!(line, "ok-after-eintr\n");
+}
+
+#[test]
+fn direct_permits_enforce_shared_budget() {
+    let total = crate::threads().get();
+    if total < 3 {
+        return;
+    }
+    let file_threads = total - 2;
+    let _guard = crate::FileThreadsGuard::enter(file_threads);
+    let a = crate::DirectPermits::acquire(10);
+    assert_eq!(a.extra, 2, "first lease takes only the shared spare permits");
+    let b = crate::DirectPermits::acquire(10);
+    assert_eq!(b.extra, 0, "concurrent caller gets 0 extra while spare permits are leased");
+    drop(a);
+    let c = crate::DirectPermits::acquire(1);
+    assert_eq!(c.extra, 1, "permits return to the shared pool on drop");
 }
