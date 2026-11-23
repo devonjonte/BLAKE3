@@ -340,6 +340,7 @@ src/platform.rs	replace Platform::avx512 -> Option<Self> with None	1	same code: 
 src/platform.rs	replace Platform::avx512 -> Option<Self> with Some(Default::default())	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/platform.rs	replace Platform::name -> &'static str with ""	1	a name for reports and legends, with no reader since the kernel reports went
 src/platform.rs	replace Platform::name -> &'static str with "xyzzy"	1	a name for the kernel report and legends (no test pins the names)
+src/platform.rs	replace Platform::sme2 -> Option<Self> with None	1	[cpu lacks sme2] equivalent: on a CPU without SME2, Platform::sme2() returns None (caught on Apple M6 SME2 hosts)
 src/platform.rs	replace Platform::sse41 -> Option<Self> with None	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/platform.rs	replace Platform::sse41 -> Option<Self> with Some(Default::default())	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
 src/platform.rs	replace avx2_detected -> bool with false	1	same code: every test binary of a release build, the mutant's line count kept, hashes as the unmutated build's here (tools/mutants/release_same.py)
