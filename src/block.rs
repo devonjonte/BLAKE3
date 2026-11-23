@@ -195,14 +195,26 @@ impl<'a> Batch<'a> {
 struct Line([u8; 128]);
 
 /// `count` messages of `N` bytes each, packed end to end with nothing
-/// between them, on a 128-byte boundary: the prepared input for many
-/// short messages of one length (a Merkle layer's leaves or digests), as
-/// the program holds them, with no copy into blocks and no padding in
-/// memory. `N` is 16 or 32. It reads and writes as a `[[u8; N]]`
+/// between them, on a 128-byte boundary: a compact layout for many
+/// short messages of one length (a Merkle layer's leaves or digests)
+/// without per-message block padding in caller memory (`N` is 16 or 32;
+/// backing storage is `N` bytes per message rounded up once to a
+/// 128-byte line). It reads and writes as a `[[u8; N]]`
 /// (`leaves[i] = digest`), and the batch calls take it as they take a
-/// [`Batch`]; a layer's digests written into one are the next layer's
-/// input. The alignment is the type's: only this constructor makes one,
-/// so a call checks nothing.
+/// [`Batch`]. For `Packed<32>` with an even count, the digests can also
+/// be borrowed directly as 64-byte parent pairs via [`Packed::as_blocks`]
+/// (carry or pad an odd last digest according to your tree).
+///
+/// **Speed vs. [`Batch`]:** `hash_many` currently expands `Packed`
+/// messages into padded 64-byte blocks in 128-message groups on the
+/// stack, so for repeated hashing of an already-prepared batch a
+/// [`Batch`] is faster today (about 1.5–1.8× faster for a reported
+/// 32-byte workload on Apple M6). However, when refilling or chaining
+/// 32-byte digests between rounds, writing digests straight into a
+/// `Packed<32>` avoids per-slot copies into a `Batch` and can beat
+/// `Batch::set` end-to-end — measure your full loop. The alignment is
+/// the type's: only this constructor makes one, so a call checks nothing
+/// about alignment.
 ///
 /// # Trait implementations
 ///

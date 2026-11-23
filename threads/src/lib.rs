@@ -84,17 +84,25 @@
 //!
 //! | Your data | Call |
 //! |---|---|
-//! | One message in memory | [`convenience::hash`], or for speed [`throughput::hash_multithreaded`] |
+//! | One message in memory (now and then) | [`convenience::hash`], or for large inputs across cores [`throughput::hash_multithreaded`] |
+//! | One message in memory, repeated call after call | [`throughput::hash_multithreaded`] (on aligned [`Block`](throughput::Block)s), or on one thread [`throughput::TreeHasher::hash`] directly on caller-owned `&[u8]` slices without copying into aligned blocks (use [`throughput::update_multithreaded`] for large unaligned slices across cores) |
 //! | One message arriving in pieces | [`convenience::Hasher`], or for speed [`throughput::update_multithreaded`] |
-//! | Many messages of one length, in one buffer | [`throughput::hash_many_multithreaded`] |
-//! | Many 16- or 32-byte messages (a Merkle layer's leaves or digests) | [`throughput::hash_many_multithreaded`] over a [`throughput::Packed`] |
+//! | Many messages of one length, in one buffer | [`throughput::hash_many_multithreaded`] over a [`throughput::Batch`] |
+//! | Many 16- or 32-byte messages (a Merkle layer's leaves or digests) | [`throughput::hash_many_multithreaded`] over a [`throughput::Batch`] (fastest for already-prepared batches) or [`throughput::Packed`] (compact storage; expands on the stack internally, avoids refill copies in chains) |
 //! | Many messages of different lengths, in memory | [`throughput::hash_each_multithreaded`] |
 //! | Many messages arriving at once (a server's uploads) | [`throughput::Pipeline`]; on one thread, or holding each message's running state, [`throughput::update_each`] |
 //! | Continuous stream of messages or batches | [`throughput::Pipeline`] |
 //!
 //! Each call returns once its hash is done, and uses other CPU cores
 //! where that is faster (the forms without `multithreaded` stay on the
-//! calling thread).
+//! calling thread). As a current heuristic (not a frozen contract),
+//! [`throughput::hash_multithreaded`] and
+//! [`throughput::hash_many_multithreaded`] stay on the calling thread
+//! below 512 KiB of stored input bytes — raw input length for single
+//! messages, `count × max(64, round_up(message_len, 64))` for a
+//! [`throughput::Batch`], and `count × N` for a [`throughput::Packed<N>`] —
+//! and at or above 512 KiB are eligible to use available worker threads
+//! (batches also require at least two messages).
 //!
 //! Short messages hash fastest together: 1024 messages of 64 bytes in one
 //! [`throughput::hash_many`] call take about a fifth of the time of 1024
@@ -528,8 +536,13 @@ pub mod throughput {
     /// assert!(hashes.iter().all(|h| h == blake3_servil::convenience::hash(&[7u8; 256]).as_bytes()));
     /// ```
     ///
-    /// **Speed**: below 512 KiB in all it runs on the calling thread, at
-    /// [`hash_many`]'s speed; larger batches use the other cores too (on an
+    /// **Speed**: below 512 KiB of stored input bytes (`count × max(64,
+    /// round_up(message_len, 64))` for a [`Batch`], so a `Batch` of
+    /// 4,096 × 36 B stays serial while 8,192 × 36 B qualifies; `count × N`
+    /// for a [`Packed<N>`], so `Packed<32>` qualifies at 16,384 messages; an
+    /// implementation heuristic, not a frozen contract), or with fewer than
+    /// two messages, it runs on the calling thread at [`hash_many`]'s speed.
+    /// Larger batches are eligible to use available worker threads (on an
     /// Apple M4 Max, 64-byte messages from about 10 down to 3 ns each). It
     /// shares the cores with other callers as [`hash_multithreaded`] does.
     // Inlined, so a constant mode folds to its constants (as
@@ -566,11 +579,13 @@ pub mod throughput {
     /// assert_eq!(hash, blake3_servil::convenience::hash(&[0u8; 1 << 20]));
     /// ```
     ///
-    /// **Speed**, on an Apple M4 Max (16 cores): below 512 KiB it hashes on the
-    /// calling thread, at [`hash`](crate::convenience::hash)'s speed; from 512 KiB it uses the other cores
-    /// too: about 14 GB/s at 1 MiB, 21 GB/s at 4 MiB, and 26 to 29 GB/s from
-    /// 16 MiB, 2 to 5 times [`hash`](crate::convenience::hash). The extra threads wait asleep between calls and
-    /// use no CPU then.
+    /// **Speed**, on an Apple M4 Max (16 cores): below 512 KiB (an
+    /// implementation heuristic, not a frozen contract) it hashes on the
+    /// calling thread, at [`hash`]'s speed; from 512 KiB it is eligible to
+    /// use available worker threads too: about 14 GB/s at 1 MiB, 21 GB/s
+    /// at 4 MiB, and 26 to 29 GB/s from 16 MiB, 2 to 5 times
+    /// [`hash`](crate::convenience::hash). Idle workers park between calls
+    /// and use no CPU once parked.
     ///
     /// **Several callers at once**: calls from several threads of one program
     /// share the cores in turn, each getting a fair part; a call that finds the

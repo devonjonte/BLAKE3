@@ -12,10 +12,11 @@
 //!   cannot go wrong. Bytes already in place become blocks with no copy
 //!   through [`Block::from_bytes`], and a batch through
 //!   [`Batch::from_blocks`] where its messages fill their blocks.
-//!   [`update_each`] alone takes pieces of any
-//!   length anywhere, into a [`Hasher`](crate::convenience::Hasher) (which
-//!   copies short ones into its own buffer); an aligned long piece runs
-//!   fastest.
+//!   [`update_each`] and [`TreeHasher::hash`] take byte slices of any
+//!   length and alignment directly (without the caller copying them
+//!   into aligned [`Block`]s); `update_each` copies short pieces into a
+//!   [`Hasher`](crate::convenience::Hasher), and `TreeHasher::hash`
+//!   hashes caller-owned `&[u8]` slices on the hot path.
 //! - **Digests go where the program says**: into its slices and places.
 //! - **Every call takes a [`Mode`]**: `Mode::Plain` for the plain hash.
 //!
@@ -93,7 +94,9 @@ pub fn hash(mode: Mode, input: &[Block], len: usize) -> Hash {
 /// `hash_many_multithreaded`.
 ///
 /// A [`Packed`] of 16- or 32-byte messages is a batch too, as the program
-/// holds them, with no copy into blocks:
+/// holds them, with no caller-side copy into [`Block`]s (currently
+/// expanded into padded blocks on the stack in 128-message groups; see
+/// [`Packed`] for the layout trade-off against [`Batch`]):
 ///
 /// ```
 /// # blake3_servil_core::initialize();
@@ -547,12 +550,23 @@ impl TreeHasher {
         crate::tree::root_children(&crate::tree::PlatformKernels { key: &self.key, flags: self.flags, platform }, input, 0, first_chunk)
     }
 
-    /// This `TreeHasher`, its calls kept to the calling core's own kernels: for
-    /// a program that runs many of them at once on different cores. On
-    /// Apple M4 and later one accelerator serves the whole chip, and a
-    /// call that hashes 16 KiB or more takes it when it is free; calls on
-    /// many cores at once would share it, each slower than on its own
-    /// core's kernels. On other CPUs this changes nothing.
+    /// This `TreeHasher`, its calls kept to the calling core's own kernels.
+    ///
+    /// On systems where this build selects SME2 (such as Apple M4 and
+    /// later, or 64-bit Arm Linux CPUs with 512-bit SME2), calls hashing
+    /// 16 KiB or more (or SME2-sized batches, e.g. 11 or more nonempty
+    /// one-block messages in `hash_many`) take a process-local, best-effort
+    /// turn on SME2; this option routes this `TreeHasher`'s calls to the
+    /// core's own NEON kernels instead. That helps in two situations:
+    ///
+    /// - **Several threads hashing at once:** avoiding contention on the
+    ///   shared matrix hardware.
+    /// - **Single-threaded workloads interleaving small batches (roughly
+    ///   11–24 short messages) with scalar hashes:** entering and leaving
+    ///   SME2 streaming mode (and any resulting core clock transitions)
+    ///   can cost more than hashing the small batch on NEON directly.
+    ///
+    /// On builds or CPUs that do not select SME2, this changes nothing.
     pub fn on_this_core(mut self) -> Self {
         self.on_this_core = true;
         self
@@ -580,9 +594,16 @@ impl TreeHasher {
 
     /// The hash of the whole message `input`: what
     /// [`convenience::hash_with`](crate::convenience::hash_with) returns
-    /// for this `TreeHasher`'s mode, the mode's key not derived again. A
-    /// program that hashes many messages under one key-derivation context
-    /// pays for the context once, in [`new`](TreeHasher::new).
+    /// for this `TreeHasher`'s mode, the mode's key not derived again.
+    ///
+    /// Unlike [`convenience::hash_with`](crate::convenience::hash_with),
+    /// this runs the hot throughput path (no cold-call code prefetch), and
+    /// unlike [`hash`], it takes any `&[u8]` slice directly without the
+    /// caller copying it into aligned [`Block`]s (partial trailing blocks
+    /// are still padded on the stack internally) — making it the direct
+    /// single-threaded call for repeated back-to-back hashing of
+    /// caller-owned `&[u8]` slices (and for deriving many hashes under one
+    /// key-derivation context, paid once in [`new`](TreeHasher::new)).
     ///
     /// ```
     /// # blake3_servil_core::initialize();
