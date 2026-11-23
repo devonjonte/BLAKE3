@@ -14,6 +14,16 @@
 # sit well above every test there.
 slow-timeout = { period = "60s", terminate-after = 1 }
 
+[profile.ci]
+# Shared multi-tenant GitHub Actions VMs (notably ubuntu-24.04-arm) fluctuate
+# on 2-second wall-clock throughput ratios (`two_callers_share_the_pool`
+# routinely failed at ~1.68x vs the 1.5x bound due to host vCPU scheduling).
+# The clockless fairness tests (`lanes::sources::test`) still run on every CI
+# runner, and `pool_fairness` still runs under the default profile on our
+# dedicated native fleet hosts (`x86-workhorse`, `arm-vm`, `mac-m6-build`).
+slow-timeout = { period = "60s", terminate-after = 1 }
+default-filter = "not test(two_callers_share_the_pool)"
+
 [profile.emulated]
 # CI's x86_widths job: the suites under Intel's emulator, as a CPU the
 # runner is not (BLAKE3 #346). A test runs tens of times slower there: on

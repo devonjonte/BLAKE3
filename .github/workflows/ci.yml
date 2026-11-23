@@ -113,7 +113,7 @@ jobs:
     - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --features= --release
     # The crate with the pool and the stream (threads/).
     - name: threads
-      run: sh tools/ci-locked.sh nextest run -p blake3-servil --no-fail-fast && sh tools/ci-locked.sh nextest run -p blake3-servil --release && sh tools/ci-locked.sh test --doc -p blake3-servil
+      run: sh tools/ci-locked.sh nextest run -p blake3-servil -P ci --no-fail-fast && sh tools/ci-locked.sh nextest run -p blake3-servil -P ci --release && sh tools/ci-locked.sh test --doc -p blake3-servil
 
     # Test vectors.
     - name: test vectors
@@ -177,7 +177,7 @@ jobs:
     - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --no-default-features
     - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --lib --tests --features=serde
     - name: threads
-      run: sh tools/ci-locked.sh nextest run -p blake3-servil --lib --tests --no-fail-fast
+      run: sh tools/ci-locked.sh nextest run -p blake3-servil -P ci --lib --tests --no-fail-fast
     # Both suites once more on a build without the SME2 unit, as a C
     # compiler that cannot assemble SME2 makes it (GCC 13 and older: this
     # image's cc, Debian 12's, Raspberry Pi OS's). There the kernels take
@@ -205,7 +205,7 @@ jobs:
           cat sixteen.log
           grep -q "leaves out the SME2 kernel" sixteen.log
         done
-        sh tools/ci-locked.sh nextest run -p blake3-servil --lib --tests --no-fail-fast
+        sh tools/ci-locked.sh nextest run -p blake3-servil -P ci --lib --tests --no-fail-fast
     # QEMU 11.1.2, Debian's static build, pinned by its SHA-256 and BLAKE3
     # hashes: the runner's own (Ubuntu's 8.2.2) crashed itself now and then
     # emulating a test's intended panic (#113).
@@ -224,7 +224,7 @@ jobs:
         # emulator's scheduling decides: it skips (#213).
         BLAKE3_EMULATED: 1
     - name: threads, as a Cortex-A72
-      run: sh tools/ci-locked.sh nextest run -p blake3-servil --lib --tests
+      run: sh tools/ci-locked.sh nextest run -p blake3-servil -P ci --lib --tests
       env:
         CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
         BLAKE3_EMULATED: 1
@@ -273,7 +273,7 @@ jobs:
           export CARGO=~/.cargo/bin/cargo
           sh tools/ci-locked.sh nextest run -p blake3-servil-core
           sh tools/ci-locked.sh test --doc -p blake3-servil-core
-          sh tools/ci-locked.sh nextest run -p blake3-servil --no-fail-fast'
+          sh tools/ci-locked.sh nextest run -p blake3-servil -P ci --no-fail-fast'
 
   # x86-64's three kernel widths, whichever CPU this runner is: the suites
   # as an AVX-512 CPU (Ice Lake server), as one with AVX2 and no AVX-512
