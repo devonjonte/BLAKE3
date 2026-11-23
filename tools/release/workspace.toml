@@ -1,7 +1,9 @@
-# The four crates as one workspace, beside a copy of the repository named
-# `checkout` and with tools/release/Cargo.lock as its lock:
-# tools/crates-release.sh packages the crates from it, and
-# tools/dependency_policy.py checks their dependencies in it.
+# All six crates in the repository as one workspace, beside a checkout
+# named `checkout` and with tools/release/Cargo.lock as its lock:
+# tools/crates-release.sh packages the four published crates from it,
+# tools/dependency_policy.py checks all six crates' dependencies in it,
+# and tools/ci-locked.sh runs library, C API, and test-vector CI checks
+# against tools/release/Cargo.lock.
 [workspace]
-members = ["checkout/version", "checkout", "checkout/threads", "checkout/b3sum"]
+members = ["checkout/version", "checkout", "checkout/threads", "checkout/b3sum", "checkout/capi", "checkout/test_vectors"]
 resolver = "3"

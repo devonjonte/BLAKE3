@@ -43,7 +43,10 @@ class Versions(unittest.TestCase):
         (self.root / "capi/b3.h").write_text(f'#define B3_VERSION "{DEV}"\n')
         self.run_command("cargo", "generate-lockfile", "--offline", "--manifest-path", "b3sum/Cargo.toml")
         (self.root / "tools/release").mkdir()
-        shutil.copyfile(self.root / "b3sum/Cargo.lock", self.root / "tools/release/Cargo.lock")
+        (self.root / "tools/release/Cargo.lock").write_text(
+            (self.root / "b3sum/Cargo.lock").read_text()
+            + f'\n[[package]]\nname = "blake3-servil-c"\nversion = "{DEV}"\ndependencies = [\n "blake3-servil-core",\n]\n'
+        )
         self.git("init", "-q")
         self.git("config", "user.name", "Version test")
         self.git("config", "user.email", "version-test@example.invalid")
@@ -86,7 +89,7 @@ class Versions(unittest.TestCase):
         for path in MANIFESTS:
             self.assertIn(f'version = "{full}"', (self.root / path).read_text())
         self.assertEqual((self.root / "b3sum/Cargo.lock").read_text().count(f'version = "{full}"'), 4)
-        self.assertEqual((self.root / "tools/release/Cargo.lock").read_text().count(f'version = "{full}"'), 4)
+        self.assertEqual((self.root / "tools/release/Cargo.lock").read_text().count(f'version = "{full}"'), 5)
         notes = (self.root / "CHANGELOG.md").read_text()
         self.assertTrue(notes.startswith(f"# blake3-servil {full},"))
         self.assertEqual(self.git("status", "--porcelain"), "")

@@ -102,6 +102,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake3-servil-c"
+version = "0.10.0+dev"
+dependencies = [
+ "blake3-servil-core",
+ "libc",
+ "serde_json",
+]
+
+[[package]]
 name = "blake3-servil-core"
 version = "0.10.0+dev"
 dependencies = [
@@ -772,6 +781,16 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "test_vectors"
+version = "0.0.0"
+dependencies = [
+ "blake3-servil-core",
+ "hex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

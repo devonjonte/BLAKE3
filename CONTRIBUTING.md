@@ -482,17 +482,23 @@ it. The dependency policy's checks, below, then run on the new lock.
 
 ### The dependency policy
 
-Both locked resolutions — the four crates in the release workspace
-(`tools/release/Cargo.lock`) and the standalone CLI (`b3sum/Cargo.lock`) —
-pass three checks in CI (`dependency policy`), under every feature;
-`python3 tools/dependency_policy.py` runs the same checks here. That
-covers what a build compiles in, what a build runs (build scripts,
-procedural macros), and the locked test dependencies of both graphs.
+Both locked resolutions — all six repository crates in the workspace
+(`tools/release/workspace.toml` and `tools/release/Cargo.lock`, covering
+the four published crates plus `capi/` and `test_vectors/`) and the
+standalone CLI (`b3sum/Cargo.lock`) — pass three checks in CI
+(`dependency policy`), under every feature;
+`python3 tools/dependency_policy.py` runs the same checks here. Every
+Rust build and test in CI runs `--locked` against those two lockfiles
+(`tools/ci-locked.sh` for the libraries, C API and test vectors;
+`b3sum/Cargo.lock` for `b3sum`). That covers what a build compiles in,
+what a build runs (build scripts, procedural macros), and the locked
+test dependencies of both graphs.
 
 - **Ours or from crates.io.** A package that a manifest takes by path
-  must be one of the four crates, which `tools/release/workspace.toml`
-  names. The two tools below take any such package for ours, so a
-  library copied into the repository would pass them unaudited.
+  must be one of the six repository crates, which
+  `tools/release/workspace.toml` names. The two tools below take any
+  such package for ours, so a library copied into the repository would
+  pass them unaudited.
 - **`cargo-deny`, against `deny.toml`.** No advisory in RustSec's
   database, wherever the package is in the graph. No yanked version,
   and a version whose yank status could not be read fails too.
@@ -521,15 +527,7 @@ VERSION`) and give the reason in the commit.
 
 What the checks leave out:
 
-- The libraries' tests in CI take their test dependencies as Cargo
-  resolves them that day, since the libraries carry no lock of their
-  own; the checks hold the versions that the release lock names for
-  them. Holding the test runs to those versions is the next step
-  (BLAKE3 #479).
-- The C library (`capi/`) builds from the core library alone, which is
-  inside the checks. Its tests' packages, the test vectors' crate and
-  SUPERCOP's packaging are outside: none of them is published as a
-  crate.
+- SUPERCOP's non-Cargo C packaging is outside the Rust lockfiles.
 
 ### Every artifact is a clean build of the version commit
 

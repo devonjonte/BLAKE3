@@ -19,6 +19,9 @@ fn installed_consumer(kind: &str) -> String {
     let lib_dir = installed.join("lib");
     let mut build = Command::new(env!("CARGO"));
     build.args(["cinstall", "--manifest-path"]).arg(here.join("Cargo.toml"));
+    if std::env::var_os("BLAKE3_CI").is_some() {
+        build.arg("--locked");
+    }
     build.arg("--target-dir").arg(target.join("build"));
     build.arg("--destdir").arg(&stage);
     build.args(["--prefix=/b3-capi-test", "--libdir=lib", "--library-type", kind]);

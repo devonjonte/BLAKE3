@@ -7,15 +7,17 @@
                                                     audits (diff, certify, add-exemption, prune ...)
 
 What is checked is both locked resolutions the repository builds and ships from, under every feature:
-- `release`: the four published crates in the release workspace (tools/release/workspace.toml and
-  tools/release/Cargo.lock), as tools/crates-release.sh packages them.
+- `release`: all six crates in the repository workspace (tools/release/workspace.toml and
+  tools/release/Cargo.lock), covering the four published crates (tools/crates-release.sh) plus `capi/`
+  and `test_vectors/` (tools/ci-locked.sh).
 - `cli`: the standalone CLI (b3sum/Cargo.toml and b3sum/Cargo.lock), as tools/b3sum-release.sh builds it.
 
 Each invocation stages its own private temporary directory under target/ (cleaned up on exit), holding a
 copy of the tracked files as the working tree has them, so concurrent runs never collide and a planted
 fault never touches the tree. On each of the two graphs:
-- `by path`: every package without a source must match one of the four published crates (`OURS`) by both
-  name and manifest path, and Cargo's workspace_members must be exactly the expected roots (`strangers`).
+- `by path`: every package without a source must match one of the graph's repository crates (`OURS` for
+  `release`, `CLI_OURS` for `cli`) by both name and manifest path, and Cargo's workspace_members must be
+  exactly the expected roots (`strangers`).
 - cargo-deny against deny.toml (`--color never`, `-D index-failure`): `advisories`, `bans`, `licenses`,
   `sources`.
 - `audits`: cargo-vet against tools/release/supply-chain/ (`--locked`).
@@ -33,12 +35,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 AUDITS = Path("tools") / "release" / "supply-chain"
-# The four crates this repository publishes, by package name and folder inside a checkout.
-OURS = {
+# The four crates reachable from standalone b3sum/Cargo.toml, by package name and folder.
+CLI_OURS = {
     "blake3-servil-version": "version",
     "blake3-servil-core": ".",
     "blake3-servil": "threads",
     "b3sums": "b3sum",
+}
+# All six crates in the repository workspace (tools/release/workspace.toml).
+OURS = {
+    **CLI_OURS,
+    "blake3-servil-c": "capi",
+    "test_vectors": "test_vectors",
 }
 
 
@@ -104,14 +112,14 @@ def strangers(metadata, checkout, expected_members, workspace_members_list=None,
             where = f"{path.parent.relative_to(checkout)}/"
         except ValueError:
             where = str(path.parent)
-        wrong.append(f"{name} {package['version']} is taken by path, from {where}, and matches none of the four crates "
+        wrong.append(f"{name} {package['version']} is taken by path, from {where}, and matches none of the repository crates "
                      "by name and path: a dependency comes from crates.io, where the policy's checks see it")
     for name in sorted(set(ours) - seen):
         wrong.append(f"expected crate {name} at {ours[name]}/Cargo.toml is absent from the graph")
     return wrong
 
 
-def check_graph(manifest, checkout, expected_members, deny_config, audit_store, workspace_members_list=None, say=print, environment=None):
+def check_graph(manifest, checkout, expected_members, deny_config, audit_store, workspace_members_list=None, ours=OURS, say=print, environment=None):
     """Run all checks on one locked graph; return the list of failed check-group names."""
     def run(*command):
         done = subprocess.run(command, cwd=manifest.parent, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -121,7 +129,7 @@ def check_graph(manifest, checkout, expected_members, deny_config, audit_store, 
     metadata = run("cargo", "metadata", "--locked", "--all-features", "--format-version", "1", "--manifest-path", manifest)
     if metadata.returncode:
         return ["the lock"]                                                # Cargo could not read the graph with this lock
-    wrong = strangers(json.loads(metadata.stdout), checkout, expected_members, workspace_members_list=workspace_members_list)
+    wrong = strangers(json.loads(metadata.stdout), checkout, expected_members, workspace_members_list=workspace_members_list, ours=ours)
     for line in wrong:
         say(f"dependency policy: {line}")
     names = ["by path"] if wrong else []
@@ -142,8 +150,8 @@ def failed(stage, say=print, environment=None):
     audit_store = stage / "supply-chain"
     return {
         "release": check_graph(release_manifest, stage / "release" / "checkout", set(OURS), deny_config, audit_store,
-                               workspace_members_list=members_list, say=say, environment=environment),
-        "cli": check_graph(cli_manifest, stage / "cli", {"b3sums"}, deny_config, audit_store, say=say, environment=environment),
+                               workspace_members_list=members_list, ours=OURS, say=say, environment=environment),
+        "cli": check_graph(cli_manifest, stage / "cli", {"b3sums"}, deny_config, audit_store, ours=CLI_OURS, say=say, environment=environment),
     }
 
 

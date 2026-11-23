@@ -89,39 +89,40 @@ jobs:
       run: rustc -vV && grep -m1 -E '^(flags|Features)' /proc/cpuinfo
     # The tests run under cargo-nextest, each in its own process (AGENTS:
     # "Tests run under nextest"); the doc examples under cargo test --doc.
+    # Every Cargo build and test runs --locked against tools/release/Cargo.lock
+    # via tools/ci-locked.sh.
     # Default tests plus the optional trait implementations (every public
     # feature).
-    - run: cargo nextest run --features=serde
-    - run: cargo test --doc --features=serde
+    - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --features=serde
+    - run: sh tools/ci-locked.sh test --doc -p blake3-servil-core --features=serde
     # no_std library checks (with and without optional features; --lib
     # leaves #[cfg(test)] off so dead-code warnings surface under -D warnings)
     # and no_std tests.
-    - run: cargo check --lib --no-default-features
-    - run: cargo check --lib --no-default-features --features=serde
-    - run: cargo nextest run --no-default-features
+    - run: sh tools/ci-locked.sh check -p blake3-servil-core --lib --no-default-features
+    - run: sh tools/ci-locked.sh check -p blake3-servil-core --lib --no-default-features --features=serde
+    - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --no-default-features
     - name: Make sure enabling LTO via CFLAGS doesn't break the build.
-      run: cargo build --tests
+      run: sh tools/ci-locked.sh build -p blake3-servil-core --tests
       env:
         CFLAGS: -flto
 
     # The test profile (optimized, its assertions and overflow checks on:
     # Cargo.toml), and the release profile, for the optimizer's own
     # behavior.
-    - run: cargo nextest run --features=
-    - run: cargo nextest run --features= --release
+    - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --features=
+    - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --features= --release
     # The crate with the pool and the stream (threads/).
     - name: threads
-      run: cargo nextest run --no-fail-fast && cargo nextest run --release && cargo test --doc
-      working-directory: ./threads
+      run: sh tools/ci-locked.sh nextest run -p blake3-servil --no-fail-fast && sh tools/ci-locked.sh nextest run -p blake3-servil --release && sh tools/ci-locked.sh test --doc -p blake3-servil
 
     # Test vectors.
     - name: test vectors
-      run: cargo nextest run
-      working-directory: ./test_vectors
+      run: sh tools/ci-locked.sh nextest run -p test_vectors
     # The C API (capi/: b3.h over the crate).
     - name: C API
-      run: cargo nextest run --release
-      working-directory: ./capi
+      run: sh tools/ci-locked.sh nextest run -p blake3-servil-c --release
+      env:
+        CARGO_PROFILE_RELEASE_PANIC: abort
 
   b3sum_tests:
     name: b3sum ${{ matrix.target.name }} ${{ matrix.channel }}
@@ -171,13 +172,12 @@ jobs:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
     - run: sh tools/ci-rust.sh stable
     - run: sh tools/ci-tools.sh nextest cargo-c
-    - run: cargo check --lib --no-default-features
-    - run: cargo check --lib --no-default-features --features=serde
-    - run: cargo nextest run --no-default-features
-    - run: cargo nextest run --lib --tests --features=serde
+    - run: sh tools/ci-locked.sh check -p blake3-servil-core --lib --no-default-features
+    - run: sh tools/ci-locked.sh check -p blake3-servil-core --lib --no-default-features --features=serde
+    - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --no-default-features
+    - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --lib --tests --features=serde
     - name: threads
-      run: cargo nextest run --lib --tests --no-fail-fast
-      working-directory: ./threads
+      run: sh tools/ci-locked.sh nextest run -p blake3-servil --lib --tests --no-fail-fast
     # Both suites once more on a build without the SME2 unit, as a C
     # compiler that cannot assemble SME2 makes it (GCC 13 and older: this
     # image's cc, Debian 12's, Raspberry Pi OS's). There the kernels take
@@ -195,9 +195,9 @@ jobs:
         export CC="$RUNNER_TEMP/cc-refuses-armv9" CARGO_TARGET_DIR="$PWD/target/sixteen"
         unset BLAKE3_CI
         for cmd in \
-          "cargo check --lib --no-default-features" \
-          "cargo check --lib --no-default-features --features=serde" \
-          "cargo nextest run --lib --tests --features=serde"; do
+          "sh tools/ci-locked.sh check -p blake3-servil-core --lib --no-default-features" \
+          "sh tools/ci-locked.sh check -p blake3-servil-core --lib --no-default-features --features=serde" \
+          "sh tools/ci-locked.sh nextest run -p blake3-servil-core --lib --tests --features=serde"; do
           # Each build gets its own transcript and target dir so one build's
           # fallback notice cannot certify another (review 8dff8004).
           rm -rf "$CARGO_TARGET_DIR"
@@ -205,7 +205,7 @@ jobs:
           cat sixteen.log
           grep -q "leaves out the SME2 kernel" sixteen.log
         done
-        cd threads && cargo nextest run --lib --tests --no-fail-fast
+        sh tools/ci-locked.sh nextest run -p blake3-servil --lib --tests --no-fail-fast
     # QEMU 11.1.2, Debian's static build, pinned by its SHA-256 and BLAKE3
     # hashes: the runner's own (Ubuntu's 8.2.2) crashed itself now and then
     # emulating a test's intended panic (#113).
@@ -217,21 +217,21 @@ jobs:
         cargo run -q --release --locked --manifest-path b3sum/Cargo.toml -- -c qemu.b3
         ar x qemu-user_11.1.2+ds-3_arm64.deb data.tar.xz && tar xJf data.tar.xz ./usr/bin/qemu-aarch64
         sudo install usr/bin/qemu-aarch64 /usr/local/bin/qemu-aarch64 && qemu-aarch64 --version
-    - run: cargo nextest run --lib --tests --features=serde
+    - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --lib --tests --features=serde
       env:
         CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
         # tests/pool_fairness.rs measures the pool's shares by time, which an
         # emulator's scheduling decides: it skips (#213).
         BLAKE3_EMULATED: 1
     - name: threads, as a Cortex-A72
-      run: cargo nextest run --lib --tests
-      working-directory: ./threads
+      run: sh tools/ci-locked.sh nextest run -p blake3-servil --lib --tests
       env:
         CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu cortex-a72
         BLAKE3_EMULATED: 1
     - name: C API
-      run: cargo nextest run --release
-      working-directory: ./capi
+      run: sh tools/ci-locked.sh nextest run -p blake3-servil-c --release
+      env:
+        CARGO_PROFILE_RELEASE_PANIC: abort
 
   capi_macos:
     name: "C API on macOS (installed consumers)"
@@ -241,12 +241,14 @@ jobs:
     - run: sh tools/ci-rust.sh stable
     - run: sh tools/ci-tools.sh nextest cargo-c
     # no_std checks on Apple Silicon under -D warnings (without #[cfg(test)]).
-    - run: cargo check --lib --no-default-features
-    - run: cargo check --lib --no-default-features --features=serde
+    - run: sh tools/ci-locked.sh check -p blake3-servil-core --lib --no-default-features
+    - run: sh tools/ci-locked.sh check -p blake3-servil-core --lib --no-default-features --features=serde
     # The same installed-consumer test as on Linux: shared and static
     # installations, pkg-config flags, C11 and C++11 callers.
     - name: C API
-      run: cargo nextest run --release --manifest-path capi/Cargo.toml
+      run: sh tools/ci-locked.sh nextest run -p blake3-servil-c --release
+      env:
+        CARGO_PROFILE_RELEASE_PANIC: abort
 
   # The oldest GCC supported (CONTRIBUTING.md): Debian 12's, the oldest in a
   # supported distribution (Debian 11's support ended in August 2026). Older compilers are unsupported (GCC 5.4's
@@ -268,9 +270,10 @@ jobs:
           echo "b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55  /tmp/rustup-init" | sha256sum -c
           chmod +x /tmp/rustup-init && /tmp/rustup-init -y --profile minimal --default-toolchain "$(sed -n "s/^rustc //p" /work/tools/b3sum-release.toolchain)" && rm /tmp/rustup-init
           sh tools/ci-tools.sh nextest
-          ~/.cargo/bin/cargo nextest run
-          ~/.cargo/bin/cargo test --doc
-          cd threads && ~/.cargo/bin/cargo nextest run --no-fail-fast'
+          export CARGO=~/.cargo/bin/cargo
+          sh tools/ci-locked.sh nextest run -p blake3-servil-core
+          sh tools/ci-locked.sh test --doc -p blake3-servil-core
+          sh tools/ci-locked.sh nextest run -p blake3-servil --no-fail-fast'
 
   # x86-64's three kernel widths, whichever CPU this runner is: the suites
   # as an AVX-512 CPU (Ice Lake server), as one with AVX2 and no AVX-512
@@ -311,7 +314,7 @@ jobs:
         mkdir "$RUNNER_TEMP/sde" && tar xJf sde.tar.xz -C "$RUNNER_TEMP/sde" --strip-components=1
         rm sde.tar.xz sde.b3
         "$RUNNER_TEMP/sde/sde64" -version | head -n 1
-    - run: cargo nextest run --release --lib --tests --no-run
+    - run: sh tools/ci-locked.sh nextest run -p blake3-servil-core --release --lib --tests --no-run
     # The `emulated` profile's clock (.config/nextest.toml): a test runs
     # tens of times slower here than on the CPU.
     # The emulator stops a test at the first instruction the CPU it plays
@@ -319,10 +322,9 @@ jobs:
     # and its kernels, and not the system's libraries: as a Nehalem, the
     # runner's dynamic loader (chosen for the real CPU) ran an AVX
     # instruction before any test did.
-    - run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -${{ matrix.cpu.flag }} -chip_check_exe_only -- " cargo nextest run -P emulated --release --lib --tests
+    - run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -${{ matrix.cpu.flag }} -chip_check_exe_only -- " sh tools/ci-locked.sh nextest run -p blake3-servil-core -P emulated --release --lib --tests
     - name: threads, emulated
-      working-directory: ./threads
-      run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -${{ matrix.cpu.flag }} -chip_check_exe_only -- " cargo nextest run -P emulated --release --lib --tests
+      run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$RUNNER_TEMP/sde/sde64 -${{ matrix.cpu.flag }} -chip_check_exe_only -- " sh tools/ci-locked.sh nextest run -p blake3-servil -P emulated --release --lib --tests
 
   x86_model:
     name: "the x86-64 proofs' model against the CPU"

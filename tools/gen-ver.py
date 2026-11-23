@@ -150,10 +150,13 @@ def check_copies(full):
     lock = tomllib.loads(Path("b3sum/Cargo.lock").read_text())
     release = tomllib.loads(Path(RELEASE_LOCK).read_text())
     for name in PACKAGES.keys() - {"blake3-servil-c"}:
-        for path, packages in (("b3sum/Cargo.lock", lock), (RELEASE_LOCK, release)):
-            versions = [p["version"] for p in packages["package"] if p["name"] == name]
-            if versions != [full]:
-                sys.exit(f"{path}: expected one {name} at {full}, found {versions}")
+        versions = [p["version"] for p in lock["package"] if p["name"] == name]
+        if versions != [full]:
+            sys.exit(f"b3sum/Cargo.lock: expected one {name} at {full}, found {versions}")
+    for name in PACKAGES:
+        versions = [p["version"] for p in release["package"] if p["name"] == name]
+        if versions != [full]:
+            sys.exit(f"{RELEASE_LOCK}: expected one {name} at {full}, found {versions}")
     # The crates are packaged with the release lock (tools/crates-release.sh)
     # and b3sum is built and tested with its own: one set of dependencies,
     # so every package of b3sum's lock is in the release lock as it is there.
@@ -220,10 +223,10 @@ def set_version(full, notes=True):
     if notes:
         lines.append(("CHANGELOG.md", r"\A" + TITLED + r"(?=[ \t,\n]|\Z)", f"# blake3-servil {full}"))
     lines.append(("capi/b3.h", r'^#define B3_VERSION ".*"$', f'#define B3_VERSION "{full}"'))
-    # The release lock names the published packages too, as its
+    # The release lock names all five versioned packages as its
     # workspace's members: no workspace of theirs is in the repository for
     # Cargo to update it by.
-    lines += [(RELEASE_LOCK, rf'^(name = "{re.escape(name)}"\nversion = ")[^"]*', rf"\g<1>{full}") for name in PACKAGES if name != "blake3-servil-c"]
+    lines += [(RELEASE_LOCK, rf'^(name = "{re.escape(name)}"\nversion = ")[^"]*', rf"\g<1>{full}") for name in PACKAGES]
     # Every line to replace is found before any is written: a stamp that
     # stopped at a file it could not read as it expects (one with carriage
     # returns before its line feeds, say) had by then written the files
