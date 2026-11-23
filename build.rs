@@ -232,8 +232,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // SME2 sits on top of NEON: the SME2 wrapper falls back to NEON for
         // inputs that don't fill a group of sixteen. It is built on every
         // AArch64 target with NEON enabled and runtime detection (Apple
-        // platforms and Linux, the same cfg as platform.rs's sme2_reported
-        // and Cargo.toml's libc dependency) whose C compiler assembles SME2.
+        // platforms and Linux, the same cfg as platform.rs's sme2_reported)
+        // whose C compiler assembles SME2.
         // Platform::detect() selects the SME2 kernels when the CPU reports
         // SME2 with 512-bit streaming vectors and the NEON hybrids otherwise.
         let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();

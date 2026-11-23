@@ -964,11 +964,13 @@ among them, and however often the hash is timed.
    rotations, exclusive ors, loads and stores, and no CPU we know of
    varies their time with their values. Arm CPUs also make the promise
    formally, for a listed set of instructions, while data-independent
-   timing (DIT) is on. This implementation leaves DIT as the calling thread has it:
-   turning it on and off in each call made the shortest messages up to
-   60% slower in our measurements, and leaving it on would change the
-   timing of the caller's own code. A program that wants Arm's promise
-   turns DIT on in its threads before it hashes.
+   timing (DIT) is on. This implementation leaves DIT as the calling
+   thread has it — for both hashing and `Hash`/`Cv`/`LastCv` equality
+   (`src/ct.rs`): turning DIT on and off per call made short messages up
+   to 60% slower and digest comparisons 16–18× slower on Apple M6 and
+   AmpereOne, and leaving it on would change the timing of the caller's
+   own code. A program that wants Arm's promise turns DIT on in its
+   threads before hashing and verifying.
    Intel's equivalent is DOITM (IA32_UARCH_MISC_CTL, bit 2), on Alder
    Lake and later. Only the operating system or firmware can set that
    MSR, for the whole machine. No call in this crate can turn it on, so a
