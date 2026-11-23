@@ -698,46 +698,83 @@ fn test_pseudo_files_among_many() {
 /// reads hex alone, as before.
 #[test]
 fn test_sigilcode() {
-    // BLAKE3 of the empty input, as johnservil/sigil's README gives it.
-    const EMPTY: &str = "ᢳᕌᔃጾዿᑂഔጕꔍⶰᣟꕄꕛቴⴲజᐽᙿᕯⶂጁᑃሃᛜጩ";
+    blake3::initialize();
+    // BLAKE3 of the empty input in Sigil 0.2 (leading LRM, 8 hex digits, 22 letters).
+    const EMPTY: &str = "\u{200e}af1349b9ꛡኾपⷃꢢꔹടꗐᘦꚧꢯꗔᚵᖣꗘᒬᔑৎሱसቝᗰ";
     let dir = tempfile::tempdir().unwrap();
     let empty = dir.path().join("empty");
     let full = dir.path().join("full");
+    let full_bytes = vec![7u8; 1 << 20];
     fs::write(&empty, b"").unwrap();
-    fs::write(&full, vec![7u8; 1 << 20]).unwrap();
+    fs::write(&full, &full_bytes).unwrap();
+    let help = cmd!(b3sum_exe(), "--help").read().unwrap();
+    assert!(help.contains("--sigilcode") && help.contains("[experimental]"), "help marks --sigilcode experimental");
     let out = cmd!(b3sum_exe(), "--sigilcode", "--no-names", &empty).read().unwrap();
     assert_eq!(out, EMPTY);
     let tagged = cmd!(b3sum_exe(), "--sigilcode", "--tag", &empty).read().unwrap();
     assert_eq!(tagged, format!("BLAKE3 ({}) = {EMPTY}", empty.to_string_lossy()));
-    // A sigil of any length from one byte, its letters three bytes of UTF-8
-    // each; no output at all is a clear error.
-    for (len, letters) in [("1", 2), ("16", 13), ("64", 48), ("1000", 729)] {
-        let sigil = cmd!(b3sum_exe(), "--sigilcode", "--no-names", "-l", len, &full).read().unwrap();
-        assert_eq!((sigil.chars().count(), sigil.len()), (letters, 3 * letters), "{len}");
+    // A Sigil 0.2 encoding of any length from 8 bytes: LRM (3 UTF-8 bytes) +
+    // 8 ASCII hex digits + n letters (3 UTF-8 bytes each), decoding to the exact
+    // XOF bytes at both offset 0 and nonzero --seek; under 8 bytes is a clear error.
+    let mut hasher = blake3::convenience::Hasher::new(blake3::Mode::Plain, None);
+    hasher.update(&full_bytes);
+    for (len, letters, seek) in [(8usize, 5usize, 0u64), (16, 10, 0), (32, 22, 0), (64, 45, 0), (1000, 726, 0), (48, 34, 137)] {
+        let len_s = len.to_string();
+        let seek_s = seek.to_string();
+        let sigil = if seek == 0 {
+            cmd!(b3sum_exe(), "--sigilcode", "--no-names", "-l", &len_s, &full).read().unwrap()
+        } else {
+            cmd!(b3sum_exe(), "--sigilcode", "--no-names", "-l", &len_s, "--seek", &seek_s, &full).read().unwrap()
+        };
+        assert!(sigil.starts_with('\u{200e}'), "len={len} seek={seek}");
+        assert_eq!((sigil.chars().count(), sigil.len()), (1 + 8 + letters, 3 + 8 + 3 * letters), "len={len} seek={seek}");
+        let mut want = vec![0u8; len];
+        let mut reader = hasher.finalize_xof();
+        reader.set_position(seek);
+        reader.fill(&mut want);
+        assert_eq!(sigilcode::decode(&sigil, len).unwrap(), want, "decoded bytes match XOF for len={len} seek={seek}");
     }
-    let f = cmd!(b3sum_exe(), "--sigilcode", "-l", "0", &full).stderr_capture().unchecked().run().unwrap();
-    assert!(!f.status.success());
-    assert!(String::from_utf8_lossy(&f.stderr).contains("--sigilcode writes at least one output byte"));
-    // A checkfile mixing sigils, hex, and the tagged form: --sigilcode
-    // checks it clean, and plain --check refuses its sigil lines.
+    for short in ["0", "1", "7"] {
+        let f = cmd!(b3sum_exe(), "--sigilcode", "-l", short, &full).stderr_capture().unchecked().run().unwrap();
+        assert!(!f.status.success(), "--length {short}");
+        assert!(String::from_utf8_lossy(&f.stderr).contains("--sigilcode writes at least 8 output bytes"), "--length {short}");
+    }
+    // A checkfile mixing sigils (including one pasted without its leading LRM
+    // and with uppercase hex), hex, and the tagged form: --sigilcode checks it
+    // clean, and plain --check refuses its sigil lines.
     let sigil_line = cmd!(b3sum_exe(), "--sigilcode", &full).read().unwrap();
+    let (full_sigil, full_name) = sigil_line.split_once("  ").unwrap();
+    let pasted_sigil = format!(
+        "{}{}",
+        full_sigil.trim_start_matches('\u{200e}').chars().take(8).collect::<String>().to_ascii_uppercase(),
+        full_sigil.trim_start_matches('\u{200e}').chars().skip(8).collect::<String>()
+    );
     let hex_line = cmd!(b3sum_exe(), &empty).read().unwrap();
     let checkfile = dir.path().join("sums.b3");
-    fs::write(&checkfile, format!("{sigil_line}\n{hex_line}\n{tagged}\n")).unwrap();
+    fs::write(&checkfile, format!("{sigil_line}\n{pasted_sigil}  {full_name}\n{hex_line}\n{tagged}\n")).unwrap();
     let checked = cmd!(b3sum_exe(), "--sigilcode", "--check", &checkfile).read().unwrap();
-    assert_eq!(checked.lines().filter(|l| l.ends_with(": OK")).count(), 3, "{checked}");
+    assert_eq!(checked.lines().filter(|l| l.ends_with(": OK")).count(), 4, "{checked}");
     let plain = cmd!(b3sum_exe(), "--check", &checkfile).stdout_capture().stderr_capture().unchecked().run().unwrap();
     assert!(!plain.status.success());
     assert_eq!(String::from_utf8_lossy(&plain.stdout).lines().filter(|l| l.ends_with(": OK")).count(), 1);
-    assert_eq!(String::from_utf8_lossy(&plain.stderr).matches("a sigil? check it with --sigilcode").count(), 2);
-    // Two neighbours swapped: the sigil's own check refuses it.
-    let (sigil, name) = sigil_line.split_once("  ").unwrap();
-    let mut chars: Vec<char> = sigil.chars().collect();
-    chars.swap(3, 4);
-    fs::write(&checkfile, format!("{}  {name}\n", chars.iter().collect::<String>())).unwrap();
-    let f = cmd!(b3sum_exe(), "--sigilcode", "--check", &checkfile).stderr_capture().unchecked().run().unwrap();
-    assert!(!f.status.success());
-    assert!(String::from_utf8_lossy(&f.stderr).contains("Invalid hash, read as a sigil"));
+    assert_eq!(String::from_utf8_lossy(&plain.stderr).matches("a sigil? check it with --sigilcode").count(), 3);
+    // A valid sigil for a different file must fail verification.
+    fs::write(&checkfile, format!("{EMPTY}  {full_name}\n")).unwrap();
+    let wrong = cmd!(b3sum_exe(), "--sigilcode", "--check", &checkfile).stdout_capture().stderr_capture().unchecked().run().unwrap();
+    assert!(!wrong.status.success());
+    assert!(String::from_utf8_lossy(&wrong.stdout).contains(": FAILED"));
+    // Two distinct neighbours swapped (once in the hex handle, once in the
+    // letters): the sigil's own check refuses both.
+    let base_chars: Vec<char> = full_sigil.chars().collect();
+    for range in [1..8usize, 9..base_chars.len() - 1] {
+        let i = range.into_iter().find(|&i| base_chars[i] != base_chars[i + 1]).expect("distinct neighbours");
+        let mut chars = base_chars.clone();
+        chars.swap(i, i + 1);
+        fs::write(&checkfile, format!("{}  {full_name}\n", chars.iter().collect::<String>())).unwrap();
+        let f = cmd!(b3sum_exe(), "--sigilcode", "--check", &checkfile).stderr_capture().unchecked().run().unwrap();
+        assert!(!f.status.success(), "swap at {i}");
+        assert!(String::from_utf8_lossy(&f.stderr).contains("Invalid hash, read as a sigil"), "swap at {i}");
+    }
     // Raw bytes have no text form.
     let f = cmd!(b3sum_exe(), "--sigilcode", "--raw", &empty).stderr_capture().unchecked().run().unwrap();
     assert!(!f.status.success());
@@ -1196,7 +1233,7 @@ fn test_the_outputs_last_byte_and_none_past_it() {
     let raw = cmd!(b3sum_exe(), "--raw", "--length=1", &seek).stdin_bytes("foo").stdout_capture().run().unwrap().stdout;
     assert_eq!(raw, byte);
     for args in
-        [&["--length=2", &seek][..], &["--raw", "--length=2", &seek], &["--length=1", "--seek=18446744073709551615"], &["--sigilcode", "--length=2", &seek]]
+        [&["--length=2", &seek][..], &["--raw", "--length=2", &seek], &["--length=1", "--seek=18446744073709551615"], &["--sigilcode", "--length=8", &seek]]
     {
         let refused = cmd(b3sum_exe(), args).stdin_bytes("foo").stdout_capture().stderr_capture().unchecked().run().unwrap();
         assert_eq!(refused.status.code(), Some(1), "{args:?}");
