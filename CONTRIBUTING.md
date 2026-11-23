@@ -259,6 +259,22 @@ margin.
 
 ## Branches and changes
 
+Before opening a pull request or kicking the landing gates, run through
+three quick authoring checks (and include the answer in the commit
+message or pull request body where relevant):
+
+1. **One truth and fewest modes:** Does this change keep two copies of
+   one idea (two lockfiles, two readers, two formats) or add a mode that
+   could be eliminated instead? Is anything now vestigial so it should
+   be deleted in this same commit?
+2. **Control proof (for non-Rust tools, CI steps, or new planted-fault
+   controls where `cargo-mutants` does not run):** Temporarily disable
+   the safeguard or plant the fault your new check guards against, run
+   it, and record the observed failure.
+3. **Non-default modes:** Exercise any `no_std`, optional-feature, or
+   stamped-release branch your change touches rather than relying only
+   on default/`+dev` runs.
+
 `next` is the development line and `main` the release line. Work happens
 on `candidate/<topic>` branches; a candidate joins `next` as a
 fast-forward of its tip (so what was checked is what lands), by
