@@ -32,7 +32,7 @@ b64() { printf %s "$1" | tr a-f A-F | basenc --base16 -d | basenc --base64url | 
 # tools, the specification, every checked generator, and the executing
 # driver, which can come from another commit. A green run with identical
 # inputs is reused; its status names the run that already passed.
-inputs=$(listing=$(git -C "$root" ls-tree "$commit" -- c c2sp tools/verify tools/gen_neon_hybrid.py tools/gen_sme2_hybrid.py tools/gen_x86.py tools/gen_output16.py tools/gen_output8.py tools/gen_output_sme2.py tools/gen_output_neon.py tools/gen_packed_x86.py tools/gen_packed_sme2.py tools/gen_packed_neon.py tools/gen_counter_x86.py tools/gen_counter_sme2.py tools/gen_counter_neon.py) && driver=$(sha256sum < "$0") && printf '%s\n%s\n' "$listing" "$driver" | sha256sum | cut -d' ' -f1)
+inputs=$(listing=$(git -C "$root" ls-tree "$commit" -- c c2sp tools/verify tools/gen_neon_hybrid.py tools/gen_sme2_hybrid.py tools/gen_x86.py tools/gen_avx512_32.py tools/gen_output16.py tools/gen_output8.py tools/gen_output_sme2.py tools/gen_output_neon.py tools/gen_packed_x86.py tools/gen_packed_sme2.py tools/gen_packed_neon.py tools/gen_counter_x86.py tools/gen_counter_sme2.py tools/gen_counter_neon.py) && driver=$(sha256sum < "$0") && printf '%s\n%s\n' "$listing" "$driver" | sha256sum | cut -d' ' -f1)
 logs=$root/tmp/long-proofs/$commit-$inputs
 record=$root/tmp/long-proofs/inputs/$inputs.txt
 if [ -f "$record" ]; then
