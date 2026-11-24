@@ -547,11 +547,16 @@ fn stop(why: core::fmt::Arguments) -> ! {
         #[cfg(not(target_os = "macos"))]
         type Nfds = usize;
         unsafe extern "C" {
+            fn alarm(seconds: u32) -> u32;
             fn poll(fds: *mut PollFd, nfds: Nfds, timeout: i32) -> i32;
             fn write(fd: i32, buf: *const core::ffi::c_void, count: usize) -> isize;
         }
-        // Best-effort nonblocking diagnostic directly to fd 2, bypassing
-        // Rust's stderr mutex and skipping the write if stderr is full.
+        // Best-effort diagnostic directly to fd 2, bypassing Rust's stderr
+        // mutex, with zero heap allocation and zero threads. Requiring exact
+        // `pfd.revents == POLLOUT` skips already-full pipes and broken/closed
+        // pipes (avoiding SIGPIPE in C hosts and b3sum). Arming `alarm(1)`
+        // before `write` bounds the rare TOCTOU race where another writer
+        // fills a blocking stderr pipe after `poll` (under default SIGALRM).
         let mut buf = StackBuf { bytes: [0; 320], len: 0 };
         let _ = buf.write_fmt(why);
         let _ = buf.write_str("\n");
@@ -559,7 +564,8 @@ fn stop(why: core::fmt::Arguments) -> ! {
         // Sound: valid PollFd pointer and initialized stack slice of length `buf.len <= 320 <= PIPE_BUF`.
         unsafe {
             let _ = poll(&mut pfd, 1, 0);
-            if pfd.revents & POLLOUT != 0 {
+            if pfd.revents == POLLOUT {
+                let _ = alarm(1);
                 let _ = write(2, buf.bytes.as_ptr().cast(), buf.len);
             }
         }
@@ -623,11 +629,12 @@ static PLANTED_FAILURE: core::sync::atomic::AtomicBool = core::sync::atomic::Ato
 static PLANTED_WRONG_CASE: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(usize::MAX);
 
 /// Run the self-test unless it has passed: once per process, the first
-/// caller running it and any other waiting. It publishes no data, so a
-/// relaxed load suffices on the fast path.
+/// caller running it and any other waiting. The `Acquire` load pairs with
+/// the `Release` store in `ensure_slow()` so fast-path callers observe the
+/// `DETECTED` platform published during `run()` on weak-memory CPUs.
 #[inline]
 pub(crate) fn ensure() {
-    if STATE.load(core::sync::atomic::Ordering::Relaxed) != PASSED {
+    if STATE.load(core::sync::atomic::Ordering::Acquire) != PASSED {
         ensure_slow();
     }
 }
@@ -1197,5 +1204,38 @@ mod stops {
                 assert!(stderr.contains(needle), "{which}: stderr missing {needle:?}: {stderr}");
             }
         }
+    }
+
+    /// On a broken stderr pipe (no reader) with default `SIGPIPE` disposition
+    /// (as in C hosts and `b3sum`), `stop()` must skip writing and terminate
+    /// with `SIGABRT` (6) rather than `SIGPIPE` (13).
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_stop_aborts_on_broken_stderr_pipe_with_default_sigpipe() {
+        use std::os::unix::io::FromRawFd as _;
+        use std::os::unix::process::ExitStatusExt as _;
+        const CHILD: &str = "BLAKE3_SERVIL_TEST_BROKEN_STDERR";
+        if std::env::var_os(CHILD).is_some() {
+            // Restore default SIGPIPE disposition (Rust test binaries ignore it).
+            unsafe {
+                libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+            }
+            PLANTED_WRONG_CASE.store(0, core::sync::atomic::Ordering::Relaxed);
+            run();
+            std::process::exit(0);
+        }
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0, "pipe");
+        // Close the read end immediately so fd 2 is an empty broken pipe.
+        assert_eq!(unsafe { libc::close(fds[0]) }, 0, "close read end");
+        let write_end = unsafe { std::fs::File::from_raw_fd(fds[1]) };
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "self_test::stops::test_stop_aborts_on_broken_stderr_pipe_with_default_sigpipe", "--nocapture", "--test-threads", "1"])
+            .env(CHILD, "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::from(write_end))
+            .output()
+            .expect("spawn child");
+        assert_eq!(out.status.signal(), Some(6), "broken stderr pipe must terminate by SIGABRT (6), not SIGPIPE (13): {:?}", out.status);
     }
 }
