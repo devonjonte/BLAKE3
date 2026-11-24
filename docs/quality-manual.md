@@ -981,6 +981,88 @@ among them, and however often the hash is timed.
    (the GoFetch attack, 2024); Apple's guidance for cryptographic code
    is to turn DIT on, as in 2.
 
+## Stateful types, compiler ratchets, and empirical `#499` results
+
+In November 2026 (`BLAKE3` #499), we refactored stateful types across the
+workspace so invariants live in the type system rather than comments or
+caller discipline: private fields, checked constructors, purpose-built
+newtypes (`Domain`, `Cv`/`LastCv`, `Batch`/`Block`, `Loan`, `FileEnd`),
+explicit state machines, crate `[lints]` tables denying
+`unsafe_op_in_unsafe_fn`, `unused_must_use`, `unreachable_patterns`,
+`clippy::correctness`, and `clippy::cast_possible_truncation` (with zero
+shipped suppressions), checked `// Sound:` comments on every shipped
+`unsafe` block (`tools/unsafe_reasons.py`), site comments on every
+shipped `debug_assert!`, guard-page allocators, arithmetic work-count
+lifecycle tests (`src/lifecycle_counts.rs`), and a non-rising complexity
+ratchet (`tools/counts.py`) enforced by `check-builds.sh` and `land.py`.
+
+To measure the effect empirically, we ran 12 independent blinded GPT
+Astra security audits (`exit 0`, 2 runs × 6 areas) before (`485669d8`)
+and after (`69dfdccc`) the 7-commit rollout using the exact same
+immutable brief (`SHA-256 c6cd2f1c6db2487082c5156b39dc2de83f318195851557cf9c74f6c1e3f83c41`):
+
+- **Total findings dropped 82.7% (`168 → 29`)**, with **zero
+  memory-safety findings** across all 12 post-#499 runs.
+- Three core and concurrency areas reached **`0 + 0 = 0` (`76 → 0`
+  across 6 independent runs)**: Tree (`21 → 0`), Batch/Packed/Groups
+  (`24 → 0`), and concurrent `Pipeline`/Pool/Loans (`31 → 0`).
+- All 7 commits passed Apple M6 all-cells A/B regression checks (`no
+  regression`), confirming zero runtime performance penalty.
+
+## Supply-chain attack risk mitigation
+
+Every dependency, build script, proc-macro, CI action, and downloaded
+toolchain is part of the trusted computing base. Our defense layers
+(rolled out across `#479` and `#487`):
+
+1. **Minimal trusted codebase:** prefer small, readable, owned code over
+   third-party crates and external build toolchains — targeting zero
+   third-party runtime dependencies in shipped libraries and replacing
+   C-compiler assembly builds with Rust `global_asm!` (`#487`).
+2. **Cryptographic pinning and locked builds:** pin every GitHub Action
+   to a 40-character commit SHA, every container image to a `@sha256:`
+   digest, and every downloaded bootstrap tool to a versioned URL checked
+   by SHA-256 (and BLAKE3 where supported). Commit lockfiles and require
+   `--locked` builds in CI and releases.
+3. **Automated policy & honest audit provenance:** gate dependencies with
+   `cargo-deny`, `tools/dependency_policy.py`, and `cargo-vet`. Agent-authored
+   dependency reviews are recorded under explicit custom criteria
+   (`agent-safe-to-deploy`, `agent-safe-to-run`) so our audit ledger
+   never falsely implies an independent human security review.
+4. **Isolated release authority and reproducible rebuilds:** separate
+   agent accounts, sandboxed cross-family review sessions, and release
+   credentials; require explicit human maintainer approval (Zooko) for
+   release tags, publications, yanks, and advisories; lock release tags;
+   and verify published crates and binaries byte-for-byte via independent
+   reproducible rebuilds (`tools/release_artifacts.py --published --rebuilt`).
+
+## Wall-clock gate economics
+
+Quality practices compete for calendar time as well as CPU time. On
+November 23, 2026 we audited every landing gate against our defect ledger:
+
+- **Highest defect yield per minute:** cross-family AI landing review
+  (~14 min/commit; caught 78 pre-landing findings across `#499` and 9 of
+  12 hardest bugs in `0.10.0`), `#499` compile-time types/lints/ratchets
+  (~0 min recurring; −82.7% blinded findings), `check-builds.sh` (~2–3 min),
+  and fast native mutation testing (`x86-workhorse` 1.5 min,
+  `mac-m6-build` 1.7 min).
+- **Lowest defect yield per minute (eliminated):** `arm-vm` per-landing
+  mutation runs averaged 22.4 min/run (7.1 hours across 19 runs, 8/19
+  timeout failures, 0 unique defects); shared GitHub Actions
+  `ubuntu-24.04-arm` `pool_fairness` wall-clock tests flaked 4 of 5 runs
+  with 0 real bugs; and running full 24-min `mac-m6-timing` sweeps on
+  non-library commits compared identical library code.
+
+Accordingly, `tools/land.py` runs per-landing mutants on fast native
+x86-64 and Apple M6 hosts (keeping `tests aarch64` on `arm-vm` and
+`arm-vm` mutants on demand for pre-release), `tools/mutants/cargo-nextest`
+runs fast `--lib` unit tests before `--tests` integration tests so
+killed mutants fail in milliseconds, `.config/nextest.toml` `[profile.ci]`
+skips the shared-runner wall-clock ratio test while keeping clockless
+fairness tests everywhere, and `cells` auto-scopes to benchmarked
+library code.
+
 ## Not yet done
 
 No human has reviewed the code line by line, and nobody has audited it.

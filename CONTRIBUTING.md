@@ -287,19 +287,35 @@ found complete. A candidate lands once:
 - every suite above passes, and `sh tools/check-builds.sh`;
 - CI passes on it, started by hand (`workflow_dispatch`) when it changes
   code for targets the VM and Mac do not run (x86-64, AArch64 without
-  SME2);
-- mutation testing passes on a change to the Rust
-  (`python3 tools/mutants/check.py`: the mutants in the changed lines,
-  in about a minute, the time it took printed at its end);
+  SME2). Shared GitHub Actions runners run `blake3-servil` under
+  `[profile.ci]` (`.config/nextest.toml`), which skips the 2-second
+  wall-clock `two_callers_share_the_pool` ratio test that flaked under
+  multi-tenant vCPU scheduling while keeping clockless fairness tests
+  (`lanes::sources::test`) on every CI job and `pool_fairness` on our
+  dedicated fleet hosts;
+- mutation testing passes on fast native hosts for a change to the Rust
+  (`python3 tools/mutants/check.py` on x86-64 Linux [~1.5 min] and Apple
+  Silicon arm64+SME2 [~1.7 min]; `tools/mutants/cargo-nextest` runs fast
+  `--lib` unit tests before `--tests` integration tests so mutants killed
+  by unit tests fail in milliseconds instead of hanging behind blocking
+  integration tests). Slow VM mutation runs (`arm-vm` `mutants aarch64`,
+  which averaged 22.4 min/run and cost 7.1 hours across 19 Nov 23 runs
+  with 8 timeout failures and 0 unique defects) are no longer a
+  per-landing gate and remain available on demand for pre-release runs,
+  while `arm-vm`'s Linux/AArch64 test suites (`tests aarch64`) stay a
+  mandatory landing gate;
 - its commit message says what it adds to the library or removes, with
   `python3 tools/size.py BASE REV`'s output where it changes the
   library's code (a few minutes: it counts and builds);
-- the regression check finds no slowdown natively on the timing Mac (a
-  Mac Mini M6 that runs timing jobs alone), over every cell
-  (`--cells all`:
-  about twenty minutes there). A candidate that changes no compiled code
-  needs no speed check: it would compare identical code. The Mac
-  check is a job you queue yourself, through the shared exchange
+- when benchmarked library code changes (`src/`, `c/`, `build.rs`,
+  `Cargo.toml`, `Cargo.lock`, `threads/src/`, `threads/build.rs`,
+  `threads/Cargo.toml`, `threads/Cargo.lock`, `version/`), the regression
+  check (`cells`) finds no slowdown natively on the timing Mac (a Mac
+  Mini M6 that runs timing jobs alone), over every cell (`--cells all`:
+  about twenty minutes there, queued in parallel with CI and tests).
+  Changes outside benchmarked library code (`b3sum/`, `capi/`, tests,
+  tools, CI, docs) do not require `cells` in `tools/land.py`. The Mac
+  check is a job queued through the shared exchange
   (`tools/runner/README.md`, "Running a job"), and
   its result is a link on the pull request. Every cell, since a change
   checked at the points its author expected can slow one nobody named;
@@ -308,7 +324,7 @@ found complete. A candidate lands once:
   commit message. Virtual machines are timed nightly on a best-effort
   basis (never awaited for a landing or a release, and a slowdown seen
   only on a VM is looked into when nothing better waits); the VM's
-  correctness checks, tests and mutants on AArch64 Linux, stay a gate.
+  correctness test suites on AArch64 Linux (`tests aarch64`) stay a gate.
 - for a change to shipped code (the library crates, `b3sum`, the C
   header and API, and their build scripts and manifests), one review by
   an AI model of another family than its author's has read it, with
