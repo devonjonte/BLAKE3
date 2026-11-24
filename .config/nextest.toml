@@ -36,7 +36,11 @@ slow-timeout = { period = "300s", terminate-after = 1 }
 # server on an AMD Zen 5 runner the two differ, as they should.
 # two_callers_share_the_pool measures 2-second wall-clock throughput parity,
 # which fluctuates on virtualized/emulated CI runners (just as under mutants).
-default-filter = "not test(test_wide_bit_matches_cpuinfo) and not test(two_callers_share_the_pool)"
+# binary(build_version) spawns `git` and `cargo build` to verify crate version
+# strings (zero SIMD/assembly instructions); under Intel SDE it wasted 166.5
+# CPU-seconds per job emulating `git` and `rustc` while already running
+# natively on Linux stable/nightly, GCC 12, arm-vm, and mac-m6-build.
+default-filter = "not test(test_wide_bit_matches_cpuinfo) and not test(two_callers_share_the_pool) and not binary(build_version)"
 
 [profile.mutants]
 # A mutant's tests stop at the first that fails, and the tests still running

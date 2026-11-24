@@ -63,6 +63,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 REPO = "servil-software-factory/BLAKE3"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -258,6 +259,28 @@ def check_counts(base, sha):
     return run.stdout.strip()
 
 
+def push_next(sha, run=subprocess.run, sleep=time.sleep):
+    """Push `sha` to `origin/next`, retrying brief GitHub `landable` propagation lag."""
+    cmd = ["git", "-C", ROOT, "push", "origin", f"{sha}:refs/heads/next"]
+    for attempt in range(4):
+        res = run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            if res.stdout:
+                sys.stdout.write(res.stdout)
+            if res.stderr:
+                sys.stderr.write(res.stderr)
+            return
+        err = res.stderr or ""
+        if attempt < 3 and "GH006" in err and "landable" in err:
+            sleep(2)
+            continue
+        if res.stdout:
+            sys.stdout.write(res.stdout)
+        if err:
+            sys.stderr.write(err)
+        raise subprocess.CalledProcessError(res.returncode, cmd, res.stdout, err)
+
+
 def main(argv):
     if len(argv) < 2 or argv[0] not in ("status", "gate", "record", "land"):
         sys.exit(__doc__)
@@ -286,7 +309,7 @@ def main(argv):
         sys.exit(f"land: {sha[:12]} does not land: " + ", ".join(missing))
     check_counts(base, sha)
     post(sha, "landable", "success", landable(base, [g for g, _, _ in gates]))
-    subprocess.run(["git", "-C", ROOT, "push", "origin", f"{sha}:refs/heads/next"], check=True)
+    push_next(sha)
     print(f"land: next is {sha}")
 
 

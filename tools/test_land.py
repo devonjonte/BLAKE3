@@ -161,5 +161,31 @@ class CountsRatchet(unittest.TestCase):
             land.ROOT = orig_root
 
 
+class PushNextRetry(unittest.TestCase):
+    def test_retries_transient_gh006_landable_lag(self):
+        import subprocess
+        sleeps = []
+        responses = [
+            subprocess.CompletedProcess([], 1, "", 'remote: error: GH006: Required status check "landable" is expected.\n'),
+            subprocess.CompletedProcess([], 0, "", "ok\n"),
+        ]
+        land.push_next("deadbeef", run=lambda *a, **k: responses.pop(0), sleep=sleeps.append)
+        self.assertEqual(sleeps, [2])
+
+    def test_non_landable_push_error_does_not_retry(self):
+        import subprocess
+        sleeps = []
+        calls = []
+
+        def fake_run(*a, **k):
+            calls.append(a)
+            return subprocess.CompletedProcess([], 1, "", "remote: error: non-fast-forward\n")
+
+        with self.assertRaises(subprocess.CalledProcessError):
+            land.push_next("deadbeef", run=fake_run, sleep=sleeps.append)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(sleeps, [])
+
+
 if __name__ == "__main__":
     unittest.main()
