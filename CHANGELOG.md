@@ -1,3 +1,65 @@
+# blake3-servil 0.11.0+dev, against blake3-servil 0.10.0
+
+Changes landed on `next` since `0.10.0` (unreleased).
+
+## Breaking changes and migration
+
+- **Removed optional `serde` feature** (`15194e18`, `#479`): `Hash` no
+  longer implements `serde::Serialize` / `serde::Deserialize`. Callers
+  that previously enabled `features = ["serde"]` can drop the feature
+  and serialize `*hash.as_bytes()` (32-byte array) / reconstruct with
+  `Hash::from_bytes` in a local adapter to keep the same wire format.
+- **Removed `b3sum --sigilcode`** (`2c221200`, `#479`): `--sigilcode`
+  was experimental and is no longer shipped in `b3sums`. Existing
+  manifests written with `--sigilcode` will need to be re-generated in
+  standard hex.
+- **Arm `PSTATE.DIT` for `Hash`/`Cv`/`LastCv` equality** (`6366776f`,
+  `#479`): owned branchless integer assembly (`src/ct.rs`) replaces
+  `constant_time_eq` and leaves Arm `PSTATE.DIT` as the calling thread
+  has it (matching hashing, avoiding the 16–18× per-call `msr dit`
+  penalty measured on Apple M6 and AmpereOne). Callers that want Arm's
+  hardware DIT guarantee should enable `DIT` in their threads across
+  both hashing and digest verification.
+
+## Supply-chain hardening (`#479`)
+
+- **Zero third-party runtime dependencies in shipped library crates**
+  (`blake3-servil-core`, `blake3-servil`, `blake3-servil-c`) on every
+  supported platform (`6366776f`): owned `src/ct.rs` replaces
+  `constant_time_eq`, and AArch64 `sysctlbyname`/`getauxval` use direct
+  `extern "C"` with native `#[link(name = "c")]` directives (`libc` is
+  dev-only).
+- **`b3sums` trimmed to `blake3-servil` + `libc`** (`2c221200`):
+  replaced `memmap2`, `anyhow`, `tempfile`, `duct`, and `hex`, shrinking
+  `b3sum/Cargo.lock` from 57 to 26 registry packages.
+- **Release workspace trimmed & `cargo-vet` provenance isolated**
+  (`15194e18`, `faa2c07b`): `tools/release/Cargo.lock` shrank from 112
+  to 61 registry packages and exemptions from 86 to 41, with explicit
+  custom `agent-safe-to-deploy` / `agent-safe-to-run` `cargo-vet`
+  criteria separating AI-agent audits from human audits.
+
+## Safety and assurance
+
+- **Stateful-type & defense-in-depth rollout (`#499`, `2291a502`–`69dfdccc`):**
+  private fields, checked constructors, and RAII guards across `Domain`,
+  `Stage`, `CvStack`, `Block`, `Batch`, `TreeHasher`/`Cv`/`LastCv`,
+  `Loan`, and `FileEnd`; crate `[lints]` tables denying narrowing `as`
+  casts (`clippy::cast_possible_truncation = "deny"`, zero shipped
+  suppressions) and `clippy::correctness`; `// Sound:` verified across
+  all five shipped crates & build scripts (`tools/unsafe_reasons.py`);
+  custom guard-page global allocators (`tests/guard_alloc.rs`,
+  `threads/tests/guard_alloc.rs`); arithmetic lifecycle work counts; and
+  non-rising `tools/counts.py` ratchet. Validated by 12 blinded
+  before/after GPT Astra audits (**−82.7%** findings, `168 → 29`, `0`
+  memory-safety findings, `0` Apple M6 regressions).
+- **Startup publication & fail-stop (`#514`, `bd18c8c5`):** `self_test::ensure()`
+  fast path now uses `Ordering::Acquire` to formally synchronize with
+  `DETECTED` publication on weak-memory CPUs, and Unix `stop()` requires
+  exact `pfd.revents == POLLOUT` (fixing broken-pipe `SIGPIPE` in C hosts
+  and `b3sum`) with an `alarm(1)` guard on raw `write(2)`.
+
+---
+
 # blake3-servil 0.10.0+b0b4c80c39ff28c2dbcc2234a6dc17b40911830d, against blake3-servil 0.9.1
 
 What changed since 0.9.1 (0.9.0 with the one fix of GHSA-q4c5-2759-8c8x), each item with where it is described. Every
