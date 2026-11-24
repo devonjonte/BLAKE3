@@ -119,6 +119,46 @@ pub fn hash_many<P: Prepared + ?Sized>(mode: Mode, batch: &P, out: &mut [[u8; OU
     crate::hash_many_serial(batch.bytes(), batch.message_len(), batch.slot(), key, flags, out);
 }
 
+/// Hash `out.len()` single-block messages derived from `template` (`4..=64`
+/// bytes) in `mode`, replacing the 4-byte little-endian word at byte offset
+/// `counter_word * 4` with `start.wrapping_add(i)` (modulo 2^32) for
+/// `i in 0..out.len()`.
+///
+/// On AVX-512, AVX2, Apple/AArch64 SME2, and AArch64 NEON, full SIMD groups
+/// broadcast the template once into registers or L1 stack storage and advance
+/// only the counter word between groups, avoiding caller-side buffer stamping
+/// and input memory traffic in proof-of-work and counter-grinding loops; any
+/// remaining tail hashes serially.
+///
+/// Panics if `template.len() > BLOCK_LEN`, `counter_word >= 16`, or
+/// `counter_word * 4 + 4 > template.len()` (checked in every build, even
+/// when `out` is empty).
+///
+/// # Example
+///
+/// ```
+/// # blake3_servil_core::initialize();
+/// use blake3_servil_core::{Mode, convenience, throughput};
+/// let mut template = [0u8; 52];
+/// template[..48].fill(0xab);
+/// let mut digests = [[0u8; 32]; 16];
+/// throughput::hash_counter_range(Mode::Plain, &template, 12, 100, &mut digests);
+/// template[48..52].copy_from_slice(&103u32.to_le_bytes());
+/// assert_eq!(digests[3], *convenience::hash(&template).as_bytes());
+/// ```
+#[inline(always)]
+pub fn hash_counter_range(mode: Mode, template: &[u8], counter_word: usize, start: u32, out: &mut [[u8; OUT_LEN]]) {
+    crate::ffi_counter::validate_counter_range(template, counter_word);
+    let platform = crate::platform::Platform::detect();
+    if out.is_empty() {
+        return;
+    }
+    let mut room = core::mem::MaybeUninit::uninit();
+    let (key, flags) = mode.key(&mut room);
+    let turn = crate::platform::Sme2Turn::take(platform, out.len() >= 16);
+    crate::ffi_counter::hash_counter_range_on(template, counter_word, start, key, flags, out, turn.platform());
+}
+
 /// Hash a key-derivation context string and return a [`ContextKey`].
 ///
 /// This has the same security requirement as key derivation. **The context
@@ -627,6 +667,24 @@ impl TreeHasher {
     pub fn hash_many<P: Prepared + ?Sized>(&self, batch: &P, out: &mut [[u8; OUT_LEN]]) {
         let turn = self.turn_if(crate::many::sme2_sized(batch.message_len(), out.len()));
         self.hash_many_on(turn.platform(), batch, out);
+    }
+
+    /// Hash `out.len()` single-block messages derived from `template`
+    /// (`4..=64` bytes) in this `TreeHasher`'s mode, replacing the 4-byte
+    /// little-endian word at byte offset `counter_word * 4` with
+    /// `start.wrapping_add(i)` (modulo 2^32) for `i in 0..out.len()`.
+    ///
+    /// Respects [`Self::on_this_core`] on Apple/AArch64 SME2 hosts. Panics if
+    /// `template.len() > BLOCK_LEN`, `counter_word >= 16`, or
+    /// `counter_word * 4 + 4 > template.len()` (checked in every build, even
+    /// when `out` is empty).
+    pub fn hash_counter_range(&self, template: &[u8], counter_word: usize, start: u32, out: &mut [[u8; OUT_LEN]]) {
+        crate::ffi_counter::validate_counter_range(template, counter_word);
+        let turn = self.turn_if(out.len() >= 16);
+        if out.is_empty() {
+            return;
+        }
+        crate::ffi_counter::hash_counter_range_on(template, counter_word, start, self.domain.key(), self.domain.flags(), out, turn.platform());
     }
 
     /// A worker's checked slice of a [`Prepared`] batch, on `platform`'s
@@ -1247,8 +1305,11 @@ mod tree_test {
         let items: std::vec::Vec<(&[Block], usize)> = (0..16).map(|i| (&blocks.blocks()[i * 32..(i + 1) * 32], 2 * CHUNK_LEN)).collect();
         let mut expected_each = std::vec![[0u8; OUT_LEN]; 16];
         tree.clone().on_this_core().hash_each(&items, &mut expected_each);
+        let tmpl = [0x5au8; 52];
+        let mut expected_counter = std::vec![[0u8; OUT_LEN]; 16];
+        tree.clone().on_this_core().hash_counter_range(&tmpl, 12, 7, &mut expected_counter);
 
-        // Hold the SME2 turn: neither parent_cvs nor hash_each may enter SME2.
+        // Hold the SME2 turn: neither parent_cvs, hash_each, nor hash_counter_range may enter SME2.
         let mut held = None;
         for _ in 0..10_000 {
             let t = crate::platform::Sme2Turn::take(crate::platform::Platform::SME2, true);
@@ -1262,20 +1323,27 @@ mod tree_test {
         let parents_fn = crate::sme2::ffi::blake3_servil_sme2_hash16_parents_512 as *const () as usize;
         let messages_fn = crate::sme2::ffi::blake3_servil_sme2_hash16_messages_512 as *const () as usize;
 
-        // Subthreshold calls (30 children = 15 pairs; 15 two-chunk messages) must
+        // Subthreshold calls (30 children = 15 pairs; 15 two-chunk messages; 15 counters) must
         // not even attempt to acquire the held turn (Ran::TurnTaken stays clear).
         let mut got_parents = std::vec![Cv::unset(); 16];
         let mut got_each = std::vec![[0u8; OUT_LEN]; 16];
+        let mut got_counter = std::vec![[0u8; OUT_LEN]; 16];
         crate::RAN.with(|r| r.set(0));
         crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
         tree.parent_cvs(&children[..30], &mut got_parents[..15]);
         assert_eq!(crate::RAN.with(|r| r.get()) & crate::Ran::TurnTaken as u32, 0, "15 parent pairs must not try to take the SME2 turn");
         tree.hash_each(&items[..15], &mut got_each[..15]);
         assert_eq!(crate::RAN.with(|r| r.get()) & crate::Ran::TurnTaken as u32, 0, "15 two-chunk messages must not try to take the SME2 turn");
+        tree.hash_counter_range(&tmpl, 12, 7, &mut got_counter[..15]);
+        assert_eq!(crate::RAN.with(|r| r.get()) & crate::Ran::TurnTaken as u32, 0, "15 TreeHasher counters must not try to take the SME2 turn");
+        assert_eq!(&got_counter[..15], &expected_counter[..15]);
+        hash_counter_range(Mode::Plain, &tmpl, 12, 7, &mut got_counter[..15]);
+        assert_eq!(crate::RAN.with(|r| r.get()) & crate::Ran::TurnTaken as u32, 0, "15 free counters must not try to take the SME2 turn");
         assert_eq!(&got_parents[..15], &expected_parents[..15]);
         assert_eq!(&got_each[..15], &expected_each[..15]);
+        assert_eq!(&got_counter[..15], &expected_counter[..15]);
 
-        // Eligible calls (32 children = 16 pairs; 16 two-chunk messages) DO consult
+        // Eligible calls (32 children = 16 pairs; 16 two-chunk messages; 16 counters) DO consult
         // the held turn (recording Ran::TurnTaken) and fall back off SME2.
         crate::RAN.with(|r| r.set(0));
         crate::RAN_ENTRIES.with(|r| r.borrow_mut().clear());
@@ -1284,6 +1352,14 @@ mod tree_test {
         crate::RAN.with(|r| r.set(0));
         tree.hash_each(&items, &mut got_each);
         assert_ne!(crate::RAN.with(|r| r.get()) & crate::Ran::TurnTaken as u32, 0, "16 two-chunk messages must consult the SME2 turn");
+        crate::RAN.with(|r| r.set(0));
+        tree.hash_counter_range(&tmpl, 12, 7, &mut got_counter);
+        assert_ne!(crate::RAN.with(|r| r.get()) & crate::Ran::TurnTaken as u32, 0, "16 TreeHasher counters must consult the SME2 turn");
+        assert_eq!(got_counter, expected_counter);
+        crate::RAN.with(|r| r.set(0));
+        hash_counter_range(Mode::Plain, &tmpl, 12, 7, &mut got_counter);
+        assert_ne!(crate::RAN.with(|r| r.get()) & crate::Ran::TurnTaken as u32, 0, "16 free counters must consult the SME2 turn");
+        assert_eq!(got_counter, expected_counter);
         crate::RAN_ENTRIES.with(|r| {
             let ran = r.borrow();
             assert!(!ran.contains(&parents_fn), "parent_cvs bypassed a held SME2 turn");
