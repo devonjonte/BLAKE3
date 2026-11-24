@@ -3647,10 +3647,10 @@ impl Task {
 }
 
 impl Task {
-    /// The members' digests: messages of one length side by side on the
-    /// multi-lane kernels (`hash_many`'s, from a table of pointers) where
-    /// that length is one block, or on x86 two to sixteen blocks of a power
-    /// of two (128 B to 1 KiB); any others one at a time.
+    /// The members' digests: two or more messages of one length side by side on
+    /// the multi-lane kernels (`hash_many`'s, from a table of pointers) where
+    /// that length is 1, 2, 4, 8, or 16 whole blocks (64 B to 1 KiB) across all
+    /// architectures; any others one at a time.
     ///
     /// # Safety
     ///
@@ -3893,7 +3893,12 @@ mod test {
         platforms.extend([Platform::sse41(), Platform::avx2()].into_iter().flatten());
         #[cfg(blake3_avx512_ffi)]
         platforms.extend(Platform::avx512());
-        platforms.push(Platform::detect());
+        let detected = Platform::detect();
+        platforms.push(detected);
+        let own = Platform::own_core();
+        if own != detected && !platforms.contains(&own) {
+            platforms.push(own);
+        }
         let key = [0x5Au8; crate::KEY_LEN];
         let context = "equal queue members";
         let counts: &[usize] = &[2, 3, 4, 7, 8, 15, 16, 17, 63, MEMBERS];
@@ -3930,11 +3935,9 @@ mod test {
                                 crate::RAN.with(|r| r.set(0));
                                 unsafe { task.run_members(&tree, platform) };
                                 // Which path (BLAKE3 #219): one length, two
-                                // members or more, a length with a kernel
-                                // (one block everywhere; 128 B to 1 KiB on
-                                // x86-64): side by side; else one at a time.
-                                let side_by_side =
-                                    !mixed && count >= 2 && (len == 64 || (cfg!(target_arch = "x86_64") && matches!(len, 128 | 256 | 512 | 1024)));
+                                // members or more, a power-of-two block length
+                                // (64 B to 1 KiB): side by side; else one at a time.
+                                let side_by_side = !mixed && count >= 2 && matches!(len, 64 | 128 | 256 | 512 | 1024);
                                 let ran = crate::RAN.with(|r| r.get());
                                 assert_eq!(
                                     ran & crate::Ran::EqualMembers as u32 != 0,

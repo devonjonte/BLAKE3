@@ -161,11 +161,7 @@ src/lib.rs	replace | with ^ in hash_many_rounded	1	same code: every test binary 
 src/lib.rs	replace | with ^ in hash_one_chunk_root	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/lib.rs	replace | with ^ in ran	1	test-only: the tests' record of what ran (crate::ran); no shipped build has it
 src/many.rs	delete ! in across_from	2	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
-src/many.rs	delete match arm 128 in try_whole_group	1	x86-64 only: cfg excludes this arm on AArch64. The borrowed whole-block test checks it on x86-64.
-src/many.rs	delete match arm 256 in try_whole_group	1	x86-64 only: cfg excludes this arm on AArch64. The borrowed whole-block test checks it on x86-64.
 src/many.rs	delete match arm 3 in hash_four_at_a_time	1	speed: the arrangement for whole blocks without the NEON plans (x86-64, WebAssembly; test_hash_blocks_without_plans runs it here): every grouping gives the same digests
-src/many.rs	delete match arm 512 in try_whole_group	1	x86-64 only: cfg excludes this arm on AArch64. The borrowed whole-block test checks it on x86-64.
-src/many.rs	delete match arm CHUNK_LEN in try_whole_group	1	x86-64 only: cfg excludes this arm on AArch64. The borrowed whole-block test checks it on x86-64.
 src/many.rs	replace != with == in across_from	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace != with == in hash_four_at_a_time	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)
 src/many.rs	replace % with + in across_from	1	same code: every test binary hashes as the unmutated build's here (tools/mutants/code_hash.py)

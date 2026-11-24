@@ -598,13 +598,9 @@ pub(crate) fn try_whole_group<'a>(
     }
     match input(0).len() {
         BLOCK_LEN => run::<BLOCK_LEN>(count, input, key, flags, platform, output),
-        #[cfg(target_arch = "x86_64")]
         128 => run::<128>(count, input, key, flags, platform, output),
-        #[cfg(target_arch = "x86_64")]
         256 => run::<256>(count, input, key, flags, platform, output),
-        #[cfg(target_arch = "x86_64")]
         512 => run::<512>(count, input, key, flags, platform, output),
-        #[cfg(target_arch = "x86_64")]
         CHUNK_LEN => run::<CHUNK_LEN>(count, input, key, flags, platform, output),
         _ => false,
     }
@@ -860,11 +856,15 @@ mod test {
         let tree = crate::throughput::TreeHasher::new(crate::Mode::Plain);
         let input = [std::vec![9; CHUNK_LEN], std::vec![7; CHUNK_LEN], std::vec![2; CHUNK_LEN]];
         let mut out = [[0; OUT_LEN]; 3];
+        let hash_many_calls = || crate::COUNTED.with(|c| c[crate::Counted::HashManyCall as usize].get());
         for len in [64, 65, 128, 192, 256, 512, 1024] {
             let before = out;
             let bytes = |i: usize| &input[i][..len];
-            let grouped = len == 64 || cfg!(target_arch = "x86_64") && matches!(len, 128 | 256 | 512 | 1024);
+            let grouped = matches!(len, 64 | 128 | 256 | 512 | 1024);
+            let calls_before = hash_many_calls();
             assert_eq!(tree.try_hash_group_on(platform, out.len(), bytes, |i, digest| out[i] = digest), grouped, "{len} bytes");
+            let calls_delta = hash_many_calls() - calls_before;
+            assert_eq!(calls_delta, u64::from(grouped), "HashManyCall delta for {len} bytes");
             if grouped {
                 for (i, digest) in out.iter().enumerate() {
                     assert_eq!(digest, blake3::hash(bytes(i)).as_bytes());
@@ -874,8 +874,10 @@ mod test {
             }
         }
         let before = out;
+        let calls_before = hash_many_calls();
         assert!(!tree.try_hash_group_on(platform, out.len(), |i| &input[i][..if i == 0 { 64 } else { 63 }], |i, digest| out[i] = digest));
         assert!(!tree.try_hash_group_on(platform, 1, |i| &input[i][..64], |i, digest| out[i] = digest));
+        assert_eq!(hash_many_calls(), calls_before, "rejected groups make no HashManyCall");
         assert_eq!(out, before, "a mixed group or one message leaves no output");
     }
 
