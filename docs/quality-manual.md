@@ -4,7 +4,11 @@ This manual is for experts and maintainers: it lists every step we have
 taken to make blake3-servil compute correct digests and stay
 memory-safe, with the command that reproduces it, what it rests on, the
 bugs it found, and what formal verification we have tried. For the
-overview, read [QUALITY.md](../QUALITY.md) first.
+overview, read [QUALITY.md](../QUALITY.md) first; for the organization-wide
+Servil Software Factory standards (stateful-type programming style,
+supply-chain risk mitigation, cross-family review, wall-clock gate
+discipline, and release promotion rules), see the
+[Servil Software Factory Manual](https://github.com/servil-software-factory).
 
 ## What runs where
 
@@ -1009,59 +1013,33 @@ immutable brief (`SHA-256 c6cd2f1c6db2487082c5156b39dc2de83f318195851557cf9c74f6
 - All 7 commits passed Apple M6 all-cells A/B regression checks (`no
   regression`), confirming zero runtime performance penalty.
 
-## Supply-chain attack risk mitigation
+## BLAKE3-Servil supply-chain & wall-clock evidence
 
-Every dependency, build script, proc-macro, CI action, and downloaded
-toolchain is part of the trusted computing base. Our defense layers
-(rolled out across `#479` and `#487`):
+The organization-wide standards for supply-chain risk mitigation and
+wall-clock gate discipline live in the
+[Servil Software Factory Manual](https://github.com/servil-software-factory).
+BLAKE3-Servil's concrete checks and measured numbers:
 
-1. **Minimal trusted codebase:** prefer small, readable, owned code over
-   third-party crates and external build toolchains — targeting zero
-   third-party runtime dependencies in shipped libraries and replacing
-   C-compiler assembly builds with Rust `global_asm!` (`#487`).
-2. **Cryptographic pinning and locked builds:** pin every GitHub Action
-   to a 40-character commit SHA, every container image to a `@sha256:`
-   digest, and every downloaded bootstrap tool to a versioned URL checked
-   by SHA-256 (and BLAKE3 where supported). Commit lockfiles and require
-   `--locked` builds in CI and releases.
-3. **Automated policy & honest audit provenance:** gate dependencies with
-   `cargo-deny`, `tools/dependency_policy.py`, and `cargo-vet`. Agent-authored
-   dependency reviews are recorded under explicit custom criteria
-   (`agent-safe-to-deploy`, `agent-safe-to-run`) so our audit ledger
-   never falsely implies an independent human security review.
-4. **Isolated release authority and reproducible rebuilds:** separate
-   agent accounts, sandboxed cross-family review sessions, and release
-   credentials; require explicit human maintainer approval (Zooko) for
-   release tags, publications, yanks, and advisories; lock release tags;
-   and verify published crates and binaries byte-for-byte via independent
-   reproducible rebuilds (`tools/release_artifacts.py --published --rebuilt`).
-
-## Wall-clock gate economics
-
-Quality practices compete for calendar time as well as CPU time. On
-November 23, 2026 we audited every landing gate against our defect ledger:
-
-- **Highest defect yield per minute:** cross-family AI landing review
-  (~14 min/commit; caught 78 pre-landing findings across `#499` and 9 of
-  12 hardest bugs in `0.10.0`), `#499` compile-time types/lints/ratchets
-  (~0 min recurring; −82.7% blinded findings), `check-builds.sh` (~2–3 min),
-  and fast native mutation testing (`x86-workhorse` 1.5 min,
-  `mac-m6-build` 1.7 min).
-- **Lowest defect yield per minute (eliminated):** `arm-vm` per-landing
-  mutation runs averaged 22.4 min/run (7.1 hours across 19 runs, 8/19
-  timeout failures, 0 unique defects); shared GitHub Actions
-  `ubuntu-24.04-arm` `pool_fairness` wall-clock tests flaked 4 of 5 runs
-  with 0 real bugs; and running full 24-min `mac-m6-timing` sweeps on
-  non-library commits compared identical library code.
-
-Accordingly, `tools/land.py` runs per-landing mutants on fast native
-x86-64 and Apple M6 hosts (keeping `tests aarch64` on `arm-vm` and
-`arm-vm` mutants on demand for pre-release), `tools/mutants/cargo-nextest`
-runs fast `--lib` unit tests before `--tests` integration tests so
-killed mutants fail in milliseconds, `.config/nextest.toml` `[profile.ci]`
-skips the shared-runner wall-clock ratio test while keeping clockless
-fairness tests everywhere, and `cells` auto-scopes to benchmarked
-library code.
+- **Dependency & lockfile policy (`#479`, `#487`):** `python3 tools/dependency_policy.py`
+  and `python3 tools/dependency_policy.py controls` (10 planted faults)
+  enforce `deny.toml`, `--locked` builds, and `cargo-vet` across both the
+  release workspace and standalone `b3sum/` (`b3sum` trimmed to
+  `blake3-servil` + `libc`, `b3sum/Cargo.lock` 57 → 26 packages in
+  `2c221200`). Reproducible release verification runs via
+  `tools/release_artifacts.py TAG --published --rebuilt`.
+- **Wall-clock gate calibration (Nov 23, 2026):** across all 7 `#499`
+  commits, cross-family GPT Astra landing reviews averaged 14 min (78
+  pre-landing findings), `check-builds.sh` ~2–3 min, `x86-workhorse`
+  mutants 1.5 min, and `mac-m6-build` arm64+SME2 mutants 1.7 min — while
+  `arm-vm` AArch64 mutants averaged 22.4 min (7.1 hours across 19 runs,
+  8/19 timeout failures, 0 unique defects) and shared-runner
+  `ubuntu-24.04-arm` `pool_fairness` flaked 4 of 5 runs. Consequently,
+  `tools/land.py` keeps fast native `mutants x86_64` + `mutants arm64`
+  and `arm-vm` `tests aarch64` per landing (reserving `arm-vm` mutants
+  for pre-release), `tools/mutants/cargo-nextest` runs `--lib` unit tests
+  before `--tests` integration tests, `.config/nextest.toml` `[profile.ci]`
+  skips the shared-runner wall-clock ratio test, and `cells` auto-scopes
+  to benchmarked library code.
 
 ## Not yet done
 
