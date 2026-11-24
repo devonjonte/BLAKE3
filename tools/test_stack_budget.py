@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Unit tests for tools/stack_budget.py."""
+
+import unittest
+
+import stack_budget
+
+
+SAMPLE_FUNCS_FIRST = """
+StackSizes [
+  Entry {
+    Functions: [_ZN18blake3_servil_core4tree9hash_tree17h0000000000000000E]
+    Size: 0x2000
+  }
+  Entry {
+    Functions: [_ZN18blake3_servil_core11convenience6Hasher8finalize17h0000000000000000E]
+    Size: 0x1000
+  }
+  Entry {
+    Functions: [_ZN13blake3_servil5lanes8run_work17h0000000000000000E]
+    Size: 0x800
+  }
+  Entry {
+    Functions: [_ZN6b3sums4main17h0000000000000000E]
+    Size: 0x400
+  }
+]
+"""
+
+SAMPLE_SIZE_FIRST = """
+StackSizes [
+  Entry {
+    Size: 0x4001
+    Functions: [_ZN13blake3_servil5lanes8too_big17h0000000000000000E]
+  }
+]
+"""
+
+
+class StackBudgetTests(unittest.TestCase):
+    def test_parses_and_passes_under_caps(self) -> None:
+        entries = stack_budget.parse_llvm_readobj_stack_sizes(SAMPLE_FUNCS_FIRST)
+        self.assertEqual(len(entries), 4)
+        max_by_bucket, violations = stack_budget.check_entries(entries)
+        self.assertEqual(violations, [])
+        self.assertEqual(max_by_bucket["core"][0], 0x2000)
+        self.assertEqual(max_by_bucket["core::Hasher"][0], 0x1000)
+        self.assertEqual(max_by_bucket["threads"][0], 0x800)
+        self.assertEqual(max_by_bucket["b3sum"][0], 0x400)
+
+    def test_fails_when_threads_exceeds_16k(self) -> None:
+        entries = stack_budget.parse_llvm_readobj_stack_sizes(SAMPLE_SIZE_FIRST)
+        _, violations = stack_budget.check_entries(entries)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("threads:", violations[0])
+        self.assertIn("16385 B > 16384 B", violations[0])
+
+    def test_fails_when_hasher_exceeds_32k(self) -> None:
+        entries = [(32 * 1024 + 8, "_ZN18blake3_servil_core11convenience6Hasher8finalizeE")]
+        _, violations = stack_budget.check_entries(entries)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("core::Hasher:", violations[0])
+
+    def test_fails_when_core_exceeds_128k(self) -> None:
+        entries = [(128 * 1024 + 16, "_ZN18blake3_servil_core4tree8too_deepE")]
+        _, violations = stack_budget.check_entries(entries)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("core:", violations[0])
+
+
+if __name__ == "__main__":
+    unittest.main()

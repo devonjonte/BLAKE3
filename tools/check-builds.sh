@@ -85,6 +85,8 @@ step sh -c 'python3 tools/gen_output8.py | cmp - c/blake3_output8.S'
 # operations: with every feature on, so that a trait implementation
 # behind a feature (as 0.9's Zeroize was) is one of those accounted for.
 step python3 tools/test_api.py
+step python3 tools/test_stack_budget.py
+step python3 tools/stack_budget.py
 for manifest in Cargo.toml threads/Cargo.toml; do
     step sh -c 'RUSTC_BOOTSTRAP=1 cargo rustdoc -q --manifest-path "$0" --lib --all-features -- -Z unstable-options --output-format json' "$manifest"
 done
