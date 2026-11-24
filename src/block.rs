@@ -208,14 +208,12 @@ struct Line([u8; 128]);
 /// be borrowed directly as 64-byte parent pairs via [`Packed::as_blocks`]
 /// (carry or pad an odd last digest according to your tree).
 ///
-/// **Speed vs. [`Batch`]:** `hash_many` currently expands `Packed`
-/// messages into padded 64-byte blocks in 128-message groups on the
-/// stack, so for repeated hashing of an already-prepared batch a
-/// [`Batch`] is faster today (about 1.5–1.8× faster for a reported
-/// 32-byte workload on Apple M6). However, when refilling or chaining
-/// 32-byte digests between rounds, writing digests straight into a
-/// `Packed<32>` avoids per-slot copies into a `Batch` and can beat
-/// `Batch::set` end-to-end — measure your full loop. The alignment is
+/// **Speed vs. [`Batch`]:** full SIMD groups run directly on zero-padding-free
+/// packed kernels (AVX-512, AVX2, SME2, and AArch64 NEON `8+3`) that load the
+/// 16-, 32-, or 48-byte messages straight from caller memory and skip the
+/// guaranteed-zero message words, making `Packed<N>` both smaller in memory
+/// and faster than [`Batch`] for whole-group batches; only a short trailing
+/// remainder (or SSE4.1) expands into a 1 KiB stack buffer. The alignment is
 /// the type's: only this constructor makes one, so a call checks nothing
 /// about alignment.
 ///
