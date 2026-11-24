@@ -73,6 +73,74 @@ impl FdMeta {
     }
 }
 
+/// Whether `rdev` is Linux's cloning PTY master multiplexor `/dev/ptmx` (5, 2).
+#[cfg(target_os = "linux")]
+#[inline]
+fn is_ptmx_rdev(rdev: u64) -> bool {
+    rdev == libc::makedev(5, 2)
+}
+
+/// Whether `fd` is a non-cloning terminal whose pathname reopens the same
+/// stream (excludes cloning PTY masters such as `/dev/ptmx` / `posix_openpt`).
+#[cfg(unix)]
+fn is_reopenable_tty_fd(fd: RawFd, rdev: libc::dev_t) -> bool {
+    // Sound: `isatty` queries an open fd without touching memory.
+    if unsafe { libc::isatty(fd) } != 1 {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    if is_ptmx_rdev(rdev as u64) {
+        return false;
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = rdev;
+    // A real terminal or PTY slave has a tty device name (`/dev/pts/N`,
+    // `/dev/ttysNNN`, etc.), whereas a cloning PTY master has none.
+    let mut name = [0 as libc::c_char; 256];
+    // Sound: `name` is valid writable storage of length `name.len()`.
+    unsafe { libc::ttyname_r(fd, name.as_mut_ptr(), name.len()) == 0 }
+}
+
+/// Refuse record-oriented sockets (non-`SOCK_STREAM` sockets such as
+/// `SOCK_SEQPACKET` / `SOCK_DGRAM`) whose short reads silently discard record
+/// tails instead of behaving like byte streams (#515).
+#[cfg(unix)]
+pub(crate) fn ensure_byte_stream_fd(fd: RawFd, mode_type: libc::mode_t) -> crate::err::Result<()> {
+    if mode_type == libc::S_IFSOCK {
+        let mut sock_type: libc::c_int = 0;
+        let mut len = libc::socklen_t::try_from(core::mem::size_of::<libc::c_int>()).expect("c_int size fits in socklen_t");
+        // Sound: `sock_type` and `len` are valid writable stack variables.
+        let rc = unsafe { libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_TYPE, (&mut sock_type as *mut libc::c_int).cast(), &mut len) };
+        if rc == 0 && sock_type != libc::SOCK_STREAM {
+            crate::bail!("record-oriented socket input is not supported; use a byte-stream socket or pipe");
+        }
+    }
+    Ok(())
+}
+
+/// Read a stream completely into `out` using read requests at least one kernel
+/// page wide (`>= 64 KiB`), avoiding `Read::read_to_end`'s initial 32-byte
+/// probe that silently truncates Linux `pipe2(O_DIRECT)` packet-mode pipes
+/// (which buffer up to `PAGE_SIZE` bytes per packet in `fs/pipe.c`), and using
+/// fallible `try_reserve` so OOM returns an I/O error instead of aborting (#515).
+pub(crate) fn read_stream_to_end(reader: &mut impl Read, out: &mut Vec<u8>) -> io::Result<()> {
+    let chunk_len = crate::min_packet_read_len().max(64 * 1024);
+    let mut chunk = Vec::new();
+    chunk.try_reserve_exact(chunk_len).map_err(|_| io::Error::new(io::ErrorKind::OutOfMemory, "out of memory"))?;
+    chunk.resize(chunk_len, 0);
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => return Ok(()),
+            Ok(n) => {
+                out.try_reserve(n).map_err(|_| io::Error::new(io::ErrorKind::OutOfMemory, "out of memory"))?;
+                out.extend_from_slice(&chunk[..n]);
+            }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Query `(dev, ino, kind, len)` directly on `fd` using `fstat`, without
 /// duplicating the descriptor.
 #[cfg(unix)]
@@ -89,8 +157,7 @@ pub(crate) fn fstat_fd(fd: RawFd) -> io::Result<FdMeta> {
     let kind = match mode_type {
         libc::S_IFREG => FileKind::Regular,
         libc::S_IFIFO | libc::S_IFSOCK => FileKind::Stream,
-        // Sound: `isatty` queries an open fd without touching memory.
-        libc::S_IFCHR if unsafe { libc::isatty(fd) } == 1 => FileKind::Stream,
+        libc::S_IFCHR if is_reopenable_tty_fd(fd, st.st_rdev) => FileKind::Stream,
         _ => FileKind::Other,
     };
     Ok(FdMeta { id: StreamId { dev: st.st_dev as u64, ino: st.st_ino as u64 }, kind, mode_type, len: st.st_size.max(0) as u64 })
@@ -104,10 +171,6 @@ pub(crate) struct StdinContext {
     pub(crate) stdin: Option<FdMeta>,
     #[cfg(unix)]
     cwd: Option<PathBuf>,
-    #[cfg(unix)]
-    cwd_in_dev_or_proc: bool,
-    #[cfg(unix)]
-    cwd_is_root: bool,
 }
 
 /// How an operand or checkfile entry relates to standard input.
@@ -121,12 +184,13 @@ pub(crate) enum InputRole {
     /// than reopening the pathname.
     #[cfg(unix)]
     StdinStreamAlias,
-    /// macOS `/dev/stdin` or `/dev/fd/0` when stdin is a regular file and OS
-    /// lookup confirms the path resolves to Darwin's `fd(4)` entry for fd 0
-    /// and matches fd 0's `(dev, ino)`: hashed from offset 0 via positioned
-    /// reads (`pread`) or `mmap` without moving fd 0's cursor.
+    /// macOS `/dev/stdin` or `/dev/fd/<N>` (for any descriptor `N`) when OS
+    /// lookup confirms the path resolves to Darwin's `fd(4)` entry for a
+    /// regular file: opened via the pathname (preserving OS lookup errors and
+    /// permissions) and read from offset 0 via positioned `pread` or `mmap`
+    /// without moving the underlying open-file description's shared cursor.
     #[cfg(target_os = "macos")]
-    DarwinRegularFd0,
+    DarwinRegularDevFd,
     /// Ordinary pathname opened normally.
     Path,
 }
@@ -137,9 +201,7 @@ impl StdinContext {
         {
             let stdin = fstat_fd(0).ok();
             let cwd = std::env::current_dir().ok();
-            let cwd_in_dev_or_proc = cwd.as_ref().is_some_and(|p| p.starts_with("/dev") || p.starts_with("/proc"));
-            let cwd_is_root = cwd.as_deref() == Some(Path::new("/"));
-            Self { stdin, cwd, cwd_in_dev_or_proc, cwd_is_root }
+            Self { stdin, cwd }
         }
         #[cfg(not(unix))]
         {
@@ -153,22 +215,44 @@ impl StdinContext {
         self.stdin.filter(|m| m.kind == FileKind::Stream).map(|m| m.id)
     }
 
-    /// Fast lexical nomination: whether `path` could plausibly land under
-    /// `/dev` or `/proc` (including relative names from `/`, `/dev`, `/proc`,
-    /// or paths with `..`). This ONLY filters which operands get an OS `stat`
-    /// check; it NEVER overrides the OS's resolution.
+    /// Fast lexical nomination: whether walking `path` from `cwd` either lands
+    /// under `/dev` or `/proc` or crosses a `..` from inside a subdirectory of
+    /// `/dev` or `/proc` (such as `/dev/fd/../../self/fd/0`, where `/dev/fd`
+    /// symlinks to `/proc/self/fd`). Ordinary paths with a local directory
+    /// named `dev` or `proc` (e.g. `dev/../fifo` under `/tmp/work`) are never
+    /// nominated. This ONLY filters which operands get an OS `stat` check.
     #[cfg(unix)]
     fn might_be_dev_or_proc(&self, path: &Path) -> bool {
-        let has_parent_dir = path.components().any(|c| matches!(c, Component::ParentDir));
-        let needs_check = if path.is_absolute() {
-            path.starts_with("/dev") || path.starts_with("/proc") || has_parent_dir
+        let mut cur = if path.is_absolute() {
+            PathBuf::from("/")
         } else {
-            self.cwd_in_dev_or_proc || has_parent_dir || (self.cwd_is_root && (path.starts_with("dev") || path.starts_with("proc")))
+            let Some(cwd) = self.cwd.as_deref() else {
+                return false;
+            };
+            cwd.to_path_buf()
         };
-        if !needs_check {
-            return false;
+        let is_under = |p: &Path| p.starts_with("/dev") || p.starts_with("/proc");
+        let is_inside_subdir = |p: &Path| is_under(p) && p != Path::new("/dev") && p != Path::new("/proc");
+        for comp in path.components() {
+            match comp {
+                Component::Prefix(_) => {}
+                Component::RootDir => {
+                    cur.clear();
+                    cur.push("/");
+                }
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if is_inside_subdir(&cur) {
+                        return true;
+                    }
+                    if cur.parent().is_some() {
+                        cur.pop();
+                    }
+                }
+                Component::Normal(part) => cur.push(part),
+            }
         }
-        normalize_lexical(path, self.cwd.as_deref()).is_some_and(|norm| norm.starts_with("/dev") || norm.starts_with("/proc"))
+        is_under(&cur)
     }
 
     /// Classify `path` consistently across hashing operands, `--outboard`,
@@ -179,23 +263,16 @@ impl StdinContext {
             return InputRole::StdinDash;
         }
         #[cfg(unix)]
-        if let Some(stdin) = self.stdin
-            && self.might_be_dev_or_proc(path)
-        {
-            match stdin.kind {
-                FileKind::Stream => {
-                    if path_matches_fd_meta(path, stdin) {
-                        return InputRole::StdinStreamAlias;
-                    }
-                }
-                FileKind::Regular =>
-                {
-                    #[cfg(target_os = "macos")]
-                    if is_verified_darwin_fd0(path, stdin) {
-                        return InputRole::DarwinRegularFd0;
-                    }
-                }
-                FileKind::Other => {}
+        if self.might_be_dev_or_proc(path) {
+            if let Some(stdin) = self.stdin
+                && stdin.kind == FileKind::Stream
+                && path_matches_fd_meta(path, stdin)
+            {
+                return InputRole::StdinStreamAlias;
+            }
+            #[cfg(target_os = "macos")]
+            if is_verified_darwin_regular_dev_fd(path) {
+                return InputRole::DarwinRegularDevFd;
             }
         }
         InputRole::Path
@@ -203,8 +280,7 @@ impl StdinContext {
 }
 
 /// Lexically normalize `path` against `cwd` without touching the filesystem.
-/// Used only to decide whether to inspect a path with OS metadata calls.
-#[cfg(unix)]
+#[cfg(all(test, unix))]
 pub(crate) fn normalize_lexical(path: &Path, cwd: Option<&Path>) -> Option<PathBuf> {
     let mut out = if path.is_absolute() { PathBuf::new() } else { cwd?.to_path_buf() };
     for comp in path.components() {
@@ -226,22 +302,25 @@ pub(crate) fn normalize_lexical(path: &Path, cwd: Option<&Path>) -> Option<PathB
     Some(out)
 }
 
-/// Verify via OS resolution that `path` actually resolves to Darwin's `fd(4)`
-/// descriptor 0 entry (`/dev/stdin` -> `fd/0` or `/dev/fd/0`) AND that
-/// `stat(path)` confirms it names the same regular file as fd 0 (preserving
-/// trailing-slash errors, directory-symlink `..` semantics, and lookup errors).
+/// Verify via OS resolution that `path` resolves to a Darwin `fd(4)` entry
+/// (`/dev/fd/<N>` or a symlink in `/dev` targeting `fd/<N>`, for any open
+/// descriptor `N`) referring to a regular file, preserving trailing-slash
+/// errors, directory-symlink `..` semantics, and OS lookup errors.
 #[cfg(target_os = "macos")]
-fn is_verified_darwin_fd0(path: &Path, stdin: FdMeta) -> bool {
+fn is_verified_darwin_regular_dev_fd(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::MetadataExt;
-    // Reject trailing slash (regular file is not a directory) and verify `stat` matches fd 0.
+    fn is_fd_number(name: &std::ffi::OsStr) -> bool {
+        let bytes = name.as_bytes();
+        !bytes.is_empty() && bytes.iter().all(u8::is_ascii_digit) && std::str::from_utf8(bytes).ok().and_then(|s| s.parse::<i32>().ok()).is_some()
+    }
+    // Reject trailing slash (regular file is not a directory) and verify `stat` sees a regular file.
     if path.as_os_str().as_bytes().ends_with(b"/") {
         return false;
     }
     let Ok(meta) = std::fs::metadata(path) else {
         return false;
     };
-    if !meta.is_file() || (StreamId { dev: meta.dev(), ino: meta.ino() }) != stdin.id {
+    if !meta.is_file() {
         return false;
     }
     // Resolve the parent directory via the OS kernel (`canonicalize`) so
@@ -256,13 +335,19 @@ fn is_verified_darwin_fd0(path: &Path, stdin: FdMeta) -> bool {
     let Ok(real_parent) = std::fs::canonicalize(parent) else {
         return false;
     };
-    if real_parent == Path::new("/dev/fd") && file_name == "0" {
+    if real_parent == Path::new("/dev/fd") && is_fd_number(file_name) {
         return true;
     }
     if real_parent == Path::new("/dev") {
         let entry = real_parent.join(file_name);
         if let Ok(target) = std::fs::read_link(&entry) {
-            return target == Path::new("fd/0") || target == Path::new("/dev/fd/0");
+            let rel = target.strip_prefix("/dev/fd").or_else(|_| target.strip_prefix("fd"));
+            if let Ok(rest) = rel
+                && let Some(fd_name) = rest.file_name()
+                && rest.components().count() == 1
+            {
+                return is_fd_number(fd_name);
+            }
         }
     }
     false
@@ -270,22 +355,31 @@ fn is_verified_darwin_fd0(path: &Path, stdin: FdMeta) -> bool {
 
 /// Whether `path` currently resolves via OS `stat` to the exact same `(dev, ino)`
 /// AND file type (`S_IFMT`) as `target` (preserving symlinks, `..`, and trailing
-/// directory requirements).
+/// directory requirements), excluding cloning PTY master devices.
 #[cfg(unix)]
 pub(crate) fn path_matches_fd_meta(path: &Path, target: FdMeta) -> bool {
     use std::os::unix::fs::MetadataExt;
     std::fs::metadata(path).is_ok_and(|meta| {
         let mode_type = meta.mode() & u32::from(libc::S_IFMT);
+        #[cfg(target_os = "linux")]
+        if mode_type == u32::from(libc::S_IFCHR) && is_ptmx_rdev(meta.rdev()) {
+            return false;
+        }
         mode_type == u32::from(target.mode_type) && StreamId { dev: meta.dev(), ino: meta.ino() } == target.id
     })
 }
 
-/// Whether `path` currently resolves via OS `stat` to a stream matching `stream`.
+/// Whether `path` currently resolves via OS `stat` to a stream matching `stream`
+/// (excluding cloning PTY master devices).
 #[cfg(unix)]
 pub(crate) fn path_matches_stream(path: &Path, stream: StreamId) -> bool {
     use std::os::unix::fs::MetadataExt;
     std::fs::metadata(path).is_ok_and(|meta| {
         let mode_type = meta.mode() & u32::from(libc::S_IFMT);
+        #[cfg(target_os = "linux")]
+        if mode_type == u32::from(libc::S_IFCHR) && is_ptmx_rdev(meta.rdev()) {
+            return false;
+        }
         (mode_type == u32::from(libc::S_IFIFO) || mode_type == u32::from(libc::S_IFSOCK) || mode_type == u32::from(libc::S_IFCHR))
             && StreamId { dev: meta.dev(), ino: meta.ino() } == stream
     })
@@ -490,6 +584,11 @@ impl PreadReader {
     pub(crate) fn new(fd: RawFd, offset: u64) -> Self {
         Self { fd, offset }
     }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn offset(&self) -> u64 {
+        self.offset
+    }
 }
 
 #[cfg(unix)]
@@ -564,10 +663,29 @@ mod test {
     fn root_cwd_nominates_relative_dev_and_proc_candidates() {
         #[cfg(unix)]
         {
-            let ctx = StdinContext { stdin: None, cwd: Some(PathBuf::from("/")), cwd_in_dev_or_proc: false, cwd_is_root: true };
+            let ctx = StdinContext { stdin: None, cwd: Some(PathBuf::from("/")) };
             assert!(ctx.might_be_dev_or_proc(Path::new("dev/stdin")));
             assert!(ctx.might_be_dev_or_proc(Path::new("proc/self/fd/0")));
+            assert!(ctx.might_be_dev_or_proc(Path::new("/dev/fd/../../self/fd/0")));
+            assert!(ctx.might_be_dev_or_proc(Path::new("/tmp/../dev/fd/../../self/fd/0")));
             assert!(!ctx.might_be_dev_or_proc(Path::new("tmp/file")));
+
+            // Ordinary directory containing a subdirectory named `dev` or `proc`:
+            // `dev/../fifo` must NEVER be nominated as a `/dev` or `/proc` alias (#515).
+            let work = StdinContext { stdin: None, cwd: Some(PathBuf::from("/tmp/work")) };
+            assert!(!work.might_be_dev_or_proc(Path::new("dev/../fifo")));
+            assert!(!work.might_be_dev_or_proc(Path::new("proc/../fifo")));
+            assert!(!work.might_be_dev_or_proc(Path::new("/tmp/work/dev/../fifo")));
+            assert!(work.might_be_dev_or_proc(Path::new("../../dev/fd/0")));
+
+            // Escaping `/dev` via `..` lands outside `/dev` and must not nominate.
+            let in_dev = StdinContext { stdin: None, cwd: Some(PathBuf::from("/dev")) };
+            assert!(!in_dev.might_be_dev_or_proc(Path::new("../tmp/work/fifo")));
+            assert!(in_dev.might_be_dev_or_proc(Path::new("stdin")));
+
+            // Traversing `..` from inside `/dev/fd` can cross the `/proc/self/fd` symlink.
+            let in_dev_fd = StdinContext { stdin: None, cwd: Some(PathBuf::from("/dev/fd")) };
+            assert!(in_dev_fd.might_be_dev_or_proc(Path::new("../../self/fd/0")));
         }
     }
 

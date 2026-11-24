@@ -357,7 +357,7 @@ pub(crate) fn stdin_named_twice(paths: &[PathBuf], stdin_ctx: &StdinContext) -> 
     #[cfg(target_os = "macos")]
     let mut dash_refs = 0usize;
     #[cfg(target_os = "macos")]
-    let mut darwin_fd0_refs = 0usize;
+    let mut darwin_dev_fd_refs = 0usize;
     for path in paths {
         match stdin_ctx.classify(path) {
             InputRole::StdinDash => {
@@ -372,27 +372,33 @@ pub(crate) fn stdin_named_twice(paths: &[PathBuf], stdin_ctx: &StdinContext) -> 
                 stream_refs += 1;
             }
             #[cfg(target_os = "macos")]
-            InputRole::DarwinRegularFd0 => {
-                darwin_fd0_refs += 1;
+            InputRole::DarwinRegularDevFd => {
+                darwin_dev_fd_refs += 1;
             }
             InputRole::Path => {}
         }
     }
     #[cfg(target_os = "macos")]
-    if dash_refs > 0 && darwin_fd0_refs > 0 {
+    if dash_refs > 0 && darwin_dev_fd_refs > 0 {
         return true;
     }
     stream_refs > 1
 }
 
-/// Hash a regular-file fd 0 on macOS from offset 0 via `mmap` or positioned
-/// `pread`, without moving fd 0's shared open-file-description offset.
+/// Hash a regular-file Darwin `/dev/fd/<N>` (or `/dev/stdin`) operand from
+/// offset 0 via `mmap` or positioned `pread`, after opening `path` normally to
+/// preserve OS lookup errors and permissions, without moving the underlying
+/// open-file description's shared offset (#515).
 #[cfg(target_os = "macos")]
-fn hash_darwin_regular_fd0_hash(args: &Args) -> err::Result<blake3::Hash> {
-    let meta = file_end::fstat_fd(0)?;
+fn hash_darwin_regular_dev_fd_hash(args: &Args, path: &Path) -> err::Result<blake3::Hash> {
+    use std::os::fd::AsRawFd;
+    let file = File::open(path)?;
+    let fd = file.as_raw_fd();
+    let meta = file_end::fstat_fd(fd)?;
+    file_end::ensure_byte_stream_fd(fd, meta.mode_type)?;
     if meta.len < MAP_LEN as u64 {
         let mut buf = Vec::with_capacity((usize::try_from(meta.len).expect("len < MAP_LEN") + 1).max(4096).min(SMALL_MEM_CAP + 1));
-        let mut reader = file_end::PreadReader::new(0, 0);
+        let mut reader = file_end::PreadReader::new(fd, 0);
         let mut chunk = [0u8; 64 * 1024];
         loop {
             let n = reader.read(&mut chunk)?;
@@ -411,7 +417,7 @@ fn hash_darwin_regular_fd0_hash(args: &Args) -> err::Result<blake3::Hash> {
     }
     if let Ok(len) = usize::try_from(meta.len)
         && len >= MAP_LEN
-        && let Some(map) = args.map(&0i32)
+        && let Some(map) = args.map(&file)
     {
         if resident(&map) {
             let h = hash_slice_32(args.mode, &map);
@@ -421,7 +427,7 @@ fn hash_darwin_regular_fd0_hash(args: &Args) -> err::Result<blake3::Hash> {
         drop(map);
     }
     let mut hasher = args.base_hasher.clone();
-    update_from(&mut hasher, file_end::PreadReader::new(0, 0))?;
+    update_from(&mut hasher, file_end::PreadReader::new(fd, 0))?;
     Ok(hasher.finalize())
 }
 
@@ -454,6 +460,10 @@ pub(crate) fn hash_path_hash(args: &Args, path: &Path, stdin_ctx: &StdinContext,
                 }
                 return Ok(hr.hash);
             }
+            #[cfg(unix)]
+            if let Ok(meta) = file_end::fstat_fd(0) {
+                file_end::ensure_byte_stream_fd(0, meta.mode_type)?;
+            }
             let mut hasher = args.base_hasher.clone();
             update_from(&mut hasher, io::stdin())?;
             Ok(hasher.finalize())
@@ -471,12 +481,15 @@ pub(crate) fn hash_path_hash(args: &Args, path: &Path, stdin_ctx: &StdinContext,
             // Reuse fd 0 directly instead of reopening `/dev/stdin` (which
             // fails with ENXIO on inherited Unix sockets and can block
             // forever on a closed named FIFO).
+            if let Ok(meta) = file_end::fstat_fd(0) {
+                file_end::ensure_byte_stream_fd(0, meta.mode_type)?;
+            }
             let mut hasher = args.base_hasher.clone();
             update_from(&mut hasher, io::stdin())?;
             Ok(hasher.finalize())
         }
         #[cfg(target_os = "macos")]
-        InputRole::DarwinRegularFd0 => hash_darwin_regular_fd0_hash(args),
+        InputRole::DarwinRegularDevFd => hash_darwin_regular_dev_fd_hash(args, path),
         InputRole::Path => {
             #[cfg(unix)]
             {
@@ -522,6 +535,13 @@ pub(crate) fn hash_open_file(args: &Args, file: File) -> err::Result<blake3::Has
 /// Hash an already-opened `file`, returning the digest along with exact byte
 /// count and whether the file descriptor's cursor was advanced.
 pub(crate) fn hash_open_file_ex(args: &Args, mut file: File) -> err::Result<HashRead> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        if let Ok(fd_meta) = file_end::fstat_fd(file.as_raw_fd()) {
+            file_end::ensure_byte_stream_fd(file.as_raw_fd(), fd_meta.mode_type)?;
+        }
+    }
     if let Ok(meta) = file.metadata()
         && meta.is_file()
     {
@@ -610,6 +630,10 @@ fn hash_path(args: &Args, path: &Path, stdin_ctx: &StdinContext) -> err::Result<
             if args.keyed() {
                 bail!("Cannot open `-` in keyed mode");
             }
+            #[cfg(unix)]
+            if let Ok(meta) = file_end::fstat_fd(0) {
+                file_end::ensure_byte_stream_fd(0, meta.mode_type)?;
+            }
             update_from(&mut hasher, io::stdin())?;
         }
         #[cfg(unix)]
@@ -617,31 +641,45 @@ fn hash_path(args: &Args, path: &Path, stdin_ctx: &StdinContext) -> err::Result<
             if args.keyed() {
                 bail!("Cannot open `-` in keyed mode");
             }
+            if let Ok(meta) = file_end::fstat_fd(0) {
+                file_end::ensure_byte_stream_fd(0, meta.mode_type)?;
+            }
             update_from(&mut hasher, io::stdin())?;
         }
         #[cfg(target_os = "macos")]
-        InputRole::DarwinRegularFd0 => {
-            let meta = file_end::fstat_fd(0)?;
+        InputRole::DarwinRegularDevFd => {
+            use std::os::fd::AsRawFd;
+            let file = File::open(path)?;
+            let fd = file.as_raw_fd();
+            let meta = file_end::fstat_fd(fd)?;
+            file_end::ensure_byte_stream_fd(fd, meta.mode_type)?;
             if meta.len >= MAP_LEN as u64
-                && let Some(map) = args.map(&0i32)
+                && let Some(map) = args.map(&file)
                 && resident(&map)
             {
                 update(&mut hasher, &map);
                 hold(map);
             } else {
-                update_from(&mut hasher, file_end::PreadReader::new(0, 0))?;
+                update_from(&mut hasher, file_end::PreadReader::new(fd, 0))?;
             }
         }
         InputRole::Path => {
             let mut file = File::open(path)?;
+            #[cfg(unix)]
+            {
+                use std::os::fd::AsRawFd;
+                if let Ok(fd_meta) = file_end::fstat_fd(file.as_raw_fd()) {
+                    file_end::ensure_byte_stream_fd(file.as_raw_fd(), fd_meta.mode_type)?;
+                }
+            }
             if let Ok(meta) = file.metadata()
                 && meta.is_file()
                 && meta.len() < 64 * 1024
             {
                 let mut stack_buf = [0u8; 64 * 1024];
-                let n = fill(&mut file, &mut stack_buf)?;
+                let (n, eof) = fill(&mut file, &mut stack_buf)?;
                 update(&mut hasher, &stack_buf[..n]);
-                if n == stack_buf.len() {
+                if !eof {
                     update_from(&mut hasher, file)?;
                 }
             } else {
@@ -726,14 +764,30 @@ const DIRECT_THREADS: usize = 16;
 const MAX_THREADS: usize = 1024;
 
 static POOL_ONCE: std::sync::Once = std::sync::Once::new();
-/// Total thread count passed to `initialize_multithreaded` when `POOL_ONCE`
-/// ran (so `POOL_INIT_THREADS - 1` background workers are running).
-static POOL_INIT_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+struct ThreadBudget {
+    file_threads: usize,
+    pool_threads: usize,
+    leased_direct: usize,
+    strict: bool,
+}
+
+static THREAD_BUDGET: std::sync::Mutex<ThreadBudget> =
+    std::sync::Mutex::new(ThreadBudget { file_threads: 1, pool_threads: 0, leased_direct: 0, strict: false });
+
+fn lock_budget() -> std::sync::MutexGuard<'static, ThreadBudget> {
+    THREAD_BUDGET.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 pub(crate) fn init_pool_once(n: usize) {
-    let clamped = n.clamp(1, MAX_THREADS);
     POOL_ONCE.call_once(|| {
-        POOL_INIT_THREADS.store(clamped, std::sync::atomic::Ordering::Release);
+        let clamped = {
+            let mut b = lock_budget();
+            let limit = if b.strict { threads().get().saturating_sub(b.file_threads.saturating_add(b.leased_direct)).saturating_add(1) } else { MAX_THREADS };
+            let chosen = n.min(limit).clamp(1, MAX_THREADS);
+            b.pool_threads = chosen;
+            chosen
+        };
         blake3::initialize_multithreaded(std::num::NonZeroUsize::new(clamped));
     });
 }
@@ -742,8 +796,7 @@ pub(crate) fn init_pool_once(n: usize) {
 /// threads already started in the global pool so total simultaneous hashing
 /// threads stay within `--num-threads` across multiple batches/checkfiles.
 pub(crate) fn max_file_threads(total: usize) -> usize {
-    let pool_n = POOL_INIT_THREADS.load(std::sync::atomic::Ordering::Acquire);
-    let bg_workers = pool_n.saturating_sub(1);
+    let bg_workers = lock_budget().pool_threads.saturating_sub(1);
     total.saturating_sub(bg_workers).max(1)
 }
 
@@ -777,60 +830,34 @@ pub(crate) fn threads() -> std::num::NonZeroUsize {
     *THREADS.get_or_init(|| std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN))
 }
 
-static FILE_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
-#[cfg(any(target_os = "linux", test))]
-static STRICT_THREAD_BUDGET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-#[cfg(any(target_os = "linux", test))]
-static SPARE_DIRECT_PERMITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
 /// Scoped accounting for active file-worker threads under `--num-threads`.
-/// Initializes the shared spare permit pool for `direct::hash` so concurrent
-/// file workers share `total - file_threads` extra hashing threads rather than
-/// each multiplying the budget independently.
+/// Shares one mutex-serialized hashing thread budget across file workers,
+/// global pool background workers, and `direct::hash` helper threads (#515).
 pub(crate) struct FileThreadsGuard {
     prev_file: usize,
-    #[cfg(any(target_os = "linux", test))]
     prev_strict: bool,
-    #[cfg(any(target_os = "linux", test))]
-    prev_spare: usize,
 }
 
 impl FileThreadsGuard {
     pub(crate) fn enter(file_threads: usize) -> Self {
-        use std::sync::atomic::Ordering;
         let capped = file_threads.clamp(1, threads().get());
-        let prev_file = FILE_THREADS.swap(capped, Ordering::AcqRel);
-        #[cfg(any(target_os = "linux", test))]
-        let (prev_strict, prev_spare) = {
-            let spare = threads().get().saturating_sub(capped);
-            let prev_spare = SPARE_DIRECT_PERMITS.swap(spare, Ordering::AcqRel);
-            let prev_strict = STRICT_THREAD_BUDGET.swap(true, Ordering::AcqRel);
-            (prev_strict, prev_spare)
-        };
-        Self {
-            prev_file,
-            #[cfg(any(target_os = "linux", test))]
-            prev_strict,
-            #[cfg(any(target_os = "linux", test))]
-            prev_spare,
-        }
+        let mut b = lock_budget();
+        let prev_file = core::mem::replace(&mut b.file_threads, capped);
+        let prev_strict = core::mem::replace(&mut b.strict, true);
+        Self { prev_file, prev_strict }
     }
 }
 
 impl Drop for FileThreadsGuard {
     fn drop(&mut self) {
-        use std::sync::atomic::Ordering;
-        #[cfg(any(target_os = "linux", test))]
-        {
-            STRICT_THREAD_BUDGET.store(self.prev_strict, Ordering::Release);
-            SPARE_DIRECT_PERMITS.store(self.prev_spare, Ordering::Release);
-        }
-        FILE_THREADS.store(self.prev_file, Ordering::Release);
+        let mut b = lock_budget();
+        b.strict = self.prev_strict;
+        b.file_threads = self.prev_file;
     }
 }
 
 /// Shared lease of extra helper threads for `direct::hash` under strict
-/// `--num-threads` budgeting.
+/// `--num-threads` budgeting, serialized atomically with pool initialization.
 #[cfg(any(target_os = "linux", test))]
 pub(crate) struct DirectPermits {
     pub(crate) extra: usize,
@@ -840,21 +867,20 @@ pub(crate) struct DirectPermits {
 #[cfg(any(target_os = "linux", test))]
 impl DirectPermits {
     pub(crate) fn acquire(want_extra: usize) -> Self {
-        use std::sync::atomic::Ordering;
-        if want_extra == 0 || !STRICT_THREAD_BUDGET.load(Ordering::Acquire) {
+        if want_extra == 0 {
+            return Self { extra: 0, leased: false };
+        }
+        let mut b = lock_budget();
+        if !b.strict {
             return Self { extra: want_extra, leased: false };
         }
-        let mut cur = SPARE_DIRECT_PERMITS.load(Ordering::Acquire);
-        loop {
-            let take = cur.min(want_extra);
-            if take == 0 {
-                return Self { extra: 0, leased: false };
-            }
-            match SPARE_DIRECT_PERMITS.compare_exchange_weak(cur, cur - take, Ordering::AcqRel, Ordering::Acquire) {
-                Ok(_) => return Self { extra: take, leased: true },
-                Err(next) => cur = next,
-            }
+        let used = b.file_threads.saturating_add(b.pool_threads.saturating_sub(1)).saturating_add(b.leased_direct);
+        let take = threads().get().saturating_sub(used).min(want_extra);
+        if take == 0 {
+            return Self { extra: 0, leased: false };
         }
+        b.leased_direct += take;
+        Self { extra: take, leased: true }
     }
 }
 
@@ -862,14 +888,16 @@ impl DirectPermits {
 impl Drop for DirectPermits {
     fn drop(&mut self) {
         if self.leased && self.extra > 0 {
-            SPARE_DIRECT_PERMITS.fetch_add(self.extra, std::sync::atomic::Ordering::Release);
+            let mut b = lock_budget();
+            b.leased_direct = b.leased_direct.saturating_sub(self.extra);
         }
     }
 }
 
 pub(crate) fn pool_threads() -> std::num::NonZeroUsize {
-    let file_threads = FILE_THREADS.load(std::sync::atomic::Ordering::Relaxed);
-    std::num::NonZeroUsize::new(threads().get().saturating_sub(file_threads).saturating_add(1)).expect("at least one thread")
+    let b = lock_budget();
+    let leased_direct = if b.strict { b.leased_direct } else { 0 };
+    std::num::NonZeroUsize::new(threads().get().saturating_sub(b.file_threads.saturating_add(leased_direct)).saturating_add(1)).expect("at least one thread")
 }
 
 pub(crate) fn update(hasher: &mut blake3::convenience::Hasher, input: &[u8]) {
@@ -886,17 +914,46 @@ thread_local! {
     static BUFFERS: std::cell::RefCell<[Vec<u8>; 2]> = std::cell::RefCell::new([vec![0; PIECE], vec![0; PIECE]]);
 }
 
-fn fill(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<usize> {
+/// Minimum read request length so Linux `pipe2(O_DIRECT)` packet-mode pipes
+/// (which buffer up to one kernel `PAGE_SIZE` per packet in `fs/pipe.c` and
+/// discard any unread tail on a short `read`) never silently truncate a packet
+/// on 4 KiB, 16 KiB, or 64 KiB page kernels (#515).
+pub(crate) fn min_packet_read_len() -> usize {
+    #[cfg(target_os = "linux")]
+    {
+        static PAGE_SIZE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+        *PAGE_SIZE.get_or_init(|| {
+            // Sound: `sysconf(_SC_PAGESIZE)` queries an immutable OS constant.
+            let ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+            usize::try_from(ps).ok().filter(|&n| n >= 4096).unwrap_or(4096)
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        4096
+    }
+}
+
+/// Fill `buffer` from `reader`, returning `(bytes_read, reached_eof)`.
+/// Keeps every read request `>= min_packet_read_len()` (at least one kernel
+/// page on Linux) when filling a piece buffer so `pipe2(O_DIRECT)` packet-mode
+/// pipes never discard a packet tail on a short trailing read (#515);
+/// `reached_eof` is true only when `reader.read` actually returns `Ok(0)`.
+fn fill(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<(usize, bool)> {
+    let min_read = min_packet_read_len();
     let mut filled = 0;
     while filled < buffer.len() {
+        if filled > 0 && buffer.len() >= min_read && buffer.len() - filled < min_read {
+            return Ok((filled, false));
+        }
         match reader.read(&mut buffer[filled..]) {
-            Ok(0) => break,
+            Ok(0) => return Ok((filled, true)),
             Ok(n) => filled += n,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) => return Err(e),
         }
     }
-    Ok(filled)
+    Ok((filled, false))
 }
 
 fn update_from(hasher: &mut blake3::convenience::Hasher, reader: impl Read + Send) -> io::Result<()> {
@@ -907,30 +964,32 @@ pub(crate) fn update_from_counted(hasher: &mut blake3::convenience::Hasher, mut 
     #[cfg(test)]
     STREAMED.with(|streamed| streamed.set(streamed.get() + 1));
     BUFFERS.with_borrow_mut(|[first, second]| {
-        let mut len = fill(&mut reader, first)?;
+        let (mut len, mut eof) = fill(&mut reader, first)?;
         let mut total = len as u64;
-        if len < PIECE {
+        if eof {
             update(hasher, &first[..len]);
             return Ok(total);
         }
         if threads().get() == 1 {
             loop {
                 update(hasher, &first[..len]);
-                if len < PIECE {
+                if eof {
                     return Ok(total);
                 }
-                len = fill(&mut reader, first)?;
+                let next = fill(&mut reader, first)?;
+                len = next.0;
+                eof = next.1;
                 total += len as u64;
             }
         }
         std::thread::scope(|scope| {
             let (free_tx, free_rx) = std::sync::mpsc::sync_channel::<&mut [u8]>(1);
-            let (full_tx, full_rx) = std::sync::mpsc::sync_channel::<(&mut [u8], io::Result<usize>)>(1);
+            let (full_tx, full_rx) = std::sync::mpsc::sync_channel::<(&mut [u8], io::Result<(usize, bool)>)>(1);
             let reader = &mut reader;
             scope.spawn(move || {
                 for buffer in free_rx {
                     let read = fill(reader, buffer);
-                    let last = !matches!(read, Ok(n) if n == buffer.len());
+                    let last = !matches!(read, Ok((_, false)));
                     if full_tx.send((buffer, read)).is_err() || last {
                         break;
                     }
@@ -938,17 +997,19 @@ pub(crate) fn update_from_counted(hasher: &mut blake3::convenience::Hasher, mut 
             });
             free_tx.send(&mut second[..]).expect("the reader waits for a buffer");
             let mut current: &mut [u8] = &mut first[..];
+            let mut cur_len = len;
             loop {
-                update(hasher, current);
+                update(hasher, &current[..cur_len]);
                 let (next, read) = full_rx.recv().expect("the reader sends every piece");
-                let len = read?;
-                total += len as u64;
-                if len < next.len() {
-                    update(hasher, &next[..len]);
+                let (next_len, next_eof) = read?;
+                total += next_len as u64;
+                if next_eof {
+                    update(hasher, &next[..next_len]);
                     return Ok(total);
                 }
                 free_tx.send(current).expect("the reader waits for a buffer");
                 current = next;
+                cur_len = next_len;
             }
         })
     })
@@ -1071,6 +1132,10 @@ fn print_output(output: blake3::OutputReader, path: &Path, args: &Args, out: &mu
 }
 
 fn read_key_from_stdin() -> err::Result<[u8; blake3::KEY_LEN]> {
+    #[cfg(unix)]
+    if let Ok(meta) = file_end::fstat_fd(0) {
+        file_end::ensure_byte_stream_fd(0, meta.mode_type)?;
+    }
     let mut bytes = Vec::with_capacity(blake3::KEY_LEN + 1);
     let n = std::io::stdin().lock().take(blake3::KEY_LEN as u64 + 1).read_to_end(&mut bytes)?;
     if n < blake3::KEY_LEN {
@@ -1446,7 +1511,11 @@ fn outboard_of(
             if matches!(mode, blake3::Mode::Keyed(_)) {
                 bail!("Cannot open `-` in keyed mode");
             }
-            io::stdin().lock().read_to_end(bytes)?;
+            #[cfg(unix)]
+            if let Ok(meta) = file_end::fstat_fd(0) {
+                file_end::ensure_byte_stream_fd(0, meta.mode_type)?;
+            }
+            file_end::read_stream_to_end(&mut io::stdin().lock(), bytes)?;
             return Ok(outboard::outboard(mode, bytes, threads, &mut rooms.cvs, nodes));
         }
         #[cfg(unix)]
@@ -1454,20 +1523,27 @@ fn outboard_of(
             if matches!(mode, blake3::Mode::Keyed(_)) {
                 bail!("Cannot open `-` in keyed mode");
             }
-            io::stdin().lock().read_to_end(bytes)?;
+            if let Ok(meta) = file_end::fstat_fd(0) {
+                file_end::ensure_byte_stream_fd(0, meta.mode_type)?;
+            }
+            file_end::read_stream_to_end(&mut io::stdin().lock(), bytes)?;
             return Ok(outboard::outboard(mode, bytes, threads, &mut rooms.cvs, nodes));
         }
         #[cfg(target_os = "macos")]
-        InputRole::DarwinRegularFd0 => {
-            let meta = file_end::fstat_fd(0)?;
+        InputRole::DarwinRegularDevFd => {
+            use std::os::fd::AsRawFd;
+            let file = File::open(path)?;
+            let fd = file.as_raw_fd();
+            let meta = file_end::fstat_fd(fd)?;
+            file_end::ensure_byte_stream_fd(fd, meta.mode_type)?;
             if meta.len >= MAP_LEN as u64
-                && let Some(map) = args.map(&0i32)
+                && let Some(map) = args.map(&file)
             {
                 let hash = outboard::outboard(mode, &map, threads, &mut rooms.cvs, nodes);
                 hold(map);
                 return Ok(hash);
             }
-            file_end::pread_all_into(0, bytes)?;
+            file_end::pread_all_into(fd, bytes)?;
             return Ok(outboard::outboard(mode, bytes, threads, &mut rooms.cvs, nodes));
         }
         InputRole::Path => {}
@@ -1493,7 +1569,18 @@ fn outboard_of(
         hold(map);
         return Ok(hash);
     }
-    file.read_to_end(bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        if let Ok(fd_meta) = file_end::fstat_fd(file.as_raw_fd()) {
+            file_end::ensure_byte_stream_fd(file.as_raw_fd(), fd_meta.mode_type)?;
+        }
+    }
+    if meta.is_file() {
+        file.read_to_end(bytes)?;
+    } else {
+        file_end::read_stream_to_end(&mut file, bytes)?;
+    }
     Ok(outboard::outboard(mode, bytes, threads, &mut rooms.cvs, nodes))
 }
 
@@ -1681,55 +1768,104 @@ fn check_one_checkfile(path: &Path, args: &Args, stdin_ctx: &StdinContext, files
     let stdin;
     let mut stdin_lock;
     #[cfg(target_os = "macos")]
-    let mut darwin_pread;
+    let mut darwin_pread = file_end::PreadReader::new(0, 0);
     let mut bufreader: io::BufReader<&mut dyn Read>;
     #[cfg(unix)]
     let own: Option<StreamId>;
     #[cfg(not(unix))]
     let own: Option<()> = None;
     let checkfile_is_stdin;
+    #[cfg(target_os = "macos")]
+    let mut darwin_stdin_dash_pread = false;
+    let check_buf_cap = min_packet_read_len().max(64 * 1024);
     match stdin_ctx.classify(path) {
         InputRole::StdinDash => {
             checkfile_is_stdin = true;
             #[cfg(unix)]
-            {
+            let _stdin_meta = {
                 let meta = file_end::fstat_fd(0)?;
+                file_end::ensure_byte_stream_fd(0, meta.mode_type)?;
                 own = (meta.kind == file_end::FileKind::Stream).then_some(meta.id);
+                meta
+            };
+            #[cfg(target_os = "macos")]
+            {
+                if _stdin_meta.kind == file_end::FileKind::Regular {
+                    // Sound: `lseek(SEEK_CUR)` queries fd 0's current offset without touching memory.
+                    let start = unsafe { libc::lseek(0, 0, libc::SEEK_CUR) }.max(0) as u64;
+                    darwin_pread = file_end::PreadReader::new(0, start);
+                    darwin_stdin_dash_pread = true;
+                    bufreader = io::BufReader::with_capacity(check_buf_cap, &mut darwin_pread);
+                } else {
+                    stdin = io::stdin();
+                    stdin_lock = stdin.lock();
+                    bufreader = io::BufReader::with_capacity(check_buf_cap, &mut stdin_lock);
+                }
             }
-            stdin = io::stdin();
-            stdin_lock = stdin.lock();
-            bufreader = io::BufReader::new(&mut stdin_lock);
+            #[cfg(not(target_os = "macos"))]
+            {
+                stdin = io::stdin();
+                stdin_lock = stdin.lock();
+                bufreader = io::BufReader::with_capacity(check_buf_cap, &mut stdin_lock);
+            }
         }
         #[cfg(unix)]
         InputRole::StdinStreamAlias => {
             checkfile_is_stdin = true;
             let meta = file_end::fstat_fd(0)?;
+            file_end::ensure_byte_stream_fd(0, meta.mode_type)?;
             own = (meta.kind == file_end::FileKind::Stream).then_some(meta.id);
             stdin = io::stdin();
             stdin_lock = stdin.lock();
-            bufreader = io::BufReader::new(&mut stdin_lock);
+            bufreader = io::BufReader::with_capacity(check_buf_cap, &mut stdin_lock);
         }
         #[cfg(target_os = "macos")]
-        InputRole::DarwinRegularFd0 => {
+        InputRole::DarwinRegularDevFd => {
+            use std::os::fd::AsRawFd;
             checkfile_is_stdin = false;
             own = None;
-            darwin_pread = file_end::PreadReader::new(0, 0);
-            bufreader = io::BufReader::new(&mut darwin_pread);
+            file = File::open(path)?;
+            let meta = file_end::fstat_fd(file.as_raw_fd())?;
+            file_end::ensure_byte_stream_fd(file.as_raw_fd(), meta.mode_type)?;
+            darwin_pread = file_end::PreadReader::new(file.as_raw_fd(), 0);
+            bufreader = io::BufReader::with_capacity(check_buf_cap, &mut darwin_pread);
         }
         InputRole::Path => {
             file = File::open(path)?;
             #[cfg(unix)]
-            {
+            let _meta = {
                 use std::os::fd::AsRawFd;
                 let meta = file_end::fstat_fd(file.as_raw_fd())?;
+                file_end::ensure_byte_stream_fd(file.as_raw_fd(), meta.mode_type)?;
                 own = (meta.kind == file_end::FileKind::Stream).then_some(meta.id);
                 checkfile_is_stdin = own.is_some() && own == stdin_ctx.stdin_stream_id();
-            }
+                meta
+            };
             #[cfg(not(unix))]
             {
                 checkfile_is_stdin = false;
             }
-            bufreader = io::BufReader::new(&mut file);
+            #[cfg(target_os = "macos")]
+            {
+                use std::os::fd::AsRawFd;
+                if _meta.kind == file_end::FileKind::Regular {
+                    // On macOS, opening `/dev/fd/N` shares the underlying open
+                    // file description offset (`fd(4)`). Reading a regular
+                    // checkfile via positioned `pread` prevents any `-` or
+                    // `/dev/fd/M` entry from advancing the parser cursor behind
+                    // its back (#515).
+                    // Sound: `lseek(SEEK_CUR)` queries the current offset without touching memory.
+                    let start = unsafe { libc::lseek(file.as_raw_fd(), 0, libc::SEEK_CUR) }.max(0) as u64;
+                    darwin_pread = file_end::PreadReader::new(file.as_raw_fd(), start);
+                    bufreader = io::BufReader::with_capacity(check_buf_cap, &mut darwin_pread);
+                } else {
+                    bufreader = io::BufReader::with_capacity(check_buf_cap, &mut file);
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                bufreader = io::BufReader::with_capacity(check_buf_cap, &mut file);
+            }
         }
     }
 
@@ -1814,6 +1950,12 @@ fn check_one_checkfile(path: &Path, args: &Args, stdin_ctx: &StdinContext, files
             }
         }
     }
+    #[cfg(target_os = "macos")]
+    if darwin_stdin_dash_pread {
+        drop(bufreader);
+        // Sound: `lseek` updates fd 0's offset to match the consumed checkfile bytes.
+        unsafe { libc::lseek(0, darwin_pread.offset() as libc::off_t, libc::SEEK_SET) };
+    }
     ensure!(saw_line, "{}: no checksum entries", path.display());
     Ok(())
 }
@@ -1856,6 +1998,7 @@ fn main() -> err::Result<()> {
     blake3::__confine_cli_to_one_node();
     if let Some(requested) = args.num_threads() {
         THREADS.set(cap_requested_threads(requested)).expect("main sets the threads first");
+        lock_budget().strict = true;
     }
     let stdin_ctx = StdinContext::current();
     let mut out = OutBuf::new();
