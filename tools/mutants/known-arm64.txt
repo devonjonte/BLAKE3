@@ -34,6 +34,7 @@ src/each.rs	replace hash_held with ()	1	as on aarch64: survives (known-aarch64.t
 src/each.rs	replace | with & in by_blocks_at_once	3	[cpu has FEAT_SHA3] equivalent here: changes only the SHA-3-free prefix/scalar path; this CPU hashes the whole group through the last-lane kernels instead. Cortex-A72 CI exercises the prefix/scalar path
 src/each.rs	replace | with ^ in by_blocks_at_once	4	equivalent: the mode flags have none of CHUNK_START, CHUNK_END or ROOT, so OR and XOR join disjoint bits
 src/each.rs	replace | with ^ in hash_cohort	1	as on aarch64: survives (known-aarch64.txt): equivalent: | and ^ agree on flag bits that never overlap; on x86_64: survives (known-x86_64.txt): equivalent: | and ^ agree on flag bits that never overlap
+src/each.rs	replace | with ^ in hash_each_middle	3	equivalent: | and ^ agree on disjoint mode and PARENT/ROOT flag bits
 src/ffi_counter.rs	replace * with + in hash_counter_groups	2	x86-64 only: AVX-512 and AVX2 arms are compiled out on arm64
 src/ffi_counter.rs	replace * with / in hash_counter_groups	2	x86-64 only: AVX-512 and AVX2 arms are compiled out on arm64
 src/ffi_counter.rs	replace += with *= in hash_counter_groups	2	x86-64 only: AVX-512 and AVX2 arms are compiled out on arm64
