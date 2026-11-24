@@ -22,14 +22,15 @@ Changes landed on `next` since `0.10.0` (unreleased).
   hardware DIT guarantee should enable `DIT` in their threads across
   both hashing and digest verification.
 
-## Supply-chain hardening (`#479`)
+## Supply-chain hardening (`#479`, `#487`)
 
-- **Zero third-party runtime dependencies in shipped library crates**
+- **Zero third-party runtime or build dependencies in shipped library crates**
   (`blake3-servil-core`, `blake3-servil`, `blake3-servil-c`) on every
-  supported platform (`6366776f`): owned `src/ct.rs` replaces
-  `constant_time_eq`, and AArch64 `sysctlbyname`/`getauxval` use direct
+  supported platform (`6366776f`, `e36ef4d1`): owned `src/ct.rs` replaces
+  `constant_time_eq`, AArch64 `sysctlbyname`/`getauxval` use direct
   `extern "C"` with native `#[link(name = "c")]` directives (`libc` is
-  dev-only).
+  dev-only), and all assembly kernels compile via `core::arch::global_asm!`
+  (dropping `cc` and external C-compiler requirements for library builds).
 - **`b3sums` trimmed to `blake3-servil` + `libc`** (`2c221200`):
   replaced `memmap2`, `anyhow`, `tempfile`, `duct`, and `hex`, shrinking
   `b3sum/Cargo.lock` from 57 to 26 registry packages.
@@ -58,6 +59,36 @@ Changes landed on `next` since `0.10.0` (unreleased).
   `DETECTED` publication on weak-memory CPUs, and Unix `stop()` requires
   exact `pfd.revents == POLLOUT` (fixing broken-pipe `SIGPIPE` in C hosts
   and `b3sum`) with an `alarm(1)` guard on raw `write(2)`.
+- **Enforced per-function stack budgets (`#499`, `04b9489d`):**
+  `tools/stack_budget.py` parses ELF `.stack_sizes` in `tools/check-builds.sh`
+  (≤ 128 KiB `core`/`b3sum`, ≤ 32 KiB `Hasher` non-update APIs, ≤ 16 KiB
+  `threads`).
+- **`b3sum` OS edge-case hardening (`#515`, `d8318dc3`):** rejects
+  `SOCK_SEQPACKET`/`SOCK_DGRAM` inputs across all paths, keeps `pipe2(O_DIRECT)`
+  packet reads ≥ `sysconf(_SC_PAGESIZE)` across `fill()`,
+  `read_stream_to_end()`, and checkfile `BufReader`, anchors
+  `/dev`/`/proc` checks at root and excludes `/dev/ptmx`, isolates
+  macOS `/dev/fd/<N>` regular-file offsets via `PreadReader`, and shares
+  one `ThreadBudget` across `--num-threads`.
+
+## Performance and new APIs (`#501`, `#509`, `#512`, `#527`)
+
+- **Direct-load SIMD `Packed<16/32/48>` kernels across all 4 ISAs
+  (`#501`, `36402294`):** AVX-512 16-way, AVX2 8-way, Apple SME2 16-way,
+  and AArch64 NEON `8+3` 11-way (`no_std`, 36/36 Z3 proofs), removing
+  the 8 KiB stack expansion on full SIMD groups — up to `2.55×` faster
+  `Packed<32>` on Apple M6 (`18.77 → 7.36 ns/h`), `-42.5%` (`1.74×`) on
+  Apple M4 `MerkleTree 65536×32 B`, and `-21.1%` on Ryzen 9700X.
+- **Zero-copy `Packed<N>` & `Pipeline` ergonomics (`#509`, `#512`,
+  `d13e5037`, `7b7a4509`, `905e5eba`, `1ecb67ff`):** added `Packed<48>`,
+  borrowed `&[[u8; 16/32/48]]` via `Prepared + ?Sized`,
+  `Pipeline::message_with` for per-message `Mode`, `Pipeline::with_batches`
+  / `with_owners_and_batches` accepting `Packed<16/32/48>`, `Vec<[u8; N]>`,
+  and `Box<[[u8; N]]>`, and compression-work-based batch admission.
+- **AArch64 `128..1024 B` borrowed-group SIMD (`#527`, `172da807`):**
+  enabled 2–16 block borrowed-message SIMD grouping on AArch64 — `-53.3%`
+  (`2.14×`) on Apple M6 `ContinuousMessages | 1 KiB`, `-35.7%` on `512 B`,
+  and `-18.8%` to `-31.8%` on `InterleavedTurn` (zero regressions).
 
 ---
 

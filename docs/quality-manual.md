@@ -650,8 +650,10 @@ status 1.
 
 ## Check it yourself
 
-On an Apple Silicon Mac, or on Linux with a C compiler that assembles
-SME2 (clang 17 or later; set `CC=clang-19` or similar):
+Building the shipped library crates requires only `rustc` (LLVM assembles
+both x86-64 and AArch64/SME2 kernels directly via `core::arch::global_asm!`).
+To run the full test and check suite (which also compiles the official
+`blake3` reference oracle and `capi/` tests with a C compiler):
 
 ```sh
 git clone -b main https://github.com/servil-software-factory/BLAKE3 && cd BLAKE3
