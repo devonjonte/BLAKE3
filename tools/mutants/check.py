@@ -743,7 +743,7 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None, tkn
         # and made each build 10% slower, the run no faster, October 21).
         tests = ["--test", "shuttle_finish", "--test", "shuttle_park", "--test", "shuttle_waker"] if loom else ["--lib", "--tests"]
         shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", *tests]
-        runs.append((tree, subprocess.Popen(shard, cwd=os.path.join(tree, CRATE), env=env, preexec_fn=capped(shards))))
+        runs.append((tree, shard, subprocess.Popen(shard, cwd=os.path.join(tree, CRATE), env=env, preexec_fn=capped(shards))))
         envs[tree] = env
     names = collections.Counter()
     timed = collections.Counter()  # the time-outs, by name: their own outcome
@@ -751,10 +751,23 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None, tkn
     rows = []  # (mutant name, function, test, outcome, ms); the unmutated tree's mutant name is UNMUTATED
     kept = os.path.join(last(), "map" if MAP and label == "run" else label)
     shutil.rmtree(kept, ignore_errors=True)
-    for k, (tree, process) in enumerate(runs):
+    for k, (tree, shard, process) in enumerate(runs):
         # 0: every mutant caught; 2: some missed; 3: some timed out. Any
         # other status (a failing unmutated baseline) is no result.
-        assert process.wait() in (0, 2, 3), f"cargo mutants failed ({process.returncode}) in {tree}"
+        rc = process.wait()
+        if rc == 4:
+            # A persistent shard target dir can occasionally carry a stale
+            # incremental CGU across commits (e.g. missing _anon.*.llvm.*).
+            # Wipe that shard's incremental + deps caches and retry once.
+            shard_target = envs[tree]["CARGO_TARGET_DIR"]
+            shutil.rmtree(os.path.join(shard_target, "mutants"), ignore_errors=True)
+            shutil.rmtree(os.path.join(tree, "mutants-result"), ignore_errors=True)
+            if "MUTANTS_SAME_CODE" in envs[tree]:
+                shutil.rmtree(envs[tree]["MUTANTS_SAME_CODE"], ignore_errors=True)
+                os.makedirs(envs[tree]["MUTANTS_SAME_CODE"])
+            print(f"RETRY: shard {k} baseline build failed (rc=4) in {tree}; cleared {shard_target}/mutants and retrying once", flush=True)
+            rc = subprocess.run(shard, cwd=os.path.join(tree, CRATE), env=envs[tree], preexec_fn=capped(shards)).returncode
+        assert rc in (0, 2, 3), f"cargo mutants failed ({rc}) in {tree}"
         out = os.path.join(tree, "mutants-result", "mutants.out")
         # No mutants.out when there was nothing to test (a diff of no
         # mutants), so none of its files.
