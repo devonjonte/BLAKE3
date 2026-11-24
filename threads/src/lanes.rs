@@ -4191,6 +4191,49 @@ mod test {
             }),
             "at MIN_SPLIT_LEN: the pool"
         );
+        // Packed<16> and Packed<32> take one 64-byte compression per message,
+        // so both cross MIN_SPLIT_LEN at MIN_SPLIT_LEN / BLOCK_LEN messages.
+        let min_packed = MIN_SPLIT_LEN / crate::BLOCK_LEN;
+        let mut packed_out = std::vec![[0u8; crate::OUT_LEN]; min_packed];
+        let p16_under = crate::throughput::Packed::<16>::new(min_packed - 1);
+        let p16_at = crate::throughput::Packed::<16>::new(min_packed);
+        let p32_under = crate::throughput::Packed::<32>::new(min_packed - 1);
+        let p32_at = crate::throughput::Packed::<32>::new(min_packed);
+        assert!(
+            !went_to_pool(&mut || crate::throughput::hash_many_multithreaded(crate::Mode::Plain, &p16_under, &mut packed_out[..min_packed - 1])),
+            "Packed<16> under MIN_SPLIT_LEN compressions: serial"
+        );
+        assert!(
+            went_to_pool(&mut || crate::throughput::hash_many_multithreaded(crate::Mode::Plain, &p16_at, &mut packed_out)),
+            "Packed<16> at MIN_SPLIT_LEN compressions: the pool"
+        );
+        assert!(
+            !went_to_pool(&mut || crate::throughput::hash_many_multithreaded(crate::Mode::Plain, &p32_under, &mut packed_out[..min_packed - 1])),
+            "Packed<32> under MIN_SPLIT_LEN compressions: serial"
+        );
+        assert!(
+            went_to_pool(&mut || crate::throughput::hash_many_multithreaded(crate::Mode::Plain, &p32_at, &mut packed_out)),
+            "Packed<32> at MIN_SPLIT_LEN compressions: the pool"
+        );
+        // Digest-oracle check in the newly split band with distinct inputs and a non-power-of-two tail.
+        let tail_count = min_packed + 37;
+        let mut p16_tail = crate::throughput::Packed::<16>::new(tail_count);
+        let mut p32_tail = crate::throughput::Packed::<32>::new(tail_count);
+        for i in 0..tail_count {
+            let b0 = (i & 0xff) as u8;
+            let b1 = ((i >> 8) & 0xff) as u8;
+            p16_tail[i] = [b0, b1, b0 ^ 0x5A, b1 ^ 0xA5, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+            p32_tail[i][..16].copy_from_slice(&p16_tail[i]);
+            p32_tail[i][16..].fill(b0.wrapping_add(b1));
+        }
+        let mut out16 = std::vec![[0u8; crate::OUT_LEN]; tail_count];
+        let mut out32 = std::vec![[0u8; crate::OUT_LEN]; tail_count];
+        assert!(went_to_pool(&mut || crate::throughput::hash_many_multithreaded(crate::Mode::Plain, &p16_tail, &mut out16)), "Packed<16> tail batch uses pool");
+        assert!(went_to_pool(&mut || crate::throughput::hash_many_multithreaded(crate::Mode::Plain, &p32_tail, &mut out32)), "Packed<32> tail batch uses pool");
+        for i in 0..tail_count {
+            assert_eq!(out16[i], *blake3_servil_core::convenience::hash(&p16_tail[i]).as_bytes(), "Packed<16> msg {i}");
+            assert_eq!(out32[i], *blake3_servil_core::convenience::hash(&p32_tail[i]).as_bytes(), "Packed<32> msg {i}");
+        }
     }
 
     const US: fn(u64) -> std::time::Duration = std::time::Duration::from_micros;
