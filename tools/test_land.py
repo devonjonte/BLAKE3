@@ -14,14 +14,19 @@ class Gates(unittest.TestCase):
         self.assertEqual(land.required(["AGENTS.md", "docs/core-api.md"]), ())
 
     def test_code_needs_every_gate_and_proof_inputs_the_proofs(self):
-        base = ("CI", "check-builds", "mutants x86_64", "mutants aarch64", "mutants arm64", "tests aarch64", "tests arm64", "cells")
-        shipped = base + ("review",)
-        self.assertEqual(land.required(["src/lib.rs", "README.md"]), shipped)
-        for path in ("threads/src/pipeline.rs", "b3sum/src/main.rs", "capi/b3.h", "capi/src/lib.rs", "build.rs", "Cargo.toml", "version/src/lib.rs"):
-            self.assertEqual(land.required([path]), shipped, path)
+        base = ("CI", "check-builds", "mutants x86_64", "mutants arm64", "tests aarch64", "tests arm64")
+        shipped_non_perf = base + ("review",)
+        shipped_perf = base + ("cells", "review")
+        self.assertEqual(land.required(["src/lib.rs", "README.md"]), shipped_perf)
+        for path in ("threads/src/pipeline.rs", "build.rs", "Cargo.toml", "threads/Cargo.toml", "version/src/lib.rs"):
+            self.assertEqual(land.required([path]), shipped_perf, path)
+        for path in ("Cargo.lock", "threads/Cargo.lock"):
+            self.assertEqual(land.required([path]), base + ("cells",), f"perf lockfile only: {path}")
+        for path in ("b3sum/src/main.rs", "b3sum/Cargo.toml", "capi/b3.h", "capi/src/lib.rs"):
+            self.assertEqual(land.required([path]), shipped_non_perf, f"shipped but not benchmarked lib: {path}")
         for path in ("tools/land.py", "tools/runner/runner.py", "tools/mutants/known-arm64.txt", ".github/workflows/ci.yml", "tests/lifecycle.rs", "b3sum/tests/cli_tests.rs"):
             self.assertEqual(land.required([path]), base, f"not shipped code: {path}")
-        self.assertEqual(land.required(["c/blake3_neon_hybrid_aarch64.S"]), shipped + ("long proofs",))
+        self.assertEqual(land.required(["c/blake3_neon_hybrid_aarch64.S"]), shipped_perf + ("long proofs",))
         for path in ("tools/verify/canon.py", "tools/gen_neon_hybrid.py", "c2sp/BLAKE3/Blake3.lean"):
             self.assertEqual(land.required([path]), base + ("long proofs",), path)
 
@@ -136,13 +141,12 @@ class Subjects(unittest.TestCase):
 class Landable(unittest.TestCase):
     def test_the_status_text_fits_github_for_every_set_of_gates(self):
         base = "0123456789abcdef"
-        for paths in (["AGENTS.md"], ["src/lib.rs"], ["c/x.S"]):
+        for paths in (["AGENTS.md"], ["tools/land.py"], ["b3sum/src/main.rs"], ["src/lib.rs"], ["c/x.S"]):
             text = land.landable(base, list(land.required(paths)))
             self.assertLessEqual(len(text), 140, paths)
             self.assertTrue(text.startswith("every gate green on top of 0123456789ab: "))
         self.assertIn("check-builds", land.landable(base, ["CI", "check-builds", "cells"]), "the gates by name while they fit")
-        self.assertTrue(land.landable(base, list(land.required(["src/lib.rs"]))).endswith(": 9 gates"))
-        self.assertTrue(land.landable(base, list(land.required(["c/x.S"]))).endswith(": 10 gates"))
+        self.assertTrue(land.landable(base, list(land.required(["c/x.S"]))).endswith(": 9 gates"))
         self.assertTrue(land.landable(base, []).endswith("*.md only"))
 
 

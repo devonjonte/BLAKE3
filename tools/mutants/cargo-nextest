@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""cargo-nextest, narrowed to the tests a mutant can reach (check.py).
+"""cargo-nextest shim for mutation runs (check.py).
 
 check.py puts this file's directory first on PATH for a mutation run, so
-cargo-mutants' `cargo nextest run ...` arrives here. The worktree holds
-one mutant (cargo-mutants --in-place): its diff against HEAD names the
-lines it changed, and the map of the tests' lines (tools/tests/reach.py,
-tmp/tests-map/<tree id>.tsv for HEAD's tree) names the tests that ran
-them. Those tests run, through the real cargo-nextest, with a filterset;
-the rest cannot see the mutant. Where the rule says every test (a change
-outside a function, or no map for HEAD's tree), every test runs, as
-without this file. The outcome a mutant gets is the same as the whole
-suite's would be, in a fraction of the time: the mutant's tests alone.
+cargo-mutants' `cargo nextest run ...` arrives here. It does two things:
+
+1. Fast-fail ordering (`MUTANTS_FAST_LIB=1`): when both `--lib` and `--tests`
+   are requested, run the fast `--lib` unit tests first and only run `--tests`
+   integration tests if `--lib` passes. A mutant killed by a millisecond unit
+   test fails immediately instead of hanging behind a blocking integration test.
+   When `MUTANTS_SAME_CODE` is active (Linux ELF hashing), a quick `nextest list`
+   populates `.stat` for every binary first so `same-code` checks stay whole-suite.
+2. Reach narrowing (`MUTANTS_REACH=1`): narrows the run with `-E` to the tests
+   that ran the mutated lines (tools/tests/reach.py).
 
 Every other invocation (list, --no-run) passes straight through.
 """
@@ -55,22 +56,69 @@ def narrowed(args):
     return " | ".join(f"(binary_id(={t.split(' ', 1)[0]}) & test(={t.split(' ', 1)[1]}))" for t in sorted(chosen))
 
 
-def main():
-    args = sys.argv[1:]
-    # cargo invokes `cargo-nextest nextest run ...`.
-    command = [real_nextest(), *args]
+def with_extra(args, extra):
+    """Insert nextest flags before `--` (if present), else at the end."""
+    if not extra:
+        return list(args)
+    at = args.index("--") if "--" in args else len(args)
+    return [*args[:at], *extra, *args[at:]]
+
+
+def list_command(real, args):
+    """Build the `nextest list` command matching `args` (minus any `-- ...`)."""
+    at = args.index("--") if "--" in args else len(args)
+    return [real, "nextest", "list", *args[2:at]]
+
+
+def phase_commands(real, args, expr):
+    """Split a `--lib --tests` run into `[lib_cmd, tests_cmd]`."""
+    extra = ["--no-tests=pass"] + (["-E", expr] if expr is not None else [])
+    lib_args = [a for a in args if a != "--tests"]
+    tests_args = [a for a in args if a != "--lib"]
+    return [
+        [real, *with_extra(lib_args, extra)],
+        [real, *with_extra(tests_args, extra)],
+    ]
+
+
+def dispatch(args, env, real, run_cmd, exec_cmd, narrow_fn=narrowed):
+    """Execute nextest for `args`, returning the exit status (or execing)."""
     is_run = len(args) >= 2 and args[0] == "nextest" and args[1] == "run" and "--no-run" not in args
-    if is_run and os.environ.get("MUTANTS_REACH") == "1":
+    expr = None
+    if is_run and env.get("MUTANTS_REACH") == "1":
         try:
-            expr = narrowed(args)
+            expr = narrow_fn(args)
         except Exception as error:  # a failure to narrow is no reason to misjudge: every test
             print(f"cargo-nextest shim: every test ({error})", file=sys.stderr)
             expr = None
-        if expr is not None:
-            # Before the `--` that separates nextest's arguments from the tests'.
-            at = args.index("--") if "--" in args else len(args)
-            command = [real_nextest(), *args[:at], "-E", expr, *args[at:]]
-    os.execv(command[0], command)
+
+    if is_run and env.get("MUTANTS_FAST_LIB") == "1" and "--lib" in args and "--tests" in args:
+        if env.get("MUTANTS_SAME_CODE"):
+            # Let test-runner record `.stat` for every binary (--lib and --tests)
+            # so same-code hashing compares the entire test set, not --lib alone.
+            run_cmd(list_command(real, args), stdout=subprocess.DEVNULL)
+        lib_cmd, tests_cmd = phase_commands(real, args, expr)
+        rc = run_cmd(lib_cmd)
+        if rc != 0:
+            return rc
+        return run_cmd(tests_cmd)
+
+    cmd = [real, *with_extra(args, ["-E", expr] if expr is not None else [])]
+    exec_cmd(cmd)
+    return 0
+
+
+def main():
+    real = real_nextest()
+
+    def run_cmd(cmd, stdout=None):
+        return subprocess.run(cmd, stdout=stdout).returncode
+
+    def exec_cmd(cmd):
+        os.execv(cmd[0], cmd)
+
+    rc = dispatch(sys.argv[1:], os.environ, real, run_cmd, exec_cmd)
+    sys.exit(rc)
 
 
 if __name__ == "__main__":

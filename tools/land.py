@@ -18,14 +18,27 @@ The gates of a commit, from what it changes against next:
   nothing but *.md files           none (the fast-forward alone)
   anything else                    the jobs of the tests' workflow on the
                                    commit (ci.yml), all green; check-builds;
-                                   mutants on x86_64, aarch64 and arm64;
-                                   tests on aarch64 and arm64; cells
+                                   mutants on x86_64 and arm64;
+                                   tests on aarch64 and arm64
+  benchmarked library code (src/, c/, build.rs, Cargo.toml, Cargo.lock,
+                            threads/src/, threads/build.rs,
+                            threads/Cargo.toml, threads/Cargo.lock,
+                            version/src/, version/Cargo.toml)
+                                   cells as well
   shipped code (src/, c/, build.rs, threads/src/, threads/build.rs,
                 b3sum/src/, capi/src/, capi/b3.h, version/src/,
                 the crates' Cargo.toml)
                                    review as well
   proof inputs (c/, c2sp/, tools/verify/, the generators)
                                    long proofs as well
+
+(November 23, 2026: Zooko approved dropping per-landing `mutants aarch64`
+on arm-vm and scoping `cells` to benchmarked library code after Nov 23's
+wall-clock audit showed arm-vm mutants cost 7.1 hours across 19 runs with
+0 unique defects — while native x86_64 [1.5m] and Mac M6 arm64+SME2 [1.7m]
+cover mutation testing fast, and `tests aarch64` stays on arm-vm. arm-vm
+mutants remain available on demand for pre-release checks via
+tools/mutants/check.py.)
 
 `gate` runs check-builds and the x86-64 mutants here, in a worktree of
 their own at COMMIT. The others run where they run (the Arm VM, the Mac,
@@ -54,7 +67,13 @@ import sys
 REPO = "servil-software-factory/BLAKE3"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCAL = ("check-builds", "mutants x86_64")
-ELSEWHERE = ("mutants aarch64", "mutants arm64", "tests aarch64", "tests arm64", "cells")
+ELSEWHERE = ("mutants arm64", "tests aarch64", "tests arm64")
+RECORDABLE = ELSEWHERE + LOCAL + ("cells", "review", "long proofs")
+PERF_CODE = (
+    "src/", "c/", "build.rs", "Cargo.toml", "Cargo.lock",
+    "threads/src/", "threads/build.rs", "threads/Cargo.toml", "threads/Cargo.lock",
+    "version/src/", "version/Cargo.toml",
+)
 SHIPPED_CODE = (
     "src/", "c/", "build.rs", "Cargo.toml",
     "threads/src/", "threads/build.rs", "threads/Cargo.toml",
@@ -77,8 +96,16 @@ def api(path, *fields, method="GET"):
     return json.loads(out.stdout) if out.stdout.strip() else None
 
 
+def _matches(path, rules):
+    return any(path.startswith(p) if p.endswith("/") else path == p for p in rules)
+
+
+def is_perf(path):
+    return _matches(path, PERF_CODE)
+
+
 def is_shipped(path):
-    return any(path.startswith(p) if p.endswith("/") else path == p for p in SHIPPED_CODE)
+    return _matches(path, SHIPPED_CODE)
 
 
 def required(paths):
@@ -86,6 +113,8 @@ def required(paths):
     if all(p.endswith(".md") for p in paths):
         return ()
     gates = ("CI",) + LOCAL + ELSEWHERE
+    if any(is_perf(p) for p in paths):
+        gates += ("cells",)
     if any(is_shipped(p) for p in paths):
         gates += ("review",)
     if any(p.startswith(PROOF_INPUTS) for p in paths):
@@ -233,8 +262,8 @@ def main(argv):
     if len(argv) < 2 or argv[0] not in ("status", "gate", "record", "land"):
         sys.exit(__doc__)
     if argv[0] == "record":
-        if len(argv) != 5 or argv[1] not in ELSEWHERE + LOCAL + ("long proofs",):
-            sys.exit("land: record GATE COMMIT success|failure DESCRIPTION, GATE one of: " + ", ".join(ELSEWHERE + LOCAL + ("long proofs",)))
+        if len(argv) != 5 or argv[1] not in RECORDABLE:
+            sys.exit("land: record GATE COMMIT success|failure DESCRIPTION, GATE one of: " + ", ".join(RECORDABLE))
         post(git("rev-parse", argv[2] + "^{commit}"), argv[1], argv[3], argv[4])
         return
     sha, base, paths = resolve(argv[1])

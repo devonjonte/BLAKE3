@@ -727,14 +727,18 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None, tkn
             # compile them beside Shuttle's primitives): every schedule it
             # tries, in place of the suite's one schedule and its clock.
             env["RUSTFLAGS"] = os.environ.get("RUSTFLAGS", "") + " --cfg shuttle"
-        elif REACH:
-            # Each mutant's tests alone: tools/mutants/cargo-nextest, first
-            # on PATH, narrows cargo-mutants' nextest run to the tests that
-            # ran the mutated lines (the map tools/tests/reach.py keeps for
-            # HEAD's tree), the whole suite where the rule says so.
+        else:
+            # Put tools/mutants/cargo-nextest first on PATH for every normal
+            # mutation run: it executes fast `--lib` unit tests before `--tests`
+            # integration tests so mutants killed by unit tests fail in
+            # milliseconds instead of hanging behind slow integration tests, and
+            # when REACH is enabled it also narrows tests to those that ran the
+            # mutated lines (tools/tests/reach.py).
             env["PATH"] = os.path.join(tree, "tools", "mutants") + os.pathsep + env.get("PATH", "")
-            env["MUTANTS_REACH"] = "1"
-            env["TESTS_MAP_DIR"] = os.path.join(ROOT, "tmp", "tests-map")
+            env["MUTANTS_FAST_LIB"] = "1"
+            if REACH:
+                env["MUTANTS_REACH"] = "1"
+                env["TESTS_MAP_DIR"] = os.path.join(ROOT, "tmp", "tests-map")
         # Consecutive slices (cargo-mutants' default): a shard's mutants in one
         # file one after another rebuild less (round-robin evened the shards
         # and made each build 10% slower, the run no faster, October 21).
