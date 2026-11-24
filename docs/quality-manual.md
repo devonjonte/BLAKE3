@@ -14,7 +14,7 @@ discipline, and release promotion rules), see the
 
 | Platform | Its kernels | Checked |
 |---|---|---|
-| 64-bit Arm: Apple Silicon, Linux and macOS | generated assembly: NEON with integer lanes, and SME2 on Apple M4 | **proved** at every block and group count, and tested |
+| 64-bit Arm: Apple Silicon, Linux and macOS | generated assembly: NEON with integer lanes, and SME2 on Apple M4 and later (tested natively on Apple M6) | **proved** at every block and group count, and tested |
 | x86-64: Linux | BLAKE3-Servil's generated assembly: whole chunks with a partial one, the chunk root, and on AVX-512 32 whole chunks or 16 parent nodes at once (dispatched on AMD Zen 5 and later) | **proved** for every input, and tested |
 | | upstream's assembly, its symbols renamed and its batch kernels' loads kept within each input (bug 8, below) | **proved** at every shape the crate calls (below), and tested |
 
@@ -32,7 +32,7 @@ release's measure of assurance.
 | Worker reads state after its owner frees it | Pipeline worker-visible state lives for the process | correct reuse or synchronization of that state |
 | A wait loses a wake or races on a waker | Shuttle checks the production finish/park/waker modules; `tools/check-waker-order.py` compiles the Apple Arm64 wait handshakes (`WakerSlot`, `Park`, `sme2_serve`) and verifies their fences against `RCpc` loads, rejecting unfenced controls | every possible schedule, or weak-memory paths outside those handshakes |
 | The Pipeline hands a result, a Room or a storage over too early, or loses a wake | Shuttle runs the whole of `pipeline.rs` against a stand-in pool; ten planted faults each make that model fail | schedules not tried, weak-memory execution, and the pool itself, which the model replaces |
-| An `unsafe` block rests on a reason no one wrote down | every block of `pipeline.rs` and of `b3sum` states its reason; a check refuses one without | that each stated reason is true: they are read by people and by the audits, not proved |
+| An `unsafe` block rests on a reason no one wrote down | every `unsafe` block across all five shipped crates and build scripts carries a `// Sound:` comment verified by `tools/unsafe_reasons.py` (0 undocumented blocks); `tools/counts.py` blocks rising counts of undocumented `unsafe`, `debug_assert!`, and narrowing-cast allows | that each stated reason is true: they are read by people and by the audits, not proved |
 | Kernel still writes an I/O buffer after error recovery frees it | failed `io_uring_enter` aborts before recovery or unwind; a ring dropped with reads in flight aborts; a panic in `b3sum` aborts | every other lifetime or cancellation path |
 | File name replaced after the file is opened | every path hashes the file already open; direct reads reopen that descriptor through procfs | a coherent snapshot against concurrent writes to that inode: a file changed while it is hashed can give the hash of bytes it never held (`b3sum/README.md`, #443) |
 | Incomplete output, or empty verification input, reported as success | output errors propagated; each checkfile must contain a line, and each invalid line fails | complete directory verification or authentication of the expected digests |
@@ -119,10 +119,12 @@ coverage; the tests also check calls into them and the other platforms.
   such), or code that does nothing (removed).
 
 **Contracts and hangs.** Types enforce preconditions first. Ordinary
-contract checks use `debug_assert!`; release builds omit those checks.
-Checks that cheaply prevent memory mismanagement or a silently wrong
-result run in every build. A failed safety check stops the call or the
-process, rather than selecting an unchecked continuation.
+contract checks use `debug_assert!` (every shipped `debug_assert!` carries
+a site comment explaining why it cannot run in release builds, and
+`tools/counts.py` blocks rising `debug_assert!` counts); release builds
+omit those checks. Checks that cheaply prevent memory mismanagement or a
+silently wrong result run in every build. A failed safety check stops the
+call or the process, rather than selecting an unchecked continuation.
 
 A mistake that would give a wrong digest with no error is made
 impossible where a type can: the batch calls take a `Batch`, which lets
@@ -280,7 +282,9 @@ authenticate a binary.
   (`test_every_multithreaded_call_inside_guard_pages`:
   `hash_multithreaded`, `update_multithreaded` and the rest). The C API has its own
   (`capi/tests/guard_pages.rs`), with the hasher's state in guarded
-  memory as well. A byte planted past an input (in `throughput::hash`)
+  memory as well. Custom guard-page global allocators (`tests/guard_alloc.rs`,
+  `threads/tests/guard_alloc.rs`) back every heap allocation with trailing
+  inaccessible pages during full test runs. A byte planted past an input (in `throughput::hash`)
   or past an output (in `b3_hasher_finalize_xof`) crashes them. They found
   bug 8 below as a crash.
 - **On the Mac**: every suite in debug builds (overflow checks and
@@ -653,10 +657,12 @@ SME2 (clang 17 or later; set `CC=clang-19` or similar):
 git clone -b main https://github.com/servil-software-factory/BLAKE3 && cd BLAKE3
 cargo nextest run --release --lib --tests         # the one-thread crate
 cargo nextest run --release --manifest-path threads/Cargo.toml --lib --tests
-cargo nextest run --release --manifest-path b3sum/Cargo.toml --tests
+cargo nextest run --release --manifest-path b3sum/Cargo.toml --lib --tests
 cargo test --release --doc                        # each doc example in its own process
 cargo nextest run --release --manifest-path test_vectors/Cargo.toml
 cargo nextest run --release --manifest-path capi/Cargo.toml   # the C API
+sh tools/check-builds.sh                          # full target×feature -D warnings, Shuttle, controls, counts
+python3 tools/dependency_policy.py                # cargo-deny + cargo-vet + lockfile checks
 ```
 
 The tests need [cargo-nextest](https://nexte.st).
@@ -1026,8 +1032,12 @@ BLAKE3-Servil's concrete checks and measured numbers:
   and `python3 tools/dependency_policy.py controls` (10 planted faults)
   enforce `deny.toml`, `--locked` builds, and `cargo-vet` across both the
   release workspace and standalone `b3sum/` (`b3sum` trimmed to
-  `blake3-servil` + `libc`, `b3sum/Cargo.lock` 57 → 26 packages in
-  `2c221200`). Reproducible release verification runs via
+  `blake3-servil` + `libc`, `b3sum/Cargo.lock` 57 → 26 in `2c221200`;
+  optional `serde` and direct test deps trimmed, `tools/release/Cargo.lock`
+  112 → 61 and exemptions 86 → 45 in `15194e18`; `src/ct.rs` and AArch64
+  runtime `libc` removed in `6366776f`, giving shipped libraries **zero
+  third-party runtime dependencies** on every supported platform).
+  Reproducible release verification runs via
   `tools/release_artifacts.py TAG --published --rebuilt`.
 - **Wall-clock gate calibration (Nov 23, 2026):** across all 7 `#499`
   commits, cross-family GPT Astra landing reviews averaged 14 min (78
