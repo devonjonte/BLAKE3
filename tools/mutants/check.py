@@ -104,6 +104,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -464,16 +465,6 @@ def test_limits(shards, cpus, total):
     return threads, min(memory_cap(shards), (total - (4 << 30)) // (shards * threads))
 
 
-def capped(shards):
-    """The shard's preexec_fn, which caps its data on Linux; None on macOS,
-    which enforces no RLIMIT_DATA on memory a program maps (its malloc's),
-    and where setting it stopped every shard (runner jobs 1865-1867)."""
-    if sys.platform != "linux":
-        return None
-    cap = memory_cap(shards)
-    return lambda: cap_memory(cap)
-
-
 def cap_memory(cap):
     """In a shard's child before it runs (preexec_fn): its data limit, `cap`
     bytes, computed in the parent (memory_cap): a child forked from a
@@ -481,6 +472,139 @@ def cap_memory(cap):
     (macOS's sysctl there stopped every shard, runner job 1866)."""
     import resource
     resource.setrlimit(resource.RLIMIT_DATA, (cap, cap))
+
+
+def _prepare_shard_child(cap):
+    os.setsid()
+    cap_memory(cap)
+
+
+def shard_spawn_kwargs(shards):
+    """Keyword arguments for Popen so every shard runs in its own session /
+    process group (allowing `stop_shards` to end the shard and all of its
+    cargo/rustc/nextest children together, BLAKE3 #465). Caps data on Linux
+    only: macOS enforces no RLIMIT_DATA on mmap'd malloc memory, and setting
+    it there stopped every shard (runner jobs 1865-1867)."""
+    if sys.platform != "linux":
+        return {"start_new_session": True}
+    cap = memory_cap(shards)
+    return {"preexec_fn": lambda: _prepare_shard_child(cap)}
+
+
+def _kill_group(pid, sig):
+    try:
+        os.killpg(pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _group_alive(pid):
+    try:
+        os.killpg(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def stop_shards(active, grace=2.0, clear_incremental=None):
+    """End every still-running shard process group in `active` (`(tree, proc)`
+    pairs) with SIGTERM, escalating to SIGKILL after `grace` seconds, reap
+    each process, and clear `mutants/incremental` for any shard interrupted
+    mid-build so half-written incremental CGUs cannot poison the next run."""
+    running = [(tree, proc) for tree, proc in active if proc.poll() is None]
+    if not running:
+        return
+    for _, proc in running:
+        _kill_group(proc.pid, signal.SIGTERM)
+    deadline = time.monotonic() + grace
+    still_procs = []
+    for tree, proc in running:
+        left = max(0.0, deadline - time.monotonic())
+        try:
+            proc.wait(timeout=left)
+        except subprocess.TimeoutExpired:
+            still_procs.append((tree, proc))
+    # Also wait briefly for any surviving descendants in exited leaders' groups.
+    while time.monotonic() < deadline and any(_group_alive(proc.pid) for _, proc in running):
+        time.sleep(0.02)
+    for _, proc in running:
+        if proc.poll() is None or _group_alive(proc.pid):
+            _kill_group(proc.pid, signal.SIGKILL)
+    for _, proc in still_procs:
+        try:
+            proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            pass
+    if clear_incremental:
+        for tree, _ in running:
+            target = clear_incremental.get(tree)
+            if target:
+                shutil.rmtree(os.path.join(target, "mutants", "incremental"), ignore_errors=True)
+
+
+def run_shards(specs, envs, shards, cwd_fn=lambda tree: os.path.join(tree, CRATE), grace=2.0):
+    """Spawn every `(tree, shard)` in its own process group and wait until all
+    finish (retrying a baseline `rc == 4` once after clearing `target/mutants`),
+    requiring `rc in (0, 2, 3)`. If any shard fails — regardless of shard index —
+    or an interrupt arrives, immediately stop every sibling shard's process
+    group and clear their interrupted incremental caches before propagating the
+    error (BLAKE3 #465)."""
+    spawn_kwargs = shard_spawn_kwargs(shards)
+    pending = []
+    active = []
+    retried = set()
+    completed = False
+    try:
+        for k, (tree, shard) in enumerate(specs):
+            proc = subprocess.Popen(shard, cwd=cwd_fn(tree), env=envs[tree], **spawn_kwargs)
+            pending.append([k, tree, shard, proc])
+            active.append((tree, proc))
+        while pending:
+            progressed = False
+            next_pending = []
+            for entry in pending:
+                k, tree, shard, process = entry
+                rc = process.poll()
+                if rc is None:
+                    next_pending.append(entry)
+                    continue
+                progressed = True
+                # 0: every mutant caught; 2: some missed; 3: some timed out. Any
+                # other status (a failing unmutated baseline) is no result.
+                if rc == 4 and k not in retried:
+                    # A persistent shard target dir can occasionally carry a stale
+                    # incremental CGU across commits (e.g. missing _anon.*.llvm.*).
+                    # Wipe that shard's incremental + deps caches and retry once.
+                    retried.add(k)
+                    shard_target = envs[tree]["CARGO_TARGET_DIR"]
+                    shutil.rmtree(os.path.join(shard_target, "mutants"), ignore_errors=True)
+                    shutil.rmtree(os.path.join(tree, "mutants-result"), ignore_errors=True)
+                    if "MUTANTS_SAME_CODE" in envs[tree]:
+                        shutil.rmtree(envs[tree]["MUTANTS_SAME_CODE"], ignore_errors=True)
+                        os.makedirs(envs[tree]["MUTANTS_SAME_CODE"])
+                    print(f"RETRY: shard {k} baseline build failed (rc=4) in {tree}; cleared {shard_target}/mutants and retrying once", flush=True)
+                    retry = subprocess.Popen(shard, cwd=cwd_fn(tree), env=envs[tree], **spawn_kwargs)
+                    active.append((tree, retry))
+                    next_pending.append([k, tree, shard, retry])
+                    continue
+                assert rc in (0, 2, 3), f"cargo mutants failed ({rc}) in {tree}"
+            pending = next_pending
+            if pending and not progressed:
+                time.sleep(0.05)
+        completed = True
+    finally:
+        if not completed:
+            stop_shards(active, grace=grace, clear_incremental={t: e["CARGO_TARGET_DIR"] for t, e in envs.items()})
+
+
+def install_sigterm_handler():
+    """Turn SIGTERM into SystemExit so `finally:` blocks clean up running
+    shards instead of leaving orphaned cargo/rustc processes behind."""
+    def _on_term(_signum, _frame):
+        raise SystemExit(128 + signal.SIGTERM)
+    signal.signal(signal.SIGTERM, _on_term)
 
 
 def with_model(label, found, timed):
@@ -743,31 +867,16 @@ def run(files, extra=(), shards=SHARDS, label="run", loom=False, known=None, tkn
         # and made each build 10% slower, the run no faster, October 21).
         tests = ["--test", "shuttle_finish", "--test", "shuttle_park", "--test", "shuttle_waker"] if loom else ["--lib", "--tests"]
         shard = args + ["--shard", f"{k}/{shards}", "--output", os.path.join(tree, "mutants-result"), "--", *tests]
-        runs.append((tree, shard, subprocess.Popen(shard, cwd=os.path.join(tree, CRATE), env=env, preexec_fn=capped(shards))))
+        runs.append((tree, shard))
         envs[tree] = env
+    run_shards(runs, envs, shards)
     names = collections.Counter()
     timed = collections.Counter()  # the time-outs, by name: their own outcome
     functions = collections.defaultdict(list)  # (file, function) -> [(outcome, name)]
     rows = []  # (mutant name, function, test, outcome, ms); the unmutated tree's mutant name is UNMUTATED
     kept = os.path.join(last(), "map" if MAP and label == "run" else label)
     shutil.rmtree(kept, ignore_errors=True)
-    for k, (tree, shard, process) in enumerate(runs):
-        # 0: every mutant caught; 2: some missed; 3: some timed out. Any
-        # other status (a failing unmutated baseline) is no result.
-        rc = process.wait()
-        if rc == 4:
-            # A persistent shard target dir can occasionally carry a stale
-            # incremental CGU across commits (e.g. missing _anon.*.llvm.*).
-            # Wipe that shard's incremental + deps caches and retry once.
-            shard_target = envs[tree]["CARGO_TARGET_DIR"]
-            shutil.rmtree(os.path.join(shard_target, "mutants"), ignore_errors=True)
-            shutil.rmtree(os.path.join(tree, "mutants-result"), ignore_errors=True)
-            if "MUTANTS_SAME_CODE" in envs[tree]:
-                shutil.rmtree(envs[tree]["MUTANTS_SAME_CODE"], ignore_errors=True)
-                os.makedirs(envs[tree]["MUTANTS_SAME_CODE"])
-            print(f"RETRY: shard {k} baseline build failed (rc=4) in {tree}; cleared {shard_target}/mutants and retrying once", flush=True)
-            rc = subprocess.run(shard, cwd=os.path.join(tree, CRATE), env=envs[tree], preexec_fn=capped(shards)).returncode
-        assert rc in (0, 2, 3), f"cargo mutants failed ({rc}) in {tree}"
+    for k, (tree, _shard) in enumerate(runs):
         out = os.path.join(tree, "mutants-result", "mutants.out")
         # No mutants.out when there was nothing to test (a diff of no
         # mutants), so none of its files.
@@ -1547,13 +1656,28 @@ def every_crate():
     statuses = []
     for crate in crates:
         print(f"mutants: the crate {'at the root' if crate == '.' else 'in ' + crate + '/'}", flush=True)
-        statuses.append(subprocess.run([sys.executable, os.path.abspath(__file__), *sys.argv[1:], "--crate", crate],
-                                       env=env, pass_fds=[lock.fileno() for lock in held.files]).returncode)
+        child = subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), *sys.argv[1:], "--crate", crate],
+            env=env,
+            pass_fds=[lock.fileno() for lock in held.files],
+        )
+        try:
+            statuses.append(child.wait())
+        except BaseException:
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait()
+            raise
     print(f"mutants: {len(statuses)} crates took {round(time.monotonic() - started)} s in all")
     sys.exit(next((s for s in (1, 2) if s in statuses), max(statuses)))
 
 
 if __name__ == "__main__":
+    install_sigterm_handler()
     if "--crate" in sys.argv or "--help" in sys.argv or "-h" in sys.argv:
         main()
     else:

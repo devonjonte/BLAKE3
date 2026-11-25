@@ -1,5 +1,11 @@
 """A change's shards: today's count everywhere it was measured, more only
-where the machine has the CPUs and the memory and the change has the mutants."""
+where the machine has the CPUs and the memory and the change has the mutants,
+and sibling shard process-group cleanup when a shard fails or is interrupted."""
+import os
+import subprocess
+import sys
+import tempfile
+import time
 import unittest
 
 import check
@@ -50,6 +56,91 @@ class Count(unittest.TestCase):
                 shards = check.shard_count(mutants, wide)
                 self.assertTrue(check.SHARDS <= shards <= wide)
                 self.assertTrue(shards == check.SHARDS or mutants // shards >= 8, (mutants, wide, shards))
+
+
+class Cleanup(unittest.TestCase):
+    @staticmethod
+    def _alive(pid):
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
+    def _wait_dead(self, pid, timeout=3.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not self._alive(pid):
+                return True
+            time.sleep(0.05)
+        return not self._alive(pid)
+
+    def test_run_shards_kills_sibling_process_groups_and_clears_incremental_on_failure(self):
+        # Shard 0 spawns a long-lived child in its process group while shard 1
+        # fails baseline twice (rc=4): run_shards must fail fast without waiting
+        # for shard 0, terminate both shard 0 and its child, and wipe only the
+        # interrupted shard's incremental dir.
+        with tempfile.TemporaryDirectory() as tmp:
+            t0, t1 = os.path.join(tmp, "s0"), os.path.join(tmp, "s1")
+            tgt0, tgt1 = os.path.join(tmp, "tgt0"), os.path.join(tmp, "tgt1")
+            inc0 = os.path.join(tgt0, "mutants", "incremental")
+            os.makedirs(t0)
+            os.makedirs(t1)
+            os.makedirs(inc0)
+            with open(os.path.join(inc0, "partial.o"), "wb"):
+                pass
+            pidfile = os.path.join(tmp, "child.pid")
+            shard0 = ["sh", "-c", f"sleep 30 & pid=$!; echo $pid > {pidfile}.tmp && mv {pidfile}.tmp {pidfile}; wait"]
+            shard1 = [
+                sys.executable,
+                "-c",
+                f"import os, sys, time\n"
+                f"deadline = time.monotonic() + 5.0\n"
+                f"while not os.path.exists({pidfile!r}) and time.monotonic() < deadline:\n"
+                f"    time.sleep(0.02)\n"
+                f"sys.exit(4)\n",
+            ]
+            envs = {
+                t0: dict(os.environ, CARGO_TARGET_DIR=tgt0),
+                t1: dict(os.environ, CARGO_TARGET_DIR=tgt1),
+            }
+            started = time.monotonic()
+            with self.assertRaises(AssertionError):
+                check.run_shards([(t0, shard0), (t1, shard1)], envs, shards=2, cwd_fn=lambda t: t, grace=1.0)
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 5.0, "failing shard 1 must abort running shard 0 immediately")
+            self.assertTrue(os.path.exists(pidfile), "shard 0 spawned its child before shard 1 failed")
+            with open(pidfile) as f:
+                child_pid = int(f.read().strip())
+            self.assertTrue(self._wait_dead(child_pid), f"grandchild {child_pid} left alive after shard failure")
+            self.assertFalse(os.path.exists(inc0), "interrupted shard incremental cache cleared")
+
+    def test_stop_shards_escalates_to_sigkill_and_leaves_finished_caches_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            done_tree, hung_tree = os.path.join(tmp, "done"), os.path.join(tmp, "hung")
+            done_tgt, hung_tgt = os.path.join(tmp, "tgt-done"), os.path.join(tmp, "tgt-hung")
+            done_inc = os.path.join(done_tgt, "mutants", "incremental")
+            hung_inc = os.path.join(hung_tgt, "mutants", "incremental")
+            for d in (done_tree, hung_tree, done_inc, hung_inc):
+                os.makedirs(d)
+            done_proc = subprocess.Popen([sys.executable, "-c", "pass"], **check.shard_spawn_kwargs(2))
+            done_proc.wait()
+            ready = os.path.join(tmp, "ready")
+            hung_proc = subprocess.Popen(
+                ["sh", "-c", f"trap '' TERM; : > {ready}; sleep 30"],
+                **check.shard_spawn_kwargs(2),
+            )
+            deadline = time.monotonic() + 3.0
+            while not os.path.exists(ready) and time.monotonic() < deadline:
+                time.sleep(0.02)
+            check.stop_shards(
+                [(done_tree, done_proc), (hung_tree, hung_proc)],
+                grace=0.2,
+                clear_incremental={done_tree: done_tgt, hung_tree: hung_tgt},
+            )
+            self.assertIsNotNone(hung_proc.poll(), "SIGTERM-ignoring shard killed via SIGKILL")
+            self.assertTrue(os.path.exists(done_inc), "already-finished shard incremental cache kept")
+            self.assertFalse(os.path.exists(hung_inc), "killed shard incremental cache cleared")
 
 
 if __name__ == "__main__":
