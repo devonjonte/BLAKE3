@@ -292,12 +292,15 @@ where
         push_positional(&mut file, arg)?;
     }
 
-    // Requirements and conflicts (identical to the previous clap definition).
+    // Requirements and conflicts (plus rejecting contradictory `--raw --tag`, #465).
     if keyed && file.is_empty() {
         return Err("the following required arguments were not provided:\n  <FILE>...".to_owned());
     }
     if derive_key.is_some() && keyed {
         return Err("the argument '--derive-key <CONTEXT>' cannot be used with '--keyed'".to_owned());
+    }
+    if raw && tag {
+        return Err("the argument '--raw' cannot be used with '--tag'".to_owned());
     }
     if check {
         for (present, other) in [

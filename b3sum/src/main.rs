@@ -219,21 +219,37 @@ impl Args {
     }
 }
 
-/// 32 KiB buffered writer over stdout so multi-file runs make one `write`
-/// syscall per 32 KiB rather than one `LineWriter` flush per filename, while
+/// Buffered writer over stdout: flushes each completed text line immediately
+/// when stdout is a terminal, and buffers up to 32 KiB when redirected to a
+/// pipe or file so multi-file runs make one `write` syscall per 32 KiB while
 /// still hitting `SIGPIPE` on closed pipes (`test_reader_gone`). Tracks
 /// partial writes and poisons itself on fatal errors so already-delivered
 /// prefixes are never duplicated on later flushes.
 pub(crate) struct OutBuf {
     buf: Vec<u8>,
     poisoned: bool,
+    flush_each_line: bool,
 }
 
 const OUT_BUF_CAP: usize = 32 * 1024;
 
 impl OutBuf {
     fn new() -> Self {
-        Self { buf: Vec::with_capacity(OUT_BUF_CAP), poisoned: false }
+        use std::io::IsTerminal as _;
+        Self { buf: Vec::with_capacity(OUT_BUF_CAP), poisoned: false, flush_each_line: io::stdout().is_terminal() }
+    }
+
+    #[inline]
+    fn is_line_flushed(&self) -> bool {
+        self.flush_each_line
+    }
+
+    #[inline]
+    fn finish_line(&mut self) -> io::Result<()> {
+        if self.flush_each_line {
+            self.flush()?;
+        }
+        Ok(())
     }
 
     #[inline]
@@ -1079,7 +1095,7 @@ pub(crate) fn print_hash_output(hash: blake3::Hash, path: &Path, args: &Args, ou
     if args.no_names() {
         write_hash_text(&hash, args, out)?;
         out.write_bytes(b"\n")?;
-        return Ok(());
+        return out.finish_line().map_err(Into::into);
     }
 
     // Fast zero-allocation path when valid UTF-8 (or ASCII) without `\`, `\n`, `\r`!
@@ -1098,7 +1114,7 @@ pub(crate) fn print_hash_output(hash: blake3::Hash, path: &Path, args: &Args, ou
             out.write_bytes(s.as_bytes())?;
             out.write_bytes(b"\n")?;
         }
-        return Ok(());
+        return out.finish_line().map_err(Into::into);
     }
 
     let FilepathString { filepath_string, is_escaped } = filepath_to_string(path);
@@ -1117,6 +1133,7 @@ pub(crate) fn print_hash_output(hash: blake3::Hash, path: &Path, args: &Args, ou
         out.write_bytes(filepath_string.as_bytes())?;
         out.write_bytes(b"\n")?;
     }
+    out.finish_line()?;
     Ok(())
 }
 
@@ -1157,7 +1174,7 @@ fn print_output(output: blake3::OutputReader, path: &Path, args: &Args, out: &mu
     if args.no_names() {
         write_text_output(output, args, out)?;
         out.write_bytes(b"\n")?;
-        return Ok(());
+        return out.finish_line().map_err(Into::into);
     }
     let FilepathString { filepath_string, is_escaped } = filepath_to_string(path);
     if is_escaped {
@@ -1169,12 +1186,13 @@ fn print_output(output: blake3::OutputReader, path: &Path, args: &Args, out: &mu
         out.write_bytes(b") = ")?;
         write_text_output(output, args, out)?;
         out.write_bytes(b"\n")?;
-        return Ok(());
+        return out.finish_line().map_err(Into::into);
     }
     write_text_output(output, args, out)?;
     out.write_bytes(b"  ")?;
     out.write_bytes(filepath_string.as_bytes())?;
     out.write_bytes(b"\n")?;
+    out.finish_line()?;
     Ok(())
 }
 
@@ -1635,6 +1653,29 @@ fn hash_inputs(args: &Args, stdin_ctx: &StdinContext, out: &mut OutBuf) -> u64 {
     if let Some(dir) = args.outboard() {
         return outboard_inputs(args, dir, stdin_ctx, out);
     }
+    if out.is_line_flushed() {
+        // Interactive terminal output: hash and flush each operand in order
+        // before opening the next so a later blocking FIFO/stream never holds
+        // back earlier ready hashes (while each large file still uses all
+        // hashing threads). Redirected runs stay on the batched pipelines (#465).
+        let mut failed = 0u64;
+        for path in &args.file_args {
+            let res = if args.is_standard_32() {
+                hash_path_hash(args, path, stdin_ctx, None).and_then(|h| print_hash_output(h, path, args, out))
+            } else {
+                hash_path(args, path, stdin_ctx).and_then(|o| print_output(o, path, args, out))
+            };
+            if let Err(e) = res {
+                failed = failed.saturating_add(1);
+                let _ = out.flush();
+                eprintln_safe!("{}: {}: {}", NAME, path.to_string_lossy(), e);
+                if out.is_poisoned() {
+                    break;
+                }
+            }
+        }
+        return failed;
+    }
     if args.is_standard_32() {
         let mut failed = 0u64;
         hash_paths_32(args, &args.file_args, stdin_ctx, None, &mut |idx, res| {
@@ -1728,6 +1769,7 @@ fn emit_checked_entry(parsed: ParsedCheckLine, res: err::Result<blake3::Hash>, a
         Ok(h) => h,
         Err(e) => {
             out.write_bytes(format!("{}: FAILED ({})\n", display, e).as_bytes())?;
+            out.finish_line()?;
             return Ok(false);
         }
     };
@@ -1736,11 +1778,13 @@ fn emit_checked_entry(parsed: ParsedCheckLine, res: err::Result<blake3::Hash>, a
         if !args.quiet() {
             out.write_bytes(display.as_bytes())?;
             out.write_bytes(b": OK\n")?;
+            out.finish_line()?;
         }
         Ok(true)
     } else {
         out.write_bytes(display.as_bytes())?;
         out.write_bytes(b": FAILED\n")?;
+        out.finish_line()?;
         Ok(false)
     }
 }
@@ -2096,6 +2140,8 @@ mod test {
         assert!(parse_from(["b3sum", "--check", "--length", "32"]).is_err());
         assert!(parse_from(["b3sum", "--check", "--raw"]).is_err());
         assert!(parse_from(["b3sum", "--check", "--tag"]).is_err());
+        assert!(parse_from(["b3sum", "--raw", "--tag"]).is_err());
+        assert!(parse_from(["b3sum", "--tag", "--raw"]).is_err());
         assert!(parse_from(["b3sum", "--check", "--no-names"]).is_err());
         assert!(parse_from(["b3sum", "--check", "--keyed", "f"]).is_err());
         assert!(parse_from(["b3sum", "--check", "--derive-key", "x"]).is_err());
@@ -2114,5 +2160,21 @@ mod test {
         assert!(parse_from(["b3sum", "--length"]).is_err());
         assert!(parse_from(["b3sum", "--num-threads", "0"]).is_err());
         assert!(parse_from(["b3sum", "--unknown"]).is_err());
+    }
+
+    #[test]
+    fn test_outbuf_buffers_when_not_line_flushed() {
+        // Under cargo-nextest stdout is redirected to a pipe (not a terminal):
+        // OutBuf must keep line bytes buffered across finish_line() until
+        // OUT_BUF_CAP or explicit flush(), preserving piped batching (#465).
+        let mut out = crate::OutBuf { buf: Vec::with_capacity(crate::OUT_BUF_CAP), poisoned: false, flush_each_line: false };
+        assert!(!out.is_line_flushed());
+        out.write_bytes(b"abc  file\n").unwrap();
+        out.finish_line().unwrap();
+        assert_eq!(out.buf.as_slice(), b"abc  file\n", "redirected OutBuf must retain bytes across finish_line");
+        // With line flushing enabled, finish_line drains the buffer immediately.
+        out.flush_each_line = true;
+        out.finish_line().unwrap();
+        assert!(out.buf.is_empty(), "terminal OutBuf must drain on finish_line");
     }
 }
