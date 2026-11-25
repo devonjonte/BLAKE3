@@ -1677,3 +1677,203 @@ fn test_check_64_byte_non_ascii_hex_does_not_abort() {
         assert_eq!(String::from_utf8(out.stdout).unwrap(), "good.bin: OK\n");
     }
 }
+
+#[test]
+fn test_raw_conflicts_with_tag() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("f.bin");
+    fs::write(&file, b"hello").unwrap();
+    for flags in [["--raw", "--tag"], ["--tag", "--raw"]] {
+        let out = cmd!(b3sum_exe(), flags[0], flags[1], &file).stdout_capture().stderr_capture().unchecked().run().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{flags:?}");
+        assert!(out.stdout.is_empty(), "{flags:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("--raw") && stderr.contains("--tag"), "{flags:?}: {stderr}");
+    }
+}
+
+#[cfg(unix)]
+mod pty_helpers {
+    use std::ffi::CString;
+    use std::fs;
+    use std::io::Read as _;
+    use std::os::fd::FromRawFd as _;
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    use std::path::Path;
+    use std::process::Child;
+
+    pub struct ChildGuard(pub Option<Child>);
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            if let Some(mut c) = self.0.take() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        }
+    }
+
+    pub fn make_fifo(path: &Path) {
+        let cpath = CString::new(path.as_os_str().as_bytes()).expect("fifo path has no NUL");
+        // Sound: `cpath` is a NUL-terminated path string.
+        assert_eq!(unsafe { libc::mkfifo(cpath.as_ptr(), 0o600) }, 0, "mkfifo: {}", std::io::Error::last_os_error());
+    }
+
+    /// Allocate a PTY master/slave pair; caller keeps `slave` open until all
+    /// expected output lines have been read from `master` (preventing macOS
+    /// XNU `ptsclose` teardown from discarding buffered lines on child exit).
+    pub fn open_pty() -> (fs::File, fs::File) {
+        // Sound: standard POSIX PTY setup sequence on freshly opened master fd.
+        let (master, slave_path) = unsafe {
+            let fd = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
+            assert!(fd >= 0, "posix_openpt: {}", std::io::Error::last_os_error());
+            assert_eq!(libc::grantpt(fd), 0, "grantpt");
+            assert_eq!(libc::unlockpt(fd), 0, "unlockpt");
+            let name = libc::ptsname(fd);
+            assert!(!name.is_null(), "ptsname");
+            let path = std::ffi::CStr::from_ptr(name).to_str().unwrap().to_owned();
+            (fs::File::from_raw_fd(fd), path)
+        };
+        let slave = fs::OpenOptions::new().read(true).write(true).custom_flags(libc::O_NOCTTY).open(&slave_path).unwrap();
+        (master, slave)
+    }
+
+    /// Read blocking from `master` until `n` complete lines (`\n`-terminated)
+    /// have accumulated in `buf`, returning those lines stripped of `\r\n`.
+    /// Relies on nextest's single hang timeout rather than private wall clocks.
+    pub fn read_lines(master: &mut fs::File, buf: &mut Vec<u8>, n: usize) -> Vec<String> {
+        let mut tmp = [0u8; 512];
+        loop {
+            if buf.iter().filter(|&&b| b == b'\n').count() >= n {
+                let text = String::from_utf8_lossy(buf);
+                return text.split('\n').take(n).map(|l| l.trim_end_matches('\r').to_owned()).collect();
+            }
+            match master.read(&mut tmp) {
+                Ok(0) => panic!("unexpected PTY EOF after reading {:?}", String::from_utf8_lossy(buf)),
+                Ok(k) => buf.extend_from_slice(&tmp[..k]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => panic!("PTY read error: {e}"),
+            }
+        }
+    }
+}
+
+/// When stdout is a terminal, `b3sum` flushes each completed result line before
+/// opening the next operand, so a later writerless FIFO never holds back earlier
+/// hashes across single-thread, multi-thread, `--tag`, `--no-names`, and XOF
+/// (`--length`) modes (#465).
+#[test]
+#[cfg(unix)]
+fn test_terminal_stdout_flushes_before_opening_blocked_fifo() {
+    use std::io::Write as _;
+    blake3::initialize();
+
+    let dir = tempfile::tempdir().unwrap();
+    let first_bytes = b"immediate-terminal-line";
+    let second_bytes = b"second-after-fifo";
+    fs::write(dir.path().join("first.txt"), first_bytes).unwrap();
+    let fifo = dir.path().join("gate.fifo");
+    pty_helpers::make_fifo(&fifo);
+
+    let h1 = blake3::convenience::hash(first_bytes).to_hex().to_string();
+    let h2 = blake3::convenience::hash(second_bytes).to_hex().to_string();
+    let mut xof1 = [0u8; 64];
+    let mut xof2 = [0u8; 64];
+    blake3::convenience::Hasher::new(blake3::Mode::Plain, None).update(first_bytes).finalize_xof().fill(&mut xof1);
+    blake3::convenience::Hasher::new(blake3::Mode::Plain, None).update(second_bytes).finalize_xof().fill(&mut xof2);
+    let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let x1 = hex(&xof1);
+    let x2 = hex(&xof2);
+
+    let cases: &[(&[&str], String, String)] = &[
+        (&["--num-threads", "1", "first.txt", "gate.fifo"], format!("{h1}  first.txt"), format!("{h2}  gate.fifo")),
+        (&["first.txt", "gate.fifo"], format!("{h1}  first.txt"), format!("{h2}  gate.fifo")),
+        (&["--tag", "first.txt", "gate.fifo"], format!("BLAKE3 (first.txt) = {h1}"), format!("BLAKE3 (gate.fifo) = {h2}")),
+        (&["--no-names", "first.txt", "gate.fifo"], h1.clone(), h2.clone()),
+        (&["--length", "64", "first.txt", "gate.fifo"], format!("{x1}  first.txt"), format!("{x2}  gate.fifo")),
+    ];
+
+    for (cli_args, want1, want2) in cases {
+        let (mut master, slave_keep) = pty_helpers::open_pty();
+        let child_stdout = slave_keep.try_clone().unwrap();
+        let mut guard = pty_helpers::ChildGuard(Some(
+            std::process::Command::new(b3sum_exe())
+                .current_dir(dir.path())
+                .args(*cli_args)
+                .stdin(std::process::Stdio::null())
+                .stdout(child_stdout)
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+
+        // No writer has opened `gate.fifo` yet: line 1 must arrive first!
+        let mut pty_buf = Vec::new();
+        let first = pty_helpers::read_lines(&mut master, &mut pty_buf, 1);
+        assert_eq!(first[0], *want1, "case {cli_args:?}: line 1 must flush before opening writerless gate.fifo");
+
+        // Now perform a causal writer-only rendezvous on `gate.fifo`: blocks
+        // until the child opens `gate.fifo` for reading, then delivers payload+EOF.
+        let mut writer = fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+        writer.write_all(second_bytes).unwrap();
+        drop(writer);
+
+        // Read line 2 while `slave_keep` is still held open (safe on macOS XNU).
+        let both = pty_helpers::read_lines(&mut master, &mut pty_buf, 2);
+        assert_eq!(both, vec![want1.clone(), want2.clone()], "case {cli_args:?}");
+        drop(slave_keep);
+        let status = guard.0.take().unwrap().wait().unwrap();
+        assert!(status.success(), "case {cli_args:?}: exited {status:?}");
+    }
+}
+
+/// Multi-file terminal run with a small file, a large `--no-mmap` file, and a
+/// writerless FIFO must flush both earlier files before opening the FIFO even
+/// with multiple threads (preventing channel-consumer stalls on a blocking
+/// FIFO, #465).
+#[test]
+#[cfg(unix)]
+fn test_terminal_stdout_flushes_multi_file_large_before_blocked_fifo() {
+    use std::io::Write as _;
+    blake3::initialize();
+
+    let dir = tempfile::tempdir().unwrap();
+    let mid_bytes = vec![0x41u8; 64 * 1024];
+    let big_bytes = vec![0x5Au8; 2 * 1024 * 1024];
+    let fifo_bytes = b"fifo-tail-bytes";
+    fs::write(dir.path().join("mid.bin"), &mid_bytes).unwrap();
+    fs::write(dir.path().join("big.bin"), &big_bytes).unwrap();
+    let fifo = dir.path().join("gate.fifo");
+    pty_helpers::make_fifo(&fifo);
+
+    let want_mid = format!("{}  mid.bin", blake3::convenience::hash(&mid_bytes).to_hex());
+    let want_big = format!("{}  big.bin", blake3::convenience::hash(&big_bytes).to_hex());
+    let want_fifo = format!("{}  gate.fifo", blake3::convenience::hash(fifo_bytes).to_hex());
+
+    let (mut master, slave_keep) = pty_helpers::open_pty();
+    let child_stdout = slave_keep.try_clone().unwrap();
+    let mut guard = pty_helpers::ChildGuard(Some(
+        std::process::Command::new(b3sum_exe())
+            .current_dir(dir.path())
+            .args(["--num-threads", "2", "--no-mmap", "mid.bin", "big.bin", "gate.fifo"])
+            .stdin(std::process::Stdio::null())
+            .stdout(child_stdout)
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap(),
+    ));
+
+    let mut pty_buf = Vec::new();
+    let first_two = pty_helpers::read_lines(&mut master, &mut pty_buf, 2);
+    assert_eq!(first_two, vec![want_mid.clone(), want_big.clone()]);
+
+    let mut writer = fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+    writer.write_all(fifo_bytes).unwrap();
+    drop(writer);
+
+    let all_three = pty_helpers::read_lines(&mut master, &mut pty_buf, 3);
+    assert_eq!(all_three, vec![want_mid, want_big, want_fifo]);
+    drop(slave_keep);
+    let status = guard.0.take().unwrap().wait().unwrap();
+    assert!(status.success(), "b3sum exited {status:?}");
+}
