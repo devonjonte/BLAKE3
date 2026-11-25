@@ -17,7 +17,7 @@ engineering and supply-chain standards live in the
 | Thread schedules and memory order | [Shuttle](https://github.com/awslabs/shuttle) runs the thread pool's wake-up code and the `Pipeline` across thousands of schedules, and ten planted concurrency bugs each fail the `Pipeline` model. For Apple Arm64 weak ordering, `tools/check-waker-order.py` compiles the production wait paths (`WakerSlot`, `Park`, `sme2_serve`) and verifies their fences against `RCpc` loads, rejecting unfenced controls. | Schedules Shuttle has not tried, and weak-memory paths outside those wait handshakes. |
 | Memory bounds | Guard-page tests and custom guard-page allocators (`tests/guard_alloc.rs`, `threads/tests/guard_alloc.rs`) place unreadable guard pages beside input and output buffers, so reading or writing one byte too far crashes at once. | Paths no test runs. |
 | `unsafe` Rust and `debug_assert!` | Every `unsafe` block across all five shipped crates and build scripts carries a `// Sound:` comment verified by `tools/unsafe_reasons.py` (0 undocumented blocks). Every `debug_assert!` in shipped code carries a site comment explaining why it cannot run in release builds. | Whether each stated reason holds: people and audits check that. |
-| `b3sum` I/O | `b3sum` hashes the open file handle, checks output writes, rejects empty checkfiles, uses 64-bit ring read lengths, and handles short cache-only reads and repeated standard input. On a panic or failed `io_uring` call, it exits at once so the kernel cannot write into freed buffers. | Files modified while `b3sum` reads them (see below). |
+| `b3sum` I/O | `b3sum` hashes the open file handle, checks output writes, rejects empty checkfiles, clamps buffer room before converting to the 32-bit ring read length, and handles short cache-only reads and repeated standard input. On a panic or failed `io_uring` call, it exits at once so the kernel cannot write into freed buffers. | Files modified while `b3sum` reads them (see below). |
 | Tests of the tests | Every path is checked against official BLAKE3 test vectors and outputs from the official `blake3` crate, plus arithmetic work-count lifecycle tests (`src/lifecycle_counts.rs`). Fast native mutation testing (x86-64 Linux and Apple Silicon arm64+SME2) plants small bugs in the library crates one by one and requires a failing test or a written reason. A script removes eleven `b3sum` safety checks one by one and requires a failing test for each. | Bugs outside those mutations and controls. |
 | Supply chain | Shipped library crates (`blake3-servil-core`, `blake3-servil`, `blake3-servil-c`) have **zero third-party runtime or build dependencies** on every supported platform (`src/ct.rs` replaces `constant_time_eq`, `libc` is dev-only in `6366776f`, and `core::arch::global_asm!` replaces `cc` in `e36ef4d1` / `#487`), and `b3sum` depends only on `blake3-servil` and `libc`. CI actions, containers, and bootstrap tools are pinned by full SHA/digest; builds run `--locked`; `tools/dependency_policy.py` enforces `cargo-deny` and `cargo-vet` with ten planted-fault controls. | Bugs or compromise in the Rust compiler, OS C library, or remaining dev/test dependencies. |
 | Startup (`initialize()`) | Runs the kernels chosen for your CPU against known answers and aborts on a mismatch (`b3sum` calls this at startup). | Tampered binaries, later hardware faults, and one Arm short-message family skipped for startup speed. |
@@ -30,9 +30,9 @@ rotation or an out-of-bounds write) and checking that the tools reject them.
 
 Linux `b3sum` binaries and the published Rust crates build reproducibly from
 the release tag, byte for byte ([how to rebuild and compare](b3sum/README.md)).
-GitHub Actions rebuilds them on each release and checks each builder's output
-independently against the tag and its digest files. Release tags are locked
-against changes.
+GitHub Actions rebuilds them on each release and compares each builder's output
+independently against the published release artifacts and their digest files.
+Release tags are locked against changes.
 
 Releases are not cryptographically signed. Check the SHA-256 digest from a
 channel you trust before running a downloaded binary. Build the C library from

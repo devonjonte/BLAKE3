@@ -253,11 +253,27 @@ def is_kernel_object(name):
     return not name.endswith(".rcgu.o") and re.search(r"(?:^|-)blake3_[\w-]+\.o$", name) is not None
 
 
+def machine_code_env(tree, target, base_env=None):
+    """Build environment for deterministic release library sizing (#465):
+    one codegen unit avoids multi-CGU partitioning drift between runs on
+    the same commit, and remapping the temporary worktree path removes
+    checkout-path-length drift from panic/assertion strings."""
+    env = dict(os.environ if base_env is None else base_env, CARGO_TARGET_DIR=target)
+    env["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"] = "1"
+    real_tree = os.path.realpath(tree)
+    remaps = [f"--remap-path-prefix={tree}=/src"]
+    if real_tree != tree:
+        remaps.append(f"--remap-path-prefix={real_tree}=/src")
+    existing = env.get("RUSTFLAGS", "").strip()
+    env["RUSTFLAGS"] = " ".join(([existing] if existing else []) + remaps)
+    return env
+
+
 def machine_code(tree, target):
     """(the assembly kernels' bytes, the compiled Rust's): the text of
     each object in each crate's release library, the kernels' by their
     file names (legacy cc builds) or `blake3_servil_*` symbols (`global_asm!`)."""
-    env = dict(os.environ, CARGO_TARGET_DIR=target)
+    env = machine_code_env(tree, target)
     kernels = rust = 0
     for crate, _ in crate_dirs(tree):
         rlib = os.path.join(target, "release", f"lib{lib_name(crate)}.rlib")
