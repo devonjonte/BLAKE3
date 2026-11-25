@@ -115,8 +115,57 @@ def home():
 # The Pipeline's package, as Cargo names what it compiles.
 PACKAGE = "blake3-servil"
 
+# Upper bound (seconds) on one build+model run so a fault that loops
+# without deadlocking cannot hang indefinitely (BLAKE3 #465).
+DEFAULT_MODEL_TIMEOUT = 600.0
 
-def model_passes(copy):
+
+def model_timeout():
+    raw = os.environ.get("PIPELINE_MODEL_CONTROLS_TIMEOUT")
+    if raw is None:
+        return DEFAULT_MODEL_TIMEOUT
+    try:
+        secs = float(raw)
+    except ValueError:
+        sys.exit(f"pipeline_model_controls: invalid PIPELINE_MODEL_CONTROLS_TIMEOUT: {raw!r}")
+    if secs <= 0:
+        sys.exit(f"pipeline_model_controls: PIPELINE_MODEL_CONTROLS_TIMEOUT must be positive, got {raw!r}")
+    return secs
+
+
+def _proc_start_ticks(pid):
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            rest = f.read().rsplit(b")", 1)[1].split()
+        # Field 22 (1-indexed) is starttime; field 3 is index 0 after ')'.
+        return rest[19].decode()
+    except (OSError, IndexError, UnicodeDecodeError):
+        return None
+
+
+def _active_run_path():
+    return os.path.join(home(), "active-run")
+
+
+def _record_active_run(pid):
+    ticks = _proc_start_ticks(pid)
+    if ticks is None:
+        return
+    path = _active_run_path()
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(f"{pid} {ticks}\n")
+    os.replace(tmp, path)
+
+
+def _clear_active_run():
+    try:
+        os.remove(_active_run_path())
+    except FileNotFoundError:
+        pass
+
+
+def model_passes(copy, timeout=None):
     """Whether the model passes on the copy as it is now, and what it
     said. The copy's source was written since its last build (the copy
     made anew, or a fault planted), so Cargo must compile the Pipeline's
@@ -125,17 +174,36 @@ def model_passes(copy):
     last build for unchanged, and a clock or a file system can make a
     new file no newer), and is no verdict on this source. A run that
     passes ran the model's one test."""
-    env = {**os.environ, "RUSTFLAGS": "--cfg shuttle", "CARGO_TARGET_DIR": os.path.join(home(), "target")}
+    if timeout is None:
+        timeout = model_timeout()
+    # Force plain Cargo diagnostics so CARGO_TERM_COLOR=always cannot wrap
+    # `Compiling` in ANSI escape sequences and break the compile check (#465).
+    env = {
+        **os.environ,
+        "RUSTFLAGS": "--cfg shuttle",
+        "CARGO_TARGET_DIR": os.path.join(home(), "target"),
+        "CARGO_TERM_COLOR": "never",
+    }
     run = None
+    timed_out = False
     try:
-        # In a process group of its own: a stop of this script stops the
+        # In a process group of its own: a stop or timeout stops the
         # build and the model with it.
         # --nocapture: the model names each scenario as it begins, and a
         # process that the Pipeline stops takes what was captured with it.
         run = subprocess.Popen(
             ["cargo", "test", "--locked", "--release", "--test", "shuttle_pipeline", "--", "--nocapture"],
             cwd=os.path.join(copy, "threads"), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
-        stdout, stderr = run.communicate()
+        _record_active_run(run.pid)
+        try:
+            stdout, stderr = run.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                os.killpg(run.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = run.communicate()
     except BaseException:
         # Stopped (a signal's exception) while the model ran: the whole
         # group, whether or not Cargo itself has ended by now.
@@ -146,6 +214,10 @@ def model_passes(copy):
                 pass
             run.wait()
         raise
+    finally:
+        _clear_active_run()
+    if timed_out:
+        sys.exit(f"pipeline_model_controls: the model timed out after {timeout:g} s:\n{stdout[-2000:]}\n{stderr[-2000:]}")
     # A fault may show as a failed comparison, a deadlock Shuttle reports,
     # or the Pipeline's own stop of the process: each is a panic or a
     # signal after the test began. Anything else is no verdict.
@@ -203,14 +275,28 @@ def tree_files():
 def end_earlier_runs():
     """End what a run that was killed outright left running (its build,
     its model): they would read the copy while this run makes it anew,
-    and their builds would land among this run's. They are known by the
-    build directory in their environment, which is the copy's own and
-    which this script alone gives a process (a person's shell in the
-    copy, or an editor, has another or none, and is left alone). Where
-    the system has no /proc to ask, nothing is looked for."""
+    and their builds would land among this run's. If an active-run record
+    names a previous session leader whose start time and target env still
+    match, end its whole process group first; then sweep any remaining
+    descendants carrying the copy's private CARGO_TARGET_DIR. Where the
+    system has no /proc to ask, nothing is looked for."""
     if not os.path.isdir("/proc"):
         return
     mark = os.fsencode("CARGO_TARGET_DIR=" + os.path.join(home(), "target"))
+    rec = _active_run_path()
+    if os.path.isfile(rec):
+        try:
+            with open(rec) as f:
+                parts = f.read().split()
+            if len(parts) == 2:
+                pgid, recorded_ticks = int(parts[0]), parts[1]
+                if pgid != os.getpid() and _proc_start_ticks(pgid) == recorded_ticks:
+                    with open(f"/proc/{pgid}/environ", "rb") as ef:
+                        if mark in ef.read().split(b"\0"):
+                            os.killpg(pgid, signal.SIGKILL)
+        except (OSError, ValueError):
+            pass
+        _clear_active_run()
     for _ in range(100):
         found = False
         for entry in os.listdir("/proc"):
@@ -249,7 +335,11 @@ def make_copy(copy, read=None):
         source, path = os.path.join(ROOT, name), os.path.join(copy, name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         if os.path.islink(source):
-            os.symlink(os.readlink(source), path)
+            target = os.readlink(source)
+            if read:
+                read(name)
+            os.symlink(target, path)
+            seen[name] = ("link", target)
             continue
         was = os.stat(source)
         with open(source, "rb") as f:
@@ -259,15 +349,19 @@ def make_copy(copy, read=None):
         with open(path, "wb") as f:
             f.write(data)
         os.chmod(path, was.st_mode & 0o777)
-        seen[name] = (was.st_mtime_ns, was.st_size)
-    # The tree is not held still while it is read. A file written
-    # meanwhile may have been taken half-written, or beside files of an
-    # earlier moment: no tree that ever was.
+        seen[name] = ("file", was.st_dev, was.st_ino, was.st_mtime_ns, was.st_size)
+    # The tree is not held still while it is read. A file written or link
+    # retargeted meanwhile may have been taken half-written, or beside
+    # files of an earlier moment: no tree that ever was.
     now = {}
     for name in seen:
+        src = os.path.join(ROOT, name)
         try:
-            is_now = os.stat(os.path.join(ROOT, name))
-            now[name] = (is_now.st_mtime_ns, is_now.st_size)
+            if os.path.islink(src):
+                now[name] = ("link", os.readlink(src))
+            else:
+                is_now = os.stat(src)
+                now[name] = ("file", is_now.st_dev, is_now.st_ino, is_now.st_mtime_ns, is_now.st_size)
         except OSError:
             now[name] = None
     changed = sorted(name for name in seen if now[name] != seen[name])
@@ -302,6 +396,9 @@ def controls(copy):
     end_earlier_runs()
     make_copy(copy)
     source = os.path.join(copy, SOURCE)
+    # Never write a fault through a symbolic link into the working tree (#465).
+    if os.path.islink(source) or not os.path.isfile(source):
+        sys.exit(f"pipeline_model_controls: {SOURCE} must be a regular file, not a symbolic link")
     with open(source, "rb") as f:
         original = f.read().decode()
     for name, find, _ in FAULTS:
@@ -315,6 +412,8 @@ def controls(copy):
     os.makedirs(os.path.join(home(), "logs"))
     missed = []
     for name, find, replace in FAULTS:
+        if os.path.islink(source):
+            sys.exit(f"pipeline_model_controls: {SOURCE} became a symbolic link before fault '{name}'")
         with open(source, "wb") as f:
             f.write(original.replace(find, replace).encode())
         passes, said = model_passes(copy)
