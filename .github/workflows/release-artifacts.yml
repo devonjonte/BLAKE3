@@ -83,3 +83,31 @@ jobs:
         TAG: ${{ github.event.release.tag_name || inputs.tag }}
         GITHUB_TOKEN: ${{ github.token }}
       run: python3 tools/release_artifacts.py "$TAG" --published --rebuilt rebuilt --builders b3sum-X64=x86_64-unknown-linux-gnu,b3sum-ARM64=aarch64-unknown-linux-gnu
+
+  close-milestone:
+    name: close the release's completed milestone
+    needs: clean
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        ref: ${{ github.event.release.tag_name }}
+        fetch-depth: 2
+    - name: Take the milestone helper from the code commit in the tag's name
+      env:
+        TAG: ${{ github.event.release.tag_name }}
+      run: |
+        git checkout --quiet --detach "${TAG#*+}"
+        test -f tools/close_release_milestone.py || { echo "release predates tools/close_release_milestone.py; skipping"; exit 0; }
+    - name: close completed milestone for TAG
+      env:
+        TAG: ${{ github.event.release.tag_name }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        test -f tools/close_release_milestone.py || exit 0
+        python3 tools/close_release_milestone.py "$TAG"
