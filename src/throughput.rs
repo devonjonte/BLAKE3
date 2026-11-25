@@ -598,10 +598,15 @@ impl TreeHasher {
     ///
     /// - **Several threads hashing at once:** avoiding contention on the
     ///   shared matrix hardware.
-    /// - **Single-threaded workloads interleaving small batches (roughly
-    ///   11–24 short messages) with scalar hashes:** entering and leaving
-    ///   SME2 streaming mode (and any resulting core clock transitions)
-    ///   can cost more than hashing the small batch on NEON directly.
+    /// - **Single-threaded workloads interleaving short batches with
+    ///   scalar hashes:** entering and leaving SME2 streaming mode (and
+    ///   any resulting core clock transitions) can cost more than hashing
+    ///   the batch on NEON directly. On Apple M4/M6 this crossover sits
+    ///   around ~135–155 one-block messages when calls alternate with
+    ///   scalar work (e.g. a 12-to-64-message batch interleaved with
+    ///   scalar hashes runs faster with `.on_this_core()`, while steady
+    ///   cold-cache batches from `ONE_BLOCK_PAD_MIN = 11` upward still
+    ///   benefit from SME2 by default).
     ///
     /// On builds or CPUs that do not select SME2, this changes nothing.
     pub fn on_this_core(mut self) -> Self {
