@@ -24,52 +24,70 @@ CAP_CORE_B3SUM = 128 * 1024  # 131,072 B
 CAP_HASHER = 32 * 1024       #  32,768 B
 CAP_THREADS = 16 * 1024      #  16,384 B
 
-# Match both legacy (`_ZN...18blake3_servil_core...`) and v0 (`_R...18blake3_servil_core...`)
-# Rust mangled names as well as already-demangled names.
-_SIZE_RE = re.compile(r"Size:\s*(0x[0-9a-fA-F]+|\d+)")
-_FUNCS_RE = re.compile(r"Functions:\s*\[([^\]]*)\]")
+# Match Entry blocks and anchored Size/Functions lines inside `llvm-readobj --stack-sizes`
+# so headers like `AddressSize: 64bit` outside `Entry { ... }` are never parsed as stack sizes.
+_ENTRY_OPEN_RE = re.compile(r"^\s*Entry\s*\{\s*$")
+_ENTRY_CLOSE_RE = re.compile(r"^\s*\}\s*$")
+_SIZE_RE = re.compile(r"^\s*Size:\s*(0x[0-9a-fA-F]+|\d+)\s*$")
+_FUNCS_RE = re.compile(r"^\s*Functions:\s*\[([^\]]*)\]\s*$")
+
+# Match owning-crate tokens in v0 (`_R...18blake3_servil_core...`), legacy (`_ZN18blake3_servil_core...`),
+# and demangled (`blake3_servil_core::...`) symbols; the earliest match identifies the defining crate
+# rather than a type argument from another crate (e.g. `Pipeline<..., blake3_servil_core::block::Batch>`).
+_CRATE_RE = re.compile(
+    r"(?:(?<!\d)18blake3_servil_core(?![A-Za-z_])|\bblake3_servil_core::)"
+    r"|(?:(?<!\d)13blake3_servil(?![A-Za-z_])|\bblake3_servil::)"
+    r"|(?:(?<!\d)6b3sums(?![A-Za-z_])|(?<!\d)5b3sum(?![A-Za-z_])|\bb3sums?::)"
+)
+_HASHER_RE = re.compile(r"(?:(?<!\d)6Hasher(?![A-Za-z_])|::Hasher::)")
+_UPDATE_RE = re.compile(r"(?:(?<!\d)6update(?![A-Za-z_])|::update(?:_|\b))")
 
 
 def classify_symbol(sym: str) -> tuple[str, int] | None:
     """Return `(bucket_name, cap_bytes)` for our shipped crates, or None."""
-    if "blake3_servil_core" in sym:
-        if ("Hasher" in sym or "6Hasher" in sym) and "6update" not in sym and "::update" not in sym:
+    m = _CRATE_RE.search(sym)
+    if m is None:
+        return None
+    tok = m.group(0)
+    if "blake3_servil_core" in tok:
+        if _HASHER_RE.search(sym) and not _UPDATE_RE.search(sym):
             return ("core::Hasher", CAP_HASHER)
         return ("core", CAP_CORE_B3SUM)
-    if "blake3_servil" in sym:
+    if "blake3_servil" in tok:
         return ("threads", CAP_THREADS)
-    if "b3sums" in sym or "b3sum" in sym:
-        return ("b3sum", CAP_CORE_B3SUM)
-    return None
+    return ("b3sum", CAP_CORE_B3SUM)
 
 
 def parse_llvm_readobj_stack_sizes(text: str) -> list[tuple[int, str]]:
     """Parse `llvm-readobj --stack-sizes` output into `(size_bytes, symbol)` pairs."""
     entries: list[tuple[int, str]] = []
-    cur_size: int | None = None
+    in_entry = False
+    entry_size: int | None = None
+    entry_funcs: list[str] = []
     for line in text.splitlines():
-        m_fn = _FUNCS_RE.search(line)
+        if _ENTRY_OPEN_RE.match(line):
+            in_entry = True
+            entry_size = None
+            entry_funcs = []
+            continue
+        if not in_entry:
+            continue
+        if _ENTRY_CLOSE_RE.match(line):
+            if entry_size is not None:
+                for fn in entry_funcs:
+                    entries.append((entry_size, fn))
+            in_entry = False
+            entry_size = None
+            entry_funcs = []
+            continue
+        m_fn = _FUNCS_RE.match(line)
         if m_fn:
-            funcs = [f.strip() for f in m_fn.group(1).split(",") if f.strip()]
-            if cur_size is not None:
-                for fn in funcs:
-                    entries.append((cur_size, fn))
-                cur_size = None
-            else:
-                # Some llvm-readobj versions print Functions before Size.
-                pending_funcs = funcs
-                continue
-        m_sz = _SIZE_RE.search(line)
+            entry_funcs = [f.strip() for f in m_fn.group(1).split(",") if f.strip()]
+            continue
+        m_sz = _SIZE_RE.match(line)
         if m_sz:
             raw = m_sz.group(1)
-            sz = int(raw, 16) if raw.startswith("0x") else int(raw)
-            if "pending_funcs" in locals() and pending_funcs:
-                for fn in pending_funcs:
-                    entries.append((sz, fn))
-                pending_funcs = []
-                cur_size = None
-            else:
-                cur_size = sz
+            entry_size = int(raw, 16) if raw.startswith("0x") else int(raw)
     return entries
 
 
@@ -112,6 +130,7 @@ def main() -> int:
             "build",
             "--quiet",
             "--release",
+            "--locked",
             "--manifest-path",
             str(repo / "b3sum" / "Cargo.toml"),
             "--bin",

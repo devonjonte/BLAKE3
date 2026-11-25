@@ -89,7 +89,7 @@ Options:
       --no-mmap               Read every file and map none: a file that another program shortens
                               while b3sum hashes it then cannot stop the run
       --no-names              Omit filenames in the output
-      --raw                   Write raw output bytes to stdout, rather than hex (conflicts with --tag)
+      --raw                   Write raw output bytes to stdout, rather than hex
       --tag                   Output BSD-style checksums: BLAKE3 ([FILE]) = [HASH]
   -c, --check                 Read BLAKE3 sums from the [FILE]s and check them
       --quiet                 Skip printing OK for each checked file
@@ -104,7 +104,8 @@ https://github.com/servil-software-factory/BLAKE3/blob/main/b3sum/README.md
 ```
 
 By default, `b3sum` uses all the CPU cores it is allowed: it hashes multiple
-files in parallel and splits large files across threads. When stdout is a
+files in parallel and splits large files across threads. (`--raw` and `--tag`
+cannot be combined.) When stdout is a
 terminal, `b3sum` hashes and flushes each completed line in order so results
 appear promptly; when stdout is redirected to a pipe or file, output is
 buffered in 32 KiB chunks. On a Linux machine

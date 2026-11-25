@@ -53,8 +53,14 @@ def close_completed_milestone(tag, repo, token, api_base="https://api.github.com
     out = out or sys.stdout
     version = version_from_tag(tag)
     wanted = {version, f"v{version}"}
-    milestones = request("GET", f"{api_base}/repos/{repo}/milestones?state=open&per_page=100", token)
-    match = next((m for m in milestones if m.get("title") in wanted), None)
+    match = None
+    page = 1
+    while True:
+        milestones = request("GET", f"{api_base}/repos/{repo}/milestones?state=open&per_page=100&page={page}", token)
+        match = next((m for m in milestones if m.get("title") in wanted), None)
+        if match is not None or len(milestones) < 100:
+            break
+        page += 1
     if match is None:
         print(f"milestone: no open milestone matching {version!r} in {repo}; nothing to close", file=out)
         return "not_found"

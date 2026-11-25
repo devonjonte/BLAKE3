@@ -67,6 +67,50 @@ class StackBudgetTests(unittest.TestCase):
         self.assertEqual(len(violations), 1)
         self.assertIn("core:", violations[0])
 
+    def test_ignores_address_size_header_and_empty_functions_entry(self) -> None:
+        sample = """
+File: target/stack-budget/release/b3sum
+Format: elf64-x86-64
+Arch: x86_64
+AddressSize: 64bit
+StackSizes [
+  Entry {
+    Functions: []
+    Size: 0x10
+  }
+  Entry {
+    Functions: [_RNvNtCs760tuxHRkot_13blake3_servil5lanes8too_big]
+    Size: 0x5000
+  }
+  Entry {
+    Functions: [_RNvNtCs6LKpzGEycGt_18blake3_servil_core4tree5small]
+    Size: 0x40
+  }
+]
+"""
+        entries = stack_budget.parse_llvm_readobj_stack_sizes(sample)
+        self.assertEqual(
+            entries,
+            [
+                (0x5000, "_RNvNtCs760tuxHRkot_13blake3_servil5lanes8too_big"),
+                (0x40, "_RNvNtCs6LKpzGEycGt_18blake3_servil_core4tree5small"),
+            ],
+        )
+        _, violations = stack_budget.check_entries(entries)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("threads:", violations[0])
+
+    def test_classifies_threads_symbol_with_core_type_arg_as_threads(self) -> None:
+        sym = "_RNvMsr_NtCs760tuxHRkot_13blake3_servil8pipelineINtB5_8PipelinejuNtNtCs6LKpzGEycGt_18blake3_servil_core5block5BatchE12poll_message"
+        self.assertEqual(stack_budget.classify_symbol(sym), ("threads", stack_budget.CAP_THREADS))
+        _, violations = stack_budget.check_entries([(24 * 1024, sym)])
+        self.assertEqual(len(violations), 1)
+        self.assertIn("threads:", violations[0])
+
+    def test_tree_hasher_not_classified_as_incremental_hasher(self) -> None:
+        sym = "_RNvMs0_NtCs6LKpzGEycGt_18blake3_servil_core10throughput10TreeHasher9hash_each"
+        self.assertEqual(stack_budget.classify_symbol(sym), ("core", stack_budget.CAP_CORE_B3SUM))
+
 
 if __name__ == "__main__":
     unittest.main()
