@@ -59,19 +59,41 @@ Changes landed on `next` since `0.10.0` (unreleased).
   `DETECTED` publication on weak-memory CPUs, and Unix `stop()` requires
   exact `pfd.revents == POLLOUT` (fixing broken-pipe `SIGPIPE` in C hosts
   and `b3sum`) with an `alarm(1)` guard on raw `write(2)`.
-- **Enforced per-function stack budgets (`#499`, `04b9489d`):**
-  `tools/stack_budget.py` parses ELF `.stack_sizes` in `tools/check-builds.sh`
-  (≤ 128 KiB `core`/`b3sum`, ≤ 32 KiB `Hasher` non-update APIs, ≤ 16 KiB
-  `threads`).
-- **`b3sum` OS edge-case hardening (`#515`, `d8318dc3`):** rejects
+- **Enforced per-function stack budgets & 128 KiB cold `initialize()` safety
+  (`#499`, `#509`, `04b9489d`, `89a64fba`):** `tools/stack_budget.py` parses
+  ELF `.stack_sizes` in `tools/check-builds.sh` (≤ 128 KiB `core`/`b3sum`,
+  ≤ 32 KiB `Hasher` non-update APIs, ≤ 16 KiB `threads`). Cold `self_test`
+  frames stay out-of-line with an 8 KiB SME2 stack tier
+  (`walk_on_stack_small`) and in-place `chunks_keyed` init, verified on
+  128 KiB threads (`tests/initialize_stack.rs`).
+- **Per-PR AArch64 Linux SME2 CI execution coverage (`#412`, `7af3b05b`):**
+  restored Linux SME2 execution testing via a parallel `AArch64 Linux SME2
+  (QEMU 512-bit SVL)` CI job using SHA-256 + BLAKE3 pinned Debian
+  `qemu-user 11.1.2`, explicitly verifying `HWCAP2_SME2`, `rdsvl == 64`,
+  the core & threads suites, and SME2 fail-stop on every landing.
+- **Panic-safe `Pipeline` submission, compact `Rooms::refs`, & `#465`
+  tooling hardening (`dec50d97`, `64dc6939`, `4e76366a`, `1b6f3178`,
+  `05dc723e`, `4a98640b`, `55de8c84`, `93e3461f`, `ee9ab359`, `80e57abf`,
+  `3b66d989`):** panic-safe `Pipeline` submission with fork stop in wait
+  loops and `ROOM_CLOSING_BIT` / compact `Rooms::refs` (`#494`);
+  independent `.b3` release checksums alongside `.sha256` (`#446`);
+  least-privilege automatic GitHub release milestone closure (`05dc723e`);
+  deterministic single-CGU `tools/size.py`; `tools/gen-ver.py` atomic
+  `update-ref` rollback and `index.lock` guard; and `tools/mutants`
+  sibling-shard cleanup and `rc=4` incremental-cache self-healing.
+- **`b3sum` OS edge-case hardening, terminal flushing, & lazy NUMA
+  (`#515`, `#469`, `#465`, `d8318dc3`, `493ef6f1`, `b49942b2`):** rejects
   `SOCK_SEQPACKET`/`SOCK_DGRAM` inputs across all paths, keeps `pipe2(O_DIRECT)`
   packet reads ≥ `sysconf(_SC_PAGESIZE)` across `fill()`,
   `read_stream_to_end()`, and checkfile `BufReader`, anchors
   `/dev`/`/proc` checks at root and excludes `/dev/ptmx`, isolates
-  macOS `/dev/fd/<N>` regular-file offsets via `PreadReader`, and shares
-  one `ThreadBudget` across `--num-threads`.
+  macOS `/dev/fd/<N>` regular-file offsets via `PreadReader`, shares
+  one `ThreadBudget` across `--num-threads`, defers Linux NUMA node
+  confinement until threads are actually needed, flushes completed output
+  lines immediately on terminals while preserving 32 KiB buffering on pipes,
+  and rejects contradictory `--raw --tag`.
 
-## Performance and new APIs (`#501`, `#509`, `#512`, `#527`)
+## Performance and new APIs (`#336`, `#376`, `#389`, `#398`, `#404`, `#448`, `#501`, `#509`, `#511`, `#512`, `#523`, `#527`)
 
 - **Direct-load SIMD `Packed<16/32/48>` kernels across all 4 ISAs
   (`#501`, `36402294`):** AVX-512 16-way, AVX2 8-way, Apple SME2 16-way,
@@ -79,16 +101,42 @@ Changes landed on `next` since `0.10.0` (unreleased).
   the 8 KiB stack expansion on full SIMD groups — up to `2.55×` faster
   `Packed<32>` on Apple M6 (`18.77 → 7.36 ns/h`), `-42.5%` (`1.74×`) on
   Apple M4 `MerkleTree 65536×32 B`, and `-21.1%` on Ryzen 9700X.
+- **Register-only `hash_counter_range` across all 4 ISAs (`#511`,
+  `846ca533`):** hashes consecutive `(key, counter)` ranges in keyed or
+  derive-key mode without materializing input buffers across AVX-512,
+  AVX2, Apple SME2, and AArch64 NEON (`no_std`, 36/36 Z3 proofs;
+  `1.49×` end-to-end BLINCS `from_seed` speedup on Apple M6, `-55%`
+  instructions).
 - **Zero-copy `Packed<N>` & `Pipeline` ergonomics (`#509`, `#512`,
-  `d13e5037`, `7b7a4509`, `905e5eba`, `1ecb67ff`):** added `Packed<48>`,
-  borrowed `&[[u8; 16/32/48]]` via `Prepared + ?Sized`,
+  `#502`, `d13e5037`, `7b7a4509`, `905e5eba`, `1ecb67ff`, `444e6ef7`):**
+  added `Packed<48>`, borrowed `&[[u8; 16/32/48]]` via `Prepared + ?Sized`,
   `Pipeline::message_with` for per-message `Mode`, `Pipeline::with_batches`
   / `with_owners_and_batches` accepting `Packed<16/32/48>`, `Vec<[u8; N]>`,
-  and `Box<[[u8; N]]>`, and compression-work-based batch admission.
-- **AArch64 `128..1024 B` borrowed-group SIMD (`#527`, `172da807`):**
-  enabled 2–16 block borrowed-message SIMD grouping on AArch64 — `-53.3%`
-  (`2.14×`) on Apple M6 `ContinuousMessages | 1 KiB`, `-35.7%` on `512 B`,
-  and `-18.8%` to `-31.8%` on `InterleavedTurn` (zero regressions).
+  and `Box<[[u8; N]]>`, compression-work-based batch admission, and
+  measured Apple M4/M6 SME2 crossover guidance on `TreeHasher::on_this_core()`.
+- **AArch64 SIMD & SME2 kernels (`#527`, `#523`, `#336`, `172da807`,
+  `eb8d7a0e`, `c2fe4ef6`):** enabled `128..1024 B` borrowed-group SIMD
+  on AArch64 (`-53.3%` / `2.14×` on Apple M6 `ContinuousMessages | 1 KiB`,
+  `-35.7%` on `512 B`), zero-spill sequential scalars in NEON
+  `k6`/`k8`/`k10`/`kn6`/`pn6`/`pn10`, per-lane-key SME2 keyed chunks,
+  and NEON `output8` kernels.
+- **x86-64 EVEX partial-chunk, `hash_each`, & `finalize_each` SIMD wave
+  (`#376`, `#398`, `#404`, `#448`, `e60cfd27`, `8030cb39`, `704dcd1c`,
+  `c1a91893`, `7ecc8803`, `6348b723`, `c891b2b8`, `5d250f20`):**
+  zero-spill EVEX AVX-512F+VL partial-chunk kernels (`4`/`8`/`16` lanes,
+  9/9 Z3 proofs); SIMD partial last chunks and in-place Merkle reduction
+  in `hash_each` (Apple M6 `Collection | Nix files -10.8%` and `git
+  objects -10.2%` instructions); SIMD `output16`/`output8` final blocks
+  in `hash_each` (up to `5.3×`) and staged/padded `finalize_each`
+  (`5.03×–6.54×` Zen 5, `2.41×–2.97×` Ice Lake); out-of-line slow path
+  for `hash_many_rounded` on powers of two (Zen 5 `4 KiB -7.4%`, `8 KiB
+  -5.7%`); and 8 dead CV-transpose shuffles dropped from `output16`.
+- **Adaptive per-ticket `Pipeline::batch` local-wake learning (`#389`,
+  `5d3a9ac5`):** learns per-ticket when waking the pool helps (`EPYC
+  9255 -58.9%`, `EPYC 7443 -59.2%`, zero Apple M6 regressions).
+- **`b3sum` multi-file Linux `O_DIRECT` (`716c7cee`):** uses direct I/O
+  for cold `>= 32 MiB` files in multi-file runs when at least 4 readers
+  per file worker are available (skipping warm files via `mincore`).
 
 ---
 

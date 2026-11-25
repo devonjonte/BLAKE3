@@ -89,7 +89,7 @@ Options:
       --no-mmap               Read every file and map none: a file that another program shortens
                               while b3sum hashes it then cannot stop the run
       --no-names              Omit filenames in the output
-      --raw                   Write raw output bytes to stdout, rather than hex
+      --raw                   Write raw output bytes to stdout, rather than hex (conflicts with --tag)
       --tag                   Output BSD-style checksums: BLAKE3 ([FILE]) = [HASH]
   -c, --check                 Read BLAKE3 sums from the [FILE]s and check them
       --quiet                 Skip printing OK for each checked file
@@ -104,7 +104,10 @@ https://github.com/servil-software-factory/BLAKE3/blob/main/b3sum/README.md
 ```
 
 By default, `b3sum` uses all the CPU cores it is allowed: it hashes multiple
-files in parallel and splits large files across threads. On a Linux machine
+files in parallel and splits large files across threads. When stdout is a
+terminal, `b3sum` hashes and flushes each completed line in order so results
+appear promptly; when stdout is redirected to a pipe or file, output is
+buffered in 32 KiB chunks. On a Linux machine
 with several memory nodes, runs that use multiple threads (or pass
 `--num-threads` > 1) keep to one node, the one that holds the most of the CPUs
 the process is allowed (the library's README says more); single-threaded runs
@@ -161,14 +164,28 @@ disturbed).
 
 What happens when a file changes during the run:
 
-| The file... | Read | Mapped |
+| The file... | Read (including `--no-mmap` and `O_DIRECT`) | Mapped (`mmap`) |
 |---|---|---|
-| grows at its end | the added bytes are hashed if they arrive before `b3sum` reaches the end | the added bytes are not hashed |
-| is cut short | if `b3sum` had already read past the new end, it prints the hash of what it read: a file that never existed | `b3sum` stops with an error and prints no hash, unless the cut falls inside the file's last page of memory (4 KiB on most machines): then the missing bytes read as zeros, and it prints the hash of a file that never existed |
-| is overwritten in place | old bytes and new bytes may be mixed | the same |
+| grows at its end | the added bytes are hashed if they arrive before `b3sum` reaches EOF | the added bytes are not hashed (mapped length is fixed at open) |
+| is cut short | if `b3sum` had already read past the new end (or across parallel `O_DIRECT` regions), it prints the hash of the bytes it read: a file that never existed | `b3sum` stops with `SIGBUS` and prints no hash, unless the cut falls inside the file's last memory page (4 KiB on most x86-64/Linux hosts, 16 KiB on Apple Silicon): then the missing bytes read as zeros, and it prints the hash of a file that never existed |
+| is overwritten in place | old bytes and new bytes may be mixed (and parallel `O_DIRECT` readers can visit different regions concurrently) | old bytes and new bytes may be mixed (and external writes into a live shared mapping violate `&[u8]` immutability) |
 
-`b3sum` does not yet detect these cases
-([#443](https://github.com/servil-software-factory/BLAKE3/issues/443)).
+**Why `b3sum` does not try to detect concurrent modification automatically:**
+like `sha256sum`, `md5sum`, and official `b3sum`, `b3sum` does not lock input
+files or re-`fstat` them after reading. A post-read metadata check adds syscall
+overhead to every hashed file while still missing same-size or same-mtime
+in-place overwrites.
+
+**How to hash files safely when writers may be active:**
+
+- Pass `--no-mmap` whenever hashing live, untrusted, or potentially changing
+  files so truncation cannot trigger `SIGBUS` and concurrent writers cannot
+  mutate a live shared mapping.
+- If you need a guaranteed point-in-time digest of a file on a live filesystem,
+  take a copy-on-write clone or filesystem snapshot first (for example APFS
+  `cp -c`, Btrfs/XFS `cp --reflink=always`, or a ZFS/Btrfs/LVM snapshot) and
+  hash the snapshot. Opt-in OS reflink/snapshot support in `b3sum` is tracked
+  in [#550](https://github.com/servil-software-factory/BLAKE3/issues/550).
 
 ## Direct I/O for large cold files
 

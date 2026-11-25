@@ -1061,9 +1061,13 @@ BLAKE3-Servil's concrete checks and measured numbers:
 No human has reviewed the code line by line, and nobody has audited it.
 The test suites run on Apple M6 Macs under macOS, on an AmpereOne VM
 under Linux, on x86-64 servers (AMD Zen 3 and Zen 5, Intel Ice Lake),
-and on CI's hosted machines. Under Linux the SME2 kernels now run on no
-machine of ours: the AmpereOne has no SME2. Through 0.9 they ran in a
-Debian 12 VM on an Apple M4 Max, which exposes its SME2 unit.
+and on CI's hosted machines. Under Linux we do not currently have a
+bare-metal SME2 host (the AmpereOne has no SME2); per-PR Linux SME2
+execution coverage runs in CI via the `AArch64 Linux SME2 (QEMU 512-bit
+SVL)` job (`7af3b05b`, `#412`), which verifies `HWCAP2_SME2`, `rdsvl ==
+64`, the core and threads suites, and SME2 fail-stop using SHA-256 and
+BLAKE3 pinned Debian `qemu-user 11.1.2`. Native Apple Silicon SME2
+continues to run on macOS (`mac-m6-build` and `mac-m6-timing`).
 
 Not yet proved: that the Rust around the kernels (the dispatch, the tree,
 the `Hasher`) keeps secrets from steering a whole call, which is
