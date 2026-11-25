@@ -140,6 +140,24 @@ figure names its machine.
   for cold `>= 32 MiB` files in multi-file runs when at least 4 readers
   per file worker are available (skipping warm files via `mincore`).
 
+## Slower
+
+In full native `bench-hashes check --cells all` runs comparing `0.11.0`
+against `0.10.0` (alongside 70+ faster cells up to `-83.5%` on x86-64
+and `-68.7%` on Apple M6), three small `Pipeline` (`blake3-servil-mt`)
+edge cells read slower on x86-64 (tracked for follow-up in `#556`):
+
+- **AMD EPYC 9255 (Zen 5):** `solo | ContinuousBatches | 1024`: `+6.1%`
+  (traded in `#389` / `5d3a9ac5` for `-58.2%` on `65536`, `-48.9%`
+  `shared-one-cache | 65536`, `-42.8%` `shared-two-caches | 65536`, and
+  `-27.2%` `shared-one-cache | 16384`).
+- **2× Intel Xeon Gold 6330 (Ice Lake):** `solo | ContinuousMessages |
+  4 KiB`: `+5.8%`.
+- **2× AMD EPYC 7443 (Zen 3, AVX2):** `shared-two-caches |
+  ContinuousMessages | 64 B`: `+15.4%` (wide run-to-run variance,
+  `-16.7%..+54.8%`; `solo` and `shared-one-cache` are level, and
+  `shared-one-cache | ContinuousBatches | 16384` is `-40.5%`).
+
 ---
 
 # blake3-servil 0.10.0+b0b4c80c39ff28c2dbcc2234a6dc17b40911830d, against blake3-servil 0.9.1
