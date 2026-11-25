@@ -1,4 +1,4 @@
-# blake3-servil 0.11.0+dev, against blake3-servil 0.10.0
+# blake3-servil 0.11.0+2c43b150bd18c89b6c08a133446c51a3fe6981bc, against blake3-servil 0.10.0
 
 What changed since `0.10.0`, each item with its issue or commit. Every
 figure names its machine.

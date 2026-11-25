@@ -2,7 +2,7 @@
 # program it installs is b3sum.
 [package]
 name = "b3sums"
-version = "0.10.0+dev"
+version = "0.11.0+dev"
 authors = ["Jack O'Connor <oconnor663@gmail.com>", "John Servil"]
 description = "b3sum, the BLAKE3 command-line hasher, on blake3-servil: the same digests, faster"
 repository = "https://github.com/servil-software-factory/BLAKE3"
@@ -17,7 +17,7 @@ path = "src/main.rs"
 [features]
 
 [dependencies]
-blake3 = { version = "=0.10.0+dev", path = "../threads", package = "blake3-servil" }
+blake3 = { version = "=0.11.0+dev", path = "../threads", package = "blake3-servil" }
 
 # Unix syscalls: memory-mapped reads, direct I/O, io_uring, signals, fstat.
 [target.'cfg(unix)'.dependencies]
