@@ -33,7 +33,13 @@ SCRIPT = os.path.join(TOOLS, "pipeline_model_controls.py")
 CARGO = """#!/bin/sh
 echo "$(pwd) $CARGO_TARGET_DIR" >> "$CONTROLS_RAN_IN"
 passes() { echo "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out"; exit 0; }
-compiles() { echo "   Compiling blake3-servil v0.0.0 ($(pwd))" >&2; }
+compiles() {
+    if [ "${CARGO_TERM_COLOR:-}" = always ]; then
+        printf '\033[1;32m   Compiling\033[0m blake3-servil v0.0.0 (%s)\n' "$(pwd)" >&2
+    else
+        echo "   Compiling blake3-servil v0.0.0 ($(pwd))" >&2
+    fi
+}
 if cmp -s src/pipeline.rs "$CONTROLS_ORIGINAL"; then
     compiles
     echo "running 1 test"
@@ -411,6 +417,60 @@ class Controls(unittest.TestCase):
             run = self.run_script("caught", CARGO_TARGET_DIR=inside)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertFalse(os.path.lexists(os.path.join(inside, "pipeline-model-controls", "tree", "builds-here")))
+
+    def test_a_symlink_source_is_refused_and_never_written_through(self):
+        outside = os.path.join(self.base, "outside-pipeline.rs")
+        with open(outside, "w", newline="") as f:
+            f.write(self.original)
+        os.remove(self.source)
+        os.symlink(outside, self.source)
+        self.before = files_under(self.root)
+        run = self.run_script("caught")
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("must be a regular file, not a symbolic link", run.stderr)
+        self.assertFalse(os.path.exists(self.ran_in), "no build should run on a symlinked source")
+        with open(outside, newline="") as f:
+            self.assertEqual(f.read(), self.original, "target of symlink must never be overwritten")
+        self.assert_untouched()
+
+    def test_cargo_term_color_always_does_not_break_compile_check(self):
+        run = self.run_script("caught", CARGO_TERM_COLOR="always")
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn(f"fails for each of {len(faults())} planted faults", run.stdout)
+        self.assert_untouched()
+
+    def test_a_model_that_never_ends_times_out_and_kills_its_process_group(self):
+        run = subprocess.Popen(
+            [sys.executable, self.script],
+            env=self.env("never-ends", PIPELINE_MODEL_CONTROLS_TIMEOUT="2"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        model = self.wait_for_a_fault(run)
+        out, err = run.communicate(timeout=30)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("timed out after 2 s", err)
+        deadline = time.time() + 10
+        while alive(model) and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(alive(model), "timed-out model grandchild outlived timeout")
+        self.assert_untouched()
+
+    def test_a_symlink_retargeted_while_the_copy_is_made_stops_the_run(self):
+        os.symlink("threads/Cargo.toml", os.path.join(self.root, "moving-link"))
+        controls = script(self.script)
+        copy = os.path.join(self.base, "a-copy-link")
+
+        def retarget(name):
+            if name == "moving-link":
+                link = os.path.join(self.root, "moving-link")
+                os.remove(link)
+                os.symlink("Cargo.lock", link)
+
+        with self.assertRaises(SystemExit) as stop:
+            controls.make_copy(copy, read=retarget)
+        self.assertIn("the tree changed while it was copied (moving-link)", str(stop.exception))
 
     def test_an_argument_is_refused(self):
         run = self.run_script("caught", "--put-back")
