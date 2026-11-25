@@ -85,6 +85,13 @@ class MachineCode(unittest.TestCase):
         for name in rust:
             self.assertFalse(size.is_kernel_object(name), name)
 
+    def test_machine_code_env_pins_single_cgu_and_remaps_worktree_path(self):
+        env = size.machine_code_env("/tmp/worktree-xyz", "/tmp/tgt", base_env={"RUSTFLAGS": "-C target-cpu=generic"})
+        self.assertEqual(env["CARGO_TARGET_DIR"], "/tmp/tgt")
+        self.assertEqual(env["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"], "1")
+        self.assertIn("-C target-cpu=generic", env["RUSTFLAGS"])
+        self.assertIn("--remap-path-prefix=/tmp/worktree-xyz=/src", env["RUSTFLAGS"])
+
 
 if __name__ == "__main__":
     unittest.main()
