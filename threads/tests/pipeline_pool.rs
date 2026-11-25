@@ -312,11 +312,27 @@ fn block_on_finishes_lone_tasks_and_large_batches_after_pauses() {
 #[test]
 fn pipeline_completes_every_path_when_pinned_to_one_cpu() {
     unsafe extern "C" {
+        fn sched_getaffinity(pid: i32, cpusetsize: usize, mask: *mut core::ffi::c_ulong) -> i32;
         fn sched_setaffinity(pid: i32, cpusetsize: usize, mask: *const core::ffi::c_ulong) -> i32;
     }
+    let mut allowed = [0 as core::ffi::c_ulong; 16];
+    // Sound: `allowed` is a live writable buffer of `size_of_val(&allowed)` bytes.
+    if unsafe { sched_getaffinity(0, core::mem::size_of_val(&allowed), allowed.as_mut_ptr()) } != 0 {
+        return;
+    }
+    let Some((word_idx, bit)) = allowed.iter().enumerate().find_map(|(i, &w)| if w != 0 { Some((i, w.trailing_zeros())) } else { None }) else {
+        return;
+    };
     let mut mask = [0 as core::ffi::c_ulong; 16];
-    mask[0] = 1;
-    assert_eq!(unsafe { sched_setaffinity(0, core::mem::size_of_val(&mask), mask.as_ptr()) }, 0);
+    mask[word_idx] = 1 << bit;
+    // Sound: `mask` is a live readable buffer of `size_of_val(&mask)` bytes.
+    if unsafe { sched_setaffinity(0, core::mem::size_of_val(&mask), mask.as_ptr()) } != 0 {
+        let err = std::io::Error::last_os_error();
+        if matches!(err.raw_os_error(), Some(1 | 13)) {
+            return; // Sandbox refuses CPU binding (EPERM / EACCES, #465).
+        }
+        panic!("sched_setaffinity failed unexpectedly: {err}");
+    }
 
     blake3_servil::initialize_multithreaded(None);
     let data = pattern(3 * ROOM_LEN + 111);

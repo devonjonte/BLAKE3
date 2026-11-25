@@ -2068,7 +2068,15 @@ pub(crate) mod places {
         fn the_pool_stays_on_one_node_without_binding_the_caller() {
             let before = affinity().unwrap();
             let nodes = node_masks();
-            if std::thread::available_parallelism().map_or(1, |n| n.get()) < 2 || allowed_nodes(&nodes, &before) < 2 {
+            let max_node_cpus = nodes
+                .iter()
+                .map(|cpus| cpus.iter().zip(&before).map(|(node, allowed)| (node & allowed).count_ones() as usize).sum::<usize>())
+                .max()
+                .unwrap_or(0);
+            // Skip when no single allowed node has >= 2 CPUs (e.g., 1 CPU on
+            // each of two nodes sizes the default pool to 1 thread with 0
+            // workers, #465).
+            if std::thread::available_parallelism().map_or(1, |n| n.get()) < 2 || allowed_nodes(&nodes, &before) < 2 || max_node_cpus < 2 {
                 return;
             }
             crate::initialize_multithreaded(None);
@@ -2165,6 +2173,17 @@ pub(crate) mod places {
         #[test]
         #[cfg(target_os = "linux")]
         fn the_workers_take_their_places_and_a_thread_learns() {
+            let Ok(cur) = affinity() else {
+                return;
+            };
+            // Sound: `cur` is a live `Set` of `size_of::<Set>()` readable bytes.
+            if unsafe { sched_setaffinity(0, core::mem::size_of::<Set>(), &cur) } != 0 {
+                let err = std::io::Error::last_os_error();
+                if matches!(err.raw_os_error(), Some(libc::EPERM | libc::EACCES)) {
+                    return; // Sandbox refuses CPU binding (#465).
+                }
+                panic!("sched_setaffinity failed unexpectedly: {err}");
+            }
             confine_cli_thread();
             let cpus = allowed().unwrap();
             if cpus.len() < 4 {
@@ -3702,17 +3721,101 @@ pub(crate) mod sources {
             let in_turn: Vec<usize> = served.iter().copied().skip(TURN as usize).step_by(TURN as usize + 1).collect();
             assert_eq!(in_turn, (4..64).chain(0..4).collect::<Vec<_>>());
             assert!(lowest_first(&served));
-            // Nothing anywhere: a turn that is due finds nothing and says so.
+            // Nothing anywhere: a turn that is due finds nothing and preserves
+            // both `taken` and `cursor` across the empty walk (#465). When both
+            // slot 0 and the slot at `cursor` (slot 4) then become nonempty, the
+            // due turn must serve slot 4 rather than resetting to slot 0.
             for s in &sources {
                 s.claimed.store(s.finish.published.load(Ordering::SeqCst), Ordering::SeqCst);
             }
             turn.taken = TURN;
             assert!(!run_one_from(&mut turn, |_, _| panic!("nothing to serve")));
             sources[0].finish.published.fetch_add(1, Ordering::SeqCst);
+            sources[4].finish.published.fetch_add(1, Ordering::SeqCst);
+            assert!(
+                run_one_from(&mut turn, |source, _| assert_eq!(slot_of(source), 4)),
+                "empty walk must preserve due turn and cursor across competing nonempty sources"
+            );
+            // Drain slot 0, then verify a due turn still wraps below its cursor.
+            assert!(run_one_from(&mut turn, |source, _| assert_eq!(slot_of(source), 0)));
+            turn.taken = TURN;
+            sources[0].finish.published.fetch_add(1, Ordering::SeqCst);
             assert!(run_one_from(&mut turn, |source, _| assert_eq!(slot_of(source), 0)), "a due turn still finds work below its cursor");
             for slot in slots {
                 Source::unregister(slot);
             }
+        }
+
+        /// The live worker loop (`Pool::serve`) persists its `Turn` across
+        /// iterations: a lower-slot source that continuously republishes work
+        /// before emptying cannot starve a higher-slot source (#465).
+        #[test]
+        #[cfg(not(shuttle))]
+        fn test_worker_loop_persists_turn_under_continuous_lower_source() {
+            use core::sync::atomic::AtomicBool;
+            struct State {
+                low: &'static Source,
+                stop: AtomicBool,
+                low_runs: AtomicU64,
+                high_ran: AtomicBool,
+            }
+            unsafe fn run_low(ctx: *const (), _arg: u64, _platform: Platform) {
+                // Sound: `ctx` points to a leaked `'static State`.
+                let st = unsafe { &*(ctx as *const State) };
+                st.low_runs.fetch_add(1, Ordering::Relaxed);
+                if !st.stop.load(Ordering::Acquire) {
+                    // Sound: `run_low` matches `unsafe fn(*const (), u64, Platform)` and
+                    // `low` has capacity 4 with at most 2 items in flight.
+                    unsafe { st.low.publish_actions(run_low, ctx, &[1], false) };
+                }
+            }
+            unsafe fn run_high(ctx: *const (), _arg: u64, _platform: Platform) {
+                // Sound: `ctx` points to a leaked `'static State`.
+                let st = unsafe { &*(ctx as *const State) };
+                st.stop.store(true, Ordering::Release);
+                st.high_ran.store(true, Ordering::Release);
+            }
+
+            // Two threads (1 caller + 1 worker): only the single worker serves
+            // these sources, so if `Pool::serve` reset `Turn` each iteration
+            // `low` would monopolize it forever and `high` would never run.
+            crate::initialize_multithreaded(core::num::NonZeroUsize::new(2));
+            if pool().workers() == 0 {
+                return;
+            }
+            let low: &'static Source = Box::leak(Box::new(Source::with_actions(4)));
+            let high: &'static Source = Box::leak(Box::new(Source::with_actions(2)));
+            let low_slot = low.register().expect("low slot");
+            let high_slot = high.register().expect("high slot");
+            assert!(low_slot < high_slot, "low slot ({low_slot}) must precede high slot ({high_slot})");
+            let state: &'static State =
+                Box::leak(Box::new(State { low, stop: AtomicBool::new(false), low_runs: AtomicU64::new(0), high_ran: AtomicBool::new(false) }));
+            let ctx = (state as *const State).cast::<()>();
+            // Seed `low` with 2 items so it stays continuously nonempty as the
+            // worker drains one and immediately republishes another, plus 1
+            // item on `high`.
+            // Sound: `run_low` / `run_high` match the action ABI and `ctx` is `'static`.
+            unsafe {
+                low.publish_actions(run_low, ctx, &[1, 2], false);
+                high.publish_actions(run_high, ctx, &[9], false);
+            }
+            pool().park.wake_one();
+            let deadline = now() + std::time::Duration::from_secs(5);
+            while !state.high_ran.load(Ordering::Acquire) {
+                if now() >= deadline {
+                    state.stop.store(true, Ordering::Release);
+                    panic!("higher-slot source starved after {} lower-slot runs (worker loop failed to persist Turn)", state.low_runs.load(Ordering::Relaxed));
+                }
+                std::thread::yield_now();
+            }
+            // Wait for any final in-flight `low` item to be claimed before unregistering.
+            let drain_deadline = now() + std::time::Duration::from_secs(2);
+            while low.waiting() > 0 && now() < drain_deadline {
+                pool().park.wake_one();
+                std::thread::yield_now();
+            }
+            Source::unregister(high_slot);
+            Source::unregister(low_slot);
         }
 
         #[test]
