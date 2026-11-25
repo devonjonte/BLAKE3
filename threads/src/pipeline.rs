@@ -930,12 +930,14 @@ struct RoomStream {
     len: u64,
     head_piece: u32,
     tail_piece: u32,
+    /// Position of this slot in `Pipeline::piece_slots`, or `NONE` when `head_piece == NONE`.
+    piece_slot_pos: u32,
     stack_len: usize,
     merged_pieces: u64,
 }
 
 impl RoomStream {
-    const EMPTY: Self = RoomStream { len: 0, head_piece: NONE, tail_piece: NONE, stack_len: 0, merged_pieces: 0 };
+    const EMPTY: Self = RoomStream { len: 0, head_piece: NONE, tail_piece: NONE, piece_slot_pos: NONE, stack_len: 0, merged_pieces: 0 };
 }
 
 /// Public mode provenance of a slot for short-message group batching.
@@ -1121,6 +1123,9 @@ pub struct Pipeline<T, B = (), P = Batch<'static>> {
     room_cursor: usize,
     /// FIFO ring of free `PieceNode`s.
     free_pieces: Ring<u32>,
+    /// Active slots with `room_streams[s].head_piece != NONE` (at most `m.min(p_cap)`),
+    /// maintained in O(1) so `alloc_piece_node` drains only piece-bearing slots (#465).
+    piece_slots: Vec<u32>,
     /// Monotonic circular cursor over `0..group_count` (`MemberGroup`s cycle in FIFO order).
     group_cursor: usize,
     open_group: Option<(u32, u64)>,
@@ -1513,6 +1518,7 @@ impl<T, B, P> Pipeline<T, B, P> {
             local_free_rooms,
             room_cursor: 0,
             free_pieces,
+            piece_slots: Vec::with_capacity(if limits.rooms == 0 { 0 } else { m }),
             group_cursor: 0,
             open_group: None,
             local_count: 0,
@@ -1623,7 +1629,7 @@ impl<T, B, P> Pipeline<T, B, P> {
     /// If the Pipeline has no Rooms (`Limits.rooms` is 0).
     #[inline(always)]
     pub fn room(&mut self) -> impl Future<Output = Room> + '_ {
-        RoomFut { pipe: self, registered: false }
+        RoomFut { pipe: self, registered: false, done: false }
     }
 
     #[inline(always)]
@@ -1779,6 +1785,8 @@ impl<T, B, P> Pipeline<T, B, P> {
         let rs = &mut self.room_streams[s];
         if rs.tail_piece == NONE {
             rs.head_piece = pnode;
+            rs.piece_slot_pos = u32::try_from(self.piece_slots.len()).expect("piece_slots length fits u32");
+            self.piece_slots.push(u32::try_from(s).expect("slot fits u32"));
         } else {
             // Sound: `next` is the owner's alone (workers read a node's other
             // fields).
@@ -1801,11 +1809,12 @@ impl<T, B, P> Pipeline<T, B, P> {
                 // Every node may be another open message's: its later
                 // pieces finished while a worker was on an earlier one,
                 // and only a commit to it or its end would fold them.
-                // (A slot with no pieces has none to fold.)
-                for other in 0..self.slots.len() {
-                    if other != current_slot {
-                        self.drain_pieces(other, true);
-                    }
+                // Scan only slots that currently hold pieces (`<= piece_cap`),
+                // not all `self.slots.len()` slots (#465). `keep_last = true`
+                // keeps at least one piece per slot, so `piece_slots` stays fixed.
+                for idx in 0..self.piece_slots.len() {
+                    let other = self.piece_slots[idx] as usize;
+                    self.drain_pieces(other, true);
                 }
             }
             if let Some(p) = self.free_pieces.pop_front() {
@@ -2243,7 +2252,15 @@ impl<T, B, P> Pipeline<T, B, P> {
             rs.head_piece = next;
             if next == NONE {
                 rs.tail_piece = NONE;
+                let pos = rs.piece_slot_pos;
+                rs.piece_slot_pos = NONE;
+                let idx = pos as usize;
+                self.piece_slots.swap_remove(idx);
+                if let Some(&moved) = self.piece_slots.get(idx) {
+                    self.room_streams[moved as usize].piece_slot_pos = pos;
+                }
             }
+            let rs = &mut self.room_streams[s];
             if aborted {
                 continue;
             }
@@ -2559,6 +2576,7 @@ impl<T, B, P> Future for MessageWithFut<'_, T, B, P> {
 struct RoomFut<'a, T, B, P> {
     pipe: &'a mut Pipeline<T, B, P>,
     registered: bool,
+    done: bool,
 }
 
 impl<T, B, P> Unpin for RoomFut<'_, T, B, P> {}
@@ -2576,13 +2594,16 @@ impl<T, B, P> Future for RoomFut<'_, T, B, P> {
 
     #[inline(always)]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Room> {
+        assert!(!self.done, "Pipeline::room future polled after completion");
         if let Some(r) = self.pipe.pop_cached_room() {
             self.registered = false;
+            self.done = true;
             return Poll::Ready(r);
         }
         match self.pipe.poll_room(cx) {
             Poll::Ready(r) => {
                 self.registered = false;
+                self.done = true;
                 Poll::Ready(r)
             }
             Poll::Pending => {
@@ -4530,7 +4551,8 @@ mod test {
             let pnode = p_ab.free_pieces.pop_front().unwrap();
             p_ab.shared().pieces[pnode as usize].done.store(false, Ordering::SeqCst);
             unsafe { *p_ab.shared().pieces[pnode as usize].next.get() = NONE };
-            p_ab.room_streams[0] = RoomStream { len: ROOM_LEN as u64, head_piece: pnode, tail_piece: pnode, stack_len: 0, merged_pieces: 0 };
+            p_ab.room_streams[0] = RoomStream { len: ROOM_LEN as u64, head_piece: pnode, tail_piece: pnode, piece_slot_pos: 0, stack_len: 0, merged_pieces: 0 };
+            p_ab.piece_slots.push(0);
             p_ab.slots[0] = SlotMeta { tag: Some(77), kind: SlotKind::WaitAborted { group: 0, epoch: 5 }, mode: SlotMode::Default };
             p_ab.free_slots.pop_front();
             p_ab.end_queue.push_back(0);
@@ -5216,5 +5238,224 @@ mod test {
         let _ = drain_one(&mut pipe);
         assert!(!owned_front_near);
         assert_eq!(pipe.batches_in_flight, 0);
+    }
+
+    #[test]
+    fn room_future_polled_after_completion_panics_on_fast_and_slow_paths() {
+        crate::initialize_multithreaded(core::num::NonZeroUsize::new(1));
+        let mut pipe = Pipeline::<u32>::new(Mode::Plain, Limits { messages: 2, rooms: 2 });
+        let waker = core::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
+
+        // 1. Fast path (`pop_cached_room`): poll to Ready, then verify repoll
+        // panics without taking the second free room.
+        let r0 = {
+            let mut fut = core::pin::pin!(pipe.room());
+            let Poll::Ready(r) = fut.as_mut().poll(&mut cx) else { panic!("cached room ready immediately") };
+            let err = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+                let _ = fut.as_mut().poll(&mut cx);
+            }));
+            assert!(err.is_err(), "repolling completed fast-path RoomFut must panic");
+            r
+        };
+        assert_eq!(pipe.local_free_rooms.len(), 1, "repoll must not lease a second room");
+
+        // 2. Slow path (`poll_room` -> Pending -> Ready): exhaust both rooms,
+        // poll once to Pending, drop `r0`, poll to Ready, then verify repoll panics.
+        let r1 = block_on(pipe.room());
+        let r_slow = {
+            let mut fut = core::pin::pin!(pipe.room());
+            assert!(fut.as_mut().poll(&mut cx).is_pending(), "all rooms held: slow path returns Pending");
+            drop(r0);
+            let Poll::Ready(r) = fut.as_mut().poll(&mut cx) else { panic!("released room ready on slow path") };
+            let err = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+                let _ = fut.as_mut().poll(&mut cx);
+            }));
+            assert!(err.is_err(), "repolling completed slow-path RoomFut must panic");
+            r
+        };
+        drop(r_slow);
+        drop(r1);
+    }
+
+    #[test]
+    fn piece_slots_tracks_active_multi_room_slots_in_o1_and_reclaims_in_alloc_piece_node() {
+        crate::initialize_multithreaded(core::num::NonZeroUsize::new(1));
+        // 0. Zero-room pipelines reserve no piece_slots capacity (#465).
+        let zero_rooms = Pipeline::<u32>::new(Mode::Plain, Limits { messages: 8, rooms: 0 });
+        assert_eq!(zero_rooms.piece_slots.capacity(), 0);
+        drop(zero_rooms);
+
+        // 1. Verify O(1) push and swap-remove position updates on sparse,
+        // non-zero slot IDs [2, 4, 6] (with non-room placeholders occupying
+        // slots 0, 1, 3, 5), exercising middle-slot abort and head/tail ends
+        // without leaving stale indices or reallocating.
+        let mut pipe = Pipeline::<u32>::new(Mode::Plain, Limits { messages: 8, rooms: 4 });
+        let initial_cap = pipe.piece_slots.capacity();
+        assert_eq!(initial_cap, 8);
+        assert!(pipe.piece_slots.is_empty());
+        let pad0 = block_on(pipe.message(100, None));
+        let pad1 = block_on(pipe.message(101, None));
+        let mut m2 = block_on(pipe.message(2, None));
+        let pad3 = block_on(pipe.message(103, None));
+        let mut m4 = block_on(pipe.message(4, None));
+        let pad5 = block_on(pipe.message(105, None));
+        let mut m6 = block_on(pipe.message(6, None));
+        assert_eq!([m2.slot, m4.slot, m6.slot], [2, 4, 6]);
+        let mut d2 = Vec::new();
+        let mut d6 = Vec::new();
+        for (m, fill, buf) in [(&mut m2, 0x22u8, Some(&mut d2)), (&mut m4, 0x44u8, None), (&mut m6, 0x66u8, Some(&mut d6))] {
+            let mut r = block_on(pipe.room());
+            r.bytes_mut().fill(fill);
+            if let Some(out) = buf {
+                out.extend_from_slice(r.bytes_mut());
+            }
+            pipe.commit(m, &mut r, ROOM_LEN);
+            drop(r);
+        }
+        assert_eq!(pipe.piece_slots, [2, 4, 6]);
+        assert_eq!([pipe.room_streams[2].piece_slot_pos, pipe.room_streams[4].piece_slot_pos, pipe.room_streams[6].piece_slot_pos], [0, 1, 2]);
+        for empty_slot in [0usize, 1, 3, 5, 7] {
+            assert_eq!(pipe.room_streams[empty_slot].piece_slot_pos, NONE);
+        }
+        assert_eq!(pipe.piece_slots.capacity(), initial_cap, "piece_slots must not reallocate");
+
+        // Abort the middle active slot (slot 4 at index 1): swap_remove moves
+        // slot 6 into index 1 and updates slot 6's piece_slot_pos to 1.
+        pipe.abort(m4);
+        assert_eq!(pipe.piece_slots, [2, 6]);
+        assert_eq!(pipe.room_streams[4].piece_slot_pos, NONE);
+        assert_eq!(pipe.room_streams[2].piece_slot_pos, 0);
+        assert_eq!(pipe.room_streams[6].piece_slot_pos, 1);
+
+        // End slot 2 (index 0): swap_remove moves slot 6 into index 0.
+        pipe.end(m2);
+        let (tag2, hash2) = loop {
+            if let Some(Event::Hashed { tag, hash, .. }) = pipe.next_event() {
+                break (tag, hash);
+            }
+            block_on(pipe.ready());
+        };
+        assert_eq!((tag2, *hash2.as_bytes()), (2, *blake3::hash(&d2).as_bytes()));
+        assert_eq!(pipe.piece_slots, [6]);
+        assert_eq!(pipe.room_streams[2].piece_slot_pos, NONE);
+        assert_eq!(pipe.room_streams[6].piece_slot_pos, 0);
+
+        // End slot 6 last: piece_slots returns empty.
+        pipe.end(m6);
+        let (tag6, hash6) = loop {
+            if let Some(Event::Hashed { tag, hash, .. }) = pipe.next_event() {
+                break (tag, hash);
+            }
+            block_on(pipe.ready());
+        };
+        assert_eq!((tag6, *hash6.as_bytes()), (6, *blake3::hash(&d6).as_bytes()));
+        assert!(pipe.piece_slots.is_empty());
+        assert_eq!(pipe.room_streams[6].piece_slot_pos, NONE);
+        for pad in [pad0, pad1, pad3, pad5] {
+            pipe.abort(pad);
+        }
+
+        // 2. Exhaust `free_pieces` while sparse slot 5 holds finished foldable
+        // pieces on a 64-message pipeline, and slot 1 also holds a finished
+        // foldable stream temporarily detached from `piece_slots`: `alloc_piece_node`
+        // must scan only `piece_slots` (reclaiming slot 5 without touching slot 1,
+        // catching both a revert to a full 0..m scan and an `idx` vs `piece_slots[idx]`
+        // mix-up), then produce official `blake3::hash` digests for every message.
+        let mut p2 = Pipeline::<u32>::new(Mode::Plain, Limits { messages: 64, rooms: 2 });
+        let pad0 = block_on(p2.message(200, None));
+        let mut m_untracked = block_on(p2.message(30, None));
+        let pads_mid: Vec<_> = (2..5).map(|i| block_on(p2.message(200 + i, None))).collect();
+        let mut m_a = block_on(p2.message(10, None));
+        let pad6 = block_on(p2.message(206, None));
+        let mut m_b = block_on(p2.message(20, None));
+        assert_eq!((m_untracked.slot, m_a.slot, m_b.slot), (1, 5, 7));
+
+        let mut data_u = Vec::new();
+        let mut ru0 = block_on(p2.room());
+        ru0.bytes_mut().fill(0x30);
+        data_u.extend_from_slice(ru0.bytes_mut());
+        p2.commit(&mut m_untracked, &mut ru0, ROOM_LEN);
+        drop(ru0);
+        let pu0 = p2.room_streams[1].head_piece as usize;
+        p2.shared().pieces[pu0].done.store(false, Ordering::SeqCst);
+        let mut ru1 = block_on(p2.room());
+        ru1.bytes_mut().fill(0x31);
+        data_u.extend_from_slice(ru1.bytes_mut());
+        p2.commit(&mut m_untracked, &mut ru1, ROOM_LEN);
+        drop(ru1);
+        assert_ne!(p2.room_streams[1].head_piece, p2.room_streams[1].tail_piece, "slot 1 holds two pieces");
+        p2.shared().pieces[pu0].done.store(true, Ordering::SeqCst);
+
+        let mut data_a = Vec::new();
+        // Commit 2 full rooms to `m_a` (slot 5), keeping piece 0's `done` bit
+        // clear across the second commit (matching the multi-worker case where
+        // a worker is still hashing piece 0 when piece 1 is submitted), then
+        // mark piece 0 done so slot 5 holds two finished pieces (`head != tail`).
+        let mut r0 = block_on(p2.room());
+        r0.bytes_mut().fill(0x10);
+        data_a.extend_from_slice(r0.bytes_mut());
+        p2.commit(&mut m_a, &mut r0, ROOM_LEN);
+        drop(r0);
+        let p0 = p2.room_streams[5].head_piece as usize;
+        p2.shared().pieces[p0].done.store(false, Ordering::SeqCst);
+
+        let mut r1 = block_on(p2.room());
+        r1.bytes_mut().fill(0x11);
+        data_a.extend_from_slice(r1.bytes_mut());
+        p2.commit(&mut m_a, &mut r1, ROOM_LEN);
+        drop(r1);
+        assert_ne!(p2.room_streams[5].head_piece, p2.room_streams[5].tail_piece, "m_a holds two pieces");
+        p2.shared().pieces[p0].done.store(true, Ordering::SeqCst);
+
+        // Temporarily detach slot 1 from `piece_slots` (leaving only [5]) and
+        // park all remaining free piece nodes so `m_b`'s commit forces
+        // `alloc_piece_node` to reclaim strictly through `piece_slots`.
+        assert_eq!(p2.piece_slots, [1, 5]);
+        p2.piece_slots.swap_remove(0);
+        p2.room_streams[5].piece_slot_pos = 0;
+        p2.room_streams[1].piece_slot_pos = NONE;
+        let mut parked_nodes = Vec::new();
+        while let Some(node) = p2.free_pieces.pop_front() {
+            parked_nodes.push(node);
+        }
+        assert!(p2.free_pieces.is_empty());
+        assert_eq!(p2.piece_slots, [5]);
+
+        let mut data_b = Vec::new();
+        let mut r = block_on(p2.room());
+        r.bytes_mut().fill(0x77);
+        data_b.extend_from_slice(r.bytes_mut());
+        p2.commit(&mut m_b, &mut r, ROOM_LEN);
+        drop(r);
+        assert_ne!(p2.room_streams[1].head_piece, p2.room_streams[1].tail_piece, "untracked lower slot 1 must not be scanned");
+        assert_eq!(p2.room_streams[5].head_piece, p2.room_streams[5].tail_piece, "tracked sparse slot 5 piece p0 reclaimed");
+        assert_eq!(p2.piece_slots, [5, 7]);
+        assert_eq!([p2.room_streams[5].piece_slot_pos, p2.room_streams[7].piece_slot_pos], [0, 1]);
+
+        // Re-attach slot 1 to `piece_slots` before finishing all messages.
+        p2.room_streams[1].piece_slot_pos = 2;
+        p2.piece_slots.push(1);
+        for node in parked_nodes {
+            p2.free_pieces.push_back(node);
+        }
+        p2.end(m_untracked);
+        p2.end(m_a);
+        p2.end(m_b);
+        let mut got = Vec::new();
+        while got.len() < 3 {
+            if let Some(Event::Hashed { tag, hash, .. }) = p2.next_event() {
+                got.push((tag, *hash.as_bytes()));
+            } else {
+                block_on(p2.ready());
+            }
+        }
+        assert_eq!(got, [(30, *blake3::hash(&data_u).as_bytes()), (10, *blake3::hash(&data_a).as_bytes()), (20, *blake3::hash(&data_b).as_bytes())]);
+        assert!(p2.piece_slots.is_empty());
+        p2.abort(pad0);
+        for pad in pads_mid {
+            p2.abort(pad);
+        }
+        p2.abort(pad6);
     }
 }
