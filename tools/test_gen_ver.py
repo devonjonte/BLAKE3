@@ -303,16 +303,75 @@ class Versions(unittest.TestCase):
 
     def test_a_stamp_writes_nothing_where_a_line_to_replace_is_missing(self):
         # The header's line is not as the stamp expects (carriage returns):
-        # the manifests before it were written by then, and the stamp left
-        # them so.
+        # both --check and a stamp refuse it consistently (#465), and nothing
+        # is written.
         (self.root / "capi/b3.h").write_bytes(b'#define B3_VERSION "' + DEV.encode() + b'"\r\n')
         self.git("commit", "-qam", "a header with carriage returns")
         before = self.files()
+        self.assertIn("capi/b3.h: B3_VERSION must be", self.stamp("--check", succeeds=False))
         said = self.stamp("0.9.0", succeeds=False)
         self.assertIn("capi/b3.h: no line matches", said)
         self.assertIn("nothing is written", said)
         self.assertEqual(self.files(), before)
         self.assertEqual(self.git("tag", "-l"), "")
+
+    def test_stale_or_concurrent_index_lock_never_leaves_tree_stamped(self):
+        # 1. Pre-existing .git/index.lock stops before any file is written.
+        lock = self.root / ".git/index.lock"
+        head, before = self.git("rev-parse", "HEAD"), self.files()
+        lock.write_bytes(b"")
+        try:
+            said = self.stamp("0.9.0", succeeds=False)
+            self.assertIn("git index is locked", said)
+            self.assertIn("nothing is written", said)
+            self.assertEqual(self.files(), before)
+            self.assertEqual(self.git("rev-parse", "HEAD"), head)
+        finally:
+            lock.unlink(missing_ok=True)
+        # 2. A lock appearing mid-stamp (when git commit runs) causes git
+        # checkout in put_back to fail too; byte-snapshot fallback still
+        # restores every stamped file on disk (#465).
+        with tempfile.TemporaryDirectory() as bin:
+            self.stand_in(bin, "cargo", f': > "{lock}"\nexec $real "$@"')
+            try:
+                self.stamp("0.9.0", succeeds=False, path=bin)
+            finally:
+                lock.unlink(missing_ok=True)
+            self.assertEqual(self.files(), before)
+            self.assertEqual(self.git("rev-parse", "HEAD"), head)
+            self.assertEqual(self.git("tag", "-l"), "")
+
+    def test_interrupt_after_tag_creation_removes_dangling_tag_and_undoes_stamp(self):
+        # Simulate an interrupt / failure immediately after `git tag` writes
+        # the tag: rollback must delete the tag it created and undo the commit
+        # atomically (#465).
+        with tempfile.TemporaryDirectory() as bin:
+            self.stand_in(bin, "git", '[ "$1" = tag ] && [ "$2" != -l ] && { $real "$@"; echo "interrupted after tag" >&2; exit 130; }\nexec $real "$@"')
+            head, before = self.git("rev-parse", "HEAD"), self.files()
+            out = self.stamp("0.9.0", succeeds=False, path=bin)
+            self.assertIn("the stamp is undone: no tag is made", out)
+            self.assertEqual(self.git("rev-parse", "HEAD"), head)
+            self.assertEqual(self.git("tag", "-l"), "", "dangling tag must be removed on rollback")
+            self.assertEqual(self.files(), before)
+
+    def test_atomic_rollback_preserves_concurrent_commit_on_update_ref(self):
+        # A concurrent commit lands right as rollback invokes `git update-ref`:
+        # update-ref's <oldvalue> CAS must reject the rollback without touching
+        # the concurrent commit (#465).
+        with tempfile.TemporaryDirectory() as bin:
+            self.stand_in(
+                bin,
+                "git",
+                '[ "$1" = tag ] && [ "$2" != -l ] && { echo "tag refused" >&2; exit 1; }\n'
+                '[ "$1" = update-ref ] && [ "$2" != -d ] && { $real commit -q --allow-empty -m "raced commit"; }\n'
+                'exec $real "$@"',
+            )
+            head = self.git("rev-parse", "HEAD")
+            out = self.stamp("0.9.0", succeeds=False, path=bin)
+            self.assertIn("is left where it is: the branch has moved on", out)
+            self.assertEqual(self.git("log", "-1", "--format=%s"), "raced commit")
+            self.assertEqual(self.git("rev-parse", "HEAD^^"), head)
+            self.assertEqual(self.git("tag", "-l"), "")
 
     def test_check_holds_a_version_commits_title_to_its_release(self):
         self.stamp("99.2.0")

@@ -36,6 +36,7 @@ X.Y.Z+<hash> on the commit whose parent is <hash> (the release commit).
 """
 import os
 import re
+import signal
 import subprocess
 import sys
 import tomllib
@@ -145,7 +146,9 @@ def check_copies(full):
     # or to an older release's would go out over the new release's notes.
     if not full.endswith("+dev") and not title.startswith((f"# blake3-servil {full} ", f"# blake3-servil {full},", f"# blake3-servil {full}\t")) and title != f"# blake3-servil {full}":
         sys.exit(f"CHANGELOG.md: its title names the release {full} on its version commit (found {title!r})")
-    if f'#define B3_VERSION "{full}"' not in Path("capi/b3.h").read_text().splitlines():
+    with open("capi/b3.h", newline="") as f:
+        header_lines = f.read().split("\n")
+    if f'#define B3_VERSION "{full}"' not in header_lines:
         sys.exit(f"capi/b3.h: B3_VERSION must be {full}")
     lock = tomllib.loads(Path("b3sum/Cargo.lock").read_text())
     release = tomllib.loads(Path(RELEASE_LOCK).read_text())
@@ -175,38 +178,71 @@ def stamp_files(notes=True):
     return [*PACKAGES.values(), *(["CHANGELOG.md"] if notes else []), "b3sum/Cargo.lock", RELEASE_LOCK, "capi/b3.h"]
 
 
-def put_back(files):
+def put_back(files, snapshot=None):
     """The stamp's own files as the commit under them has them. No other
     file is touched: what someone saved elsewhere in the tree while the
-    stamp ran is theirs."""
-    git("checkout", "-q", "HEAD", "--", *files)
+    stamp ran is theirs. If git checkout fails (e.g. an index lock appeared
+    mid-stamp), fall back to writing the pre-stamp byte snapshot directly."""
+    try:
+        git("checkout", "-q", "HEAD", "--", *files)
+    except subprocess.CalledProcessError:
+        if snapshot is None:
+            raise
+        for path, data in snapshot.items():
+            Path(path).write_bytes(data)
+
+
+def check_index_unlocked():
+    """Refuse to stamp while .git/index.lock exists so a stale lock cannot
+    leave the tree stamped after git commit fails (#465)."""
+    lock = Path(git("rev-parse", "--git-dir")) / "index.lock"
+    if lock.exists():
+        sys.exit(f"git index is locked ({lock}); nothing is written")
 
 
 def stamped(full, message, notes=True):
     """The version written into the stamp's files and committed, whole or
     not at all: where it stops after it has written (Cargo's update of
     b3sum's lock fails, a copy does not agree, the commit is refused),
-    its files go back as they were, and only they. Returns the commit."""
+    its files go back as they were, and only they. Returns `(parent, commit, snapshot)`."""
+    check_index_unlocked()
     files = stamp_files(notes)
+    parent = git("rev-parse", "HEAD")
+    snapshot = {path: Path(path).read_bytes() for path in files}
     try:
         set_version(full, notes)
         git("commit", "-q", "--no-verify", "-m", message, "--", *files)
     except BaseException:
-        put_back(files)
+        put_back(files, snapshot)
         raise
-    return git("rev-parse", "HEAD")
+    # Resolve the exact commit we just made rather than blindly trusting a
+    # later `rev-parse HEAD` if a concurrent writer moves the branch.
+    head = git("rev-parse", "HEAD")
+    if git("rev-parse", f"{head}^") != parent:
+        sys.exit(f"HEAD moved unexpectedly during stamp (expected parent {parent}, got {head})")
+    return parent, head, snapshot
 
 
-def taken_back(stamp, notes=True):
-    """Undo the stamp's commit: the branch back at its parent and the
-    stamp's files as they are there. Only where the commit is still the
-    branch's last: if something else has moved the branch since, nothing
-    is moved or written, and the answer is False."""
-    if git("rev-parse", "HEAD") != stamp:
+def taken_back(stamp, parent, snapshot=None, notes=True):
+    """Undo the stamp's commit atomically: move the current branch ref (or
+    detached HEAD) from `stamp` back to `parent` via `git update-ref` with
+    `<oldvalue> = stamp` so a concurrent commit cannot be removed (#465),
+    then restore the stamp's files."""
+    ref_proc = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True, text=True)
+    target_ref = ref_proc.stdout.strip() if ref_proc.returncode == 0 and ref_proc.stdout.strip() else "HEAD"
+    move = subprocess.run(["git", "update-ref", target_ref, parent, stamp], capture_output=True, text=True)
+    if move.returncode != 0:
         return False
-    git("reset", "-q", "--soft", "HEAD^")
-    put_back(stamp_files(notes))
+    files = stamp_files(notes)
+    subprocess.run(["git", "reset", "-q", "HEAD", "--", *files], capture_output=True, text=True)
+    put_back(files, snapshot)
     return True
+
+
+def drop_tag_if_at(tag, stamp):
+    """Atomically remove `tag` only if it points to `stamp` (cleaning up a
+    tag created right before an interrupt or error, #465)."""
+    subprocess.run(["git", "update-ref", "-d", f"refs/tags/{tag}", stamp], capture_output=True, text=True)
 
 
 def set_version(full, notes=True):
@@ -243,6 +279,8 @@ def set_version(full, notes=True):
     check_copies(full)
 
 
+# Turn SIGTERM into SystemExit so stamp rollback runs on termination too (#465).
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if sys.argv[1:] == ["--check"]:
     release, named = current()
@@ -286,7 +324,7 @@ if not isinstance(origin, str):
 # The commit is made with --no-verify: the pre-commit hook's speed check
 # measures code, and this commit changes version strings alone (AGENTS:
 # follow a rule for its purpose).
-stamp = stamped(full, f"Version {full}")
+parent, stamp, snapshot = stamped(full, f"Version {full}")
 # The release check's own reading of a version commit, before the tag
 # names this one: its parent with the version written in, and nothing
 # else. A stamp can write more than that where a tool it runs rewrites a
@@ -298,7 +336,8 @@ try:
     git("tag", f"v{full}", stamp)
 except BaseException as refused:
     reason = refused.stderr.strip() if isinstance(refused, subprocess.CalledProcessError) else refused
-    if taken_back(stamp):
+    drop_tag_if_at(f"v{full}", stamp)
+    if taken_back(stamp, parent, snapshot):
         sys.exit(f"the stamp is undone: no tag is made, and its files are as they were. {reason}")
     sys.exit(f"no tag is made, and the stamp's commit {stamp} is left where it is: the branch has moved on since. {reason}")
 print(f"v{full}")
