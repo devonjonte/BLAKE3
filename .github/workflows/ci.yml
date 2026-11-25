@@ -201,6 +201,70 @@ jobs:
       env:
         CARGO_PROFILE_RELEASE_PANIC: abort
 
+  aarch64_sme2_qemu:
+    # Exercise Linux AArch64 SME2 detection, startup self-test, assembly
+    # kernels (512-bit SVL), and thread-pool paths under QEMU user emulation
+    # on every PR (#412, #465). Correctness only (not timing).
+    name: "AArch64 Linux SME2 (QEMU 512-bit SVL)"
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      CC: clang
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - run: sh tools/ci-rust.sh stable
+    - run: sh tools/ci-tools.sh nextest
+    - name: QEMU 11.1.2
+      run: |
+        curl -sSfLO --retry 3 https://snapshot.debian.org/archive/debian/20261115T000000Z/pool/main/q/qemu/qemu-user_11.1.2+ds-3_arm64.deb
+        echo "e278d393447a97b548728918af8e395a33086f5b7100138e38cf06a41766612e  qemu-user_11.1.2+ds-3_arm64.deb" | sha256sum -c
+        echo "7c3f49bb0945cf7e2148480118a34dc34ef1641cf5f83f0137996b78f2202945  qemu-user_11.1.2+ds-3_arm64.deb" > qemu.b3
+        cargo run -q --release --locked --manifest-path b3sum/Cargo.toml -- -c qemu.b3
+        ar x qemu-user_11.1.2+ds-3_arm64.deb data.tar.xz && tar xJf data.tar.xz ./usr/bin/qemu-aarch64
+        sudo install usr/bin/qemu-aarch64 /usr/local/bin/qemu-aarch64 && qemu-aarch64 --version
+    - name: verify QEMU reports Linux SME2 (512-bit SVL)
+      run: |
+        cat <<'EOF' > /tmp/check_sme2.c
+        #include <stdio.h>
+        #include <sys/auxv.h>
+        int main(void) {
+            unsigned long h2 = getauxval(26);
+            if (!(h2 & (1UL << 37))) { fprintf(stderr, "missing HWCAP2_SME2 (0x%lx)\n", h2); return 1; }
+            unsigned long svl;
+            __asm__ volatile(".arch_extension sme\n rdsvl %0, #1" : "=r"(svl));
+            if (svl != 64) { fprintf(stderr, "unexpected SVL bytes: %lu\n", svl); return 2; }
+            printf("QEMU SME2 verified: HWCAP2=0x%lx SVL=%lu bytes\n", h2, svl);
+            return 0;
+        }
+        EOF
+        clang -O2 /tmp/check_sme2.c -o /tmp/check_sme2
+        qemu-aarch64 -cpu max,sme-default-vector-length=64 /tmp/check_sme2
+    - name: core, as Linux SME2 (512-bit SVL)
+      run: |
+        # Exclude ffi_output::tests::self_test_aborts_on_wrong_output from the
+        # outer runner only because its `Command::new(current_exe())` child runs
+        # natively on this arm64 host (without QEMU SME2); verify the SME2
+        # fail-stop child directly under QEMU SME2 right below.
+        sh tools/ci-locked.sh nextest run -p blake3-servil-core --lib --tests --no-fail-fast \
+          -E 'not test(ffi_output::tests::self_test_aborts_on_wrong_output)'
+        bin=$(sh tools/ci-locked.sh test -p blake3-servil-core --lib --no-run --message-format=json \
+          | python3 -c 'import json,sys; print([j["executable"] for line in sys.stdin if (j:=json.loads(line)).get("executable") and j.get("target",{}).get("kind")==["lib"]][-1])')
+        set +e
+        out=$(BLAKE3_SERVIL_TEST_ARM_OUTPUT_FAIL=sme2 qemu-aarch64 -cpu max,sme-default-vector-length=64 "$bin" --exact ffi_output::tests::self_test_aborts_on_wrong_output --nocapture 2>&1)
+        rc=$?
+        set -e
+        echo "$out"
+        test "$rc" -ne 0
+        echo "$out" | grep -q "SME2 keyed chunks"
+      env:
+        CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu max,sme-default-vector-length=64
+        BLAKE3_EMULATED: 1
+    - name: threads, as Linux SME2 (512-bit SVL)
+      run: sh tools/ci-locked.sh nextest run -p blake3-servil -P ci --lib --tests --no-fail-fast
+      env:
+        CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -cpu max,sme-default-vector-length=64
+        BLAKE3_EMULATED: 1
+
   capi_macos:
     name: "C API on macOS (installed consumers)"
     runs-on: macos-latest
