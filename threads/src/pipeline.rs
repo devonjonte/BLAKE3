@@ -1361,11 +1361,13 @@ impl<T, B, P: Prepared + 'static> Pipeline<T, B, P> {
                 self.action_buf[p] = pack_arg(KIND_MULTI, s32, u32::try_from(p).expect("piece fits u32"), sme2);
             }
             let near = if self.source_slot.is_some() {
-                self.batches_in_flight += 1;
                 let mut plan = Plan::new(PlaceKind::PipelineBatch, work_bytes, 1);
-                plan.in_flight = self.batches_in_flight;
                 let near = plan.near();
-                self.batch_plans[s] = Some(plan);
+                if plan.is_learning() {
+                    self.batches_in_flight += 1;
+                    plan.in_flight = self.batches_in_flight;
+                    self.batch_plans[s] = Some(plan);
+                }
                 near
             } else {
                 false
@@ -5176,7 +5178,7 @@ mod test {
         pipe.batch(msg, batch, vec![[0u8; OUT_LEN]; split_count].into_boxed_slice());
         let recorded_in_flight = pipe.batches_in_flight;
         let ev = drain_one(&mut pipe);
-        assert_eq!(recorded_in_flight, usize::from(is_registered));
+        assert_eq!(recorded_in_flight, usize::from(is_registered && crate::lanes::places::near_workers().is_some()));
         assert_eq!(pipe.batches_in_flight, 0);
         let Event::Batch { batch, digests, .. } = ev else { panic!("expected Batch event") };
         assert_eq!(digests[0], *crate::convenience::hash(&batch.bytes()[..64]).as_bytes());

@@ -1176,6 +1176,20 @@ pub(crate) mod places {
             if left < TRIAL { (other(round), left == MEASURED - 1) } else { (round, left == TRIAL + MEASURED - 1) }
         }
 
+        /// Whether the next job sits in the unmeasured steady middle of a
+        /// round (`left > TRIAL + MEASURED`), where neither `rate` nor `LAST`
+        /// feeds any subsequent measurement: advancing `job` immediately
+        /// avoids clock reads and division on steady-state calls.
+        fn advance_unmeasured(&mut self) -> Option<Reach> {
+            if self.job >= 2 * TRIAL && self.round_end() - self.job > TRIAL + MEASURED {
+                let reach = self.round.unwrap_or(Reach::All);
+                self.job += 1;
+                Some(reach)
+            } else {
+                None
+            }
+        }
+
         /// The reach of the next job.
         pub(crate) fn choose(&self) -> Reach {
             self.stands().0
@@ -1243,7 +1257,9 @@ pub(crate) mod places {
     }
 
     std::thread_local! {
-        static LEARNED: core::cell::Cell<[[Learned; CLASSES]; 4]> = const { core::cell::Cell::new([[Learned { job: 0, rate: [0; 2], round: None, longer: 0 }; CLASSES]; 4]) };
+        static LEARNED: [[core::cell::Cell<Learned>; CLASSES]; 4] = const {
+            [const { [const { core::cell::Cell::new(Learned { job: 0, rate: [0; 2], round: None, longer: 0 }) }; CLASSES] }; 4]
+        };
         /// The thread's last learning job: its kind and class, and when it ended.
         static LAST: core::cell::Cell<Option<(Kind, usize, std::time::Instant)>> = const { core::cell::Cell::new(None) };
     }
@@ -1283,6 +1299,7 @@ pub(crate) mod places {
         pub(crate) threads: usize,
         /// Active batches in flight when this plan was created (`1` for sync calls).
         pub(crate) in_flight: usize,
+        near: bool,
         learning: Option<(Kind, usize, Reach, std::time::Instant)>,
     }
 
@@ -1291,35 +1308,57 @@ pub(crate) mod places {
         /// threads: all of them, where the workers have no places, where
         /// the caller's place has none, and from FAR_LEN up.
         pub(crate) fn new(kind: Kind, len: usize, all: usize) -> Plan {
-            let Some(near) = near_workers() else { return Plan { threads: all, in_flight: 1, learning: None } };
+            let Some(near) = near_workers() else { return Plan { threads: all, in_flight: 1, near: false, learning: None } };
             if len >= FAR_LEN {
-                return Plan { threads: all, in_flight: 1, learning: None };
+                return Plan { threads: all, in_flight: 1, near: false, learning: None };
             }
-            let reach = LEARNED.with(|l| l.get()[kind as usize][class(len)].choose());
-            let threads = if reach == Reach::Near { (near + 1).min(all) } else { all };
-            Plan { threads, in_flight: 1, learning: Some((kind, len, reach, now())) }
+            let cls = class(len);
+            let (reach, timed) = LEARNED.with(|l| {
+                let cell = &l[kind as usize][cls];
+                let mut cur = cell.get();
+                if let Some(reach) = cur.advance_unmeasured() {
+                    cell.set(cur);
+                    (reach, false)
+                } else {
+                    (cur.choose(), true)
+                }
+            });
+            let stay_near = reach == Reach::Near;
+            let threads = if stay_near { (near + 1).min(all) } else { all };
+            if !timed {
+                LAST.with(|l| l.set(None));
+                return Plan { threads, in_flight: 1, near: stay_near, learning: None };
+            }
+            Plan { threads, in_flight: 1, near: stay_near, learning: Some((kind, len, reach, now())) }
         }
 
         /// Whether the job stays with the caller's place.
         pub(crate) fn near(&self) -> bool {
-            matches!(self.learning, Some((_, _, Reach::Near, _)))
+            self.near
+        }
+
+        /// Whether this job records its completion into [`LEARNED`].
+        pub(crate) fn is_learning(&self) -> bool {
+            self.learning.is_some()
         }
 
         /// The job is done: the thread learns from it.
         pub(crate) fn done(&self) {
             if let Some((kind, len, reach, started)) = self.learning {
                 let ended = now();
+                let cls = class(len);
                 let nanos = cost(
                     ended - started,
-                    LAST.with(|l| l.replace(Some((kind, class(len), ended))))
-                        .filter(|&(k, c, _)| k == kind && c == class(len))
+                    LAST.with(|l| l.replace(Some((kind, cls, ended))))
+                        .filter(|&(k, c, _)| k == kind && c == cls)
                         .map(|(_, _, last)| ended - last),
                     self.in_flight.max(1),
                 );
                 LEARNED.with(|l| {
-                    let mut all = l.get();
-                    all[kind as usize][class(len)].record_for(reach, nanos, len);
-                    l.set(all);
+                    let cell = &l[kind as usize][cls];
+                    let mut cur = cell.get();
+                    cur.record_for(reach, nanos, len);
+                    cell.set(cur);
                 });
             }
         }
@@ -2296,7 +2335,8 @@ pub(crate) mod places {
             let base = now();
             TEST_CLOCK.with(|c| c.set(Some((base, std::time::Duration::ZERO, std::time::Duration::from_millis(1)))));
             let len = 3 << 20;
-            let learned = |kind: Kind, len: usize| LEARNED.with(|l| l.get()[kind as usize][class(len)]);
+            let learned = |kind: Kind, len: usize| LEARNED.with(|l| l[kind as usize][class(len)].get());
+            let snapshot_learned = || LEARNED.with(|l| l.each_ref().map(|row| row.each_ref().map(|c| c.get())));
             for job in 0..2 * TRIAL {
                 let plan = Plan::new(Kind::Tree, len, all);
                 let want_near = job >= TRIAL;
@@ -2326,20 +2366,16 @@ pub(crate) mod places {
             assert_eq!(learned(Kind::Tree, len).rate, [325, 651]);
             let mut other_class = learned(Kind::Tree, len);
             other_class.rate[Reach::All as usize] = 651;
-            LEARNED.with(|l| {
-                let mut all = l.get();
-                all[Kind::Tree as usize][class(len)] = other_class;
-                l.set(all);
-            });
+            LEARNED.with(|l| l[Kind::Tree as usize][class(len)].set(other_class));
             Plan::new(Kind::Tree, len / 4, all).done();
             Plan::new(Kind::Tree, len, all).done();
             assert_eq!(learned(Kind::Tree, len).rate, [325, 651]);
             // From FAR_LEN up: every thread's, and nothing learned.
-            let before = LEARNED.with(|l| l.get());
+            let before = snapshot_learned();
             let plan = Plan::new(Kind::Tree, FAR_LEN, all);
             assert_eq!((plan.threads, plan.near(), plan.learning.is_none()), (all, false, true));
             plan.done();
-            assert_eq!(LEARNED.with(|l| l.get()), before);
+            assert_eq!(snapshot_learned(), before);
             assert!(Plan::new(Kind::Tree, FAR_LEN - 1, all).learning.is_some());
             // Split Pipeline::batch learns its own kind (Kind::PipelineBatch).
             for job in 0..2 * TRIAL {
@@ -3056,6 +3092,11 @@ pub(crate) mod sources {
         /// Whether the current job stays with the workers of its caller's
         /// place (a job under FAR_LEN, where workers have places).
         near: core::sync::atomic::AtomicBool,
+        /// Ticket end (`next`) of the most recent `near = true` action
+        /// publication, or `0` if this source has never published a near
+        /// action. Non-near publications never write this field, so its line
+        /// stays clean and Shared across caches on message/room/group rings.
+        near_until: AtomicUsize,
         /// What is published and what is finished, and the handshake
         /// between the waiting caller and the worker finishing its last
         /// piece (crate::finish, which Loom checks).
@@ -3098,6 +3139,7 @@ pub(crate) mod sources {
                 job: AtomicPtr::new(core::ptr::null_mut()),
                 base: AtomicUsize::new(0),
                 near: core::sync::atomic::AtomicBool::new(false),
+                near_until: AtomicUsize::new(0),
                 finish: crate::finish::Finish::new(),
             }
         }
@@ -3145,6 +3187,9 @@ pub(crate) mod sources {
                 slot.arg.store(arg, Ordering::Relaxed);
                 slot.near.store(near, Ordering::Relaxed);
             }
+            if near {
+                self.near_until.store(next, Ordering::Release);
+            }
             self.finish.published.store(next, Ordering::Release);
             core::sync::atomic::fence(Ordering::SeqCst);
             let pool = pool();
@@ -3159,7 +3204,14 @@ pub(crate) mod sources {
         /// Whether the action currently at the head of this source's waiting
         /// ring prefers local-cache speculative wakes.
         pub(crate) fn front_action_near(&self) -> bool {
+            let until = self.near_until.load(Ordering::Acquire);
+            if until == 0 {
+                return false;
+            }
             let c = self.claimed.load(Ordering::Acquire);
+            if c >= until {
+                return false;
+            }
             let p = self.finish.published.load(Ordering::Acquire);
             c < p && self.actions[c % self.actions.len()].near.load(Ordering::Relaxed)
         }
