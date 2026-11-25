@@ -1,6 +1,7 @@
 # blake3-servil 0.11.0+dev, against blake3-servil 0.10.0
 
-Changes landed on `next` since `0.10.0` (unreleased).
+What changed since `0.10.0`, each item with its issue or commit. Every
+figure names its machine.
 
 ## Breaking changes and migration
 

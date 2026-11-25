@@ -6,7 +6,7 @@ A fast [BLAKE3](https://blake3.io) implementation for 64-bit Arm and x86-64, fro
 **Before 1.0.** The Servil Software Factory aims at software that serves its users reliably
 and loyally; [its page](https://github.com/servil-software-factory) says how, and what it
 promises for a project it supports. It counts a project as supported from version 1.0.
-blake3-servil is at 0.10, its first candidate: [SECURITY.md](SECURITY.md) says what we do
+blake3-servil is at 0.11, its first candidate: [SECURITY.md](SECURITY.md) says what we do
 about a vulnerability today, and the API may still change between minor versions.
 
 ## How fast
@@ -70,7 +70,7 @@ version names the commit of its code, so the version alone identifies
 what you have (`b3sum --version` and the C library's `b3_version()`
 print it). The code after a release reads `X.Y.Z+dev`, "newer than
 X.Y.Z", and a build of it prints its commit too, and from a dirty tree the
-Git tree id of its working tree: `0.10.0+dev.<commit>.dirty.<tree>`. Write
+Git tree id of its working tree: `0.11.0+dev.<commit>.dirty.<tree>`. Write
 it whole wherever you write it: tools that check it may come.
 
 ```rust
